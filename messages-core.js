@@ -272,18 +272,14 @@
         } catch (e) {}
     }
 
-    // FIX: TTL-based dedup (8s) instead of permanent Set.
-    // Permanent Set caused a message arriving via BOTH wsService.on AND REALTIME_EVENT
-    // postMessage to be treated as duplicate on the 2nd path and dropped silently.
-    // Short TTL still blocks visual double-renders but auto-clears so nothing is lost.
-    const _dedupTs = new Map();
-    const _DEDUP_TTL = 8000;
     function isDuplicateMessage(messageId) {
         if (!messageId) return false;
-        const now = Date.now();
-        for (const [id, ts] of _dedupTs) { if (now - ts > _DEDUP_TTL) _dedupTs.delete(id); }
-        if (_dedupTs.has(String(messageId))) return true;
-        _dedupTs.set(String(messageId), now);
+        if (processedMessageIds.has(messageId)) return true;
+        processedMessageIds.add(messageId);
+        
+        if (processedMessageIds.size > 1000) {
+            processedMessageIds.clear();
+        }
         return false;
     }
     
@@ -1878,7 +1874,23 @@ try {
                 Logger.warn('ParentConnectionManager', 'Invalid incoming message');
                 return;
             }
-            
+
+            // ECHO PREVENTION: If the sender is the current user, this is an echo
+            // of a message we already added optimistically. Update status only.
+            const currentUserId = SessionManager.getUserId();
+            if (message.senderId && currentUserId &&
+                String(message.senderId) === String(currentUserId)) {
+                if (ChatManager && ChatManager.updateMessageStatus) {
+                    ChatManager.updateMessageStatus(
+                        message.localId || message.id,
+                        message.status || 'delivered',
+                        { serverId: message.id, localId: message.localId || null }
+                    );
+                }
+                Logger.debug('ParentConnectionManager', `Own-message echo ignored (status updated): ${message.id}`);
+                return;
+            }
+
             if (isDuplicateMessage(message.id)) {
                 Logger.debug('ParentConnectionManager', `Duplicate message ignored: ${message.id}`);
                 return;
@@ -1886,20 +1898,71 @@ try {
             
             Logger.info('ParentConnectionManager', `Message received: ${message.id}`);
             
+            const normalizedMessage = {
+                ...message,
+                status: message.status || 'delivered',
+                conversationId: message.chatId || message.conversationId,
+                chatId: message.chatId || message.conversationId,
+                timestamp: message.createdAt || message.timestamp || Date.now(),
+                createdAt: message.createdAt || message.timestamp || Date.now()
+            };
+
             if (ChatManager && ChatManager.addMessage) {
-                ChatManager.addMessage({
-                    ...message,
-                    status: message.status || 'delivered'
-                });
+                ChatManager.addMessage(normalizedMessage);
+            }
+
+            // Update conversation last-message & sort so it bubbles to top in sidebar
+            const chatId = normalizedMessage.chatId || normalizedMessage.conversationId;
+            if (chatId && ChatManager && ChatManager._conversationsMap) {
+                const conv = ChatManager._conversationsMap.get(chatId)
+                    || ChatManager._conversationsMap.get(String(chatId));
+                if (conv) {
+                    conv.lastMessage = normalizedMessage.content || '';
+                    conv.lastMessageAt = normalizedMessage.createdAt || Date.now();
+                    const activeChat = ChatManager.getActiveChat && ChatManager.getActiveChat();
+                    const isViewingThisChat = activeChat && String(activeChat.id) === String(chatId);
+                    if (!isViewingThisChat) {
+                        conv.unreadCount = (conv.unreadCount || 0) + 1;
+                    }
+                    if (ChatManager._conversations) {
+                        ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+                    }
+                }
+            }
+
+            // Always re-render sidebar (badge + conversation order)
+            try {
+                window.dispatchEvent(new CustomEvent('renderChatsList', {
+                    detail: {
+                        conversations: (ChatManager && ChatManager._conversations) || [],
+                        currentChat: ChatManager && ChatManager._activeConversation,
+                        currentCategory: ChatManager && ChatManager.getCurrentCategory ? ChatManager.getCurrentCategory() : 'all',
+                        messageDrafts: {}
+                    }
+                }));
+            } catch (_e) {}
+
+            // Re-render messages panel only if receiver is currently viewing this chat
+            const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
+            if (activeChat && chatId && String(activeChat.id) === String(chatId)) {
+                try {
+                    window.dispatchEvent(new CustomEvent('renderMessages', {
+                        detail: {
+                            messages: ChatManager.getMessages ? ChatManager.getMessages() : [],
+                            currentChat: activeChat,
+                            currentUser: SessionManager.getUser ? SessionManager.getUser() : null
+                        }
+                    }));
+                } catch (_e) {}
             }
             
-            if (message.senderId !== SessionManager.getUserId() && UIFeatures) {
+            if (UIFeatures) {
                 UIFeatures.playNotificationSound();
             }
             
             try {
                 window.dispatchEvent(new CustomEvent('newMessage', {
-                    detail: { message }
+                    detail: { message: normalizedMessage }
                 }));
             } catch (e) {}
         },
@@ -4804,101 +4867,16 @@ try {
         },
         
         _attachSendMessageListener: function() {
-            const sendButton = document.getElementById('sendButton');
-            const input = document.getElementById('messageInput');
-            
-            if (sendButton) {
-                sendButton.addEventListener('click', async () => {
-                    const guardResult = window.__guardAction('UI:sendMessage', MODULE_NAME, currentState);
-                    if (guardResult !== null) {
-                        console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
-                        return;
-                    }
-                    
-                    if (!canSendUserMessages()) {
-                        console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
-                        return;
-                    }
-                    
-                    if (!SessionManager.isAuthenticated()) {
-                        console.log(`[${MODULE_NAME}] ⏳ Session not ready...`);
-                        return;
-                    }
-                    
-                    if (!input) return;
-                    const text = input.value.trim();
-                    if (text) {
-                        const result = await MessageHandler.sendMessage(text);
-                        if (result.success) {
-                            input.value = '';
-                            input.style.height = 'auto';
-                            UIStateManager.clearDraft(ChatManager.getActiveChat()?.id);
-                        } else {
-                            console.error('[UI] Failed to send message:', result.error);
-                            try {
-                                window.dispatchEvent(new CustomEvent('messageError', {
-                                    detail: { error: result.error }
-                                }));
-                            } catch (e) {}
-                        }
-                    }
-                });
-            }
-            
-            if (input) {
-                input.addEventListener('keypress', async (e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        
-                        const guardResult = window.__guardAction('UI:sendMessage', MODULE_NAME, currentState);
-                        if (guardResult !== null) {
-                            console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
-                            return;
-                        }
-                        
-                        if (!canSendUserMessages()) {
-                            console.log(`[${MODULE_NAME}] ⏳ Waiting for activation...`);
-                            return;
-                        }
-                        
-                        if (!SessionManager.isAuthenticated()) {
-                            console.log(`[${MODULE_NAME}] ⏳ Session not ready...`);
-                            return;
-                        }
-                        
-                        const text = input.value.trim();
-                        if (text) {
-                            const result = await MessageHandler.sendMessage(text);
-                            if (result.success) {
-                                input.value = '';
-                                input.style.height = 'auto';
-                                UIStateManager.clearDraft(ChatManager.getActiveChat()?.id);
-                            } else {
-                                console.error('[UI] Failed to send message:', result.error);
-                                try {
-                                    window.dispatchEvent(new CustomEvent('messageError', {
-                                        detail: { error: result.error }
-                                    }));
-                                } catch (e) {}
-                            }
-                        }
-                    }
-                });
-                
-                input.addEventListener('input', () => {
-                    const conversationId = ChatManager.getActiveChat()?.id;
-                    if (conversationId && canSendUserMessages() && SessionManager.isAuthenticated()) {
-                        const text = input.value.trim();
-                        UIStateManager.saveDraft(conversationId, text);
-                        
-                        if (text && !TypingManager._isTyping) {
-                            TypingManager.sendTyping(conversationId, true);
-                        } else if (!text && TypingManager._isTyping) {
-                            TypingManager.sendTyping(conversationId, false);
-                        }
-                    }
-                });
-            }
+            // FIX: Removed all send button and keypress listeners from messages-core.js.
+            // messages-ui.js already attaches its own click handler to #sendButton (line ~7159)
+            // and its own keydown Enter handler to #messageInput (line ~8493).
+            // Having both attach simultaneously caused every send action to fire TWO
+            // calls to sendMessage() → two HTTP POST /messages requests → two messages
+            // stored on the server with different IDs → sender sees duplicates,
+            // receiver sees the message arrive twice via WebSocket, second one deduped
+            // and dropped → looks like delivery failed.
+            // messages-ui.js is the authoritative UI layer. messages-core.js only exposes
+            // the sendMessage() API that messages-ui.js calls.
         },
         
         _attachTypingListener: function() {
@@ -5526,13 +5504,19 @@ try {
             }
 
             if (ChatManager && ChatManager._conversationsMap && chatId) {
-                const conversation = ChatManager._conversationsMap.get(chatId);
+                const conversation = ChatManager._conversationsMap.get(chatId)
+                    || ChatManager._conversationsMap.get(String(chatId));
                 if (conversation && normalizedMessage) {
                     conversation.lastMessage = normalizedMessage.content;
                     conversation.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
-                    const myId = SessionManager?.getUserId?.();
-                    if (normalizedMessage.senderId && String(normalizedMessage.senderId) !== String(myId)) {
-                        conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+                    // Only increment unread if the receiver is NOT currently viewing this chat
+                    const _activeForUnread = ChatManager?.getActiveChat?.();
+                    const _isViewingForUnread = _activeForUnread && String(_activeForUnread.id) === String(chatId);
+                    if (!_isViewingForUnread) {
+                        const myId = SessionManager?.getUserId?.();
+                        if (!normalizedMessage.senderId || String(normalizedMessage.senderId) !== String(myId)) {
+                            conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+                        }
                     }
                 }
                 if (ChatManager._conversations) {
@@ -5543,6 +5527,8 @@ try {
             const activeChat = ChatManager?.getActiveChat?.();
             const isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
 
+            // ALWAYS re-render sidebar — receiver must see badge/order update even when
+            // they are on a different screen or the app is in the background.
             try {
                 window.dispatchEvent(new CustomEvent('renderChatsList', {
                     detail: {
@@ -5554,6 +5540,7 @@ try {
                 }));
             } catch (_e) {}
 
+            // Re-render messages panel immediately when receiver is viewing this chat
             if (isThisChat) {
                 try {
                     const currentUser = SessionManager?.getUser?.();
@@ -5564,6 +5551,30 @@ try {
                             currentUser: currentUser
                         }
                     }));
+                } catch (_e) {}
+                // Auto-scroll to bottom for receiver so new message is visible
+                try {
+                    const container = document.getElementById('messagesContainer');
+                    if (container) {
+                        requestAnimationFrame(() => {
+                            container.scrollTop = container.scrollHeight;
+                        });
+                    }
+                } catch (_e) {}
+            } else if (normalizedMessage) {
+                // Receiver is NOT in this chat — show a push notification / in-app badge
+                try {
+                    const _senderId = normalizedMessage.senderId;
+                    const _myId = SessionManager?.getUserId?.();
+                    // Only notify for messages from other users
+                    if (!_senderId || String(_senderId) !== String(_myId)) {
+                        if (UIFeatures && typeof UIFeatures.playNotificationSound === 'function') {
+                            UIFeatures.playNotificationSound();
+                        }
+                        window.dispatchEvent(new CustomEvent('kyn:incomingMessage', {
+                            detail: { message: normalizedMessage, chatId }
+                        }));
+                    }
                 } catch (_e) {}
             }
         };
@@ -5588,48 +5599,45 @@ try {
                 // Gate only on chatId so we never silently drop a valid incoming message.
                 if (!message || !chatId) return;
 
+                // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
-                const _hasMediaType = ['image','video','audio','file','sticker'].includes(message.type);
-                if (!_safeId && !_safeLocalId && !message.content && !_hasMediaType) return;
+                // Reject messages with no usable id to prevent corrupt dedup state
+                if (!_safeId && !_safeLocalId && !message.content) return;
 
-                // FIX: Dedup — same message arrives via wsService.on AND REALTIME_EVENT
-                // postMessage simultaneously (4 copies per send). Block all but the first.
-                const _dedupKey = _safeId || _safeLocalId;
-                if (_dedupKey && isDuplicateMessage(_dedupKey)) return;
-
-                // FIX: Normalise senderId to integer now so isSent comparison is always reliable.
-                // Server sometimes sends senderId as string or omits it in favour of sender.id.
-                if (!message.senderId && message.sender) {
-                    message.senderId = message.sender.id || message.sender.userId;
-                }
-                if (message.senderId != null) {
-                    message.senderId = parseInt(message.senderId, 10) || message.senderId;
+                // ECHO PREVENTION: WebSocket echoes our own sent messages back.
+                // The optimistic message is already in the UI — only update its status.
+                const _realtimeCurrentUserId = SessionManager && SessionManager.getUserId ? SessionManager.getUserId() : null;
+                const _realtimeSenderId = message.senderId || (message.sender && message.sender.id);
+                if (_realtimeSenderId && _realtimeCurrentUserId &&
+                    String(_realtimeSenderId) === String(_realtimeCurrentUserId)) {
+                    // This is our own message echoed back — update status and return
+                    const _echoLocalId = _safeLocalId || message.localId || null;
+                    const _echoServerId = _safeId || null;
+                    if (ChatManager && ChatManager.updateMessageStatus) {
+                        ChatManager.updateMessageStatus(
+                            _echoLocalId || _echoServerId,
+                            message.status || 'sent',
+                            { serverId: _echoServerId, localId: _echoLocalId }
+                        );
+                    }
+                    return;
                 }
 
                 let normalizedMessage = {
-                    id:            _safeId || _safeLocalId || ('tmp_' + Date.now()),
-                    serverId:      _safeId || null,
-                    localId:       _safeLocalId || null,
-                    content:       message.content || message.text || '',
-                    type:          message.type || 'text',
-                    senderId:      message.senderId,
-                    sender:        message.sender || null,
-                    timestamp:     message.createdAt || message.timestamp || Date.now(),
-                    createdAt:     message.createdAt || message.timestamp || Date.now(),
-                    updatedAt:     message.updatedAt || message.createdAt || Date.now(),
-                    status:        message.status || 'delivered',
+                    id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
+                    serverId: _safeId || null,
+                    localId:  _safeLocalId || null,
+                    content: message.content || message.text || '',
+                    type: message.type || 'text',
+                    senderId: message.senderId || message.sender?.id,
+                    sender: message.sender || null,
+                    timestamp: message.createdAt || message.timestamp || Date.now(),
+                    createdAt: message.createdAt || message.timestamp || Date.now(),
+                    status: message.status || 'delivered',
                     conversationId: chatId,
-                    chatId:        chatId,
-                    isLocalOnly:   false,
-                    reactions:     message.reactions || {},
-                    replyToId:     message.replyToId || null,
-                    fileName:      message.fileName || message.file_name || null,
-                    fileSize:      message.fileSize || message.file_size || null,
-                    duration:      message.duration || null,
-                    metadata:      message.metadata || {},
-                    attachment:    message.attachment || message.media || null,
-                    messageMediaAttachments: message.messageMediaAttachments || message.attachments || [],
+                    chatId: chatId,
+                    isLocalOnly: false
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {

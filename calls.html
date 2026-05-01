@@ -108,6 +108,16 @@ window.__CALLS_IFRAME__ = {
             document.body.classList.add('call-active');
             // Stop ring countdown
             _stopDeclineTimer();
+            // Populate the peer name from globals so it's never "User"
+            var _nameEl = document.getElementById('callWithName');
+            if (_nameEl) {
+                var _resolvedName = window.__activePeerName
+                    || window.__incomingCallerName
+                    || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
+                    || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                    || null;
+                if (_resolvedName && _resolvedName !== 'User') _nameEl.textContent = _resolvedName;
+            }
         } else {
             // idle: show idle screen
             if (idle) idle.classList.add('active');
@@ -214,11 +224,37 @@ window.__CALLS_IFRAME__ = {
                 break;
 
             case 'call_accepted':
-                showScreen('in-call');
+                // Transition with correct peer name
+                (function() {
+                    var _n = window.__activePeerName || window.__incomingCallerName
+                        || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
+                        || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                        || (data && (data.callerName || data.userName || data.name)) || null;
+                    var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
+                    var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+                    if (typeof window.transitionToInCall === 'function' && _n) {
+                        window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
+                    } else {
+                        showScreen('in-call');
+                    }
+                })();
                 break;
 
             case 'call_connected':
-                showScreen('in-call');
+                // Transition with correct peer name
+                (function() {
+                    var _n = window.__activePeerName || window.__incomingCallerName
+                        || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
+                        || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                        || (data && (data.callerName || data.userName || data.name)) || null;
+                    var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
+                    var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+                    if (typeof window.transitionToInCall === 'function' && _n) {
+                        window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
+                    } else {
+                        showScreen('in-call');
+                    }
+                })();
                 break;
 
             case 'call_ended':
@@ -2769,26 +2805,14 @@ window.__CALLS_IFRAME__ = {
             <p class="unified-auto-decline">Auto declining in <span id="declineTimer">180</span>s</p>
             <div class="unified-call-actions">
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-decline" id="declineCallBtn" onclick="if(window.showScreen) window.showScreen('idle');">
+                    <button class="unified-btn unified-btn-decline" id="declineCallBtn">
                         <i class="fas fa-phone-slash"></i>
                     </button>
                     <span>Decline</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn" onclick="if(window.showScreen) window.showScreen('in-call');">
+                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn">
                         <i class="fas fa-phone"></i>
-                    </button>
-                    <span>Audio</span>
-                </div>
-                <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-video" id="acceptVideoCallBtn" onclick="if(window.showScreen) window.showScreen('in-call');">
-                        <i class="fas fa-video"></i>
-                    </button>
-                    <span>Video</span>
-                </div>
-                <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept-green" id="acceptCallBtnAlt" onclick="if(window.showScreen) window.showScreen('in-call'); document.getElementById('acceptCallBtn').click();">
-                        <i class="fas fa-check"></i>
                     </button>
                     <span>Accept</span>
                 </div>

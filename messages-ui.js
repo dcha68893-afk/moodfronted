@@ -369,36 +369,23 @@
         const core = getMessagesCore();
 
         if (core && core.getCurrentUserId) {
-            const id = core.getCurrentUserId();
-            if (id != null) return parseInt(id, 10) || id;
+
+            return core.getCurrentUserId();
+
         }
 
         if (core && core.SessionManager && core.SessionManager.getCurrentUserId) {
-            const id = core.SessionManager.getCurrentUserId();
-            if (id != null) return parseInt(id, 10) || id;
+
+            return core.SessionManager.getCurrentUserId();
+
         }
 
-        // Globally-cached userId set by SessionManager on login — fastest path
+        // FIX Bug6: fallback to globally-cached userId set by SessionManager on login.
+        // This ensures message bubbles always resolve sent/received correctly even
+        // when the core reference is not yet available during async renders.
         if (window._kynCurrentUserId) {
-            return parseInt(window._kynCurrentUserId, 10) || window._kynCurrentUserId;
+            return window._kynCurrentUserId;
         }
-
-        // FIX: Deep fallback — read from localStorage user cache written by messages-core.
-        // This ensures bubble direction is ALWAYS correct even when the module hasn't
-        // finished initialising (e.g. first render from cache on page load / navigation).
-        // Without this, getCurrentUserId() returns null → String(null) === "null" →
-        // String(senderId) !== "null" for every message → everything renders as "received".
-        try {
-            const userCache = localStorage.getItem('kynecta_user_cache_v8');
-            if (userCache) {
-                const parsed = JSON.parse(userCache);
-                const uid = parsed.userId || parsed.id;
-                if (uid != null) {
-                    window._kynCurrentUserId = uid; // warm the fast-path for next render
-                    return parseInt(uid, 10) || uid;
-                }
-            }
-        } catch (_e) {}
 
         return null;
 
@@ -3327,11 +3314,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3413,11 +3398,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3481,11 +3464,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3549,11 +3530,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3625,11 +3604,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3707,11 +3684,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3775,11 +3750,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3875,11 +3848,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const status = message.status || 'sent';
 
@@ -3943,11 +3914,9 @@
 
             const core = getMessagesCore();
 
-            // FIX: Full fallback so currentUserId is never null.
-            // null → String(null)='null' → all bubbles appear as 'received' for both users.
-            const currentUserId = getCurrentUserId();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
 
-            const isSent = currentUserId != null && String(message.senderId) === String(currentUserId);
+            const isSent = String(message.senderId) === String(currentUserId);
 
             const time = core?.formatTime ?
 
@@ -9069,9 +9038,16 @@ Type: ${message.type || 'text'}`;
 
         async _handleSendMessage() {
 
+            // FIX: Prevent double-send. messages-core.js previously ALSO attached
+            // click+keypress handlers to #sendButton and #messageInput, causing every
+            // send to fire twice → two HTTP POST /messages → two server IDs → sender
+            // sees duplicates, receiver sees the second WS event deduped and dropped.
+            if (this._sending) return;
+            this._sending = true;
+
             const input = UIFailsafe.safeGetElement('messageInput');
 
-            if (!input) return;
+            if (!input) { this._sending = false; return; }
 
 
 
@@ -9083,7 +9059,7 @@ Type: ${message.type || 'text'}`;
 
             
 
-            if (!content && !attachment) return;
+            if (!content && !attachment) { this._sending = false; return; }
 
 
 
@@ -9119,13 +9095,19 @@ Type: ${message.type || 'text'}`;
 
 
 
-            const result = core?.sendMessage(content, {
+            let result;
+            try {
+                result = core?.sendMessage(content, {
 
-                type: attachment?.type || 'text',
+                    type: attachment?.type || 'text',
 
-                attachment: attachment
+                    attachment: attachment
 
-            });
+                });
+            } catch (sendErr) {
+                this._sending = false;
+                throw sendErr;
+            }
 
 
 
@@ -9154,6 +9136,10 @@ Type: ${message.type || 'text'}`;
                 }).catch((error) => {
 
                     UIRenderer.showNotification('Failed to send: ' + error.message, 'error');
+
+                }).finally(() => {
+
+                    this._sending = false;
 
                 });
 

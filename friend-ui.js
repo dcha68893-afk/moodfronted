@@ -1,3 +1,4 @@
+
 // =============================================
 // FRIEND PAGE UI - STABILIZED COMMUNICATION v4.7
 // DETERMINISTIC MICRO-FRONTEND ARCHITECTURE
@@ -3677,9 +3678,11 @@ function createUserSearchItemElement(user) {
                         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
                         sendFriendRequest(userId, 'friend', 'Added via All Users').then(result => {
                             if (result && result.success) {
-                                btn.innerHTML = '<i class="fas fa-check"></i>';
-                                btn.style.background = 'var(--success-color, #28a745)';
-                                btn.title = 'Request sent';
+                                // Show pending clock — request is sent but NOT yet accepted
+                                btn.innerHTML = '<i class="fas fa-clock"></i>';
+                                btn.className = 'friend-action-btn danger';
+                                btn.title = 'Request pending';
+                                btn.dataset.action = 'cancel-request';
                                 showNotification(`Friend request sent to ${displayName}`, 'success');
                             } else {
                                 btn.disabled = false;

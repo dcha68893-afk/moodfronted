@@ -796,6 +796,10 @@ function showInCallScreen(callInfo) {
     transitionToInCall(callInfo || {});
 }
 
+// Export so calls.html _handleCoreEvent can call transitionToInCall with the peer name
+window.transitionToInCall = transitionToInCall;
+window.showInCallScreen   = showInCallScreen;
+
     function showNotificationInCalls(message, type = 'info') {
         const notificationArea = document.getElementById('notificationArea') || document.getElementById('call-notification-container') || document.body;
         const notification = document.createElement('div');
@@ -3992,9 +3996,18 @@ case 'CALL_INITIATED':
                 case 'call_ended':
                 case 'call_rejected':
                 case 'call_failed':
-                case 'call_timeout':
                     this.handleCallEnded(data);
                     // FIX for Bug 6: Refresh call history after call ends
+                    this.refreshCallHistory();
+                    break;
+                case 'call_timeout':
+                    // Skip if already in-call — timeout fires stale after receiver accepts
+                    if (UIState.callState === 'connected' ||
+                        (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
+                        console.warn('[Calls UI] call_timeout ignored — already in-call screen active');
+                        break;
+                    }
+                    this.handleCallEnded(data);
                     this.refreshCallHistory();
                     break;
                 case 'call_force_ended':
@@ -4501,6 +4514,9 @@ case 'CALL_INITIATED':
                     UIState.callParticipants = [{ name: _callerName }];
                 }
             }
+            // Store caller avatar globally so transitionToInCall can use it
+            const _callerAvatar = (callData && (callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto)) || null;
+            window.__incomingCallerAvatar = _callerAvatar;
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
             if (!elements.incomingCallModal) {
                 if (typeof cacheElements === 'function') cacheElements();
@@ -5005,6 +5021,7 @@ case 'CALL_INITIATED':
             window.__activePeerType   = null;
             window.__activePeerAvatar = null;
             window.__incomingCallerName = null;
+            window.__incomingCallerAvatar = null;
             // Disconnect the incoming-modal guard observer
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) {
@@ -7539,14 +7556,24 @@ acceptIncomingCallGeneric: async function(asVideo) {
                 payload: { callId, callerName, callType }
             }, '*');
         }
-        // Fallback: if core never fires call_connected within 4 s, show in-call anyway
+        // Immediately transition to in-call screen on receiver side with correct caller name
+        transitionToInCall({
+            userName: callerName || window.__incomingCallerName || 'Caller',
+            callType: callType,
+            userAvatar: window.__incomingCallerAvatar || null
+        });
+        // Fallback: if transitionToInCall wasn't enough (race), retry once after 1s
         window._receiverShowFallback = setTimeout(() => {
             const inCall = document.getElementById('inCallScreen');
             if (!inCall || !inCall.classList.contains('active')) {
                 console.warn('[UI] Fallback: showing in-call screen for receiver');
-                transitionToInCall({ userName: callerName, callType });
+                transitionToInCall({
+                    userName: callerName || window.__incomingCallerName || 'Caller',
+                    callType: callType,
+                    userAvatar: window.__incomingCallerAvatar || null
+                });
             }
-        }, 4000);
+        }, 1000);
     }
 },
 

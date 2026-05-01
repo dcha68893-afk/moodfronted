@@ -2862,9 +2862,40 @@ const FriendCacheManager = {
                     // FIX: Only load truly accepted friends. Records with status
                     // 'pending', 'pending_sent', 'pending_received', 'blocked',
                     // or 'removed' must NOT appear in the friends list.
+                    // IMPORTANT: 'online', 'offline', 'away', 'busy' are PRESENCE statuses,
+                    // NOT friendship statuses. The messages module saves all conversation
+                    // participants to kynecta_friends_cache_v8 with their presence status —
+                    // those must NOT be loaded as accepted friends or every user appears as
+                    // a friend before they accept a request.
                     if (f && f.id) {
-                        const st = f.status || 'accepted'; // legacy records have no status → accepted
-                        if (st === 'accepted' || st === 'online' || st === 'offline' || st === 'away' || st === 'busy') {
+                        // A record is an accepted friend ONLY if it has an explicit
+                        // friendship status of 'accepted', OR it has NO status at all
+                        // (true legacy records from before status was added) AND it also
+                        // has an 'addedAt' or 'friendId' field proving it came from the
+                        // friends module — not the messages module's participant list.
+                        const friendshipStatus = f.friendshipStatus || f.friendStatus || null;
+                        const rawStatus = f.status;
+                        const isPresenceOnly = rawStatus === 'online' || rawStatus === 'offline' ||
+                                               rawStatus === 'away' || rawStatus === 'busy';
+
+                        let isAcceptedFriend = false;
+                        if (friendshipStatus === 'accepted') {
+                            isAcceptedFriend = true;
+                        } else if (rawStatus === 'accepted') {
+                            isAcceptedFriend = true;
+                        } else if (!rawStatus && !isPresenceOnly) {
+                            // Legacy record with no status — only treat as friend if it
+                            // has fields that uniquely identify a friends-module record
+                            isAcceptedFriend = !!(f.addedAt || f.friendId || f.localId || f.serverId);
+                        }
+                        // Explicitly reject pending/blocked/removed records
+                        if (rawStatus === 'pending_sent' || rawStatus === 'pending_received' ||
+                            rawStatus === 'pending' || rawStatus === 'blocked' || rawStatus === 'removed' ||
+                            rawStatus === 'none') {
+                            isAcceptedFriend = false;
+                        }
+
+                        if (isAcceptedFriend) {
                             // FIX: Always use String key to prevent integer/string duplication
                             const key = String(f.id);
                             this._cache.friends.set(key, { ...f, id: key });
@@ -2995,6 +3026,18 @@ const FriendCacheManager = {
         if (!Array.isArray(friendsArray)) return false;
         friendsArray.forEach(f => {
             if (f && f.id) {
+                // FIX: Reject records with pending/blocked/removed/presence-only statuses.
+                // The messages module stores all participants with presence statuses
+                // ('online'/'offline') in shared localStorage keys — those must not be
+                // treated as accepted friends.
+                const st = f.status;
+                if (st === 'pending_sent' || st === 'pending_received' ||
+                    st === 'pending' || st === 'blocked' || st === 'removed' ||
+                    st === 'none') return; // skip — not an accepted friend
+                // Allow: 'accepted', undefined/null (legacy), or presence statuses
+                // only when the record has friend-module-specific fields
+                if ((st === 'online' || st === 'offline' || st === 'away' || st === 'busy') &&
+                    !(f.addedAt || f.friendId || f.localId || f.serverId)) return;
                 const key = String(f.id);
                 this._cache.friends.set(key, { ...f, id: key });
                 this._timestamps.set(`friend_${key}`, Date.now());
@@ -6911,14 +6954,36 @@ function loadCachedDataInstantly() {
                 const friendsData = JSON.parse(cachedFriends);
                 const friends = friendsData.friends || friendsData; // Handle both formats
                 if (Array.isArray(friends) && friends.length > 0) {
-                    friends.forEach(friend => {
+                    // FIX: The messages module also writes to kynecta_friends_cache_v8
+                    // with ALL conversation participants (not just accepted friends) and
+                    // sets their online presence status ('online'/'offline') as the status
+                    // field. We must NOT load these as accepted friends — only load records
+                    // that explicitly have friendship status 'accepted' or are genuine
+                    // legacy friend records (identifiable by friends-module-only fields).
+                    const acceptedFriends = friends.filter(friend => {
+                        if (!friend || !friend.id) return false;
+                        const st = friend.status;
+                        if (st === 'accepted') return true;
+                        if (st === 'pending_sent' || st === 'pending_received' ||
+                            st === 'pending' || st === 'blocked' || st === 'removed' ||
+                            st === 'none') return false;
+                        // Presence-only statuses from messages module participants —
+                        // only treat as accepted friend if there's a friends-module marker
+                        if (st === 'online' || st === 'offline' || st === 'away' || st === 'busy' || !st) {
+                            return !!(friend.addedAt || friend.friendId || friend.localId || friend.serverId);
+                        }
+                        return false;
+                    });
+                    acceptedFriends.forEach(friend => {
                         FriendCacheManager._cache.friends.set(String(friend.id), friend);
                     });
-                    FriendCacheManager.syncToGlobals();
-                    window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                        detail: { friends: friends, count: friends.length, cached: true, offline: !navigator.onLine }
-                    }));
-                    Logger.info('loadCachedDataInstantly', `Loaded ${friends.length} friends from localStorage cache`);
+                    if (acceptedFriends.length > 0) {
+                        FriendCacheManager.syncToGlobals();
+                        window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                            detail: { friends: acceptedFriends, count: acceptedFriends.length, cached: true, offline: !navigator.onLine }
+                        }));
+                    }
+                    Logger.info('loadCachedDataInstantly', `Loaded ${acceptedFriends.length}/${friends.length} friends from localStorage cache`);
                 }
             } catch (e) {
                 Logger.warn('loadCachedDataInstantly', 'Failed to parse cached friends data', e);

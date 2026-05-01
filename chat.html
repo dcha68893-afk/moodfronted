@@ -2661,7 +2661,51 @@
         });
     </script>
     
-    <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
+
+        // ── FIX: Receiver notification + badge when message arrives off-screen ─
+        // messages-core fires 'kyn:incomingMessage' when the receiver gets a new
+        // message but is NOT currently viewing that chat. This listener in the
+        // parent shell handles the badge update and browser notification.
+        window.addEventListener('message', function(evt) {
+            if (!isTrustedOrigin(evt.origin)) return;
+            const d = evt.data || {};
+            if (d.type !== 'kyn:incomingMessage') return;
+            const msg = d.detail || d.payload || d;
+            if (!msg) return;
+
+            // Show / update the unread dot on the messages nav icon
+            document.querySelectorAll('.mobile-nav-icon[data-page="messages"], .nav-icon[data-page="messages"]').forEach(function(icon) {
+                if (!icon.querySelector('.nav-badge')) {
+                    const b = document.createElement('span');
+                    b.className = 'nav-badge';
+                    b.textContent = '!';
+                    icon.appendChild(b);
+                }
+            });
+
+            // Show a native notification when the tab is not focused
+            if (document.hidden && window.Notification && Notification.permission === 'granted') {
+                try {
+                    const senderName = (msg.sender && (msg.sender.displayName || msg.sender.username)) || 'New message';
+                    new Notification(senderName, {
+                        body: msg.content || 'You have a new message',
+                        icon: '/favicon.ico',
+                        tag: 'kyn-msg-' + (msg.chatId || msg.conversationId || Date.now())
+                    });
+                } catch (_e) {}
+            }
+        });
+
+        // Clear the unread badge when the user navigates back to the messages tab
+        document.querySelectorAll('.mobile-nav-icon[data-page="messages"], .nav-icon[data-page="messages"]').forEach(function(icon) {
+            icon.addEventListener('click', function() {
+                const badge = icon.querySelector('.nav-badge');
+                if (badge) badge.remove();
+            });
+        });
+
+    </script>
+        <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
     <script src="js/kynecta.safety.layer.js"></script>
     <script>
         // Signal to child iframes that AppStorage is ready
@@ -3953,19 +3997,35 @@
                     if (targetModule && moduleToIframeId[targetModule]) {
                         const iframe = document.getElementById(moduleToIframeId[targetModule]);
                         if (iframe && iframe.contentWindow) {
+                            // Always re-read session in case it arrived after page load
+                            if (!cachedToken || !cachedUserId) updateSessionCache();
+
                             if (cachedToken && cachedUserId) {
+                                // Send immediately
                                 sendSessionToModule(iframe, targetModule);
-                                // Re-send after 350ms: messages-core may still be in INITIALIZING
-                                // state on the first send and silently drops PARENT_READY.
-                                // The second send lands after its internal init completes.
+                                // Re-send at 350ms: core may still be in INITIALIZING and drops first
                                 setTimeout(() => {
                                     if (iframe && iframe.contentWindow && cachedToken && cachedUserId) {
                                         sendSessionToModule(iframe, targetModule);
                                     }
                                 }, 350);
+                                // Third retry at 800ms covers very slow devices / cold starts
+                                setTimeout(() => {
+                                    if (iframe && iframe.contentWindow && cachedToken && cachedUserId) {
+                                        sendSessionToModule(iframe, targetModule);
+                                        // Also push friends immediately after session is confirmed ACTIVE
+                                        if (targetModule === 'messages') sendFriendsToMessagesIframe();
+                                    }
+                                }, 800);
                             } else {
                                 updateSessionCache();
-                                if (cachedToken && cachedUserId) sendSessionToModule(iframe, targetModule);
+                                if (cachedToken && cachedUserId) {
+                                    sendSessionToModule(iframe, targetModule);
+                                    // Retry once in case updateSessionCache was async
+                                    setTimeout(() => {
+                                        if (cachedToken && cachedUserId) sendSessionToModule(iframe, targetModule);
+                                    }, 500);
+                                }
                             }
                             setTimeout(() => pushSettingsToModule(iframe, targetModule), 300);
                         }
@@ -4583,16 +4643,41 @@
                 // This is what makes the receiver's screen update instantly without polling.
                 function _fwdNewMessage(payload) {
                     const msgIframe = document.getElementById('messagesIframe');
-                    if (msgIframe && msgIframe.contentWindow) {
-                        // Forward as both event name variants so messages-core.js handleRealtimePayload picks it up
-                        msgIframe.contentWindow.postMessage({ type: 'message:new',  payload: payload, source: 'ws-bridge' }, '*');
-                        msgIframe.contentWindow.postMessage({ type: 'new_message',  payload: payload, source: 'ws-bridge' }, '*');
+                    if (!msgIframe || !msgIframe.contentWindow) return;
+
+                    // ECHO PREVENTION in parent bridge: if the WebSocket echoes the
+                    // sender's own message back, forward ONLY a status-update so the
+                    // optimistic bubble's tick upgrades to "sent/delivered".
+                    // Never re-add the message as a new one on the sender's side.
+                    const _wsPayloadSenderId = payload && (payload.senderId || (payload.sender && payload.sender.id));
+                    const _wsCurrentUserId   = cachedUserId ? String(cachedUserId) : null;
+                    if (_wsPayloadSenderId && _wsCurrentUserId &&
+                        String(_wsPayloadSenderId) === _wsCurrentUserId) {
+                        // It's our own echo — only forward a status confirmation
+                        msgIframe.contentWindow.postMessage({
+                            type: 'message:sent',
+                            payload: {
+                                localId:  payload.localId  || null,
+                                serverId: payload.id       || payload.serverId || null,
+                                messageId: payload.id      || payload.localId  || null,
+                                status:   payload.status   || 'sent'
+                            },
+                            source: 'ws-bridge'
+                        }, '*');
+                        return; // Do NOT forward as new_message
                     }
-                    // Also update the sidebar unread badge by bumping the conversation last message
+
+                    // Forward as both event name variants so messages-core.js picks it up
+                    msgIframe.contentWindow.postMessage({ type: 'message:new',  payload: payload, source: 'ws-bridge' }, '*');
+                    msgIframe.contentWindow.postMessage({ type: 'new_message',  payload: payload, source: 'ws-bridge' }, '*');
+
+                    // Also update the sidebar unread badge by bumping conversation last message
                     if (payload && payload.chatId) {
-                        if (msgIframe && msgIframe.contentWindow) {
-                            msgIframe.contentWindow.postMessage({ type: 'CONVERSATION_UPDATED', payload: { chatId: payload.chatId, lastMessage: payload.content, lastMessageAt: payload.createdAt || Date.now() }, source: 'ws-bridge' }, '*');
-                        }
+                        msgIframe.contentWindow.postMessage({
+                            type: 'CONVERSATION_UPDATED',
+                            payload: { chatId: payload.chatId, lastMessage: payload.content, lastMessageAt: payload.createdAt || Date.now() },
+                            source: 'ws-bridge'
+                        }, '*');
                     }
                 }
                 function _fwdMessageDelivered(payload) {
