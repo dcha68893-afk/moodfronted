@@ -688,9 +688,13 @@ function transitionToInCall(callInfo) {
         });
     }
 
-    // ── Resolve peer name ─────────────────────────────────────────────────
+    // ── Resolve peer name (caller uses __activePeerName, receiver uses stored callerName) ──
     const name = callInfo.userName
+        || window.__activePeerName
+        || window.__incomingCallerName
         || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+        || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
+        || (UIState.callData && (UIState.callData.callerName || UIState.callData.fromUserName))
         || 'User';
     const callType = callInfo.callType || UIState.callType || 'voice';
 
@@ -712,8 +716,8 @@ function transitionToInCall(callInfo) {
         }
     }
 
-    // ── Timer (elapsed from callStartTime) ───────────────────────────────
-    UIState.callStartTime = Date.now(); // always reset so receiver timer starts from 0:00
+    // ── Timer: always start fresh from 0:00 when transitioning to in-call ─
+    UIState.callStartTime = Date.now();
     if (window._currentCallTimer) clearInterval(window._currentCallTimer);
     window._currentCallTimer = setInterval(() => {
         if (!UIState.callActive) { clearInterval(window._currentCallTimer); return; }
@@ -750,6 +754,21 @@ function transitionToInCall(callInfo) {
     };
     if (endCallBtn && !endCallBtn._wired) { endCallBtn._wired = true; endCallBtn.onclick = endHandler; }
     if (callHeaderEndBtn && !callHeaderEndBtn._wired) { callHeaderEndBtn._wired = true; callHeaderEndBtn.onclick = endHandler; }
+
+    // ── Collapse/minimise button: hides in-call screen, shows mini bar in parent ─
+    const incallCollapseBtn = document.getElementById('incallCollapseBtn');
+    if (incallCollapseBtn && !incallCollapseBtn._wired) {
+        incallCollapseBtn._wired = true;
+        incallCollapseBtn.onclick = function() {
+            const inCallScreen = document.getElementById('inCallScreen');
+            if (inCallScreen) { inCallScreen.classList.remove('active'); inCallScreen.style.setProperty('display','none','important'); }
+            const callWithName = document.getElementById('callWithName');
+            const peerName = (callWithName && callWithName.textContent) || window.__activePeerName || window.__incomingCallerName || 'User';
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'CALL_MINIMISED', payload: { peer: peerName } }, '*');
+            }
+        };
+    }
 
     // ── Ensure remote audio is playing ───────────────────────────────────
     setTimeout(() => {
@@ -850,11 +869,11 @@ function showInCallScreen(callInfo) {
         }
         const userName = data.userName || data.name || data.user_name || 'User';
         const callType = data.callType || data.type || data.call_type || 'voice';
-        const source = data.source || data.origin || data.from || 'messages';
+        const source = data.source || data.origin || data.from || 'calls';
         let returnTo = data.returnTo || source;
         if (returnTo === 'friends-page' || returnTo === 'friends' || returnTo === 'friend') returnTo = 'friends';
         else if (returnTo === 'messages' || returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-        else returnTo = 'messages'; // never default to calls panel
+        else returnTo = 'calls';
 
         const chatUserId = data.chatUserId || data.conversationUserId || null;
         
@@ -1279,7 +1298,7 @@ function displayCallHistory(calls) {
     document.querySelectorAll('.call-action-btn').forEach(function(btn) {
         btn.removeEventListener('click', handleCallActionClick);
         btn.addEventListener('click', function(e) {
-            window.__pendingCallReturnTo = 'messages';
+            window.__pendingCallReturnTo = 'calls';
             window.__pendingCallChatUserId = null;
             handleCallActionClick.call(btn, e);
         });
@@ -1532,10 +1551,11 @@ function cacheCallHistory(calls) {
             return false;
         }
         
-        const mediaActions = ['toggleMute', 'toggleVideo', 'toggleScreenShare'];
-        if (mediaActions.includes(actionName)) {
-            const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'ACTIVE', 'initiating'];
-            if (activeStates.includes(UIState.callState) || UIState.callActive === true || !!UIState.activeCallId) {
+        // All in-call control actions bypass assertActive when a call is active
+        const inCallActions = ['toggleMute', 'toggleVideo', 'toggleScreenShare', 'toggleSpeaker', 'endCall', 'toggleRecording'];
+        if (inCallActions.includes(actionName)) {
+            const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'in-call', 'ACTIVE', 'initiating', 'calling'];
+            if (activeStates.includes(UIState.callState) || UIState.callActive === true || !!UIState.activeCallId || window.__callActive) {
                 return true;
             }
         }
@@ -2467,16 +2487,17 @@ async function initiateCallWithPendingUser() {
                 settingsToggle: '#settingsToggle',
                 settingsToggleIcon: '#settingsToggleIcon',
                 menuDotsBtn: '#menuDotsBtn',
+                moreBtn: '#moreBtn',
                 menuDotsDropdown: '#menuDotsDropdown',
                 
+                menuRecord: '#menuRecord',
+                menuRecordLabel: '#menuRecordLabel',
                 menuParticipants: '#menuParticipants',
                 menuChat: '#menuChat',
                 menuWhiteboard: '#menuWhiteboard',
                 menuNotes: '#menuNotes',
                 menuPolls: '#menuPolls',
                 menuRelationship: '#menuRelationship',
-                menuRecord: '#menuRecord',
-                menuRecordLabel: '#menuRecordLabel',
                 
                 muteBtn: '#muteBtn',
                 videoBtn: '#videoBtn',
@@ -2486,13 +2507,6 @@ async function initiateCallWithPendingUser() {
                 intentionBtn: '#intentionBtn',
                 focusModeBtn: '#focusModeBtn',
                 endCallBtn: '#endCallBtn',
-                moreBtn: '#moreBtn',
-                incallCollapseBtn: '#incallCollapseBtn',
-                pipContainer: '#pipContainer',
-                pipVideo: '#pipVideo',
-                pipCloseBtn: '#pipCloseBtn',
-                incallAvatarWrap: '#incallAvatarWrap',
-                remoteVideo: '#remoteVideo',
                 
                 callWithName: '#callWithName',
                 callStatusText: '#callStatusText',
@@ -3436,10 +3450,10 @@ renderContactsList: function(contacts) {
                     const uid = audioBtn.dataset.userId;
                     const uname = audioBtn.dataset.userName || 'User';
                     if (!uid) return;
-                    window.__pendingCallReturnTo = 'messages';
-                    window.__callOriginReturnTo = 'messages';
+                    window.__pendingCallReturnTo = 'calls';
+                    window.__callOriginReturnTo = 'calls';
                     if (typeof startCallWithUser === 'function') startCallWithUser(uid, uname, 'voice');
-                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'voice', returnTo: 'messages' } }));
+                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'voice', returnTo: 'calls' } }));
                     return;
                 }
                 const videoBtn = e.target.closest('.contact-video-call-btn');
@@ -3448,10 +3462,10 @@ renderContactsList: function(contacts) {
                     const uid = videoBtn.dataset.userId;
                     const uname = videoBtn.dataset.userName || 'User';
                     if (!uid) return;
-                    window.__pendingCallReturnTo = 'messages';
-                    window.__callOriginReturnTo = 'messages';
+                    window.__pendingCallReturnTo = 'calls';
+                    window.__callOriginReturnTo = 'calls';
                     if (typeof startCallWithUser === 'function') startCallWithUser(uid, uname, 'video');
-                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'video', returnTo: 'messages' } }));
+                    else window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: { userId: uid, userName: uname, callType: 'video', returnTo: 'calls' } }));
                     return;
                 }
             });
@@ -3627,15 +3641,15 @@ handleContactItemClick: function(e) {
                         const userName = audioBtn.dataset.userName || 'User';
                         if (!userId) return;
                         console.log('[Calls UI] Audio call btn clicked:', userId, userName);
-                        window.__pendingCallReturnTo = 'messages';
-                        window.__callOriginReturnTo = 'messages';
+                        window.__pendingCallReturnTo = 'calls';
+                        window.__callOriginReturnTo = 'calls';
                         window.__pendingCallChatUserId = null;
                         window.__callOriginChatUserId = null;
                         if (typeof startCallWithUser === 'function') {
                             startCallWithUser(userId, userName, 'voice');
                         } else {
                             window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
-                                detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'messages' }
+                                detail: { userId, userName, callType: 'voice', source: 'calls', returnTo: 'calls' }
                             }));
                         }
                         return;
@@ -3648,15 +3662,15 @@ handleContactItemClick: function(e) {
                         const userName = videoBtn.dataset.userName || 'User';
                         if (!userId) return;
                         console.log('[Calls UI] Video call btn clicked:', userId, userName);
-                        window.__pendingCallReturnTo = 'messages';
-                        window.__callOriginReturnTo = 'messages';
+                        window.__pendingCallReturnTo = 'calls';
+                        window.__callOriginReturnTo = 'calls';
                         window.__pendingCallChatUserId = null;
                         window.__callOriginChatUserId = null;
                         if (typeof startCallWithUser === 'function') {
                             startCallWithUser(userId, userName, 'video');
                         } else {
                             window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', {
-                                detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'messages' }
+                                detail: { userId, userName, callType: 'video', source: 'calls', returnTo: 'calls' }
                             }));
                         }
                         return;
@@ -4355,30 +4369,6 @@ case 'CALL_INITIATED':
         },
         
         addRemoteVideo: function(streamId, stream, participantName) {
-            // ── Always attach audio to the dedicated #remoteAudio element ─────
-            const remoteAudioEl = document.getElementById('remoteAudio');
-            if (remoteAudioEl && stream.getAudioTracks().length > 0) {
-                remoteAudioEl.srcObject = stream;
-                remoteAudioEl.play().catch(() => {
-                    const resume = () => { remoteAudioEl.play().catch(() => {}); document.removeEventListener('click', resume); document.removeEventListener('touchstart', resume); };
-                    document.addEventListener('click', resume, { once: true });
-                    document.addEventListener('touchstart', resume, { once: true });
-                });
-            }
-
-            // ── Attach video to the in-call #remoteVideo element ─────────────
-            const hasVideoTracks = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
-            if (hasVideoTracks) {
-                const remoteVideoEl = document.getElementById('remoteVideo');
-                if (remoteVideoEl) {
-                    remoteVideoEl.srcObject = stream;
-                    remoteVideoEl.style.display = 'block';
-                    remoteVideoEl.play().catch(() => {});
-                }
-                const avatarWrap = document.getElementById('incallAvatarWrap');
-                if (avatarWrap) avatarWrap.style.display = 'none';
-            }
-
             if (!elements.videoGrid) return;
             
             // Remove existing container for this stream if any
@@ -4397,9 +4387,9 @@ case 'CALL_INITIATED':
             container.className = 'video-container remote-video-container';
             container.dataset.streamId = streamId;
             
-            const hasVideoTracksGrid = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
+            const hasVideoTracks = stream.getVideoTracks().filter(t => t.enabled && t.readyState === 'live').length > 0;
 
-            if (hasVideoTracksGrid) {
+            if (hasVideoTracks) {
                 // ── VIDEO CALL ────────────────────────────────────────────────
                 const video = document.createElement('video');
                 video.className = 'video-element';
@@ -4500,6 +4490,17 @@ case 'CALL_INITIATED':
         },
         
         handleIncomingCall: function(callData) {
+            // Store caller name durably so transitionToInCall can use it on receiver side
+            const _callerName = (callData && (callData.callerName || callData.fromUserName || callData.userName || callData.name)) || null;
+            if (_callerName) {
+                window.__incomingCallerName = _callerName;
+                // Also persist in UIState so transitionToInCall fallbacks find it
+                UIState.callData = UIState.callData || {};
+                UIState.callData.callerName = _callerName;
+                if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
+                    UIState.callParticipants = [{ name: _callerName }];
+                }
+            }
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
             if (!elements.incomingCallModal) {
                 if (typeof cacheElements === 'function') cacheElements();
@@ -4950,14 +4951,21 @@ case 'CALL_INITIATED':
             }
             if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
 
-            UIState.callStartTime = Date.now(); // always reset so both sides start timer from 0:00
+            // ── Set state FIRST so canPerformAction unblocks buttons ─────────
             UIState.callActive    = true;
             UIState.callState     = 'connected';
+            UIState.callStartTime = Date.now();
+            window.__callActive   = true;
 
-            const name = (callData && (callData.callerName || callData.userName || callData.receiverName || callData.calleeName))
-                || window.__activePeerName
-                || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
-            const type = (callData && callData.callType) || window.__activePeerType || UIState.callType || 'voice';
+            // ── Resolve name: on caller side use __activePeerName (set at dial time) ──
+            //    On receiver side use __incomingCallerName (set when incoming call arrived) ──
+            const name = window.__activePeerName
+                || window.__incomingCallerName
+                || (callData && (callData.callerName || callData.userName || callData.receiverName || callData.calleeName))
+                || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+                || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
+                || 'User';
+            const type = window.__activePeerType || (callData && callData.callType) || UIState.callType || 'voice';
 
             transitionToInCall({ userName: name, callType: type });
         },
@@ -4996,6 +5004,7 @@ case 'CALL_INITIATED':
             window.__activePeerName   = null;
             window.__activePeerType   = null;
             window.__activePeerAvatar = null;
+            window.__incomingCallerName = null;
             // Disconnect the incoming-modal guard observer
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) {
@@ -5031,9 +5040,11 @@ case 'CALL_INITIATED':
             })();
 
             // ── Capture navigation target BEFORE clearing state ───────────────
-            const returnTo = window.__callOriginReturnTo
-                || window.__pendingCallReturnTo
-                || 'messages';
+            const returnTo = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
+                ? window.__callOriginReturnTo
+                : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
+                    ? window.__pendingCallReturnTo
+                    : 'messages'; // NEVER default to calls panel
             const chatUserId = window.__callOriginChatUserId
                 || window.__pendingCallChatUserId
                 || null;
@@ -5145,7 +5156,7 @@ case 'CALL_INITIATED':
                             timestamp: Date.now()
                         }, '*');
                     } else {
-                        // returnTo === 'calls' or unset — go to messages instead of staying on call panel
+                        // Fallback: always go to messages, never the calls panel
                         window.parent.postMessage({
                             type: 'SWITCH_MODULE',
                             module: 'messages',
@@ -5378,14 +5389,7 @@ case 'CALL_ACCEPTED': {
     const _peerAva  = window.__activePeerAvatar
         || (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
 
-    // ── Restore UIState in case a stale call_force_ended wiped it ────────
-    UIState.callActive    = true;
-    UIState.callState     = 'connected';
-    UIState.callStartTime = UIState.callStartTime || Date.now();
-    window.__callActive   = true;
-    document.body.classList.add('call-active');
-
-    // ── Dismiss incoming call modal on receiver side ──────────────────────
+    // ── Dismiss incoming call modal (receiver side cleanup) ───────────────
     if (_im) { _im.classList.remove('active'); _im.style.setProperty('display','none','important'); }
 
     transitionToInCall({ userName: _peerName, callType: _peerType, userAvatar: _peerAva });
@@ -6029,14 +6033,19 @@ case 'CALL_ACCEPTED': {
                 this.addListener(elements.menuDotsBtn, 'click', UIEventHandlers.toggleMenuDots);
             }
 
-            // ── Record menu item ─────────────────────────────────────────────
+            // ── moreBtn: in-call controls bar ⋯ → opens menuDotsDropdown ─────
+            if (elements.moreBtn) {
+                this.addListener(elements.moreBtn, 'click', UIEventHandlers.toggleMenuDots);
+            }
+
+            // ── Record menu item ──────────────────────────────────────────────
             if (elements.menuRecord) {
                 this.addListener(elements.menuRecord, 'click', () => {
-                    UIEventHandlers.closeMenuDots();
+                    UIEventHandlers.closeMenuDots && UIEventHandlers.closeMenuDots();
                     UIEventHandlers.toggleRecording();
                 });
             }
-            
+
             if (elements.menuParticipants) {
                 this.addListener(elements.menuParticipants, 'click', () => {
                     UIEventHandlers.closeMenuDots();
@@ -6170,45 +6179,6 @@ case 'CALL_ACCEPTED': {
             
             if (elements.speakerBtn) {
                 this.addListener(elements.speakerBtn, 'click', UIEventHandlers.toggleSpeaker);
-            }
-
-            // moreBtn (⋯) — opens the menuDotsDropdown panel (participants, chat, whiteboard, notes, polls)
-            if (elements.moreBtn) {
-                this.addListener(elements.moreBtn, 'click', UIEventHandlers.toggleMenuDots);
-            }
-
-            // Collapse / minimise in-call screen (call stays active in background)
-            if (elements.incallCollapseBtn) {
-                this.addListener(elements.incallCollapseBtn, 'click', function(e) {
-                    e && e.stopPropagation();
-                    const inCallScreen = document.getElementById('inCallScreen');
-                    if (inCallScreen) {
-                        inCallScreen.classList.remove('active');
-                        inCallScreen.style.setProperty('display', 'none', 'important');
-                    }
-                    if (window.parent && window.parent !== window) {
-                        const peerName = (elements.callWithName && elements.callWithName.textContent) || window.__activePeerName || 'User';
-                        window.parent.postMessage({ type: 'CALL_MINIMISED', payload: { peer: peerName } }, '*');
-                    }
-                });
-            }
-
-            // PiP close — stop camera, hide pip, restore avatar
-            if (elements.pipCloseBtn) {
-                this.addListener(elements.pipCloseBtn, 'click', function(e) {
-                    e && e.stopPropagation();
-                    if (UIState.localStream) {
-                        UIState.localStream.getVideoTracks().forEach(t => t.stop());
-                    }
-                    UIState.isVideoOff = true;
-                    if (elements.pipContainer) elements.pipContainer.style.display = 'none';
-                    if (elements.pipVideo) elements.pipVideo.srcObject = null;
-                    if (elements.incallAvatarWrap) elements.incallAvatarWrap.style.display = '';
-                    if (elements.remoteVideo) elements.remoteVideo.style.display = 'none';
-                    const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
-                    if (icon) icon.className = 'fas fa-video-slash';
-                    if (elements.videoBtn) elements.videoBtn.classList.remove('active');
-                });
             }
             
             if (elements.moodBtn) {
@@ -6465,22 +6435,22 @@ case 'CALL_ACCEPTED': {
             window.__pendingCallChatUserId = null;
         },
 
-        // ── toggleRecording — mixes local + remote audio into a downloadable .webm ──
+        // ── toggleRecording: mixes local + remote audio into downloadable .webm ──
         toggleRecording: function() {
             if (!UIState._mediaRecorder) {
-                // START recording
+                // Collect all available audio tracks (local mic + remote)
                 const tracks = [];
                 if (UIState.localStream) UIState.localStream.getAudioTracks().forEach(t => tracks.push(t));
                 const remoteAudioEl = document.getElementById('remoteAudio');
                 if (remoteAudioEl && remoteAudioEl.srcObject) {
                     remoteAudioEl.srcObject.getAudioTracks().forEach(t => tracks.push(t));
                 }
-                if (tracks.length === 0) { showNotification('No audio stream available to record', 'error'); return; }
+                if (tracks.length === 0) { showNotification('No audio stream to record', 'error'); return; }
 
                 const mixStream = new MediaStream(tracks);
                 let mr;
                 try { mr = new MediaRecorder(mixStream, { mimeType: 'audio/webm;codecs=opus' }); }
-                catch(e) { try { mr = new MediaRecorder(mixStream); } catch(e2) { showNotification('Recording not supported in this browser', 'error'); return; } }
+                catch(e) { try { mr = new MediaRecorder(mixStream); } catch(e2) { showNotification('Recording not supported', 'error'); return; } }
 
                 UIState._recordChunks = [];
                 mr.ondataavailable = e => { if (e.data && e.data.size > 0) UIState._recordChunks.push(e.data); };
@@ -6488,25 +6458,22 @@ case 'CALL_ACCEPTED': {
                     const blob = new Blob(UIState._recordChunks, { type: 'audio/webm' });
                     const url  = URL.createObjectURL(blob);
                     const a    = document.createElement('a');
-                    a.href     = url;
-                    a.download = 'call-recording-' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.webm';
-                    a.click();
-                    URL.revokeObjectURL(url);
+                    a.href = url; a.download = 'call-recording-' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.webm';
+                    a.click(); URL.revokeObjectURL(url);
                     UIState._recordChunks = [];
                     UIState._mediaRecorder = null;
                     if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Record';
-                    const icon = elements.menuRecord && elements.menuRecord.querySelector('i');
-                    if (icon) icon.style.color = '#ff3b30';
+                    const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
+                    if (recIcon) recIcon.style.color = '#ff3b30';
                     showNotification('Recording saved', 'success');
                 };
                 mr.start(1000);
                 UIState._mediaRecorder = mr;
                 if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Stop Recording';
-                const icon = elements.menuRecord && elements.menuRecord.querySelector('i');
-                if (icon) icon.style.color = '#fff';
+                const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
+                if (recIcon) recIcon.style.color = '#fff';
                 showNotification('Recording started', 'info');
             } else {
-                // STOP recording
                 UIState._mediaRecorder.stop();
                 showNotification('Recording stopped — saving…', 'info');
             }
@@ -6671,8 +6638,8 @@ case 'CALL_ACCEPTED': {
             
             // Use startCallWithUser for reliable call initiation
             if (typeof startCallWithUser === 'function') {
-                window.__pendingCallReturnTo = 'messages';
-                window.__callOriginReturnTo = 'messages';
+                window.__pendingCallReturnTo = 'calls';
+                window.__callOriginReturnTo = 'calls';
                 startCallWithUser(userId, userName, callType);
             } else if (coreInstance && (coreInstance.startCall || coreInstance.initiateCall)) {
                 showNotification(`Starting ${callType} call...`, 'info');
@@ -6781,110 +6748,89 @@ case 'CALL_ACCEPTED': {
         
         toggleMute: function() {
             if (!canPerformAction('toggleMute')) return;
-            
+
+            UIState.isMuted = !UIState.isMuted;
+
+            // Mute/unmute actual audio tracks
             if (coreInstance && coreInstance.toggleMic) {
                 coreInstance.toggleMic();
-                // Sync UI state after core toggles
-                UIState.isMuted = !UIState.isMuted;
             } else if (UIState.localStream) {
-                const audioTracks = UIState.localStream.getAudioTracks();
-                if (audioTracks.length > 0) {
-                    UIState.isMuted = !UIState.isMuted;
-                    audioTracks.forEach(track => { track.enabled = !UIState.isMuted; });
-                } else {
-                    UIState.isMuted = !UIState.isMuted;
-                }
-            } else {
-                UIState.isMuted = !UIState.isMuted;
+                UIState.localStream.getAudioTracks().forEach(t => { t.enabled = !UIState.isMuted; });
             }
 
-            const icon = elements.muteBtn && elements.muteBtn.querySelector('i');
-            if (icon) icon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+            // Always update icon
+            const muteIcon = elements.muteBtn && elements.muteBtn.querySelector('i');
+            if (muteIcon) muteIcon.className = UIState.isMuted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
             if (elements.muteBtn) elements.muteBtn.classList.toggle('active', UIState.isMuted);
 
-            showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
+            showNotification(UIState.isMuted ? 'Microphone muted' : 'Microphone on', 'info');
         },
         
         toggleVideo: function() {
             if (!canPerformAction('toggleVideo')) return;
-            
-            if (coreInstance && coreInstance.toggleCamera) {
-                coreInstance.toggleCamera();
-            } else if (UIState.localStream && UIState.localStream.getVideoTracks().length > 0) {
-                // Already have a video track — toggle it
-                const videoTracks = UIState.localStream.getVideoTracks();
+
+            const hasVideoTrack = UIState.localStream && UIState.localStream.getVideoTracks().length > 0;
+
+            if (hasVideoTrack) {
+                // Toggle existing video track on/off
                 UIState.isVideoOff = !UIState.isVideoOff;
-                videoTracks.forEach(track => { track.enabled = !UIState.isVideoOff; });
+                UIState.localStream.getVideoTracks().forEach(t => { t.enabled = !UIState.isVideoOff; });
                 const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
                 if (icon) icon.className = UIState.isVideoOff ? 'fas fa-video-slash' : 'fas fa-video';
                 if (elements.videoBtn) elements.videoBtn.classList.toggle('active', !UIState.isVideoOff);
                 // Show/hide PiP
                 const pip = document.getElementById('pipContainer');
                 if (pip) pip.style.display = UIState.isVideoOff ? 'none' : 'block';
-                showNotification(UIState.isVideoOff ? 'Camera turned off' : 'Camera turned on', 'info');
+                showNotification(UIState.isVideoOff ? 'Camera off' : 'Camera on', 'info');
+            } else if (coreInstance && coreInstance.toggleCamera) {
+                coreInstance.toggleCamera();
+                const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+                if (icon) icon.className = 'fas fa-video';
+                if (elements.videoBtn) elements.videoBtn.classList.add('active');
             } else {
-                // No video track yet — request camera, show PiP preview + send upgrade signal
+                // No video track yet — request camera access
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    showNotification('Camera not supported on this device', 'error');
-                    return;
+                    showNotification('Camera not supported on this device', 'error'); return;
                 }
                 navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
                     .then(camStream => {
-                        const videoTrack = camStream.getVideoTracks()[0];
-                        if (!videoTrack) return;
-
-                        // Store on UIState so it's cleaned up on call end
+                        const vTrack = camStream.getVideoTracks()[0];
+                        if (!vTrack) return;
                         if (!UIState.localStream) UIState.localStream = camStream;
-                        else { camStream.getTracks().forEach(t => UIState.localStream.addTrack(t)); }
-
+                        else camStream.getTracks().forEach(t => { try { UIState.localStream.addTrack(t); } catch(e){} });
                         UIState.isVideoOff = false;
 
-                        // PiP — local camera preview
+                        // PiP preview
                         const pipContainer = document.getElementById('pipContainer');
-                        const pipVideo     = document.getElementById('pipVideo');
-                        if (pipVideo) {
-                            pipVideo.srcObject = camStream;
-                            pipVideo.play().catch(() => {});
-                        }
+                        const pipVideo = document.getElementById('pipVideo');
+                        if (pipVideo) { pipVideo.srcObject = camStream; pipVideo.play().catch(()=>{}); }
                         if (pipContainer) pipContainer.style.display = 'block';
 
-                        // Remote video area — avatar hidden, video shown when remote stream arrives
+                        // Hide avatar, show remote video slot
                         const avatarWrap = document.getElementById('incallAvatarWrap');
                         const remoteVideo = document.getElementById('remoteVideo');
                         if (avatarWrap) avatarWrap.style.display = 'none';
                         if (remoteVideo) remoteVideo.style.display = 'block';
 
-                        // Update icon
                         const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
                         if (icon) icon.className = 'fas fa-video';
                         if (elements.videoBtn) elements.videoBtn.classList.add('active');
 
-                        // Add track to RTCPeerConnection if available
+                        // Add video track to peer connection
                         const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
                             || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
-                        if (pc && pc.addTrack) {
-                            try { pc.addTrack(videoTrack, UIState.localStream); } catch(e) {}
-                        }
+                        if (pc && pc.addTrack) { try { pc.addTrack(vTrack, UIState.localStream); } catch(e){} }
 
-                        // Signal to remote that video is being upgraded
+                        // Signal remote peer about video upgrade
                         if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'VIDEO_UPGRADE_REQUEST',
-                                payload: { enabled: true, userId: window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId },
-                                source: 'calls-iframe'
-                            }, '*');
+                            window.parent.postMessage({ type: 'VIDEO_UPGRADE_REQUEST', payload: { enabled: true }, source: 'calls-iframe' }, '*');
                         }
-
                         showNotification('Camera on', 'info');
                     })
                     .catch(err => {
-                        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                            showNotification('Camera permission denied', 'error');
-                        } else if (err.name === 'NotFoundError') {
-                            showNotification('No camera found', 'error');
-                        } else {
-                            showNotification('Could not start camera', 'error');
-                        }
+                        if (err.name === 'NotAllowedError') showNotification('Camera permission denied', 'error');
+                        else if (err.name === 'NotFoundError') showNotification('No camera found', 'error');
+                        else showNotification('Could not start camera', 'error');
                     });
             }
         },
@@ -6962,35 +6908,28 @@ case 'CALL_ACCEPTED': {
         
         toggleSpeaker: function() {
             UIState.isSpeakerOn = !UIState.isSpeakerOn;
-            
+
             const icon = elements.speakerBtn && elements.speakerBtn.querySelector('i');
-            if (icon) {
-                icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
-            }
+            if (icon) icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
             if (elements.speakerBtn) elements.speakerBtn.classList.toggle('active', UIState.isSpeakerOn);
 
-            // Route audio output — setSinkId where supported, otherwise volume approximation
+            // Route audio output
             const remoteAudio = document.getElementById('remoteAudio');
             if (remoteAudio) {
                 if (typeof remoteAudio.setSinkId === 'function') {
-                    // Try to enumerate devices and pick earpiece vs speaker
                     navigator.mediaDevices.enumerateDevices().then(devices => {
                         const earpiece = devices.find(d => d.kind === 'audiooutput' && /earpiece|handset/i.test(d.label));
-                        const speakerDev = devices.find(d => d.kind === 'audiooutput' && /speaker/i.test(d.label));
-                        const target = UIState.isSpeakerOn ? (speakerDev || '') : (earpiece || '');
-                        remoteAudio.setSinkId(typeof target === 'string' ? target : target.deviceId || '').catch(() => {});
-                    }).catch(() => {});
+                        const speaker  = devices.find(d => d.kind === 'audiooutput' && /speaker/i.test(d.label));
+                        const target   = UIState.isSpeakerOn ? (speaker || '') : (earpiece || '');
+                        remoteAudio.setSinkId(typeof target === 'string' ? target : (target.deviceId || '')).catch(()=>{});
+                    }).catch(()=>{});
                 }
-                // Volume approximation as fallback
-                remoteAudio.volume = UIState.isSpeakerOn ? 1.0 : 0.35;
+                remoteAudio.volume = UIState.isSpeakerOn ? 1.0 : 0.4;
             }
 
-            // Also call core if it exposes speaker control
-            if (window.callCore && window.callCore.setSpeakerEnabled) {
-                window.callCore.setSpeakerEnabled(UIState.isSpeakerOn);
-            }
+            if (coreInstance && coreInstance.setSpeakerEnabled) coreInstance.setSpeakerEnabled(UIState.isSpeakerOn);
 
-            showNotification(`Switched to ${UIState.isSpeakerOn ? 'speaker' : 'headphones / earpiece'}`, 'info');
+            showNotification(UIState.isSpeakerOn ? 'Speaker on' : 'Earpiece / headphones', 'info');
         },
 
          endCall: async function() {
@@ -7137,15 +7076,8 @@ case 'CALL_ACCEPTED': {
                             payload: { returnFromCall: true },
                             timestamp: Date.now()
                         }, '*');
-                    } else {
-                        // returnTo === 'calls' — go to messages instead of call panel
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE',
-                            module: 'messages',
-                            payload: { returnFromCall: true },
-                            timestamp: Date.now()
-                        }, '*');
                     }
+                    // returnTo === 'calls' → stay here, no SWITCH_MODULE needed
                 }
                 
                 // Also force UI update locally
@@ -7574,7 +7506,7 @@ acceptIncomingCallGeneric: async function(asVideo) {
         // ── FIX: Set navigation origin so handleCallEnded returns here after call ──
         // On receiver side, returnTo should go back to wherever they were (calls page).
         if (!window.__callOriginReturnTo) {
-            window.__callOriginReturnTo = 'messages'; // receiver came from calls page
+            window.__callOriginReturnTo = 'calls'; // receiver came from calls page
             window.__callOriginChatUserId = null;
         }
 
@@ -9081,7 +9013,7 @@ window.addEventListener('message', function(event) {
         document.querySelectorAll('.call-action-btn').forEach(function(btn) {
             btn.removeEventListener('click', handleCallActionClick);
             btn.addEventListener('click', function(e) {
-                window.__pendingCallReturnTo = 'messages';
+                window.__pendingCallReturnTo = 'calls';
                 window.__pendingCallChatUserId = null;
                 handleCallActionClick.call(btn, e);
             });
@@ -10019,32 +9951,4 @@ if (detectExistingCore()) {
     } else {
         _signal();
     }
-})();
-// ── kyn:remoteTrack → attach video to #remoteVideo, audio to #remoteAudio ──
-// Fires from calls-core.js ontrack event so both audio & video are routed correctly.
-(function() {
-    window.addEventListener('kyn:remoteTrack', function(e) {
-        var track  = e.detail && e.detail.track;
-        var stream = e.detail && e.detail.stream;
-        if (!track) return;
-
-        if (track.kind === 'audio') {
-            var remoteAudioEl = document.getElementById('remoteAudio');
-            if (remoteAudioEl) {
-                if (!remoteAudioEl.srcObject) remoteAudioEl.srcObject = stream || new MediaStream([track]);
-                remoteAudioEl.play().catch(function() {});
-            }
-        }
-
-        if (track.kind === 'video') {
-            var remoteVideoEl = document.getElementById('remoteVideo');
-            var avatarWrap    = document.getElementById('incallAvatarWrap');
-            if (remoteVideoEl) {
-                remoteVideoEl.srcObject = stream || new MediaStream([track]);
-                remoteVideoEl.style.display = 'block';
-                remoteVideoEl.play().catch(function() {});
-            }
-            if (avatarWrap) avatarWrap.style.display = 'none';
-        }
-    });
 })();

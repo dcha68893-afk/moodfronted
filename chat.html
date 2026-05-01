@@ -1892,11 +1892,11 @@
                 const nameEl = document.getElementById('callerName');
                 if (nameEl) nameEl.innerText = callData.callerName || callData.fromUserName || 'Someone';
 
-                // When already on calls page: the in-app incoming modal handles everything.
-                // Do NOT show the notification banner and do NOT navigate (user is already there).
+                // ── KEY FIX: if user is already on the calls page, NEVER show the banner ──
+                // The in-app incomingCallModal inside the iframe handles Accept/Decline.
                 const _onCallsPage = (window.__currentPage === 'calls');
                 if (!_onCallsPage) {
-                    // User is on another page — show banner with Accept/Decline buttons
+                    // User is on another page — show banner + navigate to calls page
                     const _bA = document.getElementById('bannerAcceptCall');
                     const _bD = document.getElementById('bannerDeclineCall');
                     if (_bA) _bA.style.display = '';
@@ -1907,7 +1907,7 @@
                     window.__lastActivePage = window.__currentPage || 'messages';
                     navigateToPage('calls');
                 } else {
-                    // Already on calls page — just mark active, deliver to iframe, no banner
+                    // Already on calls page — just mark active, modal handles it
                     document.body.classList.add('call-screen-active');
                     window.__activeCallInProgress = true;
                 }
@@ -3685,27 +3685,27 @@
                     return;
                 }
 
-                // Minimised call — show a slim "Call in progress" tap-to-return bar
+                // ── CALL_MINIMISED: show slim green "Call in progress" tap-to-return bar ──
                 if (data.type === 'CALL_MINIMISED') {
                     const peerName = (data.payload && data.payload.peer) || 'User';
-                    let miniBar = document.getElementById('_miniCallBar');
+                    let miniBar = document.getElementById('_kynMiniCallBar');
                     if (!miniBar) {
                         miniBar = document.createElement('div');
-                        miniBar.id = '_miniCallBar';
-                        miniBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:8500;background:linear-gradient(90deg,#34c759,#28a745);color:#fff;padding:9px 16px;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;';
-                        miniBar.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><i class="fas fa-phone" style="font-size:14px"></i><span id="_miniBarName">Call in progress</span></div><span style="font-size:11px;opacity:.85">Tap to return →</span>';
+                        miniBar.id = '_kynMiniCallBar';
+                        miniBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:8500;background:linear-gradient(90deg,#34c759,#28a745);color:#fff;padding:9px 16px;font-size:13px;font-weight:600;display:none;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,.3);cursor:pointer;';
+                        miniBar.innerHTML = '<div style="display:flex;align-items:center;gap:8px"><i class="fas fa-phone-alt" style="font-size:14px"></i><span id="_kynMiniBarName">Call in progress</span></div><span style="font-size:11px;opacity:.85">Tap to return →</span>';
                         miniBar.addEventListener('click', () => { navigateToPage('calls'); miniBar.style.display = 'none'; });
                         document.body.appendChild(miniBar);
                     }
-                    const nameEl = document.getElementById('_miniBarName');
-                    if (nameEl) nameEl.textContent = 'Call in progress with ' + peerName;
+                    const nameSpan = document.getElementById('_kynMiniBarName');
+                    if (nameSpan) nameSpan.textContent = 'Call in progress with ' + peerName;
                     miniBar.style.display = 'flex';
                     return;
                 }
 
-                // Hide mini bar on call end
-                if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED') {
-                    const miniBar = document.getElementById('_miniCallBar');
+                // Hide mini bar when call fully ends
+                if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
+                    const miniBar = document.getElementById('_kynMiniCallBar');
                     if (miniBar) miniBar.style.display = 'none';
                 }
 
@@ -3876,8 +3876,12 @@
                     window.__callDispatchLock = { ts: 0, userId: null };
                     try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
 
-                    // Never go back to 'calls' panel — always go to origin page or messages
-                    const returnTo = (ctx?.returnTo && ctx.returnTo !== 'calls') ? ctx.returnTo : (window.__lastActivePage && window.__lastActivePage !== 'calls' ? window.__lastActivePage : 'messages');
+                    // NEVER navigate back to 'calls' panel — always go to origin or messages
+                    const returnTo = (ctx?.returnTo && ctx.returnTo !== 'calls')
+                        ? ctx.returnTo
+                        : (window.__lastActivePage && window.__lastActivePage !== 'calls')
+                            ? window.__lastActivePage
+                            : 'messages';
                     console.log(`[Parent] 📞 Call ended → returnTo=${returnTo}`);
 
                     if (returnTo === 'messages') {
@@ -3904,8 +3908,8 @@
                             }, 300);
                         }
                     } else {
-                        // Default: go to messages, never the call panel
-                        navigateToPage('messages');
+                        // Any other origin — navigate to it; but never the calls panel
+                        navigateToPage(returnTo !== 'calls' ? returnTo : 'messages');
                     }
                 }
 
