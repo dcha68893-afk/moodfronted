@@ -833,6 +833,59 @@ body {
     opacity: 0.8;
 }
 
+/* ── Reply quote bubble (WhatsApp-style) ─────────────────────────────────── */
+.reply-quote {
+    display: flex;
+    align-items: stretch;
+    background: rgba(0,0,0,0.18);
+    border-radius: 6px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    overflow: hidden;
+    max-width: 100%;
+}
+
+.reply-quote-bar {
+    width: 3px;
+    background: var(--primary-color, #22c55e);
+    flex-shrink: 0;
+}
+
+.reply-quote-body {
+    padding: 5px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow: hidden;
+}
+
+.reply-quote-sender {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary-color, #22c55e);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.reply-quote-text {
+    font-size: 12px;
+    color: rgba(255,255,255,0.72);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.message.received .reply-quote {
+    background: rgba(255,255,255,0.1);
+}
+
+/* ── Reaction mine highlight ─────────────────────────────────────────────── */
+.reaction-mine {
+    background-color: rgba(34,197,94,0.28) !important;
+    border-color: var(--primary-color, #22c55e) !important;
+}
+
 /* Message Types */
 .message-image {
     max-width: 100%;
@@ -3888,6 +3941,8 @@ input:focus + .toggle-slider,
     pointer-events: none;
     background: none !important;
     border: none !important;
+    width: auto !important;
+    line-height: 1;
 }
 
 .message-date-separator span,
@@ -3904,8 +3959,8 @@ input:focus + .toggle-slider,
     backdrop-filter: blur(4px);
     border: none !important;
     display: inline-block !important;
-    width: auto !important;
     max-width: fit-content !important;
+    width: auto !important;
 }
 
 /* ── Floating scroll-date badge ─────────────────────────────────────────── */

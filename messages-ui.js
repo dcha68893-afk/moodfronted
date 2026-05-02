@@ -2137,13 +2137,11 @@
 
                         if (activeChat && incomingChatId && String(activeChat.id) === incomingChatId) {
                             const allMsgs = core?.getMessages?.() || [];
-                            // ✅ FIX: Filter to only this chat's messages before rendering
                             const chatMsgs = allMsgs.filter(m =>
                                 String(m.chatId || m.conversationId || '') === incomingChatId
                             );
                             const currentUser = core?.getCurrentUser?.();
                             UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, currentUser);
-                            // Auto-scroll so new message is visible
                             try {
                                 const c = document.getElementById('messagesContainer');
                                 if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
@@ -2887,9 +2885,7 @@
 
                     const currentChat = e.detail.currentChat;
                     let messages = e.detail.messages || [];
-                    // ✅ FIX: Always filter messages to the current chat before rendering.
-                    // ChatManager._messages is a flat global array — without filtering,
-                    // messages from other chats contaminate the panel.
+                    // ✅ Filter messages to active chat only before rendering
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const chatId = String(currentChat.id);
                         const filtered = messages.filter(m =>
@@ -3056,7 +3052,6 @@
 
                         if (currentChat && incomingChatId && String(currentChat.id) === incomingChatId) {
                             const allMsgs = core?.getMessages?.() || [];
-                            // ✅ FIX: filter to only active chat messages
                             const chatMsgs = allMsgs.filter(m =>
                                 String(m.chatId || m.conversationId || '') === incomingChatId
                             );
@@ -3295,31 +3290,37 @@
 
         _groupMessagesByDate(messages) {
 
-            const groups = {};
-
             const core = getMessagesCore();
 
-            
-
-            messages.forEach(message => {
-
-                const date = core?.formatDate ? 
-
-                    core.formatDate(message.timestamp) : 
-
-                    new Date(message.timestamp).toLocaleDateString();
-
-                if (!groups[date]) {
-
-                    groups[date] = [];
-
-                }
-
-                groups[date].push(message);
-
+            // ✅ FIX: Sort ALL messages by timestamp first so every message appears
+            // in strict chronological order (incoming and outgoing interleaved correctly).
+            const sorted = [...messages].sort((a, b) => {
+                const ta = Number(a.createdAt || a.timestamp || 0);
+                const tb = Number(b.createdAt || b.timestamp || 0);
+                return ta - tb;
             });
 
-            
+            // Group into ordered date buckets preserving sort order
+            // Use a Map so insertion order (= date order) is guaranteed
+            const groupMap = new Map();
+
+            sorted.forEach(message => {
+                const ts = message.createdAt || message.timestamp || Date.now();
+                const date = core?.formatDate
+                    ? core.formatDate(ts)
+                    : new Date(ts).toLocaleDateString();
+
+                if (!groupMap.has(date)) {
+                    groupMap.set(date, []);
+                }
+                groupMap.get(date).push(message);
+            });
+
+            // Convert to plain object in sorted date order (Map preserves insertion order)
+            const groups = {};
+            for (const [date, msgs] of groupMap) {
+                groups[date] = msgs;
+            }
 
             return groups;
 
@@ -3347,7 +3348,22 @@
 
             const reactions = this._renderReactions(message.reactions);
 
-            const replyIndicator = message.replyTo ? '<div class="reply-indicator"><i class="fas fa-reply"></i> Reply</div>' : '';
+            // ✅ FIX: Show actual quoted content in reply bubble (WhatsApp-style)
+            let replyIndicator = '';
+            if (message.replyTo || message.replyToId) {
+                const replyData = message.replyTo || {};
+                const replyContent = replyData.content || replyData.text || '';
+                const replySender = replyData.senderName || replyData.sender?.username || '';
+                const replyPreview = replyContent.length > 60 ? replyContent.substring(0, 60) + '…' : replyContent;
+                replyIndicator = `
+                    <div class="reply-quote" onclick="window.messagesUI?.scrollToMessage?.('${replyData.id || replyData.messageId || ''}')">
+                        <div class="reply-quote-bar"></div>
+                        <div class="reply-quote-body">
+                            ${replySender ? `<span class="reply-quote-sender">${replySender}</span>` : ''}
+                            <span class="reply-quote-text">${replyPreview || '📎 Media'}</span>
+                        </div>
+                    </div>`;
+            }
 
             const editedIndicator = message.edited ? '<span class="edited-indicator">(edited)</span>' : '';
 
@@ -4010,24 +4026,21 @@
 
         _renderReactions(reactions) {
 
-            if (!reactions || Object.keys(reactions).length === 0) return '';
+            if (!reactions || typeof reactions !== 'object' || Object.keys(reactions).length === 0) return '';
 
-            
+            const core = getMessagesCore();
+            const myId = core?.getCurrentUserId?.() || getCurrentUserId();
 
             let html = '<div class="message-reactions">';
 
             for (const [emoji, users] of Object.entries(reactions)) {
-
-                if (users && users.length > 0) {
-
-                    html += `<span class="reaction" title="${users.length} ${users.length === 1 ? 'person' : 'people'}">${emoji} ${users.length}</span>`;
-
-                }
-
+                const userList = Array.isArray(users) ? users : (users ? [users] : []);
+                if (userList.length === 0) continue;
+                const iMine = myId && userList.some(u => String(u) === String(myId));
+                html += `<span class="reaction${iMine ? ' reaction-mine' : ''}" title="${userList.length} ${userList.length === 1 ? 'person' : 'people'}">${emoji} ${userList.length}</span>`;
             }
 
             html += '</div>';
-
             return html;
 
         },
@@ -10777,10 +10790,7 @@ Type: ${message.type || 'text'}`;
 
         setupAutoOpenChat();
 
-        // ✅ ROOT-FIX: Receiver-side real-time message display.
-        // When a new message arrives for the receiver, messages-core fires kyn:incomingMessage.
-        // We listen here and immediately render it into the chat panel if the chat is open,
-        // OR update the sidebar badge if a different chat is active.
+        // ✅ FIX: Receiver-side real-time render — fires when message arrives for non-active chat
         window.addEventListener('kyn:incomingMessage', function(evt) {
             const detail = evt.detail || {};
             const incomingMsg  = detail.message || detail;
@@ -10791,7 +10801,6 @@ Type: ${message.type || 'text'}`;
             const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
 
             if (activeChat && String(activeChat.id) === incomingChat) {
-                // Receiver has this chat open — render the new message immediately
                 const allMsgs = core?.getMessages?.() || core?.ChatManager?._messages || [];
                 const chatMsgs = allMsgs.filter(m =>
                     String(m.chatId || m.conversationId || '') === incomingChat
@@ -10803,13 +10812,26 @@ Type: ${message.type || 'text'}`;
                     if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
                 } catch(_) {}
             } else {
-                // Receiver is in a different chat — bump unread badge on sidebar
                 const conversations = core?.getConversations?.() || [];
                 const currentChat2 = core?.getCurrentConversation?.();
                 const currentCategory = core?.getCurrentCategory?.() || 'all';
                 UIRenderer.renderChatsList(conversations, currentChat2, currentCategory, {});
             }
         });
+
+        // ✅ FIX: Scroll to a quoted reply message when clicking the reply quote bubble
+        window.messagesUI = window.messagesUI || {};
+        window.messagesUI.scrollToMessage = function(messageId) {
+            if (!messageId) return;
+            const el = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.style.transition = 'background 0.3s';
+                el.style.background = 'rgba(34,197,94,0.18)';
+                setTimeout(() => { el.style.background = ''; }, 1200);
+            }
+        };
+
 
 
         const primeCachedUi = () => {

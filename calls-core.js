@@ -13029,11 +13029,95 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
             this._peerConnection.ontrack = (event) => {
 
+                console.log('[CallsCore] 🎵 ONTRACK CALLED - Received remote track', {
+                    track: event.track ? event.track.kind : 'null',
+                    trackId: event.track ? event.track.id : 'null',
+                    streams: event.streams ? event.streams.length : 0,
+                    streamId: event.streams[0] ? event.streams[0].id : 'null'
+                });
 
+                const track  = event.track;
+                const stream = event.streams[0] || new MediaStream([track]);
 
-                const stream = event.streams[0] || new MediaStream([event.track]);
+                // ── Route by track kind: audio → remoteAudio, video → remoteVideo ──
+                // Using event.track.kind prevents assigning a video+audio stream to
+                // <audio> (which silently drops playback) and ensures both sides hear
+                // each other.
+                if (track.kind === 'audio') {
+                    // Build (or reuse) a dedicated audio-only stream for the <audio> element
+                    if (!this._remoteAudioStream) {
+                        this._remoteAudioStream = new MediaStream();
+                    }
+                    // Remove any stale audio tracks from a previous session
+                    this._remoteAudioStream.getAudioTracks().forEach(t => {
+                        this._remoteAudioStream.removeTrack(t);
+                    });
+                    this._remoteAudioStream.addTrack(track);
 
+                    let remoteAudio = document.getElementById('remoteAudio');
+                    if (!remoteAudio) {
+                        remoteAudio = document.createElement('audio');
+                        remoteAudio.id = 'remoteAudio';
+                        remoteAudio.autoplay = true;
+                        remoteAudio.setAttribute('playsinline', '');
+                        remoteAudio.style.display = 'none';
+                        document.body.appendChild(remoteAudio);
+                    }
+                    // Apply per-user volume preference
+                    remoteAudio.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
+                    remoteAudio.srcObject = this._remoteAudioStream;
+                    remoteAudio.play().catch(function(playErr) {
+                        console.warn('[CallsCore] Remote audio autoplay blocked, retrying on gesture', playErr.message);
+                        const retryPlay = function() {
+                            remoteAudio.play().catch(function() {});
+                            document.removeEventListener('click',      retryPlay);
+                            document.removeEventListener('touchstart', retryPlay);
+                        };
+                        document.addEventListener('click',      retryPlay, { once: true });
+                        document.addEventListener('touchstart', retryPlay, { once: true });
+                    });
+                    console.log('[CallsCore] ✅ AUDIO TRACK routed → #remoteAudio (audio-only stream)');
+                }
 
+                if (track.kind === 'video') {
+                    // Build (or reuse) a dedicated video stream for the <video> element
+                    if (!this._remoteVideoStream) {
+                        this._remoteVideoStream = new MediaStream();
+                    }
+                    this._remoteVideoStream.getVideoTracks().forEach(t => {
+                        this._remoteVideoStream.removeTrack(t);
+                    });
+                    this._remoteVideoStream.addTrack(track);
+
+                    let remoteVideo = document.getElementById('remoteVideo');
+                    if (!remoteVideo) {
+                        remoteVideo = document.createElement('video');
+                        remoteVideo.id = 'remoteVideo';
+                        remoteVideo.autoplay = true;
+                        remoteVideo.setAttribute('playsinline', '');
+                        remoteVideo.style.cssText = 'width:100%;height:100%;object-fit:cover;background:#000;';
+                        const wrap = document.getElementById('incallAvatarWrap');
+                        const parent = wrap ? wrap.parentNode : document.body;
+                        parent.appendChild(remoteVideo);
+                        console.log('[CallsCore] Created <video id="remoteVideo">');
+                    }
+                    remoteVideo.srcObject = this._remoteVideoStream;
+                    remoteVideo.style.display = 'block';
+                    // Hide avatar, show video
+                    const avatarWrap = document.getElementById('incallAvatarWrap');
+                    if (avatarWrap) avatarWrap.style.display = 'none';
+                    remoteVideo.play().catch(function(videoPlayErr) {
+                        console.warn('[CallsCore] Remote video autoplay blocked, retrying on gesture', videoPlayErr.message);
+                        const retryVideoPlay = function() {
+                            remoteVideo.play().catch(function() {});
+                            document.removeEventListener('click',      retryVideoPlay);
+                            document.removeEventListener('touchstart', retryVideoPlay);
+                        };
+                        document.addEventListener('click',      retryVideoPlay, { once: true });
+                        document.addEventListener('touchstart', retryVideoPlay, { once: true });
+                    });
+                    console.log('[CallsCore] ✅ VIDEO TRACK routed → #remoteVideo');
+                }
 
                 if (stream) {
 
@@ -13049,104 +13133,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
                     callsState.remoteStream = stream;
 
-
-
-
-
-
-
-                    // ── AUDIO: pipe all audio tracks from remote stream into #remoteAudio ──
-                    try {
-                        let remoteAudio = document.getElementById('remoteAudio');
-                        if (!remoteAudio) {
-                            remoteAudio = document.createElement('audio');
-                            remoteAudio.id      = 'remoteAudio';
-                            remoteAudio.autoplay = true;
-                            remoteAudio.setAttribute('playsinline', '');
-                            remoteAudio.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;left:-9999px;';
-                            document.body.appendChild(remoteAudio);
-                        }
-                        if (remoteAudio.srcObject !== stream) {
-                            remoteAudio.srcObject = stream;
-                        }
-                        remoteAudio.volume = 1.0;
-                        remoteAudio.muted  = false;
-                        const _audioPlay = remoteAudio.play();
-                        if (_audioPlay) {
-                            _audioPlay.catch(function(playErr) {
-                                console.warn('[CallsCore] Remote audio autoplay blocked, retrying on gesture', playErr.message);
-                                const retryPlay = function() {
-                                    remoteAudio.play().catch(function() {});
-                                    document.removeEventListener('click',      retryPlay);
-                                    document.removeEventListener('touchstart', retryPlay);
-                                    document.removeEventListener('keydown',    retryPlay);
-                                };
-                                document.addEventListener('click',      retryPlay, { once: true });
-                                document.addEventListener('touchstart', retryPlay, { once: true });
-                                document.addEventListener('keydown',    retryPlay, { once: true });
-                            });
-                        }
-                        console.log('[CallsCore] ✅ AUDIO STREAM ATTACHED — remoteAudio.srcObject set');
-                    } catch (audioErr) {
-                        logError(MODULE, 'Failed to attach remote audio', audioErr);
-                    }
-
-                    // ── VIDEO: if stream has live video tracks, attach to #remoteVideo ──
-                    try {
-                        const _liveVideoTracks = stream.getVideoTracks().filter(function(t) {
-                            return t.readyState === 'live' && t.enabled;
-                        });
-                        if (_liveVideoTracks.length > 0) {
-                            const _remoteVideo = document.getElementById('remoteVideo');
-                            if (_remoteVideo) {
-                                if (_remoteVideo.srcObject !== stream) {
-                                    _remoteVideo.srcObject = stream;
-                                }
-                                _remoteVideo.volume = 1.0;
-                                _remoteVideo.muted  = false;
-                                _remoteVideo.style.display = 'block';
-                                _remoteVideo.play().catch(function() {
-                                    _remoteVideo.muted = true;
-                                    _remoteVideo.play().then(function() {
-                                        _remoteVideo.muted  = false;
-                                        _remoteVideo.volume = 1.0;
-                                    }).catch(function() {});
-                                });
-                                const _avatarWrap = document.getElementById('incallAvatarWrap');
-                                if (_avatarWrap) _avatarWrap.style.display = 'none';
-                                console.log('[CallsCore] ✅ VIDEO STREAM ATTACHED — remoteVideo.srcObject set');
-                            }
-                        }
-                        // Watch for video tracks added later (audio → video call upgrade)
-                        if (!stream._callsVideoTrackListenerAdded) {
-                            stream._callsVideoTrackListenerAdded = true;
-                            stream.addEventListener('addtrack', function(addEv) {
-                                if (addEv.track && addEv.track.kind === 'video') {
-                                    const _rv = document.getElementById('remoteVideo');
-                                    if (_rv) {
-                                        if (_rv.srcObject !== stream) _rv.srcObject = stream;
-                                        _rv.style.display = 'block';
-                                        _rv.play().catch(function() {});
-                                        const _aw = document.getElementById('incallAvatarWrap');
-                                        if (_aw) _aw.style.display = 'none';
-                                        console.log('[CallsCore] ✅ Video track added dynamically — remoteVideo updated');
-                                    }
-                                }
-                            });
-                        }
-                    } catch (videoErr) {
-                        logError(MODULE, 'Failed to attach remote video', videoErr);
-                    }
-
-
-
-
-
-
-
                     logSuccess(MODULE, 'Remote stream added');
-
-
 
                     this._notifyListeners('remote_stream_added', { stream, track: event.track });
 
@@ -13426,51 +13413,34 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
         addStream: function(stream) {
 
-
-
             if (!this._peerConnection) return false;
-
-
 
             
 
-
+            console.log('[CallsCore] 🎤 Adding local stream to peer connection', {
+                audioTracks: stream.getAudioTracks().length,
+                videoTracks: stream.getVideoTracks().length,
+                totalTracks: stream.getTracks().length
+            });
 
             try {
-
-
-
                 stream.getTracks().forEach(track => {
-
-
-
+                    console.log('[CallsCore] Adding track:', {
+                        kind: track.kind,
+                        id: track.id,
+                        enabled: track.enabled,
+                        readyState: track.readyState
+                    });
                     this._peerConnection.addTrack(track, stream);
-
-
-
                 });
 
-
-
+                console.log('[CallsCore] ✅ Local stream added to peer connection successfully');
                 return true;
 
-
-
             } catch (error) {
-
-
-
                 logError(MODULE, 'Failed to add stream to peer connection', error);
-
-
-
                 return false;
-
-
-
             }
-
-
 
         },
 
@@ -13558,6 +13528,8 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
             
 
+            console.log('[CallsCore] 📞 Creating WebRTC offer with options:', options);
+
 
 
             try {
@@ -13568,7 +13540,15 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
+                console.log('[CallsCore] ✅ WebRTC offer created successfully');
+
+
+
                 await this._peerConnection.setLocalDescription(offer);
+
+
+
+                console.log('[CallsCore] ✅ Local description set for offer');
 
 
 
@@ -13576,7 +13556,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            } catch (error) {
+            } catch (error)  {
 
 
 

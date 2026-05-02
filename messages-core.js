@@ -4005,6 +4005,46 @@ try {
                 }
                 
                 EventBus.emit('message:reaction', { messageId, emoji, add });
+
+                // ✅ FIX: Immediately patch the DOM reaction row for this message
+                // so both sender AND receiver see the emoji without a full page re-render.
+                try {
+                    const el = document.querySelector(`[data-message-id="${messageId}"] .message-reactions`);
+                    const bubble = document.querySelector(`[data-message-id="${messageId}"] .message-bubble`);
+                    if (bubble) {
+                        // Rebuild reaction HTML inline
+                        const myId = SessionManager.getUserId();
+                        let rHtml = '';
+                        if (message.reactions && Object.keys(message.reactions).length > 0) {
+                            rHtml = '<div class="message-reactions">';
+                            for (const [em, users] of Object.entries(message.reactions)) {
+                                const ul = Array.isArray(users) ? users : (users ? [users] : []);
+                                if (ul.length === 0) continue;
+                                const mine = myId && ul.some(u => String(u) === String(myId));
+                                rHtml += `<span class="reaction${mine ? ' reaction-mine' : ''}" title="${ul.length} ${ul.length === 1 ? 'person' : 'people'}">${em} ${ul.length}</span>`;
+                            }
+                            rHtml += '</div>';
+                        }
+                        if (el) {
+                            el.outerHTML = rHtml;
+                        } else if (rHtml) {
+                            bubble.insertAdjacentHTML('beforeend', rHtml);
+                        }
+                    }
+                } catch (_re) {}
+
+                // Also trigger a full re-render via the renderMessages event for sync
+                try {
+                    const activeChat = ChatManager.getActiveChat();
+                    if (activeChat) {
+                        const chatMsgs = ChatManager.getMessages().filter(m =>
+                            String(m.chatId || m.conversationId || '') === String(activeChat.id)
+                        );
+                        window.dispatchEvent(new CustomEvent('renderMessages', {
+                            detail: { messages: chatMsgs, currentChat: activeChat, currentUser: null }
+                        }));
+                    }
+                } catch (_re) {}
             }
             
             return true;
@@ -4119,27 +4159,20 @@ try {
                 this._showChatPanel(tempConversation);
             }
 
-            // ✅ FIX: Load cached messages immediately so the panel is never blank.
-            // Priority: IndexedDB (most complete) → localStorage fallback.
+            // ✅ FIX: Load cached messages immediately — IDB first, then localStorage fallback
             const isPending = typeof actualId === 'string' && actualId.startsWith('pending_');
             if (!isPending) {
-                // 1. Try IndexedDB first (set by previous sessions / server syncs)
                 if (window.KynectaLocalStore) {
                     const idbCached = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(() => []);
                     if (idbCached && idbCached.length > 0) {
                         ChatManager.setMessages(idbCached, actualId);
                     } else {
-                        // 2. Fall back to localStorage
                         const lsCached = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
-                        if (lsCached && lsCached.length > 0) {
-                            ChatManager.setMessages(lsCached, actualId);
-                        }
+                        if (lsCached && lsCached.length > 0) ChatManager.setMessages(lsCached, actualId);
                     }
                 } else {
                     const cached = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
-                    if (cached && cached.length > 0) {
-                        ChatManager.setMessages(cached, actualId);
-                    }
+                    if (cached && cached.length > 0) ChatManager.setMessages(cached, actualId);
                 }
             }
             
@@ -4150,12 +4183,11 @@ try {
                 }, { requireAck: false });
             }
             
-            // ✅ FIX: Always fetch from server on open (force:true bypasses 8s minFetchGap debounce)
+            // ✅ FIX: force:true bypasses 8s minFetchGap so messages always refresh on open
             if (!isPending) {
                 if (navigator.onLine && SessionManager.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
                     await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(() => {});
                 }
-                // Offline: already loaded from IDB/localStorage above
             } else {
                 console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
             }
@@ -5519,7 +5551,6 @@ try {
                 if (conversation && normalizedMessage) {
                     conversation.lastMessage = normalizedMessage.content;
                     conversation.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
-                    // Only increment unread if the receiver is NOT currently viewing this chat
                     const _activeForUnread = ChatManager?.getActiveChat?.();
                     const _isViewingForUnread = _activeForUnread && String(_activeForUnread.id) === String(chatId);
                     if (!_isViewingForUnread) {
@@ -5537,7 +5568,7 @@ try {
             const activeChat = ChatManager?.getActiveChat?.();
             const isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
 
-            // ALWAYS re-render sidebar — receiver sees badge/order update even when on a different screen.
+            // Always update sidebar
             try {
                 window.dispatchEvent(new CustomEvent('renderChatsList', {
                     detail: {
@@ -5549,12 +5580,11 @@ try {
                 }));
             } catch (_e) {}
 
-            // Re-render messages panel when receiver IS viewing this chat
             if (isThisChat) {
                 try {
                     const currentUser = SessionManager?.getUser?.();
-                    // ✅ FIX: Filter _messages to only this chat — getMessages() returns ALL chats' messages
                     const _allMsgs = ChatManager.getMessages ? ChatManager.getMessages() : (ChatManager._messages || []);
+                    // ✅ Filter to only this chat's messages
                     const _chatMsgs = _allMsgs.filter(m =>
                         String(m.chatId || m.conversationId || '') === String(chatId)
                     );
@@ -5566,15 +5596,11 @@ try {
                         }
                     }));
                 } catch (_e) {}
-                // Auto-scroll to bottom so new message is visible
                 try {
                     const container = document.getElementById('messagesContainer');
-                    if (container) {
-                        requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
-                    }
+                    if (container) requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
                 } catch (_e) {}
             } else if (normalizedMessage) {
-                // Receiver is NOT in this chat — show notification badge
                 try {
                     const _senderId = normalizedMessage.senderId;
                     const _myId = SessionManager?.getUserId?.();
@@ -5715,10 +5741,6 @@ try {
             const data = event.data;
             if (!data || typeof data !== 'object') return;
 
-            // ✅ ROOT-CAUSE FIX: Only route ACTUAL new incoming messages via handleRealtimePayload.
-            // Previously this called handleRealtimePayload(data.type, data) for ALL postMessages,
-            // including message:sent, message:delivered, message:read — causing those status events
-            // to be treated as new incoming messages (duplicates on sender, ghost messages).
             const _rawType = String(data.type || '').toLowerCase();
             const _isNewMsg = _rawType === 'message:new' || _rawType === 'new_message' ||
                               _rawType === 'newmessage' || _rawType === 'chat:message' ||
@@ -5726,7 +5748,6 @@ try {
             if (_isNewMsg) {
                 handleRealtimePayload(data.type, data);
             }
-            // Status events are handled via document CustomEvents dispatched by message.html
 
             if (data && (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE' || data.type === 'STATUS_UPDATE')) {
                 const p = data.payload || data;
@@ -5775,15 +5796,12 @@ try {
         _bindKynectaRealtime();
         window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: false });
 
-        // ✅ FIX: Bridge from DOM CustomEvents dispatched by message.html's corrected router.
-        // Each type routes to the correct handleRealtimePayload path — no cross-contamination.
         window.addEventListener('kyn:message:received', function(evt) {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
         });
         document.addEventListener('message:new', function(evt) {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
         });
-        // Status events (sent/delivered/read) — route to correct handler, NOT as new messages
         document.addEventListener('message:sent', function(evt) {
             if (evt.detail) handleRealtimePayload('message:sent', evt.detail);
         });

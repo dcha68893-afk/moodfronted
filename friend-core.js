@@ -70,7 +70,8 @@ const POLLING_CONFIG = {
 };
 
 let pollingIntervals = {
-    incomingRequests: null
+    incomingRequests: null,
+    sentRequests: null  // FIX: added for sent-requests polling
 };
 
 let pollingRetryCounts = {
@@ -280,7 +281,55 @@ const PollingManager = {
         this._fetchInFlight = false;
         pollingRetryCounts.incomingRequests = 0;
     },
-    
+
+    // FIX: Sent requests were never polled — if a friend accepted your request while
+    // your socket was disconnected, the "Sent Requests" list would never clear.
+    startPollingSentRequests() {
+        if (pollingIntervals.sentRequests) return;
+        pollingIntervals.sentRequests = setInterval(
+            () => this._fetchSentRequests(),
+            POLLING_CONFIG.INCOMING_REQUESTS_INTERVAL
+        );
+        Logger.info('PollingManager', 'Started polling for sent requests');
+    },
+
+    stopPollingSentRequests() {
+        if (pollingIntervals.sentRequests) {
+            clearInterval(pollingIntervals.sentRequests);
+            pollingIntervals.sentRequests = null;
+            Logger.info('PollingManager', 'Stopped polling for sent requests');
+        }
+    },
+
+    async _fetchSentRequests() {
+        if (this._fetchInFlight) return;
+        if (!authReadyReceived || !__session.ready || !__session.token) return;
+        this._fetchInFlight = true;
+        try {
+            const response = await authorizedRequest('/api/friends/sent', { timeout: 10000 });
+            if (response?.success) {
+                let sentData = [];
+                const d = response.data;
+                if (Array.isArray(d?.requests))            sentData = d.requests;
+                else if (Array.isArray(d?.data?.requests)) sentData = d.data.requests;
+                else if (Array.isArray(d))                 sentData = d;
+
+                const current = FriendCacheManager.getAllSentRequests?.() || [];
+                if (!ShallowCompare.areRequestsEqual(current, sentData)) {
+                    FriendCacheManager.setSentRequests?.(sentData);
+                    FriendCacheManager.syncToGlobals();
+                    window.dispatchEvent(new CustomEvent('sentRequestsUpdated', {
+                        detail: { requests: sentData, source: 'polling', timestamp: Date.now() }
+                    }));
+                }
+            }
+        } catch (_) {
+            // Non-fatal — socket events are the primary mechanism
+        } finally {
+            this._fetchInFlight = false;
+        }
+    },
+
     // FIXED: Added _fetchInFlight deduplication guard
     async _fetchIncomingRequests() {
         // FIXED: Skip if already fetching to prevent duplicate requests
@@ -852,8 +901,9 @@ function handleAuthReady(message) {
         sendChildReady();
         flushRequestQueue();
 
-        // Start polling for incoming requests after auth is ready
+        // Start polling for incoming and sent requests after auth is ready
         PollingManager.startPollingIncomingRequests();
+        PollingManager.startPollingSentRequests(); // FIX: sent requests now auto-refresh
 
     } else {
         console.error('[Lifecycle] AUTH_READY received but could not extract user.', {
@@ -3096,14 +3146,17 @@ const FriendCacheManager = {
         return existed;
     },
     
-    getSentRequest(id) {
-        return this._cache.sentRequests.get(id) || null;
-    },
-    
     getAllSentRequests() {
         return Array.from(this._cache.sentRequests.values());
     },
-    
+
+    // FIX: getSentRequest was missing. cancelFriendRequest() calls this via optional
+    // chaining — without it existingSent is always undefined and rollback on cancel
+    // failure never restores the card in the UI.
+    getSentRequest(id) {
+        return this._cache.sentRequests.get(String(id)) || null;
+    },
+
     setSentRequest(request) {
         if (!request || !request.id) return false;
         this._cache.sentRequests.set(request.id, request);
@@ -4044,7 +4097,8 @@ const FriendRequestManager = {
         Logger.info('FriendRequestManager', 'Declining friend request', { requestId });
 
         const existingRequest = FriendCacheManager.getRequest(requestId);
-        const friendId = existingRequest?.senderId || existingRequest?.user?.id;
+        // FIX: socket-delivered requests use 'requesterId'; polling-fetched use 'senderId'
+        const friendId = existingRequest?.senderId || existingRequest?.requesterId || existingRequest?.user?.id || existingRequest?.sender?.id;
 
         // Optimistic: remove from incoming requests + persist removed state
         FriendCacheManager.removeRequest(requestId);
@@ -9873,6 +9927,7 @@ window.addEventListener('beforeunload', () => {
     FriendCacheManager.persist();
     FriendSearchEngine.clearCache();
     PollingManager.stopPollingIncomingRequests();
+    PollingManager.stopPollingSentRequests(); // FIX: stop sent polling on cleanup
 });
 
 // =============================================
@@ -10492,47 +10547,3 @@ function applySettingToFriendModule(section, key, value) {
     });
 })();
 
-// =============================================
-// [FIX 3 — PARENT/SERVER RELAY: FRIEND_ACCEPTED → FRIEND_REQUEST_ACCEPTED]
-// =============================================
-// When this module sends  FRIEND_ACCEPTED  to the parent (via safeSend/postMessage),
-// the parent (or server WebSocket handler) MUST relay a  FRIEND_REQUEST_ACCEPTED
-// message back to the ORIGINAL SENDER's active session.
-//
-// The payload now includes:
-//   targetUserId    — the user ID of the original request sender (must be notified)
-//   acceptedById    — the user ID of the receiver who just accepted
-//   acceptedByName  — display name of the receiver
-//   acceptedByAvatar— avatar of the receiver
-//   friend          — full friend profile object of the receiver
-//   requestId       — the original friend-request ID
-//   friendId        — same as acceptedById (the accepting user's ID)
-//
-// Add this handler in your parent window / server WebSocket router:
-//
-//   if (message.type === 'FRIEND_ACCEPTED') {
-//       const { targetUserId, friendId, requestId, friend,
-//               acceptedById, acceptedByName, acceptedByAvatar } = message.payload;
-//
-//       if (targetUserId) {
-//           sendToUser(targetUserId, {
-//               type: 'FRIEND_REQUEST_ACCEPTED',
-//               payload: {
-//                   requestId,
-//                   friendId:       acceptedById,        // the receiver's ID
-//                   friend: friend || {                  // receiver's profile
-//                       id:          acceptedById,
-//                       displayName: acceptedByName,
-//                       avatar:      acceptedByAvatar
-//                   },
-//                   acceptedById,
-//                   acceptedByName,
-//                   timestamp: Date.now()
-//               }
-//           });
-//       }
-//   }
-//
-// sendToUser() is your server's mechanism for pushing a message to a specific
-// online user (WebSocket broadcast, SSE push, Firebase RTDB, Pusher, etc.).
-// =============================================

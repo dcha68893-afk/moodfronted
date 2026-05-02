@@ -1,4 +1,3 @@
-
 // =============================================
 // FRIEND PAGE UI - STABILIZED COMMUNICATION v4.7
 // DETERMINISTIC MICRO-FRONTEND ARCHITECTURE
@@ -2320,7 +2319,8 @@ async function optimisticAcceptRequest(requestData, button) {
     if (!requestData) return;
     
     const requestId = requestData.id;
-    const senderId = requestData.senderId || requestData.user?.id;
+    // FIX: socket-delivered requests use 'requesterId'; polling-fetched use 'senderId'
+    const senderId = requestData.senderId || requestData.requesterId || requestData.user?.id || requestData.sender?.id;
     const requestElement = button ? button.closest('.friend-item') : null;
     const displayName = requestData.user?.displayName || requestData.displayName || 'User';
     
@@ -2382,11 +2382,10 @@ async function optimisticAcceptRequest(requestData, button) {
     console.log('[UI] Connection ready, proceeding with API call');
     
     try {
-        // Make direct API call to accept the request
-        const response = await authorizedRequest(`/api/friends/requests/${requestId}/accept`, {
-            method: 'POST',
-            timeout: 15000
-        });
+        // FIX: Route through FriendRequestManager instead of calling authorizedRequest directly.
+        // This ensures offline queuing, retry logic, and cache updates all apply consistently,
+        // matching the same code path used by decline/cancel.
+        const response = await FriendRequestManager.acceptFriendRequest(requestId, senderId);
         
         console.log('[UI] Accept request API response:', response);
         

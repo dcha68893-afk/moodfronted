@@ -787,6 +787,32 @@ function transitionToInCall(callInfo) {
     if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
     }
+
+    // ── Volume slider: inject once into incall controls ───────────────────
+    if (!document.getElementById('remoteVolumeSlider')) {
+        const incallControls = document.querySelector('.incall-controls')
+            || document.querySelector('.call-controls-row')
+            || document.querySelector('#inCallScreen .controls');
+        if (incallControls) {
+            const volWrap = document.createElement('div');
+            volWrap.id = 'volumeControlWrap';
+            volWrap.style.cssText = 'display:flex;align-items:center;gap:6px;padding:0 8px;';
+            volWrap.innerHTML =
+                '<i class="fas fa-volume-down" style="color:#fff;font-size:14px;" title="Volume"></i>' +
+                '<input type="range" id="remoteVolumeSlider" min="0" max="100" value="100" ' +
+                'style="width:80px;accent-color:#0084ff;cursor:pointer;vertical-align:middle;" ' +
+                'title="Remote volume">' +
+                '<i class="fas fa-volume-up" style="color:#fff;font-size:14px;"></i>';
+            incallControls.appendChild(volWrap);
+            document.getElementById('remoteVolumeSlider').addEventListener('input', function() {
+                const vol = parseInt(this.value, 10) / 100;
+                window.__remoteVolume = vol;
+                const remoteAudio = document.getElementById('remoteAudio');
+                if (remoteAudio) remoteAudio.volume = vol;
+            });
+        }
+    }
+
     console.log('[UI] ✅ In-call screen VISIBLE for both sides');
 }
 
@@ -4232,30 +4258,61 @@ case 'CALL_INITIATED':
             switch (event) {
                 case 'local_stream_ready':
                     UIState.localStream = data.stream;
+                    // Attach local stream to local video element immediately
                     (function attachLocalVideo(stream) {
-                        if (!stream) return;
-                        const hasVideoTracks = stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled);
-                        // Always wire the dedicated PiP video element
+                        // Always explicitly set #pipVideo first (the in-call PiP element)
                         const pipVideo = document.getElementById('pipVideo');
-                        if (pipVideo) {
-                            if (pipVideo.srcObject !== stream) pipVideo.srcObject = stream;
+                        const pipContainer = document.getElementById('pipContainer');
+                        const hasVideoTracks = stream && stream.getVideoTracks().length > 0;
+
+                        if (pipVideo && stream) {
+                            pipVideo.srcObject   = stream;
                             pipVideo.muted       = true;
                             pipVideo.autoplay    = true;
                             pipVideo.playsInline = true;
                             pipVideo.play().catch(() => {});
                         }
-                        // Show PiP container whenever there are live video tracks
-                        const pipContainer = document.getElementById('pipContainer');
+                        // Show pip container whenever there are video tracks (covers upgrade scenario too)
                         if (pipContainer && hasVideoTracks) {
                             pipContainer.style.display = 'block';
                         }
-                        // Legacy fallbacks
-                        const localVid = document.getElementById('localVideo') || document.getElementById('selfVideo');
-                        if (localVid && localVid !== pipVideo) {
-                            if (localVid.srcObject !== stream) localVid.srcObject = stream;
-                            localVid.muted = true;
+
+                        // Also set on any other local video element (video grid, calling overlay preview)
+                        const localVid = document.getElementById('localVideo')
+                            || document.getElementById('selfVideo')
+                            || document.querySelector('.local-video video');
+                        if (localVid && localVid !== pipVideo && stream) {
+                            localVid.srcObject   = stream;
+                            localVid.muted       = true;
+                            localVid.autoplay    = true;
+                            localVid.playsInline = true;
                             localVid.play().catch(() => {});
                         }
+                        // If no dedicated local video element, add one to videoGrid
+                        if (!localVid && stream && elements.videoGrid) {
+                            const hasLocalContainer = document.getElementById('localVideoContainer');
+                            if (!hasLocalContainer) {
+                                const container = document.createElement('div');
+                                container.id = 'localVideoContainer';
+                                container.className = 'video-container local-video-container';
+                                container.style.cssText = 'position:relative;';
+                                const video = document.createElement('video');
+                                video.id = 'localVideo';
+                                video.className = 'video-element';
+                                video.autoplay = true;
+                                video.playsInline = true;
+                                video.muted = true;
+                                video.srcObject = stream;
+                                const overlay = document.createElement('div');
+                                overlay.className = 'video-overlay';
+                                overlay.innerHTML = '<div class="video-name"><span>You</span></div>';
+                                container.appendChild(video);
+                                container.appendChild(overlay);
+                                elements.videoGrid.appendChild(container);
+                                video.play().catch(() => {});
+                            }
+                        }
+                        // Hide placeholder once we have a stream
                         const placeholder = document.getElementById('offlineCallPlaceholder');
                         if (placeholder) placeholder.style.display = 'none';
                     })(data.stream);
@@ -4546,51 +4603,48 @@ case 'CALL_INITIATED':
             })();
 
             // ── RINGTONE: play ringtone for receiver ─────────────────────────
+            // ── RINGTONE: musical ascending chime for receiver ──────────────
             (function _playRingtone() {
                 try {
                     if (window._incomingRingtone) {
                         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                     }
-                    // Use a data-URI ringtone so it works without a separate file
-                    // Falls back to Web Audio API beep if Audio fails
-                    const audioSrc = window.__callRingtone ||
-                        'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAA' + // minimal fallback
-                        'AAAQABAAQAAAA==';
-                    let ring;
-                    try {
-                        ring = new Audio();
-                        ring.src = audioSrc;
-                        ring.loop = true;
-                        ring.volume = 0.8;
-                        const playPromise = ring.play();
-                        if (playPromise && typeof playPromise.catch === 'function') {
-                            playPromise.catch(() => {
-                                // Autoplay blocked — try Web Audio beep instead
-                                _tryWebAudioRing();
-                            });
-                        }
+                    // Use custom ringtone file if provided, else generate musical chime via Web Audio
+                    if (window.__callRingtoneUrl) {
+                        const ring = new Audio(window.__callRingtoneUrl);
+                        ring.loop = true; ring.volume = 0.85;
+                        ring.play().catch(() => _tryWebAudioChime());
                         window._incomingRingtone = ring;
-                    } catch(e) {
-                        _tryWebAudioRing();
+                    } else {
+                        _tryWebAudioChime();
                     }
-
-                    function _tryWebAudioRing() {
+                    function _tryWebAudioChime() {
                         try {
                             const ctx = new (window.AudioContext || window.webkitAudioContext)();
                             let ringing = true;
-                            window._incomingRingtone = { _ctx: ctx, pause: function() { ringing = false; try { ctx.close(); } catch(e) {} }, currentTime: 0 };
-                            (function beep() {
+                            window._incomingRingtone = {
+                                _ctx: ctx,
+                                pause: function() { ringing = false; try { ctx.close(); } catch(e) {} },
+                                currentTime: 0
+                            };
+                            // Ascending chime: C5-E5-G5-C6, repeats every 2.5 s
+                            const freqs = [523, 659, 784, 1047];
+                            (function chime() {
                                 if (!ringing || ctx.state === 'closed') return;
-                                const osc = ctx.createOscillator();
-                                const gain = ctx.createGain();
-                                osc.connect(gain);
-                                gain.connect(ctx.destination);
-                                osc.frequency.value = 520;
-                                gain.gain.setValueAtTime(0.4, ctx.currentTime);
-                                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-                                osc.start(ctx.currentTime);
-                                osc.stop(ctx.currentTime + 0.4);
-                                osc.onended = function() { if (ringing) setTimeout(beep, 800); };
+                                const t = ctx.currentTime;
+                                freqs.forEach(function(f, i) {
+                                    const osc  = ctx.createOscillator();
+                                    const gain = ctx.createGain();
+                                    osc.connect(gain); gain.connect(ctx.destination);
+                                    osc.type = 'sine';
+                                    osc.frequency.value = f;
+                                    gain.gain.setValueAtTime(0, t + i * 0.12);
+                                    gain.gain.linearRampToValueAtTime(0.35, t + i * 0.12 + 0.05);
+                                    gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.45);
+                                    osc.start(t + i * 0.12);
+                                    osc.stop(t + i * 0.12 + 0.5);
+                                });
+                                setTimeout(function() { if (ringing) chime(); }, 2500);
                             })();
                         } catch(e) { /* silent fail */ }
                     }
@@ -4867,54 +4921,39 @@ case 'CALL_INITIATED':
                 if (elements.callContainer) elements.callContainer.dataset.offlineTimer = window._outgoingRingTimer;
             })();
 
-            // If receiver is offline, also play ringtone for caller
-            if (!UIState.callReceiverOnline) {
-                (function _playCallerRingtone() {
-                    try {
-                        if (window._callerRingtone) {
-                            try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
-                        }
-                        const audioSrc = window.__callRingtone ||
-                            'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAA' + // minimal fallback
-                            'AAAQABAAQAAAA==';
-                        let ring;
-                        try {
-                            ring = new Audio();
-                            ring.src = audioSrc;
-                            ring.loop = true;
-                            ring.volume = 0.6;
-                            const playPromise = ring.play();
-                            if (playPromise && typeof playPromise.catch === 'function') {
-                                playPromise.catch(() => { _tryWebAudioBeep(); });
-                            }
-                            window._callerRingtone = ring;
-                        } catch(e) {
-                            _tryWebAudioBeep();
-                        }
-
-                        function _tryWebAudioBeep() {
-                            try {
-                                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                                let ringing = true;
-                                window._callerRingtone = { _ctx: ctx, pause: function() { ringing = false; try { ctx.close(); } catch(e) {} }, currentTime: 0 };
-                                (function beep() {
-                                    if (!ringing || ctx.state === 'closed') return;
-                                    const osc = ctx.createOscillator();
-                                    const gain = ctx.createGain();
-                                    osc.connect(gain);
-                                    gain.connect(ctx.destination);
-                                    osc.frequency.value = 600;
-                                    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-                                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-                                    osc.start(ctx.currentTime);
-                                    osc.stop(ctx.currentTime + 0.3);
-                                    osc.onended = function() { if (ringing) setTimeout(beep, 1000); };
-                                })();
-                            } catch(e) { /* silent fail */ }
-                        }
-                    } catch(e) { /* silent fail */ }
-                })();
-            }
+            // Ringback tone for caller — plays on BOTH online and offline receiver (WhatsApp-style)
+            (function _playCallerRingback() {
+                try {
+                    if (window._callerRingtone) {
+                        try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                    }
+                    // Standard telephone ringback cadence: 1s ring, 3s silence
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    let ringing = true;
+                    window._callerRingtone = {
+                        _ctx: ctx,
+                        pause: function() { ringing = false; try { ctx.close(); } catch(e) {} },
+                        currentTime: 0
+                    };
+                    (function ring() {
+                        if (!ringing || ctx.state === 'closed') return;
+                        // Two-tone ringback (440 Hz + 480 Hz) — classic telephone sound
+                        [440, 480].forEach(function(freq) {
+                            const osc  = ctx.createOscillator();
+                            const gain = ctx.createGain();
+                            osc.connect(gain); gain.connect(ctx.destination);
+                            osc.type = 'sine';
+                            osc.frequency.value = freq;
+                            gain.gain.setValueAtTime(0.2, ctx.currentTime);
+                            gain.gain.setValueAtTime(0.2, ctx.currentTime + 1.0);
+                            gain.gain.setValueAtTime(0, ctx.currentTime + 1.0);
+                            osc.start(ctx.currentTime);
+                            osc.stop(ctx.currentTime + 1.0);
+                        });
+                        setTimeout(function() { if (ringing) ring(); }, 4000); // 1s on, 3s off
+                    })();
+                } catch(e) { /* silent fail */ }
+            })();
         },
         
         handleCallStarted: function(callData) {
@@ -5199,6 +5238,8 @@ case 'CALL_INITIATED':
         handleRemoteStreamAdded: function(payload) {
             if (payload.stream) {
                 UIState.remoteStreams.set(payload.stream.id, payload.stream);
+                // Keep UIState.remoteStream in sync so toggleRecording can find it
+                UIState.remoteStream = payload.stream;
                 this.addRemoteVideo(payload.stream.id, payload.stream);
             }
         },
@@ -6426,139 +6467,13 @@ case 'CALL_ACCEPTED': {
             if (elements.callTimer) elements.callTimer.textContent = '0:00';
             // Clear dedup locks
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
-            if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
-            window.__pendingCallReturnTo = null;
-            window.__pendingCallChatUserId = null;
-        },
 
-        // ── toggleRecording: mixes local + remote audio into downloadable .webm ──
-        toggleRecording: function() {
-            if (!UIState._mediaRecorder) {
-                // ── Collect audio tracks (local mic + remote) ──────────────────
-                const audioTracks = [];
-                if (UIState.localStream) {
-                    UIState.localStream.getAudioTracks()
-                        .filter(t => t.readyState === 'live')
-                        .forEach(t => audioTracks.push(t));
-                }
-                const remoteAudioEl = document.getElementById('remoteAudio');
-                if (remoteAudioEl && remoteAudioEl.srcObject) {
-                    remoteAudioEl.srcObject.getAudioTracks()
-                        .filter(t => t.readyState === 'live')
-                        .forEach(t => { if (!audioTracks.includes(t)) audioTracks.push(t); });
-                }
-                if (audioTracks.length === 0) {
-                    showNotification('No audio stream to record', 'error');
-                    return;
-                }
-
-                // ── Check if we are currently in a video call ──────────────────
-                const remoteVideo = document.getElementById('remoteVideo');
-                const pipVideo    = document.getElementById('pipVideo');
-                const isVideoCall = remoteVideo &&
-                    remoteVideo.style.display !== 'none' &&
-                    remoteVideo.srcObject &&
-                    remoteVideo.srcObject.getVideoTracks().some(t => t.readyState === 'live');
-
-                let mixStream;
-                let drawTimer = null;
-
-                if (isVideoCall) {
-                    // ── VIDEO RECORDING: composite canvas ─────────────────────
-                    const canvas  = document.createElement('canvas');
-                    canvas.width  = 1280;
-                    canvas.height = 720;
-                    const ctx = canvas.getContext('2d');
-
-                    drawTimer = setInterval(() => {
-                        ctx.clearRect(0, 0, 1280, 720);
-                        if (remoteVideo.readyState >= 2) {
-                            ctx.drawImage(remoteVideo, 0, 0, 1280, 720);
-                        } else {
-                            ctx.fillStyle = '#111';
-                            ctx.fillRect(0, 0, 1280, 720);
-                        }
-                        if (pipVideo && pipVideo.readyState >= 2) {
-                            // PiP: local camera in top-right corner
-                            ctx.save();
-                            ctx.beginPath();
-                            ctx.roundRect(1280 - 236, 16, 220, 160, 10);
-                            ctx.clip();
-                            ctx.drawImage(pipVideo, 1280 - 236, 16, 220, 160);
-                            ctx.restore();
-                        }
-                    }, 50);
-
-                    const canvasStream = canvas.captureStream(20);
-                    mixStream = new MediaStream([...audioTracks, ...canvasStream.getVideoTracks()]);
-                    UIState._recordDrawTimer = drawTimer;
-                } else {
-                    // ── AUDIO-ONLY RECORDING ──────────────────────────────────
-                    mixStream = new MediaStream(audioTracks);
-                }
-
-                // ── Pick best supported MIME type ─────────────────────────────
-                let mr;
-                const mimeTypes = isVideoCall
-                    ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'audio/webm;codecs=opus', 'audio/webm']
-                    : ['audio/webm;codecs=opus', 'audio/webm'];
-
-                for (const mime of mimeTypes) {
-                    if (MediaRecorder.isTypeSupported(mime)) {
-                        try { mr = new MediaRecorder(mixStream, { mimeType: mime }); break; } catch(e) {}
-                    }
-                }
-                if (!mr) {
-                    try { mr = new MediaRecorder(mixStream); }
-                    catch(e2) { showNotification('Recording not supported in this browser', 'error'); return; }
-                }
-
-                UIState._recordChunks = [];
-                UIState._recordIsVideo = isVideoCall;
-
-                mr.ondataavailable = e => {
-                    if (e.data && e.data.size > 0) UIState._recordChunks.push(e.data);
-                };
-                mr.onstop = () => {
-                    if (UIState._recordDrawTimer) {
-                        clearInterval(UIState._recordDrawTimer);
-                        UIState._recordDrawTimer = null;
-                    }
-                    const isVid = UIState._recordIsVideo;
-                    const blob  = new Blob(UIState._recordChunks, { type: isVid ? 'video/webm' : 'audio/webm' });
-                    const url   = URL.createObjectURL(blob);
-                    const a     = document.createElement('a');
-                    const ts    = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-                    a.href     = url;
-                    a.download = 'call-recording-' + ts + '.webm';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    UIState._recordChunks    = [];
-                    UIState._mediaRecorder   = null;
-                    UIState._recordIsVideo   = false;
-                    if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Record';
-                    const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
-                    if (recIcon) { recIcon.style.color = '#ff3b30'; recIcon.classList.remove('fa-circle'); recIcon.classList.add('fa-circle'); }
-                    showNotification('Recording saved ✓', 'success');
-                };
-
-                mr.start(500);
-                UIState._mediaRecorder = mr;
-                if (elements.menuRecordLabel) elements.menuRecordLabel.textContent = 'Stop Recording';
-                const recIcon = elements.menuRecord && elements.menuRecord.querySelector('i');
-                if (recIcon) { recIcon.style.color = '#ff3b30'; recIcon.classList.add('recording-pulse'); }
-                showNotification(isVideoCall ? 'Video recording started 🔴' : 'Audio recording started 🔴', 'info');
-            } else {
-                UIState._mediaRecorder.stop();
-                showNotification('Recording stopped — saving…', 'info');
-            }
-        },
-
-        toggleMenuDots: function(e) {
-            e?.stopPropagation();
-            if (elements.menuDotsDropdown) {
+        if (hasVideo) {
+            // Video recording: composite both video feeds on canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = 1280;
+            canvas.height = 720;
+            const ctx = canvas.getContext('2d');
                 elements.menuDotsDropdown.classList.toggle('active');
                 UILogger.interaction('toggleMenuDots', 'menuDotsBtn');
             }
@@ -6865,28 +6780,39 @@ case 'CALL_ACCEPTED': {
                 if (icon) icon.className = 'fas fa-video';
                 if (elements.videoBtn) elements.videoBtn.classList.add('active');
             } else {
-                // No video track yet — request camera access
+                // No video track yet — request camera access and upgrade to video call
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                     showNotification('Camera not supported on this device', 'error'); return;
                 }
-                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
                     .then(camStream => {
                         const vTrack = camStream.getVideoTracks()[0];
                         if (!vTrack) return;
-                        if (!UIState.localStream) UIState.localStream = camStream;
-                        else camStream.getTracks().forEach(t => { try { UIState.localStream.addTrack(t); } catch(e){} });
+
+                        // Merge video track into existing local stream
+                        if (!UIState.localStream) {
+                            UIState.localStream = camStream;
+                        } else {
+                            try { UIState.localStream.addTrack(vTrack); } catch(e) {}
+                        }
                         UIState.isVideoOff = false;
 
-                        // PiP preview
+                        // Show PiP with local camera — use the FULL localStream so audio stays in sync
                         const pipContainer = document.getElementById('pipContainer');
-                        const pipVideo = document.getElementById('pipVideo');
-                        if (pipVideo) { pipVideo.srcObject = camStream; pipVideo.play().catch(()=>{}); }
+                        const pipVideo     = document.getElementById('pipVideo');
+                        if (pipVideo) {
+                            pipVideo.srcObject   = UIState.localStream;
+                            pipVideo.muted       = true;
+                            pipVideo.autoplay    = true;
+                            pipVideo.playsInline = true;
+                            pipVideo.play().catch(() => {});
+                        }
                         if (pipContainer) pipContainer.style.display = 'block';
 
-                        // Hide avatar, show remote video slot
-                        const avatarWrap = document.getElementById('incallAvatarWrap');
+                        // Prepare remote video area
+                        const avatarWrap  = document.getElementById('incallAvatarWrap');
                         const remoteVideo = document.getElementById('remoteVideo');
-                        if (avatarWrap) avatarWrap.style.display = 'none';
+                        if (avatarWrap)  avatarWrap.style.display  = 'none';
                         if (remoteVideo) remoteVideo.style.display = 'block';
 
                         const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
@@ -6894,41 +6820,51 @@ case 'CALL_ACCEPTED': {
                         if (elements.videoBtn) elements.videoBtn.classList.add('active');
 
                         // Add video track to peer connection and renegotiate
+                        const cs = window.callsState;
+                        const callId = cs && (cs.serverCallId || cs.activeCallId);
                         const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
-                            || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
+                                || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
                         if (pc && pc.addTrack) {
-                            try { pc.addTrack(vTrack, UIState.localStream); } catch(e){}
-                            // Renegotiate so remote peer receives the video track
-                            if (pc.createOffer) {
+                            try {
+                                pc.addTrack(vTrack, UIState.localStream);
+                                // Renegotiate: create new offer with video and send via core signaling
                                 pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
                                     .then(offer => pc.setLocalDescription(offer))
                                     .then(() => {
-                                        // Forward SDP through existing signalling channel
-                                        const callId = (window.callsState && window.callsState.serverCallId)
-                                            || (window.KynectaCallSession && window.KynectaCallSession.serverCallId);
-                                        window.dispatchEvent(new CustomEvent('webrtc:sendSignal', {
-                                            detail: {
-                                                type: 'SIGNAL_OFFER',
-                                                payload: { callId, offer: pc.localDescription, timestamp: Date.now() }
-                                            }
-                                        }));
+                                        // Send via callCore signaling (goes through WS to remote peer)
+                                        if (coreInstance && coreInstance.sendAction) {
+                                            coreInstance.sendAction('SIGNAL_OFFER', {
+                                                offer:  pc.localDescription,
+                                                callId: callId,
+                                                isVideoUpgrade: true
+                                            }).catch(() => {});
+                                        } else if (window.callCore && window.callCore.sendToParent) {
+                                            window.callCore.sendToParent('SIGNAL_OFFER', {
+                                                offer:  pc.localDescription,
+                                                callId: callId,
+                                                isVideoUpgrade: true
+                                            });
+                                        }
+                                        console.log('[Calls UI] Video upgrade offer sent via renegotiation');
                                     })
-                                    .catch(err => { console.warn('[CallsUI] Renegotiation failed', err.message); });
+                                    .catch(err => console.warn('[Calls UI] Video upgrade renegotiation failed:', err));
+                            } catch(e) {
+                                console.warn('[Calls UI] Failed to add video track to PC:', e);
                             }
                         }
 
-                        // Signal remote peer about video upgrade (WhatsApp-style prompt)
-                        const callerName = (window.callsState && window.callsState.remoteUserName)
-                            || (window.KynectaCallSession && window.KynectaCallSession.current && window.KynectaCallSession.current.callerName)
-                            || 'The caller';
+                        // Notify remote peer to show "Switch to video?" prompt
+                        // This goes via postMessage to parent which routes it through WS
                         if (window.parent && window.parent !== window) {
                             window.parent.postMessage({
                                 type: 'VIDEO_UPGRADE_REQUEST',
-                                payload: { enabled: true, callerName },
+                                payload: { enabled: true, callId: callId },
                                 source: 'calls-iframe'
                             }, '*');
                         }
-                        showNotification('Camera on — waiting for other side to accept', 'info');
+                        // Store track ref for possible rollback if remote declines
+                        UIState._videoUpgradeTrack = vTrack;
+                        showNotification('Camera on — waiting for remote to accept video', 'info');
                     })
                     .catch(err => {
                         if (err.name === 'NotAllowedError') showNotification('Camera permission denied', 'error');
@@ -7033,6 +6969,102 @@ case 'CALL_ACCEPTED': {
             if (coreInstance && coreInstance.setSpeakerEnabled) coreInstance.setSpeakerEnabled(UIState.isSpeakerOn);
 
             showNotification(UIState.isSpeakerOn ? 'Speaker on' : 'Earpiece / headphones', 'info');
+        },
+
+        // ── RECORDING (audio+video with visual indicator) ─────────────────
+        toggleRecording: function() {
+            if (UIState._recorder && UIState._recorder.state === 'recording') {
+                // Stop recording
+                UIState._recorder.stop();
+                UIState._recorder = null;
+                // Clear pulsing indicator
+                if (UIState._recPulseInterval) { clearInterval(UIState._recPulseInterval); UIState._recPulseInterval = null; }
+                if (UIState._recAnimFrame)     { cancelAnimationFrame(UIState._recAnimFrame); UIState._recAnimFrame = null; }
+                const menuRecord = document.getElementById('menuRecord');
+                if (menuRecord) { menuRecord.style.color = ''; menuRecord.textContent = 'Record'; menuRecord.classList.remove('recording-active'); }
+                showNotification('Recording stopped — file downloading', 'info');
+                return;
+            }
+
+            // Start recording
+            const localStream  = UIState.localStream  || (coreInstance && coreInstance.getLocalStream && coreInstance.getLocalStream());
+            const remoteStream = UIState.remoteStream  || (coreInstance && coreInstance.getRemoteStream && coreInstance.getRemoteStream())
+                              || (window.callsState && window.callsState.remoteStream);
+
+            if (!localStream && !remoteStream) {
+                showNotification('No active streams to record', 'error');
+                return;
+            }
+
+            const isVideo = (localStream  && localStream.getVideoTracks().length  > 0)
+                         || (remoteStream && remoteStream.getVideoTracks().length > 0);
+
+            let recordStream;
+
+            if (isVideo) {
+                // Composite both video feeds on a canvas
+                const canvas    = document.createElement('canvas');
+                canvas.width    = 1280; canvas.height = 720;
+                const ctx       = canvas.getContext('2d');
+                const remoteVid = document.getElementById('remoteVideo');
+                const localVid  = document.getElementById('pipVideo');
+                const canvasSt  = canvas.captureStream(25);
+
+                function drawFrame() {
+                    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1280, 720);
+                    if (remoteVid && remoteVid.readyState >= 2) ctx.drawImage(remoteVid, 0, 0, 1280, 720);
+                    if (localVid  && localVid.readyState  >= 2) ctx.drawImage(localVid, 1280 - 252, 12, 240, 135);
+                    UIState._recAnimFrame = requestAnimationFrame(drawFrame);
+                }
+                drawFrame();
+
+                // Mix audio
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const dest     = audioCtx.createMediaStreamDestination();
+                if (localStream  && localStream.getAudioTracks().length)  audioCtx.createMediaStreamSource(localStream).connect(dest);
+                if (remoteStream && remoteStream.getAudioTracks().length) audioCtx.createMediaStreamSource(remoteStream).connect(dest);
+                dest.stream.getAudioTracks().forEach(t => canvasSt.addTrack(t));
+                recordStream = canvasSt;
+            } else {
+                // Audio-only: mix local + remote
+                const audioCtx2 = new (window.AudioContext || window.webkitAudioContext)();
+                const dest2     = audioCtx2.createMediaStreamDestination();
+                if (localStream  && localStream.getAudioTracks().length)  audioCtx2.createMediaStreamSource(localStream).connect(dest2);
+                if (remoteStream && remoteStream.getAudioTracks().length) audioCtx2.createMediaStreamSource(remoteStream).connect(dest2);
+                recordStream = dest2.stream;
+            }
+
+            const mimeTypes = isVideo
+                ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+                : ['audio/webm;codecs=opus', 'audio/webm'];
+            const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+            let recorder;
+            try { recorder = new MediaRecorder(recordStream, mimeType ? { mimeType } : {}); }
+            catch(e) { showNotification('Recording not supported in this browser', 'error'); return; }
+
+            const chunks = [];
+            recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+            recorder.onstop = () => {
+                if (UIState._recAnimFrame) { cancelAnimationFrame(UIState._recAnimFrame); UIState._recAnimFrame = null; }
+                const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+                const url  = URL.createObjectURL(blob);
+                const a    = Object.assign(document.createElement('a'), { href: url, download: 'call-recording-' + Date.now() + '.webm' });
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+                showNotification('Recording saved', 'success');
+            };
+            recorder.start(1000);
+            UIState._recorder = recorder;
+
+            // Pulse the Record menu item red while active
+            const menuRecord = document.getElementById('menuRecord');
+            if (menuRecord) menuRecord.classList.add('recording-active');
+            let _pulse = true;
+            UIState._recPulseInterval = setInterval(() => {
+                if (menuRecord) { menuRecord.style.color = _pulse ? '#ff3b30' : ''; _pulse = !_pulse; }
+            }, 800);
+            showNotification('Recording started', 'success');
         },
 
          endCall: async function() {
@@ -8946,6 +8978,52 @@ setupFriendsListListener();
         }
     }, { once: true });
 
+    // ── VIDEO_UPGRADE_RESPONSE: remote declined → roll back camera ──────────
+    window.addEventListener('message', function(event) {
+        const data = event.data;
+        if (!data || data.type !== 'VIDEO_UPGRADE_RESPONSE') return;
+        const accepted = data.payload && data.payload.accepted;
+        if (accepted === false) {
+            // Remote declined — stop camera and remove video track from PC
+            const vTrack = UIState._videoUpgradeTrack;
+            if (vTrack) {
+                vTrack.stop();
+                if (UIState.localStream) {
+                    try { UIState.localStream.removeTrack(vTrack); } catch(e) {}
+                }
+                // Remove sender from peer connection and renegotiate back to audio-only
+                const pc = (window.callCore && window.callCore.getPeerConnection && window.callCore.getPeerConnection())
+                        || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
+                if (pc) {
+                    const senders = pc.getSenders ? pc.getSenders() : [];
+                    senders.forEach(function(s) {
+                        if (s.track === vTrack) { try { pc.removeTrack(s); } catch(e) {} }
+                    });
+                    pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false })
+                        .then(o => pc.setLocalDescription(o))
+                        .then(() => {
+                            if (window.callCore && window.callCore.sendToParent) {
+                                window.callCore.sendToParent('SIGNAL_OFFER', {
+                                    offer: pc.localDescription,
+                                    callId: window.callsState && (window.callsState.serverCallId || window.callsState.activeCallId),
+                                    isVideoRollback: true
+                                });
+                            }
+                        }).catch(() => {});
+                }
+                UIState._videoUpgradeTrack = null;
+            }
+            // Hide PiP, reset button
+            const pipContainer = document.getElementById('pipContainer');
+            if (pipContainer) pipContainer.style.display = 'none';
+            const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
+            if (icon) icon.className = 'fas fa-video-slash';
+            if (elements.videoBtn) elements.videoBtn.classList.remove('active');
+            UIState.isVideoOff = true;
+            showNotification('Remote declined video — staying audio-only', 'info');
+        }
+    });
+
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
         if (section && key !== undefined) applyCallUISetting(section, key, value);
@@ -9952,37 +10030,6 @@ if (detectExistingCore()) {
                 });
                 break;
             }
-
-            case 'VIDEO_UPGRADE_ACCEPTED':
-                // Remote side accepted our video upgrade request — enable our camera
-                if (typeof UIEventHandlers !== 'undefined' && UIEventHandlers.toggleVideo) {
-                    // Only trigger if we're not already in video mode
-                    if (!UIState.localStream || !UIState.localStream.getVideoTracks().some(t => t.readyState === 'live')) {
-                        UIEventHandlers.toggleVideo();
-                    }
-                }
-                if (typeof showNotification === 'function') showNotification('Video call accepted ✓', 'success');
-                break;
-
-            case 'VIDEO_UPGRADE_DECLINED':
-                // Remote declined — roll back: stop any video tracks we started, revert UI
-                if (UIState.localStream) {
-                    UIState.localStream.getVideoTracks().forEach(t => { t.enabled = false; t.stop(); });
-                }
-                UIState.isVideoOff = true;
-                const _pipC = document.getElementById('pipContainer');
-                if (_pipC) _pipC.style.display = 'none';
-                const _aw   = document.getElementById('incallAvatarWrap');
-                if (_aw) _aw.style.display = 'flex';
-                const _rv   = document.getElementById('remoteVideo');
-                if (_rv) _rv.style.display = 'none';
-                if (elements && elements.videoBtn) {
-                    elements.videoBtn.classList.remove('active');
-                    const _vi = elements.videoBtn.querySelector('i');
-                    if (_vi) _vi.className = 'fas fa-video-slash';
-                }
-                if (typeof showNotification === 'function') showNotification('Video declined by other party', 'warning');
-                break;
         }
     });
 
