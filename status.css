@@ -6,16 +6,18 @@
 }
 
 :root {
-    --primary-color: #0084ff;
-    --secondary-color: #f0f2f5;
+    --primary-color: #00a884;
+    --secondary-color: #2a3942;
     --danger-color: #ff3b30;
     --success-color: #34c759;
     --warning-color: #ff9500;
     --info-color: #5ac8fa;
-    --text-primary: #050505;
-    --text-secondary: #65676b;
-    --bg-color: #ffffff;
-    --border-color: #dddfe2;
+    --text-primary: #e9edef;
+    --text-secondary: #8696a0;
+    --bg-color: #111b21;
+    --surface-color: #1f2c34;
+    --surface-alt: #2a3942;
+    --border-color: #2a3942;
     --status-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.2);
@@ -3230,67 +3232,67 @@ html.dark-mode .modal,
 html.dark-mode .modal-content,
 html.dark-mode .status-viewer-panel,
 html.dark-mode .viewer-container {
-  --bg-color: #ffffff !important;
-  --text-primary: #050505 !important;
-  --text-secondary: #65676b !important;
-  --border-color: #dddfe2 !important;
-  --secondary-color: #f0f2f5 !important;
-  background-color: #ffffff !important;
-  color: #050505 !important;
+  --bg-color: #111b21 !important;
+  --text-primary: #e9edef !important;
+  --text-secondary: #8696a0 !important;
+  --border-color: #2a3942 !important;
+  --secondary-color: #2a3942 !important;
+  background-color: #111b21 !important;
+  color: #e9edef !important;
 }
 
-/* Ensure body and root are always light */
+/* Dark theme body */
 html, body, .app-container {
-  background-color: #ffffff !important;
-  color: #050505 !important;
+  background-color: #111b21 !important;
+  color: #e9edef !important;
 }
 
-/* Status list items always white */
+/* Status list items dark */
 .status-list-content,
 .status-item,
 .status-content,
 .sidebar {
-  background-color: #ffffff !important;
-  color: #050505 !important;
+  background-color: #111b21 !important;
+  color: #e9edef !important;
 }
 
-/* Status preview text always dark on white */
+/* Status preview text */
 .status-preview,
 .status-name-text,
 .status-time,
 .status-details {
-  color: var(--text-secondary, #65676b) !important;
+  color: var(--text-secondary, #8696a0) !important;
 }
 
-/* Category tabs always light */
+/* Category tabs dark */
 .status-categories {
-  background-color: #ffffff !important;
-  border-bottom: 1px solid #dddfe2 !important;
+  background-color: #1f2c34 !important;
+  border-bottom: 1px solid #2a3942 !important;
 }
 
 .category-btn {
-  color: #65676b !important;
+  color: #8696a0 !important;
   background: transparent !important;
 }
 
 .category-btn.active {
-  color: #3b82f6 !important;
-  border-bottom-color: #3b82f6 !important;
+  color: #00a884 !important;
+  border-bottom-color: #00a884 !important;
 }
 
-/* Quick action cards always white */
+/* Quick action cards dark */
 .quick-action-btn {
-  background-color: #ffffff !important;
-  color: #050505 !important;
-  border: 1px solid #dddfe2 !important;
+  background-color: #1f2c34 !important;
+  color: #e9edef !important;
+  border: 1px solid #2a3942 !important;
 }
 
-/* Modals always white */
+/* Modals dark */
 .modal-content,
 .create-status-modal,
 .viewer-modal {
-  background-color: #ffffff !important;
-  color: #050505 !important;
+  background-color: #1f2c34 !important;
+  color: #e9edef !important;
 }
 
 /* ================================================================
@@ -3344,7 +3346,7 @@ html, body, .app-container {
 
 @media (max-width: 768px) {
   html, body {
-    background-color: #ffffff !important;
+    background-color: #111b21 !important;
   }
 
   .sidebar-header {
@@ -3353,30 +3355,30 @@ html, body, .app-container {
   }
 
   .status-list-content {
-    background-color: #ffffff !important;
+    background-color: #111b21 !important;
   }
 
   .status-item {
-    background-color: #ffffff !important;
-    border-bottom: 1px solid #f0f2f5 !important;
+    background-color: #111b21 !important;
+    border-bottom: 1px solid #2a3942 !important;
   }
 
   .status-name-text {
-    color: #050505 !important;
+    color: #e9edef !important;
     font-weight: 600;
   }
 
   .status-time,
   .status-preview {
-    color: #65676b !important;
+    color: #8696a0 !important;
   }
 
   /* Quick action grid cards on mobile */
   .quick-action-btn {
-    background-color: #ffffff !important;
-    border: 1px solid #e5e7eb !important;
+    background-color: #1f2c34 !important;
+    border: 1px solid #2a3942 !important;
     border-radius: 12px !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
   }
 
   .quick-action-icon {
@@ -3384,18 +3386,18 @@ html, body, .app-container {
   }
 
   .quick-action-text {
-    color: #374151 !important;
+    color: #8696a0 !important;
     font-size: 12px !important;
   }
 
   /* Category tabs */
   .category-btn {
     background: transparent !important;
-    color: #65676b !important;
+    color: #8696a0 !important;
   }
   .category-btn.active {
-    color: #3b82f6 !important;
-    border-bottom: 2px solid #3b82f6 !important;
+    color: #00a884 !important;
+    border-bottom: 2px solid #00a884 !important;
   }
 }
 
@@ -3414,14 +3416,14 @@ html, body, .app-container {
   padding: 12px 16px;
   gap: 12px;
   border-bottom: 1px solid #f0f2f5;
-  background: #ffffff !important;
+  background: #1f2c34 !important;
 }
 
 .skeleton-avatar {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(90deg, #f0f2f5 25%, #e4e6eb 50%, #f0f2f5 75%);
+  background: linear-gradient(90deg, #1f2c34 25%, #2a3942 50%, #1f2c34 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
   flex-shrink: 0;
@@ -3437,7 +3439,7 @@ html, body, .app-container {
 .skeleton-line {
   height: 12px;
   border-radius: 6px;
-  background: linear-gradient(90deg, #f0f2f5 25%, #e4e6eb 50%, #f0f2f5 75%);
+  background: linear-gradient(90deg, #1f2c34 25%, #2a3942 50%, #1f2c34 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
 }

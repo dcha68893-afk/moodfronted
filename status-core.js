@@ -7358,26 +7358,79 @@ function startTokenReadinessCheck() {
 // =============================================
 
 const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
-    // ALWAYS use parent proxy - never direct fetch
-    if (!ensureActive('secureApiCall')) {
-        throw new Error('Module not active');
-    }
-    
-    if (!isSessionReady()) {
-        throw new Error('Session not ready');
-    }
-    
     const method = options.method || 'GET';
-    const body = options.body;
+    const body   = options.body;
     const params = options.params;
-    
-    // Use makeApiRequest which sends to parent and returns the unwrapped data object.
-    // DO NOT wrap in a fake Response — all callers access properties directly
-    // (response?.statuses, response?.data?.user, etc.).
-    const result = await makeApiRequest(endpoint, method, body, params);
-    return result;
+
+    // ── Helper: direct fetch (no postMessage bridge needed) ──────────────────
+    const directFetch = async () => {
+        const token =
+            _sessionToken ||
+            (function() {
+                try { return localStorage.getItem('moodchat_token') || localStorage.getItem('authToken') ||
+                             localStorage.getItem('token') || localStorage.getItem('accessToken') || null; }
+                catch(_) { return null; }
+            })();
+
+        if (!token) throw new Error('No auth token for direct fetch');
+
+        let ep = endpoint;
+        if (ep.startsWith('/api/')) ep = ep.substring(4);
+        if (!ep.startsWith('/')) ep = '/' + ep;
+
+        const getBase = () => {
+            if (typeof window.__getApiBase === 'function') return window.__getApiBase().replace(/\/api\/?$/, '');
+            const h = window.location.hostname;
+            if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:3000';
+            return 'https://moodchat-fy56.onrender.com';
+        };
+
+        const url = getBase() + '/api' + ep + (params ? '?' + new URLSearchParams(params) : '');
+        const fetchOpts = {
+            method: method.toUpperCase(),
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            credentials: 'include',
+        };
+        if (body && method.toUpperCase() !== 'GET') fetchOpts.body = typeof body === 'string' ? body : JSON.stringify(body);
+
+        const res  = await fetch(url, fetchOpts);
+        const json = await res.json().catch(() => ({ success: false }));
+        if (!res.ok) {
+            const err = new Error(json.message || json.error || `HTTP ${res.status}`);
+            err.statusCode = res.status;
+            throw err;
+        }
+        // Unwrap standard { success, data } envelope
+        if (json && json.data !== undefined && json.success === true) return json.data;
+        return json;
+    };
+
+    // If module is not yet active, go straight to direct fetch
+    if (!ensureActive('secureApiCall')) {
+        logStatus('INFO', `secureApiCall (not ACTIVE): direct fetch for ${method} ${endpoint}`);
+        return directFetch();
+    }
+
+    if (!isSessionReady()) {
+        logStatus('INFO', `secureApiCall (no session): direct fetch for ${method} ${endpoint}`);
+        return directFetch();
+    }
+
+    // Try postMessage bridge first with a 7-second timeout; fall back to direct fetch
+    try {
+        const result = await Promise.race([
+            makeApiRequest(endpoint, method, body, params),
+            new Promise((_, rej) => setTimeout(() => rej(new Error(`API request timeout: ${endpoint}`)), 7000))
+        ]);
+        return result;
+    } catch (err) {
+        if (err.message && (err.message.includes('timeout') || err.message.includes('not active') || err.message.includes('not ready'))) {
+            logStatus('WARNING', `secureApiCall: bridge failed (${err.message}), switching to direct fetch for ${endpoint}`);
+            return directFetch();
+        }
+        throw err;
+    }
 }, 'secureApiCall', null);
-// =============================================
 // GLOBAL STATE VARIABLES
 // =============================================
 let currentUser = null;
@@ -8374,14 +8427,16 @@ const addReactionToStatus = createErrorBoundary(async function(statusId, reactio
     if (state.offlineModeEnabled) {
         pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-        const offlineKey = `reaction_offline_${statusId}_${reaction}`;
-        if (!_loggedMessages.has(offlineKey)) {
-            _loggedMessages.add(offlineKey);
-            logStatus('SUCCESS', `Reaction queued offline: ${reaction}`);
-        }
         return { success: true, offline: true };
     }
     
+    // Always call StatusAPI directly — never route through postMessage bridge
+    // which requires the parent to be ACTIVE and timesout frequently.
+    const api = window.StatusAPI;
+    if (api && api.addReaction) {
+        return api.addReaction(statusId, reaction);
+    }
+    // Fallback to postMessage only if StatusAPI is completely unavailable
     return safeSendAction('ADD_REACTION', { statusId, reaction });
 }, 'addReactionToStatus', { success: false });
 
@@ -8397,14 +8452,14 @@ const removeReactionFromStatus = createErrorBoundary(async function(statusId, re
     if (state.offlineModeEnabled) {
         pendingReactions = pendingReactions.filter(r => !(r.statusId === statusId && r.reaction === reaction));
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-        const offlineKey = `reaction_remove_offline_${statusId}`;
-        if (!_loggedMessages.has(offlineKey)) {
-            _loggedMessages.add(offlineKey);
-            logStatus('SUCCESS', `Reaction removal queued offline`);
-        }
         return { success: true, offline: true };
     }
     
+    // Use StatusAPI directly
+    const api = window.StatusAPI;
+    if (api && api.removeReaction) {
+        return api.removeReaction(statusId);
+    }
     return safeSendAction('REMOVE_REACTION', { statusId, reaction });
 }, 'removeReactionFromStatus', { success: false });
 

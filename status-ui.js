@@ -2954,7 +2954,7 @@ function showStatusViewer(statusData) {
         currentViewerStatus = statusData;
         currentSlideIndex = 0;
         UIStateManager.saveViewerState();
-        if (!viewedStatuses.has(statusData.id) && ensureUIActive('trackView')) {
+        if (!viewedStatuses.has(statusData.id)) {
             viewedStatuses.add(statusData.id);
             if (typeof window.localStorage !== 'undefined') {
                 localStorage.setItem(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, JSON.stringify(Array.from(viewedStatuses)));
@@ -2964,9 +2964,17 @@ function showStatusViewer(statusData) {
                 const ring = statusItem.querySelector('.status-ring');
                 if (ring) ring.classList.add('viewed');
             }
-            const core = getCore();
-            if (core && core.markStatusViewed) {
-                core.markStatusViewed(statusData.id).catch(() => {});
+            // ── Real view tracking via StatusAPI (direct fetch, always works) ──
+            const api = window.StatusAPI;
+            if (api && api.viewStatus) {
+                api.viewStatus(statusData.id).then(result => {
+                    if (result && result.success && result.viewCount !== undefined) {
+                        // Update view count in current status object so "seen by" count is live
+                        if (currentViewerStatus && currentViewerStatus.id === statusData.id) {
+                            currentViewerStatus.viewCount = result.viewCount;
+                        }
+                    }
+                }).catch(() => {});
             }
         }
         const viewer = UIElements.statusViewerPanel;
@@ -3633,12 +3641,46 @@ function showReportModal() {
     }
 }
 
-function sendReply() {
+async function sendReply() {
     if (!ensureUIActive('sendReply')) return;
     const replyInput = UIElements.getElement('replyInput');
-    if (replyInput && replyInput.value.trim() && currentViewerStatus) {
-        showNotification('Reply sent', 'success');
-        replyInput.value = '';
+    const replyText = replyInput ? replyInput.value.trim() : '';
+    if (!replyText || !currentViewerStatus) return;
+
+    const sendBtn = UIElements.getElement('sendReplyBtn');
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+
+    try {
+        const api = window.StatusAPI;
+        if (!api || !api.replyToStatus) {
+            showNotification('Reply service unavailable', 'error');
+            return;
+        }
+        const result = await api.replyToStatus(currentViewerStatus.id, replyText);
+        if (result && result.success) {
+            replyInput.value = '';
+            showNotification('Reply sent ✓', 'success');
+            // Close the status viewer and open the relevant chat
+            const viewer = UIElements.statusViewerPanel;
+            if (viewer) viewer.classList.remove('active');
+            // If parent window can open chat, use it
+            try {
+                const ownerId = currentViewerStatus.userId || currentViewerStatus.user?.id;
+                if (ownerId && window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'OPEN_CHAT',
+                        payload: { userId: ownerId, chatId: result.chatId }
+                    }, '*');
+                }
+            } catch (_) {}
+        } else {
+            showNotification(result.error || 'Failed to send reply', 'error');
+        }
+    } catch (error) {
+        UILogger.error('Reply', 'Failed to send reply', error);
+        showNotification('Failed to send reply', 'error');
+    } finally {
+        if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
     }
 }
 
@@ -4541,10 +4583,27 @@ function initializeReactions() {
             if (!ensureUIActive('reaction')) return;
             if (currentViewerStatus) {
                 try {
-                    const core = getCore();
-                    if (core && core.addReactionToStatus) {
-                        await core.addReactionToStatus(currentViewerStatus.id, key);
+                    const api = window.StatusAPI;
+                    let result;
+                    // Try direct API first (always available, even before core is ACTIVE)
+                    if (api && api.addReaction) {
+                        result = await api.addReaction(currentViewerStatus.id, emoji);
+                    } else {
+                        const core = getCore();
+                        if (core && core.addReactionToStatus) {
+                            result = await core.addReactionToStatus(currentViewerStatus.id, key);
+                        }
+                    }
+                    if (result && result.success) {
                         showNotification(`Reacted with ${emoji}`, 'success');
+                        // Update button to show selected state
+                        container.querySelectorAll('.reaction-btn').forEach(b => b.classList.remove('selected'));
+                        btn.classList.add('selected');
+                        if (result.count !== undefined) {
+                            btn.innerHTML = `${emoji} <span class="reaction-count">${result.count}</span>`;
+                        }
+                    } else {
+                        showNotification('Failed to add reaction', 'error');
                     }
                 } catch (error) {
                     UILogger.error('Reaction', 'Failed to add reaction', error);
@@ -6469,6 +6528,31 @@ if (typeof window !== 'undefined') {
         window.retryConnection = retryConnection;
         window.enableOfflineMode = enableOfflineMode;
         window.retryHandshake = retryHandshake;
+
+        // Real-time UI update helpers (called by StatusWebSocket handlers)
+        window.updateStatusReactionUI = function(statusId, emoji, count) {
+            try {
+                // If viewer is open for this status, update its reaction button
+                if (currentViewerStatus && String(currentViewerStatus.id) === String(statusId)) {
+                    const container = UIElements.getElement('reactionsContainer');
+                    if (container) {
+                        const btn = container.querySelector(`[data-reaction="${Object.keys(reactions).find(k => reactions[k] === emoji)}"]`);
+                        if (btn && count !== undefined) {
+                            btn.innerHTML = `${emoji} <span class="reaction-count">${count}</span>`;
+                        }
+                    }
+                }
+            } catch (_) {}
+        };
+
+        window.updateViewerCountUI = function(statusId, count) {
+            try {
+                if (currentViewerStatus && String(currentViewerStatus.id) === String(statusId)) {
+                    const el = document.querySelector('.viewer-count, .view-count, [data-viewer-count]');
+                    if (el) el.textContent = count + ' views';
+                }
+            } catch (_) {}
+        };
         
     } catch (e) {
         console.error('[UI] Failed to expose globals:', e);

@@ -4511,6 +4511,41 @@
                     __dispatchCallToIframe(p.userId, p.userName || p.name || 'User', p.callType || 'voice', returnTo, p.userId, 'friends-module');
                 }
 
+                // ── STATUS_REPLY_RECEIVED / OPEN_CHAT ─────────────────────────────────────
+                // Fired by status-ui.js when a user replies to a status.
+                // Navigate to messages and open the correct conversation.
+                if (data.type === 'OPEN_CHAT' || data.type === 'STATUS_REPLY_RECEIVED') {
+                    const p = data.payload || {};
+                    const targetUserId = p.userId || p.recipientId || p.ownerId;
+                    const targetChatId = p.chatId;
+
+                    const chatPayload = {
+                        userId:       targetUserId,
+                        chatId:       targetChatId,
+                        findExisting: true,
+                        statusReply:  true,
+                        timestamp:    Date.now(),
+                    };
+
+                    navigateToPage('messages');
+
+                    let _srAttempts = 0;
+                    const _postStatusReplyOpen = () => {
+                        const messagesIframe = document.getElementById('messagesIframe');
+                        if (messagesIframe && messagesIframe.contentWindow) {
+                            messagesIframe.contentWindow.postMessage({
+                                type:    'OPEN_CHAT_WITH_USER',
+                                payload: chatPayload,
+                                source:  'parent-frame',
+                                timestamp: Date.now(),
+                            }, '*');
+                        }
+                        if (_srAttempts++ < 3) setTimeout(_postStatusReplyOpen, 500);
+                    };
+                    setTimeout(_postStatusReplyOpen, 300);
+                    console.log('[chat.html] STATUS_REPLY → navigated to messages, opening chat userId:', targetUserId, 'chatId:', targetChatId);
+                }
+
                 if (data.type === 'CHILD_CLOSING') {
                     const returnPage = data.returnTo || window.__lastActivePage || 'messages';
                     navigateToPage(returnPage);

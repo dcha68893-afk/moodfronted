@@ -409,7 +409,125 @@ class StatusAPI {
     filterExpiredStatuses(statuses) {
         return statuses.filter(s => !this.isStatusExpired(s));
     }
-}
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // VIEW STATUS — record a view, deduplicated server-side
+    // ─────────────────────────────────────────────────────────────────────────
+    async viewStatus(statusId) {
+        try {
+            const response = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/${statusId}/view`),
+                { method: 'POST', headers: this.getAuthHeaders() }
+            );
+            if (!response.ok) {
+                // 410 = expired, treat as soft failure
+                if (response.status === 410) return { success: true, expired: true };
+                return { success: false, error: `HTTP ${response.status}` };
+            }
+            const result = await this._parseJSON(response);
+            return { success: true, viewCount: result.data?.viewCount || 0 };
+        } catch (error) {
+            // Non-fatal — never break the viewer on network issues
+            console.warn('[StatusAPI] viewStatus error:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ADD REACTION — emoji reaction; one per user (replaces previous)
+    // ─────────────────────────────────────────────────────────────────────────
+    async addReaction(statusId, emoji) {
+        try {
+            if (!statusId || !emoji) return { success: false, error: 'Missing statusId or emoji' };
+            const response = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/${statusId}/react`),
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                    body: JSON.stringify({ emoji })
+                }
+            );
+            if (!response.ok) {
+                const err = await this._parseJSON(response).catch(() => ({}));
+                return { success: false, error: err.message || `HTTP ${response.status}` };
+            }
+            const result = await this._parseJSON(response);
+            return { success: true, emoji, count: result.data?.count || 0 };
+        } catch (error) {
+            console.error('[StatusAPI] addReaction error:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // REMOVE REACTION
+    // ─────────────────────────────────────────────────────────────────────────
+    async removeReaction(statusId) {
+        try {
+            const response = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/${statusId}/react`),
+                { method: 'DELETE', headers: this.getAuthHeaders() }
+            );
+            if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
+            return { success: true };
+        } catch (error) {
+            console.error('[StatusAPI] removeReaction error:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // REPLY TO STATUS — sends as a chat message linked to status_id
+    // ─────────────────────────────────────────────────────────────────────────
+    async replyToStatus(statusId, replyText) {
+        try {
+            if (!statusId || !replyText || !replyText.trim()) {
+                return { success: false, error: 'Missing statusId or reply content' };
+            }
+            const response = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/${statusId}/reply`),
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                    body: JSON.stringify({ content: replyText.trim() })
+                }
+            );
+            if (!response.ok) {
+                const err = await this._parseJSON(response).catch(() => ({}));
+                return { success: false, error: err.message || `HTTP ${response.status}` };
+            }
+            const result = await this._parseJSON(response);
+            return {
+                success: true,
+                message: result.data?.message,
+                chatId: result.data?.chatId,
+                statusPreview: result.data?.statusPreview,
+            };
+        } catch (error) {
+            console.error('[StatusAPI] replyToStatus error:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET REACTIONS — fetch all reactions for a status
+    // ─────────────────────────────────────────────────────────────────────────
+    async getReactions(statusId) {
+        try {
+            const response = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/${statusId}/reactions`),
+                { headers: this.getAuthHeaders() }
+            );
+            if (!response.ok) return { success: false, reactions: [] };
+            const result = await this._parseJSON(response);
+            return { success: true, reactions: result.data?.reactions || [] };
+        } catch (error) {
+            console.warn('[StatusAPI] getReactions error:', error.message);
+            return { success: false, reactions: [] };
+        }
+    }
+
+} // end class StatusAPI
 
 // Singleton
 window.StatusAPI = new StatusAPI();

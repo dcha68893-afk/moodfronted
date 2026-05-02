@@ -2321,31 +2321,49 @@ const renderers = {
             var priceDisplay = (!isNaN(num) && num > 0) ? 'KES ' + num.toLocaleString('en-KE') : String(priceVal);
             buyBtn.innerHTML = '<i class="fas fa-shopping-cart"></i> Buy Now — ' + priceDisplay;
             buyBtn.onclick = function() {
-                if (window.openPurchaseModal) {
-                    window.openPurchaseModal(listing);
-                } else {
-                    alert('Purchase: ' + listing.title + '\nPrice: ' + priceDisplay + '\nContact the seller to complete.');
-                }
+                openPlaceOrderPanel(listing);
             };
             container.appendChild(buyBtn);
         }
 
-        // Add contact button for services
-        if (listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service') {
+        // Message Seller button — always shown (not just for services)
+        const sellerId   = listing.userId || listing.sellerId;
+        const sellerName = listing.user?.displayName || listing.user?.username || 'Seller';
+        if (sellerId) {
             const contactBtn = document.createElement('button');
             contactBtn.className = 'action-btn secondary';
             contactBtn.style.marginTop = '10px';
             contactBtn.style.width = '100%';
             contactBtn.innerHTML = '<i class="fas fa-comment"></i> Message Seller';
             contactBtn.onclick = () => {
-                if (openChat) {
-                    openChat(listing.userId || listing.sellerId, listing.user?.displayName || 'Seller');
-                } else if (window.openChat) {
-                    window.openChat(listing.userId || listing.sellerId, listing.user?.displayName || 'Seller');
+                const chatFn = typeof openChat === 'function' ? openChat : window.openChat;
+                if (typeof chatFn === 'function') {
+                    chatFn(sellerId, sellerName);
+                } else {
+                    window.location.href = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName);
                 }
             };
             container.appendChild(contactBtn);
         }
+
+        // Reviews button
+        const reviewsBtn = document.createElement('button');
+        reviewsBtn.className = 'action-btn secondary';
+        reviewsBtn.style.marginTop = '10px';
+        reviewsBtn.style.width = '100%';
+        reviewsBtn.innerHTML = '<i class="fas fa-star"></i> Reviews & Ratings';
+        reviewsBtn.onclick = () => openReviewsPanel(listing.id);
+        container.appendChild(reviewsBtn);
+
+        // Seller Profile button
+        const sellerBtn = document.createElement('button');
+        sellerBtn.className = 'action-btn secondary';
+        sellerBtn.style.marginTop = '10px';
+        sellerBtn.style.width = '100%';
+        sellerBtn.innerHTML = '<i class="fas fa-store"></i> View Seller Profile';
+        sellerBtn.onclick = () => openSellerPanel(listing.userId || listing.sellerId);
+        container.appendChild(sellerBtn);
+
     }, '<div class="error-placeholder">Failed to load listing details</div>'),
 
     // FIX E: Spotlight renderer - show section when items exist
@@ -2968,9 +2986,35 @@ function handleBulkUpload(e) {
         processBulkUpload(file);
         showNotification('Bulk upload started', 'info');
     }
+}
+
 // Expose on window for emergency handler fallback
 window._publishListingFromModal = function() { publishListingFromModal(); };
 async function publishListingFromModal() {
+    const activeTab = UIState.createListingActiveTab || 'service';
+
+    // Handle service tab
+    if (activeTab === 'service') {
+        const title = DOM.serviceTitle?.value;
+        const description = DOM.serviceDescription?.value;
+        const price = DOM.servicePrice?.value;
+
+        if (!title || !description) {
+            showNotification('Please fill in title and description', 'error');
+            return;
+        }
+
+        const listing = await createServiceListing(title, description, {
+            price: price,
+            visibility: UIState.selectedTrustCircle,
+            moodContext: UIState.selectedMoodContext,
+            template: UIState.selectedTemplate
+        });
+
+        // FIX: only celebrate when backend confirmed the listing
+        if (listing && !listing._isOptimistic) {
+            showNotification('Service listing published successfully!', 'success');
+            hideCreateListingModal();
             UIPipeline.liveUpdate();
             console.log('[TOOLS FLOW] Step 4: UI updated after service listing created', { id: listing.id });
         } else if (!listing) {
@@ -3422,7 +3466,9 @@ function showDetailMenu() {
 }
 
 function reserveListing() {
-    showNotification('Reservation feature coming soon', 'info');
+    const listing = UIState.currentListingData;
+    if (!listing) { showNotification('No listing selected', 'info'); return; }
+    openPlaceOrderPanel(listing);
 }
 
 function shareListing() {
@@ -3444,8 +3490,16 @@ function showTipOptions() {
 }
 
 function contactSeller() {
-    if (UIState.currentListingData && openChat) {
-        openChat(UIState.currentListingData.userId || UIState.currentListingData.sellerId, UIState.currentListingData.user?.displayName);
+    const listing = UIState.currentListingData;
+    if (!listing) { showNotification('No listing selected', 'info'); return; }
+    const sellerId   = listing.userId || listing.sellerId;
+    const sellerName = listing.user?.displayName || listing.user?.username || 'Seller';
+    const chatFn = typeof openChat === 'function' ? openChat : window.openChat;
+    if (typeof chatFn === 'function') {
+        chatFn(sellerId, sellerName);
+    } else {
+        const url = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName);
+        window.location.href = url;
     }
 }
 
@@ -4332,6 +4386,11 @@ window.addEventListener('tools:active', function() {
         if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
     } catch(e) {}
 })();
+// Standalone wrapper so viewListingDetail can be exported as a named function
+function viewListingDetail(listing) {
+    return renderers.viewListingDetail(listing);
+}
+
 // ----------------------------------------------------------------------
 // PRESERVED EXPORTS (Full Compatibility)
 // ----------------------------------------------------------------------
@@ -4342,3 +4401,474 @@ export {
     showCreateListingModal,
     viewListingDetail
 };
+// ══════════════════════════════════════════════════════════════════════════════
+// MARKETPLACE PANELS — Orders, Reviews, Seller Profile
+// Injected into Tools.html at runtime, powered by existing auth + API layer
+// ══════════════════════════════════════════════════════════════════════════════
+
+(function initMarketplacePanels() {
+
+    // ── Inject panel HTML once ────────────────────────────────────────────────
+    function injectPanels() {
+        if (document.getElementById('mp-orders-panel')) return;
+        document.body.insertAdjacentHTML('beforeend', `
+<style>
+.mp-panel{position:fixed;inset:0;z-index:9000;display:none;align-items:flex-end;background:rgba(0,0,0,.5);}
+.mp-panel.active{display:flex;}
+.mp-sheet{background:var(--bg-primary,#fff);width:100%;max-width:640px;margin:0 auto;border-radius:20px 20px 0 0;max-height:90vh;overflow-y:auto;padding:20px;box-sizing:border-box;}
+.mp-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.mp-hdr h3{margin:0;font-size:18px;font-weight:700;}
+.mp-x{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#888);line-height:1;}
+.mp-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:10px;border:none;cursor:pointer;font-size:14px;font-weight:600;transition:.15s;}
+.mp-btn:disabled{opacity:.5;cursor:not-allowed;}
+.mp-primary{background:var(--primary-color,#6C63FF);color:#fff;}
+.mp-primary:hover:not(:disabled){opacity:.88;}
+.mp-danger{background:#ef4444;color:#fff;}
+.mp-outline{background:transparent;border:1.5px solid var(--border-color,#e0e0e0);color:var(--text-primary,#222);}
+.mp-card{border:1px solid var(--border-color,#e0e0e0);border-radius:12px;padding:14px;margin-bottom:12px;}
+.mp-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;}
+.mp-badge.pending{background:#fef9c3;color:#854d0e;}
+.mp-badge.paid{background:#dcfce7;color:#166534;}
+.mp-badge.shipped{background:#dbeafe;color:#1e40af;}
+.mp-badge.delivered{background:#d1fae5;color:#065f46;}
+.mp-badge.cancelled{background:#fee2e2;color:#991b1b;}
+.mp-badge.refunded{background:#f3f4f6;color:#374151;}
+.mp-stars{color:#f59e0b;font-size:16px;letter-spacing:2px;}
+.mp-stars-input span{font-size:30px;cursor:pointer;color:#d1d5db;transition:.1s;}
+.mp-stars-input span.on{color:#f59e0b;}
+.mp-field{margin-bottom:14px;}
+.mp-field label{display:block;font-size:13px;font-weight:600;margin-bottom:5px;color:var(--text-secondary,#666);}
+.mp-field input,.mp-field textarea,.mp-field select{width:100%;padding:10px 12px;border:1.5px solid var(--border-color,#e0e0e0);border-radius:10px;font-size:14px;background:var(--bg-primary,#fff);color:var(--text-primary,#222);box-sizing:border-box;}
+.mp-field textarea{resize:vertical;min-height:72px;}
+.mp-tabs{display:flex;border-bottom:2px solid var(--border-color,#e0e0e0);margin-bottom:16px;overflow-x:auto;}
+.mp-tab{padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-secondary,#888);}
+.mp-tab.active{border-bottom-color:var(--primary-color,#6C63FF);color:var(--primary-color,#6C63FF);}
+.mp-spinner{text-align:center;padding:32px;color:var(--text-secondary,#888);}
+.mp-empty{text-align:center;padding:40px 20px;color:var(--text-secondary,#888);}
+.mp-stat-row{display:flex;gap:10px;margin-bottom:16px;}
+.mp-stat{flex:1;background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;text-align:center;}
+.mp-stat strong{display:block;font-size:22px;font-weight:800;}
+.mp-stat span{font-size:12px;color:var(--text-secondary,#888);}
+.mp-seller-avatar{width:68px;height:68px;border-radius:50%;background:var(--primary-color,#6C63FF);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;margin:0 auto 10px;overflow:hidden;}
+.mp-seller-avatar img{width:100%;height:100%;object-fit:cover;}
+.mp-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.mp-product-tile{border:1px solid var(--border-color,#e0e0e0);border-radius:10px;overflow:hidden;}
+.mp-product-tile-img{width:100%;height:88px;object-fit:cover;background:var(--bg-secondary,#f5f5f5);display:flex;align-items:center;justify-content:center;font-size:26px;}
+.mp-product-tile-body{padding:8px;}
+.mp-product-tile-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mp-product-tile-price{font-size:12px;color:var(--primary-color,#6C63FF);font-weight:700;}
+</style>
+
+<!-- ORDERS PANEL -->
+<div id="mp-orders-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>🛒 My Orders</h3><button class="mp-x" onclick="closeOrdersPanel()">✕</button></div>
+    <div class="mp-tabs">
+      <div class="mp-tab active" onclick="loadOrdersTab(this,'')">All</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'pending')">Pending</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'paid')">Paid</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'shipped')">Shipped</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'delivered')">Delivered</div>
+    </div>
+    <div id="mp-orders-body"></div>
+  </div>
+</div>
+
+<!-- PLACE ORDER PANEL -->
+<div id="mp-place-order-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>🛍 Place Order</h3><button class="mp-x" onclick="closePlaceOrderPanel()">✕</button></div>
+    <div id="mp-place-order-body"></div>
+  </div>
+</div>
+
+<!-- REVIEWS PANEL -->
+<div id="mp-reviews-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>⭐ Reviews</h3><button class="mp-x" onclick="closeReviewsPanel()">✕</button></div>
+    <div id="mp-reviews-body"></div>
+    <div id="mp-write-review-body"></div>
+  </div>
+</div>
+
+<!-- SELLER PANEL -->
+<div id="mp-seller-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>🏪 Seller Profile</h3><button class="mp-x" onclick="closeSellerPanel()">✕</button></div>
+    <div id="mp-seller-body"></div>
+  </div>
+</div>
+`);
+
+        // Close on backdrop click
+        ['mp-orders-panel','mp-place-order-panel','mp-reviews-panel','mp-seller-panel'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', e => { if (e.target === el) el.classList.remove('active'); });
+        });
+    }
+
+    // ── API helper ────────────────────────────────────────────────────────────
+    async function mpFetch(method, path, body) {
+        let token = null;
+        if (typeof getAuthSession === 'function') {
+            const s = getAuthSession(); if (s?.token) token = s.token;
+        }
+        if (!token && window.sessionClient?.getToken) token = window.sessionClient.getToken();
+        if (!token) { showNotification('Please log in first', 'error'); throw new Error('Not authenticated'); }
+
+        const url = path.startsWith('/api/marketplace/')
+            ? path.replace('/api/marketplace/', '/api/tools/marketplace/')
+            : path;
+
+        const res = await fetch(url, {
+            method,
+            credentials: 'include',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Request failed (' + res.status + ')');
+        return json;
+    }
+
+    function esc(s) {
+        if (s == null) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function fmtDate(iso) {
+        if (!iso) return '—';
+        try { return new Date(iso).toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' }); } catch { return iso; }
+    }
+    function stars(n) { return '★'.repeat(Math.max(0,Math.round(n))) + '☆'.repeat(Math.max(0,5-Math.round(n))); }
+    function myId() {
+        if (window.sessionClient?.getUser) return window.sessionClient.getUser()?.id;
+        return window.currentUser?.id;
+    }
+
+    // ── ORDERS ────────────────────────────────────────────────────────────────
+    window.openOrdersPanel = async function() {
+        injectPanels();
+        document.getElementById('mp-orders-panel').classList.add('active');
+        loadOrdersTab(document.querySelector('#mp-orders-panel .mp-tab'), '');
+    };
+    window.closeOrdersPanel = function() {
+        document.getElementById('mp-orders-panel').classList.remove('active');
+    };
+    window.loadOrdersTab = async function(tabEl, status) {
+        if (tabEl) {
+            document.querySelectorAll('#mp-orders-panel .mp-tab').forEach(t => t.classList.remove('active'));
+            tabEl.classList.add('active');
+        }
+        const body = document.getElementById('mp-orders-body');
+        body.innerHTML = '<div class="mp-spinner"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+        try {
+            const qs  = status ? '?status=' + status : '';
+            const res = await mpFetch('GET', '/api/tools/marketplace/orders/mine' + qs);
+            const orders = res.data?.orders || [];
+            if (!orders.length) {
+                body.innerHTML = '<div class="mp-empty"><i class="fas fa-box-open" style="font-size:36px;margin-bottom:10px;display:block;"></i>No orders yet</div>';
+                return;
+            }
+            body.innerHTML = orders.map(o => `
+                <div class="mp-card">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <strong style="font-size:15px;">${esc(o.product?.title || 'Product')}</strong>
+                        <span class="mp-badge ${o.status}">${o.status}</span>
+                    </div>
+                    <div style="font-size:13px;color:var(--text-secondary,#666);">
+                        Qty: ${o.quantity} &nbsp;|&nbsp; Total: ${esc(o.currency)} ${Number(o.totalPrice).toLocaleString()}
+                    </div>
+                    <div style="font-size:12px;color:var(--text-secondary,#888);margin-top:3px;">Ordered ${fmtDate(o.createdAt)}</div>
+                    ${o.trackingNumber ? `<div style="font-size:12px;margin-top:3px;">Tracking: <strong>${esc(o.trackingNumber)}</strong></div>` : ''}
+                    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                        ${['pending','paid'].includes(o.status) ? `<button class="mp-btn mp-danger" onclick="cancelOrder('${o.id}')">Cancel</button>` : ''}
+                        ${o.status === 'delivered' ? `<button class="mp-btn mp-outline" onclick="openReviewsPanel('${o.productId}','${o.id}')">Write Review</button>` : ''}
+                        <button class="mp-btn mp-outline" onclick="openSellerPanel('${o.sellerId}')">Seller Profile</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            body.innerHTML = '<div class="mp-empty">Failed to load orders: ' + esc(e.message) + '</div>';
+        }
+    };
+    window.cancelOrder = async function(orderId) {
+        if (!confirm('Cancel this order?')) return;
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/orders/' + orderId + '/cancel', { reason: 'Cancelled by buyer' });
+            showNotification('Order cancelled', 'success');
+            loadOrdersTab(null, '');
+        } catch (e) { showNotification('Failed: ' + e.message, 'error'); }
+    };
+
+    // ── PLACE ORDER ───────────────────────────────────────────────────────────
+    window.openPlaceOrderPanel = function(listing) {
+        injectPanels();
+        const panel = document.getElementById('mp-place-order-panel');
+        const body  = document.getElementById('mp-place-order-body');
+        const price = parseFloat(String(listing.price).replace(/[^0-9.]/g,'')) || 0;
+        const cur   = listing.currency || 'KES';
+
+        body.innerHTML = `
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:18px;">
+                ${listing.images?.[0]
+                    ? `<img src="${esc(listing.images[0])}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;">`
+                    : `<div style="width:64px;height:64px;border-radius:10px;background:var(--primary-color,#6C63FF);display:flex;align-items:center;justify-content:center;font-size:24px;">🛍</div>`}
+                <div>
+                    <div style="font-weight:700;font-size:15px;">${esc(listing.title)}</div>
+                    <div style="color:var(--primary-color,#6C63FF);font-weight:600;margin-top:3px;">${cur} ${price.toLocaleString()} per item</div>
+                </div>
+            </div>
+            <div class="mp-field"><label>Quantity</label>
+                <input type="number" id="mp-qty" value="1" min="1" ${listing.stock ? 'max="'+listing.stock+'"' : ''} oninput="updateOrderTotal(${price},'${cur}')">
+            </div>
+            <div class="mp-field"><label>Delivery Address</label>
+                <textarea id="mp-addr" placeholder="Enter delivery address or 'Pickup in person'"></textarea>
+            </div>
+            <div class="mp-field"><label>Payment Method</label>
+                <select id="mp-payment">
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="cash">Cash on Delivery</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="mp-field"><label>Notes to Seller (optional)</label>
+                <textarea id="mp-notes" placeholder="Any special requests…" style="min-height:56px;"></textarea>
+            </div>
+            <div style="background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;">Total</span>
+                <span id="mp-total" style="font-weight:800;font-size:16px;color:var(--primary-color,#6C63FF);">${cur} ${price.toLocaleString()}</span>
+            </div>
+            <button id="mp-submit-order-btn" class="mp-btn mp-primary" style="width:100%;" onclick="submitOrder('${listing.id}','${cur}',${price})">
+                <i class="fas fa-shopping-cart"></i> Place Order
+            </button>
+        `;
+        panel.classList.add('active');
+    };
+    window.closePlaceOrderPanel = function() {
+        document.getElementById('mp-place-order-panel').classList.remove('active');
+    };
+    window.updateOrderTotal = function(price, cur) {
+        const qty   = parseInt(document.getElementById('mp-qty')?.value) || 1;
+        const total = document.getElementById('mp-total');
+        if (total) total.textContent = cur + ' ' + (qty * price).toLocaleString();
+    };
+    window.submitOrder = async function(productId, currency, unitPrice) {
+        const qty     = parseInt(document.getElementById('mp-qty')?.value) || 1;
+        const address = document.getElementById('mp-addr')?.value || '';
+        const payment = document.getElementById('mp-payment')?.value || 'mpesa';
+        const notes   = document.getElementById('mp-notes')?.value || '';
+        const btn     = document.getElementById('mp-submit-order-btn');
+
+        if (!address.trim()) { showNotification('Please enter a delivery address', 'error'); return; }
+
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Placing order…'; }
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/orders', {
+                productId, quantity: qty,
+                deliveryAddress: { raw: address },
+                paymentMethod: payment, notes,
+            });
+            showNotification('Order placed! Check My Orders for updates 🎉', 'success');
+            closePlaceOrderPanel();
+        } catch (e) {
+            showNotification('Failed to place order: ' + e.message, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-shopping-cart"></i> Place Order'; }
+        }
+    };
+
+    // ── REVIEWS ───────────────────────────────────────────────────────────────
+    let _reviewProductId = null, _reviewOrderId = null, _reviewRating = 0;
+
+    window.openReviewsPanel = async function(productId, orderId) {
+        injectPanels();
+        _reviewProductId = productId;
+        _reviewOrderId   = orderId || null;
+        _reviewRating    = 0;
+        document.getElementById('mp-reviews-panel').classList.add('active');
+        await loadReviews();
+    };
+    window.closeReviewsPanel = function() {
+        document.getElementById('mp-reviews-panel').classList.remove('active');
+    };
+    async function loadReviews() {
+        const body  = document.getElementById('mp-reviews-body');
+        const write = document.getElementById('mp-write-review-body');
+        body.innerHTML  = '<div class="mp-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+        write.innerHTML = '';
+        try {
+            const res  = await mpFetch('GET', '/api/tools/marketplace/listings/' + _reviewProductId + '/reviews');
+            const { reviews = [], avgRating = 0, total = 0 } = res.data || {};
+            const alreadyReviewed = reviews.some(r => r.userId === myId());
+
+            if (!reviews.length) {
+                body.innerHTML = '<div class="mp-empty"><i class="fas fa-star" style="font-size:32px;margin-bottom:10px;display:block;color:#d1d5db;"></i>No reviews yet</div>';
+            } else {
+                body.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color,#e0e0e0);">
+                        <span style="font-size:42px;font-weight:800;line-height:1;">${parseFloat(avgRating).toFixed(1)}</span>
+                        <div><div class="mp-stars" style="font-size:20px;">${stars(avgRating)}</div>
+                        <div style="font-size:13px;color:var(--text-secondary,#888);">${total} review${total!==1?'s':''}</div></div>
+                    </div>
+                ` + reviews.map(r => `
+                    <div class="mp-card">
+                        <div class="mp-stars">${stars(r.rating)}</div>
+                        <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+                            <strong style="font-size:14px;">${esc(r.reviewer?.displayName || r.reviewer?.username || 'User')}</strong>
+                            ${r.isVerifiedPurchase ? '<span class="mp-badge paid" style="font-size:10px;">✓ Verified</span>' : ''}
+                            <span style="font-size:12px;color:var(--text-secondary,#888);margin-left:auto;">${fmtDate(r.createdAt)}</span>
+                        </div>
+                        ${r.comment ? `<p style="margin:0 0 8px;font-size:14px;">${esc(r.comment)}</p>` : ''}
+                        ${r.sellerReply ? `
+                            <div style="background:var(--bg-secondary,#f5f5f5);border-radius:8px;padding:10px;margin-top:8px;">
+                                <div style="font-size:12px;font-weight:700;margin-bottom:4px;">Seller replied:</div>
+                                <p style="margin:0;font-size:13px;">${esc(r.sellerReply)}</p>
+                            </div>` : ''}
+                        <button class="mp-btn mp-outline" style="margin-top:8px;padding:4px 10px;font-size:12px;"
+                            onclick="markReviewHelpful('${r.id}',this)">👍 Helpful (${r.helpfulCount||0})</button>
+                    </div>
+                `).join('');
+            }
+
+            // Show write-review form only when coming from a delivered order
+            if (_reviewOrderId && !alreadyReviewed) {
+                _reviewRating = 0;
+                write.innerHTML = `
+                    <hr style="border:none;border-top:1px solid var(--border-color,#e0e0e0);margin:16px 0;">
+                    <h4 style="margin:0 0 14px;font-size:16px;">Write a Review</h4>
+                    <div class="mp-field"><label>Your Rating</label>
+                        <div class="mp-stars-input" id="mp-star-row">
+                            ${[1,2,3,4,5].map(n=>`<span data-n="${n}" onclick="setReviewRating(${n})">☆</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="mp-field"><label>Comment (optional)</label>
+                        <textarea id="mp-review-comment" placeholder="Share your experience…"></textarea>
+                    </div>
+                    <button id="mp-submit-review-btn" class="mp-btn mp-primary" onclick="submitReview()">
+                        <i class="fas fa-paper-plane"></i> Submit Review
+                    </button>
+                `;
+            }
+        } catch (e) {
+            body.innerHTML = '<div class="mp-empty">Failed to load reviews: ' + esc(e.message) + '</div>';
+        }
+    }
+    window.setReviewRating = function(n) {
+        _reviewRating = n;
+        document.querySelectorAll('#mp-star-row span').forEach(s => {
+            const v = parseInt(s.dataset.n);
+            s.textContent = v <= n ? '★' : '☆';
+            s.classList.toggle('on', v <= n);
+        });
+    };
+    window.submitReview = async function() {
+        if (!_reviewRating) { showNotification('Please select a star rating', 'error'); return; }
+        const comment = document.getElementById('mp-review-comment')?.value || '';
+        const btn     = document.getElementById('mp-submit-review-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting…'; }
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/listings/' + _reviewProductId + '/reviews', {
+                rating: _reviewRating, comment, orderId: _reviewOrderId,
+            });
+            showNotification('Review submitted! 🌟', 'success');
+            _reviewOrderId = null; // hide write form on reload
+            await loadReviews();
+        } catch (e) {
+            showNotification('Failed: ' + e.message, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Review'; }
+        }
+    };
+    window.markReviewHelpful = async function(reviewId, btn) {
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/reviews/' + reviewId + '/helpful');
+            showNotification('Marked as helpful', 'success');
+            if (btn) {
+                const m = btn.textContent.match(/\((\d+)\)/);
+                const n = m ? parseInt(m[1]) + 1 : 1;
+                btn.textContent = '👍 Helpful (' + n + ')';
+            }
+        } catch (e) { showNotification(e.message, 'error'); }
+    };
+
+    // ── SELLER PROFILE ────────────────────────────────────────────────────────
+    window.openSellerPanel = async function(sellerId) {
+        if (!sellerId) return;
+        injectPanels();
+        document.getElementById('mp-seller-panel').classList.add('active');
+        const body = document.getElementById('mp-seller-body');
+        body.innerHTML = '<div class="mp-spinner"><i class="fas fa-spinner fa-spin"></i> Loading profile…</div>';
+        try {
+            const res = await mpFetch('GET', '/api/tools/marketplace/seller/' + sellerId);
+            const { seller = {}, listings = [], stats = {} } = res.data || {};
+            body.innerHTML = `
+                <div style="text-align:center;padding:10px 0 20px;">
+                    <div class="mp-seller-avatar">
+                        ${seller.avatar ? `<img src="${esc(seller.avatar)}" alt="Seller">` : (seller.name||'S').charAt(0).toUpperCase()}
+                    </div>
+                    <div style="font-weight:800;font-size:18px;">${esc(seller.name||'Seller')}</div>
+                    <div style="font-size:13px;color:var(--text-secondary,#888);margin-top:4px;">Member since ${fmtDate(seller.joinedAt)}</div>
+                </div>
+                <div class="mp-stat-row">
+                    <div class="mp-stat"><strong>${stats.listingCount||0}</strong><span>Listings</span></div>
+                    <div class="mp-stat"><strong>${stats.avgRating ? parseFloat(stats.avgRating).toFixed(1) : '—'}</strong><span>Rating</span></div>
+                    <div class="mp-stat"><strong>${stats.reviewCount||0}</strong><span>Reviews</span></div>
+                </div>
+                <button class="mp-btn mp-primary" style="width:100%;margin-bottom:16px;"
+                    onclick="messageSeller('${esc(seller.id||sellerId)}','${esc(seller.name||'Seller')}')">
+                    <i class="fas fa-comment"></i> Message Seller
+                </button>
+                ${listings.length ? `
+                <div style="font-weight:700;font-size:15px;margin-bottom:10px;">Active Listings (${stats.listingCount||0})</div>
+                <div class="mp-grid-2">
+                    ${listings.slice(0,6).map(l => `
+                        <div class="mp-product-tile">
+                            ${l.images?.[0]
+                                ? `<img src="${esc(l.images[0])}" class="mp-product-tile-img" alt="${esc(l.title)}">`
+                                : `<div class="mp-product-tile-img">🛍</div>`}
+                            <div class="mp-product-tile-body">
+                                <div class="mp-product-tile-title">${esc(l.title)}</div>
+                                <div class="mp-product-tile-price">${esc(l.currency||'KES')} ${Number(l.price||0).toLocaleString()}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>` : '<div class="mp-empty" style="padding:20px;">No active listings</div>'}
+            `;
+        } catch (e) {
+            body.innerHTML = '<div class="mp-empty">Failed to load seller profile: ' + esc(e.message) + '</div>';
+        }
+    };
+    window.closeSellerPanel = function() {
+        document.getElementById('mp-seller-panel').classList.remove('active');
+    };
+    window.messageSeller = function(sellerId, sellerName) {
+        closeSellerPanel();
+        const chatFn = typeof openChat === 'function' ? openChat : window.openChat;
+        if (typeof chatFn === 'function') {
+            chatFn(sellerId, sellerName);
+        } else {
+            window.location.href = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName||'');
+        }
+    };
+
+    // ── WebSocket event listeners ──────────────────────────────────────────────
+    function wireWS() {
+        const ws = window.WebSocketService || window.wsService;
+        const handle = (event, cb) => {
+            if (ws?.on) ws.on(event, cb);
+            window.addEventListener('ws:' + event, e => cb(e.detail));
+        };
+        handle('ORDER_PLACED',         d => showNotification('✅ Order placed for "' + (d.order?.product?.title||'item') + '"', 'success'));
+        handle('ORDER_RECEIVED',       () => showNotification('🛍 New order received!', 'success'));
+        handle('ORDER_STATUS_UPDATED', d => showNotification('📦 Order is now: ' + d.status, 'info'));
+        handle('NEW_REVIEW',           () => showNotification('⭐ You have a new review!', 'info'));
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => { injectPanels(); wireWS(); });
+    } else {
+        injectPanels();
+        wireWS();
+    }
+
+})();

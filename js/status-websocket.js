@@ -121,6 +121,10 @@ class StatusWebSocket {
         s.on('status:deleted',      (data) => this._handleStatusDeleted(data));
         s.on('status_deleted',      (data) => this._handleStatusDeleted(data)); // legacy alias
 
+        // Real-time reaction & reply events
+        s.on('status:reaction',     (data) => this._handleStatusReaction(data));
+        s.on('status:reply',        (data) => this._handleStatusReply(data));
+
         // Connection state — KynectaRealtime exposes these via .on() too
         s.on('connect', () => {
             this.isConnected      = true;
@@ -214,6 +218,55 @@ class StatusWebSocket {
         }
 
         this._emit('status:created', data);
+    }
+
+    // ── STATUS REACTION (real-time, owner receives) ──────────────────────────
+    _handleStatusReaction(data) {
+        if (!data || !data.statusId) return;
+        console.log('[StatusWebSocket] status:reaction', data);
+
+        // Update reaction button count in the active viewer if it's open
+        if (typeof window.updateStatusReactionUI === 'function') {
+            window.updateStatusReactionUI(data.statusId, data.emoji, data.count);
+        }
+
+        // Show toast notification to status owner
+        const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
+        const currentId   = currentUser && (currentUser.id || currentUser.userId);
+        if (currentId) {
+            // The server only fires this event on the owner's room, so if we receive
+            // it, it means someone reacted to our status
+            if (typeof window.showNotification === 'function') {
+                window.showNotification(`${data.emoji} Someone reacted to your status`, 'info');
+            }
+        }
+
+        this._emit('status:reaction', data);
+    }
+
+    // ── STATUS REPLY (real-time, delivered via chat system) ──────────────────
+    _handleStatusReply(data) {
+        if (!data) return;
+        console.log('[StatusWebSocket] status:reply', data);
+
+        // Forward to parent so the chat module can display the new message
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage({
+                    type:    'STATUS_REPLY_RECEIVED',
+                    payload: data,
+                    source:  'status',
+                }, '*');
+            } catch (_) {}
+        }
+
+        const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
+        const currentId   = currentUser && (currentUser.id || currentUser.userId);
+        if (currentId && typeof window.showNotification === 'function') {
+            window.showNotification('💬 Someone replied to your status', 'info');
+        }
+
+        this._emit('status:reply', data);
     }
 
     // ── STATUS VIEWED ─────────────────────────────────────────────────────────
