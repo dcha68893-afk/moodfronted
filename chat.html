@@ -1462,6 +1462,8 @@
         window.__getApiBase = window.__getApiBase || function() {
             return `${window.__getApiOrigin()}/api`;
         };
+        // Expose __apiBaseUrl so group-ui.js panelFetch can resolve the backend origin
+        window.__apiBaseUrl = window.__getApiBase();
 
         // Session protection - prevent clearing critical auth keys
         (function() {
@@ -3862,7 +3864,12 @@
 
                     if (returnTo === 'friends-page' || returnTo === 'friend') returnTo = 'friends';
                     else if (returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-                    else if (returnTo !== 'messages' && returnTo !== 'friends') returnTo = 'calls';
+                    // Never store 'calls' as returnTo — always fall back to last real page
+                    else if (returnTo !== 'messages' && returnTo !== 'friends') {
+                        returnTo = (window.__lastActivePage && window.__lastActivePage !== 'calls')
+                            ? window.__lastActivePage
+                            : 'messages';
+                    }
 
                     const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now() };
                     window.__callReturnContext = ctx;
@@ -3939,7 +3946,15 @@
                     window.__callDispatchLock = { ts: 0, userId: null };
                     try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
 
-                    // NEVER navigate back to 'calls' panel — always go to origin or messages
+                    // Debounce: ignore duplicate navigation within 3s (CALL_ENDED fires 6+ times from WS bridge)
+                    const _ceNow = Date.now();
+                    if (window.__callEndedNavAt && (_ceNow - window.__callEndedNavAt) < 3000) return;
+                    window.__callEndedNavAt = _ceNow;
+                    setTimeout(() => { window.__callEndedNavAt = 0; }, 5000);
+
+                    // NEVER navigate back to 'calls' panel — always go to origin or messages.
+                    // For receiver side (ctx is null — they never set returnContext), fall back to
+                    // __lastActivePage so they return to wherever they were before the call arrived.
                     const returnTo = (ctx?.returnTo && ctx.returnTo !== 'calls')
                         ? ctx.returnTo
                         : (window.__lastActivePage && window.__lastActivePage !== 'calls')
@@ -4038,6 +4053,48 @@
                 if (data.type === 'FRIEND_ACCEPTED' || data.type === 'FRIEND_REJECTED' || data.type === 'FRIEND_REMOVED') {
                     setTimeout(() => requestFriendsFromFriendIframe(), 500);
                     dispatchEventToModules({ type: data.type, payload: data.payload || data, originalSource: data.source || 'child-module' });
+
+                    // FIX: When a friend request is accepted, the accepter's iframe sends
+                    // FRIEND_ACCEPTED with targetUserId = the original sender's userId.
+                    // The parent MUST relay FRIEND_REQUEST_ACCEPTED back to ALL modules so
+                    // the sender's "Sent Requests" list clears and their friends list updates.
+                    // In this single-user iframe architecture, all modules belong to the same
+                    // logged-in user — but the socket server handles cross-user notification.
+                    // The relay here covers same-user multi-tab and the friends iframe itself.
+                    if (data.type === 'FRIEND_ACCEPTED') {
+                        const p = data.payload || {};
+                        const targetUserId   = p.targetUserId   || p.requesterId || null;
+                        const acceptedById   = p.acceptedById   || p.friendId    || null;
+                        const acceptedByName = p.acceptedByName || p.friend?.displayName || '';
+                        const acceptedByAvatar = p.acceptedByAvatar || p.friend?.avatar || null;
+                        const requestId      = p.requestId || null;
+
+                        // Relay FRIEND_REQUEST_ACCEPTED to all modules (covers the accepter's
+                        // own views — friends list, sent requests, etc.)
+                        const acceptedPayload = {
+                            type: 'FRIEND_REQUEST_ACCEPTED',
+                            payload: {
+                                requestId,
+                                friendId:        acceptedById,
+                                acceptedById,
+                                acceptedByName,
+                                acceptedByAvatar,
+                                friend:          p.friend || { id: acceptedById, displayName: acceptedByName, avatar: acceptedByAvatar },
+                                targetUserId,
+                                timestamp:       Date.now()
+                            },
+                            source: 'parent',
+                            originalSource: 'friend-accepted-relay'
+                        };
+                        dispatchEventToModules(acceptedPayload);
+
+                        // Also emit on the EventBus so any subscriber (status, calls, etc.) can react
+                        try {
+                            if (window.KynectaEventBus) {
+                                window.KynectaEventBus.emit('FRIEND_REQUEST_ACCEPTED', acceptedPayload.payload, { async: true });
+                            }
+                        } catch(_) {}
+                    }
                 }
 
                 // SETTINGS HANDLERS
@@ -4105,6 +4162,63 @@
                         timestamp: Date.now()
                     }, { async: true });
                     dispatchEventToModules({ type: 'SETTING_CHANGED', payload: { section, key, value, timestamp: Date.now() }, originalSource: 'settings' });
+                }
+
+                // ✅ ROOT-FIX: ADD_REACTION — previously silently dropped.
+                // messages-core safeSend('ADD_REACTION') posts to this parent,
+                // but there was no handler → reaction never reached API or DB,
+                // never broadcast to receiver, only updated local memory.
+                if (data.type === 'ADD_REACTION') {
+                    (async () => {
+                        const p = data.payload || data;
+                        const msgId = p.messageId;
+                        const emoji = p.emoji;
+                        if (!msgId || !emoji) return;
+                        let token = cachedToken;
+                        if (!token) {
+                            try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                        }
+                        try {
+                            const resp = await fetch(`/api/messages/${msgId}/react`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                                body: JSON.stringify({ emoji, add: p.add !== false })
+                            });
+                            const result = await resp.json().catch(() => ({}));
+                            // Echo the confirmed reactions back to messages iframe so sender sees own reaction
+                            if (result.success && result.data) {
+                                const msgIframe = document.getElementById('messagesIframe');
+                                if (msgIframe && msgIframe.contentWindow) {
+                                    msgIframe.contentWindow.postMessage({
+                                        type: 'REACTION_UPDATED',
+                                        payload: { messageId: msgId, reactions: result.data.reactions, emoji, action: result.data.action }
+                                    }, '*');
+                                }
+                            }
+                        } catch(e) { console.warn('[chat.html] ADD_REACTION api error:', e); }
+                    })();
+                    return;
+                }
+
+                // ✅ ROOT-FIX: FORWARD_MESSAGE — also silently dropped before.
+                if (data.type === 'FORWARD_MESSAGE') {
+                    (async () => {
+                        const p = data.payload || data;
+                        const { messageId, targetConversationIds } = p;
+                        if (!messageId || !targetConversationIds || !targetConversationIds.length) return;
+                        let token = cachedToken;
+                        if (!token) {
+                            try { token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
+                        }
+                        try {
+                            await fetch(`/api/messages/${messageId}/forward`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+                                body: JSON.stringify({ targetConversationIds })
+                            });
+                        } catch(e) { console.warn('[chat.html] FORWARD_MESSAGE api error:', e); }
+                    })();
+                    return;
                 }
 
                 // STORAGE PROXY HANDLERS
@@ -4725,6 +4839,23 @@
                 window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
                 window.wsService.on('presence:update',    _fwdPresence);
 
+                // ✅ ROOT-FIX: Forward message:reaction from server WebSocket to messages iframe.
+                // Server calls wsService.broadcastToChat(chatId, 'message:reaction', {...})
+                // after any reaction add/remove. Without this forward, receiver NEVER sees
+                // emoji reactions in real-time — they vanish after page load.
+                function _fwdReaction(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        msgIframe.contentWindow.postMessage({
+                            type: 'message:reaction',
+                            payload,
+                            source: 'ws-bridge'
+                        }, '*');
+                    }
+                }
+                window.wsService.on('message:reaction', _fwdReaction);
+                window.wsService.on('message_reaction',  _fwdReaction);
+
                 // ── GROUP REAL-TIME BRIDGE ────────────────────────────────────
                 // Forward all group WebSocket events from wsService into groupIframe
                 // via postMessage. The group module runs inside an iframe — parent-window
@@ -4784,12 +4915,81 @@
                 window.wsService.on('group:membership_change',   function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',   d); });
                 window.wsService.on('group:member:added',        function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',   d); });
                 window.wsService.on('group:member:removed',      function(d) { _fwdToGroupIframe('GROUP_MEMBER_REMOVED', d); });
+                // FIX: Forward server-side group:refresh_needed so new members see the group instantly
+                window.wsService.on('group:refresh_needed',           function(d) { _fwdToGroupIframe('group:refresh_needed',   d); });
+                window.wsService.on('GROUP_MEMBER_ADDED',             function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',     d); });
                 window.wsService.on('group:member:left',         function(d) { _fwdToGroupIframe('GROUP_MEMBER_LEFT',    d); });
                 window.wsService.on('group:member:joined',       function(d) { _fwdToGroupIframe('GROUP_MEMBER_ADDED',   d); });
                 window.wsService.on('group:joined',              _fwdGroupCreated);
                 window.wsService.on('group_joined',              _fwdGroupCreated);
                 window.wsService.on('group:invitation:received', function(d) { _fwdToGroupIframe('GROUP_INVITE_RECEIVED', d); });
                 window.wsService.on('group:typing',              function(d) { _fwdToGroupIframe('GROUP_TYPING',          d); });
+
+                // ── FRIEND REAL-TIME BRIDGE ───────────────────────────────────
+                // FIX: Friend socket events (friend:request, friend:accepted, etc.)
+                // were NEVER forwarded from wsService to the friendsIframe.
+                // The friend module runs inside an iframe — window CustomEvents
+                // are NOT received there. Only postMessage reaches it.
+                // Without this bridge, the RECEIVER never sees incoming requests
+                // and the SENDER never sees their request get accepted — both
+                // sides require a manual refresh to update their UI.
+                function _fwdToFriendIframe(type, payload) {
+                    const ff = document.getElementById('friendsIframe');
+                    if (ff && ff.contentWindow) {
+                        ff.contentWindow.postMessage({
+                            type, payload, source: 'ws-bridge', timestamp: Date.now()
+                        }, '*');
+                    }
+                }
+
+                // Forward incoming friend request to receiver's friendsIframe
+                function _fwdFriendRequest(payload) {
+                    _fwdToFriendIframe('friend:request', payload);
+                    _fwdToFriendIframe('FRIEND_REQUEST_RECEIVED', payload);
+                    // Also bump the badge counter via a custom event
+                    try { window.dispatchEvent(new CustomEvent('kyn:friend:request', { detail: payload })); } catch(_) {}
+                }
+
+                // Forward accepted notification to both users' friendsIframe
+                function _fwdFriendAccepted(payload) {
+                    _fwdToFriendIframe('friend:accepted', payload);
+                    _fwdToFriendIframe('FRIEND_REQUEST_ACCEPTED', payload);
+                    // Also relay FRIEND_REQUEST_ACCEPTED through dispatchEventToModules
+                    // so messages + calls modules update their contacts lists
+                    dispatchEventToModules({
+                        type: 'FRIEND_REQUEST_ACCEPTED',
+                        payload: payload,
+                        originalSource: 'ws-bridge'
+                    });
+                    setTimeout(() => requestFriendsFromFriendIframe(), 500);
+                }
+
+                // Forward rejection to sender's friendsIframe
+                function _fwdFriendRejected(payload) {
+                    _fwdToFriendIframe('friend:rejected', payload);
+                    _fwdToFriendIframe('FRIEND_REQUEST_REJECTED', payload);
+                }
+
+                // Forward removal to both users' friendsIframe
+                function _fwdFriendRemoved(payload) {
+                    _fwdToFriendIframe('friend:removed', payload);
+                    _fwdToFriendIframe('FRIEND_REMOVED', payload);
+                    dispatchEventToModules({ type: 'FRIEND_REMOVED', payload, originalSource: 'ws-bridge' });
+                }
+
+                // All naming conventions the backend / socket server might use
+                window.wsService.on('friend:request',          _fwdFriendRequest);
+                window.wsService.on('friend_request',          _fwdFriendRequest);
+                window.wsService.on('friendRequest',           _fwdFriendRequest);
+                window.wsService.on('friend:accepted',         _fwdFriendAccepted);
+                window.wsService.on('friend_accepted',         _fwdFriendAccepted);
+                window.wsService.on('friend:request:accepted', _fwdFriendAccepted);
+                window.wsService.on('friend:rejected',         _fwdFriendRejected);
+                window.wsService.on('friend_rejected',         _fwdFriendRejected);
+                window.wsService.on('friend:request:rejected', _fwdFriendRejected);
+                window.wsService.on('friend:removed',          _fwdFriendRemoved);
+                window.wsService.on('friend_removed',          _fwdFriendRemoved);
+                window.wsService.on('friend:unfriended',       _fwdFriendRemoved);
             }
 
             // Bind now if wsService is already real

@@ -4385,12 +4385,31 @@ function getAuthToken() {
 }
 
 async function panelFetch(path, opts = {}) {
+    // Resolve absolute backend URL so requests from the iframe hit the backend
+    // (moodchat-fy56.onrender.com) not the frontend (moodfronted.onrender.com)
+    const backendBase = (
+        window.__apiBaseUrl ||
+        window.parent?.__apiBaseUrl ||
+        window.__getApiBase?.() ||
+        window.parent?.__getApiBase?.() ||
+        (window.__API_CORE__?.getBaseUrl?.()) ||
+        (window.parent?.__API_CORE__?.getBaseUrl?.()) ||
+        'https://moodchat-fy56.onrender.com/api'
+    );
+    // Strip leading /api from path since backendBase already ends in /api
+    const normalizedPath = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
+    const separator = backendBase.endsWith('/') ? '' : '/';
+    const fullUrl = backendBase.replace(/\/$/, '') + (normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath);
+
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken(), ...(opts.headers||{}) };
     try {
-        const res = await fetch(path, { ...opts, headers });
+        const res = await fetch(fullUrl, { ...opts, headers });
+        if (!res.ok && res.status === 404) {
+            console.warn('[GROUP UI] panelFetch 404:', fullUrl);
+        }
         return await res.json().catch(() => ({}));
     } catch (error) {
-        console.warn('[GROUP UI] panelFetch failed:', error?.message || error);
+        console.warn('[GROUP UI] panelFetch failed:', error?.message || error, fullUrl);
         return { success: false, message: error?.message || 'Request failed' };
     }
 }

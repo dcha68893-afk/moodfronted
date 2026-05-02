@@ -822,8 +822,9 @@ function handleParentReady(message, event) {
 
     parentReadyReceived = true;
     transitionTo(LIFECYCLE_STATES.ACTIVE, 'parent_ready_received');
-    window.__PARENT_READY__    = true;
+    window.__PARENT_READY__       = true;
     window.__HANDSHAKE_COMPLETE__ = true;
+    window.__IFRAME_READY__       = true;  // FIX: was never set — blocked all friend ops
     console.log(`[${MODULE_NAME}] ✅ ACTIVE`);
     onModuleActive();
 }
@@ -6736,7 +6737,12 @@ const SafetyGuards = {
             return { valid: false, reason: 'Session not valid' };
         }
         
-        if (!window.__IFRAME_READY__ || !window.__HANDSHAKE_COMPLETE__) {
+        // FIX: __IFRAME_READY__ was NEVER set anywhere in the codebase — this guard
+        // was blocking every single friend operation silently (click fires, no API call).
+        // __HANDSHAKE_COMPLETE__ is set in handleParentReady() and is sufficient.
+        // We remove the __IFRAME_READY__ check since it has no setter and would always
+        // block. If you want to keep the flag, set it alongside __HANDSHAKE_COMPLETE__.
+        if (!window.__HANDSHAKE_COMPLETE__) {
             return { valid: false, reason: 'Connection not ready' };
         }
         
@@ -10547,3 +10553,47 @@ function applySettingToFriendModule(section, key, value) {
     });
 })();
 
+// =============================================
+// [FIX 3 — PARENT/SERVER RELAY: FRIEND_ACCEPTED → FRIEND_REQUEST_ACCEPTED]
+// =============================================
+// When this module sends  FRIEND_ACCEPTED  to the parent (via safeSend/postMessage),
+// the parent (or server WebSocket handler) MUST relay a  FRIEND_REQUEST_ACCEPTED
+// message back to the ORIGINAL SENDER's active session.
+//
+// The payload now includes:
+//   targetUserId    — the user ID of the original request sender (must be notified)
+//   acceptedById    — the user ID of the receiver who just accepted
+//   acceptedByName  — display name of the receiver
+//   acceptedByAvatar— avatar of the receiver
+//   friend          — full friend profile object of the receiver
+//   requestId       — the original friend-request ID
+//   friendId        — same as acceptedById (the accepting user's ID)
+//
+// Add this handler in your parent window / server WebSocket router:
+//
+//   if (message.type === 'FRIEND_ACCEPTED') {
+//       const { targetUserId, friendId, requestId, friend,
+//               acceptedById, acceptedByName, acceptedByAvatar } = message.payload;
+//
+//       if (targetUserId) {
+//           sendToUser(targetUserId, {
+//               type: 'FRIEND_REQUEST_ACCEPTED',
+//               payload: {
+//                   requestId,
+//                   friendId:       acceptedById,        // the receiver's ID
+//                   friend: friend || {                  // receiver's profile
+//                       id:          acceptedById,
+//                       displayName: acceptedByName,
+//                       avatar:      acceptedByAvatar
+//                   },
+//                   acceptedById,
+//                   acceptedByName,
+//                   timestamp: Date.now()
+//               }
+//           });
+//       }
+//   }
+//
+// sendToUser() is your server's mechanism for pushing a message to a specific
+// online user (WebSocket broadcast, SSE push, Firebase RTDB, Pusher, etc.).
+// =============================================

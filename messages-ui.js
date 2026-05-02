@@ -2137,15 +2137,12 @@
 
                         if (activeChat && incomingChatId && String(activeChat.id) === incomingChatId) {
                             const allMsgs = core?.getMessages?.() || [];
-                            const chatMsgs = allMsgs.filter(m =>
-                                String(m.chatId || m.conversationId || '') === incomingChatId
-                            );
-                            const currentUser = core?.getCurrentUser?.();
-                            UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, currentUser);
-                            try {
-                                const c = document.getElementById('messagesContainer');
-                                if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
-                            } catch(_) {}
+                            // ✅ FIX: filter + sort by timestamp so order is correct
+                            const chatMsgs = allMsgs
+                                .filter(m => String(m.chatId || m.conversationId || '') === incomingChatId)
+                                .sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
+                            UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core?.getCurrentUser?.());
+                            try { const c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(()=>{c.scrollTop=c.scrollHeight;}); } catch(_){}
                         }
 
                     }
@@ -2885,13 +2882,13 @@
 
                     const currentChat = e.detail.currentChat;
                     let messages = e.detail.messages || [];
-                    // ✅ Filter messages to active chat only before rendering
+                    // ✅ FIX: filter to active chat + sort ASC before rendering
                     if (currentChat && currentChat.id && messages.length > 0) {
-                        const chatId = String(currentChat.id);
-                        const filtered = messages.filter(m =>
-                            String(m.chatId || m.conversationId || '') === chatId
-                        );
-                        if (filtered.length > 0) messages = filtered;
+                        const cid = String(currentChat.id);
+                        const filtered = messages.filter(m => String(m.chatId || m.conversationId || '') === cid);
+                        if (filtered.length > 0) {
+                            messages = filtered.sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
+                        }
                     }
                     this.renderMessages(messages, currentChat, e.detail.currentUser);
 
@@ -3047,19 +3044,15 @@
 
                         const core = getMessagesCore();
                         const currentChat = core?.getCurrentConversation?.();
-                        const currentUser = core?.getCurrentUser?.();
                         const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
 
                         if (currentChat && incomingChatId && String(currentChat.id) === incomingChatId) {
                             const allMsgs = core?.getMessages?.() || [];
-                            const chatMsgs = allMsgs.filter(m =>
-                                String(m.chatId || m.conversationId || '') === incomingChatId
-                            );
-                            this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, currentUser);
-                            try {
-                                const c = document.getElementById('messagesContainer');
-                                if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
-                            } catch(_) {}
+                            const chatMsgs = allMsgs
+                                .filter(m => String(m.chatId || m.conversationId || '') === incomingChatId)
+                                .sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
+                            this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, core?.getCurrentUser?.());
+                            try { const c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(()=>{c.scrollTop=c.scrollHeight;}); } catch(_){}
                         }
 
                     }
@@ -3292,36 +3285,27 @@
 
             const core = getMessagesCore();
 
-            // ✅ FIX: Sort ALL messages by timestamp first so every message appears
-            // in strict chronological order (incoming and outgoing interleaved correctly).
+            // ✅ FIX: Sort ALL messages by timestamp ASC first — incoming and outgoing
+            // interleave correctly. No sender grouping — pure timeline order like WhatsApp.
             const sorted = [...messages].sort((a, b) => {
                 const ta = Number(a.createdAt || a.timestamp || 0);
                 const tb = Number(b.createdAt || b.timestamp || 0);
                 return ta - tb;
             });
 
-            // Group into ordered date buckets preserving sort order
-            // Use a Map so insertion order (= date order) is guaranteed
+            // Use a Map to preserve date-insertion order (oldest date first)
             const groupMap = new Map();
-
             sorted.forEach(message => {
                 const ts = message.createdAt || message.timestamp || Date.now();
                 const date = core?.formatDate
                     ? core.formatDate(ts)
-                    : new Date(ts).toLocaleDateString();
-
-                if (!groupMap.has(date)) {
-                    groupMap.set(date, []);
-                }
+                    : new Date(Number(ts)).toLocaleDateString();
+                if (!groupMap.has(date)) groupMap.set(date, []);
                 groupMap.get(date).push(message);
             });
 
-            // Convert to plain object in sorted date order (Map preserves insertion order)
             const groups = {};
-            for (const [date, msgs] of groupMap) {
-                groups[date] = msgs;
-            }
-
+            for (const [date, msgs] of groupMap) groups[date] = msgs;
             return groups;
 
         },
@@ -3348,19 +3332,19 @@
 
             const reactions = this._renderReactions(message.reactions);
 
-            // ✅ FIX: Show actual quoted content in reply bubble (WhatsApp-style)
+            // ✅ FIX: WhatsApp-style reply quote with sender name + content preview
             let replyIndicator = '';
             if (message.replyTo || message.replyToId) {
-                const replyData = message.replyTo || {};
-                const replyContent = replyData.content || replyData.text || '';
-                const replySender = replyData.senderName || replyData.sender?.username || '';
-                const replyPreview = replyContent.length > 60 ? replyContent.substring(0, 60) + '…' : replyContent;
-                replyIndicator = `
-                    <div class="reply-quote" onclick="window.messagesUI?.scrollToMessage?.('${replyData.id || replyData.messageId || ''}')">
+                const rd = message.replyTo || {};
+                const rContent = rd.content || rd.text || '';
+                const rSender  = rd.senderName || rd.sender?.username || '';
+                const rPreview = rContent.length > 60 ? rContent.substring(0, 60) + '\u2026' : rContent;
+                const rId      = rd.id || rd.messageId || '';
+                replyIndicator = `<div class="reply-quote" onclick="window.messagesUI&&window.messagesUI.scrollToMessage&&window.messagesUI.scrollToMessage('${rId}')">
                         <div class="reply-quote-bar"></div>
                         <div class="reply-quote-body">
-                            ${replySender ? `<span class="reply-quote-sender">${replySender}</span>` : ''}
-                            <span class="reply-quote-text">${replyPreview || '📎 Media'}</span>
+                            ${rSender ? `<span class="reply-quote-sender">${rSender}</span>` : ''}
+                            <span class="reply-quote-text">\${rPreview || '\uD83D\uDCCE Media'}</span>
                         </div>
                     </div>`;
             }
@@ -4029,17 +4013,15 @@
             if (!reactions || typeof reactions !== 'object' || Object.keys(reactions).length === 0) return '';
 
             const core = getMessagesCore();
-            const myId = core?.getCurrentUserId?.() || getCurrentUserId();
+            const myId = core?.getCurrentUserId?.() || getCurrentUserId?.();
 
             let html = '<div class="message-reactions">';
-
             for (const [emoji, users] of Object.entries(reactions)) {
-                const userList = Array.isArray(users) ? users : (users ? [users] : []);
-                if (userList.length === 0) continue;
-                const iMine = myId && userList.some(u => String(u) === String(myId));
-                html += `<span class="reaction${iMine ? ' reaction-mine' : ''}" title="${userList.length} ${userList.length === 1 ? 'person' : 'people'}">${emoji} ${userList.length}</span>`;
+                const ul = Array.isArray(users) ? users : (users ? [users] : []);
+                if (!ul.length) continue;
+                const isMine = myId && ul.some(u => String(u) === String(myId));
+                html += `<span class="reaction${isMine ? ' reaction-mine' : ''}" title="${ul.length} ${ul.length === 1 ? 'person' : 'people'}">${emoji} ${ul.length}</span>`;
             }
-
             html += '</div>';
             return html;
 
@@ -10790,45 +10772,36 @@ Type: ${message.type || 'text'}`;
 
         setupAutoOpenChat();
 
-        // ✅ FIX: Receiver-side real-time render — fires when message arrives for non-active chat
+        // ✅ FIX: Receiver real-time render + sidebar badge
         window.addEventListener('kyn:incomingMessage', function(evt) {
             const detail = evt.detail || {};
             const incomingMsg  = detail.message || detail;
             const incomingChat = String(incomingMsg.chatId || incomingMsg.conversationId || detail.chatId || '');
             if (!incomingChat) return;
-
             const core = getMessagesCore();
             const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
-
             if (activeChat && String(activeChat.id) === incomingChat) {
                 const allMsgs = core?.getMessages?.() || core?.ChatManager?._messages || [];
-                const chatMsgs = allMsgs.filter(m =>
-                    String(m.chatId || m.conversationId || '') === incomingChat
-                );
-                const currentUser = core?.getCurrentUser?.();
-                UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, currentUser);
-                try {
-                    const c = document.getElementById('messagesContainer');
-                    if (c) requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
-                } catch(_) {}
+                const chatMsgs = allMsgs
+                    .filter(m => String(m.chatId || m.conversationId || '') === incomingChat)
+                    .sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
+                UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core?.getCurrentUser?.());
+                try { const c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(()=>{c.scrollTop=c.scrollHeight;}); } catch(_){}
             } else {
-                const conversations = core?.getConversations?.() || [];
-                const currentChat2 = core?.getCurrentConversation?.();
-                const currentCategory = core?.getCurrentCategory?.() || 'all';
-                UIRenderer.renderChatsList(conversations, currentChat2, currentCategory, {});
+                UIRenderer.renderChatsList(core?.getConversations?.() || [], core?.getCurrentConversation?.(), core?.getCurrentCategory?.() || 'all', {});
             }
         });
 
-        // ✅ FIX: Scroll to a quoted reply message when clicking the reply quote bubble
+        // ✅ FIX: Scroll-to-replied-message when clicking reply quote
         window.messagesUI = window.messagesUI || {};
         window.messagesUI.scrollToMessage = function(messageId) {
             if (!messageId) return;
-            const el = document.querySelector(`[data-message-id="${messageId}"]`);
+            const el = document.querySelector('[data-message-id="' + messageId + '"]');
             if (el) {
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.transition = 'background 0.3s';
-                el.style.background = 'rgba(34,197,94,0.18)';
-                setTimeout(() => { el.style.background = ''; }, 1200);
+                el.style.transition = 'background 0.35s';
+                el.style.background = 'rgba(34,197,94,0.2)';
+                setTimeout(() => { el.style.background = ''; }, 1300);
             }
         };
 

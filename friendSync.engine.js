@@ -648,8 +648,9 @@
                 Authorization: `Bearer ${token}`,
             };
 
-            // Reduce timeout for better responsiveness
-            const EFFECTIVE_TIMEOUT = Math.min(REQUEST_TIMEOUT_MS, 8000);
+            // FIX: Increased from 8s — Render.com cold starts can take 10-15s.
+            // The sync engine is background, so a longer timeout is fine.
+            const EFFECTIVE_TIMEOUT = Math.min(REQUEST_TIMEOUT_MS, 25000);
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), EFFECTIVE_TIMEOUT);
 
@@ -662,10 +663,12 @@
                             reject(new Error('API request timeout'));
                         }, EFFECTIVE_TIMEOUT);
 
+                        // FIX: Listen on THIS window — API_RESPONSE is posted back to the
+                        // child iframe, not to the parent. window.parent.addEventListener was wrong.
                         const handleMessage = (event) => {
                             if (event.data && event.data.type === 'API_RESPONSE' && event.data.requestId === requestId) {
                                 clearTimeout(timeoutId);
-                                window.parent.removeEventListener('message', handleMessage);
+                                window.removeEventListener('message', handleMessage);
                                 
                                 if (event.data.payload && event.data.payload.success !== false) {
                                     resolve(event.data.payload);
@@ -681,7 +684,7 @@
                             }
                         };
 
-                        window.parent.addEventListener('message', handleMessage);
+                        window.addEventListener('message', handleMessage);
                         
                         // Send API request to parent
                         window.parent.postMessage({

@@ -4005,46 +4005,6 @@ try {
                 }
                 
                 EventBus.emit('message:reaction', { messageId, emoji, add });
-
-                // ✅ FIX: Immediately patch the DOM reaction row for this message
-                // so both sender AND receiver see the emoji without a full page re-render.
-                try {
-                    const el = document.querySelector(`[data-message-id="${messageId}"] .message-reactions`);
-                    const bubble = document.querySelector(`[data-message-id="${messageId}"] .message-bubble`);
-                    if (bubble) {
-                        // Rebuild reaction HTML inline
-                        const myId = SessionManager.getUserId();
-                        let rHtml = '';
-                        if (message.reactions && Object.keys(message.reactions).length > 0) {
-                            rHtml = '<div class="message-reactions">';
-                            for (const [em, users] of Object.entries(message.reactions)) {
-                                const ul = Array.isArray(users) ? users : (users ? [users] : []);
-                                if (ul.length === 0) continue;
-                                const mine = myId && ul.some(u => String(u) === String(myId));
-                                rHtml += `<span class="reaction${mine ? ' reaction-mine' : ''}" title="${ul.length} ${ul.length === 1 ? 'person' : 'people'}">${em} ${ul.length}</span>`;
-                            }
-                            rHtml += '</div>';
-                        }
-                        if (el) {
-                            el.outerHTML = rHtml;
-                        } else if (rHtml) {
-                            bubble.insertAdjacentHTML('beforeend', rHtml);
-                        }
-                    }
-                } catch (_re) {}
-
-                // Also trigger a full re-render via the renderMessages event for sync
-                try {
-                    const activeChat = ChatManager.getActiveChat();
-                    if (activeChat) {
-                        const chatMsgs = ChatManager.getMessages().filter(m =>
-                            String(m.chatId || m.conversationId || '') === String(activeChat.id)
-                        );
-                        window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: { messages: chatMsgs, currentChat: activeChat, currentUser: null }
-                        }));
-                    }
-                } catch (_re) {}
             }
             
             return true;
@@ -4159,7 +4119,7 @@ try {
                 this._showChatPanel(tempConversation);
             }
 
-            // ✅ FIX: Load cached messages immediately — IDB first, then localStorage fallback
+            // ✅ FIX: Load cached messages immediately — IDB first, localStorage fallback
             const isPending = typeof actualId === 'string' && actualId.startsWith('pending_');
             if (!isPending) {
                 if (window.KynectaLocalStore) {
@@ -5568,7 +5528,6 @@ try {
             const activeChat = ChatManager?.getActiveChat?.();
             const isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
 
-            // Always update sidebar
             try {
                 window.dispatchEvent(new CustomEvent('renderChatsList', {
                     detail: {
@@ -5584,16 +5543,12 @@ try {
                 try {
                     const currentUser = SessionManager?.getUser?.();
                     const _allMsgs = ChatManager.getMessages ? ChatManager.getMessages() : (ChatManager._messages || []);
-                    // ✅ Filter to only this chat's messages
-                    const _chatMsgs = _allMsgs.filter(m =>
-                        String(m.chatId || m.conversationId || '') === String(chatId)
-                    );
+                    // ✅ Filter to this chat only + sort by timestamp ASC
+                    const _chatMsgs = _allMsgs
+                        .filter(m => String(m.chatId || m.conversationId || '') === String(chatId))
+                        .sort((a, b) => Number(a.createdAt || a.timestamp || 0) - Number(b.createdAt || b.timestamp || 0));
                     window.dispatchEvent(new CustomEvent('renderMessages', {
-                        detail: {
-                            messages: _chatMsgs.length > 0 ? _chatMsgs : _allMsgs,
-                            currentChat: activeChat,
-                            currentUser: currentUser
-                        }
+                        detail: { messages: _chatMsgs.length > 0 ? _chatMsgs : _allMsgs, currentChat: activeChat, currentUser }
                     }));
                 } catch (_e) {}
                 try {
@@ -5605,12 +5560,8 @@ try {
                     const _senderId = normalizedMessage.senderId;
                     const _myId = SessionManager?.getUserId?.();
                     if (!_senderId || String(_senderId) !== String(_myId)) {
-                        if (UIFeatures && typeof UIFeatures.playNotificationSound === 'function') {
-                            UIFeatures.playNotificationSound();
-                        }
-                        window.dispatchEvent(new CustomEvent('kyn:incomingMessage', {
-                            detail: { message: normalizedMessage, chatId }
-                        }));
+                        if (UIFeatures && typeof UIFeatures.playNotificationSound === 'function') UIFeatures.playNotificationSound();
+                        window.dispatchEvent(new CustomEvent('kyn:incomingMessage', { detail: { message: normalizedMessage, chatId } }));
                     }
                 } catch (_e) {}
             }
@@ -5661,6 +5612,12 @@ try {
                     return;
                 }
 
+                // ✅ FIX: Always prefer server-generated createdAt (ISO string from DB).
+                // message.timestamp may be a client epoch number — use createdAt first.
+                const _serverCreatedAt = message.createdAt
+                    ? (typeof message.createdAt === 'string' ? new Date(message.createdAt).getTime() : Number(message.createdAt))
+                    : (message.timestamp ? Number(message.timestamp) : Date.now());
+
                 let normalizedMessage = {
                     id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
                     serverId: _safeId || null,
@@ -5669,11 +5626,14 @@ try {
                     type: message.type || 'text',
                     senderId: message.senderId || message.sender?.id,
                     sender: message.sender || null,
-                    timestamp: message.createdAt || message.timestamp || Date.now(),
-                    createdAt: message.createdAt || message.timestamp || Date.now(),
+                    replyToId: message.replyToId || null,
+                    replyTo:   message.replyTo   || null,
+                    timestamp: _serverCreatedAt,
+                    createdAt: _serverCreatedAt,
                     status: message.status || 'delivered',
                     conversationId: chatId,
                     chatId: chatId,
+                    reactions: message.reactions || {},
                     isLocalOnly: false
                 };
 
@@ -5735,18 +5695,76 @@ try {
                 }
                 return;
             }
+
+            // ✅ ROOT-FIX: Handle message:reaction broadcast from server.
+            // Server calls wsService.broadcastToChat(chatId, 'message:reaction', {...})
+            // BOTH sender and receiver receive this. Update in-memory and re-render.
+            if (normalizedType === 'message:reaction' || normalizedType === 'message_reaction' ||
+                normalizedType === 'reaction_updated') {
+                const d = (data.payload && data.payload.messageId) ? data.payload : data;
+                const { messageId, reactions, chatId: rChatId } = d;
+                if (!messageId || !reactions) return;
+
+                // Update in-memory message
+                const msgs = ChatManager.getMessages ? ChatManager.getMessages() : [];
+                const target = msgs.find(m => String(m.id || m.serverId) === String(messageId));
+                if (target) {
+                    target.reactions = reactions;
+                    // Patch the DOM directly — no full re-render needed
+                    try {
+                        const bubble = document.querySelector(`[data-message-id="${messageId}"] .message-bubble`);
+                        const existingReactions = document.querySelector(`[data-message-id="${messageId}"] .message-reactions`);
+                        const myId = SessionManager?.getUserId?.();
+                        let rHtml = '';
+                        if (reactions && Object.keys(reactions).length > 0) {
+                            rHtml = '<div class="message-reactions">';
+                            for (const [em, users] of Object.entries(reactions)) {
+                                const ul = Array.isArray(users) ? users : (users ? [users] : []);
+                                if (!ul.length) continue;
+                                const mine = myId && ul.some(u => String(u) === String(myId));
+                                rHtml += `<span class="reaction${mine ? ' reaction-mine' : ''}" title="${ul.length} ${ul.length===1?'person':'people'}">${em} ${ul.length}</span>`;
+                            }
+                            rHtml += '</div>';
+                        }
+                        if (existingReactions) {
+                            existingReactions.outerHTML = rHtml;
+                        } else if (rHtml && bubble) {
+                            bubble.insertAdjacentHTML('beforeend', rHtml);
+                        }
+                    } catch(_) {}
+                }
+                // Also persist to local store
+                try {
+                    const activeChat = ChatManager.getActiveChat?.();
+                    if (activeChat) {
+                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${activeChat.id}`, msgs);
+                    }
+                } catch(_) {}
+                return;
+            }
         };
+
+        // ✅ ROOT-FIX: Also handle REACTION_UPDATED (sent from chat.html after API call)
+        window.addEventListener('message', function(event) {
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+            if (data.type === 'REACTION_UPDATED') {
+                handleRealtimePayload('message:reaction', data);
+            }
+        });
 
         window.addEventListener('message', function(event) {
             const data = event.data;
             if (!data || typeof data !== 'object') return;
-
+            // Only route actual new messages — NOT status events
             const _rawType = String(data.type || '').toLowerCase();
             const _isNewMsg = _rawType === 'message:new' || _rawType === 'new_message' ||
                               _rawType === 'newmessage' || _rawType === 'chat:message' ||
                               _rawType === 'message_received';
-            if (_isNewMsg) {
-                handleRealtimePayload(data.type, data);
+            if (_isNewMsg) handleRealtimePayload(data.type, data);
+            // Reaction from server broadcast via chat.html
+            if (data.type === 'message:reaction' || data.type === 'REACTION_UPDATED') {
+                handleRealtimePayload('message:reaction', data);
             }
 
             if (data && (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE' || data.type === 'STATUS_UPDATE')) {
@@ -5810,6 +5828,10 @@ try {
         });
         document.addEventListener('message:read', function(evt) {
             if (evt.detail) handleRealtimePayload('message:read', evt.detail);
+        });
+        // ✅ Reaction from ws-bridge forwarded via message.html
+        document.addEventListener('message:reaction', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:reaction', evt.detail);
         });
     }   // end setupRealtimeMessageListener
 

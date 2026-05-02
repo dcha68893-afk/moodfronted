@@ -407,7 +407,7 @@ function safeSend(type, payload = {}) {
 // =============================================
 // API REQUEST FUNCTION - STRICT PARENT PIPELINE
 // =============================================
-function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 10000) {
+function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
         // STRICT: Only allow in ACTIVE state
         if (!LifecycleState.ensureActive()) {
@@ -869,6 +869,15 @@ case 'SETTING_CHANGED':
                 this.handleSettingsChange(message);
                 return true;
 
+                case 'group:refresh_needed':
+                case 'GROUP_REFRESH_NEEDED':
+                    if (LifecycleState.isActive() && sessionReady) {
+                        setTimeout(() => {
+                            if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(() => {});
+                        }, 200);
+                    }
+                    return true;
+
                 default:
                     debugLog('Unhandled message type:', message.type);
                     return false;
@@ -1314,6 +1323,7 @@ handleSettingsChange(message) {
         
         if (payload.groupId && payload.member) {
             const { groupId, member } = payload;
+            const currentUserId = getCurrentUserLocal()?.id || getCurrentUserLocal()?.uid;
             
             // Update GroupCore
             if (GroupCore) {
@@ -1326,8 +1336,22 @@ handleSettingsChange(message) {
                             group.memberCount = group.members.length;
                         }
                         GroupCore.updateGroupInLists(group);
+                        // If THIS user was just added, ensure group appears in joinedGroups
+                        if (String(member.userId) === String(currentUserId)) {
+                            if (!GroupCore.joinedGroups.some(g => g.id === groupId)) {
+                                GroupCore.joinedGroups.push(group);
+                            }
+                            if (!GroupCore.groups.some(g => g.id === groupId)) {
+                                GroupCore.groups.push(group);
+                            }
+                        }
                         GroupCore.saveGroups();
                         GroupCore.emit('group:member-added', { groupId, member });
+                        // Refresh UI immediately
+                        if (LifecycleState.isActive()) {
+                            if (typeof updateGroupCounts === 'function') updateGroupCounts();
+                            if (typeof updateCurrentSection === 'function') updateCurrentSection();
+                        }
                     }
                 }
             }
@@ -1346,6 +1370,13 @@ handleSettingsChange(message) {
                         group.memberCount = group.members.length;
                     }
                     updateGroupInAllLists(group);
+                }
+            } else if (typeof groups !== 'undefined') {
+                // Group not found locally — new group for this user, trigger full sync
+                if (LifecycleState.isActive() && sessionReady) {
+                    setTimeout(() => {
+                        if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(() => {});
+                    }, 500);
                 }
             }
         }
@@ -3052,6 +3083,40 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
         window.addEventListener('group:member_role_changed', (evt) => {
             if (evt.detail) handleGroupMemberEvent('group:member_role_changed', evt.detail);
         });
+
+        // FIX: Listen for group:refresh_needed — server tells this user to sync
+        const _handleRefreshNeeded = (payload) => {
+            if (!LifecycleState.isActive() || !sessionReady) return;
+            if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(() => {});
+            if (typeof syncGroupInvitesFromServer === 'function') syncGroupInvitesFromServer().catch(() => {});
+        };
+        if (window.wsService && window.wsService.on) window.wsService.on('group:refresh_needed', _handleRefreshNeeded);
+        if (window.KynectaRealtime && window.KynectaRealtime.on) window.KynectaRealtime.on('group:refresh_needed', _handleRefreshNeeded);
+
+        // FIX: Listen for GROUP_MEMBER_ADDED socket event
+        const _handleMemberAddedSocket = (payload) => {
+            if (!payload || !payload.groupId) return;
+            const currentUserId = getCurrentUserLocal()?.id || getCurrentUserLocal()?.uid;
+            if (String(payload.userId) === String(currentUserId) || String(payload.memberId) === String(currentUserId)) {
+                if (LifecycleState.isActive() && sessionReady) {
+                    setTimeout(() => {
+                        if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(() => {});
+                    }, 300);
+                }
+            }
+            MessageRouter.handleMemberAdded({ payload: {
+                groupId: payload.groupId,
+                member: payload.member || { userId: payload.userId || payload.memberId }
+            }});
+        };
+        if (window.wsService && window.wsService.on) {
+            window.wsService.on('GROUP_MEMBER_ADDED', _handleMemberAddedSocket);
+            window.wsService.on('group:member:joined', _handleMemberAddedSocket);
+        }
+        if (window.KynectaRealtime && window.KynectaRealtime.on) {
+            window.KynectaRealtime.on('GROUP_MEMBER_ADDED', _handleMemberAddedSocket);
+            window.KynectaRealtime.on('group:member:joined', _handleMemberAddedSocket);
+        }
     }
     
     // ✅ ENHANCED: Handle real-time group member events
@@ -3912,7 +3977,7 @@ async function secureApiCall(endpoint, options = {}) {
         }
         
         const response = await API_WRAPPER.request(endpoint, {
-            timeout: 45000,
+            timeout: options.timeout || 45000,
             retry: 2,
             ...options
         });

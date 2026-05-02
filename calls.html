@@ -402,24 +402,8 @@ window.__CALLS_IFRAME__ = {
             _declineVideoUpgrade();
             _closePrompt();
         };
-        
-        // Add countdown timer text
-        var countdown = document.createElement('p');
-        countdown.style.cssText = 'margin:12px 0 0;font-size:12px;color:#8e8e93;';
-        countdown.textContent = 'Auto-declining in 30s...';
-        prompt.appendChild(countdown);
-        var _cd = 30;
-        var _cdInt = setInterval(function() {
-            _cd--;
-            if (countdown.parentNode) countdown.textContent = 'Auto-declining in ' + _cd + 's...';
-            if (_cd <= 0) {
-                clearInterval(_cdInt);
-                _closePrompt();
-                _declineVideoUpgrade();
-            }
-        }, 1000);
 
-        // Add to DOM
+        // Add to DOM — no auto-dismiss, only user action closes it
         document.body.appendChild(prompt);
     }
 
@@ -494,11 +478,23 @@ function _acceptVideoUpgrade() {
                     videoBtn.classList.add('active');
                 }
                 
-                // Hide avatar, show video
+                // Hide avatar, show video + participant name label
                 var avatarWrap = document.getElementById('incallAvatarWrap');
                 var remoteVideo = document.getElementById('remoteVideo');
+                var nameLabel = document.getElementById('remoteParticipantLabel');
                 if (avatarWrap) avatarWrap.style.display = 'none';
                 if (remoteVideo) remoteVideo.style.display = 'block';
+                if (nameLabel) {
+                    var peerName = window.__activePeerName
+                        || (window.UIState && window.UIState.callPeerName)
+                        || (document.getElementById('incallPeerName') && document.getElementById('incallPeerName').textContent)
+                        || 'Remote';
+                    nameLabel.textContent = peerName;
+                    nameLabel.style.display = 'block';
+                }
+                // Add video-active class to in-call screen for CSS layout switch
+                var inCallScreen = document.getElementById('inCallScreen');
+                if (inCallScreen) inCallScreen.classList.add('video-active');
                 
                 showNotification('Video call started', 'success');
             })
@@ -3683,6 +3679,8 @@ function _declineVideoUpgrade() {
                     </div>
                     <!-- Remote video shown when camera is enabled -->
                     <video class="incall-remote-video" id="remoteVideo" autoplay playsinline style="display:none"></video>
+                    <!-- Participant name shown over video (bottom-left, like WhatsApp) -->
+                    <div id="remoteParticipantLabel" style="display:none;position:absolute;bottom:72px;left:12px;background:rgba(0,0,0,0.45);color:#fff;padding:4px 10px;border-radius:16px;font-size:13px;font-weight:600;z-index:10;pointer-events:none;"></div>
                 </div>
 
                 <!-- Hidden audio element for remote voice -->

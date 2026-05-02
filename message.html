@@ -1941,30 +1941,31 @@
                 // For any other REALTIME_EVENT:* (presence, calls, etc.) fall through unchanged
             }
 
+            // ✅ ROOT-FIX: Route each ws-bridge event type to the correct handler only.
+            // Previously ALL types were dispatched as 'message:new', causing duplicates.
             const _nt = normalizedData.type;
             const _p  = normalizedData.payload || normalizedData;
 
             if (_nt === 'message:new' || _nt === 'new_message' || _nt === 'newMessage' || _nt === 'chat:message') {
-                try { document.dispatchEvent(new CustomEvent('message:new',           { detail: _p })); } catch(_) {}
-                try { window.dispatchEvent(new CustomEvent('kyn:message:received',    { detail: _p })); } catch(_) {}
+                try { document.dispatchEvent(new CustomEvent('message:new',        { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('kyn:message:received', { detail: _p })); } catch(_) {}
                 console.log('[Message HTML] ✅ FIX forwarded new message event:', _nt);
-            }
-            else if (_nt === 'message:sent' || _nt === 'message_sent') {
-                try { document.dispatchEvent(new CustomEvent('message:sent',          { detail: _p })); } catch(_) {}
-                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.localId || _p.messageId, status: 'sent', serverId: _p.serverId || _p.id || _p.messageId } })); } catch(_) {}
+            } else if (_nt === 'message:sent' || _nt === 'message_sent') {
+                try { document.dispatchEvent(new CustomEvent('message:sent',       { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _p.localId || _p.messageId, status: 'sent', serverId: _p.serverId || _p.id || _p.messageId } })); } catch(_) {}
                 console.log('[Message HTML] ✅ FIX forwarded message:sent status event');
-            }
-            else if (_nt === 'message:delivered' || _nt === 'message_delivered') {
-                try { document.dispatchEvent(new CustomEvent('message:delivered',     { detail: _p })); } catch(_) {}
-                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.messageId || _p.localId, status: 'delivered' } })); } catch(_) {}
+            } else if (_nt === 'message:delivered' || _nt === 'message_delivered') {
+                try { document.dispatchEvent(new CustomEvent('message:delivered',  { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _p.messageId || _p.localId, status: 'delivered' } })); } catch(_) {}
                 console.log('[Message HTML] ✅ FIX forwarded message:delivered status event');
-            }
-            else if (_nt === 'message:read' || _nt === 'message_read') {
-                try { document.dispatchEvent(new CustomEvent('message:read',          { detail: _p })); } catch(_) {}
-                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.messageId || _p.localId, status: 'read' } })); } catch(_) {}
-            }
-            else if (_nt === 'CONVERSATION_UPDATED') {
-                try { window.dispatchEvent(new CustomEvent('conversationUpdated',     { detail: _p })); } catch(_) {}
+            } else if (_nt === 'message:read' || _nt === 'message_read') {
+                try { document.dispatchEvent(new CustomEvent('message:read',       { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _p.messageId || _p.localId, status: 'read' } })); } catch(_) {}
+            } else if (_nt === 'message:reaction' || _nt === 'message_reaction') {
+                // ✅ ROOT-FIX: Forward reaction events to messages-core
+                try { document.dispatchEvent(new CustomEvent('message:reaction',   { detail: _p })); } catch(_) {}
+            } else if (_nt === 'CONVERSATION_UPDATED' || _nt === 'REACTION_UPDATED') {
+                try { window.dispatchEvent(new CustomEvent('conversationUpdated',  { detail: _p })); } catch(_) {}
             }
 
             // ✅ FIX 7b: Forward INCOMING_CALL so messages-ui.js modal fires.

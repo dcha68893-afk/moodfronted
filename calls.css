@@ -4365,3 +4365,36 @@ body.call-connected .unified-incoming-screen {
     cursor: pointer;
     vertical-align: middle;
 }
+
+/* ── Video-active layout: remote video fills screen ── */
+#inCallScreen.video-active .incall-centre {
+    position: relative;
+    flex: 1;
+    background: #000;
+}
+#inCallScreen.video-active #remoteVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block !important;
+}
+#inCallScreen.video-active #incallAvatarWrap {
+    display: none !important;
+}
+#inCallScreen.video-active #pipContainer {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 100px;
+    height: 140px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.3);
+    z-index: 20;
+    display: block !important;
+}
+#inCallScreen.video-active #pipVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}

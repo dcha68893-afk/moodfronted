@@ -5031,6 +5031,15 @@ case 'CALL_INITIATED':
         },
 
         handleCallEnded: function(callData) {
+            // ── Debounce: ignore duplicate CALL_ENDED within 3 seconds ──────
+            const now = Date.now();
+            if (window.__callEndedHandledAt && (now - window.__callEndedHandledAt) < 3000) {
+                console.log('[Calls UI] handleCallEnded dedup — already handled', now - window.__callEndedHandledAt, 'ms ago');
+                return;
+            }
+            window.__callEndedHandledAt = now;
+            setTimeout(() => { window.__callEndedHandledAt = 0; }, 5000); // reset after 5s for next call
+
             // ── FIX: Immediately restore parent layout + reset to idle screen ──
             window.__callActive = false;
             // Clear the CALL_ACCEPTED dedup lock and peer globals so next call works
@@ -5140,6 +5149,28 @@ case 'CALL_INITIATED':
             }
             document.querySelectorAll('audio[id^="remoteAudio_"]').forEach(a => { a.srcObject = null; a.remove(); });
             UIState.remoteStreams.clear();
+            UIState.remoteStream = null;
+
+            // ── Clean up video layout elements ───────────────────────────────
+            const _inCallScreen = document.getElementById('inCallScreen');
+            if (_inCallScreen) _inCallScreen.classList.remove('video-active');
+            const _nameLabel = document.getElementById('remoteParticipantLabel');
+            if (_nameLabel) { _nameLabel.style.display = 'none'; _nameLabel.textContent = ''; }
+            const _remoteVideo = document.getElementById('remoteVideo');
+            if (_remoteVideo) { try { _remoteVideo.srcObject = null; } catch(e) {} _remoteVideo.style.display = 'none'; }
+            const _remoteAudio = document.getElementById('remoteAudio');
+            if (_remoteAudio) { try { _remoteAudio.srcObject = null; } catch(e) {} }
+            const _pipContainer = document.getElementById('pipContainer');
+            if (_pipContainer) _pipContainer.style.display = 'none';
+            const _pipVideo = document.getElementById('pipVideo');
+            if (_pipVideo) { try { _pipVideo.srcObject = null; } catch(e) {} }
+            const _avatarWrap = document.getElementById('incallAvatarWrap');
+            if (_avatarWrap) _avatarWrap.style.display = '';
+            // Stop video upgrade track if pending
+            if (UIState._videoUpgradeTrack) {
+                try { UIState._videoUpgradeTrack.stop(); } catch(e) {}
+                UIState._videoUpgradeTrack = null;
+            }
 
             if (elements.videoGrid) {
                 elements.videoGrid.innerHTML = '';
@@ -6774,11 +6805,6 @@ case 'CALL_ACCEPTED': {
                 const pip = document.getElementById('pipContainer');
                 if (pip) pip.style.display = UIState.isVideoOff ? 'none' : 'block';
                 showNotification(UIState.isVideoOff ? 'Camera off' : 'Camera on', 'info');
-            } else if (coreInstance && coreInstance.toggleCamera) {
-                coreInstance.toggleCamera();
-                const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
-                if (icon) icon.className = 'fas fa-video';
-                if (elements.videoBtn) elements.videoBtn.classList.add('active');
             } else {
                 // No video track yet — request camera access and upgrade to video call
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -6809,11 +6835,19 @@ case 'CALL_ACCEPTED': {
                         }
                         if (pipContainer) pipContainer.style.display = 'block';
 
-                        // Prepare remote video area
+                        // Prepare remote video area + participant name label
                         const avatarWrap  = document.getElementById('incallAvatarWrap');
                         const remoteVideo = document.getElementById('remoteVideo');
+                        const nameLabel   = document.getElementById('remoteParticipantLabel');
                         if (avatarWrap)  avatarWrap.style.display  = 'none';
                         if (remoteVideo) remoteVideo.style.display = 'block';
+                        if (nameLabel) {
+                            nameLabel.textContent = UIState.callPeerName || window.__activePeerName || 'Remote';
+                            nameLabel.style.display = 'block';
+                        }
+                        // Switch to full-screen video layout
+                        const inCallScreen = document.getElementById('inCallScreen');
+                        if (inCallScreen) inCallScreen.classList.add('video-active');
 
                         const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
                         if (icon) icon.className = 'fas fa-video';

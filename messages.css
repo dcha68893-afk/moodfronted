@@ -837,28 +837,28 @@ body {
 .reply-quote {
     display: flex;
     align-items: stretch;
-    background: rgba(0,0,0,0.18);
+    background: rgba(0,0,0,0.20);
     border-radius: 6px;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
     cursor: pointer;
     overflow: hidden;
     max-width: 100%;
+    transition: background 0.2s;
 }
-
+.reply-quote:hover { background: rgba(0,0,0,0.30); }
 .reply-quote-bar {
     width: 3px;
     background: var(--primary-color, #22c55e);
     flex-shrink: 0;
 }
-
 .reply-quote-body {
     padding: 5px 8px;
     display: flex;
     flex-direction: column;
     gap: 2px;
     overflow: hidden;
+    min-width: 0;
 }
-
 .reply-quote-sender {
     font-size: 11px;
     font-weight: 700;
@@ -867,7 +867,6 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
 .reply-quote-text {
     font-size: 12px;
     color: rgba(255,255,255,0.72);
@@ -875,12 +874,11 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
 .message.received .reply-quote {
-    background: rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.10);
 }
 
-/* ── Reaction mine highlight ─────────────────────────────────────────────── */
+/* ── Own-reaction highlight ──────────────────────────────────────────────── */
 .reaction-mine {
     background-color: rgba(34,197,94,0.28) !important;
     border-color: var(--primary-color, #22c55e) !important;
