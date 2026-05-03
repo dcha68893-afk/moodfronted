@@ -9657,16 +9657,31 @@ Type: ${message.type || 'text'}`;
                 token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
             } catch(_e) {}
 
+            // ✅ FIX: Use the core makeApiRequest (parent-proxy postMessage) instead of
+            // a direct relative fetch. The API lives on moodchat-fy56.onrender.com while
+            // the frontend is on moodfronted.onrender.com — a relative /api/messages fetch
+            // hits the wrong origin and silently fails. The core's makeApiRequest routes
+            // through window.parent which holds the auth token and correct base URL.
+            const _coreApi = core && core.makeApiRequest;
             for (const chatId of chatIds) {
                 try {
-                    const resp = await fetch('/api/messages', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-                        body: JSON.stringify({ chatId: chatId, content: content2, type: 'text' })
-                    });
-                    const result = await resp.json().catch(function() { return {}; });
-                    if (resp.ok && result.success !== false) { successCount++; }
-                    else { failCount++; console.warn('[MultiSend] Failed for chatId ' + chatId + ':', result); }
+                    if (_coreApi) {
+                        // Preferred path: route through parent proxy with auth
+                        const result = await _coreApi('/messages', 'POST', { chatId: chatId, content: content2, type: 'text' });
+                        if (result && result.success !== false) { successCount++; }
+                        else { failCount++; console.warn('[MultiSend] Failed for chatId ' + chatId + ':', result); }
+                    } else {
+                        // Fallback: full absolute URL with bearer token
+                        const _backendBase = (window.__ENV_BACKEND_URL || 'https://moodchat-fy56.onrender.com/api');
+                        const resp = await fetch(_backendBase + '/messages', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+                            body: JSON.stringify({ chatId: chatId, content: content2, type: 'text' })
+                        });
+                        const result = await resp.json().catch(function() { return {}; });
+                        if (resp.ok && result.success !== false) { successCount++; }
+                        else { failCount++; console.warn('[MultiSend] Failed for chatId ' + chatId + ':', result); }
+                    }
                 } catch (e) {
                     failCount++;
                     console.warn('[MultiSend] Error for chatId ' + chatId + ':', e);
@@ -10248,6 +10263,22 @@ Type: ${message.type || 'text'}`;
             if (_backBtn) _backBtn.style.display = '';
             if (returnFromCall) {
                 setTimeout(() => { window.__returningFromCall = false; }, 1500);
+            }
+
+            // ✅ FIX: Hide bottom mobile nav icons when chat panel opens.
+            // chat.html adds 'chat-panel-active' on body only when it receives a CHAT_OPENED
+            // postMessage from this iframe. On some paths (e.g. openChatWithUserInUI called
+            // from within the iframe) that postMessage fires but chat.html may not process it
+            // quickly enough, leaving the nav visible. We also set the class directly on the
+            // parent body here so it's immediate and reliable on mobile.
+            if (window.innerWidth <= 768) {
+                try {
+                    if (window.parent && window.parent !== window && window.parent.document && window.parent.document.body) {
+                        window.parent.document.body.classList.add('chat-panel-active');
+                    }
+                } catch (_e) {
+                    // Cross-origin: parent will add the class via the CHAT_OPENED postMessage
+                }
             }
 
             // Push history state for device-back navigation support

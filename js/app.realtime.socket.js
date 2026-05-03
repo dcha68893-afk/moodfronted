@@ -1219,6 +1219,7 @@
                     const msgs = [
                         { type: 'REALTIME_EVENT:friend:accepted',           payload: payload || {} },
                         { type: 'REALTIME_EVENT:FRIEND_REQUEST_ACCEPTED',   payload: payload || {} },
+                        { type: 'FRIEND_REQUEST_ACCEPTED',                  payload: payload || {} },
                     ];
                     iframes.forEach(function (frame) {
                         msgs.forEach(function (m) {
@@ -1229,11 +1230,14 @@
                 }
 
                 // FIX: friend:request from server → translate to FRIEND_REQUEST_RECEIVED
-                // so friendSync_engine.js KynectaEventBus listener fires correctly.
+                // Send the payload BOTH flat (for handlers that read payload directly)
+                // and nested under .request (for handlers that do payload.request).
+                // The updated friend-core.js FRIEND_REQUEST_RECEIVED handler handles both.
                 if (eventType === 'friend:request') {
                     const msgs = [
-                        { type: 'REALTIME_EVENT:friend:request',            payload: payload || {} },
-                        { type: 'REALTIME_EVENT:FRIEND_REQUEST_RECEIVED',   payload: { request: payload } },
+                        { type: 'REALTIME_EVENT:friend:request',          payload: payload || {} },
+                        { type: 'REALTIME_EVENT:FRIEND_REQUEST_RECEIVED', payload: payload || {} },
+                        { type: 'FRIEND_REQUEST_RECEIVED',                payload: payload || {} },
                     ];
                     iframes.forEach(function (frame) {
                         msgs.forEach(function (m) {

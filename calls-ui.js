@@ -7719,6 +7719,17 @@ acceptIncomingCallGeneric: async function(asVideo) {
         showNotification('You are already in a call', 'warning');
         return;
     }
+
+    // ✅ FIX (Bug 4): Set call-active guard flags HERE — BEFORE any DOM mutation.
+    // The callContainer MutationObserver (dark-screen guard) checks window.__callActive
+    // and UIState.callActive on EVERY class/style change. If these are false when
+    // transitionToInCall touches the DOM, the observer immediately suppresses
+    // #callContainer and #inCallScreen, so the in-call screen never appears.
+    // Setting them first guarantees the observer allows the show.
+    UIState.callActive = true;
+    UIState.callState  = 'connecting';
+    window.__callActive = true;
+    document.body.classList.add('call-active');
     
     if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
         clearInterval(parseInt(elements.incomingCallModal.dataset.timer));

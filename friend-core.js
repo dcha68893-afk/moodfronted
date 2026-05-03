@@ -1956,19 +1956,56 @@ const ParentCommunicationManager = {
             // ── Real-time friend events forwarded from the WS bridge in chat.html ──
             if (message.type === 'FRIEND_REQUEST_RECEIVED') {
                 const payload   = message.payload || {};
-                const requestId = payload.id || payload.requestId;
-                const senderId  = payload.requesterId || payload.senderId || payload.from;
-                if (requestId && !FriendCacheManager.getRequest(requestId)) {
+                // Accept both top-level and nested-under-.request shapes
+                const reqData   = (payload.request && typeof payload.request === 'object') ? payload.request : payload;
+                const requestId = reqData.id || reqData.requestId || payload.id || payload.requestId;
+                const senderId  = reqData.requesterId || reqData.senderId || reqData.from ||
+                                  payload.requesterId || payload.senderId || payload.from;
+
+                if (requestId) {
+                    // FIX: Don't deduplicate by requestId alone — the cache may contain a
+                    // stale placeholder. Always apply the latest server data.
+                    // Look up sender info from all-users cache when socket payload is thin.
+                    let senderName   = reqData.senderName   || reqData.user?.displayName || payload.senderName   || payload.user?.displayName || '';
+                    let senderUser   = reqData.user          || payload.user              || null;
+                    let senderAvatar = reqData.senderAvatar  || reqData.user?.avatar      || payload.senderAvatar || payload.user?.avatar || '';
+                    let senderUsername = reqData.senderUsername || reqData.user?.username  || payload.senderUsername || payload.user?.username || '';
+
+                    if ((!senderName || senderName === 'Someone') && senderId) {
+                        // FIX: Resolve from local all-users cache to populate sender info immediately
+                        try {
+                            const allCache =
+                                (Array.isArray(window._allUsersCache) ? window._allUsersCache : null) ||
+                                (FriendCacheManager.getAllUsers ? FriendCacheManager.getAllUsers() : []);
+                            const found = allCache.find(u => u && String(u.id) === String(senderId));
+                            if (found) {
+                                senderName   = found.displayName || found.name ||
+                                    ([found.firstName, found.lastName].filter(Boolean).join(' ').trim()) ||
+                                    found.username || 'Someone';
+                                senderAvatar   = found.avatar    || found.photoURL || '';
+                                senderUsername = found.username  || '';
+                                senderUser     = senderUser || found;
+                            }
+                        } catch (_) {}
+                    }
+                    if (!senderName) senderName = 'Someone';
+
                     const newRequest = {
                         id:             requestId,
                         senderId:       senderId,
                         receiverId:     __session.user?.id,
                         status:         'pending',
-                        senderName:     payload.senderName     || payload.user?.displayName || 'Someone',
-                        senderUsername: payload.senderUsername || payload.user?.username    || '',
-                        senderAvatar:   payload.senderAvatar   || payload.user?.avatar     || '',
-                        user:           payload.user || null,
-                        createdAt:      payload.createdAt || new Date().toISOString(),
+                        senderName,
+                        senderUsername,
+                        senderAvatar,
+                        user:           senderUser || {
+                            id:          senderId,
+                            displayName: senderName,
+                            username:    senderUsername,
+                            avatar:      senderAvatar,
+                        },
+                        displayName:    senderName,
+                        createdAt:      reqData.createdAt || payload.createdAt || new Date().toISOString(),
                         timestamp:      Date.now(),
                     };
                     FriendCacheManager.setRequest(newRequest);
@@ -1976,6 +2013,9 @@ const ParentCommunicationManager = {
                     FriendCacheManager.persist();
                     window.dispatchEvent(new CustomEvent('requestsUpdated', {
                         detail: { requests: FriendCacheManager.getAllRequests(), realtime: true }
+                    }));
+                    window.dispatchEvent(new CustomEvent('friendRequestReceived', {
+                        detail: { request: newRequest, realtime: true }
                     }));
                     showNotification?.(`New friend request from ${newRequest.senderName}`, 'info');
                 }
@@ -1993,7 +2033,29 @@ const ParentCommunicationManager = {
                     || message.payload?.userId
                     || null;
                 const _acceptedRequestId = message.payload?.requestId || null;
-                const _friendPayload     = message.payload?.friend || null;
+                let _friendPayload       = message.payload?.friend || message.payload?.user || null;
+
+                // FIX: If the socket payload didn't include a full user object, resolve
+                // from the local all-users cache so the friend card populates immediately.
+                if (_acceptedFriendId && (!_friendPayload || !_friendPayload.displayName)) {
+                    try {
+                        const _allCache =
+                            (Array.isArray(window._allUsersCache) ? window._allUsersCache : null) ||
+                            (FriendCacheManager.getAllUsers ? FriendCacheManager.getAllUsers() : []);
+                        const _found = _allCache.find(u => u && String(u.id) === String(_acceptedFriendId));
+                        if (_found) {
+                            _friendPayload = Object.assign({}, _friendPayload || {}, {
+                                id:          _found.id,
+                                displayName: _found.displayName || _found.name ||
+                                    ([_found.firstName, _found.lastName].filter(Boolean).join(' ').trim()) ||
+                                    _found.username || '',
+                                username:    _found.username  || '',
+                                avatar:      _found.avatar    || _found.photoURL || '',
+                                status:      _found.status    || 'offline',
+                            });
+                        }
+                    } catch (_) {}
+                }
 
                 // Step 1: update KynectaFriendsLocalStore
                 const _ls = window.KynectaFriendsLocalStore;
@@ -2039,9 +2101,9 @@ const ParentCommunicationManager = {
                 }
 
                 // Step 2: update FriendCacheManager in-memory cache
-                if (_friendPayload && _acceptedFriendId) {
+                if (_acceptedFriendId) {
                     FriendCacheManager.setFriend({
-                        ..._friendPayload,
+                        ...(_friendPayload || {}),
                         id:     String(_acceptedFriendId),
                         status: 'accepted'
                     });
@@ -2093,9 +2155,23 @@ const ParentCommunicationManager = {
                 const fId = message.payload?.friendId || message.payload?.userId;
                 if (fId) {
                     FriendCacheManager.removeFriend(String(fId));
+                    // FIX: Also clean up from LocalStore so it doesn't resurrect on next sync
+                    const _ls = window.KynectaFriendsLocalStore;
+                    if (_ls) {
+                        _ls.ready().then(async () => {
+                            try {
+                                const _lr = await _ls.getByFriendId(String(fId));
+                                if (_lr) await _ls.hardDelete(_lr.id).catch(() => {});
+                            } catch (_) {}
+                        }).catch(() => {});
+                    }
                     FriendCacheManager.syncToGlobals();
                     FriendCacheManager.persist();
+                    // FIX: trigger both events so every UI section (friends list + counts) refreshes
                     window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { realtime: true } }));
+                    window.dispatchEvent(new CustomEvent('friendRemoved',  { detail: { friendId: fId, realtime: true } }));
+                    // Re-fetch authoritative list in background
+                    loadFriendsFromBackend().catch(() => {});
                 }
                 return;
             }
@@ -8015,13 +8091,38 @@ async function sendFriendRequest(friendId, category = 'friend', note = '', isTem
     } catch (e) {
         return { success: false, error: e.message, status: 'session_failed' };
     }
-    
+
+    // FIX: Look up the user's display info from all available caches so the
+    // optimistic "Sent Requests" card never shows "Unknown User".
+    // Priority: window._allUsersCache → FriendCacheManager users → localStorage discover_users
+    let displayName = null, username = null, avatar = null;
+    try {
+        const allUsersCache =
+            (window._allUsersCache && Array.isArray(window._allUsersCache) ? window._allUsersCache : null) ||
+            (FriendCacheManager.getAllUsers ? FriendCacheManager.getAllUsers() : null) ||
+            (() => { try { return JSON.parse(localStorage.getItem('discover_users') || '[]'); } catch(_) { return []; } })();
+
+        if (Array.isArray(allUsersCache)) {
+            const found = allUsersCache.find(u => u && String(u.id) === String(friendId));
+            if (found) {
+                displayName = found.displayName || found.name ||
+                    ([found.firstName, found.lastName].filter(Boolean).join(' ').trim()) ||
+                    found.username || null;
+                username    = found.username || null;
+                avatar      = found.avatar   || found.photoURL || null;
+            }
+        }
+    } catch (_) {}
+
     return await FriendRequestManager.sendFriendRequest(friendId, {
         category,
         note,
         isTemporary,
         duration,
-        isBusiness
+        isBusiness,
+        displayName,   // ← now populated from cache
+        username,
+        avatar,
     });
 }
 

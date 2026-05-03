@@ -1209,6 +1209,13 @@ export const RenderPipeline = {
         // Catch any data load completion events and update counts
         window.addEventListener('requestsUpdated', () => updateFriendCounts());
         window.addEventListener('sentRequestsUpdated', () => updateFriendCounts());
+        // FIX: friendRequestSent fires immediately on optimistic send — re-render sent list instantly
+        window.addEventListener('friendRequestSent', (event) => {
+            updateFriendCounts();
+            if (UIState.activeSection === 'requestsSection') {
+                renderSentRequests();
+            }
+        });
         window.addEventListener('pinnedFriendsUpdated', () => updateFriendCounts());
         window.addEventListener('mutedFriendsUpdated', () => updateFriendCounts());
         window.addEventListener('contactsUpdated', () => updateFriendCounts());
@@ -1218,13 +1225,14 @@ export const RenderPipeline = {
             // Always update counts; render if we have data, are active, or event is real-time
             updateFriendCounts();
             const hasRequests = (window.friendRequests?.length || friendRequests?.length || 0) > 0;
+            const hasSent     = (window.sentRequests?.length  || sentRequests?.length  || 0) > 0;
             const isRealtime  = event.detail?.realtime === true;
-            if (!isUIActive() && !hasRequests && !isRealtime) return;
+            if (!isUIActive() && !hasRequests && !hasSent && !isRealtime) return;
 
             this.queueRender('requests', debounce(() => {
                 if (UIState.activeSection === 'requestsSection') {
                     renderFriendRequests();
-                    renderSentRequests();
+                    renderSentRequests();  // FIX: always re-render sent requests too
                 } else if (isRealtime) {
                     // Badge count already updated; also flash the requests tab badge
                     updateFriendCounts();
@@ -1627,33 +1635,65 @@ export const CoreIntegration = {
         
         this.subscribe('friendRequestReceived', (event) => {
             const data = this.validateEventData(event);
-            if (data?.request) {
+            // FIX: Render immediately from the already-updated cache — no API roundtrip needed.
+            // The core already called FriendCacheManager.setRequest() and syncToGlobals() before
+            // dispatching this event, so window.friendRequests is already up-to-date.
+            updateFriendCounts();
+            if (UIState.activeSection === 'requestsSection') {
+                renderFriendRequests();
+                renderSentRequests();
+            } else {
+                // Not on requests tab — just update the badge count
+                updateFriendCounts();
+            }
+            if (data?.request?.senderName) {
+                showNotification(`New friend request from ${data.request.senderName}`, 'info');
+            } else {
                 showNotification('New friend request received', 'info');
-                if (UIState.activeSection === 'requestsSection') {
-                    loadFriendRequestsFromBackend();
-                }
             }
         });
         
         this.subscribe('friendRequestAccepted', (event) => {
             const data = this.validateEventData(event);
+            // FIX: Render both friend list and requests list instantly from updated cache,
+            // then also trigger a background sync for authoritative data.
+            updateFriendCounts();
+            if (UIState.activeSection === 'friendsSection' || UIState.activeSection === 'allFriendsSection') {
+                renderFriends();
+                renderAllFriendsList();
+            }
+            if (UIState.activeSection === 'requestsSection') {
+                renderFriendRequests();
+                renderSentRequests();
+            }
             if (data?.friendId) {
-                loadFriendsFromBackend();
-                loadSentRequestsFromBackend();
+                loadFriendsFromBackend().catch(() => {});
+                loadSentRequestsFromBackend().catch(() => {});
             }
         });
         
         this.subscribe('friendRequestRejected', (event) => {
             showNotification('Friend request was rejected', 'info');
-            loadSentRequestsFromBackend();
+            updateFriendCounts();
+            if (UIState.activeSection === 'requestsSection') {
+                renderFriendRequests();
+                renderSentRequests();
+            }
+            loadSentRequestsFromBackend().catch(() => {});
         });
         
         this.subscribe('friendRemoved', (event) => {
             const data = this.validateEventData(event);
+            // FIX: Render immediately — core already updated cache before dispatch.
+            // No API refetch needed for instant response.
+            updateFriendCounts();
+            if (UIState.activeSection === 'friendsSection') {
+                renderFriends();
+            } else if (UIState.activeSection === 'allFriendsSection') {
+                renderAllFriendsList();
+            }
             if (data?.friendId) {
-                showNotification('Friend removed', 'info');
-                if (UIState.activeSection === 'friendsSection') loadFriendsFromBackend();
-                if (UIState.activeSection === 'allFriendsSection') loadFriendsFromBackend();
+                loadFriendsFromBackend().catch(() => {});
             }
         });
         
