@@ -2987,83 +2987,130 @@ function handleBulkUpload(e) {
         showNotification('Bulk upload started', 'info');
     }
 }
-
 // Expose on window for emergency handler fallback
-window._publishListingFromModal = function() { publishListingFromModal(); };
+window._publishListingFromModal = function() { return publishListingFromModal(); };
 async function publishListingFromModal() {
     const activeTab = UIState.createListingActiveTab || 'service';
 
-    // Handle service tab
-    if (activeTab === 'service') {
-        const title = DOM.serviceTitle?.value;
-        const description = DOM.serviceDescription?.value;
-        const price = DOM.servicePrice?.value;
-
-        if (!title || !description) {
-            showNotification('Please fill in title and description', 'error');
-            return;
-        }
-
-        const listing = await createServiceListing(title, description, {
-            price: price,
-            visibility: UIState.selectedTrustCircle,
-            moodContext: UIState.selectedMoodContext,
-            template: UIState.selectedTemplate
-        });
-
-        // FIX: only celebrate when backend confirmed the listing
-        if (listing && !listing._isOptimistic) {
-            showNotification('Service listing published successfully!', 'success');
-            hideCreateListingModal();
-            UIPipeline.liveUpdate();
-            console.log('[TOOLS FLOW] Step 4: UI updated after service listing created', { id: listing.id });
-        } else if (!listing) {
-            // Error notification already shown by createServiceListing — do not double-notify
-        }
-        return;
+    // ── Immediate visual feedback — disable button while working ──────────────
+    const publishBtn = document.getElementById('publishListingBtn');
+    const originalBtnText = publishBtn ? publishBtn.innerHTML : '';
+    if (publishBtn) {
+        publishBtn.disabled = true;
+        publishBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Publishing…';
     }
-    
-    // Handle digital tab
-    if (activeTab === 'digital') {
-        const title = DOM.digitalTitle?.value;
-        const description = DOM.digitalDescription?.value;
-        const price = DOM.digitalPrice?.value;
-        
-        if (!title || !description) {
-            showNotification('Please fill in title and description', 'error');
+
+    try {
+        // ── SERVICE tab ───────────────────────────────────────────────────────
+        if (activeTab === 'service') {
+            const title       = DOM.serviceTitle?.value?.trim();
+            const description = DOM.serviceDescription?.value?.trim();
+            const price       = DOM.servicePrice?.value?.trim();
+            const condition   = document.getElementById('serviceCondition')?.value
+                             || document.querySelector('[name="serviceCondition"]')?.value
+                             || 'new';
+
+            if (!title) {
+                showNotification('Please enter a title', 'error');
+                return;
+            }
+            if (!description) {
+                showNotification('Please enter a description', 'error');
+                return;
+            }
+
+            const opts = {
+                price:          price       || '0',
+                condition:      condition,
+                category:       document.getElementById('serviceCategory')?.value || 'services',
+                visibility:     UIState.selectedTrustCircle,
+                moodContext:    UIState.selectedMoodContext,
+                template:       UIState.selectedTemplate,
+                featured:       DOM.featuredListingCheckbox?.checked || false,
+                boosted:        DOM.boostListingCheckbox?.checked    || false,
+                autoRenew:      DOM.autoRenewCheckbox?.checked       || false,
+                videoIntro:     UIState.selectedVideoIntro,
+                teamMembers:    UIState.selectedTeamMembers || [],
+                allowedGroups:  UIState.selectedGroups,
+                allowedUsers:   UIState.selectedUsers,
+            };
+
+            const listing = typeof createServiceListing === 'function'
+                ? await createServiceListing(title, description, opts)
+                : await marketplaceCore?.createListing({
+                    title, description, type: 'service', condition, ...opts
+                  });
+
+            if (listing) {
+                hideCreateListingModal();
+                resetCreateListingForm();
+                UIPipeline.syncFromCoreGlobals();
+                UIPipeline.liveUpdate();
+            }
             return;
         }
-        
-        if (!UIState.selectedDigitalFile) {
-            showNotification('Please upload a file', 'error');
+
+        // ── DIGITAL tab ───────────────────────────────────────────────────────
+        if (activeTab === 'digital') {
+            const title       = DOM.digitalTitle?.value?.trim();
+            const description = DOM.digitalDescription?.value?.trim();
+            const price       = DOM.digitalPrice?.value?.trim();
+            const condition   = document.getElementById('digitalCondition')?.value
+                             || document.querySelector('[name="digitalCondition"]')?.value
+                             || 'new';
+
+            if (!title) {
+                showNotification('Please enter a title', 'error');
+                return;
+            }
+            if (!description) {
+                showNotification('Please enter a description', 'error');
+                return;
+            }
+            if (!UIState.selectedDigitalFile) {
+                showNotification('Please upload a file', 'error');
+                return;
+            }
+
+            const opts = {
+                price:       price || '0',
+                condition:   condition,
+                category:    document.getElementById('digitalCategory')?.value || 'digital',
+                visibility:  UIState.selectedTrustCircle,
+                moodContext: UIState.selectedMoodContext,
+                template:    UIState.selectedTemplate,
+                featured:    DOM.featuredListingCheckbox?.checked || false,
+                boosted:     DOM.boostListingCheckbox?.checked    || false,
+                autoRenew:   DOM.autoRenewCheckbox?.checked       || false,
+            };
+
+            const listing = typeof createDigitalListing === 'function'
+                ? await createDigitalListing(title, description, UIState.selectedDigitalFile, opts)
+                : await marketplaceCore?.createListing({
+                    title, description, type: 'digital', condition, ...opts
+                  });
+
+            if (listing) {
+                hideCreateListingModal();
+                resetCreateListingForm();
+                UIPipeline.syncFromCoreGlobals();
+                UIPipeline.liveUpdate();
+            }
             return;
         }
-        
-        const listing = await createDigitalListing(title, description, UIState.selectedDigitalFile, {
-            price: price,
-            visibility: UIState.selectedTrustCircle,
-            moodContext: UIState.selectedMoodContext,
-            template: UIState.selectedTemplate
-        });
-        
-        // FIX: only celebrate when backend confirmed the listing
-        if (listing && !listing._isOptimistic) {
-            showNotification('Digital item published successfully!', 'success');
-            hideCreateListingModal();
-            UIPipeline.liveUpdate();
-            console.log('[TOOLS FLOW] Step 4: UI updated after digital listing created', { id: listing.id });
-        } else if (!listing) {
-            // Error notification already shown by createDigitalListing — do not double-notify
+
+        // ── PHYSICAL / OTHER tabs — delegate to core ───────────────────────
+        showNotification('Tab "' + activeTab + '" is not yet supported', 'info');
+
+    } catch (err) {
+        if (window.__TOOLS_DEBUG__) console.error('[publishListingFromModal] Error:', err.message);
+        showNotification('Failed to publish listing. Please try again.', 'error');
+    } finally {
+        // Always restore publish button
+        if (publishBtn) {
+            publishBtn.disabled = false;
+            publishBtn.innerHTML = originalBtnText || '<i class="fas fa-paper-plane"></i> Publish Listing';
         }
-        return;
-    }
-    
-    // Default fallback - try service
-    if (DOM.serviceTitle?.value) {
-        UIState.createListingActiveTab = 'service';
-        publishListingFromModal();
-    } else {
-        showNotification('Please select a listing type', 'error');
     }
 }
 
@@ -3804,6 +3851,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     cacheDOMElements();
     UIPipeline.skeleton();
     ResponsiveEngine.init();
+
+    // Hide "Loading marketplace" banner after max 4s regardless of core state
+    setTimeout(() => {
+        const el = document.getElementById('marketplaceStatusMessage');
+        if (el) el.style.display = 'none';
+    }, 4000);
+
     await pageCore.init();
     
     // Start health monitoring
@@ -4386,21 +4440,7 @@ window.addEventListener('tools:active', function() {
         if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
     } catch(e) {}
 })();
-// Standalone wrapper so viewListingDetail can be exported as a named function
-function viewListingDetail(listing) {
-    return renderers.viewListingDetail(listing);
-}
-
-// ----------------------------------------------------------------------
-// PRESERVED EXPORTS (Full Compatibility)
-// ----------------------------------------------------------------------
-export {
-    renderers,
-    UIState,
-    pageCore,
-    showCreateListingModal,
-    viewListingDetail
-};
+// [exports moved to end of file]
 // ══════════════════════════════════════════════════════════════════════════════
 // MARKETPLACE PANELS — Orders, Reviews, Seller Profile
 // Injected into Tools.html at runtime, powered by existing auth + API layer
@@ -4411,6 +4451,14 @@ export {
     // ── Inject panel HTML once ────────────────────────────────────────────────
     function injectPanels() {
         if (document.getElementById('mp-orders-panel')) return;
+        // Hide any stuck "Loading marketplace" banner immediately
+        const stuck = document.getElementById('marketplaceStatusMessage');
+        if (stuck) stuck.style.display = 'none';
+        // Also hide it after a short delay in case it renders after us
+        setTimeout(() => {
+            const s2 = document.getElementById('marketplaceStatusMessage');
+            if (s2) s2.style.display = 'none';
+        }, 1000);
         document.body.insertAdjacentHTML('beforeend', `
 <style>
 .mp-panel{position:fixed;inset:0;z-index:9000;display:none;align-items:flex-end;background:rgba(0,0,0,.5);}
@@ -4457,6 +4505,26 @@ export {
 .mp-product-tile-body{padding:8px;}
 .mp-product-tile-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mp-product-tile-price{font-size:12px;color:var(--primary-color,#6C63FF);font-weight:700;}
+/* ── Responsive overrides ───────────────────────────────────────────────── */
+@media(max-width:480px){
+  .mp-sheet{border-radius:16px 16px 0 0;padding:16px 14px;max-height:95vh;}
+  .mp-btn{padding:9px 12px;font-size:13px;}
+  .mp-tabs{gap:0;}
+  .mp-tab{padding:8px 10px;font-size:12px;}
+  .mp-stat-row{gap:6px;}
+  .mp-stat strong{font-size:18px;}
+  .mp-grid-2{grid-template-columns:1fr 1fr;gap:8px;}
+  .mp-product-tile-img{height:72px;}
+  .mp-hdr h3{font-size:16px;}
+  .mp-field input,.mp-field textarea,.mp-field select{font-size:16px;} /* prevent iOS zoom */
+}
+@media(min-width:768px){
+  .mp-panel{align-items:center;}
+  .mp-sheet{border-radius:16px;max-height:80vh;margin-bottom:0;}
+}
+/* Marketplace status banner override — hide after load */
+#marketplaceStatusMessage[style*="Loading"]{animation:mpFadeOut 5s forwards;}
+@keyframes mpFadeOut{0%{opacity:1}80%{opacity:1}100%{opacity:0;pointer-events:none;}}
 </style>
 
 <!-- ORDERS PANEL -->
@@ -4872,3 +4940,15 @@ export {
     }
 
 })();
+
+// ── Module exports ──────────────────────────────────────────────────────────
+// viewListingDetail lives on renderers — re-export as a named alias
+const viewListingDetail = (...args) => renderers.viewListingDetail(...args);
+
+export {
+    renderers,
+    UIState,
+    pageCore,
+    showCreateListingModal,
+    viewListingDetail
+};

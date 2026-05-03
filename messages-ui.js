@@ -2132,17 +2132,15 @@
                         this._notifyListeners('newMessage', e.detail.message);
 
                         const core = getMessagesCore();
-                        const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+                        const activeChat = (core && core.getCurrentConversation && core.getCurrentConversation()) || (core && core.ChatManager && core.ChatManager.getActiveChat && core.ChatManager.getActiveChat());
                         const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
+                        const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
                         if (activeChat && incomingChatId && String(activeChat.id) === incomingChatId) {
-                            const allMsgs = core?.getMessages?.() || [];
-                            // ✅ FIX: filter + sort by timestamp so order is correct
-                            const chatMsgs = allMsgs
-                                .filter(m => String(m.chatId || m.conversationId || '') === incomingChatId)
-                                .sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
-                            UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core?.getCurrentUser?.());
-                            try { const c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(()=>{c.scrollTop=c.scrollHeight;}); } catch(_){}
+                            const allMsgs = (core && core.getMessages && core.getMessages()) || [];
+                            const chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChatId; }).sort(function(a,b) { return _ts(a)-_ts(b); });
+                            UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core && core.getCurrentUser && core.getCurrentUser());
+                            try { var c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(function(){c.scrollTop=c.scrollHeight;}); } catch(_e){}
                         }
 
                     }
@@ -2882,13 +2880,11 @@
 
                     const currentChat = e.detail.currentChat;
                     let messages = e.detail.messages || [];
-                    // ✅ FIX: filter to active chat + sort ASC before rendering
+                    const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
-                        const filtered = messages.filter(m => String(m.chatId || m.conversationId || '') === cid);
-                        if (filtered.length > 0) {
-                            messages = filtered.sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
-                        }
+                        const filtered = messages.filter(function(m) { return String(m.chatId || m.conversationId || '') === cid; });
+                        if (filtered.length > 0) messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
                     }
                     this.renderMessages(messages, currentChat, e.detail.currentUser);
 
@@ -3043,16 +3039,15 @@
                     if (e.detail && e.detail.message) {
 
                         const core = getMessagesCore();
-                        const currentChat = core?.getCurrentConversation?.();
+                        const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
                         const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
+                        const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
                         if (currentChat && incomingChatId && String(currentChat.id) === incomingChatId) {
-                            const allMsgs = core?.getMessages?.() || [];
-                            const chatMsgs = allMsgs
-                                .filter(m => String(m.chatId || m.conversationId || '') === incomingChatId)
-                                .sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
-                            this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, core?.getCurrentUser?.());
-                            try { const c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(()=>{c.scrollTop=c.scrollHeight;}); } catch(_){}
+                            const allMsgs = (core && core.getMessages && core.getMessages()) || [];
+                            const chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChatId; }).sort(function(a,b) { return _ts(a)-_ts(b); });
+                            this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, core && core.getCurrentUser && core.getCurrentUser());
+                            try { var c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(function(){c.scrollTop=c.scrollHeight;}); } catch(_e){}
                         }
 
                     }
@@ -3285,27 +3280,22 @@
 
             const core = getMessagesCore();
 
-            // ✅ FIX: Sort ALL messages by timestamp ASC first — incoming and outgoing
-            // interleave correctly. No sender grouping — pure timeline order like WhatsApp.
-            const sorted = [...messages].sort((a, b) => {
-                const ta = Number(a.createdAt || a.timestamp || 0);
-                const tb = Number(b.createdAt || b.timestamp || 0);
-                return ta - tb;
-            });
+            const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
-            // Use a Map to preserve date-insertion order (oldest date first)
+            // \u2705 FIX: Sort ALL messages by server timestamp ASC - strict timeline, no sender grouping
+            const sorted = [...messages].sort(function(a, b) { return _ts(a) - _ts(b); });
+
+            // Map preserves insertion order = date chronological order
             const groupMap = new Map();
-            sorted.forEach(message => {
-                const ts = message.createdAt || message.timestamp || Date.now();
-                const date = core?.formatDate
-                    ? core.formatDate(ts)
-                    : new Date(Number(ts)).toLocaleDateString();
+            sorted.forEach(function(message) {
+                const ms = _ts(message);
+                const date = (core && core.formatDate) ? core.formatDate(ms) : new Date(ms).toLocaleDateString();
                 if (!groupMap.has(date)) groupMap.set(date, []);
                 groupMap.get(date).push(message);
             });
 
             const groups = {};
-            for (const [date, msgs] of groupMap) groups[date] = msgs;
+            groupMap.forEach(function(msgs, date) { groups[date] = msgs; });
             return groups;
 
         },
@@ -3332,21 +3322,19 @@
 
             const reactions = this._renderReactions(message.reactions);
 
-            // ✅ FIX: WhatsApp-style reply quote with sender name + content preview
             let replyIndicator = '';
             if (message.replyTo || message.replyToId) {
                 const rd = message.replyTo || {};
                 const rContent = rd.content || rd.text || '';
-                const rSender  = rd.senderName || rd.sender?.username || '';
+                const rSender = rd.senderName || (rd.sender && rd.sender.username) || '';
                 const rPreview = rContent.length > 60 ? rContent.substring(0, 60) + '\u2026' : rContent;
-                const rId      = rd.id || rd.messageId || '';
-                replyIndicator = `<div class="reply-quote" onclick="window.messagesUI&&window.messagesUI.scrollToMessage&&window.messagesUI.scrollToMessage('${rId}')">
-                        <div class="reply-quote-bar"></div>
-                        <div class="reply-quote-body">
-                            ${rSender ? `<span class="reply-quote-sender">${rSender}</span>` : ''}
-                            <span class="reply-quote-text">\${rPreview || '\uD83D\uDCCE Media'}</span>
-                        </div>
-                    </div>`;
+                const rId = String(rd.id || rd.messageId || '');
+                replyIndicator = '<div class="reply-quote" onclick="window.messagesUI&&window.messagesUI.scrollToMessage&&window.messagesUI.scrollToMessage(\'' + rId + '\')">' +
+                    '<div class="reply-quote-bar"></div>' +
+                    '<div class="reply-quote-body">' +
+                    (rSender ? '<span class="reply-quote-sender">' + rSender + '</span>' : '') +
+                    '<span class="reply-quote-text">' + (rPreview || '\uD83D\uDCCE Media') + '</span>' +
+                    '</div></div>';
             }
 
             const editedIndicator = message.edited ? '<span class="edited-indicator">(edited)</span>' : '';
@@ -4013,14 +4001,14 @@
             if (!reactions || typeof reactions !== 'object' || Object.keys(reactions).length === 0) return '';
 
             const core = getMessagesCore();
-            const myId = core?.getCurrentUserId?.() || getCurrentUserId?.();
+            const myId = (core && core.getCurrentUserId && core.getCurrentUserId()) || null;
 
             let html = '<div class="message-reactions">';
             for (const [emoji, users] of Object.entries(reactions)) {
                 const ul = Array.isArray(users) ? users : (users ? [users] : []);
                 if (!ul.length) continue;
-                const isMine = myId && ul.some(u => String(u) === String(myId));
-                html += `<span class="reaction${isMine ? ' reaction-mine' : ''}" title="${ul.length} ${ul.length === 1 ? 'person' : 'people'}">${emoji} ${ul.length}</span>`;
+                const isMine = myId && ul.some(function(u) { return String(u) === String(myId); });
+                html += '<span class="reaction' + (isMine ? ' reaction-mine' : '') + '" title="' + ul.length + ' ' + (ul.length === 1 ? 'person' : 'people') + '">' + emoji + ' ' + ul.length + '</span>';
             }
             html += '</div>';
             return html;
@@ -4581,7 +4569,16 @@
 
 
 
-            const friendName = chat.friendName || chat.name || 'User';
+            const _op2 = chat.otherParticipant || null;
+            const friendName = (function() {
+                if (_op2) {
+                    const fn = _op2.firstName || ''; const ln = _op2.lastName || '';
+                    if (fn && ln) return (fn + ' ' + ln).trim();
+                    if (fn) return fn;
+                    return _op2.displayName || _op2.username || chat.friendName || chat.name || 'User';
+                }
+                return chat.friendName || chat.name || 'User';
+            })();
 
             if (nameEl) UIFailsafe.safeSetText(nameEl, friendName);
 
@@ -9637,91 +9634,57 @@ Type: ${message.type || 'text'}`;
 
             const input = UIFailsafe.safeGetElement('multiSendInput');
 
-            const content = input?.value?.trim() || '';
+            const content2 = (input && input.value && input.value.trim()) || '';
 
             const core = getMessagesCore();
 
+            if (!content2) { UIRenderer.showNotification('Please type a message first', 'error'); return; }
 
+            const selectedChats = core && core.multiSendSelectedChats;
 
-            if (!content) {
-
-                UIRenderer.showNotification('Please type a message first', 'error');
-
-                return;
-
-            }
-
-
-
-            const selectedChats = core?.multiSendSelectedChats;
-
-            if (!selectedChats || selectedChats.size === 0) {
-
-                UIRenderer.showNotification('Select at least one chat to send to', 'error');
-
-                return;
-
-            }
-
-
+            if (!selectedChats || selectedChats.size === 0) { UIRenderer.showNotification('Select at least one chat to send to', 'error'); return; }
 
             const chatIds = Array.from(selectedChats);
 
-            let successCount = 0;
+            let successCount = 0, failCount = 0;
 
-            let failCount = 0;
-
-
-
-            const previousChat = core?.getCurrentConversation?.();
-
-
+            // \u2705 ROOT-FIX: Call API directly per chat — avoids active-chat dependency in core.sendMessage()
+            // core.sendMessage() adds the optimistic to _messages using the ACTIVE chat's id,
+            // so all multi-send bubbles appear in the currently open chat instead of their targets.
+            let token = null;
+            try {
+                const sess = core && core.getSession && core.getSession();
+                token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+            } catch(_e) {}
 
             for (const chatId of chatIds) {
-
                 try {
-
-                    const result = await core.sendMessage(content, { conversationId: chatId });
-
-                    if (result && result.success !== false) {
-
-                        successCount++;
-
-                    } else {
-
-                        failCount++;
-
-                    }
-
+                    const resp = await fetch('/api/messages', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+                        body: JSON.stringify({ chatId: chatId, content: content2, type: 'text' })
+                    });
+                    const result = await resp.json().catch(function() { return {}; });
+                    if (resp.ok && result.success !== false) { successCount++; }
+                    else { failCount++; console.warn('[MultiSend] Failed for chatId ' + chatId + ':', result); }
                 } catch (e) {
-
                     failCount++;
-
+                    console.warn('[MultiSend] Error for chatId ' + chatId + ':', e);
                 }
-
             }
 
-
-
             if (successCount > 0) {
-
-                UIRenderer.showNotification(`✓ Sent to ${successCount} chat${successCount > 1 ? 's' : ''}${failCount > 0 ? ` (${failCount} failed)` : ''}`);
-
+                UIRenderer.showNotification('\u2713 Sent to ' + successCount + ' chat' + (successCount > 1 ? 's' : '') + (failCount > 0 ? ' (' + failCount + ' failed)' : ''));
                 this._closeMultiSend();
-
                 if (input) input.value = '';
-
+                if (core && core.multiSendSelectedChats) core.multiSendSelectedChats.clear();
             } else {
-
-                UIRenderer.showNotification('Failed to send messages — please try again', 'error');
-
+                UIRenderer.showNotification('Failed to send messages \u2014 please try again', 'error');
             }
 
         },
 
-
-
-        _populateScheduleDefaults() {
+                _populateScheduleDefaults() {
 
             const now = new Date();
 
@@ -10772,37 +10735,29 @@ Type: ${message.type || 'text'}`;
 
         setupAutoOpenChat();
 
-        // ✅ FIX: Receiver real-time render + sidebar badge
+        // \u2705 FIX: Real-time receive render
         window.addEventListener('kyn:incomingMessage', function(evt) {
-            const detail = evt.detail || {};
-            const incomingMsg  = detail.message || detail;
-            const incomingChat = String(incomingMsg.chatId || incomingMsg.conversationId || detail.chatId || '');
+            var detail = evt.detail || {};
+            var incomingMsg = detail.message || detail;
+            var incomingChat = String(incomingMsg.chatId || incomingMsg.conversationId || detail.chatId || '');
             if (!incomingChat) return;
-            const core = getMessagesCore();
-            const activeChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+            var core = getMessagesCore();
+            var activeChat = (core && core.getCurrentConversation && core.getCurrentConversation()) || (core && core.ChatManager && core.ChatManager.getActiveChat && core.ChatManager.getActiveChat());
+            var _ts = function(m) { var v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
             if (activeChat && String(activeChat.id) === incomingChat) {
-                const allMsgs = core?.getMessages?.() || core?.ChatManager?._messages || [];
-                const chatMsgs = allMsgs
-                    .filter(m => String(m.chatId || m.conversationId || '') === incomingChat)
-                    .sort((a,b) => Number(a.createdAt||a.timestamp||0) - Number(b.createdAt||b.timestamp||0));
-                UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core?.getCurrentUser?.());
-                try { const c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(()=>{c.scrollTop=c.scrollHeight;}); } catch(_){}
+                var allMsgs = (core && core.getMessages && core.getMessages()) || (core && core.ChatManager && core.ChatManager._messages) || [];
+                var chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChat; }).sort(function(a,b) { return _ts(a)-_ts(b); });
+                UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core && core.getCurrentUser && core.getCurrentUser());
+                try { var c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(function(){c.scrollTop=c.scrollHeight;}); } catch(_e){}
             } else {
-                UIRenderer.renderChatsList(core?.getConversations?.() || [], core?.getCurrentConversation?.(), core?.getCurrentCategory?.() || 'all', {});
+                UIRenderer.renderChatsList((core && core.getConversations && core.getConversations()) || [], core && core.getCurrentConversation && core.getCurrentConversation(), (core && core.getCurrentCategory && core.getCurrentCategory()) || 'all', {});
             }
         });
-
-        // ✅ FIX: Scroll-to-replied-message when clicking reply quote
         window.messagesUI = window.messagesUI || {};
         window.messagesUI.scrollToMessage = function(messageId) {
             if (!messageId) return;
-            const el = document.querySelector('[data-message-id="' + messageId + '"]');
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.style.transition = 'background 0.35s';
-                el.style.background = 'rgba(34,197,94,0.2)';
-                setTimeout(() => { el.style.background = ''; }, 1300);
-            }
+            var el = document.querySelector('[data-message-id="' + messageId + '"]');
+            if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.transition = 'background 0.35s'; el.style.background = 'rgba(34,197,94,0.2)'; setTimeout(function() { el.style.background = ''; }, 1300); }
         };
 
 

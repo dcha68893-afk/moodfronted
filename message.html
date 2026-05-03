@@ -1941,8 +1941,8 @@
                 // For any other REALTIME_EVENT:* (presence, calls, etc.) fall through unchanged
             }
 
-            // ✅ ROOT-FIX: Route each ws-bridge event type to the correct handler only.
-            // Previously ALL types were dispatched as 'message:new', causing duplicates.
+            // ✅ ROOT-FIX: Route each ws-bridge type to the correct handler.
+            // Previously ALL types were fired as message:new causing duplicates.
             const _nt = normalizedData.type;
             const _p  = normalizedData.payload || normalizedData;
 
@@ -1962,7 +1962,6 @@
                 try { document.dispatchEvent(new CustomEvent('message:read',       { detail: _p })); } catch(_) {}
                 try { window.dispatchEvent(new CustomEvent('messageStatusUpdated', { detail: { messageId: _p.messageId || _p.localId, status: 'read' } })); } catch(_) {}
             } else if (_nt === 'message:reaction' || _nt === 'message_reaction') {
-                // ✅ ROOT-FIX: Forward reaction events to messages-core
                 try { document.dispatchEvent(new CustomEvent('message:reaction',   { detail: _p })); } catch(_) {}
             } else if (_nt === 'CONVERSATION_UPDATED' || _nt === 'REACTION_UPDATED') {
                 try { window.dispatchEvent(new CustomEvent('conversationUpdated',  { detail: _p })); } catch(_) {}

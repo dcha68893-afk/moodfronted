@@ -12639,6 +12639,12 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
                         { urls: 'stun:stun2.l.google.com:19302' }
 
+                        // TURN servers — required for NAT traversal behind cloud/Render hosting
+                        ,{ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
+                        ,{ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+                        ,{ urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+                        ,{ urls: 'stun:stun.relay.metered.ca:80' }
+
 
 
                     ],
@@ -12646,6 +12652,8 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
                     iceCandidatePoolSize: 10,
+
+                    iceTransportPolicy: 'all',
 
 
 
@@ -13920,7 +13928,9 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                if (callsState.callState !== 'connected') {
+                // Don't timeout if receiver has accepted — TURN relay may need more time
+                const _acceptedStates = ['connected','in-call','in_call','connecting'];
+                if (!_acceptedStates.includes(callsState.callState) && !window.__callReceiverAccepted) {
 
 
 
@@ -16184,7 +16194,8 @@ _clearStaleCallState: function() {
 
 
 
-        if (callDuration > 60000 && callsState.callState !== 'connected') {
+        // Allow 120s for TURN relay connection; also skip if receiver has accepted
+        if (callDuration > 120000 && callsState.callState !== 'connected' && callsState.callState !== 'in-call' && callsState.callState !== 'in_call' && callsState.callState !== 'connecting') {
 
 
 
@@ -16236,7 +16247,7 @@ _clearStaleCallState: function() {
 
 
 
-        if (callDuration > 60000) { // 60 second timeout for initiating state
+        if (callDuration > 120000) { // 120 second timeout — TURN relay needs more time
 
 
 

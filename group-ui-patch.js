@@ -67,8 +67,18 @@
     /** Minimal authenticated fetch wrapper — mirrors secureApiCall but works standalone */
     async function apiFetch(path, opts = {}) {
         const token = getToken();
-        const base  = window.__API_BASE_URL || window.API_BASE_URL || '';
-        const url   = base + (path.startsWith('/api') ? path : `/api${path}`);
+        // FIX: resolve against backend origin, not iframe origin
+        const base = (
+            window.__apiBaseUrl ||
+            (window.parent && window.parent.__apiBaseUrl) ||
+            (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
+            (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
+            window.__API_BASE_URL || window.API_BASE_URL ||
+            'https://moodchat-fy56.onrender.com/api'
+        );
+        // base already ends in /api — strip leading /api from path to avoid double
+        const clean = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
+        const url   = base.replace(/\/$/, '') + (clean.startsWith('/') ? clean : '/' + clean);
         const res   = await fetch(url, {
             ...opts,
             headers: {
@@ -364,61 +374,76 @@
     /* ═══════════════════════════════════════════════════════════════════════
        FIX 2 + 3 + 4 + 5 + 6 — Create Group Modal
        ═══════════════════════════════════════════════════════════════════════ */
+    /* FIX: Tab/Cancel/Create wiring via event delegation on document.
+     * cloneNode approach fails because:
+     *  a) patch runs before ES modules finish loading (plain <script> vs type="module")
+     *  b) other patches also clone the same nodes, wiping our listeners
+     * Event delegation is immune to both — registered once, catches all future clicks. */
     function patchCreateGroupModal() {
-        const modal = qs('#createGroupModal');
-        if (!modal) return;
-
-        /* ── Tab map: data-tab value → element id ── */
-        const CREATE_TAB_MAP = {
-            basic   : 'basicTab',
-            settings: 'settingsTab',
-            purpose : 'purposeTab',
-            theme   : 'themeTab',
-            members : 'membersTab',
-        };
-
-        /* Wire create-group tabs */
-        qsa('.create-group-tab', modal).forEach(btn => {
-            const fresh = freshClone(btn);
-            fresh.addEventListener('click', () => {
-                qsa('.create-group-tab', modal).forEach(b => b.classList.remove('active'));
-                Object.values(CREATE_TAB_MAP).forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.classList.remove('active');
-                });
-                fresh.classList.add('active');
-                const key = fresh.dataset.tab;
-                const targetId = CREATE_TAB_MAP[key];
-                if (targetId) {
-                    const target = document.getElementById(targetId);
-                    if (target) target.classList.add('active');
-                }
-                // FIX 3: Load friends when Members tab opened
-                if (key === 'members') loadFriendsForMembersTab();
-            });
-        });
-
-        /* FIX 5 — Cancel button */
-        const cancelBtn = freshClone(qs('#cancelCreateGroupBtn') || qs('#closeCreateGroupModal'));
-        if (cancelBtn) {
-            cancelBtn.addEventListener('click', closeCreateGroupModal);
-        }
-        const closeBtn = freshClone(qs('#closeCreateGroupModal'));
-        if (closeBtn) {
-            closeBtn.addEventListener('click', closeCreateGroupModal);
-        }
-
-        /* FIX 6 — Create Group submit */
-        const submitBtn = freshClone(qs('#createGroupBtnModal'));
-        if (submitBtn) {
-            submitBtn.addEventListener('click', handleCreateGroupSubmit);
-        }
-
-        /* Clicking outside modal → close */
-        freshClone(modal)?.addEventListener?.('click', (e) => {
-            if (e.target === modal) closeCreateGroupModal();
-        });
+        // Event delegation is set up once at document level (see below).
+        // This function is kept so boot() can call it without error.
     }
+
+    // ── CREATE GROUP TAB DELEGATION ──────────────────────────────────────
+    const CREATE_TAB_MAP = {
+        basic   : 'basicTab',
+        settings: 'settingsTab',
+        purpose : 'purposeTab',
+        theme   : 'themeTab',
+        members : 'membersTab',
+    };
+
+    document.addEventListener('click', function _createGroupTabDelegate(e) {
+        const tab = e.target.closest('.create-group-tab');
+        if (!tab) return;
+        const modal = tab.closest('#createGroupModal');
+        if (!modal) return;
+        e.stopPropagation();
+
+        // Deactivate all tabs + panels
+        qsa('.create-group-tab', modal).forEach(b => b.classList.remove('active'));
+        Object.values(CREATE_TAB_MAP).forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('active');
+        });
+        // Also deactivate any .create-group-tab-content not in the map
+        qsa('.create-group-tab-content', modal).forEach(s => s.classList.remove('active'));
+
+        // Activate clicked tab
+        tab.classList.add('active');
+        const key = tab.dataset.tab || '';
+        const targetId = CREATE_TAB_MAP[key];
+        if (targetId) {
+            const panel = document.getElementById(targetId);
+            if (panel) panel.classList.add('active');
+        }
+        if (key === 'members') loadFriendsForMembersTab();
+    }, true); // capture phase so it fires before any other handler
+
+    // ── CANCEL / CLOSE DELEGATION ────────────────────────────────────────
+    document.addEventListener('click', function _createGroupCloseDelegate(e) {
+        if (e.target.closest('#cancelCreateGroupBtn') || e.target.closest('#closeCreateGroupModal')) {
+            const modal = document.getElementById('createGroupModal');
+            if (modal && (modal.classList.contains('active') || modal.style.display === 'flex')) {
+                closeCreateGroupModal();
+            }
+        }
+    });
+
+    // ── BACKDROP CLICK ───────────────────────────────────────────────────
+    document.addEventListener('click', function _createGroupBackdropDelegate(e) {
+        const modal = document.getElementById('createGroupModal');
+        if (modal && e.target === modal) closeCreateGroupModal();
+    });
+
+    // ── CREATE BUTTON DELEGATION ─────────────────────────────────────────
+    let _patchSubmitting = false;
+    document.addEventListener('click', function _createGroupSubmitDelegate(e) {
+        if (!e.target.closest('#createGroupBtnModal')) return;
+        if (_patchSubmitting) return;
+        _patchSubmitting = true;
+        handleCreateGroupSubmit().finally(() => { _patchSubmitting = false; });
+    });
 
     function closeCreateGroupModal() {
         const modal = qs('#createGroupModal');
@@ -572,16 +597,26 @@
         if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creating…'; }
 
         try {
+            let result;
             // Prefer GroupCore
             if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
-                await window.GroupCore.createGroup(groupData);
+                result = await window.GroupCore.createGroup(groupData);
+                // Handle offline/queued case — still treat as success
+                if (result && result.queued) {
+                    toast('Group queued — will create when connected', 'info');
+                    closeCreateGroupModal();
+                    return;
+                }
+                if (result && result.success === false) {
+                    throw new Error(result.error || result.message || 'Failed to create group');
+                }
             } else if (typeof createGroupOnline === 'function') {
-                await createGroupOnline(groupData);
+                result = await createGroupOnline(groupData);
             } else {
-                // Direct API fallback
-                await apiFetch('/groups', { method: 'POST', body: groupData });
+                // Direct API fallback — GroupCore not yet loaded
+                result = await apiFetch('/groups', { method: 'POST', body: groupData });
             }
-            toast('Group created!');
+            toast('Group "' + groupData.name + '" created!');
             closeCreateGroupModal();
 
             // Send invites if any
@@ -968,6 +1003,12 @@
             } catch (_) {}
         });
 
+        // ── group:member-added → refresh counts ──────────────────────────────
+        GC.on('group:member-added', function () {
+            try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
+            try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
+        });
+
         // ── group:message-received → render in open chat or bump badge ──────
         GC.on('group:message-received', function (data) {
             const { groupId, message } = data || {};
@@ -1032,10 +1073,17 @@
         // (log suppressed)
     }
 
+    // FIX: group-ui-patch.js is a plain <script> that executes BEFORE
+    // type="module" scripts (group-core.js, group-ui.js) have run.
+    // Event delegation listeners above don't depend on modules, so they work immediately.
+    // But boot() calls functions (patchQuickActionButtons etc.) that need the DOM ready.
+    // We run boot() on window 'load' to guarantee modules have executed, then
+    // also retry wireGroupCoreEvents() which polls until window.GroupCore exists.
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', boot);
+    } else if (document.readyState === 'interactive') {
+        window.addEventListener('load', boot);
     } else {
-        // Defer slightly so group-core.js and group-ui.js modules finish loading
         setTimeout(boot, 0);
     }
 

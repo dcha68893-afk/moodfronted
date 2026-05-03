@@ -2983,12 +2983,29 @@
                 <!-- Status slides will be loaded here -->
             </div>
             
+            <!-- Tap zones for prev/next -->
+            <div class="viewer-tap-prev" id="viewerTapPrev"></div>
+            <div class="viewer-tap-next" id="viewerTapNext"></div>
+
             <!-- Action Buttons Overlay -->
             <div class="action-buttons-overlay" id="actionButtonsOverlay">
                 <!-- Action buttons will be loaded here -->
             </div>
             
-            <div class="viewer-footer">
+            <div class="viewer-footer" id="viewerFooter">
+                <!-- Owner controls (edit/delete + seen count) — shown only to status creator -->
+                <div class="owner-controls" id="ownerControls">
+                    <div class="viewer-seen-count" id="viewerSeenCount">
+                        <i class="fas fa-eye"></i>
+                        <span id="seenCountNum">0</span> views
+                    </div>
+                    <div class="owner-action-btns">
+                        <button id="editStatusBtn" title="Edit Status"><i class="fas fa-edit"></i></button>
+                        <button id="deleteStatusBtn" class="delete-btn" title="Delete Status"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+
+                <!-- Friend controls (reactions + reply) — shown to non-owners only -->
                 <!-- Reactions -->
                 <div class="reactions-container" id="reactionsContainer">
                     <!-- Reaction buttons will be loaded here -->
@@ -2996,7 +3013,7 @@
                 
                 <!-- Reply Input -->
                 <div class="reply-input-container">
-                    <input type="text" class="reply-input" id="replyInput" placeholder="Type a reply...">
+                    <input type="text" class="reply-input" id="replyInput" placeholder="Reply to status...">
                     <button class="send-reply-btn" id="sendReplyBtn">
                         <i class="fas fa-paper-plane"></i>
                     </button>

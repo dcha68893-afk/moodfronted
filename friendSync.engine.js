@@ -269,11 +269,17 @@
                 const res = await this._request('/api/friends/blocked');
                 if (!res?.success) return;
 
-                const blocked = (res.data?.blockedUsers || res.data || [])
+                // FIX: API returns { blocked: [], total: 0 } — not blockedUsers, not a plain array.
+                // The previous code tried (res.data?.blockedUsers || res.data || []).map(...)
+                // which crashed because res.data is { blocked: [], total: 0 } — an object, not array.
+                const rawList = res.data?.blocked       // ← correct key from GET /friends/blocked
+                             || res.data?.blockedUsers  // legacy fallback
+                             || (Array.isArray(res.data) ? res.data : []);  // plain-array fallback
+
+                const blocked = rawList
                     .map(u => this._normalizeRecord(u, 'blocked'));
 
                 await this._reconcile(blocked, 'blocked');
-                // FIXED: Reduced friend module sync logging noise for blocked users
                 if (blocked.length > 0) {
                     console.log(`[FriendSync] Blocked users synced: ${blocked.length}`);
                 }
@@ -648,8 +654,7 @@
                 Authorization: `Bearer ${token}`,
             };
 
-            // FIX: Increased from 8s — Render.com cold starts can take 10-15s.
-            // The sync engine is background, so a longer timeout is fine.
+            // FIX: Increased from 8s — Render.com cold starts can take 10-15s
             const EFFECTIVE_TIMEOUT = Math.min(REQUEST_TIMEOUT_MS, 25000);
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), EFFECTIVE_TIMEOUT);
@@ -663,8 +668,9 @@
                             reject(new Error('API request timeout'));
                         }, EFFECTIVE_TIMEOUT);
 
-                        // FIX: Listen on THIS window — API_RESPONSE is posted back to the
-                        // child iframe, not to the parent. window.parent.addEventListener was wrong.
+                        // FIX: Listen on THIS window — API_RESPONSE is posted back TO the
+                        // child iframe by chat.html via event.source.postMessage().
+                        // window.parent.addEventListener was wrong and silently ate all responses.
                         const handleMessage = (event) => {
                             if (event.data && event.data.type === 'API_RESPONSE' && event.data.requestId === requestId) {
                                 clearTimeout(timeoutId);

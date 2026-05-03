@@ -4634,7 +4634,7 @@ checkParentHealth = function() {
             ready: sessionClient.isValid(),
             hasToken: !!sessionClient.getToken ? sessionClient.getToken() : false,
             hasUser: !!sessionClient.getUser ? sessionClient.getUser() : false,
-            validSession: sessionClient.isReady() ? __isValidSession(sessionClient.getSession()) : false
+            validSession: sessionClient.isValid() ? __isValidSession(sessionClient.getSession()) : false
         }
     };
 };
@@ -4692,12 +4692,13 @@ export function showStatusMessage(message, type = 'info') {
         loadingMessageElement.style.backgroundColor = style.bg;
         loadingMessageElement.style.color = style.color;
         
-        if (type === 'success') {
+        if (type === 'success' || type === 'info') {
+            const hideDelay = type === 'success' ? 2000 : 5000;
             setTimeout(() => {
                 if (loadingMessageElement && loadingMessageElement.parentNode) {
                     loadingMessageElement.style.display = 'none';
                 }
-            }, 3000);
+            }, hideDelay);
         }
     } catch {}
 }
@@ -4885,7 +4886,9 @@ export const pageCore = {
                 });
             }
             
-            showStatusMessage('Marketplace loaded successfully', 'success');
+            // Hide status message immediately on success
+            const statusEl = document.getElementById('marketplaceStatusMessage');
+            if (statusEl) statusEl.style.display = 'none';
             logOnce('success', 'pageCore initialization complete');
         } catch (error) {
             isInitializing = false;
@@ -4908,16 +4911,18 @@ export const pageCore = {
         try {
             if (window.parent && window.parent !== window) {
                 await new Promise((resolve) => {
+                    const deadline = Date.now() + 3000; // max 3s wait
                     const checkSession = () => {
-                        if (sessionData || moduleState.sessionActive || (sessionClient.isValid())) {
-                            if (sessionClient.getSession() && __isValidSession(sessionClient.getSession())) {
-                                resolve();
-                            } else {
-                                setTimeout(checkSession, 100);
-                            }
-                        } else {
-                            setTimeout(checkSession, 100);
+                        if (sessionData || moduleState.sessionActive || sessionClient.isValid()) {
+                            resolve();
+                            return;
                         }
+                        if (Date.now() > deadline) {
+                            // Proceed anyway — session may arrive via postMessage later
+                            resolve();
+                            return;
+                        }
+                        setTimeout(checkSession, 100);
                     };
                     setTimeout(checkSession, 100);
                 });
@@ -6312,10 +6317,21 @@ export async function createServiceListing(title, description, options = {}) {
         showNotification('Please log in to create a listing.', 'error');
         return null;
     }
+    // Wait up to 4s for module to become active (handles slow parent handshake)
     if (!isActive()) {
-        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing: module not active');
-        showNotification('Module not ready. Please try again.', 'error');
-        return null;
+        await new Promise(resolve => {
+            const deadline = Date.now() + 4000;
+            const check = () => {
+                if (isActive() || Date.now() > deadline) { resolve(); return; }
+                setTimeout(check, 100);
+            };
+            check();
+        });
+    }
+    if (!isActive()) {
+        // Still not active - force it so listings can be created
+        if (window.__TOOLS_DEBUG__) console.warn('[TOOLS FLOW] createServiceListing: forcing active state');
+        try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'force_for_listing'); } catch {}
     }
 
     const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
@@ -6424,10 +6440,19 @@ export async function createDigitalListing(title, description, fileData, options
         showNotification('Please log in to create a listing.', 'error');
         return null;
     }
+    // Wait up to 4s for module to become active
     if (!isActive()) {
-        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing: module not active');
-        showNotification('Module not ready. Please try again.', 'error');
-        return null;
+        await new Promise(resolve => {
+            const deadline = Date.now() + 4000;
+            const check = () => {
+                if (isActive() || Date.now() > deadline) { resolve(); return; }
+                setTimeout(check, 100);
+            };
+            check();
+        });
+        if (!isActive()) {
+            try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'force_for_listing'); } catch {}
+        }
     }
 
     const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;

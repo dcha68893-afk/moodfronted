@@ -5044,6 +5044,7 @@ case 'CALL_INITIATED':
             window.__callActive = false;
             // Clear the CALL_ACCEPTED dedup lock and peer globals so next call works
             window.__callAcceptedHandled = 0;
+            window.__callReceiverAccepted = false;  // reset ICE timeout guard
             window.__activePeerName   = null;
             window.__activePeerType   = null;
             window.__activePeerAvatar = null;
@@ -5426,6 +5427,8 @@ case 'CALL_ACCEPTED': {
         break;
     }
     window.__callAcceptedHandled = Date.now();
+    // Flag for core timeout guard — prevents premature ICE timeout after acceptance
+    window.__callReceiverAccepted = true;
     console.log('[Calls UI] ✅ CALL_ACCEPTED received — transitioning caller to in-call screen');
 
     const _ap = data.payload || {};
@@ -6117,7 +6120,7 @@ case 'CALL_ACCEPTED': {
             if (elements.menuParticipants) {
                 this.addListener(elements.menuParticipants, 'click', () => {
                     UIEventHandlers.closeMenuDots();
-                    UIPanelHandlers.openParticipantsPanel();
+                    UIEventHandlers.openAddParticipantPanel();
                 });
             }
             
@@ -6498,13 +6501,10 @@ case 'CALL_ACCEPTED': {
             if (elements.callTimer) elements.callTimer.textContent = '0:00';
             // Clear dedup locks
             if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+        },
 
-        if (hasVideo) {
-            // Video recording: composite both video feeds on canvas
-            const canvas = document.createElement('canvas');
-            canvas.width = 1280;
-            canvas.height = 720;
-            const ctx = canvas.getContext('2d');
+        toggleMenuDots: function() {
+            if (elements.menuDotsDropdown) {
                 elements.menuDotsDropdown.classList.toggle('active');
                 UILogger.interaction('toggleMenuDots', 'menuDotsBtn');
             }
@@ -7101,6 +7101,107 @@ case 'CALL_ACCEPTED': {
             showNotification('Recording started', 'success');
         },
 
+        // ── ADD PARTICIPANT (group call) ───────────────────────────────────────
+        openAddParticipantPanel: function() {
+            // Remove any existing panel
+            const existing = document.getElementById('addParticipantPanel');
+            if (existing) { existing.remove(); return; }
+
+            const contacts = window.__contactsList || UIState.contacts || [];
+            const panel = document.createElement('div');
+            panel.id = 'addParticipantPanel';
+            panel.style.cssText = [
+                'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);',
+                'background:#1c1c1e;border-radius:16px;padding:16px;z-index:99999;',
+                'width:min(320px,90vw);box-shadow:0 8px 32px rgba(0,0,0,0.5);',
+                'max-height:60vh;display:flex;flex-direction:column;gap:10px;'
+            ].join('');
+
+            panel.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="color:#fff;font-weight:600;font-size:15px;">Add to call</span>
+                    <button id="closeAddParticipant" style="background:none;border:none;color:#aaa;font-size:20px;cursor:pointer;">×</button>
+                </div>
+                <input id="addParticipantSearch" type="text" placeholder="Search contacts..."
+                    style="background:#2c2c2e;border:none;border-radius:8px;padding:8px 12px;color:#fff;font-size:14px;width:100%;box-sizing:border-box;">
+                <div id="addParticipantList" style="overflow-y:auto;max-height:40vh;display:flex;flex-direction:column;gap:6px;">
+                    ${contacts.length === 0
+                        ? '<p style="color:#888;text-align:center;font-size:13px;margin:8px 0;">No contacts found</p>'
+                        : contacts.map(c => `
+                            <div class="add-participant-item" data-user-id="${c.id}" data-user-name="${c.username || c.displayName || c.name || 'User'}"
+                                style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;cursor:pointer;background:#2c2c2e;">
+                                <div style="width:36px;height:36px;border-radius:50%;background:#0084ff;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:bold;flex-shrink:0;">
+                                    ${(c.username||c.displayName||c.name||'U')[0].toUpperCase()}
+                                </div>
+                                <span style="color:#fff;font-size:14px;">${c.username || c.displayName || c.name || 'User'}</span>
+                                <button class="invite-participant-btn" data-user-id="${c.id}" data-user-name="${c.username || c.displayName || c.name || 'User'}"
+                                    style="margin-left:auto;background:#0084ff;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">
+                                    Invite
+                                </button>
+                            </div>`).join('')
+                    }
+                </div>
+            `;
+            document.body.appendChild(panel);
+
+            document.getElementById('closeAddParticipant').onclick = () => panel.remove();
+
+            // Search filter
+            document.getElementById('addParticipantSearch').addEventListener('input', function() {
+                const q = this.value.toLowerCase();
+                panel.querySelectorAll('.add-participant-item').forEach(item => {
+                    const name = (item.dataset.userName || '').toLowerCase();
+                    item.style.display = name.includes(q) ? 'flex' : 'none';
+                });
+            });
+
+            // Invite button handler
+            panel.querySelectorAll('.invite-participant-btn').forEach(btn => {
+                btn.onclick = function(e) {
+                    e.stopPropagation();
+                    const userId   = this.dataset.userId;
+                    const userName = this.dataset.userName;
+                    const callId   = UIState.activeCallId || (window.callsState && window.callsState.serverCallId);
+
+                    if (!callId) { showNotification('No active call to add participant to', 'error'); return; }
+
+                    // Send ADD_PARTICIPANT signal to server via parent
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'CALL_ADD_PARTICIPANT',
+                            payload: {
+                                callId,
+                                targetUserId: userId,
+                                targetUserName: userName,
+                                existingCallType: UIState.callType || 'voice'
+                            },
+                            source: 'calls-iframe'
+                        }, '*');
+                    }
+
+                    // Update UI: show "Calling..." on button
+                    this.textContent = 'Calling…';
+                    this.disabled = true;
+                    this.style.background = '#555';
+                    showNotification(`Calling ${userName}...`, 'info');
+
+                    // Update participant count badge
+                    const badge = document.getElementById('participantBadge');
+                    if (badge) badge.textContent = parseInt(badge.textContent || '0') + 1;
+                };
+            });
+
+            // Auto-close when clicking outside
+            setTimeout(() => {
+                document.addEventListener('click', function closeOnOutside(e) {
+                    if (!panel.contains(e.target) && e.target.id !== 'menuParticipants') {
+                        panel.remove();
+                        document.removeEventListener('click', closeOnOutside);
+                    }
+                });
+            }, 100);
+        },
+
          endCall: async function() {
             if (!UIState.activeCallId && !coreInstance?.isInCall?.()) {
                 showNotification('No active call to end', 'info');
@@ -7208,7 +7309,14 @@ case 'CALL_ACCEPTED': {
             // Navigate back to correct screen
             setTimeout(() => {
                 if (window.parent && window.parent !== window) {
-                    const returnTo = window.__callOriginReturnTo || window.__pendingCallReturnTo || 'calls';
+                    const rawReturn = window.__callOriginReturnTo || window.__pendingCallReturnTo;
+                    // Never navigate back to 'calls' panel — fall back to last real page
+                    const returnTo = (rawReturn && rawReturn !== 'calls')
+                        ? rawReturn
+                        : (window.__lastActivePage && window.__lastActivePage !== 'calls')
+                            ? window.__lastActivePage
+                            : 'messages';
+
                     const chatUserId = window.__callOriginChatUserId || window.__pendingCallChatUserId || null;
                     
                     window.__pendingCallReturnTo = null;
@@ -7230,15 +7338,8 @@ case 'CALL_ACCEPTED': {
                             payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: window.__callOriginChatUserName || null },
                             timestamp: Date.now()
                         }, '*');
-                    } else if (returnTo === 'friends') {
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE',
-                            module: 'friends',
-                            payload: { returnFromCall: true },
-                            timestamp: Date.now()
-                        }, '*');
-                    } else if (returnTo && returnTo !== 'calls') {
-                        // Any other origin module — navigate back to it
+                    } else {
+                        // Navigate back to wherever the user was (friends, status, tools, messages, etc.)
                         window.parent.postMessage({
                             type: 'SWITCH_MODULE',
                             module: returnTo,
@@ -7246,7 +7347,6 @@ case 'CALL_ACCEPTED': {
                             timestamp: Date.now()
                         }, '*');
                     }
-                    // returnTo === 'calls' → stay here, no SWITCH_MODULE needed
                 }
                 
                 // Also force UI update locally
@@ -9015,7 +9115,48 @@ setupFriendsListListener();
     // ── VIDEO_UPGRADE_RESPONSE: remote declined → roll back camera ──────────
     window.addEventListener('message', function(event) {
         const data = event.data;
-        if (!data || data.type !== 'VIDEO_UPGRADE_RESPONSE') return;
+
+        // ── VIDEO_UPGRADE_REQUEST: remote turned on camera → show receiver toast ──
+        if (data && data.type === 'VIDEO_UPGRADE_REQUEST') {
+            // Only show if we're currently in a call
+            if (!UIState.callActive) return;
+            // Show a toast with option to enable camera
+            const existing = document.getElementById('videoUpgradeToast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'videoUpgradeToast';
+            toast.style.cssText = [
+                'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);',
+                'background:rgba(30,30,30,0.95);color:#fff;border-radius:12px;',
+                'padding:12px 16px;z-index:99999;display:flex;align-items:center;gap:10px;',
+                'box-shadow:0 4px 20px rgba(0,0,0,0.4);font-size:14px;',
+                'max-width:320px;width:90%;'
+            ].join('');
+
+            const peerName = UIState.callPeerName || window.__activePeerName || 'Remote';
+            toast.innerHTML = `
+                <i class="fas fa-video" style="color:#0084ff;font-size:18px;flex-shrink:0;"></i>
+                <span style="flex:1;">${peerName} turned on camera</span>
+                <button id="videoUpgradeAcceptBtn" style="background:#0084ff;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;flex-shrink:0;">Enable mine</button>
+                <button id="videoUpgradeDismissBtn" style="background:transparent;color:#aaa;border:none;cursor:pointer;font-size:18px;padding:0 4px;">×</button>
+            `;
+            document.body.appendChild(toast);
+
+            document.getElementById('videoUpgradeAcceptBtn').onclick = function() {
+                toast.remove();
+                // Start camera on receiver side
+                UIEventHandlers.toggleVideo();
+            };
+            document.getElementById('videoUpgradeDismissBtn').onclick = function() {
+                toast.remove();
+            };
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 8000);
+        }
+
+        // ── VIDEO_UPGRADE_RESPONSE: remote declined → roll back camera ──────────
+        if (data && data.type === 'VIDEO_UPGRADE_RESPONSE') {
         const accepted = data.payload && data.payload.accepted;
         if (accepted === false) {
             // Remote declined — stop camera and remove video track from PC
@@ -9056,7 +9197,8 @@ setupFriendsListListener();
             UIState.isVideoOff = true;
             showNotification('Remote declined video — staying audio-only', 'info');
         }
-    });
+        } // end VIDEO_UPGRADE_RESPONSE if
+    }); // end combined message listener
 
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};

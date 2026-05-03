@@ -1663,12 +1663,29 @@ const UIBridge = {
 
             console.log(`[status-ui] 📥 STATUS RECEIVED via DOM event: ${evt.type} id=${statusId}`);
 
-            // Re-render the list immediately
+            // ── Inject immediately into every status pool so grouped render
+            //    can display it without waiting for the core's async fetch ──
+            if (incomingStatus && incomingStatus.id) {
+                const sid = String(incomingStatus.id);
+                // Module-level statuses array
+                if (typeof statuses !== 'undefined' && Array.isArray(statuses)) {
+                    if (!statuses.find(s => String(s.id) === sid)) {
+                        statuses.unshift({ ...incomingStatus, id: sid });
+                    }
+                }
+                // Core statusState
+                if (typeof statusState !== 'undefined' && Array.isArray(statusState.statuses)) {
+                    if (!statusState.statuses.find(s => String(s.id) === sid)) {
+                        statusState.statuses.unshift({ ...incomingStatus, id: sid });
+                    }
+                }
+            }
+
+            // Re-render the grouped list immediately
             renderStatusListInstantlyUI();
             updateMyStatusPreviewUI();
 
             // Show toast notification so user knows something arrived
-            // Only show for OTHER users' statuses, not an echo of own post
             const myId = currentUser?.id || currentUser?.userId;
             const posterId = incomingStatus.userId || payload.userId;
             if (posterId && myId && String(posterId) !== String(myId)) {
@@ -2947,48 +2964,245 @@ const LiveUpdateEngine = {
 // =============================================
 // STATUS VIEWER
 // =============================================
-function showStatusViewer(statusData) {
+// ── showStatusGroupViewer ─────────────────────────────────────────────────
+// Entry point for opening a group of statuses (WhatsApp-style carousel)
+function showStatusGroupViewer(statusGroup) {
     if (!ensureUIActive('viewStatus')) return;
-    if (!statusData || !statusData.id) return;
-    try {
-        currentViewerStatus = statusData;
-        currentSlideIndex = 0;
-        UIStateManager.saveViewerState();
-        if (!viewedStatuses.has(statusData.id)) {
-            viewedStatuses.add(statusData.id);
-            if (typeof window.localStorage !== 'undefined') {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, JSON.stringify(Array.from(viewedStatuses)));
-            }
-            const statusItem = document.querySelector(`[data-status-id="${statusData.id}"]`);
-            if (statusItem) {
-                const ring = statusItem.querySelector('.status-ring');
-                if (ring) ring.classList.add('viewed');
-            }
-            // ── Real view tracking via StatusAPI (direct fetch, always works) ──
-            const api = window.StatusAPI;
-            if (api && api.viewStatus) {
-                api.viewStatus(statusData.id).then(result => {
-                    if (result && result.success && result.viewCount !== undefined) {
-                        // Update view count in current status object so "seen by" count is live
-                        if (currentViewerStatus && currentViewerStatus.id === statusData.id) {
-                            currentViewerStatus.viewCount = result.viewCount;
-                        }
-                    }
-                }).catch(() => {});
-            }
+    if (!statusGroup || !statusGroup.length) return;
+
+    // Determine if current user is the owner
+    const myId = currentUser?.id || currentUser?.userId ||
+        (function() {
+            try {
+                const s = JSON.parse(localStorage.getItem('currentUser') || '{}');
+                return s.id || s.userId || null;
+            } catch(_) { return null; }
+        })();
+    const ownerId = statusGroup[0].userId || statusGroup[0].user?.id;
+    const isOwner = myId && String(myId) === String(ownerId);
+
+    // Store group state
+    currentViewerGroup    = statusGroup;
+    currentViewerSlot     = 0;   // which status in the group we're on
+    currentViewerStatus   = statusGroup[0];
+    UIStateManager.saveViewerState && UIStateManager.saveViewerState();
+
+    const viewer = UIElements.statusViewerPanel || document.querySelector('.status-viewer-panel');
+    if (!viewer) return;
+
+    viewer.classList.add('active');
+    if (typeof document.body.style.overflow !== 'undefined') document.body.style.overflow = 'hidden';
+
+    // Set up owner/friend mode
+    _applyViewerMode(isOwner, statusGroup[0]);
+
+    // Build progress segments
+    _buildProgressSegments(statusGroup.length);
+
+    // Set up tap zones
+    _setupTapZones();
+
+    // Load first status
+    _loadSlot(0, isOwner, statusGroup);
+
+    // Start auto-advance
+    _startSlideTimer(isOwner, statusGroup);
+}
+
+// Keep old single-status entry point working (called by other code paths)
+function showStatusViewer(statusData) {
+    if (!statusData) return;
+    showStatusGroupViewer([statusData]);
+}
+
+let _slideTimerHandle = null;
+let _slideProgress    = null;
+let currentViewerGroup = [];
+let currentViewerSlot  = 0;
+
+function _buildProgressSegments(count) {
+    const container = document.getElementById('progressIndicators') || document.querySelector('.progress-indicators');
+    if (!container) return;
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'progress-segments';
+    wrap.id = 'progressSegments';
+    for (let i = 0; i < count; i++) {
+        const seg = document.createElement('div');
+        seg.className = 'progress-segment';
+        seg.innerHTML = '<div class="fill"></div>';
+        wrap.appendChild(seg);
+    }
+    container.appendChild(wrap);
+}
+
+function _setSegmentState(index, state) {
+    const segs = document.querySelectorAll('.progress-segment');
+    segs.forEach((seg, i) => {
+        seg.classList.remove('done', 'active');
+        if (i < index) { seg.classList.add('done'); seg.querySelector('.fill').style.width = '100%'; }
+        else if (i === index) { seg.classList.add('active'); seg.querySelector('.fill').style.width = '0%'; }
+        else { seg.querySelector('.fill').style.width = '0%'; }
+    });
+}
+
+function _startSlideTimer(isOwner, group) {
+    _clearSlideTimer();
+    _setSegmentState(currentViewerSlot);
+    const DURATION = 5000;
+    const fill = document.querySelector(`.progress-segment:nth-child(${currentViewerSlot + 1}) .fill`);
+    if (fill) {
+        fill.style.transition = `width ${DURATION}ms linear`;
+        fill.style.width = '100%';
+    }
+    _slideTimerHandle = setTimeout(() => {
+        _advanceSlide(isOwner, group);
+    }, DURATION);
+}
+
+function _clearSlideTimer() {
+    if (_slideTimerHandle) { clearTimeout(_slideTimerHandle); _slideTimerHandle = null; }
+    // Reset fill transitions
+    document.querySelectorAll('.progress-segment .fill').forEach(f => {
+        f.style.transition = 'none';
+    });
+}
+
+function _advanceSlide(isOwner, group) {
+    _clearSlideTimer();
+    const next = currentViewerSlot + 1;
+    if (next < group.length) {
+        currentViewerSlot  = next;
+        currentViewerStatus = group[next];
+        _loadSlot(next, isOwner, group);
+        _startSlideTimer(isOwner, group);
+    } else {
+        // All slides done — close viewer and return to sidebar
+        closeViewer();
+    }
+}
+
+function _prevSlide(isOwner, group) {
+    _clearSlideTimer();
+    const prev = Math.max(0, currentViewerSlot - 1);
+    currentViewerSlot  = prev;
+    currentViewerStatus = group[prev];
+    _loadSlot(prev, isOwner, group);
+    _startSlideTimer(isOwner, group);
+}
+
+function _setupTapZones() {
+    const prev = document.getElementById('viewerTapPrev');
+    const next = document.getElementById('viewerTapNext');
+    if (prev && !prev._bound) {
+        prev._bound = true;
+        prev.addEventListener('click', () => _prevSlide(
+            _isCurrentOwner(), currentViewerGroup));
+    }
+    if (next && !next._bound) {
+        next._bound = true;
+        next.addEventListener('click', () => _advanceSlide(
+            _isCurrentOwner(), currentViewerGroup));
+    }
+}
+
+function _isCurrentOwner() {
+    if (!currentViewerStatus) return false;
+    const myId = currentUser?.id || currentUser?.userId;
+    return myId && String(myId) === String(currentViewerStatus.userId || currentViewerStatus.user?.id);
+}
+
+function _loadSlot(index, isOwner, group) {
+    const status = group[index];
+    currentViewerStatus = status;
+
+    // Load content
+    loadViewerContent(status);
+
+    // Apply owner/friend mode
+    _applyViewerMode(isOwner, status);
+
+    // Record view (friends only, deduplicated)
+    if (!isOwner && !viewedStatuses?.has(status.id)) {
+        if (viewedStatuses) viewedStatuses.add(status.id);
+        try { localStorage.setItem('kyn_viewed_statuses', JSON.stringify(Array.from(viewedStatuses))); } catch(_) {}
+        // Update ring state in sidebar
+        const groupItem = document.querySelector(`[data-status-ids*="${status.id}"]`);
+        if (groupItem) {
+            const ids = groupItem.dataset.statusIds.split(',');
+            const viewed = ids.filter(id => viewedStatuses?.has(id)).length;
+            const ring = groupItem.querySelector('.status-group-ring');
+            if (ring && viewed === ids.length) ring.classList.add('viewed');
         }
-        const viewer = UIElements.statusViewerPanel;
-        if (viewer) {
-            viewer.classList.add('active');
-            loadViewerContent(statusData);
-            startAutoAdvance();
-            if (ResponsiveEngine.isMobileDevice()) {
-                document.body.style.overflow = 'hidden';
-            }
+        // Call real API
+        const api = window.StatusAPI;
+        if (api && api.viewStatus) {
+            api.viewStatus(status.id).then(result => {
+                if (result?.success && result.viewCount !== undefined && isOwner) {
+                    const el = document.getElementById('seenCountNum');
+                    if (el) el.textContent = result.viewCount;
+                }
+            }).catch(() => {});
         }
-    } catch (error) {
-        logUIError('statusViewer', error);
-        showNotification('Failed to open status viewer', 'error');
+    }
+
+    // Update seen count for owner
+    if (isOwner) {
+        const el = document.getElementById('seenCountNum');
+        if (el) el.textContent = status.viewCount || 0;
+    }
+
+    // Bind owner edit/delete buttons
+    _bindOwnerButtons(status);
+}
+
+function _applyViewerMode(isOwner, status) {
+    const footer = document.getElementById('viewerFooter');
+    if (!footer) return;
+    if (isOwner) {
+        footer.classList.add('owner-mode');
+        footer.classList.remove('friend-mode');
+    } else {
+        footer.classList.add('friend-mode');
+        footer.classList.remove('owner-mode');
+    }
+}
+
+function _bindOwnerButtons(status) {
+    const editBtn   = document.getElementById('editStatusBtn');
+    const deleteBtn = document.getElementById('deleteStatusBtn');
+
+    if (editBtn && !editBtn._bound) {
+        editBtn._bound = true;
+        editBtn.addEventListener('click', () => {
+            closeViewer();
+            if (typeof editMyStatus === 'function') editMyStatus(status);
+        });
+    }
+    if (deleteBtn && !deleteBtn._bound) {
+        deleteBtn._bound = true;
+        deleteBtn.addEventListener('click', async () => {
+            _clearSlideTimer();
+            const core = getCore();
+            if (core && core.deleteStatus) {
+                await core.deleteStatus(status.id).catch(() => {});
+            }
+            closeViewer();
+            showNotification('Status deleted', 'success');
+        });
+    }
+    // Re-bind in case of new status
+    if (editBtn)   { editBtn._bound = false; editBtn.onclick = () => { closeViewer(); if (typeof editMyStatus === 'function') editMyStatus(status); }; editBtn._bound = true; }
+    if (deleteBtn) {
+        deleteBtn._bound = false;
+        deleteBtn.onclick = async () => {
+            _clearSlideTimer();
+            const core = getCore();
+            if (core && core.deleteStatus) await core.deleteStatus(status.id).catch(() => {});
+            closeViewer();
+            showNotification('Status deleted', 'success');
+        };
+        deleteBtn._bound = true;
     }
 }
 
@@ -3283,12 +3497,19 @@ function stopAutoAdvance() {
 }
 
 function closeViewer() {
-    const viewer = UIElements.statusViewerPanel;
+    _clearSlideTimer();
+    currentViewerGroup = [];
+    currentViewerSlot  = 0;
+    const viewer = UIElements.statusViewerPanel || document.querySelector('.status-viewer-panel');
     if (viewer) {
         viewer.classList.remove('active');
         document.body.style.overflow = '';
-        stopAutoAdvance();
     }
+    // Unbind owner buttons so they rebind fresh next open
+    const editBtn = document.getElementById('editStatusBtn');
+    const deleteBtn = document.getElementById('deleteStatusBtn');
+    if (editBtn)   { editBtn._bound = false; editBtn.onclick = null; }
+    if (deleteBtn) { deleteBtn._bound = false; deleteBtn.onclick = null; }
 }
 
 // =============================================
@@ -3928,7 +4149,6 @@ function renderStatusesListUI(container, statusesList) {
         });
     }
     if (filtered.length === 0) {
-        // Show shimmer skeleton instead of empty state text — seamless offline experience
         container.innerHTML = `
             <div class="status-skeleton-list">
                 ${[1,2,3,4].map(() => `
@@ -3944,16 +4164,111 @@ function renderStatusesListUI(container, statusesList) {
         `;
         return;
     }
+
+    // ── Group statuses by userId (WhatsApp-style) ──────────────────────────
+    const groupMap = new Map();
+    filtered.forEach(status => {
+        const uid = String(status.userId || status.user?.id || 'unknown');
+        if (!groupMap.has(uid)) groupMap.set(uid, []);
+        groupMap.get(uid).push(status);
+    });
+
+    // Sort each group newest-first, then sort groups by their most-recent status
+    groupMap.forEach(statuses => statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+    const sortedGroups = Array.from(groupMap.entries())
+        .sort((a, b) => new Date(b[1][0].createdAt) - new Date(a[1][0].createdAt));
+
     const fragment = document.createDocumentFragment();
-    filtered.slice(0, 20).forEach(status => {
-        const element = InitialRender.createStatusElement(status);
-        if (element) fragment.appendChild(element);
+    sortedGroups.forEach(([uid, statuses]) => {
+        const el = createGroupedStatusElement(statuses);
+        if (el) fragment.appendChild(el);
     });
     container.innerHTML = '';
     container.appendChild(fragment);
-    setTimeout(() => {
-        InitialRender.bindStatusItemHandlers(container);
-    }, 50);
+    setTimeout(() => bindGroupedStatusHandlers(container), 50);
+}
+
+// Create one list item that represents all statuses from one user
+function createGroupedStatusElement(statuses) {
+    if (!statuses || !statuses.length) return null;
+    const first = statuses[0];
+    const user = first.user || { displayName: 'Unknown User' };
+    const total = statuses.length;
+    const viewedCount = statuses.filter(s => viewedStatuses?.has(s.id)).length;
+    const allViewed = viewedCount === total;
+    const timeAgo = first.createdAt ? formatTimeAgo(first.createdAt) : 'Just now';
+
+    const initials = (user.displayName || 'U')
+        .split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+
+    const item = document.createElement('div');
+    item.className = 'status-group-item';
+    item.dataset.userId = String(first.userId || user.id || '');
+    item.dataset.statusIds = statuses.map(s => s.id).join(',');
+
+    // Build segmented ring for multiple statuses
+    let ringHtml = '';
+    if (total === 1) {
+        ringHtml = `<div class="status-group-ring ${allViewed ? 'viewed' : ''}"></div>`;
+    } else {
+        // CSS conic-gradient ring divided into segments
+        const pct = Math.round((viewedCount / total) * 100);
+        ringHtml = `<div class="status-group-ring multi" style="--filled:${pct}%"></div>`;
+    }
+
+    const avatarStyle = user.photoURL ? `style="background-image:url('${user.photoURL}')"` : '';
+    item.innerHTML = `
+        <div class="status-group-avatar">
+            ${ringHtml}
+            <div class="status-group-avatar-inner" ${avatarStyle}>
+                ${user.photoURL ? '' : `<span>${initials}</span>`}
+            </div>
+            ${total > 1 ? `<div class="status-group-count">${total}</div>` : ''}
+        </div>
+        <div class="status-group-info">
+            <div class="status-group-name">${user.displayName || 'Unknown User'}</div>
+            <div class="status-group-meta">${timeAgo}${total > 1 ? ` · ${total} updates` : ''}</div>
+        </div>
+    `;
+    return item;
+}
+
+// Bind click handlers on grouped items
+function bindGroupedStatusHandlers(container) {
+    container.querySelectorAll('.status-group-item').forEach(item => {
+        if (item._bound) return;
+        item._bound = true;
+        item.addEventListener('click', () => {
+            const ids = item.dataset.statusIds.split(',').filter(Boolean);
+
+            // Build status pool from every available source
+            const core = getCore();
+            const pool = [
+                ...(core && core.getStatuses ? core.getStatuses() : []),
+                ...(typeof statusState !== 'undefined' && statusState.statuses ? statusState.statuses : []),
+                ...(typeof statuses !== 'undefined' && Array.isArray(statuses) ? statuses : []),
+            ];
+            // Deduplicate by id
+            const seen = new Set();
+            const unique = pool.filter(s => { const k = String(s.id); if (seen.has(k)) return false; seen.add(k); return true; });
+
+            const group = ids.map(id => unique.find(st => String(st.id) === String(id))).filter(Boolean);
+
+            if (group.length) {
+                showStatusGroupViewer(group);
+            } else {
+                // Fallback: re-fetch and try again
+                const core2 = getCore();
+                if (core2 && core2.loadStatuses) {
+                    core2.loadStatuses().then(() => {
+                        const fresh = core2.getStatuses ? core2.getStatuses() : [];
+                        const g2 = ids.map(id => fresh.find(st => String(st.id) === String(id))).filter(Boolean);
+                        if (g2.length) showStatusGroupViewer(g2);
+                    }).catch(() => {});
+                }
+            }
+        });
+    });
 }
 
 // =============================================
@@ -4947,6 +5262,20 @@ async function handlePostStatus() {
                 localStorage.setItem(LOCAL_STORAGE_KEYS.STATUSES, JSON.stringify(statuses));
                 localStorage.setItem(LOCAL_STORAGE_KEYS.MY_STATUSES, JSON.stringify(myStatuses));
             } catch (_error) {}
+
+            // Also inject into core statusState so getStatuses() returns it immediately
+            if (typeof statusState !== 'undefined' && Array.isArray(statusState.statuses)) {
+                const sid = String(optimisticStatus.id);
+                if (!statusState.statuses.find(s => String(s.id) === sid)) {
+                    statusState.statuses.unshift({ ...optimisticStatus, id: sid });
+                }
+            }
+            if (typeof statusState !== 'undefined' && Array.isArray(statusState.myStatuses)) {
+                const sid = String(optimisticStatus.id);
+                if (!statusState.myStatuses.find(s => String(s.id) === sid)) {
+                    statusState.myStatuses.unshift({ ...optimisticStatus, id: sid });
+                }
+            }
 
             console.log(`[status-ui] ✅ STATUS RENDERED on sender UI id=${optimisticStatus.id}`);
 
@@ -6026,20 +6355,14 @@ function renderStatusListInstantlyUI() {
     const container = UIElements.allStatusList;
     if (!container) return;
 
-    // ── FIX: Prefer statusState.statuses (updated by status-core on every
-    //    notifyStatusObservers call) over the local `statuses` variable which
-    //    may lag behind when a receiver's screen refreshes from a socket event.
     const core = getCore();
     let liveStatuses = (core && core.getStatuses && core.getStatuses())
         || (typeof statusState !== 'undefined' && statusState.statuses)
         || statuses
         || [];
 
-    // ── FIX: Normalise all IDs to strings so that dataset.statusId comparisons
-    //    always work — server returns numbers, dataset is always a string.
+    // Normalise IDs to strings
     liveStatuses = liveStatuses.map(s => ({ ...s, id: String(s.id) }));
-
-    // Keep the module-level statuses array in sync with normalised IDs too
     if (statuses && statuses.length > 0) {
         statuses = statuses.map(s => ({ ...s, id: String(s.id) }));
     }
@@ -6059,17 +6382,9 @@ function renderStatusListInstantlyUI() {
         `;
         return;
     }
-    const fragment = document.createDocumentFragment();
-    const filtered = InitialRender.filterStatuses(liveStatuses);
-    filtered.slice(0, 10).forEach(status => {
-        const element = InitialRender.createStatusElement(status);
-        if (element) fragment.appendChild(element);
-    });
-    container.innerHTML = '';
-    container.appendChild(fragment);
-    setTimeout(() => {
-        InitialRender.bindStatusItemHandlers(container);
-    }, 50);
+
+    // ── Use the grouped renderer so new friend statuses appear correctly ──
+    renderStatusesListUI(container, liveStatuses);
 }
 
 function updateMyStatusPreviewUI() {

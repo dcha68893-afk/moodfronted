@@ -4624,6 +4624,31 @@
                     return;
                 }
 
+                // ── ADD PARTICIPANT to an existing call (group call) ─────────────
+                if (data.type === 'CALL_ADD_PARTICIPANT') {
+                    const payload = data.payload || {};
+                    console.log('[Parent] Adding participant to call', payload);
+                    // Forward to WebSocket server — server sends incoming-call notification to target user
+                    if (window.wsService) {
+                        const _wsSend = window.wsService.send || window.wsService.emit;
+                        if (typeof _wsSend === 'function') {
+                            try {
+                                _wsSend.call(window.wsService, 'call:add_participant', {
+                                    callId:         payload.callId,
+                                    targetUserId:   payload.targetUserId,
+                                    targetUserName: payload.targetUserName,
+                                    callType:       payload.existingCallType || 'voice',
+                                    invitedBy:      window.__currentUserId || null
+                                });
+                                console.log('[Parent] call:add_participant sent → userId', payload.targetUserId);
+                            } catch(e) {
+                                console.warn('[Parent] call:add_participant failed:', e.message);
+                            }
+                        }
+                    }
+                    return;
+                }
+
                 if (data.type === 'GET_FRIENDS_LIST') {
                     const src = event.source;
                     if (src && src.postMessage) src.postMessage({ type: 'FRIENDS_LIST_RESPONSE', payload: { friends: cachedFriendsList, timestamp: Date.now() } }, '*');

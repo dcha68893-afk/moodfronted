@@ -2731,9 +2731,23 @@ try {
                 const otherUser = chat.otherParticipant || 
                     (chat.participants && chat.participants.find(p => p.id !== currentUserId));
                 
-                // Strip trailing " User" suffix that backend sometimes appends to display names
-                const _rawFriendName = otherUser?.displayName || otherUser?.username || otherUser?.firstName || chat.name || 'User';
-                const friendName = _rawFriendName.replace(/\s+User$/i, '').trim() || _rawFriendName;
+                // ✅ FIX: Build real display name from firstName+lastName if available.
+                // Only strip trailing ' User' if the full name has more than one word
+                // (prevents stripping legitimate surnames like 'Mwita User').
+                const _rawFriendName = (() => {
+                    if (otherUser) {
+                        const fn = otherUser.firstName || '';
+                        const ln = otherUser.lastName || '';
+                        if (fn && ln) return (fn + ' ' + ln).trim();
+                        if (fn) return fn;
+                        return otherUser.displayName || otherUser.username || chat.name || 'User';
+                    }
+                    return chat.name || 'User';
+                })();
+                // Only strip ' User' suffix if there are at least 2 words (avoid stripping surnames)
+                const friendName = (_rawFriendName.split(' ').length > 2)
+                    ? _rawFriendName.replace(/\s+User$/i, '').trim() || _rawFriendName
+                    : _rawFriendName;
                 const friendAvatar = otherUser?.avatar || chat.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=random&color=fff`;
                 
                 let lastMessageText = chat.lastMessage?.content || chat.lastMessageContent || '';
@@ -2870,9 +2884,17 @@ try {
             // for a real-time newMessage socket event.
             try {
                 if (this._activeConversation) {
+                    const _activeChatId = String(this._activeConversation.id);
+                    // ✅ FIX: Filter _messages to active chat only before rendering.
+                    // _messages is a global flat array — rendering all of it causes
+                    // cross-chat message contamination and ordering destruction.
+                    const _ts2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const _chatMsgs = this._messages
+                        .filter(m => String(m.chatId || m.conversationId || '') === _activeChatId)
+                        .sort((a, b) => _ts2(a) - _ts2(b));
                     window.dispatchEvent(new CustomEvent('renderMessages', {
                         detail: {
-                            messages: this._messages,
+                            messages: _chatMsgs,
                             currentChat: this._activeConversation,
                             currentUser: null
                         }
@@ -2952,7 +2974,10 @@ try {
             this._messages.push(message);
             this._messagesMap.set(message.id, message);
             
-            this._messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            // ✅ FIX: Sort by server createdAt first (reliable), timestamp as fallback.
+            // Both must be numeric ms. ISO strings are parsed first.
+            const _ts = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+            this._messages.sort((a, b) => _ts(a) - _ts(b));
             
             if (message.conversationId) {
                 const conversation = this._conversationsMap.get(message.conversationId);
@@ -4005,6 +4030,38 @@ try {
                 }
                 
                 EventBus.emit('message:reaction', { messageId, emoji, add });
+
+                // ✅ FIX: Patch DOM reaction row immediately so both users see reaction
+                try {
+                    const _rEl = document.querySelector('[data-message-id="' + messageId + '"] .message-reactions');
+                    const _rBubble = document.querySelector('[data-message-id="' + messageId + '"] .message-bubble');
+                    const _myId2 = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
+                    let _rHtml = '';
+                    if (message.reactions && Object.keys(message.reactions).length > 0) {
+                        _rHtml = '<div class="message-reactions">';
+                        for (const [em, users] of Object.entries(message.reactions)) {
+                            const ul = Array.isArray(users) ? users : (users ? [users] : []);
+                            if (!ul.length) continue;
+                            const mine = _myId2 && ul.some(function(u) { return String(u) === String(_myId2); });
+                            _rHtml += '<span class="reaction' + (mine ? ' reaction-mine' : '') + '" title="' + ul.length + ' ' + (ul.length===1?'person':'people') + '">' + em + ' ' + ul.length + '</span>';
+                        }
+                        _rHtml += '</div>';
+                    }
+                    if (_rEl) { _rEl.outerHTML = _rHtml; }
+                    else if (_rHtml && _rBubble) { _rBubble.insertAdjacentHTML('beforeend', _rHtml); }
+                } catch(_re) {}
+
+                // Trigger full re-render for sync
+                try {
+                    const _ac = ChatManager.getActiveChat && ChatManager.getActiveChat();
+                    if (_ac) {
+                        const _tsRe = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        const _rMsgs = (ChatManager.getMessages ? ChatManager.getMessages() : [])
+                            .filter(function(m) { return String(m.chatId || m.conversationId || '') === String(_ac.id); })
+                            .sort(function(a,b) { return _tsRe(a)-_tsRe(b); });
+                        window.dispatchEvent(new CustomEvent('renderMessages', { detail: { messages: _rMsgs, currentChat: _ac, currentUser: null } }));
+                    }
+                } catch(_re) {}
             }
             
             return true;
@@ -4123,7 +4180,7 @@ try {
             const isPending = typeof actualId === 'string' && actualId.startsWith('pending_');
             if (!isPending) {
                 if (window.KynectaLocalStore) {
-                    const idbCached = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(() => []);
+                    const idbCached = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(function() { return []; });
                     if (idbCached && idbCached.length > 0) {
                         ChatManager.setMessages(idbCached, actualId);
                     } else {
@@ -4146,7 +4203,7 @@ try {
             // ✅ FIX: force:true bypasses 8s minFetchGap so messages always refresh on open
             if (!isPending) {
                 if (navigator.onLine && SessionManager.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
-                    await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(() => {});
+                    await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(function() {});
                 }
             } else {
                 console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
@@ -5502,38 +5559,48 @@ try {
 
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
             if (normalizedMessage && ChatManager && ChatManager.addMessage) {
+                // ✅ FIX: Normalize createdAt to numeric ms before storing
+                if (normalizedMessage.createdAt && typeof normalizedMessage.createdAt === 'string') {
+                    normalizedMessage.createdAt = new Date(normalizedMessage.createdAt).getTime();
+                }
+                if (normalizedMessage.timestamp && typeof normalizedMessage.timestamp === 'string') {
+                    normalizedMessage.timestamp = new Date(normalizedMessage.timestamp).getTime();
+                }
                 ChatManager.addMessage(normalizedMessage);
             }
+
+            const _tsNum = function(v) { return typeof v === 'string' ? new Date(v).getTime() : Number(v || 0); };
 
             if (ChatManager && ChatManager._conversationsMap && chatId) {
                 const conversation = ChatManager._conversationsMap.get(chatId)
                     || ChatManager._conversationsMap.get(String(chatId));
                 if (conversation && normalizedMessage) {
                     conversation.lastMessage = normalizedMessage.content;
-                    conversation.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
-                    const _activeForUnread = ChatManager?.getActiveChat?.();
+                    conversation.lastMessageAt = _tsNum(normalizedMessage.createdAt || normalizedMessage.timestamp) || Date.now();
+                    const _activeForUnread = ChatManager.getActiveChat && ChatManager.getActiveChat();
                     const _isViewingForUnread = _activeForUnread && String(_activeForUnread.id) === String(chatId);
                     if (!_isViewingForUnread) {
-                        const myId = SessionManager?.getUserId?.();
+                        const myId = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
                         if (!normalizedMessage.senderId || String(normalizedMessage.senderId) !== String(myId)) {
                             conversation.unreadCount = (conversation.unreadCount || 0) + 1;
                         }
                     }
                 }
                 if (ChatManager._conversations) {
-                    ChatManager._conversations.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0));
+                    ChatManager._conversations.sort(function(a, b) { return _tsNum(b.lastMessageAt) - _tsNum(a.lastMessageAt); });
                 }
             }
 
-            const activeChat = ChatManager?.getActiveChat?.();
+            const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
             const isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
 
+            // Always update sidebar
             try {
                 window.dispatchEvent(new CustomEvent('renderChatsList', {
                     detail: {
                         conversations: ensureSafeArray(ChatManager._conversations),
                         currentChat: ChatManager._activeConversation,
-                        currentCategory: ChatManager.getCurrentCategory(),
+                        currentCategory: ChatManager.getCurrentCategory && ChatManager.getCurrentCategory(),
                         messageDrafts: {}
                     }
                 }));
@@ -5541,228 +5608,42 @@ try {
 
             if (isThisChat) {
                 try {
-                    const currentUser = SessionManager?.getUser?.();
-                    const _allMsgs = ChatManager.getMessages ? ChatManager.getMessages() : (ChatManager._messages || []);
-                    // ✅ Filter to this chat only + sort by timestamp ASC
+                    const currentUser = SessionManager && SessionManager.getUser && SessionManager.getUser();
+                    const _allMsgs = (ChatManager.getMessages ? ChatManager.getMessages() : (ChatManager._messages || []));
+                    // ✅ FIX: Filter to this chat + sort ASC by server timestamp
                     const _chatMsgs = _allMsgs
-                        .filter(m => String(m.chatId || m.conversationId || '') === String(chatId))
-                        .sort((a, b) => Number(a.createdAt || a.timestamp || 0) - Number(b.createdAt || b.timestamp || 0));
+                        .filter(function(m) { return String(m.chatId || m.conversationId || '') === String(chatId); })
+                        .sort(function(a, b) { return _tsNum(a.createdAt || a.timestamp) - _tsNum(b.createdAt || b.timestamp); });
                     window.dispatchEvent(new CustomEvent('renderMessages', {
-                        detail: { messages: _chatMsgs.length > 0 ? _chatMsgs : _allMsgs, currentChat: activeChat, currentUser }
+                        detail: { messages: _chatMsgs.length > 0 ? _chatMsgs : _allMsgs, currentChat: activeChat, currentUser: currentUser }
                     }));
                 } catch (_e) {}
                 try {
                     const container = document.getElementById('messagesContainer');
-                    if (container) requestAnimationFrame(() => { container.scrollTop = container.scrollHeight; });
+                    if (container) requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
                 } catch (_e) {}
             } else if (normalizedMessage) {
                 try {
                     const _senderId = normalizedMessage.senderId;
-                    const _myId = SessionManager?.getUserId?.();
+                    const _myId = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
                     if (!_senderId || String(_senderId) !== String(_myId)) {
                         if (UIFeatures && typeof UIFeatures.playNotificationSound === 'function') UIFeatures.playNotificationSound();
-                        window.dispatchEvent(new CustomEvent('kyn:incomingMessage', { detail: { message: normalizedMessage, chatId } }));
+                        window.dispatchEvent(new CustomEvent('kyn:incomingMessage', { detail: { message: normalizedMessage, chatId: chatId } }));
                     }
                 } catch (_e) {}
             }
         };
 
-        const handleRealtimePayload = async function(type, payload) {
-            const normalizedType = String(type || '').toLowerCase();
-            const data = payload || {};
-
-            if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
-                // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
-                // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
-                // Unwrap one level if needed, then fall back to data itself.
-                const message = (data && data.payload && (data.payload.id || data.payload.chatId))
-                    ? data.payload
-                    : (data && data.data && (data.data.id || data.data.chatId))
-                        ? data.data
-                        : data;
-                const chatId = String(
-                    (message && (message.chatId || message.conversationId)) || ''
-                );
-                // ✅ FIX: Don't gate on message.id — server might not echo id back immediately.
-                // Gate only on chatId so we never silently drop a valid incoming message.
-                if (!message || !chatId) return;
-
-                // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
-                const _safeId = message.id != null ? String(message.id) : null;
-                const _safeLocalId = message.localId != null ? String(message.localId) : null;
-                // Reject messages with no usable id to prevent corrupt dedup state
-                if (!_safeId && !_safeLocalId && !message.content) return;
-
-                // ECHO PREVENTION: WebSocket echoes our own sent messages back.
-                // The optimistic message is already in the UI — only update its status.
-                const _realtimeCurrentUserId = SessionManager && SessionManager.getUserId ? SessionManager.getUserId() : null;
-                const _realtimeSenderId = message.senderId || (message.sender && message.sender.id);
-                if (_realtimeSenderId && _realtimeCurrentUserId &&
-                    String(_realtimeSenderId) === String(_realtimeCurrentUserId)) {
-                    // This is our own message echoed back — update status and return
-                    const _echoLocalId = _safeLocalId || message.localId || null;
-                    const _echoServerId = _safeId || null;
-                    if (ChatManager && ChatManager.updateMessageStatus) {
-                        ChatManager.updateMessageStatus(
-                            _echoLocalId || _echoServerId,
-                            message.status || 'sent',
-                            { serverId: _echoServerId, localId: _echoLocalId }
-                        );
-                    }
-                    return;
-                }
-
-                // ✅ FIX: Always prefer server-generated createdAt (ISO string from DB).
-                // message.timestamp may be a client epoch number — use createdAt first.
-                const _serverCreatedAt = message.createdAt
-                    ? (typeof message.createdAt === 'string' ? new Date(message.createdAt).getTime() : Number(message.createdAt))
-                    : (message.timestamp ? Number(message.timestamp) : Date.now());
-
-                let normalizedMessage = {
-                    id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
-                    serverId: _safeId || null,
-                    localId:  _safeLocalId || null,
-                    content: message.content || message.text || '',
-                    type: message.type || 'text',
-                    senderId: message.senderId || message.sender?.id,
-                    sender: message.sender || null,
-                    replyToId: message.replyToId || null,
-                    replyTo:   message.replyTo   || null,
-                    timestamp: _serverCreatedAt,
-                    createdAt: _serverCreatedAt,
-                    status: message.status || 'delivered',
-                    conversationId: chatId,
-                    chatId: chatId,
-                    reactions: message.reactions || {},
-                    isLocalOnly: false
-                };
-
-                if (window.KynectaSyncEngine?.ingestIncomingMessage) {
-                    const saved = await window.KynectaSyncEngine.ingestIncomingMessage(message, chatId).catch(() => null);
-                    if (saved) {
-                        normalizedMessage = {
-                            ...saved,
-                            conversationId: saved.chatId || saved.conversationId || chatId,
-                            chatId: saved.chatId || chatId
-                        };
-                    }
-                }
-
-                renderRealtimeUpdate(chatId, normalizedMessage);
-                EventBus.emit('message:received', normalizedMessage);
-                try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
-                return;
-            }
-
-            if (normalizedType === 'message_sent' || normalizedType === 'message:sent') {
-                // ✅ FIX 9: Unwrap postMessage bridge wrapper { type, payload, source }
-                const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
-                const messageId = d.localId || d.messageId || d.serverId || d.id;
-                console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'sent', {
-                        localId:  d.localId  || null,
-                        serverId: d.serverId || d.messageId || d.id || null
-                    });
-                }
-                return;
-            }
-
-            if (normalizedType === 'message_delivered' || normalizedType === 'message:delivered') {
-                // ✅ FIX 9: Unwrap postMessage bridge wrapper
-                const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
-                const messageId = d.localId || d.messageId || d.serverId || d.id;
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'delivered', {
-                        deliveredAt: d.deliveredAt || d.timestamp || Date.now(),
-                        localId:  d.localId  || null,
-                        serverId: d.serverId || d.messageId || d.id || null
-                    });
-                }
-                return;
-            }
-
-            if (normalizedType === 'message_read' || normalizedType === 'message:read') {
-                // ✅ FIX 9: Unwrap postMessage bridge wrapper
-                const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
-                const messageId = d.localId || d.messageId || d.serverId || d.id;
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'read', {
-                        readAt:   d.readAt   || d.timestamp || Date.now(),
-                        localId:  d.localId  || null,
-                        serverId: d.serverId || d.messageId || d.id || null
-                    });
-                }
-                return;
-            }
-
-            // ✅ ROOT-FIX: Handle message:reaction broadcast from server.
-            // Server calls wsService.broadcastToChat(chatId, 'message:reaction', {...})
-            // BOTH sender and receiver receive this. Update in-memory and re-render.
-            if (normalizedType === 'message:reaction' || normalizedType === 'message_reaction' ||
-                normalizedType === 'reaction_updated') {
-                const d = (data.payload && data.payload.messageId) ? data.payload : data;
-                const { messageId, reactions, chatId: rChatId } = d;
-                if (!messageId || !reactions) return;
-
-                // Update in-memory message
-                const msgs = ChatManager.getMessages ? ChatManager.getMessages() : [];
-                const target = msgs.find(m => String(m.id || m.serverId) === String(messageId));
-                if (target) {
-                    target.reactions = reactions;
-                    // Patch the DOM directly — no full re-render needed
-                    try {
-                        const bubble = document.querySelector(`[data-message-id="${messageId}"] .message-bubble`);
-                        const existingReactions = document.querySelector(`[data-message-id="${messageId}"] .message-reactions`);
-                        const myId = SessionManager?.getUserId?.();
-                        let rHtml = '';
-                        if (reactions && Object.keys(reactions).length > 0) {
-                            rHtml = '<div class="message-reactions">';
-                            for (const [em, users] of Object.entries(reactions)) {
-                                const ul = Array.isArray(users) ? users : (users ? [users] : []);
-                                if (!ul.length) continue;
-                                const mine = myId && ul.some(u => String(u) === String(myId));
-                                rHtml += `<span class="reaction${mine ? ' reaction-mine' : ''}" title="${ul.length} ${ul.length===1?'person':'people'}">${em} ${ul.length}</span>`;
-                            }
-                            rHtml += '</div>';
-                        }
-                        if (existingReactions) {
-                            existingReactions.outerHTML = rHtml;
-                        } else if (rHtml && bubble) {
-                            bubble.insertAdjacentHTML('beforeend', rHtml);
-                        }
-                    } catch(_) {}
-                }
-                // Also persist to local store
-                try {
-                    const activeChat = ChatManager.getActiveChat?.();
-                    if (activeChat) {
-                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${activeChat.id}`, msgs);
-                    }
-                } catch(_) {}
-                return;
-            }
-        };
-
-        // ✅ ROOT-FIX: Also handle REACTION_UPDATED (sent from chat.html after API call)
         window.addEventListener('message', function(event) {
             const data = event.data;
             if (!data || typeof data !== 'object') return;
-            if (data.type === 'REACTION_UPDATED') {
-                handleRealtimePayload('message:reaction', data);
-            }
-        });
 
-        window.addEventListener('message', function(event) {
-            const data = event.data;
-            if (!data || typeof data !== 'object') return;
-            // Only route actual new messages — NOT status events
+            // ✅ FIX: Only route actual new messages — NOT status/session/settings events
             const _rawType = String(data.type || '').toLowerCase();
-            const _isNewMsg = _rawType === 'message:new' || _rawType === 'new_message' ||
-                              _rawType === 'newmessage' || _rawType === 'chat:message' ||
-                              _rawType === 'message_received';
-            if (_isNewMsg) handleRealtimePayload(data.type, data);
-            // Reaction from server broadcast via chat.html
+            if (_rawType === 'message:new' || _rawType === 'new_message' || _rawType === 'newmessage' || _rawType === 'chat:message' || _rawType === 'message_received') {
+                handleRealtimePayload(data.type, data);
+            }
+            // Reaction updates from chat.html API echo or ws-bridge
             if (data.type === 'message:reaction' || data.type === 'REACTION_UPDATED') {
                 handleRealtimePayload('message:reaction', data);
             }
@@ -5820,6 +5701,7 @@ try {
         document.addEventListener('message:new', function(evt) {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
         });
+        // ✅ FIX: Status event listeners — route correctly, not as new messages
         document.addEventListener('message:sent', function(evt) {
             if (evt.detail) handleRealtimePayload('message:sent', evt.detail);
         });
@@ -5829,7 +5711,7 @@ try {
         document.addEventListener('message:read', function(evt) {
             if (evt.detail) handleRealtimePayload('message:read', evt.detail);
         });
-        // ✅ Reaction from ws-bridge forwarded via message.html
+        // ✅ FIX: Reaction listener
         document.addEventListener('message:reaction', function(evt) {
             if (evt.detail) handleRealtimePayload('message:reaction', evt.detail);
         });
