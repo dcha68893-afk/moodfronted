@@ -1457,10 +1457,10 @@
             return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
         };
         window.__getApiOrigin = window.__getApiOrigin || function() {
-            if (window.location && /^https?:$/i.test(window.location.protocol) && window.location.origin) {
-                return window.location.origin;
-            }
-            return window.__isLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+            const host = String(window.location?.hostname || '').toLowerCase();
+            if (window.__isLocalEnvironment(host)) return 'http://localhost:3000';
+            if (host.includes('moodfronted.onrender.com')) return 'https://moodchat-fy56.onrender.com';
+            return 'https://moodchat-fy56.onrender.com';
         };
         window.__getApiBase = window.__getApiBase || function() {
             return `${window.__getApiOrigin()}/api`;

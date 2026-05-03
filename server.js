@@ -630,22 +630,6 @@ function ensureSeedUser(userId, overrides = {}) {
   return userRecord;
 }
 
-function resolveExistingUserByIdentifier(identifier) {
-  const normalizedIdentifier = String(identifier || "").trim().toLowerCase();
-  if (!normalizedIdentifier) return null;
-
-  return Array.from(devState.users.values()).find((user) => {
-    return [
-      user.id,
-      user.username,
-      user.email,
-      user.displayName,
-    ]
-      .filter(Boolean)
-      .some((candidate) => String(candidate).trim().toLowerCase() === normalizedIdentifier);
-  }) || null;
-}
-
 [
   { id: "101", username: "alex", displayName: "Alex Morgan", email: "alex@local.dev" },
   { id: "102", username: "sam", displayName: "Sam Taylor", email: "sam@local.dev" },
@@ -789,10 +773,7 @@ function apiDataForPath(req, user) {
       return { status: 400, body: { success: false, error: "Missing credentials" } };
     }
 
-    const existingUser = resolveExistingUserByIdentifier(identifier);
-    const safeId = existingUser?.id
-      || String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_")
-      || `user_${Date.now()}`;
+    const safeId = String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_") || `user_${Date.now()}`;
     const userRecord = devState.users.get(safeId) || {
       id: safeId,
       username: safeId,
@@ -1306,10 +1287,7 @@ app.post(["/api/auth", "/api/auth/login"], apiLimiter, (req, res) => {
     return sendError(res, "Missing credentials", 400);
   }
 
-  const existingUser = resolveExistingUserByIdentifier(identifier);
-  const safeId = existingUser?.id
-    || String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_")
-    || `user_${Date.now()}`;
+  const safeId = String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_") || `user_${Date.now()}`;
   const userRecord = ensureSeedUser(safeId, {
     username: safeId,
     displayName: req.body?.displayName || safeId,

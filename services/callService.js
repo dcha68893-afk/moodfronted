@@ -271,7 +271,10 @@ export function createCallService({ state, webSocketService }) {
     if (!updatedCall) return null;
 
     if (updatedCall.status === "ringing" || updatedCall.status === "accepted") {
-      emitCallEvent(normalizedTargetUserId, ["call:incoming", "incoming_call"], updatedCall);
+      emitCallEvent(normalizedTargetUserId, ["call:incoming", "incoming_call"], {
+        ...updatedCall,
+        callerName: extra.targetUserName ? updatedCall.callerName : updatedCall.callerName,
+      });
     }
 
     return updatedCall;

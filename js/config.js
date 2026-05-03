@@ -11,11 +11,10 @@ window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) 
 };
 
 window.__getApiOrigin = window.__getApiOrigin || function() {
-    const currentOrigin = window.location && /^https?:$/i.test(window.location.protocol)
-        ? window.location.origin
-        : '';
-    if (currentOrigin) return currentOrigin;
-    return window.__isLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+    const host = String(window.location?.hostname || '').toLowerCase();
+    if (window.__isLocalEnvironment(host)) return 'http://localhost:3000';
+    if (host.includes('moodfronted.onrender.com')) return 'https://moodchat-fy56.onrender.com';
+    return 'https://moodchat-fy56.onrender.com';
 };
 
 window.__getApiBase = window.__getApiBase || function() {

@@ -56,23 +56,23 @@
     }
 
     function getBackendBaseUrl() {
-        if (typeof window.__getApiOrigin === 'function') {
-            const origin = window.__getApiOrigin();
-            if (origin) return String(origin).replace(/\/+$/, '');
-        }
         if (window.__kynAPI && window.__kynAPI.baseUrl) {
             return window.__kynAPI.baseUrl.replace(/\/api\/?$/, '');
+        }
+        if (window.BACKEND_URL) {
+            return String(window.BACKEND_URL).replace(/\/api\/?$/, '').replace(/\/+$/, '');
         }
         if (window.Environment && window.Environment.backendUrl) {
             return window.Environment.backendUrl.replace(/\/api\/?$/, '');
         }
-        if (window.location && /^https?:$/i.test(window.location.protocol) && window.location.origin) {
-            return window.location.origin.replace(/\/+$/, '');
+        if (typeof window.__getApiOrigin === 'function') {
+            const origin = window.__getApiOrigin();
+            if (origin) return String(origin).replace(/\/+$/, '');
         }
         if (!detectLocalEnvironment()) {
             return 'https://moodchat-fy56.onrender.com';
         }
-        return 'http://localhost:4000';
+        return 'http://localhost:3000';
     }
 
     // ── FIX #1: Token acquisition — check globals FIRST (set right after login) ──
