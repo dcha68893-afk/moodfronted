@@ -2803,16 +2803,17 @@ try {
             this._loaded = true;
             this._saveToCache();
 
-            // FIX: Update active conversation name if it was cached with "User"
+            // FIX: Update active conversation name if it was cached with a generic placeholder
             if (this._activeConversation) {
                 const updated = this._conversationsMap.get(this._activeConversation.id);
-                if (updated && updated.friendName && updated.friendName !== 'User' &&
-                    (this._activeConversation.friendName === 'User' || !this._activeConversation.friendName)) {
+                const _genericNames = ['User', 'Select Chat', 'Select a chat', 'Chat', ''];
+                if (updated && updated.friendName && !_genericNames.includes(updated.friendName) &&
+                    _genericNames.includes(this._activeConversation.friendName || '')) {
                     this._activeConversation = { ...this._activeConversation, ...updated };
                     // Patch the DOM header immediately
                     try {
                         const nameEl = document.getElementById('chatFriendName');
-                        if (nameEl && nameEl.textContent === 'User') {
+                        if (nameEl && _genericNames.includes(nameEl.textContent)) {
                             nameEl.textContent = updated.friendName;
                         }
                     } catch (_e) {}
@@ -4154,24 +4155,37 @@ try {
             
             const actualId = typeof conversationId === 'object' ? conversationId.id : conversationId;
             
+            // ✅ FIX: Resolve the explicit caller-supplied name from options or the conversationId object.
+            // This name is always more reliable than the stale cached conversation.friendName.
+            const _callerSuppliedName = (typeof conversationId === 'object' && conversationId.friendName)
+                ? conversationId.friendName
+                : (options && (options.friendName || options.userName)) || null;
+
             const conversation = ChatManager.getConversation(actualId);
             const canUseCachedConversation = !!conversation;
             // FIXED: Always open from cache — even offline or pre-ACTIVE
             if (conversation) {
+                // ✅ FIX: If caller supplied a better name, patch it into the conversation
+                // object so _showChatPanel uses it instead of a stale 'User' cache entry.
+                const _isGenericName = (n) => !n || n === 'User' || n === 'Loading…' || n === 'Chat';
+                if (_callerSuppliedName && !_isGenericName(_callerSuppliedName)) {
+                    conversation._optFriendName = _callerSuppliedName;
+                    if (_isGenericName(conversation.friendName)) {
+                        conversation.friendName = _callerSuppliedName;
+                    }
+                }
                 ChatManager.setActiveConversation(conversation);
                 this._showChatPanel(conversation);
             } else {
                 // No cached conversation: show the name passed via openConversation opts (userName) immediately
                 // so header never shows "Loading..." to the user
-                const _resolvedName = (typeof conversationId === 'object' && conversationId.friendName)
-                    ? conversationId.friendName
-                    : (options && options.friendName) || (options && options.userName)
+                const _resolvedName = _callerSuppliedName
                       // FIX Bug4: also check the globally-cached name set by loadChatByFriendId
                       || window.currentFriendName || null;
                 // Never show ".." placeholder — only set if we actually have a real name
                 const _displayName = _resolvedName && _resolvedName !== '..' ? _resolvedName : null;
                 // FIX Bug4: use empty string instead of 'Loading…' so _showChatPanel keeps existing DOM name
-                const tempConversation = { id: actualId, friendName: _displayName || '', friendAvatar: '', online: false };
+                const tempConversation = { id: actualId, friendName: _displayName || '', _optFriendName: _displayName || '', friendAvatar: '', online: false };
                 ChatManager.setActiveConversation(tempConversation);
                 this._showChatPanel(tempConversation);
             }
@@ -4248,14 +4262,21 @@ try {
             const indicatorEl = document.getElementById('chatStatusIndicator');
             
             if (nameEl) {
-                const resolvedPanelName = conversation.friendName || conversation.name || '';
-                // FIX Bug4/5: Never overwrite a real name with the "Loading…" placeholder.
-                // If we already have a real name in the DOM, keep it until we get a better one.
-                const existingName = nameEl.textContent || '';
-                const incomingIsPlaceholder = !resolvedPanelName || resolvedPanelName === 'Loading…' || resolvedPanelName === 'Chat';
-                const existingIsPlaceholder = !existingName || existingName === 'Loading…' || existingName === 'Select a chat' || existingName === 'Chat';
-                if (!incomingIsPlaceholder || existingIsPlaceholder) {
-                    nameEl.textContent = resolvedPanelName || existingName || 'Chat';
+                // ✅ FIX: Resolve the best available name in priority order:
+                // 1. options.friendName / options.userName (caller explicitly passed it)
+                // 2. conversation.friendName from the live map (only if not a generic placeholder)
+                // 3. existing DOM text (keep it if it's already a real name)
+                const _optName = (conversation._optFriendName) || '';  // injected below by openConversation
+                const _convName = conversation.friendName || conversation.name || '';
+                const _domName  = nameEl.textContent || '';
+                const _isGeneric = (n) => !n || n === 'User' || n === 'Loading…' || n === 'Chat' || n === 'Select a chat' || n === 'Select Chat';
+                // Pick the best non-generic name
+                const resolvedPanelName = (!_isGeneric(_optName) && _optName)
+                    || (!_isGeneric(_convName) && _convName)
+                    || (!_isGeneric(_domName) && _domName)
+                    || _optName || _convName || _domName || '';
+                if (resolvedPanelName) {
+                    nameEl.textContent = resolvedPanelName;
                 }
             }
             // FIX: Always resolve real online status from FriendManager — not stale conversation snapshot
@@ -5557,88 +5578,6 @@ try {
     function setupRealtimeMessageListener() {
         let hasRealtimeBinding = false;
 
-        // ✅ FIX: handleRealtimePayload was called throughout this function but never defined,
-        // causing "ReferenceError: handleRealtimePayload is not defined" on every incoming message.
-        // This is the canonical handler: normalizes the payload and calls renderRealtimeUpdate.
-        function handleRealtimePayload(eventType, rawData) {
-            if (!rawData) return;
-            const payload = rawData.payload || rawData;
-            if (!payload) return;
-
-            // Ignore own echoes for new-message events
-            const myId = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
-            const isNewMessageEvent = (
-                eventType === 'message:new' || eventType === 'new_message' ||
-                eventType === 'newmessage' || eventType === 'chat:message' ||
-                eventType === 'message_received' || eventType === 'MESSAGE_RECEIVED'
-            );
-
-            if (isNewMessageEvent) {
-                // Deduplicate by message id
-                const msgId = payload.id || payload.messageId;
-                if (msgId && isDuplicateMessage && isDuplicateMessage(msgId)) return;
-
-                // Normalize the message object
-                const chatId = payload.chatId || payload.conversationId || payload.chat_id;
-                const normalizedMessage = {
-                    ...payload,
-                    id: payload.id || payload.messageId || ('rt_' + Date.now()),
-                    chatId: chatId,
-                    conversationId: chatId,
-                    senderId: payload.senderId || payload.sender_id || payload.userId,
-                    content: payload.content || payload.text || payload.message || '',
-                    type: payload.type || 'text',
-                    status: payload.status || 'delivered',
-                    createdAt: payload.createdAt || payload.timestamp || Date.now(),
-                    timestamp: payload.createdAt || payload.timestamp || Date.now()
-                };
-
-                // Sender-side echo: only update status, don't re-add
-                if (myId && normalizedMessage.senderId && String(normalizedMessage.senderId) === String(myId)) {
-                    if (ChatManager && ChatManager.updateMessageStatus) {
-                        ChatManager.updateMessageStatus(
-                            normalizedMessage.localId || normalizedMessage.id,
-                            'delivered',
-                            { serverId: normalizedMessage.id }
-                        );
-                    }
-                    return;
-                }
-
-                renderRealtimeUpdate(chatId, normalizedMessage);
-                return;
-            }
-
-            // Status events
-            if (eventType === 'message:sent' || eventType === 'message_sent') {
-                const mid = payload.localId || payload.messageId || payload.id;
-                if (mid && ChatManager && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(mid, 'sent', { serverId: payload.serverId || payload.id });
-                }
-                return;
-            }
-            if (eventType === 'message:delivered' || eventType === 'message_delivered') {
-                const mid = payload.messageId || payload.localId || payload.id;
-                if (mid && ChatManager && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(mid, 'delivered');
-                }
-                return;
-            }
-            if (eventType === 'message:read' || eventType === 'message_read') {
-                const mid = payload.messageId || payload.localId || payload.id;
-                if (mid && ChatManager && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(mid, 'read');
-                }
-                return;
-            }
-            if (eventType === 'message:reaction' || eventType === 'REACTION_UPDATED') {
-                // Let conversation update re-render handle reactions
-                try {
-                    window.dispatchEvent(new CustomEvent('conversationUpdated', { detail: payload }));
-                } catch (_e) {}
-            }
-        }
-
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
             if (normalizedMessage && ChatManager && ChatManager.addMessage) {
                 // ✅ FIX: Normalize createdAt to numeric ms before storing
@@ -6028,10 +5967,6 @@ try {
         SecurityUtils,
         SafeStorage,
         Logger,
-
-        // ✅ FIX: Expose makeApiRequest so messages-ui.js can route API calls through
-        // the parent postMessage proxy (correct auth + backend URL) instead of relative fetch.
-        makeApiRequest,
         
         getState: getLifecycleState,
         isReady: () => currentState === LIFECYCLE_STATES.ACTIVE && SessionManager.isAuthenticated(),

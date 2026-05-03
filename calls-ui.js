@@ -597,7 +597,19 @@ function showIdleScreen() {
     }
 
     // ── Show idle screen ──
-    if (callContainer) { callContainer.classList.add('active'); callContainer.style.display = 'flex'; }
+    // ✅ FIX: Only show callContainer if we are NOT navigating away (i.e. the parent shell
+    // is still showing the calls iframe). After a call ends, SWITCH_MODULE hides this iframe,
+    // so we must NOT re-show callContainer — it causes a blank dark flash.
+    // We check: if CALL_ENDED was just fired (state already idle), keep callContainer hidden.
+    const _isPostCall = !UIState.callActive && UIState.callState === 'idle';
+    if (callContainer && !_isPostCall) {
+        callContainer.classList.add('active');
+        callContainer.style.display = 'flex';
+    } else if (callContainer) {
+        // Post-call: keep hidden, parent has navigated away
+        callContainer.classList.remove('active');
+        callContainer.style.setProperty('display', 'none', 'important');
+    }
     if (idleScreen) {
         idleScreen.classList.add('active');
         idleScreen.style.setProperty('display', 'block', 'important');
@@ -1583,6 +1595,13 @@ function cacheCallHistory(calls) {
         
         // All in-call control actions bypass assertActive when a call is active
         const inCallActions = ['toggleMute', 'toggleVideo', 'toggleScreenShare', 'toggleSpeaker', 'endCall', 'toggleRecording'];
+        // ✅ FIX: answerCall must also bypass the guard when there is an active incoming call.
+        // If coreReady is false (race condition during init) the accept button would silently
+        // do nothing, leaving the receiver stuck on the incoming screen forever.
+        const hasActiveincoming = !!(window._currentIncomingCallId || UIState.activeCallId);
+        if (actionName === 'answerCall' && hasActiveincoming) {
+            return true;
+        }
         if (inCallActions.includes(actionName)) {
             const activeStates = ['connected', 'ongoing', 'active', 'call_ready', 'in_call', 'in-call', 'ACTIVE', 'initiating', 'calling'];
             if (activeStates.includes(UIState.callState) || UIState.callActive === true || !!UIState.activeCallId || window.__callActive) {
@@ -5062,7 +5081,13 @@ case 'CALL_INITIATED':
             const callContainer = document.getElementById('callContainer');
             if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
             if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
-            if (callContainer) { callContainer.classList.add('active'); callContainer.style.display = 'flex'; }
+            // ✅ FIX: Do NOT show callContainer after call ends — it shows a blank dark screen.
+            // The parent shell navigates away (SWITCH_MODULE) so this iframe becomes hidden.
+            // If somehow still visible, keep callContainer hidden and only show idleScreen inside it.
+            if (callContainer) {
+                callContainer.classList.remove('active');
+                callContainer.style.setProperty('display', 'none', 'important');
+            }
             if (idleScreen)    { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
@@ -7695,12 +7720,40 @@ refreshCallHistoryAfterCall: function() {
             
             elements.callSummaryModal.classList.add('active');
             UIState.activeModals.add('callSummaryModal');
+
+            // ✅ FIX: Auto-hide the call summary after 3 seconds — user should not need to tap Done.
+            // Also ensure callContainer stays hidden during this period (no dark flash).
+            const _callContainer = document.getElementById('callContainer');
+            if (_callContainer) {
+                _callContainer.classList.remove('active');
+                _callContainer.style.setProperty('display', 'none', 'important');
+            }
+            clearTimeout(window._callSummaryAutoHide);
+            window._callSummaryAutoHide = setTimeout(() => {
+                this.closeCallSummary();
+            }, 3000);
         },
         
         closeCallSummary: function() {
             if (elements.callSummaryModal) {
                 elements.callSummaryModal.classList.remove('active');
                 UIState.activeModals.delete('callSummaryModal');
+            }
+            // ✅ FIX: After closing summary (by Done button or auto-timer), navigate back
+            // to wherever the call originated from. Without this, the user is left on the
+            // blank call container screen after dismissing the summary.
+            // Only navigate if we haven't already (handleCallEnded fires SWITCH_MODULE too).
+            if (!window.__callSummaryNavigated) {
+                window.__callSummaryNavigated = true;
+                setTimeout(() => { window.__callSummaryNavigated = false; }, 5000);
+                // Ensure callContainer is hidden
+                const _cc = document.getElementById('callContainer');
+                if (_cc) { _cc.classList.remove('active'); _cc.style.setProperty('display', 'none', 'important'); }
+                if (window.parent && window.parent !== window) {
+                    const _origin = window.__callOriginReturnTo || window.__pendingCallReturnTo || 'messages';
+                    const _mod = (_origin === 'calls' || !_origin) ? 'messages' : _origin;
+                    window.parent.postMessage({ type: 'SWITCH_MODULE', module: _mod, payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
+                }
             }
         },
         
@@ -7719,17 +7772,6 @@ acceptIncomingCallGeneric: async function(asVideo) {
         showNotification('You are already in a call', 'warning');
         return;
     }
-
-    // ✅ FIX (Bug 4): Set call-active guard flags HERE — BEFORE any DOM mutation.
-    // The callContainer MutationObserver (dark-screen guard) checks window.__callActive
-    // and UIState.callActive on EVERY class/style change. If these are false when
-    // transitionToInCall touches the DOM, the observer immediately suppresses
-    // #callContainer and #inCallScreen, so the in-call screen never appears.
-    // Setting them first guarantees the observer allows the show.
-    UIState.callActive = true;
-    UIState.callState  = 'connecting';
-    window.__callActive = true;
-    document.body.classList.add('call-active');
     
     if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
         clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
