@@ -1817,17 +1817,16 @@
     <!-- API.js must load BEFORE status.js -->
 
     <!-- New Status System Components -->
-    <!-- FIX: Load status-api, status-cache, status-websocket as regular (non-module)
-         scripts with defer so they execute after the DOM but BEFORE the module scripts
-         which depend on window.StatusAPI / window.StatusCache / window.StatusWebSocket.
-         Previously these were appended dynamically at runtime, causing a race where
-         the module scripts ran first and found all three globals undefined. -->
+    <!-- Load status-api, status-cache, status-websocket as regular non-module scripts -->
     <script src="/js/status-api.js" defer onerror="console.warn('[Status] status-api.js not found')"></script>
     <script src="/js/status-cache.js" defer onerror="console.warn('[Status] status-cache.js not found')"></script>
     <script src="/js/status-websocket.js" defer onerror="console.warn('[Status] status-websocket.js not found')"></script>
 
-    <script type="module" src="status-core.js"></script>
-    <script type="module" src="status-ui.js"></script>
+    <!-- CRITICAL: NOT type="module" — regular scripts share window scope so     -->
+    <!-- status-core.js can call window.renderStatusListInstantlyUI from         -->
+    <!-- status-ui.js, and status-ui.js can access window.StatusCore from core.  -->
+    <script src="status-core.js" defer onerror="console.warn('[Status] status-core.js not found')"></script>
+    <script src="status-ui.js" defer onerror="console.warn('[Status] status-ui.js not found')"></script>
     <script>
         // =============================================
         // DEBUGGING: Verify Status System Components
@@ -1870,14 +1869,8 @@
         
         // Diagnostic button handler
         document.getElementById('diagnosticBtn')?.addEventListener('click', () => {
-            if (window.statusUI && typeof window.statusUI.showDiagnosticOverlay === 'function') {
-                window.statusUI.showDiagnosticOverlay();
-            } else {
-                import('./status-ui.js').then(module => {
-                    if (module.showDiagnosticOverlay) {
-                        module.showDiagnosticOverlay();
-                    }
-                });
+            if (typeof window.showDiagnosticOverlay === 'function') {
+                window.showDiagnosticOverlay();
             }
         });
         

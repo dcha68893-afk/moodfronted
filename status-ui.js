@@ -3258,7 +3258,9 @@ function loadViewerContent(statusData) {
         // Last resort: render as text
         viewerContent.appendChild(createTextStatusSlide(sanitized));
     }
-    if (progressIndicators) {
+    // Only rebuild progress if NOT already built by showStatusGroupViewer
+    // (showStatusGroupViewer calls _buildProgressSegments before loadViewerContent)
+    if (progressIndicators && !document.getElementById('progressSegments')) {
         progressIndicators.innerHTML = `
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
@@ -3522,7 +3524,7 @@ async function handleStatusAction(action, statusData, button) {
     UILogger.debug('Action', `Status action: ${action}`);
     switch(action) {
         case 'view':
-            showStatusViewer(statusData);
+            showStatusGroupViewer([statusData]);
             break;
         case 'pin':
             try {
@@ -4461,7 +4463,8 @@ function setupBasicEventListeners() {
         myStatusPreview.addEventListener('click', () => {
             if (!ensureUIActive('myStatusPreview')) return;
             if (myStatuses && myStatuses.length > 0) {
-                showStatusViewer(myStatuses[0]);
+                // Open ALL own statuses as a group (WhatsApp-style)
+                showStatusGroupViewer([...myStatuses]);
             } else {
                 if (!isAuthenticated()) {
                     showNotification('Please sign in to create a status', 'error');
