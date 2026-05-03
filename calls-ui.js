@@ -172,7 +172,7 @@ function showCallingScreenViaPatch(callInfo) {
 }
 
 // ==================== CRITICAL FIX: FORCE CALLING SCREEN VISIBILITY ====================
-// This ensures the calling screen appears and STAYS visible for 2 minutes
+// This ensures the calling screen appears and STAYS visible for 3 minutes
 // ==================== GLOBAL CALL HISTORY UPDATES ====================
 const GlobalCallHistory = {
     emitUpdate: function(eventType, data = {}) {
@@ -321,7 +321,7 @@ const GlobalCallHistory = {
     
     // ========== STEP 4: Start 2-minute timer ==========
     let callActive = false;
-    let timeLeft = 120; // 2 minutes
+    let timeLeft = 180; // 3 minutes
     let ringTimer = null;
     
     const startRingTimer = () => {
@@ -342,12 +342,12 @@ const GlobalCallHistory = {
                 if (ringTimer) clearInterval(ringTimer);
                 ringTimer = null;
                 if (!callActive) {
-                    console.log('[Calls UI] Call timed out after 2 minutes');
+                    console.log('[Calls UI] Call timed out after 3 minutes');
                     if (window.callCore && window.callCore.endCall) {
                         window.callCore.endCall();
                     }
                     showIdleScreen();
-                    showNotificationInCalls('Call ended - no answer after 2 minutes', 'info');
+                    showNotificationInCalls('Call ended - no answer after 3 minutes', 'info');
                 }
             }
         }, 1000);
@@ -404,7 +404,7 @@ const GlobalCallHistory = {
             if (statusEl) {
                 statusEl.textContent = 'User is offline - waiting...';
             }
-            showNotificationInCalls(`${userName} is offline. Call will ring for 2 minutes.`, 'info');
+            showNotificationInCalls(`${userName} is offline. Call will ring for 3 minutes.`, 'info');
         } else {
             throw new Error(result?.error || result?.reason || 'Failed to start call');
         }
@@ -3991,7 +3991,7 @@ case 'CALL_INITIATED':
     }
     break;
                 case 'call_initiation_failed':
-                    // Offline fix: When receiver is offline, show call UI for 2 minutes instead of ending
+                    // Offline fix: When receiver is offline, show call UI for 3 minutes instead of ending
                     if (data && data.offline) {
                         // Show call UI even though receiver is offline
                         this.handleCallInitiated({
@@ -4002,7 +4002,7 @@ case 'CALL_INITIATED':
                             calleeName: data.calleeName,
                             offline: true
                         });
-                        showNotification('User is offline. Call will display for 2 minutes.', 'info');
+                        showNotification('User is offline. Call will display for 3 minutes.', 'info');
                     } else {
                         // For other failures, end the call
                         this.handleCallEnded(data);
@@ -4681,8 +4681,8 @@ case 'CALL_INITIATED':
                 const oldTimer = parseInt(elements.incomingCallModal.dataset.timer);
                 if (oldTimer) clearInterval(oldTimer);
 
-                // ── 2-MINUTE ring timer (120 seconds) ───────────────────────
-                let timeLeft = 120;
+                // ── 3-MINUTE ring timer (180 seconds) ───────────────────────
+                let timeLeft = 180;
                 if (elements.declineTimer) elements.declineTimer.textContent = timeLeft;
 
                 const timer = setInterval(() => {
@@ -4876,18 +4876,18 @@ case 'CALL_INITIATED':
             if (elements.callDuration) elements.callDuration.textContent = '--:--';
 
             // ── 2-MINUTE outgoing-call ring timer (applies regardless of online status) ──
-            // The callingOverlay must stay visible for the full 120 s unless:
+            // The callingOverlay must stay visible for the full 180 s unless:
             //   (a) receiver accepts → handleCallAccepted hides it
             //   (b) receiver declines → handleCallEnded hides it
             //   (c) caller manually ends → cancelCallBtn hides it
-            //   (d) 120 s timeout fires → auto-dismiss below
+            //   (d) 180 s timeout fires → auto-dismiss below
             (function _startOutgoingRingTimer() {
                 // Clear any pre-existing outgoing timer
                 if (window._outgoingRingTimer) {
                     clearInterval(window._outgoingRingTimer);
                     window._outgoingRingTimer = null;
                 }
-                let timeLeft = 120;
+                let timeLeft = 180;
                 window._outgoingRingTimer = setInterval(() => {
                     timeLeft--;
                     // Update callingStatus label while ringing
@@ -4913,7 +4913,7 @@ case 'CALL_INITIATED':
                             if (elements.callingOverlay) elements.callingOverlay.classList.remove('active');
                             // Trigger call-ended cleanup
                             UIEventHandlers.handleCallEnded({ reason: 'timeout', status: 'missed' });
-                            showNotification('Call ended — no answer after 2 minutes', 'info');
+                            showNotification('Call ended — no answer after 3 minutes', 'info');
                         }
                     }
                 }, 1000);
@@ -7107,7 +7107,17 @@ case 'CALL_ACCEPTED': {
             const existing = document.getElementById('addParticipantPanel');
             if (existing) { existing.remove(); return; }
 
-            const contacts = window.__contactsList || UIState.contacts || [];
+            const contacts = window.__contactsList || UIState.contacts || window.__cachedCallContacts || [];
+            if ((!contacts || contacts.length === 0) && window.parent && window.parent !== window) {
+                try {
+                    window.parent.postMessage({
+                        type: 'GET_FRIENDS_LIST',
+                        source: 'calls',
+                        module: 'calls',
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (_) {}
+            }
             const panel = document.createElement('div');
             panel.id = 'addParticipantPanel';
             panel.style.cssText = [
@@ -7788,7 +7798,7 @@ acceptIncomingCallGeneric: async function(asVideo) {
         //
         // Set state so the guard allows the offer through:
         UIState.callActive    = true;
-        UIState.callState     = 'connected';
+        UIState.callState     = 'connecting';
         UIState.activeCallId  = callId;
         UIState.callType      = callType;
         // Store caller info for transitionToInCall when it fires:
@@ -8938,7 +8948,7 @@ function setupFriendsListListener() {
         const data = event.data;
         
         // Handle FRIENDS_LIST_UPDATE from parent
-        if (data && data.type === 'FRIENDS_LIST_UPDATE') {
+        if (data && (data.type === 'FRIENDS_LIST_UPDATE' || data.type === 'FRIENDS_LIST_RESPONSE')) {
             const friends = data.payload?.friends || [];
             console.log('[Calls UI] Received FRIENDS_LIST_UPDATE:', friends.length, 'friends');
             // Always update if non-empty; preserve cache across refresh
@@ -8956,6 +8966,7 @@ function setupFriendsListListener() {
                 }; });
                 UIState.contacts = contacts;
                 window.__cachedCallContacts = contacts;
+                window.__contactsList = contacts;
                 if (typeof RenderingPipeline !== 'undefined' && RenderingPipeline.renderContactsList) {
                     RenderingPipeline.renderContactsList(contacts);
                 } else if (window.callsUI && window.callsUI.renderContactsList) {

@@ -14,6 +14,7 @@ function cloneCall(call) {
 export function createCallService({ state, webSocketService }) {
   if (!state.callRecords) state.callRecords = new Map();
   if (!state.idempotencyKeys) state.idempotencyKeys = new Map();
+  if (!state.callTimeouts) state.callTimeouts = new Map();
 
   function ensureUserCalls(userId) {
     if (!state.calls.has(userId)) state.calls.set(userId, []);
@@ -38,6 +39,44 @@ export function createCallService({ state, webSocketService }) {
 
     participantIds.forEach((userId) => storeCallForUser(userId, call));
     return cloneCall(call);
+  }
+
+  function clearCallTimeout(callId) {
+    const timer = state.callTimeouts.get(String(callId));
+    if (timer) {
+      clearTimeout(timer);
+      state.callTimeouts.delete(String(callId));
+    }
+  }
+
+  function scheduleCallTimeout(call) {
+    clearCallTimeout(call.id);
+    const timeoutMs = 3 * 60 * 1000;
+    const timer = setTimeout(() => {
+      const current = state.callRecords.get(String(call.id));
+      if (!current || current.status !== "ringing") return;
+
+      const timedOutCall = {
+        ...current,
+        status: "missed",
+        timeoutAt: isoNow(),
+        endedAt: isoNow(),
+        reason: "timeout",
+        updatedAt: isoNow(),
+      };
+
+      persistCall(timedOutCall);
+      state.callTimeouts.delete(String(call.id));
+
+      [timedOutCall.callerId, ...(timedOutCall.participantIds || [])]
+        .filter(Boolean)
+        .forEach((userId) => {
+          emitCallEvent(userId, ["call:timeout", "call_timeout"], timedOutCall);
+          emitCallEvent(userId, ["call:ended", "call_ended"], timedOutCall);
+        });
+    }, timeoutMs);
+
+    state.callTimeouts.set(String(call.id), timer);
   }
 
   function getCall(callId) {
@@ -112,6 +151,7 @@ export function createCallService({ state, webSocketService }) {
     };
 
     persistCall(createdCall);
+    scheduleCallTimeout(createdCall);
 
     if (idempotencyKey) {
       state.idempotencyKeys.set(`${callerId}:${idempotencyKey}`, createdCall.id);
@@ -141,6 +181,7 @@ export function createCallService({ state, webSocketService }) {
   }
 
   function answerCall(callId, user) {
+    clearCallTimeout(callId);
     const updatedCall = updateCall(callId, () => ({
       status: "accepted",
       answeredBy: normalizeUserId(user?.id),
@@ -158,6 +199,7 @@ export function createCallService({ state, webSocketService }) {
   }
 
   function rejectCall(callId, user, reason = "rejected") {
+    clearCallTimeout(callId);
     const updatedCall = updateCall(callId, () => ({
       status: "rejected",
       rejectedBy: normalizeUserId(user?.id),
@@ -176,6 +218,7 @@ export function createCallService({ state, webSocketService }) {
   }
 
   function cancelCall(callId, user) {
+    clearCallTimeout(callId);
     const updatedCall = updateCall(callId, () => ({
       status: "cancelled",
       cancelledBy: normalizeUserId(user?.id),
@@ -192,6 +235,7 @@ export function createCallService({ state, webSocketService }) {
   }
 
   function endCall(callId, user, body = {}) {
+    clearCallTimeout(callId);
     const updatedCall = updateCall(callId, () => ({
       status: body.status || "ended",
       endedBy: normalizeUserId(body.endedBy || user?.id),
@@ -208,6 +252,31 @@ export function createCallService({ state, webSocketService }) {
     return updatedCall;
   }
 
+  function addParticipant(callId, inviter, targetUserId, extra = {}) {
+    const normalizedTargetUserId = normalizeUserId(targetUserId);
+    if (!normalizedTargetUserId) return null;
+
+    const updatedCall = updateCall(callId, (existingCall) => {
+      const participantIds = Array.from(
+        new Set([...(existingCall.participantIds || []).map(String), normalizedTargetUserId])
+      );
+
+      return {
+        participantIds,
+        invitedBy: normalizeUserId(inviter?.id),
+        invitedAt: isoNow(),
+      };
+    });
+
+    if (!updatedCall) return null;
+
+    if (updatedCall.status === "ringing" || updatedCall.status === "accepted") {
+      emitCallEvent(normalizedTargetUserId, ["call:incoming", "incoming_call"], updatedCall);
+    }
+
+    return updatedCall;
+  }
+
   return {
     getCall,
     getHistoryForUser,
@@ -216,5 +285,6 @@ export function createCallService({ state, webSocketService }) {
     rejectCall,
     cancelCall,
     endCall,
+    addParticipant,
   };
 }

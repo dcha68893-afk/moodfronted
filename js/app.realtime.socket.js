@@ -1,5 +1,5 @@
 /**
- * app.realtime.socket.js — SOCKET.IO COMPATIBLE v3.1.0
+ * app.realtime.socket.js — RAW WEBSOCKET FIRST v3.2.0
  *
  * FIXES IN THIS VERSION:
  *  1. acquireToken() now checks window.__kynToken FIRST (set immediately after login)
@@ -14,32 +14,7 @@
 
     // ── Socket.IO client loader ───────────────────────────────────────────────
     let socketIOClient = null;
-    let useRawWebSocket = false;
-
-    try {
-        if (typeof io !== 'undefined') {
-            socketIOClient = io;
-            console.log('[Realtime] Socket.IO client found');
-        } else {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
-            script.async = true;
-            script.onload = () => {
-                if (typeof io !== 'undefined') {
-                    socketIOClient = io;
-                    console.log('[Realtime] Socket.IO client loaded from CDN');
-                }
-            };
-            script.onerror = () => {
-                console.warn('[Realtime] Socket.IO CDN failed, using raw WebSocket fallback');
-                useRawWebSocket = true;
-            };
-            document.head.appendChild(script);
-        }
-    } catch (err) {
-        console.warn('[Realtime] Socket.IO not available:', err);
-        useRawWebSocket = true;
-    }
+    let useRawWebSocket = true;
 
     // ── Singleton guard ───────────────────────────────────────────────────────
     if (window.KynectaRealtime && window.KynectaRealtime.__hardened) {
@@ -81,16 +56,23 @@
     }
 
     function getBackendBaseUrl() {
+        if (typeof window.__getApiOrigin === 'function') {
+            const origin = window.__getApiOrigin();
+            if (origin) return String(origin).replace(/\/+$/, '');
+        }
         if (window.__kynAPI && window.__kynAPI.baseUrl) {
             return window.__kynAPI.baseUrl.replace(/\/api\/?$/, '');
         }
         if (window.Environment && window.Environment.backendUrl) {
             return window.Environment.backendUrl.replace(/\/api\/?$/, '');
         }
+        if (window.location && /^https?:$/i.test(window.location.protocol) && window.location.origin) {
+            return window.location.origin.replace(/\/+$/, '');
+        }
         if (!detectLocalEnvironment()) {
             return 'https://moodchat-fy56.onrender.com';
         }
-        return 'http://localhost:3000';
+        return 'http://localhost:4000';
     }
 
     // ── FIX #1: Token acquisition — check globals FIRST (set right after login) ──

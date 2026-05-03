@@ -127,6 +127,16 @@ export class WebSocketService {
     this.userSockets.set(normalizedUserId, socket);
     this.socketUsers.set(socket, normalizedUserId);
     console.log("[WS] User connected:", normalizedUserId);
+
+    for (const [otherUserId] of this.userSockets.entries()) {
+      if (String(otherUserId) === normalizedUserId) continue;
+      this.send(socket, "presence:update", {
+        userId: otherUserId,
+        online: true,
+        timestamp: Date.now(),
+      });
+    }
+
     this.broadcast("presence:update", {
       userId: normalizedUserId,
       online: true,

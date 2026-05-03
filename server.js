@@ -283,6 +283,7 @@ const devState = {
   friends: new Map(),
   friendRequestsIncoming: new Map(),
   friendRequestsSent: new Map(),
+  friendRequestRecords: new Map(),
   groups: new Map(),
   groupInvites: new Map(),
   statuses: new Map(),
@@ -329,8 +330,34 @@ function ensureUserBucket(map, userId, factory) {
   return map.get(userId);
 }
 
+function uniqueById(items = [], idSelector = (item) => item?.id) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const id = idSelector(item);
+    if (id === undefined || id === null || id === "") return false;
+    const key = String(id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function normalizeEntityId(value) {
   return value === undefined || value === null || value === "" ? null : String(value);
+}
+
+function normalizeApiRoutePath(routePath) {
+  const normalized = String(routePath || "");
+  if (normalized.startsWith("/tools/marketplace")) {
+    return normalized.replace("/tools/marketplace", "/marketplace");
+  }
+  if (normalized.startsWith("/tools/premium")) {
+    return normalized.replace("/tools/premium", "/premium");
+  }
+  if (normalized.startsWith("/tools/user")) {
+    return normalized.replace("/tools/user", "/user");
+  }
+  return normalized;
 }
 
 function buildDirectChatId(userA, userB) {
@@ -358,12 +385,41 @@ function ensureChatRecord(userId, chatId, participantIds = []) {
 
 function resolveChatContext(userId, body = {}) {
   const senderId = String(userId);
-  const receiverId = normalizeEntityId(body.receiverId || body.userId || body.toUserId);
-  const requestedChatId = normalizeEntityId(body.chatId);
-  const chatId = receiverId
+  const requestedChatId = normalizeEntityId(body.chatId || body.conversationId);
+  let receiverId = normalizeEntityId(body.receiverId || body.userId || body.toUserId);
+  let participantIds = [];
+
+  if (requestedChatId && requestedChatId.includes("__")) {
+    const idsFromChatId = requestedChatId
+      .split("__")
+      .map((id) => String(id).trim())
+      .filter(Boolean);
+    if (idsFromChatId.includes(senderId)) {
+      participantIds = idsFromChatId;
+      receiverId = receiverId || idsFromChatId.find((id) => id !== senderId) || null;
+    }
+  }
+
+  if (requestedChatId && !receiverId) {
+    const existingChat = ensureUserBucket(devState.chats, senderId, () => [])
+      .find((chat) => String(chat.id) === String(requestedChatId));
+    if (existingChat?.participantIds?.length) {
+      participantIds = existingChat.participantIds.map(String);
+      receiverId = participantIds.find((id) => id !== senderId) || null;
+    }
+  }
+
+  if (receiverId) {
+    participantIds = Array.from(new Set([senderId, receiverId]));
+  } else if (participantIds.length === 0) {
+    participantIds = [senderId];
+  } else if (!participantIds.includes(senderId)) {
+    participantIds = Array.from(new Set([senderId, ...participantIds]));
+  }
+
+  const chatId = requestedChatId || (receiverId
     ? buildDirectChatId(senderId, receiverId)
-    : (requestedChatId || buildDirectChatId(senderId, senderId));
-  const participantIds = Array.from(new Set([senderId, ...(receiverId ? [receiverId] : [])]));
+    : buildDirectChatId(senderId, senderId));
   return { chatId, senderId, receiverId, participantIds };
 }
 
@@ -379,6 +435,132 @@ function cloneMessage(message) {
 
 function getUserById(userId) {
   return userId ? devState.users.get(String(userId)) || null : null;
+}
+
+function getAcceptedFriends(userId) {
+  return uniqueById(
+    ensureUserBucket(devState.friends, String(userId), () => []),
+    (friend) => friend?.id || friend?.userId
+  );
+}
+
+function getAcceptedFriendIds(userId) {
+  return getAcceptedFriends(userId).map((friend) => String(friend.id || friend.userId));
+}
+
+function getUserProfile(userId) {
+  const user = getUserById(userId);
+  if (!user) return null;
+  return {
+    ...user,
+    status: webSocketService?.isUserOnline?.(user.id) ? "online" : "offline",
+    online: webSocketService?.isUserOnline?.(user.id) || false,
+    isOnline: webSocketService?.isUserOnline?.(user.id) || false,
+    lastSeen: webSocketService?.isUserOnline?.(user.id) ? null : new Date().toISOString(),
+  };
+}
+
+function getFriendSummary(userId, friendId) {
+  const profile = getUserProfile(friendId) || ensureSeedUser(friendId);
+  return {
+    id: String(friendId),
+    userId: String(friendId),
+    displayName: profile.displayName || profile.username || `User ${friendId}`,
+    username: profile.username || String(friendId),
+    avatar: profile.avatar || null,
+    photoURL: profile.avatar || null,
+    status: profile.online ? "online" : "offline",
+    online: !!profile.online,
+    isOnline: !!profile.isOnline,
+    addedAt: new Date().toISOString(),
+  };
+}
+
+function syncFriendRelationship(userA, userB) {
+  const normalizedA = String(userA);
+  const normalizedB = String(userB);
+  if (normalizedA === normalizedB) return;
+
+  const friendsA = ensureUserBucket(devState.friends, normalizedA, () => []);
+  const friendsB = ensureUserBucket(devState.friends, normalizedB, () => []);
+
+  if (!friendsA.some((friend) => String(friend.id || friend.userId) === normalizedB)) {
+    friendsA.unshift(getFriendSummary(normalizedA, normalizedB));
+  }
+  if (!friendsB.some((friend) => String(friend.id || friend.userId) === normalizedA)) {
+    friendsB.unshift(getFriendSummary(normalizedB, normalizedA));
+  }
+}
+
+function removeFriendRelationship(userA, userB) {
+  const normalizedA = String(userA);
+  const normalizedB = String(userB);
+  devState.friends.set(
+    normalizedA,
+    ensureUserBucket(devState.friends, normalizedA, () => [])
+      .filter((friend) => String(friend.id || friend.userId) !== normalizedB)
+  );
+  devState.friends.set(
+    normalizedB,
+    ensureUserBucket(devState.friends, normalizedB, () => [])
+      .filter((friend) => String(friend.id || friend.userId) !== normalizedA)
+  );
+}
+
+function buildFriendRequestRecord({ senderId, receiverId, note = "", category = "friend" }) {
+  const sender = ensureSeedUser(senderId);
+  const receiver = ensureSeedUser(receiverId);
+  const now = new Date().toISOString();
+
+  return {
+    id: `friend_req_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
+    senderId: String(sender.id),
+    receiverId: String(receiver.id),
+    requesterId: String(sender.id),
+    status: "pending",
+    category,
+    note,
+    createdAt: now,
+    updatedAt: now,
+    senderName: sender.displayName || sender.username,
+    senderUsername: sender.username || sender.id,
+    senderAvatar: sender.avatar || null,
+    receiverName: receiver.displayName || receiver.username,
+    receiverUsername: receiver.username || receiver.id,
+    receiverAvatar: receiver.avatar || null,
+    user: {
+      id: String(sender.id),
+      displayName: sender.displayName || sender.username,
+      username: sender.username || sender.id,
+      avatar: sender.avatar || null,
+    },
+  };
+}
+
+function storeFriendRequestRecord(record) {
+  devState.friendRequestRecords.set(String(record.id), record);
+  const incoming = ensureUserBucket(devState.friendRequestsIncoming, String(record.receiverId), () => []);
+  const sent = ensureUserBucket(devState.friendRequestsSent, String(record.senderId), () => []);
+  incoming.unshift(record);
+  sent.unshift(record);
+  return record;
+}
+
+function removeFriendRequestRecord(recordId) {
+  const record = devState.friendRequestRecords.get(String(recordId));
+  if (!record) return null;
+  devState.friendRequestRecords.delete(String(recordId));
+  devState.friendRequestsIncoming.set(
+    String(record.receiverId),
+    ensureUserBucket(devState.friendRequestsIncoming, String(record.receiverId), () => [])
+      .filter((item) => String(item.id) !== String(recordId))
+  );
+  devState.friendRequestsSent.set(
+    String(record.senderId),
+    ensureUserBucket(devState.friendRequestsSent, String(record.senderId), () => [])
+      .filter((item) => String(item.id) !== String(recordId))
+  );
+  return record;
 }
 
 function resolveRequestUser(req) {
@@ -448,6 +630,22 @@ function ensureSeedUser(userId, overrides = {}) {
   return userRecord;
 }
 
+function resolveExistingUserByIdentifier(identifier) {
+  const normalizedIdentifier = String(identifier || "").trim().toLowerCase();
+  if (!normalizedIdentifier) return null;
+
+  return Array.from(devState.users.values()).find((user) => {
+    return [
+      user.id,
+      user.username,
+      user.email,
+      user.displayName,
+    ]
+      .filter(Boolean)
+      .some((candidate) => String(candidate).trim().toLowerCase() === normalizedIdentifier);
+  }) || null;
+}
+
 [
   { id: "101", username: "alex", displayName: "Alex Morgan", email: "alex@local.dev" },
   { id: "102", username: "sam", displayName: "Sam Taylor", email: "sam@local.dev" },
@@ -490,6 +688,18 @@ webSocketService.setMessageHandler(({ user, type, payload }) => {
   const normalizedType = String(type || "").toLowerCase();
   if (!user?.id) return;
 
+  const resolveCallTargetUserId = () => {
+    const directTarget = payload.targetUserId || payload.receiverId || payload.userId || payload.toUserId || null;
+    if (directTarget) return String(directTarget);
+    if (!payload.callId) return null;
+    const call = callService.getCall(payload.callId);
+    if (!call) return null;
+    if (String(call.callerId) === String(user.id)) {
+      return call.participantIds?.map(String).find(Boolean) || null;
+    }
+    return String(call.callerId);
+  };
+
   if (normalizedType === "message:new" || normalizedType === "message:send" || normalizedType === "message") {
     const receiverId = payload.receiverId || payload.userId || payload.toUserId || null;
     if (receiverId) {
@@ -513,13 +723,33 @@ webSocketService.setMessageHandler(({ user, type, payload }) => {
     return;
   }
 
-  if (normalizedType === "webrtc:signal") {
-    const targetUserId = payload.targetUserId || payload.receiverId || payload.userId || null;
+  if (
+    normalizedType === "webrtc:signal" ||
+    normalizedType === "call_offer" ||
+    normalizedType === "call_answer" ||
+    normalizedType === "ice_candidate" ||
+    normalizedType === "signal_offer" ||
+    normalizedType === "signal_answer"
+  ) {
+    const targetUserId = resolveCallTargetUserId();
     if (targetUserId) {
-      webSocketService.sendToUser(targetUserId, "webrtc:signal", {
+      const signalType = normalizedType === "call_offer" || normalizedType === "signal_offer"
+        ? "offer"
+        : normalizedType === "call_answer" || normalizedType === "signal_answer"
+          ? "answer"
+          : normalizedType === "ice_candidate"
+            ? "ice_candidate"
+            : (payload.signalType || null);
+      const relayPayload = {
         ...payload,
         fromUserId: user.id,
-      });
+        targetUserId,
+        signalType,
+      };
+      if (normalizedType !== "webrtc:signal") {
+        webSocketService.sendToUser(targetUserId, normalizedType, relayPayload);
+      }
+      webSocketService.sendToUser(targetUserId, "webrtc:signal", relayPayload);
     }
     return;
   }
@@ -536,11 +766,20 @@ webSocketService.setMessageHandler(({ user, type, payload }) => {
 
   if (normalizedType === "call:cancelled" || normalizedType === "call_cancelled" || type === "CALL_CANCELLED") {
     if (payload.callId) callService.cancelCall(payload.callId, user);
+    return;
+  }
+
+  if (normalizedType === "call:add_participant" || normalizedType === "call_add_participant") {
+    if (payload.callId && payload.targetUserId) {
+      callService.addParticipant(payload.callId, user, payload.targetUserId, payload);
+    }
+    return;
   }
 });
 
 function apiDataForPath(req, user) {
-  const { path: routePath, method } = req;
+  const method = req.method;
+  const routePath = normalizeApiRoutePath(req.path);
   const userId = user?.id || "guest";
 
   if (routePath === "/auth" || routePath === "/auth/login") {
@@ -550,7 +789,10 @@ function apiDataForPath(req, user) {
       return { status: 400, body: { success: false, error: "Missing credentials" } };
     }
 
-    const safeId = String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_") || `user_${Date.now()}`;
+    const existingUser = resolveExistingUserByIdentifier(identifier);
+    const safeId = existingUser?.id
+      || String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_")
+      || `user_${Date.now()}`;
     const userRecord = devState.users.get(safeId) || {
       id: safeId,
       username: safeId,
@@ -618,19 +860,28 @@ function apiDataForPath(req, user) {
 
   if (routePath === "/friends" || routePath.startsWith("/friends/")) {
     if (!user) return { status: 401, body: { success: false, error: "Unauthorized", data: null } };
-    const friends = ensureUserBucket(devState.friends, user.id, () => []);
+    const friends = getAcceptedFriends(user.id);
+    const incoming = ensureUserBucket(devState.friendRequestsIncoming, user.id, () => []);
+    const sent = ensureUserBucket(devState.friendRequestsSent, user.id, () => []);
     return {
       body: {
         success: true,
         data: {
           friends,
-          incoming: [],
-          sent: [],
+          incoming,
+          sent,
           pinned: [],
           muted: [],
           blocked: [],
           contacts: friends,
-          users: [],
+          users: Array.from(devState.users.values())
+            .filter((candidate) => String(candidate.id) !== String(user.id))
+            .map((candidate) => ({
+              ...candidate,
+              online: webSocketService.isUserOnline(candidate.id),
+              isOnline: webSocketService.isUserOnline(candidate.id),
+              status: webSocketService.isUserOnline(candidate.id) ? "online" : "offline",
+            })),
           groups: ensureUserBucket(devState.groups, user.id, () => []),
         },
       },
@@ -668,6 +919,9 @@ function apiDataForPath(req, user) {
       return { status: 401, body: { success: false, error: "Unauthorized", data: null } };
     }
     const statuses = ensureUserBucket(devState.statuses, userId, () => []);
+    const friendStatuses = getAcceptedFriendIds(userId)
+      .flatMap((friendId) => ensureUserBucket(devState.statuses, friendId, () => []))
+      .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0));
     if (method === "POST" && req.body) {
       const created = {
         id: `status_${Date.now()}`,
@@ -676,18 +930,18 @@ function apiDataForPath(req, user) {
         createdAt: new Date().toISOString(),
       };
       statuses.unshift(created);
-      return { body: { success: true, data: { status: created, statuses, my: statuses, friends: statuses, highlights: [] }, status: created } };
+      return { body: { success: true, data: { status: created, statuses, my: statuses, friends: friendStatuses, highlights: friendStatuses.slice(0, 20) }, status: created } };
     }
     if (routePath === "/status/my") {
       return { body: { success: true, data: { statuses }, statuses } };
     }
     if (routePath === "/status/friends") {
-      return { body: { success: true, data: { statuses }, statuses } };
+      return { body: { success: true, data: { statuses: friendStatuses }, statuses: friendStatuses } };
     }
     if (routePath === "/status/highlights") {
-      return { body: { success: true, data: { highlights: [] }, highlights: [] } };
+      return { body: { success: true, data: { highlights: friendStatuses.slice(0, 20) }, highlights: friendStatuses.slice(0, 20) } };
     }
-    return { body: { success: true, data: { statuses, my: statuses, friends: statuses, highlights: [] }, statuses } };
+    return { body: { success: true, data: { statuses, my: statuses, friends: friendStatuses, highlights: friendStatuses.slice(0, 20) }, statuses } };
   }
 
   if (routePath === "/messages" || routePath.startsWith("/messages") || routePath.startsWith("/chats") || routePath.startsWith("/conversations")) {
@@ -781,6 +1035,79 @@ function apiDataForPath(req, user) {
   if (routePath.startsWith("/marketplace")) {
     const listings = ensureMarketplaceSeed();
     const listingIdMatch = routePath.match(/^\/marketplace\/listings\/([^/]+)(?:\/([^/]+))?$/);
+
+    if (routePath === "/marketplace/orders/mine" && method === "GET") {
+      const buyerId = String(user?.id || "guest");
+      const orders = devState.purchases
+        .filter((purchase) => String(purchase.buyerId) === buyerId)
+        .map((purchase) => ({
+          ...purchase,
+          status: purchase.status || "paid",
+        }));
+      return { body: { success: true, data: { orders, total: orders.length } } };
+    }
+
+    if (routePath === "/marketplace/orders" && method === "POST") {
+      const order = {
+        id: `order_${Date.now()}`,
+        buyerId: String(user?.id || req.body?.buyerId || "guest"),
+        listingId: req.body?.listingId || null,
+        productId: req.body?.productId || req.body?.listingId || null,
+        status: "paid",
+        createdAt: new Date().toISOString(),
+      };
+      devState.purchases.unshift(order);
+      return { body: { success: true, data: { order } } };
+    }
+
+    const cancelOrderMatch = routePath.match(/^\/marketplace\/orders\/([^/]+)\/cancel$/);
+    if (cancelOrderMatch && method === "POST") {
+      const orderId = cancelOrderMatch[1];
+      const order = devState.purchases.find((purchase) => String(purchase.id) === String(orderId));
+      if (!order) return { status: 404, body: { success: false, error: "Order not found", data: null } };
+      order.status = "cancelled";
+      order.cancelReason = req.body?.reason || "Cancelled by user";
+      order.updatedAt = new Date().toISOString();
+      return { body: { success: true, data: { order } } };
+    }
+
+    const reviewListMatch = routePath.match(/^\/marketplace\/listings\/([^/]+)\/reviews$/);
+    if (reviewListMatch && method === "GET") {
+      return { body: { success: true, data: { reviews: [], total: 0 } } };
+    }
+
+    if (reviewListMatch && method === "POST") {
+      const review = {
+        id: `review_${Date.now()}`,
+        listingId: reviewListMatch[1],
+        reviewerId: String(user?.id || "guest"),
+        rating: Number(req.body?.rating || 5),
+        comment: req.body?.comment || "",
+        createdAt: new Date().toISOString(),
+      };
+      return { body: { success: true, data: { review } } };
+    }
+
+    const helpfulMatch = routePath.match(/^\/marketplace\/reviews\/([^/]+)\/helpful$/);
+    if (helpfulMatch && method === "POST") {
+      return { body: { success: true, data: { reviewId: helpfulMatch[1], helpful: true } } };
+    }
+
+    const sellerMatch = routePath.match(/^\/marketplace\/seller\/([^/]+)$/);
+    if (sellerMatch && method === "GET") {
+      const sellerId = sellerMatch[1];
+      const sellerListings = listings.filter((listing) => String(listing.sellerId) === String(sellerId));
+      return {
+        body: {
+          success: true,
+          data: {
+            seller: getUserProfile(sellerId) || ensureSeedUser(sellerId),
+            listings: sellerListings,
+            total: sellerListings.length,
+          },
+        },
+      };
+    }
 
     if (routePath === "/marketplace/listings" && method === "GET") {
       const page = Math.max(1, Number(req.query?.page || 1));
@@ -928,6 +1255,38 @@ function apiDataForPath(req, user) {
     return { body: { success: true, data: { processed: true, item: req.body || null } } };
   }
 
+  if (routePath === "/premium/features") {
+    return {
+      body: {
+        success: true,
+        data: {
+          features: {
+            premiumListings: true,
+            boostedListings: true,
+            analytics: true,
+            teamWorkspaces: true,
+          },
+        },
+      },
+    };
+  }
+
+  if (routePath === "/user/subscription") {
+    return {
+      body: {
+        success: true,
+        data: {
+          subscription: {
+            id: "plan_free",
+            plan: "free",
+            active: false,
+            features: [],
+          },
+        },
+      },
+    };
+  }
+
   if (routePath === "/profile" || routePath.startsWith("/users/") || routePath.startsWith("/storage/") || routePath.startsWith("/marketplace") || routePath.startsWith("/payments") || routePath.startsWith("/premium")) {
     return { body: { success: true, data: Array.isArray(req.body) ? req.body : safeObjectForApi(req.body) } };
   }
@@ -947,7 +1306,10 @@ app.post(["/api/auth", "/api/auth/login"], apiLimiter, (req, res) => {
     return sendError(res, "Missing credentials", 400);
   }
 
-  const safeId = String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_") || `user_${Date.now()}`;
+  const existingUser = resolveExistingUserByIdentifier(identifier);
+  const safeId = existingUser?.id
+    || String(identifier).trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_")
+    || `user_${Date.now()}`;
   const userRecord = ensureSeedUser(safeId, {
     username: safeId,
     displayName: req.body?.displayName || safeId,
@@ -1077,6 +1439,16 @@ app.post("/api/status", apiLimiter, authMiddleware, (req, res) => {
   statuses.unshift(createdStatus);
   if (dedupeKey) devState.idempotencyKeys.set(dedupeKey, createdStatus.id);
 
+  const recipients = new Set([String(req.user.id), ...getAcceptedFriendIds(req.user.id)]);
+  recipients.forEach((targetUserId) => {
+    webSocketService.sendToUser(targetUserId, "status:created", {
+      status: createdStatus,
+      statusId: createdStatus.id,
+      userId: req.user.id,
+      timestamp: Date.now(),
+    });
+  });
+
   return res.status(201).json({
     success: true,
     data: {
@@ -1085,6 +1457,207 @@ app.post("/api/status", apiLimiter, authMiddleware, (req, res) => {
     },
     message: "Status created",
   });
+});
+
+app.get("/api/status/friends", apiLimiter, authMiddleware, (req, res) => {
+  const statuses = getAcceptedFriendIds(req.user.id)
+    .flatMap((friendId) => ensureUserBucket(devState.statuses, friendId, () => []))
+    .sort((left, right) => Date.parse(right.createdAt || 0) - Date.parse(left.createdAt || 0));
+
+  return res.status(200).json({
+    success: true,
+    data: { statuses },
+    message: "Friends statuses loaded",
+  });
+});
+
+app.post("/api/status/:statusId/view", apiLimiter, authMiddleware, (req, res) => {
+  const statusId = String(req.params.statusId);
+  const statusOwnerId = Array.from(devState.statuses.entries())
+    .find(([, entries]) => entries.some((status) => String(status.id) === statusId))?.[0];
+  if (!statusOwnerId) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  const statuses = ensureUserBucket(devState.statuses, statusOwnerId, () => []);
+  const status = statuses.find((entry) => String(entry.id) === statusId);
+  if (!status) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  status.viewers = Array.isArray(status.viewers) ? status.viewers : [];
+  if (!status.viewers.includes(String(req.user.id))) {
+    status.viewers.push(String(req.user.id));
+  }
+  status.viewCount = status.viewers.length;
+  status.updatedAt = new Date().toISOString();
+
+  const payload = {
+    statusId,
+    userId: statusOwnerId,
+    viewerId: req.user.id,
+    viewerCount: status.viewCount,
+    timestamp: Date.now(),
+  };
+  webSocketService.sendToUser(statusOwnerId, "status:viewed", payload);
+  webSocketService.sendToUser(statusOwnerId, "status:viewer_update", payload);
+  webSocketService.sendToUser(req.user.id, "status:viewer_update", payload);
+
+  return sendSuccess(res, {
+    statusId,
+    viewCount: status.viewCount,
+    viewed: true,
+  }, 200, "Status view tracked");
+});
+
+app.post("/api/status/:statusId/reply", apiLimiter, authMiddleware, (req, res) => {
+  const statusId = String(req.params.statusId);
+  const replyText = String(req.body?.reply || req.body?.text || req.body?.message || "").trim();
+  if (!replyText) {
+    return sendError(res, "Reply is required", 400);
+  }
+
+  const statusOwnerId = Array.from(devState.statuses.entries())
+    .find(([, entries]) => entries.some((status) => String(status.id) === statusId))?.[0];
+  if (!statusOwnerId) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  const statuses = ensureUserBucket(devState.statuses, statusOwnerId, () => []);
+  const status = statuses.find((entry) => String(entry.id) === statusId);
+  if (!status) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  status.replies = Array.isArray(status.replies) ? status.replies : [];
+  const reply = {
+    id: `status_reply_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
+    statusId,
+    senderId: req.user.id,
+    receiverId: statusOwnerId,
+    text: replyText,
+    createdAt: new Date().toISOString(),
+  };
+  status.replies.push(reply);
+  status.replyCount = status.replies.length;
+  status.updatedAt = reply.createdAt;
+
+  const payload = {
+    statusId,
+    reply,
+    userId: statusOwnerId,
+    senderId: req.user.id,
+    timestamp: Date.now(),
+  };
+  webSocketService.sendToUser(statusOwnerId, "status:reply", payload);
+  webSocketService.sendToUser(req.user.id, "status:reply", payload);
+
+  return sendSuccess(res, {
+    reply,
+    statusId,
+    replyCount: status.replyCount,
+  }, 201, "Status reply sent");
+});
+
+app.post("/api/status/:statusId/like", apiLimiter, authMiddleware, (req, res) => {
+  const statusId = String(req.params.statusId);
+  const reaction = String(req.body?.reaction || "like");
+  const statusOwnerId = Array.from(devState.statuses.entries())
+    .find(([, entries]) => entries.some((status) => String(status.id) === statusId))?.[0];
+  if (!statusOwnerId) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  const statuses = ensureUserBucket(devState.statuses, statusOwnerId, () => []);
+  const status = statuses.find((entry) => String(entry.id) === statusId);
+  if (!status) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  status.reactions = status.reactions && typeof status.reactions === "object" ? status.reactions : {};
+  status.reactions[reaction] = Array.isArray(status.reactions[reaction]) ? status.reactions[reaction] : [];
+  if (!status.reactions[reaction].includes(String(req.user.id))) {
+    status.reactions[reaction].push(String(req.user.id));
+  }
+  status.likeCount = Object.values(status.reactions).reduce((total, users) => total + users.length, 0);
+  status.updatedAt = new Date().toISOString();
+
+  const payload = {
+    statusId,
+    reaction,
+    userId: req.user.id,
+    ownerId: statusOwnerId,
+    count: status.reactions[reaction].length,
+    totalCount: status.likeCount,
+    timestamp: Date.now(),
+  };
+  [statusOwnerId, req.user.id, ...getAcceptedFriendIds(statusOwnerId)].forEach((targetUserId) => {
+    webSocketService.sendToUser(targetUserId, "status:reaction", payload);
+  });
+
+  return sendSuccess(res, {
+    statusId,
+    reaction,
+    count: status.reactions[reaction].length,
+    totalCount: status.likeCount,
+  }, 200, "Reaction added");
+});
+
+app.delete("/api/status/:statusId/like", apiLimiter, authMiddleware, (req, res) => {
+  const statusId = String(req.params.statusId);
+  const reaction = String(req.body?.reaction || req.query?.reaction || "like");
+  const statusOwnerId = Array.from(devState.statuses.entries())
+    .find(([, entries]) => entries.some((status) => String(status.id) === statusId))?.[0];
+  if (!statusOwnerId) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  const statuses = ensureUserBucket(devState.statuses, statusOwnerId, () => []);
+  const status = statuses.find((entry) => String(entry.id) === statusId);
+  if (!status) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  status.reactions = status.reactions && typeof status.reactions === "object" ? status.reactions : {};
+  status.reactions[reaction] = (status.reactions[reaction] || []).filter((userId) => String(userId) !== String(req.user.id));
+  if (status.reactions[reaction].length === 0) {
+    delete status.reactions[reaction];
+  }
+  status.likeCount = Object.values(status.reactions).reduce((total, users) => total + users.length, 0);
+  status.updatedAt = new Date().toISOString();
+
+  return sendSuccess(res, {
+    statusId,
+    reaction,
+    totalCount: status.likeCount,
+  }, 200, "Reaction removed");
+});
+
+app.delete("/api/status/:statusId", apiLimiter, authMiddleware, (req, res) => {
+  const statusId = String(req.params.statusId);
+  const statuses = ensureUserBucket(devState.statuses, req.user.id, () => []);
+  const existing = statuses.find((status) => String(status.id) === statusId);
+  if (!existing) {
+    return sendError(res, "Status not found", 404);
+  }
+
+  devState.statuses.set(
+    String(req.user.id),
+    statuses.filter((status) => String(status.id) !== statusId)
+  );
+
+  [String(req.user.id), ...getAcceptedFriendIds(req.user.id)].forEach((targetUserId) => {
+    webSocketService.sendToUser(targetUserId, "status:deleted", {
+      statusId,
+      userId: req.user.id,
+      timestamp: Date.now(),
+    });
+  });
+
+  return sendSuccess(res, {
+    deleted: true,
+    statusId,
+  }, 200, "Status deleted");
 });
 
 app.get("/api/friends/users/all", apiLimiter, authMiddleware, (req, res) => {
@@ -1120,6 +1693,174 @@ app.get("/api/friends/incoming", apiLimiter, authMiddleware, (req, res) => {
     },
     message: "Incoming friend requests loaded",
   });
+});
+
+app.get("/api/friends/sent", apiLimiter, authMiddleware, (req, res) => {
+  const sent = ensureUserBucket(devState.friendRequestsSent, req.user.id, () => []);
+  return res.status(200).json({
+    success: true,
+    data: {
+      sent,
+      total: sent.length,
+    },
+    message: "Sent friend requests loaded",
+  });
+});
+
+app.get("/api/friends/user/:userId", apiLimiter, authMiddleware, (req, res) => {
+  const user = getUserProfile(req.params.userId);
+  if (!user) {
+    return sendError(res, "User not found", 404);
+  }
+  return sendSuccess(res, { user }, 200, "Friend profile loaded");
+});
+
+app.get("/api/friends/mutual/:userId", apiLimiter, authMiddleware, (req, res) => {
+  const mine = new Set(getAcceptedFriendIds(req.user.id));
+  const theirs = new Set(getAcceptedFriendIds(req.params.userId));
+  const mutual = Array.from(mine)
+    .filter((friendId) => theirs.has(friendId))
+    .map((friendId) => getFriendSummary(req.user.id, friendId));
+  return sendSuccess(res, { users: mutual, total: mutual.length }, 200, "Mutual friends loaded");
+});
+
+app.post("/api/friends/requests/send", apiLimiter, authMiddleware, (req, res) => {
+  const senderId = String(req.user.id);
+  const receiverId = normalizeEntityId(req.body?.receiverId || req.body?.userId);
+  if (!receiverId || receiverId === senderId) {
+    return sendError(res, "Valid receiverId is required", 400);
+  }
+
+  const existing = ensureUserBucket(devState.friendRequestsSent, senderId, () => [])
+    .find((request) => String(request.receiverId) === receiverId && String(request.status) === "pending");
+  if (existing) {
+    return sendSuccess(res, { request: existing, reused: true }, 200, "Friend request reused");
+  }
+
+  const record = buildFriendRequestRecord({
+    senderId,
+    receiverId,
+    note: req.body?.note || "",
+    category: req.body?.category || "friend",
+  });
+  storeFriendRequestRecord(record);
+
+  webSocketService.sendToUser(receiverId, "friend:request", record);
+  webSocketService.sendToUser(senderId, "friend:request", record);
+
+  return sendSuccess(res, { request: record }, 201, "Friend request sent");
+});
+
+app.post("/api/friends/requests/:requestId/accept", apiLimiter, authMiddleware, (req, res) => {
+  const requestRecord = devState.friendRequestRecords.get(String(req.params.requestId));
+  if (!requestRecord) {
+    return sendError(res, "Friend request not found", 404);
+  }
+  if (String(requestRecord.receiverId) !== String(req.user.id)) {
+    return sendError(res, "You cannot accept this friend request", 403);
+  }
+
+  removeFriendRequestRecord(requestRecord.id);
+  syncFriendRelationship(requestRecord.senderId, requestRecord.receiverId);
+
+  const acceptedBy = getFriendSummary(requestRecord.senderId, requestRecord.receiverId);
+  const requesterSummary = getFriendSummary(requestRecord.receiverId, requestRecord.senderId);
+
+  const payloadForSender = {
+    requestId: requestRecord.id,
+    friendId: requestRecord.receiverId,
+    user: acceptedBy,
+    friend: acceptedBy,
+    acceptedById: requestRecord.receiverId,
+    timestamp: Date.now(),
+  };
+  const payloadForReceiver = {
+    requestId: requestRecord.id,
+    friendId: requestRecord.senderId,
+    user: requesterSummary,
+    friend: requesterSummary,
+    acceptedById: requestRecord.receiverId,
+    timestamp: Date.now(),
+  };
+
+  webSocketService.sendToUser(requestRecord.senderId, "friend:accepted", payloadForSender);
+  webSocketService.sendToUser(requestRecord.receiverId, "friend:accepted", payloadForReceiver);
+
+  return sendSuccess(res, {
+    friendRequest: requestRecord,
+    friend: requesterSummary,
+  }, 200, "Friend request accepted");
+});
+
+app.post("/api/friends/requests/:requestId/reject", apiLimiter, authMiddleware, (req, res) => {
+  const requestRecord = devState.friendRequestRecords.get(String(req.params.requestId));
+  if (!requestRecord) {
+    return sendError(res, "Friend request not found", 404);
+  }
+  if (String(requestRecord.receiverId) !== String(req.user.id)) {
+    return sendError(res, "You cannot reject this friend request", 403);
+  }
+
+  removeFriendRequestRecord(requestRecord.id);
+  const payload = {
+    requestId: requestRecord.id,
+    senderId: requestRecord.senderId,
+    receiverId: requestRecord.receiverId,
+    timestamp: Date.now(),
+  };
+  webSocketService.sendToUser(requestRecord.senderId, "friend:rejected", payload);
+  webSocketService.sendToUser(requestRecord.receiverId, "friend:rejected", payload);
+
+  return sendSuccess(res, { requestId: requestRecord.id, rejected: true }, 200, "Friend request rejected");
+});
+
+app.delete("/api/friends/requests/:requestId", apiLimiter, authMiddleware, (req, res) => {
+  const requestRecord = devState.friendRequestRecords.get(String(req.params.requestId));
+  if (!requestRecord) {
+    return sendError(res, "Friend request not found", 404);
+  }
+  if (![String(requestRecord.senderId), String(requestRecord.receiverId)].includes(String(req.user.id))) {
+    return sendError(res, "You cannot cancel this friend request", 403);
+  }
+
+  removeFriendRequestRecord(requestRecord.id);
+  const payload = {
+    requestId: requestRecord.id,
+    senderId: requestRecord.senderId,
+    receiverId: requestRecord.receiverId,
+    timestamp: Date.now(),
+  };
+  webSocketService.sendToUser(requestRecord.senderId, "friend:rejected", payload);
+  webSocketService.sendToUser(requestRecord.receiverId, "friend:rejected", payload);
+
+  return sendSuccess(res, { requestId: requestRecord.id, deleted: true }, 200, "Friend request cancelled");
+});
+
+app.delete("/api/friends/:friendId", apiLimiter, authMiddleware, (req, res) => {
+  const friendId = String(req.params.friendId);
+  removeFriendRelationship(req.user.id, friendId);
+  const payload = {
+    userId: req.user.id,
+    friendId,
+    timestamp: Date.now(),
+  };
+  webSocketService.sendToUser(req.user.id, "friend:removed", payload);
+  webSocketService.sendToUser(friendId, "friend:removed", payload);
+  return sendSuccess(res, { deleted: true, friendId }, 200, "Friend removed");
+});
+
+app.post("/api/friends/:friendId/block", apiLimiter, authMiddleware, (req, res) => {
+  const friendId = String(req.params.friendId);
+  removeFriendRelationship(req.user.id, friendId);
+  const payload = {
+    userId: req.user.id,
+    friendId,
+    blocked: true,
+    timestamp: Date.now(),
+  };
+  webSocketService.sendToUser(req.user.id, "friend:blocked", payload);
+  webSocketService.sendToUser(friendId, "friend:blocked", payload);
+  return sendSuccess(res, { blocked: true, friendId }, 200, "User blocked");
 });
 
 app.get("/api/groups/invites/user", apiLimiter, authMiddleware, (req, res) => {
@@ -1181,7 +1922,10 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
 
   const createdAt = new Date().toISOString();
   const messageId = `msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-  const delivered = receiverId ? webSocketService.isUserOnline(receiverId) : false;
+  const recipientIds = participantIds.filter((participantId) => String(participantId) !== senderId);
+  const delivered = recipientIds.length > 0
+    ? recipientIds.every((participantId) => webSocketService.isUserOnline(participantId))
+    : false;
   const message = {
     id: messageId,
     localId,
@@ -1211,9 +1955,10 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     }
   });
 
-  if (receiverId) {
-    webSocketService.sendToUser(receiverId, "new_message", message);
-  }
+  recipientIds.forEach((participantId) => {
+    webSocketService.sendToUser(participantId, "new_message", message);
+    webSocketService.sendToUser(participantId, "message:new", message);
+  });
 
   webSocketService.sendToUser(senderId, "message_sent", {
     messageId,

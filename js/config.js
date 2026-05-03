@@ -11,7 +11,11 @@ window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) 
 };
 
 window.__getApiOrigin = window.__getApiOrigin || function() {
-    return window.__isLocalEnvironment() ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com';
+    const currentOrigin = window.location && /^https?:$/i.test(window.location.protocol)
+        ? window.location.origin
+        : '';
+    if (currentOrigin) return currentOrigin;
+    return window.__isLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
 };
 
 window.__getApiBase = window.__getApiBase || function() {
