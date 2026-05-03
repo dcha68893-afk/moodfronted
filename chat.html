@@ -2765,6 +2765,8 @@
     <script src="js/app.offline.bootstrap.js"></script>
     <script src="js/app.core.eventbus.js"></script>
     <script src="js/app.core.store.js"></script>
+    <!-- Socket.IO client — must load BEFORE app.realtime.socket.js so window.io is available -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
     <script src="js/app.realtime.socket.js"></script>
     <!-- OFFLINE-FIRST LAYER -->
     <script src="js/localStore.messages.js"></script>

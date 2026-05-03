@@ -2991,6 +2991,11 @@ function handleBulkUpload(e) {
 window._publishListingFromModal = function() { return publishListingFromModal(); };
 async function publishListingFromModal() {
     const activeTab = UIState.createListingActiveTab || 'service';
+    console.log('[PUBLISH] Starting publish, activeTab:', activeTab);
+    
+    // Check we have a function to call
+    console.log('[PUBLISH] createServiceListing available:', typeof createServiceListing);
+    console.log('[PUBLISH] DOM.serviceTitle:', DOM.serviceTitle?.value);
 
     // ── Immediate visual feedback — disable button while working ──────────────
     const publishBtn = document.getElementById('publishListingBtn');
@@ -3042,10 +3047,15 @@ async function publishListingFromModal() {
                   });
 
             if (listing) {
+                console.log('[PUBLISH] ✅ Listing created:', listing.id);
+                showNotification('Listing published! 🎉', 'success');
                 hideCreateListingModal();
                 resetCreateListingForm();
                 UIPipeline.syncFromCoreGlobals();
                 UIPipeline.liveUpdate();
+            } else {
+                console.warn('[PUBLISH] createServiceListing returned null/undefined');
+                showNotification('Could not publish listing. Check console for details.', 'error');
             }
             return;
         }
@@ -3103,8 +3113,8 @@ async function publishListingFromModal() {
         showNotification('Tab "' + activeTab + '" is not yet supported', 'info');
 
     } catch (err) {
-        if (window.__TOOLS_DEBUG__) console.error('[publishListingFromModal] Error:', err.message);
-        showNotification('Failed to publish listing. Please try again.', 'error');
+        console.error('[PUBLISH] ERROR:', err.message, err);
+        showNotification('Failed to publish: ' + (err.message || 'Unknown error'), 'error');
     } finally {
         // Always restore publish button
         if (publishBtn) {

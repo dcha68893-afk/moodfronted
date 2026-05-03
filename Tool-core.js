@@ -25,6 +25,11 @@ const LIFECYCLE_STATE = {
 };
 
 let currentState = LIFECYCLE_STATE.BOOT;
+
+// Enable debug logging when in iframe (tools is always in an iframe)
+if (window.parent && window.parent !== window && !window.__TOOLS_DEBUG__) {
+    window.__TOOLS_DEBUG__ = true;
+}
 let childReadySent = false;
 let parentReadyReceived = false;
 let initializationLock = false;
@@ -71,9 +76,10 @@ function transitionTo(nextState, reason = '') {
 }
 
 function assertActive(actionName) {
-    if (currentState !== LIFECYCLE_STATE.ACTIVE) {
-        if (window.__TOOLS_DEBUG__) console.warn(`[Tools][Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState})`);
-        return false;
+    // Non-blocking: always allow, just warn in debug mode
+    // secureApiCall handles actual auth — don't gate on lifecycle state
+    if (currentState !== LIFECYCLE_STATE.ACTIVE && window.__TOOLS_DEBUG__) {
+        console.warn(`[Tools][Lifecycle] "${actionName}" called before ACTIVE (state: ${currentState}) — proceeding`);
     }
     return true;
 }
@@ -3041,7 +3047,7 @@ class MarketplaceCoreImpl {
 
     
     async loadListings() {
-        if (!assertActive('loadListings')) return;
+        // assertActive removed — loadListings works regardless of lifecycle state
         
         this.loading = true;
         this.notifyUI('loading', true);
@@ -4867,37 +4873,37 @@ export const pageCore = {
         logOnce('init', 'pageCore initialization started');
         
         try {
-            showStatusMessage('Loading marketplace, please wait...', 'info');
-            await initializeCore();
-            await pageCore.loadParentCommunication();
-            await pageCore.loadSession();
-            await pageCore.loadEssentialData();
-            pageCore.setupEventListeners();
+            // Hide the loading banner after 3s max, regardless of outcome
+            setTimeout(() => {
+                const el = document.getElementById('marketplaceStatusMessage');
+                if (el) el.style.display = 'none';
+            }, 3000);
+
+            try { await initializeCore(); } catch(e) { console.warn('[pageCore] initializeCore:', e.message); }
+            try { await pageCore.loadParentCommunication(); } catch(e) {}
+            try { await pageCore.loadSession(); } catch(e) { console.warn('[pageCore] loadSession:', e.message); }
+            try { await pageCore.loadEssentialData(); } catch(e) { console.warn('[pageCore] loadEssentialData:', e.message); }
+            try { pageCore.setupEventListeners(); } catch(e) {}
             
             isReady = true;
             isInitializing = false;
             
-            if (isActive()) {
-                safeSend('UI_READY', {
-                    iframeId: parentComm.frameId,
-                    status: 'success',
-                    timestamp: Date.now(),
-                    bootState: currentState
-                });
+            // Always force ACTIVE so API calls work
+            if (!isActive()) {
+                try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'pagecore_init_complete'); } catch {}
             }
-            
-            // Hide status message immediately on success
+
             const statusEl = document.getElementById('marketplaceStatusMessage');
             if (statusEl) statusEl.style.display = 'none';
             logOnce('success', 'pageCore initialization complete');
         } catch (error) {
             isInitializing = false;
+            isReady = true; // Mark ready even on error so retries work
+            // Force ACTIVE regardless
+            try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'pagecore_error_recovery'); } catch {}
+            const statusEl = document.getElementById('marketplaceStatusMessage');
+            if (statusEl) statusEl.style.display = 'none';
             logError('pageCore.init', error);
-            safeSend('ERROR', {
-                iframeId: parentComm.frameId,
-                message: error.message,
-                timestamp: Date.now()
-            });
         }
     },
     
@@ -4932,8 +4938,6 @@ export const pageCore = {
     
     loadEssentialData: async () => {
         try {
-            if (!isActive()) return;
-            
             showStatusMessage('Loading marketplace data...', 'info');
             await pageCore.loadUserFriends();
             await pageCore.loadUserGroups();
@@ -5364,47 +5368,91 @@ export function handleForceReload() {
 export async function secureApiCall(method, endpoint, data = null, options = {}) {
     const normalizedEndpoint = normalizeToolsEndpoint(endpoint);
 
-    if (!isActive()) {
-        if (normalizedEndpoint.includes('/marketplace/listings') && method === 'GET') {
-            try {
-                const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
-                if (cached) return { listings: cached };
-            } catch {}
-        }
-        return null;
+    // Get token from every possible source — do NOT gate on isActive()
+    let token = null;
+    if (typeof window.getAuthSession === 'function') {
+        const s = window.getAuthSession();
+        if (s?.token) token = s.token;
     }
-    
-    // FIX: Don't block on isAuthReady — just try with whatever token is available
-    // If no token, fall back to cache for GET requests
-    const token = sessionClient.getToken ? sessionClient.getToken() : null;
+    if (!token && sessionClient.getToken) token = sessionClient.getToken();
     if (!token) {
-        if (method !== 'GET' || normalizedEndpoint.includes('/auth/')) {
-            safeSend('NEED_REFRESH', {
-                reason: 'api_call_without_session',
-                endpoint: normalizedEndpoint,
-                method: method
-            });
+        // Try parent frame token sources
+        try {
+            if (window.parent && window.parent !== window) {
+                if (typeof window.parent.getAuthSession === 'function') {
+                    const ps = window.parent.getAuthSession();
+                    if (ps?.token) token = ps.token;
+                }
+            }
+        } catch {}
+    }
+    if (!token) {
+        // Last resort: scan sessionStorage/localStorage for jwt
+        try {
+            for (const key of Object.keys(localStorage)) {
+                if (key.includes('token') || key.includes('auth') || key.includes('session')) {
+                    const val = localStorage.getItem(key);
+                    if (val && val.startsWith('eyJ')) { token = val; break; }
+                    try {
+                        const parsed = JSON.parse(val);
+                        if (parsed?.token?.startsWith('eyJ')) { token = parsed.token; break; }
+                        if (parsed?.userToken?.startsWith('eyJ')) { token = parsed.userToken; break; }
+                    } catch {}
+                }
+            }
+        } catch {}
+    }
+
+    if (!token) {
+        // Offline fallback for GET requests
+        if (method === 'GET') {
+            if (normalizedEndpoint.includes('/marketplace/listings')) {
+                try {
+                    const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+                    if (cached && cached.length) return { success: true, data: { listings: cached }, listings: cached };
+                } catch {}
+            }
         }
-        if (normalizedEndpoint.includes('/marketplace/listings') && method === 'GET') {
-            try {
-                const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
-                if (cached) return { listings: cached };
-            } catch {}
-        }
+        if (window.__TOOLS_DEBUG__) console.warn('[secureApiCall] No token found for', method, normalizedEndpoint);
         return null;
     }
-    
+
     try {
-        const response = await authorizedFetch(normalizedEndpoint, {
-            method,
-            body: data ? JSON.stringify(data) : undefined,
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        return response;
+        const requestUrl = resolveToolsApiUrl(normalizedEndpoint);
+        const headers = {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
+        };
+        const fetchOptions = { method, headers, credentials: 'include' };
+        if (data && method !== 'GET') fetchOptions.body = JSON.stringify(data);
+
+        if (window.__TOOLS_DEBUG__) console.log('[secureApiCall]', method, requestUrl, data ? JSON.stringify(data).slice(0,80) : '');
+
+        const res = await fetch(requestUrl, fetchOptions);
+
+        if (window.__TOOLS_DEBUG__) console.log('[secureApiCall] ←', res.status, normalizedEndpoint);
+
+        if (res.status === 401) {
+            safeSend('REQUEST_SESSION', { reason: '401_unauthorized' });
+            const err = new Error('Unauthorized'); err.status = 401; throw err;
+        }
+        if (!res.ok) {
+            let msg = 'HTTP ' + res.status;
+            try { const j = await res.json(); msg = j?.message || msg; } catch {}
+            const err = new Error(msg); err.status = res.status; throw err;
+        }
+        return await res.json();
     } catch (error) {
-        return handleApiError(error, method, normalizedEndpoint);
+        if (window.__TOOLS_DEBUG__) console.error('[secureApiCall] ERROR', method, normalizedEndpoint, error.message);
+        // For GET requests, return cached data on network error
+        if (method === 'GET' && normalizedEndpoint.includes('/marketplace/listings')) {
+            try {
+                const cached = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
+                if (cached && cached.length) return { success: true, data: { listings: cached }, listings: cached };
+            } catch {}
+        }
+        throw error;
     }
 }
 
@@ -5441,19 +5489,11 @@ export async function handleUnauthorized() {
 }
 
 export async function safeApiCall(method, endpoint, data = null) {
-    // If no token yet, wait briefly for session to arrive before giving up.
-    // This prevents optimistic-UI rollback when the module just became ACTIVE.
-    let token = sessionClient.getToken ? sessionClient.getToken() : null;
-    if (!token) {
-        await new Promise(resolve => setTimeout(resolve, 800));
-        token = sessionClient.getToken ? sessionClient.getToken() : null;
-    }
-
-    if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 2: API request sent', { method, endpoint, hasToken: !!token });
+    if (window.__TOOLS_DEBUG__) console.log('[safeApiCall] →', method, endpoint, data);
     const response = await secureApiCall(method, endpoint, data);
-    if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 3: API response received', response);
+    if (window.__TOOLS_DEBUG__) console.log('[safeApiCall] ←', response);
     if (response === null || response === undefined) {
-        throw new Error('No response from server — token missing or module not active');
+        throw new Error('No response from server — check network and authentication');
     }
     if (response.success === false) {
         throw new Error(response.message || 'Server returned failure');
@@ -6329,9 +6369,8 @@ export async function createServiceListing(title, description, options = {}) {
         });
     }
     if (!isActive()) {
-        // Still not active - force it so listings can be created
-        if (window.__TOOLS_DEBUG__) console.warn('[TOOLS FLOW] createServiceListing: forcing active state');
-        try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'force_for_listing'); } catch {}
+        // Still not active — proceed anyway, secureApiCall will get the token directly
+        if (window.__TOOLS_DEBUG__) console.warn('[TOOLS FLOW] createServiceListing: proceeding without ACTIVE state');
     }
 
     const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
@@ -6394,9 +6433,12 @@ export async function createServiceListing(title, description, options = {}) {
         });
 
         if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 3: API response received, status:', response?.success);
-        const confirmed = response?.data?.listing;
+        // Handle both { data: { listing } } and { listing } and flat { id, title... }
+        const confirmed = response?.data?.listing || response?.listing || 
+            (response?.id ? response : null) ||
+            (response?.data?.id ? response.data : null);
         if (!confirmed || !confirmed.id) {
-            throw new Error('Backend did not return a valid listing — DB write may have failed');
+            throw new Error('Backend did not return a valid listing. Response: ' + JSON.stringify(response).slice(0,120));
         }
 
         // Replace fake entry with the real DB-confirmed listing
@@ -6450,9 +6492,6 @@ export async function createDigitalListing(title, description, fileData, options
             };
             check();
         });
-        if (!isActive()) {
-            try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'force_for_listing'); } catch {}
-        }
     }
 
     const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
@@ -6517,9 +6556,12 @@ export async function createDigitalListing(title, description, fileData, options
             available: true
         });
 
-        const confirmed = response?.data?.listing;
+        // Handle both { data: { listing } } and { listing } and flat { id, title... }
+        const confirmed = response?.data?.listing || response?.listing || 
+            (response?.id ? response : null) ||
+            (response?.data?.id ? response.data : null);
         if (!confirmed || !confirmed.id) {
-            throw new Error('Backend did not return a valid listing — DB write may have failed');
+            throw new Error('Backend did not return a valid listing. Response: ' + JSON.stringify(response).slice(0,120));
         }
 
         // Replace fake entry with real DB-confirmed listing

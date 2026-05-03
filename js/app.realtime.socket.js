@@ -13,8 +13,11 @@
     'use strict';
 
     // ── Socket.IO client loader ───────────────────────────────────────────────
-    let socketIOClient = null;
-    let useRawWebSocket = true;
+    // Grab the Socket.IO client from window.io (loaded via <script> in chat.html).
+    // We check immediately and also poll in waitForSocketIO() in case the CDN
+    // script hasn't finished loading by the time this IIFE runs.
+    let socketIOClient = (typeof window.io === 'function') ? window.io : null;
+    let useRawWebSocket = false; // FIXED: always use Socket.IO; raw WS is a last-resort only
 
     // ── Singleton guard ───────────────────────────────────────────────────────
     if (window.KynectaRealtime && window.KynectaRealtime.__hardened) {
@@ -361,9 +364,12 @@
             this._emitStateChange();
 
             try {
-                if (socketIOClient && !useRawWebSocket) {
+                // Always prefer Socket.IO — only fall back to raw WS if the
+                // socket.io client library failed to load (CDN down, etc.)
+                if (socketIOClient) {
                     await this._connectSocketIO();
                 } else {
+                    console.warn('[Realtime] Socket.IO client not loaded — falling back to raw WebSocket');
                     await this._connectRawWebSocket();
                 }
             } catch (err) {
@@ -379,7 +385,7 @@
             }
 
             const socketOptions = {
-                transports: ['websocket', 'polling'],
+                transports: ['polling', 'websocket'], // polling first — establishes session even if WS upgrade blocked on Render, then auto-upgrades
                 timeout: SOCKET_CONFIG.connectionTimeout,
                 reconnection: false  // we manage reconnection ourselves
             };
@@ -700,15 +706,17 @@
                 this._emitStateChange();
 
                 if (!this._degradedRecoveryTimer) {
+                    const recoveryDelay = 60000; // wait 60s before attempting recovery
+                    console.log(`[Realtime] DEGRADED — will attempt recovery in ${recoveryDelay / 1000}s`);
                     this._degradedRecoveryTimer = setTimeout(() => {
                         this._degradedRecoveryTimer = null;
-                        if (this._state === CONNECTION_STATE.DEGRADED) {
+                        if (this._state === CONNECTION_STATE.DEGRADED && navigator.onLine) {
                             console.log('[Realtime] Auto-recovering from DEGRADED...');
                             this._reconnectAttempts = 0;
                             this._consecutiveErrors = 0;
                             this._connectInternal();
                         }
-                    }, 30000);
+                    }, recoveryDelay);
                 }
             }
         }
@@ -1063,12 +1071,25 @@
 
     function waitForSocketIO() {
         return new Promise((resolve) => {
+            // Already loaded
             if (socketIOClient) { resolve(); return; }
-            const deadline = Date.now() + 3000;
+            // Try picking it up from window.io immediately
+            if (typeof window.io === 'function') {
+                socketIOClient = window.io;
+                resolve();
+                return;
+            }
+            // Poll until window.io appears (CDN script loads async) or timeout
+            const deadline = Date.now() + 5000;
             const iv = setInterval(() => {
-                if (socketIOClient || Date.now() >= deadline) {
+                if (typeof window.io === 'function') {
+                    socketIOClient = window.io;
                     clearInterval(iv);
                     resolve();
+                } else if (Date.now() >= deadline) {
+                    clearInterval(iv);
+                    console.warn('[Realtime] socket.io client not found after 5s — will use raw WebSocket fallback');
+                    resolve(); // resolve anyway; _connectInternal will fall back to raw WS
                 }
             }, 50);
         });
