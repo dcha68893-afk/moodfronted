@@ -2135,12 +2135,11 @@
                         const activeChat = (core && core.getCurrentConversation && core.getCurrentConversation()) || (core && core.ChatManager && core.ChatManager.getActiveChat && core.ChatManager.getActiveChat());
                         const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
                         const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-
                         if (activeChat && incomingChatId && String(activeChat.id) === incomingChatId) {
                             const allMsgs = (core && core.getMessages && core.getMessages()) || [];
                             const chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChatId; }).sort(function(a,b) { return _ts(a)-_ts(b); });
                             UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core && core.getCurrentUser && core.getCurrentUser());
-                            try { var c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(function(){c.scrollTop=c.scrollHeight;}); } catch(_e){}
+                            try { var c2=document.getElementById('messagesContainer'); if(c2) requestAnimationFrame(function(){c2.scrollTop=c2.scrollHeight;}); } catch(_e){}
                         }
 
                     }
@@ -3042,12 +3041,11 @@
                         const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
                         const incomingChatId = String(e.detail.message.chatId || e.detail.message.conversationId || '');
                         const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-
                         if (currentChat && incomingChatId && String(currentChat.id) === incomingChatId) {
                             const allMsgs = (core && core.getMessages && core.getMessages()) || [];
                             const chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChatId; }).sort(function(a,b) { return _ts(a)-_ts(b); });
                             this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, core && core.getCurrentUser && core.getCurrentUser());
-                            try { var c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(function(){c.scrollTop=c.scrollHeight;}); } catch(_e){}
+                            try { var c3=document.getElementById('messagesContainer'); if(c3) requestAnimationFrame(function(){c3.scrollTop=c3.scrollHeight;}); } catch(_e){}
                         }
 
                     }
@@ -3279,21 +3277,18 @@
         _groupMessagesByDate(messages) {
 
             const core = getMessagesCore();
-
+            // FIX: parse ISO strings to ms for reliable numeric sort
             const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-
-            // \u2705 FIX: Sort ALL messages by server timestamp ASC - strict timeline, no sender grouping
+            // Sort ALL messages by server timestamp ASC — strict timeline, no sender batching
             const sorted = [...messages].sort(function(a, b) { return _ts(a) - _ts(b); });
-
-            // Map preserves insertion order = date chronological order
+            // Map preserves insertion order = chronological date order
             const groupMap = new Map();
-            sorted.forEach(function(message) {
-                const ms = _ts(message);
+            sorted.forEach(function(msg) {
+                const ms = _ts(msg);
                 const date = (core && core.formatDate) ? core.formatDate(ms) : new Date(ms).toLocaleDateString();
                 if (!groupMap.has(date)) groupMap.set(date, []);
-                groupMap.get(date).push(message);
+                groupMap.get(date).push(msg);
             });
-
             const groups = {};
             groupMap.forEach(function(msgs, date) { groups[date] = msgs; });
             return groups;
@@ -3330,8 +3325,7 @@
                 const rPreview = rContent.length > 60 ? rContent.substring(0, 60) + '\u2026' : rContent;
                 const rId = String(rd.id || rd.messageId || '');
                 replyIndicator = '<div class="reply-quote" onclick="window.messagesUI&&window.messagesUI.scrollToMessage&&window.messagesUI.scrollToMessage(\'' + rId + '\')">' +
-                    '<div class="reply-quote-bar"></div>' +
-                    '<div class="reply-quote-body">' +
+                    '<div class="reply-quote-bar"></div><div class="reply-quote-body">' +
                     (rSender ? '<span class="reply-quote-sender">' + rSender + '</span>' : '') +
                     '<span class="reply-quote-text">' + (rPreview || '\uD83D\uDCCE Media') + '</span>' +
                     '</div></div>';
@@ -3999,10 +3993,8 @@
         _renderReactions(reactions) {
 
             if (!reactions || typeof reactions !== 'object' || Object.keys(reactions).length === 0) return '';
-
             const core = getMessagesCore();
             const myId = (core && core.getCurrentUserId && core.getCurrentUserId()) || null;
-
             let html = '<div class="message-reactions">';
             for (const [emoji, users] of Object.entries(reactions)) {
                 const ul = Array.isArray(users) ? users : (users ? [users] : []);
@@ -4569,13 +4561,14 @@
 
 
 
-            const _op2 = chat.otherParticipant || null;
+            // FIX: prefer firstName+lastName for real name display
+            const _op = chat.otherParticipant || null;
             const friendName = (function() {
-                if (_op2) {
-                    const fn = _op2.firstName || ''; const ln = _op2.lastName || '';
-                    if (fn && ln) return (fn + ' ' + ln).trim();
+                if (_op) {
+                    const fn = (_op.firstName || '').trim(); const ln = (_op.lastName || '').trim();
+                    if (fn && ln) return fn + ' ' + ln;
                     if (fn) return fn;
-                    return _op2.displayName || _op2.username || chat.friendName || chat.name || 'User';
+                    return _op.displayName || _op.username || chat.friendName || chat.name || 'User';
                 }
                 return chat.friendName || chat.name || 'User';
             })();
@@ -7036,14 +7029,8 @@ Type: ${message.type || 'text'}`;
                         UIStateManager.setState('chatVisible', false);
 
                         // Notify parent that chat list is now shown (clears chat-panel-active on mobile)
-                        try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch(_) {}
 
-                        // ✅ FIX: Also remove directly from parent body so nav re-appears immediately
-                        try {
-                            if (window.parent && window.parent !== window && window.parent.document && window.parent.document.body) {
-                                window.parent.document.body.classList.remove('chat-panel-active');
-                            }
-                        } catch (_e) {}
+                        try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch(_) {}
 
                     });
 
@@ -9639,54 +9626,29 @@ Type: ${message.type || 'text'}`;
         async _handleMultiSend() {
 
             const input = UIFailsafe.safeGetElement('multiSendInput');
-
-            const content2 = (input && input.value && input.value.trim()) || '';
-
+            const msgContent = (input && input.value && input.value.trim()) || '';
             const core = getMessagesCore();
-
-            if (!content2) { UIRenderer.showNotification('Please type a message first', 'error'); return; }
-
+            if (!msgContent) { UIRenderer.showNotification('Please type a message first', 'error'); return; }
             const selectedChats = core && core.multiSendSelectedChats;
-
-            if (!selectedChats || selectedChats.size === 0) { UIRenderer.showNotification('Select at least one chat to send to', 'error'); return; }
-
+            if (!selectedChats || selectedChats.size === 0) { UIRenderer.showNotification('Select at least one chat', 'error'); return; }
             const chatIds = Array.from(selectedChats);
-
-            let successCount = 0, failCount = 0;
-
-            // \u2705 ROOT-FIX: Call API directly per chat — avoids active-chat dependency in core.sendMessage()
-            // core.sendMessage() adds the optimistic to _messages using the ACTIVE chat's id,
-            // so all multi-send bubbles appear in the currently open chat instead of their targets.
+            let ok = 0, fail = 0;
+            // FIX: direct API call per target chat — core.sendMessage() binds to active chat
             let token = null;
-            try {
-                const sess = core && core.getSession && core.getSession();
-                token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
-            } catch(_e) {}
-
+            try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
             for (const chatId of chatIds) {
                 try {
-                    const resp = await fetch('/api/messages', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-                        body: JSON.stringify({ chatId: chatId, content: content2, type: 'text' })
-                    });
+                    const resp = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify({ chatId: chatId, content: msgContent, type: 'text' }) });
                     const result = await resp.json().catch(function() { return {}; });
-                    if (resp.ok && result.success !== false) { successCount++; }
-                    else { failCount++; console.warn('[MultiSend] Failed for chatId ' + chatId + ':', result); }
-                } catch (e) {
-                    failCount++;
-                    console.warn('[MultiSend] Error for chatId ' + chatId + ':', e);
-                }
+                    if (resp.ok && result.success !== false) { ok++; } else { fail++; console.warn('[MultiSend] Failed chatId=' + chatId, result); }
+                } catch(e) { fail++; console.warn('[MultiSend] Error chatId=' + chatId, e); }
             }
-
-            if (successCount > 0) {
-                UIRenderer.showNotification('\u2713 Sent to ' + successCount + ' chat' + (successCount > 1 ? 's' : '') + (failCount > 0 ? ' (' + failCount + ' failed)' : ''));
+            if (ok > 0) {
+                UIRenderer.showNotification('\u2713 Sent to ' + ok + ' chat' + (ok > 1 ? 's' : '') + (fail > 0 ? ' (' + fail + ' failed)' : ''));
                 this._closeMultiSend();
                 if (input) input.value = '';
                 if (core && core.multiSendSelectedChats) core.multiSendSelectedChats.clear();
-            } else {
-                UIRenderer.showNotification('Failed to send messages \u2014 please try again', 'error');
-            }
+            } else { UIRenderer.showNotification('Failed to send — please try again', 'error'); }
 
         },
 
@@ -10741,24 +10703,25 @@ Type: ${message.type || 'text'}`;
 
         setupAutoOpenChat();
 
-        // \u2705 FIX: Real-time receive render
+        // FIX: Receiver real-time render
         window.addEventListener('kyn:incomingMessage', function(evt) {
             var detail = evt.detail || {};
-            var incomingMsg = detail.message || detail;
-            var incomingChat = String(incomingMsg.chatId || incomingMsg.conversationId || detail.chatId || '');
-            if (!incomingChat) return;
+            var inMsg = detail.message || detail;
+            var inChat = String(inMsg.chatId || inMsg.conversationId || detail.chatId || '');
+            if (!inChat) return;
             var core = getMessagesCore();
-            var activeChat = (core && core.getCurrentConversation && core.getCurrentConversation()) || (core && core.ChatManager && core.ChatManager.getActiveChat && core.ChatManager.getActiveChat());
+            var active = (core && core.getCurrentConversation && core.getCurrentConversation()) || (core && core.ChatManager && core.ChatManager.getActiveChat && core.ChatManager.getActiveChat());
             var _ts = function(m) { var v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-            if (activeChat && String(activeChat.id) === incomingChat) {
-                var allMsgs = (core && core.getMessages && core.getMessages()) || (core && core.ChatManager && core.ChatManager._messages) || [];
-                var chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChat; }).sort(function(a,b) { return _ts(a)-_ts(b); });
-                UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core && core.getCurrentUser && core.getCurrentUser());
-                try { var c=document.getElementById('messagesContainer'); if(c) requestAnimationFrame(function(){c.scrollTop=c.scrollHeight;}); } catch(_e){}
+            if (active && String(active.id) === inChat) {
+                var all = (core && core.getMessages && core.getMessages()) || (core && core.ChatManager && core.ChatManager._messages) || [];
+                var msgs = all.filter(function(m) { return String(m.chatId || m.conversationId || '') === inChat; }).sort(function(a,b) { return _ts(a)-_ts(b); });
+                UIRenderer.renderMessages(msgs.length > 0 ? msgs : all, active, core && core.getCurrentUser && core.getCurrentUser());
+                try { var el=document.getElementById('messagesContainer'); if(el) requestAnimationFrame(function(){el.scrollTop=el.scrollHeight;}); } catch(_e){}
             } else {
-                UIRenderer.renderChatsList((core && core.getConversations && core.getConversations()) || [], core && core.getCurrentConversation && core.getCurrentConversation(), (core && core.getCurrentCategory && core.getCurrentCategory()) || 'all', {});
+                UIRenderer.renderChatsList((core && core.getConversations && core.getConversations()) || [], active, (core && core.getCurrentCategory && core.getCurrentCategory()) || 'all', {});
             }
         });
+        // FIX: scroll to quoted reply message
         window.messagesUI = window.messagesUI || {};
         window.messagesUI.scrollToMessage = function(messageId) {
             if (!messageId) return;
@@ -11595,15 +11558,6 @@ Type: ${message.type || 'text'}`;
                 // FIX: Send ACK immediately so chat.html retry loop stops on attempt 1
 
                 try { window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*'); } catch(_) {}
-
-                // ✅ FIX: Also directly set chat-panel-active on parent body for instant nav hide on mobile
-                if (window.innerWidth <= 768) {
-                    try {
-                        if (window.parent && window.parent !== window && window.parent.document && window.parent.document.body) {
-                            window.parent.document.body.classList.add('chat-panel-active');
-                        }
-                    } catch (_e) {}
-                }
 
                 
 

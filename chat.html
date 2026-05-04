@@ -4572,6 +4572,20 @@
 
                 if (data.type === 'API_RESPONSE' && data.status === 401) await refreshAuthToken();
 
+                // FIX: Bounce REACTION_UPDATED (from ADD_REACTION API echo) back into
+                // messages iframe as message:reaction so the sender sees their own emoji
+                // immediately from the server-confirmed reactions object
+                if (data.type === 'REACTION_UPDATED') {
+                    const msgIframe3 = document.getElementById('messagesIframe');
+                    if (msgIframe3 && msgIframe3.contentWindow) {
+                        msgIframe3.contentWindow.postMessage({
+                            type: 'message:reaction',
+                            payload: data.payload,
+                            source: 'ws-bridge'
+                        }, '*');
+                    }
+                }
+
                 if (data.type === 'REFRESH_CALL_HISTORY') {
                     const userId = data.payload?.userId || cachedUserId;
                     if (userId) await refreshCallHistoryForUser(userId);
@@ -4924,6 +4938,25 @@
                 window.wsService.on('message:reaction', _fwdReaction);
                 window.wsService.on('message_reaction',  _fwdReaction);
 
+                // FIX: Forward presence (online/offline) into messages iframe
+                // so the chat header and sidebar dots update in real-time.
+                // Previously presence only updated FriendManager but never
+                // triggered renderChatsList so dots stayed stuck on 'offline'.
+                function _fwdPresenceToMessages(presPayload) {
+                    const msgIframe4 = document.getElementById('messagesIframe');
+                    if (!msgIframe4 || !msgIframe4.contentWindow) return;
+                    const uid = presPayload && (presPayload.userId || presPayload.id || presPayload.friendId);
+                    if (!uid) return;
+                    const online = presPayload && (presPayload.online !== false && presPayload.status !== 'offline');
+                    msgIframe4.contentWindow.postMessage({
+                        type: online ? 'FRIEND_ONLINE' : 'FRIEND_OFFLINE',
+                        payload: { userId: uid, online: online, lastSeen: presPayload.lastSeen || null }
+                    }, '*');
+                }
+                window.wsService.on('user:online',     _fwdPresenceToMessages);
+                window.wsService.on('user:offline',    function(d) { _fwdPresenceToMessages(Object.assign({}, d, { online: false })); });
+                window.wsService.on('presence:update', _fwdPresenceToMessages);
+
                 // ── GROUP REAL-TIME BRIDGE ────────────────────────────────────
                 // Forward all group WebSocket events from wsService into groupIframe
                 // via postMessage. The group module runs inside an iframe — parent-window
@@ -5004,8 +5037,16 @@
                 function _fwdToFriendIframe(type, payload) {
                     const ff = document.getElementById('friendsIframe');
                     if (ff && ff.contentWindow) {
+                        // FIX: Always include a unique `id` field.
+                        // friend-core.js _handleMessage calls markMessageProcessed(message.id).
+                        // Without an id it stores `undefined` in the dedup Set, causing EVERY
+                        // subsequent id-less message to be silently dropped forever.
                         ff.contentWindow.postMessage({
-                            type, payload, source: 'ws-bridge', timestamp: Date.now()
+                            type,
+                            payload,
+                            source:    'ws-bridge',
+                            timestamp: Date.now(),
+                            id:        'fwd_' + type + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
                         }, '*');
                     }
                 }

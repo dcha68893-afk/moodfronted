@@ -1770,8 +1770,16 @@ function handleRealtimeStatusEvent(eventName, data) {
                     }
                     // Notify UI layer
                     if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                    if (typeof renderStatusListInstantlyUI === 'function') {
-                        renderStatusListInstantlyUI();
+                    const _renderFn = (typeof renderStatusListInstantlyUI === 'function' && renderStatusListInstantlyUI)
+                        || (typeof window !== 'undefined' && window.renderStatusListInstantlyUI);
+                    if (_renderFn) {
+                        _renderFn();
+                    } else {
+                        // status-ui.js may not have run yet — retry once after a tick
+                        setTimeout(() => {
+                            const fn = typeof window !== 'undefined' && window.renderStatusListInstantlyUI;
+                            if (fn) fn();
+                        }, 100);
                     }
                     if (window.parent && window.parent !== window) {
                         try {
@@ -1801,9 +1809,10 @@ function handleRealtimeStatusEvent(eventName, data) {
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
                 if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                if (typeof renderStatusListInstantlyUI === 'function') {
-                    renderStatusListInstantlyUI();
-                }
+                const _delRenderFn = (typeof renderStatusListInstantlyUI === 'function' && renderStatusListInstantlyUI)
+                    || (typeof window !== 'undefined' && window.renderStatusListInstantlyUI);
+                if (_delRenderFn) _delRenderFn();
+                else setTimeout(() => { const fn = window && window.renderStatusListInstantlyUI; if (fn) fn(); }, 100);
                 logStatus('SUCCESS', `Realtime: status ${statusId} deleted`);
                 break;
             }

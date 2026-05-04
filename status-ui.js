@@ -6752,35 +6752,25 @@ function retryBindHandlers() {
 window.retryBindHandlers = retryBindHandlers;
 
 // =============================================
-// EXPORTS
 // =============================================
-export {
-    showStatusViewer,
-    showNotification,
-    updateCurrentSectionUI as updateCurrentSection,
-    renderStatusListInstantlyUI as renderStatusListInstantly,
-    updateMyStatusPreviewUI as updateMyStatusPreview,
-    updateMoodChartUI as updateMoodChart,
-    enableProtectedUI,
-    disableProtectedUI,
-    showLogoutState,
-    showReconnectionState,
-    renderStatusesListUI as renderStatusesList,
-    cleanupUI,
-    UILogger,
-    UIStateManager,
-    ResponsiveEngine,
-    uiErrorBoundary,
-    UIFailsafe,
-    retryHandshake,
-    showDiagnosticOverlay,
-    ensureUIActive
-};
+// EXPORTS — removed ES module export syntax since this file
+// is loaded as a regular <script defer> (not type="module").
+// All public API is exposed via window.statusUI below.
+// =============================================
 
 // =============================================
 // GLOBAL EXPOSURE
 // =============================================
 if (typeof window !== 'undefined') {
+    // Explicitly expose key functions on window so status-core.js
+    // (a separate regular script) can call them by name
+    window.renderStatusListInstantlyUI  = renderStatusListInstantlyUI;
+    window.renderStatusesListUI         = renderStatusesListUI;
+    window.updateMyStatusPreviewUI      = updateMyStatusPreviewUI;
+    window.showStatusGroupViewer        = showStatusGroupViewer;
+    window.showStatusViewer             = showStatusViewer;
+    window.showNotification             = showNotification;
+    window.closeViewer                  = closeViewer;
     try {
         window.statusUI = {
             showStatusViewer,

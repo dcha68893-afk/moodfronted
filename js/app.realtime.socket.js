@@ -1216,33 +1216,23 @@
                 //  user:${originalRequesterId} with { requestId, friendId, user }.
                 //  We just need to make sure the iframe sees both event name forms.
                 if (eventType === 'friend:accepted') {
-                    const msgs = [
-                        { type: 'REALTIME_EVENT:friend:accepted',           payload: payload || {} },
-                        { type: 'REALTIME_EVENT:FRIEND_REQUEST_ACCEPTED',   payload: payload || {} },
-                        { type: 'FRIEND_REQUEST_ACCEPTED',                  payload: payload || {} },
-                    ];
+                    var _accId = 'rt_facc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
-                        msgs.forEach(function (m) {
-                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
-                        });
+                        try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:accepted', payload: payload || {}, id: _accId }, '*'); } catch (_) {}
                     });
                     return;
                 }
 
-                // FIX: friend:request from server → translate to FRIEND_REQUEST_RECEIVED
-                // Send the payload BOTH flat (for handlers that read payload directly)
-                // and nested under .request (for handlers that do payload.request).
-                // The updated friend-core.js FRIEND_REQUEST_RECEIVED handler handles both.
+                // FIX: Send ONE message with a unique id per event.
+                // Sending multiple messages for the same event causes the dedup Set in
+                // friend-core.js to mark the first id-less message and then silently drop
+                // every subsequent one. One message + unique id = clean dedup.
+                // The REALTIME_EVENT: unwrapper in friend-core.js translates
+                // 'friend:request' → FRIEND_REQUEST_RECEIVED automatically.
                 if (eventType === 'friend:request') {
-                    const msgs = [
-                        { type: 'REALTIME_EVENT:friend:request',          payload: payload || {} },
-                        { type: 'REALTIME_EVENT:FRIEND_REQUEST_RECEIVED', payload: payload || {} },
-                        { type: 'FRIEND_REQUEST_RECEIVED',                payload: payload || {} },
-                    ];
+                    var _reqId = 'rt_freq_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
-                        msgs.forEach(function (m) {
-                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
-                        });
+                        try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:request', payload: payload || {}, id: _reqId }, '*'); } catch (_) {}
                     });
                     return;
                 }
@@ -1252,35 +1242,26 @@
                 // listens for. Without this the friend list never updates in the iframes
                 // when someone unfriends you (or when you unfriend someone on another tab).
                 if (eventType === 'friend:removed') {
-                    const msgs = [
-                        { type: 'REALTIME_EVENT:friend:removed',  payload: payload || {} },
-                        { type: 'FRIEND_REMOVED',                 payload: payload || {} },
-                    ];
+                    var _remId = 'rt_frem_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
-                        msgs.forEach(function (m) {
-                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
-                        });
+                        try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:removed', payload: payload || {}, id: _remId }, '*'); } catch (_) {}
                     });
                     return;
                 }
 
-                // FIX: friend:rejected → also send FRIEND_REQUEST_REJECTED for friend-core listeners
                 if (eventType === 'friend:rejected') {
-                    const msgs = [
-                        { type: 'REALTIME_EVENT:friend:rejected',       payload: payload || {} },
-                        { type: 'FRIEND_REQUEST_REJECTED',              payload: payload || {} },
-                    ];
+                    var _rejId = 'rt_frej_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
-                        msgs.forEach(function (m) {
-                            try { frame.contentWindow.postMessage(m, '*'); } catch (_) {}
-                        });
+                        try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:rejected', payload: payload || {}, id: _rejId }, '*'); } catch (_) {}
                     });
                     return;
                 }
 
+                var _evId = 'rt_ev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                 const eventMsg = {
-                    type: `REALTIME_EVENT:${eventType}`,
-                    payload: payload || {}
+                    type:    'REALTIME_EVENT:' + eventType,
+                    payload: payload || {},
+                    id:      _evId
                 };
                 iframes.forEach(function (frame) {
                     try { frame.contentWindow.postMessage(eventMsg, '*'); } catch (_) {}

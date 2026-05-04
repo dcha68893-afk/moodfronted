@@ -67,7 +67,7 @@
     /** Minimal authenticated fetch wrapper — mirrors secureApiCall but works standalone */
     async function apiFetch(path, opts = {}) {
         const token = getToken();
-        // FIX: resolve against backend origin, not iframe origin
+        // FIX: resolve against backend origin — not the iframe's own origin
         const base = (
             window.__apiBaseUrl ||
             (window.parent && window.parent.__apiBaseUrl) ||
@@ -76,9 +76,9 @@
             window.__API_BASE_URL || window.API_BASE_URL ||
             'https://moodchat-fy56.onrender.com/api'
         );
-        // base already ends in /api — strip leading /api from path to avoid double
-        const clean = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
-        const url   = base.replace(/\/$/, '') + (clean.startsWith('/') ? clean : '/' + clean);
+        // base ends in /api — strip leading /api from path to avoid double
+        const cleanPath = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
+        const url = base.replace(/\/$/, '') + (cleanPath.startsWith('/') ? cleanPath : '/' + cleanPath);
         const res   = await fetch(url, {
             ...opts,
             headers: {
@@ -146,19 +146,14 @@
         const discBtn = freshClone(qs('#discoverGroupsBtn'));
         if (discBtn) {
             discBtn.addEventListener('click', () => {
-                const modal = qs('#discoverGroupsModal') || qs('[id*="discover"][id*="modal"]');
-                if (modal) {
-                    modal.classList.add('active');
-                    modal.style.display = 'flex';
-                    loadDiscoverGroups();
+                // group.html has a dedicated #discoverPanel sheet
+                const panel = qs('#discoverPanel');
+                if (panel) {
+                    panel.style.display = 'flex';
+                    loadDiscoverPanel();
                 } else {
-                    // Fall back: show allGroupsSection with public filter
-                    qsa('.category-btn').forEach(b => b.classList.remove('active'));
-                    const allTab = qs('#allTab');
-                    if (allTab) allTab.classList.add('active');
-                    qsa('.groups-section').forEach(s => s.classList.remove('active'));
-                    const allSec = qs('#allGroupsSection');
-                    if (allSec) allSec.classList.add('active');
+                    const modal = qs('#discoverGroupsModal') || qs('[id*="discover"][id*="modal"]');
+                    if (modal) { modal.classList.add('active'); modal.style.display = 'flex'; }
                     loadDiscoverGroups('inline');
                 }
             });
@@ -168,14 +163,18 @@
         const invBtn = freshClone(qs('#groupInvitesBtn'));
         if (invBtn) {
             invBtn.addEventListener('click', () => {
-                // Switch to Invites tab
-                qsa('.category-btn').forEach(b => b.classList.remove('active'));
-                const invTab = qs('#invitesTab');
-                if (invTab) invTab.classList.add('active');
-                qsa('.groups-section').forEach(s => s.classList.remove('active'));
-                const invSec = qs('#invitesSection');
-                if (invSec) invSec.classList.add('active');
-                loadUserInvitations();
+                // group.html has a dedicated #invitePanel sheet
+                const panel = qs('#invitePanel');
+                if (panel) {
+                    panel.style.display = 'flex';
+                    loadInvitePanel('received');
+                } else {
+                    qsa('.category-btn').forEach(b => b.classList.remove('active'));
+                    const invTab = qs('#invitesTab'); if (invTab) invTab.classList.add('active');
+                    qsa('.groups-section').forEach(s => s.classList.remove('active'));
+                    const invSec = qs('#invitesSection'); if (invSec) invSec.classList.add('active');
+                    loadUserInvitations();
+                }
             });
         }
 
@@ -183,13 +182,14 @@
         const evtBtn = freshClone(qs('#groupEventsBtn'));
         if (evtBtn) {
             evtBtn.addEventListener('click', () => {
-                const modal = qs('#groupEventsModal') || qs('[id*="events"][id*="modal"]');
-                if (modal) {
-                    modal.classList.add('active');
-                    modal.style.display = 'flex';
-                    loadGroupEvents();
+                // group.html has a dedicated #eventsPanel sheet
+                const panel = qs('#eventsPanel');
+                if (panel) {
+                    panel.style.display = 'flex';
+                    loadGroupEventsPanel();
                 } else {
-                    // Inline fallback in details panel
+                    const modal = qs('#groupEventsModal') || qs('[id*="events"][id*="modal"]');
+                    if (modal) { modal.classList.add('active'); modal.style.display = 'flex'; }
                     loadGroupEvents('inline');
                 }
             });
@@ -374,17 +374,11 @@
     /* ═══════════════════════════════════════════════════════════════════════
        FIX 2 + 3 + 4 + 5 + 6 — Create Group Modal
        ═══════════════════════════════════════════════════════════════════════ */
-    /* FIX: Tab/Cancel/Create wiring via event delegation on document.
-     * cloneNode approach fails because:
-     *  a) patch runs before ES modules finish loading (plain <script> vs type="module")
-     *  b) other patches also clone the same nodes, wiping our listeners
-     * Event delegation is immune to both — registered once, catches all future clicks. */
-    function patchCreateGroupModal() {
-        // Event delegation is set up once at document level (see below).
-        // This function is kept so boot() can call it without error.
-    }
-
-    // ── CREATE GROUP TAB DELEGATION ──────────────────────────────────────
+    /* FIX: Use event delegation on document instead of cloneNode.
+     * cloneNode on tab buttons fails because:
+     *  a) This plain <script> runs BEFORE type="module" scripts finish
+     *  b) Other patches also clone the same nodes, wiping listeners
+     * Event delegation in capture phase is immune to both. */
     const CREATE_TAB_MAP = {
         basic   : 'basicTab',
         settings: 'settingsTab',
@@ -393,57 +387,86 @@
         members : 'membersTab',
     };
 
-    document.addEventListener('click', function _createGroupTabDelegate(e) {
+    // Tab switching — capture phase so it fires before any other handler
+    document.addEventListener('click', function _tabDelegate(e) {
         const tab = e.target.closest('.create-group-tab');
         if (!tab) return;
         const modal = tab.closest('#createGroupModal');
         if (!modal) return;
         e.stopPropagation();
-
-        // Deactivate all tabs + panels
         qsa('.create-group-tab', modal).forEach(b => b.classList.remove('active'));
-        Object.values(CREATE_TAB_MAP).forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.remove('active');
-        });
-        // Also deactivate any .create-group-tab-content not in the map
         qsa('.create-group-tab-content', modal).forEach(s => s.classList.remove('active'));
-
-        // Activate clicked tab
+        Object.values(CREATE_TAB_MAP).forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove('active'); });
         tab.classList.add('active');
         const key = tab.dataset.tab || '';
-        const targetId = CREATE_TAB_MAP[key];
-        if (targetId) {
-            const panel = document.getElementById(targetId);
-            if (panel) panel.classList.add('active');
-        }
+        const panel = document.getElementById(CREATE_TAB_MAP[key]);
+        if (panel) panel.classList.add('active');
         if (key === 'members') loadFriendsForMembersTab();
-    }, true); // capture phase so it fires before any other handler
+    }, true);
 
-    // ── CANCEL / CLOSE DELEGATION ────────────────────────────────────────
-    document.addEventListener('click', function _createGroupCloseDelegate(e) {
+    // Cancel / Close delegation
+    document.addEventListener('click', function _cancelDelegate(e) {
         if (e.target.closest('#cancelCreateGroupBtn') || e.target.closest('#closeCreateGroupModal')) {
-            const modal = document.getElementById('createGroupModal');
-            if (modal && (modal.classList.contains('active') || modal.style.display === 'flex')) {
-                closeCreateGroupModal();
-            }
+            const m = document.getElementById('createGroupModal');
+            if (m && (m.classList.contains('active') || m.style.display === 'flex')) closeCreateGroupModal();
         }
     });
 
-    // ── BACKDROP CLICK ───────────────────────────────────────────────────
-    document.addEventListener('click', function _createGroupBackdropDelegate(e) {
-        const modal = document.getElementById('createGroupModal');
-        if (modal && e.target === modal) closeCreateGroupModal();
+    // Backdrop click
+    document.addEventListener('click', function _backdropDelegate(e) {
+        const m = document.getElementById('createGroupModal');
+        if (m && e.target === m) closeCreateGroupModal();
     });
 
-    // ── CREATE BUTTON DELEGATION ─────────────────────────────────────────
+    // Create button delegation
     let _patchSubmitting = false;
-    document.addEventListener('click', function _createGroupSubmitDelegate(e) {
+    document.addEventListener('click', function _submitDelegate(e) {
         if (!e.target.closest('#createGroupBtnModal')) return;
         if (_patchSubmitting) return;
         _patchSubmitting = true;
         handleCreateGroupSubmit().finally(() => { _patchSubmitting = false; });
     });
+
+    // Mood option selection delegation
+    document.addEventListener('click', function _moodDelegate(e) {
+        const mood = e.target.closest('.mood-option');
+        if (!mood || !mood.closest('#createGroupModal')) return;
+        qsa('.mood-option', document.getElementById('createGroupModal')).forEach(m => m.classList.remove('selected'));
+        mood.classList.add('selected');
+    });
+
+    // Theme option selection delegation
+    document.addEventListener('click', function _themeDelegate(e) {
+        const theme = e.target.closest('.theme-option');
+        if (!theme || !theme.closest('#createGroupModal')) return;
+        qsa('.theme-option', document.getElementById('createGroupModal')).forEach(t => { t.style.border = '2px solid var(--border-color)'; t.querySelector('.fas')&&(t.querySelector('.fas').style.display='none'); });
+        theme.style.border = '3px solid #fff';
+        const check = theme.querySelector('.fas'); if (check) check.style.display = '';
+    });
+
+    // Events panel tab switching
+    document.addEventListener('click', function _evtTabDelegate(e) {
+        const tab = e.target.closest('.evt-tab');
+        if (!tab) return;
+        qsa('.evt-tab').forEach(t => { t.style.background='var(--bg-tertiary,#252537)'; t.style.color='var(--text-secondary)'; });
+        tab.style.background = 'var(--primary-color,#6c63ff)'; tab.style.color = '#fff';
+        const key = tab.dataset.etab;
+        if (key === 'upcoming' || key === 'past') loadGroupEventsPanel(key);
+        else if (key === 'create') showCreateEventForm();
+    });
+
+    // Invite panel tab switching
+    document.addEventListener('click', function _invTabDelegate(e) {
+        const tab = e.target.closest('.inv-tab');
+        if (!tab) return;
+        qsa('.inv-tab').forEach(t => { t.style.background='var(--bg-tertiary,#252537)'; t.style.color='var(--text-secondary)'; });
+        tab.style.background = 'var(--primary-color,#6c63ff)'; tab.style.color = '#fff';
+        loadInvitePanel(tab.dataset.invtab);
+    });
+
+    function patchCreateGroupModal() {
+        // Event delegation handles everything — this is kept so boot() can call it
+    }
 
     function closeCreateGroupModal() {
         const modal = qs('#createGroupModal');
@@ -571,26 +594,41 @@
 
     /* FIX 6 — Create Group submit handler */
     async function handleCreateGroupSubmit() {
-        const nameInput  = qs('#groupNameInput') || qs('#createGroupName') || qs('input[placeholder*="name" i]', qs('#createGroupModal'));
-        const descInput  = qs('#groupDescInput') || qs('#createGroupDescription') || qs('textarea', qs('#createGroupModal'));
-        const privSelect = qs('#groupPrivacySelect') || qs('#createGroupPrivacy') || qs('select[id*="privacy"]', qs('#createGroupModal'));
-        const purposeSel = qs('#createGroupPurpose') || qs('[id*="purpose"]', qs('#createGroupModal'));
-        const moodSel    = qs('.mood-select-btn.active', qs('#createGroupModal'));
-        const postRule   = qs('#postingRulesSelect') || qs('[id*="postingRule"]', qs('#createGroupModal'));
-        const themeSelected = qs('.theme-btn.active, .create-group-theme-btn.active', qs('#createGroupModal'));
+        const modal      = qs('#createGroupModal');
+        const nameInput  = qs('#groupNameInput', modal);
+        const descInput  = qs('#groupDescriptionInput', modal);
+        const typeSelect = qs('#groupTypeSelect', modal);
+        const purposeSel = qs('#groupPurposeSelect', modal);
+        const moodSel    = qs('.mood-option.selected', modal);
+        const postRule   = qs('#postingRulesSelect', modal);
+        const themeSelected = qs('.theme-option.selected', modal);
+        const welcomeMsg = qs('#welcomeMessageInput', modal);
+        const groupRules = qs('#groupRulesInput', modal);
+        const approveChk = qs('#approveNewMembers', modal);
+        const adminPost  = qs('#onlyAdminsCanPost', modal);
+        const allowMedia = qs('#allowMediaSharing', modal);
+        const topicInput = qs('#groupTopicInput', modal);
 
-        const name = nameInput?.value?.trim() || '';
-        if (!name) { toast('Group name is required', 'error'); nameInput?.focus(); return; }
+        const name = nameInput ? nameInput.value.trim() : '';
+        if (!name) { toast('Group name is required', 'error'); if (nameInput) nameInput.focus(); return; }
 
         const groupData = {
             name,
-            description : descInput?.value?.trim() || '',
-            privacy      : privSelect?.value || 'private',
-            purpose      : purposeSel?.value || '',
-            mood         : moodSel?.dataset?.mood || '',
-            postingRule  : postRule?.value || 'everyone',
-            theme        : themeSelected?.dataset?.theme || 'blue',
-            memberIds    : [...(window.__pendingGroupInvites || [])],
+            description    : descInput  ? descInput.value.trim()  : '',
+            privacy        : typeSelect ? typeSelect.value        : 'private',
+            purpose        : purposeSel ? purposeSel.value        : '',
+            mood           : moodSel    ? (moodSel.dataset.mood || '') : '',
+            postingRule    : postRule   ? postRule.value          : 'everyone',
+            theme          : themeSelected ? (themeSelected.dataset.theme || 'blue') : 'blue',
+            topic          : topicInput ? topicInput.value.trim() : '',
+            welcomeMessage : welcomeMsg ? welcomeMsg.value.trim() : '',
+            rules          : groupRules ? groupRules.value.trim() : '',
+            settings: {
+                requireAdminApproval: approveChk ? approveChk.checked : false,
+                onlyAdminsCanPost   : adminPost  ? adminPost.checked  : false,
+                allowMedia          : allowMedia ? allowMedia.checked : true,
+            },
+            memberIds      : window.__pendingGroupInvites ? window.__pendingGroupInvites.slice() : [],
         };
 
         const submitBtn = qs('#createGroupBtnModal');
@@ -598,10 +636,10 @@
 
         try {
             let result;
-            // Prefer GroupCore
-            if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
-                result = await window.GroupCore.createGroup(groupData);
-                // Handle offline/queued case — still treat as success
+            const GC = window.GroupCore;
+            if (GC && typeof GC.createGroup === 'function') {
+                result = await GC.createGroup(groupData);
+                // Handle queued (offline / session not ready) — still success
                 if (result && result.queued) {
                     toast('Group queued — will create when connected', 'info');
                     closeCreateGroupModal();
@@ -613,23 +651,18 @@
             } else if (typeof createGroupOnline === 'function') {
                 result = await createGroupOnline(groupData);
             } else {
-                // Direct API fallback — GroupCore not yet loaded
+                // Direct API fallback — GroupCore module not yet loaded
                 result = await apiFetch('/groups', { method: 'POST', body: groupData });
             }
-            toast('Group "' + groupData.name + '" created!');
+            toast(`Group "${groupData.name}" created!`);
             closeCreateGroupModal();
-
-            // Send invites if any
-            const pendingInvites = window.__pendingGroupInvites || [];
-            if (pendingInvites.length) {
-                window.__pendingGroupInvites = [];
-            }
+            window.__pendingGroupInvites = [];
 
             // Refresh group list
             try {
-                if (typeof updateGroupCounts === 'function') updateGroupCounts();
+                if (typeof updateGroupCounts   === 'function') updateGroupCounts();
                 if (typeof updateCurrentSection === 'function') updateCurrentSection();
-                if (window.GroupCore?.requestGroupList) window.GroupCore.requestGroupList().catch(() => {});
+                if (GC && GC.requestGroupList) GC.requestGroupList().catch(() => {});
             } catch (_) {}
         } catch (err) {
             toast(err.message || 'Failed to create group', 'error');
@@ -940,6 +973,220 @@
         // (log suppressed)
     }
 
+    /* ─── Discover panel loader (targets #discoverPanel in group.html) ─────── */
+    async function loadDiscoverPanel() {
+        const resultsEl = qs('#discoverResults');
+        if (!resultsEl) { loadDiscoverGroups(); return; }
+        resultsEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+
+        // Wire search input
+        const searchInput = qs('#discoverSearchInput');
+        if (searchInput && !searchInput._patched) {
+            searchInput._patched = true;
+            let _timer;
+            searchInput.addEventListener('input', () => {
+                clearTimeout(_timer);
+                _timer = setTimeout(() => _doDiscoverSearch(searchInput.value, resultsEl), 350);
+            });
+        }
+        await _doDiscoverSearch('', resultsEl);
+    }
+
+    async function _doDiscoverSearch(q, resultsEl) {
+        const purpose = (qs('.discover-filter.active') || qs('.discover-filter[data-purpose="all"]'))?.dataset?.purpose || 'all';
+        const params  = new URLSearchParams({ limit: '30' });
+        if (q) params.set('search', q);
+        if (purpose && purpose !== 'all') params.set('purpose', purpose);
+        try {
+            const data   = await apiFetch('/groups?' + params.toString());
+            const groups = (data.data && (data.data.groups || data.data)) || data.groups || [];
+            if (!groups.length) { resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">No groups found</div>'; return; }
+            resultsEl.innerHTML = '';
+            groups.forEach(g => {
+                const card = document.createElement('div');
+                card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color)';
+                const initials = (g.name || 'G').slice(0,2).toUpperCase();
+                card.innerHTML = `<div style="width:42px;height:42px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">${initials}</div>`
+                    + `<div style="flex:1;min-width:0"><div style="font-weight:600">${g.name||'Unnamed'}</div>`
+                    + `<div style="font-size:12px;color:var(--text-secondary)">${g.memberCount||0} members${g.purpose?' · '+g.purpose:''}</div>`
+                    + `<div style="font-size:12px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(g.description||'').slice(0,60)}</div></div>`
+                    + `<button data-gid="${g.id}" style="padding:7px 14px;border-radius:8px;border:none;background:var(--primary-color,#6c63ff);color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px">Join</button>`;
+                card.querySelector('button').addEventListener('click', async (e) => {
+                    e.currentTarget.disabled = true; e.currentTarget.textContent = '...';
+                    try { await apiFetch('/groups/'+g.id+'/join',{method:'POST'}); toast('Join request sent!'); e.currentTarget.textContent='✓ Sent'; }
+                    catch(err) { toast(err.message||'Failed','error'); e.currentTarget.disabled=false; e.currentTarget.textContent='Join'; }
+                });
+                resultsEl.appendChild(card);
+            });
+        } catch(err) {
+            resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">' + (err.message||'Failed to load') + '</div>';
+        }
+    }
+
+    /* ─── Events panel loader (targets #eventsPanel in group.html) ─────────── */
+    async function loadGroupEventsPanel(tab) {
+        tab = tab || 'upcoming';
+        const bodyEl = qs('#eventsBody');
+        if (!bodyEl) { loadGroupEvents(); return; }
+        bodyEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+        try {
+            const params = new URLSearchParams({ limit: '20' });
+            if (tab === 'upcoming') params.set('upcoming', 'true');
+            else params.set('past', 'true');
+            const data   = await apiFetch('/groups/events?' + params.toString());
+            const events = (data.data && (data.data.events || data.data)) || data.events || [];
+            if (!events.length) { bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">No events found</div>'; return; }
+            bodyEl.innerHTML = '';
+            events.forEach(ev => {
+                const d = ev.date || ev.startDate || ev.scheduledAt;
+                const card = document.createElement('div');
+                card.style.cssText = 'padding:14px 0;border-bottom:1px solid var(--border-color)';
+                card.innerHTML = `<div style="font-weight:600;margin-bottom:4px">${ev.title||'Untitled Event'}</div>`
+                    + `<div style="font-size:12px;color:var(--text-secondary)">${d ? new Date(d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Date TBD'}${ev.groupName?' · '+ev.groupName:''}</div>`
+                    + (ev.description ? `<div style="font-size:13px;margin-top:6px">${ev.description.slice(0,120)}</div>` : '');
+                bodyEl.appendChild(card);
+            });
+        } catch(err) {
+            bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">' + (err.message||'Failed to load events') + '</div>';
+        }
+    }
+
+    function showCreateEventForm() {
+        const bodyEl = qs('#eventsBody');
+        if (!bodyEl) return;
+        bodyEl.innerHTML = `
+            <div style="padding:16px 0">
+                <div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Event Title *</label>
+                <input id="_evt_title" type="text" placeholder="Enter event name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;box-sizing:border-box"></div>
+                <div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Group</label>
+                <select id="_evt_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px"><option value="">Select group...</option></select></div>
+                <div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Date &amp; Time *</label>
+                <input id="_evt_date" type="datetime-local" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;box-sizing:border-box"></div>
+                <div style="margin-bottom:20px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Description</label>
+                <textarea id="_evt_desc" rows="3" placeholder="Event description..." style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;resize:vertical;box-sizing:border-box"></textarea></div>
+                <button id="_evt_submit" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--primary-color,#6c63ff);color:#fff;font-weight:700;font-size:15px;cursor:pointer">Create Event</button>
+            </div>`;
+        // Populate group select
+        const sel = qs('#_evt_group');
+        const myGroups = (window.GroupCore && window.GroupCore.myGroups) || [];
+        myGroups.forEach(g => { const o = document.createElement('option'); o.value=g.id; o.textContent=g.name; sel.appendChild(o); });
+        qs('#_evt_submit').addEventListener('click', async () => {
+            const title = qs('#_evt_title').value.trim();
+            const gid   = qs('#_evt_group').value;
+            const dt    = qs('#_evt_date').value;
+            const desc  = qs('#_evt_desc').value.trim();
+            if (!title) { toast('Event title required','error'); return; }
+            if (!gid)   { toast('Select a group','error'); return; }
+            if (!dt)    { toast('Select date & time','error'); return; }
+            try {
+                await apiFetch('/groups/'+gid+'/events', { method:'POST', body:{ title, description:desc, date:new Date(dt).toISOString() } });
+                toast('Event created!'); loadGroupEventsPanel('upcoming');
+                qsa('.evt-tab').forEach((t,i)=>{ t.style.background=i===0?'var(--primary-color,#6c63ff)':'var(--bg-tertiary,#252537)'; t.style.color=i===0?'#fff':'var(--text-secondary)'; });
+            } catch(err) { toast(err.message||'Failed','error'); }
+        });
+    }
+
+    /* ─── Invite panel loader (targets #invitePanel in group.html) ─────────── */
+    async function loadInvitePanel(tab) {
+        tab = tab || 'received';
+        const bodyEl = qs('#inviteBody');
+        if (!bodyEl) { if (tab === 'received') loadUserInvitations(); return; }
+        bodyEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+        if (tab === 'received') {
+            try {
+                const data    = await apiFetch('/group-members/invitations?status=pending');
+                const invites = (data.data && (data.data.invitations || data.data)) || data.invitations || [];
+                if (!invites.length) { bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)"><i class="fas fa-envelope" style="font-size:28px;opacity:.4;display:block;margin-bottom:10px"></i>No pending invitations</div>'; return; }
+                bodyEl.innerHTML = '';
+                invites.forEach(inv => {
+                    const gname = (inv.group && inv.group.name) || inv.groupName || 'Group';
+                    const sname = (inv.inviter && inv.inviter.username) || inv.inviterName || 'Someone';
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--border-color)';
+                    row.innerHTML = `<div style="width:42px;height:42px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">${gname.slice(0,2).toUpperCase()}</div>`
+                        + `<div style="flex:1"><div style="font-weight:600">${gname}</div><div style="font-size:12px;color:var(--text-secondary)">From ${sname}</div></div>`
+                        + `<button data-action="accept" style="padding:7px 14px;border-radius:8px;border:none;background:#43a047;color:#fff;font-weight:600;cursor:pointer;margin-right:6px;font-size:13px">Accept</button>`
+                        + `<button data-action="decline" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border-color);background:none;color:var(--text-secondary);font-weight:600;cursor:pointer;font-size:13px">Decline</button>`;
+                    row.querySelector('[data-action="accept"]').addEventListener('click', async (e) => {
+                        e.currentTarget.disabled=true; e.currentTarget.textContent='...';
+                        try { await apiFetch('/group-members/invitations/'+inv.id+'/accept',{method:'POST'}); toast('Joined!'); row.remove(); try{if(window.GroupCore&&window.GroupCore.requestGroupList)window.GroupCore.requestGroupList().catch(()=>{})}catch(_){} }
+                        catch(err){toast(err.message||'Failed','error');e.currentTarget.disabled=false;e.currentTarget.textContent='Accept';}
+                    });
+                    row.querySelector('[data-action="decline"]').addEventListener('click', async (e) => {
+                        e.currentTarget.disabled=true;
+                        try { await apiFetch('/group-members/invitations/'+inv.id+'/reject',{method:'POST'}); row.remove(); }
+                        catch(err){toast(err.message||'Failed','error');e.currentTarget.disabled=false;}
+                    });
+                    bodyEl.appendChild(row);
+                });
+            } catch(err) { bodyEl.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-secondary)">'+(err.message||'Failed to load')+'</div>'; }
+        } else if (tab === 'sent') {
+            try {
+                const data    = await apiFetch('/group-members/invitations?status=pending&sent=true');
+                const invites = (data.data && (data.data.invitations || data.data)) || data.invitations || [];
+                if (!invites.length) { bodyEl.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-secondary)">No sent invitations</div>'; return; }
+                bodyEl.innerHTML='';
+                invites.forEach(inv => {
+                    const uname = (inv.invitee && inv.invitee.username) || inv.inviteeName || 'User';
+                    const gname = (inv.group && inv.group.name) || 'Group';
+                    const row = document.createElement('div');
+                    row.style.cssText='display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--border-color)';
+                    row.innerHTML=`<div style="flex:1"><div style="font-weight:600">${uname}</div><div style="font-size:12px;color:var(--text-secondary)">${gname} · Pending</div></div>`
+                        +`<button data-action="cancel" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border-color);background:none;color:var(--text-secondary);cursor:pointer;font-size:12px">Cancel</button>`;
+                    row.querySelector('[data-action="cancel"]').addEventListener('click', async(e)=>{
+                        e.currentTarget.disabled=true;
+                        try{await apiFetch('/group-members/invitations/'+inv.id,{method:'DELETE'});row.remove();}
+                        catch(err){toast(err.message||'Failed','error');e.currentTarget.disabled=false;}
+                    });
+                    bodyEl.appendChild(row);
+                });
+            } catch(err){bodyEl.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-secondary)">'+(err.message||'Failed')+'</div>';}
+        } else if (tab === 'invite') {
+            // Show friend list to invite to a group
+            bodyEl.innerHTML = '<div style="padding:14px 0"><select id="_inv_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;margin-bottom:12px"><option value="">Select group to invite to...</option></select><div id="_inv_friends" style="max-height:300px;overflow-y:auto"></div><button id="_inv_send" style="width:100%;padding:11px;margin-top:14px;border-radius:8px;border:none;background:var(--primary-color,#6c63ff);color:#fff;font-weight:700;font-size:14px;cursor:pointer">Send Invitations</button></div>';
+            const gsel = qs('#_inv_group');
+            const myGroups = (window.GroupCore && window.GroupCore.myGroups) || (window.GroupCore && window.GroupCore.adminGroups) || [];
+            myGroups.forEach(g=>{const o=document.createElement('option');o.value=g.id;o.textContent=g.name;gsel.appendChild(o);});
+            // Load friends
+            const fDiv = qs('#_inv_friends');
+            fDiv.innerHTML='<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin"></i></div>';
+            let _selFriends=[];
+            try {
+                const data=await apiFetch('/friends');
+                const friends=(data.data&&(data.data.friends||data.data))||data.friends||[];
+                if(!friends.length){fDiv.innerHTML='<div style="text-align:center;padding:16px;color:var(--text-secondary)">No friends to invite</div>';return;}
+                fDiv.innerHTML='';
+                friends.forEach(f=>{
+                    const nm=f.displayName||([f.firstName,f.lastName].filter(Boolean).join(' '))||f.username||'User';
+                    const row=document.createElement('div');
+                    row.style.cssText='display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;cursor:pointer;margin-bottom:4px';
+                    row.innerHTML=`<div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">${nm.slice(0,2).toUpperCase()}</div><div style="flex:1">${nm}</div><div class="_chk" style="width:20px;height:20px;border-radius:50%;border:2px solid var(--border-color)"></div>`;
+                    row.addEventListener('click',()=>{
+                        const id=String(f.id||f.userId);
+                        const idx=_selFriends.indexOf(id);
+                        if(idx===-1){_selFriends.push(id);row.style.background='rgba(102,126,234,.1)';const c=row.querySelector('._chk');c.style.background='#667eea';c.style.borderColor='#667eea';c.textContent='✓';c.style.color='#fff';c.style.fontSize='12px';c.style.display='flex';c.style.alignItems='center';c.style.justifyContent='center';}
+                        else{_selFriends.splice(idx,1);row.style.background='';const c=row.querySelector('._chk');c.style.background='';c.style.borderColor='var(--border-color)';c.textContent='';}
+                    });
+                    fDiv.appendChild(row);
+                });
+            }catch(err){fDiv.innerHTML='<div style="padding:16px;text-align:center;color:var(--text-secondary)">'+err.message+'</div>';}
+            qs('#_inv_send').addEventListener('click',async()=>{
+                const gid=gsel.value;
+                if(!gid){toast('Select a group','error');return;}
+                if(!_selFriends.length){toast('Select at least one friend','error');return;}
+                const btn=qs('#_inv_send');btn.disabled=true;btn.textContent='Sending...';
+                let ok=0,fail=0;
+                for(const fid of _selFriends){
+                    try{await apiFetch('/group-members/'+gid+'/invitations',{method:'POST',body:{inviteeId:parseInt(fid),role:'member'}});ok++;}
+                    catch(_){fail++;}
+                }
+                btn.disabled=false;btn.textContent='Send Invitations';
+                toast(ok+' invitation'+(ok!==1?'s':'')+' sent'+(fail?' ('+fail+' failed)':''));
+                _selFriends=[];
+            });
+        }
+    }
+
     /* ─── GroupCore real-time event → UI wiring ─────────────────────────────
      *
      * These bindings are the missing link between GroupCore's in-memory event
@@ -1001,12 +1248,6 @@
                     showNotification(`Group "${newGroup.name}" created!`, 'success');
                 }
             } catch (_) {}
-        });
-
-        // ── group:member-added → refresh counts ──────────────────────────────
-        GC.on('group:member-added', function () {
-            try { if (typeof updateGroupCounts   === 'function') updateGroupCounts();   } catch (_) {}
-            try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
         });
 
         // ── group:message-received → render in open chat or bump badge ──────
@@ -1073,12 +1314,9 @@
         // (log suppressed)
     }
 
-    // FIX: group-ui-patch.js is a plain <script> that executes BEFORE
-    // type="module" scripts (group-core.js, group-ui.js) have run.
-    // Event delegation listeners above don't depend on modules, so they work immediately.
-    // But boot() calls functions (patchQuickActionButtons etc.) that need the DOM ready.
-    // We run boot() on window 'load' to guarantee modules have executed, then
-    // also retry wireGroupCoreEvents() which polls until window.GroupCore exists.
+    // FIX: plain <script> executes BEFORE type="module" scripts.
+    // Event delegation listeners above are registered immediately and work fine.
+    // boot() (which uses cloneNode) must run after modules execute.
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', boot);
     } else if (document.readyState === 'interactive') {

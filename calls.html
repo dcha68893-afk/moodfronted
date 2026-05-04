@@ -233,8 +233,10 @@ window.__CALLS_IFRAME__ = {
                 var _n = window.__activePeerName || window.__incomingCallerName
                     || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
                     || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
-                    || (data && (data.callerName || data.userName || data.name)) || null;
-                var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
+                    || (data && (data.callerName || data.userName || data.name))
+                    || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.pendingCallUser && window.callsUI.UIState.pendingCallUser.userName)
+                    || null;
+                var _t = (window.UIState && window.UIState.callType) || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.callType) || (data && data.callType) || 'voice';
                 var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
                 if (typeof window.transitionToInCall === 'function' && _n) {
                     window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
@@ -563,10 +565,15 @@ function _declineVideoUpgrade() {
         if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted' || t === 'CALL_ACCEPTED') {
             var _pn = window.__activePeerName || window.__incomingCallerName
                 || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.pendingCallUser && window.callsUI.UIState.pendingCallUser.userName)
                 || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || null;
-            var _pt = (window.UIState && window.UIState.callType) || (evt.data.payload && evt.data.payload.callType) || 'voice';
+            var _pt = (window.UIState && window.UIState.callType) || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.callType) || (evt.data.payload && evt.data.payload.callType) || 'voice';
             var _pa = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
-            if (typeof window.transitionToInCall === 'function' && _pn) {
+            // Try UIEventHandlers.handleCallConnected first (sets UIState too)
+            var _UEH = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
+            if (_UEH && typeof _UEH.handleCallConnected === 'function') {
+                _UEH.handleCallConnected({ callerName: _pn, callType: _pt, callId: (evt.data.payload && evt.data.payload.callId) });
+            } else if (typeof window.transitionToInCall === 'function' && _pn) {
                 window.transitionToInCall({ userName: _pn, callType: _pt, userAvatar: _pa });
             } else {
                 showScreen('in-call');
@@ -576,13 +583,25 @@ function _declineVideoUpgrade() {
         if (t === 'CALL_INCOMING' || t === 'call:incoming' || t === 'incoming_call') {
             _handleCoreEvent('incoming_call', evt.data.payload || evt.data.data || evt.data);
         }
-        // Call ended from parent — only reset if we are NOT actively in-call
+        // Call ended from parent — reset both sides
         if (t === 'CALL_ENDED' || t === 'call:ended' || t === 'call_ended') {
-            var _activeInCall = document.getElementById('inCallScreen');
-            // Allow reset only if in-call screen is NOT active
-            // (prevents stale WS echoes from killing an established call)
-            if (!_activeInCall || !_activeInCall.classList.contains('active')) {
-                showScreen('idle');
+            // Stop ringback on caller side
+            if (window._callerRingtone) {
+                try { window._callerRingtone.pause(); } catch(ex) {}
+                if (window._callerRingtone && window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(ex) {} }
+                window._callerRingtone = null;
+            }
+            // Only reset if NOT the same tab that fired the end (to avoid double-reset on the ender)
+            // We detect this by checking if evt.data.source === 'end-btn' — that was THIS side.
+            if (evt.data.source !== 'end-btn') {
+                // Remote peer ended: reset our screens
+                var _ui = window.callsUI;
+                var _UEH = window.UIEventHandlers || (_ui && _ui.UIEventHandlers);
+                if (_UEH && typeof _UEH.handleCallEnded === 'function') {
+                    _UEH.handleCallEnded(evt.data.payload || { reason: 'remote_ended' });
+                } else {
+                    showScreen('idle');
+                }
             }
         }
         // Store call origin so we can navigate back after call
@@ -3629,7 +3648,7 @@ function _declineVideoUpgrade() {
                     <p class="unified-call-type" id="callingType">Voice Call</p>
                     <div class="unified-call-actions">
                         <div class="unified-action-item">
-                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="if(window.showScreen) window.showScreen('idle');">
+                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="if(window._callerRingtone){try{window._callerRingtone.pause();}catch(ex){}if(window._callerRingtone&&window._callerRingtone._ctx){try{window._callerRingtone._ctx.close();}catch(ex){}}window._callerRingtone=null;} if(window.showScreen) window.showScreen('idle');">
                                 <i class="fas fa-phone-slash"></i>
                             </button>
                             <span>Cancel</span>

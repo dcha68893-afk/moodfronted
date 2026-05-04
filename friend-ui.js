@@ -1189,20 +1189,15 @@ export const RenderPipeline = {
                 return;
             }
 
-            // FIX: When data comes from cache/offline or real-time WS, render immediately
-            if (fromCache || isRealtime || canRenderCached()) {
-                // Zero-delay: render synchronously in next microtask
-                this.queueRender('friends', debounce(() => {
-                    if (UIState.activeSection === 'friendsSection') renderFriends();
-                    else renderAllFriendsList();
-                }, 0));
-            } else {
-                this.queueRender('friends', debounce(() => {
-                    if (UIState.activeSection === 'friendsSection') renderFriends();
-                    else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
-                    else renderAllFriendsList();
-                }, 300));
-            }
+            // FIX: Always render regardless of active section — functions are cheap and idempotent.
+            // Previously gated on activeSection which meant a realtime removal/addition
+            // was silently ignored if the user was on a different tab.
+            const _delay = (fromCache || isRealtime) ? 0 : 300;
+            this.queueRender('friends', debounce(() => {
+                renderFriends();
+                renderAllFriendsList();
+                updateFriendCounts();
+            }, _delay));
         });
 
 
@@ -1229,14 +1224,12 @@ export const RenderPipeline = {
             const isRealtime  = event.detail?.realtime === true;
             if (!isUIActive() && !hasRequests && !hasSent && !isRealtime) return;
 
+            // FIX: Always render both lists — receiver may be on friends/all-users tab
+            // when the socket event arrives. Render immediately, section doesn't matter.
             this.queueRender('requests', debounce(() => {
-                if (UIState.activeSection === 'requestsSection') {
-                    renderFriendRequests();
-                    renderSentRequests();  // FIX: always re-render sent requests too
-                } else if (isRealtime) {
-                    // Badge count already updated; also flash the requests tab badge
-                    updateFriendCounts();
-                }
+                renderFriendRequests();
+                renderSentRequests();
+                updateFriendCounts();
             }, isRealtime ? 0 : 300));
         });
 
@@ -1246,10 +1239,9 @@ export const RenderPipeline = {
             const hasSent = (window.sentRequests?.length || sentRequests?.length || 0) > 0;
             if (!isUIActive() && !hasSent) return;
             
+            // FIX: Always render sent requests list regardless of active section
             this.queueRender('sentRequests', debounce(() => {
-                if (UIState.activeSection === 'requestsSection') {
-                    renderSentRequests();
-                }
+                renderSentRequests();
                 updateFriendCounts();
             }, 300));
         });
@@ -1608,19 +1600,17 @@ export const CoreIntegration = {
 
         this.subscribe('requestsUpdated', (event) => {
             const data = this.validateEventData(event);
-            if (data?.requests) {
-                updateFriendCounts();
-                if (UIState.activeSection === 'requestsSection') renderFriendRequests();
-            }
+            // FIX: Always render — section guard was causing receiver to miss incoming requests
+            updateFriendCounts();
+            renderFriendRequests();
+            renderSentRequests();
         });
 
         this.subscribe('sentRequestsUpdated', (event) => {
             const data = this.validateEventData(event);
-            if (data?.requests) {
-                // FIXED: Update the sent requests list and also update counts
-                if (UIState.activeSection === 'requestsSection') renderSentRequests();
-                updateFriendCounts();
-            }
+            // FIX: Always render sent requests regardless of active section
+            renderSentRequests();
+            updateFriendCounts();
         });
 
         this.subscribe('updateCurrentSection', () => updateCurrentSection());

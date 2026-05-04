@@ -1022,10 +1022,12 @@ function generateRequestId() {
 }
 
 function isMessageProcessed(messageId) {
+    if (messageId === undefined || messageId === null) return false; // FIX: never block id-less messages
     return _processedMessageIds.has(messageId);
 }
 
 function markMessageProcessed(messageId) {
+    if (messageId === undefined || messageId === null) return; // FIX: never store undefined/null
     _processedMessageIds.add(messageId);
     if (_processedMessageIds.size > _maxProcessedSize) {
         const toRemove = Array.from(_processedMessageIds).slice(0, 100);
@@ -1921,7 +1923,41 @@ const ParentCommunicationManager = {
                 return;
             }
             
-            // ── FIX: REALTIME_EVENT: prefix — app_realtime_socket.js forwards socket events
+            // ── FIX A: Bare socket event names forwarded directly by chat.html's
+            //    _fwdToFriendIframe() arrive WITHOUT the 'REALTIME_EVENT:' prefix.
+            //    e.g. { type: 'friend:request', payload: {...}, source: 'ws-bridge' }
+            //    These were silently ignored because no handler matched the bare name.
+            //    Remap them to internal types here before any further processing.
+            const _bareSocketMap = {
+                'friend:request':            'FRIEND_REQUEST_RECEIVED',
+                'friend_request':            'FRIEND_REQUEST_RECEIVED',
+                'friendRequest':             'FRIEND_REQUEST_RECEIVED',
+                'friend:accepted':           'FRIEND_REQUEST_ACCEPTED',
+                'friend_accepted':           'FRIEND_REQUEST_ACCEPTED',
+                'friend:request:accepted':   'FRIEND_REQUEST_ACCEPTED',
+                'friend:rejected':           'FRIEND_REQUEST_REJECTED',
+                'friend_rejected':           'FRIEND_REQUEST_REJECTED',
+                'friend:request:rejected':   'FRIEND_REQUEST_REJECTED',
+                'friend:removed':            'FRIEND_REMOVED',
+                'friend_removed':            'FRIEND_REMOVED',
+                'friend:unfriended':         'FRIEND_REMOVED',
+            };
+            if (message.type && _bareSocketMap[message.type]) {
+                const _barePayload = message.payload || {};
+                const _bareMapped  = _bareSocketMap[message.type];
+                ParentCommunicationManager._handleMessage({
+                    origin: event.origin,
+                    data: {
+                        type:       _bareMapped,
+                        payload:    _barePayload,
+                        _unwrapped: true,
+                        id:         'bare_' + _bareMapped + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)
+                    }
+                });
+                return;
+            }
+
+            // ── FIX B: REALTIME_EVENT: prefix — app_realtime_socket.js forwards socket events
             //    as { type: 'REALTIME_EVENT:friend:accepted', payload: {...} }.
             //    Unwrap and re-dispatch as bare internal types so all existing handlers fire.
             if (message.type && message.type.startsWith('REALTIME_EVENT:')) {
@@ -1944,10 +1980,17 @@ const ParentCommunicationManager = {
                 };
                 const mapped = socketToInternal[innerType];
                 if (mapped) {
-                    // Re-invoke this same handler with the unwrapped message
+                    // Re-invoke this same handler with the unwrapped message.
+                    // FIX: always inject a unique id so markMessageProcessed() doesn't
+                    // store undefined and silently block every future id-less message.
                     ParentCommunicationManager._handleMessage({
                         origin: event.origin,
-                        data: { type: mapped, payload: innerPayload, _unwrapped: true }
+                        data: {
+                            type:       mapped,
+                            payload:    innerPayload,
+                            _unwrapped: true,
+                            id:         'unwrap_' + mapped + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)
+                        }
                     });
                 }
                 return;
@@ -2011,6 +2054,34 @@ const ParentCommunicationManager = {
                     FriendCacheManager.setRequest(newRequest);
                     FriendCacheManager.syncToGlobals();
                     FriendCacheManager.persist();
+
+                    // FIX: Also persist to IndexedDB (KynectaFriendsLocalStore) so the
+                    // incoming request survives a page refresh without another API call.
+                    const _lsIncoming = window.KynectaFriendsLocalStore;
+                    if (_lsIncoming && requestId) {
+                        _lsIncoming.ready().then(async () => {
+                            try {
+                                await _lsIncoming.save({
+                                    id:          String(requestId),
+                                    friendId:    String(senderId || requestId),
+                                    userId:      __session.user?.id ? String(__session.user.id) : 'unknown',
+                                    serverId:    String(requestId),
+                                    status:      'pending_received',
+                                    displayName: senderName,
+                                    username:    senderUsername,
+                                    avatar:      senderAvatar,
+                                    isLocalOnly: false,
+                                    createdAt:   newRequest.createdAt,
+                                    updatedAt:   new Date().toISOString(),
+                                });
+                            } catch (_) {}
+                        }).catch(() => {});
+                    }
+
+                    // FIX: Confirm with backend immediately — this also updates the badge
+                    // count from the authoritative server count.
+                    loadFriendRequestsFromBackend().catch(() => {});
+
                     window.dispatchEvent(new CustomEvent('requestsUpdated', {
                         detail: { requests: FriendCacheManager.getAllRequests(), realtime: true }
                     }));
