@@ -7623,17 +7623,20 @@ async function loadFriendRequestsFromBackend() {
             
             console.log(`[loadFriendRequestsFromBackend] Loaded ${formattedRequests.length} incoming requests`);
             
+            // FIX: Always replace cache with authoritative server result — even if 0.
+            // This clears stale phantom requests that were cached from previous optimistic updates.
             FriendCacheManager.setRequests(formattedRequests);
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
-            
+
             window.dispatchEvent(new CustomEvent('requestsUpdated', { 
-                detail: { requests: formattedRequests, count: formattedRequests.length }
+                detail: { requests: formattedRequests, count: formattedRequests.length, authoritative: true }
             }));
             
             return { success: true, count: formattedRequests.length };
         }
         
+        // Server response failed — keep cache but don't overwrite with stale data
         const cached = FriendCacheManager.getAllRequests();
         if (cached.length > 0) {
             FriendCacheManager.syncToGlobals();
@@ -7718,15 +7721,28 @@ async function loadSentRequestsFromBackend() {
             
             console.log(`[loadSentRequestsFromBackend] Loaded ${formattedRequests.length} sent requests`);
             
-            // Update the global sentRequests variable
+            // FIX: Always replace cache with authoritative server result — even if empty (0).
+            // Previously, when server returned 0, the function fell through to the stale
+            // cached value, keeping phantom optimistic records visible in the UI forever.
             sentRequests = formattedRequests;
-            
-            // Update cache
             FriendCacheManager.setSentRequests(formattedRequests);
             FriendCacheManager.syncToGlobals();
             FriendCacheManager.persist();
+
+            // FIX: Also clean up any stale local-only (optimistic) records from IndexedDB
+            // that weren't confirmed by the server.
+            const _ls = window.KynectaFriendsLocalStore;
+            if (_ls && formattedRequests.length === 0) {
+                _ls.ready().then(async () => {
+                    try {
+                        const _pending = await _ls.getPendingSent().catch(() => []);
+                        for (const _p of (_pending || [])) {
+                            if (_p.isLocalOnly) await _ls.hardDelete(_p.id).catch(() => {});
+                        }
+                    } catch (_) {}
+                }).catch(() => {});
+            }
             
-            // Dispatch event for UI update
             window.dispatchEvent(new CustomEvent('sentRequestsUpdated', { 
                 detail: { requests: formattedRequests, count: formattedRequests.length, timestamp: Date.now() }
             }));

@@ -17656,15 +17656,10 @@ initiateCall: async function(callType, participants = []) {
                     callerName: (callsState.callData && (callsState.callData.callerName || callsState.callData.fromUserName)) || ''
                 });
 
-                // Tell parent so caller's iframe sees CALL_ACCEPTED and switches to in-call
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({
-                        type: 'CALL_ACCEPTED',
-                        payload: { callId, callType,
-                            callerName: (callsState.callData && (callsState.callData.callerName || '')) || '' },
-                        source: 'core-accept'
-                    }, '*');
-                }
+                // NOTE: Do NOT postMessage CALL_ACCEPTED to parent here.
+                // The parent chat.html would re-open the calls panel showing the idle
+                // 'Ready to Connect' screen over the in-call screen.
+                // The caller's iframe receives CALL_ACCEPTED via the backend WebSocket.
 
                 return { success: true };
 

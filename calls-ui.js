@@ -572,7 +572,7 @@ const GlobalCallHistory = {
                     g.gain.setValueAtTime(0, ctx.currentTime + 1.0);
                     osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 1.0);
                 });
-                setTimeout(function() { if (active) ring(); }, 4000);
+                setTimeout(function() { if (active) ring(); }, 2000);
             })();
         } catch(e) { /* silent — ringback is cosmetic */ }
     })();
@@ -682,6 +682,13 @@ function transitionToInCall(callInfo) {
     if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
 
     if (window.CallOverlayManager) window.CallOverlayManager.answerCall(callInfo);
+
+    // ── CRITICAL: Make callContainer visible first (parent of all call screens) ──
+    const callContainer = document.getElementById('callContainer');
+    if (callContainer) {
+        callContainer.classList.add('active');
+        callContainer.style.display = 'flex';
+    }
 
     // ── Hide calling screen + incoming modal — be aggressive about the modal ─
     ['callingScreen', 'incomingCallModal'].forEach(id => {
@@ -4811,6 +4818,9 @@ case 'CALL_INITIATED':
 
                 elements.incomingCallModal.dataset.timer = timer;
                 elements.incomingCallModal.classList.add('active'); elements.incomingCallModal.style.setProperty('display','flex','important');
+                // Ensure callContainer is visible (parent of incomingCallModal)
+                const _incomingCC = document.getElementById('callContainer');
+                if (_incomingCC) { _incomingCC.classList.add('active'); _incomingCC.style.display = 'flex'; }
                 UIState.activeModals.add('incomingCallModal');
             }
         },

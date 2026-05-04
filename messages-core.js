@@ -2870,20 +2870,31 @@ try {
             this._notifySubscribers();
 
             try {
-                if (this._activeConversation) {
-                    const _aid = String(this._activeConversation.id);
-                    const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-                    // FIX: filter to active chat only + sort ASC — prevents cross-chat contamination
-                    const _filtered = this._messages
-                        .filter(m => String(m.chatId || m.conversationId || '') === _aid)
-                        .sort((a, b) => _tsMs2(a) - _tsMs2(b));
-                    window.dispatchEvent(new CustomEvent('renderMessages', {
-                        detail: {
-                            messages: _filtered.length > 0 ? _filtered : this._messages,
-                            currentChat: this._activeConversation,
-                            currentUser: null
+                // FIX: Only render if we have a conversationId to scope against.
+                // Using _activeConversation alone is unreliable when fetchMessages
+                // resolves async after the user has already switched to a different chat.
+                const _renderChatId = conversationId || this._activeConversation?.id;
+                if (_renderChatId) {
+                    const _activeForRender = this._activeConversation;
+                    // Only paint the panel if the user is still viewing this chat
+                    if (_activeForRender && String(_activeForRender.id) === String(_renderChatId)) {
+                        const _aid = String(_renderChatId);
+                        const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        // Strict filter — NEVER fall back to the full _messages array
+                        // which may contain messages from other chats.
+                        const _filtered = this._messages
+                            .filter(m => String(m.chatId || m.conversationId || '') === _aid)
+                            .sort((a, b) => _tsMs2(a) - _tsMs2(b));
+                        if (_filtered.length > 0) {
+                            window.dispatchEvent(new CustomEvent('renderMessages', {
+                                detail: {
+                                    messages: _filtered,
+                                    currentChat: _activeForRender,
+                                    currentUser: null
+                                }
+                            }));
                         }
-                    }));
+                    }
                 }
             } catch (_e) {}
 
@@ -2975,12 +2986,36 @@ try {
                 }
             }
             
-            if (this._activeConversation && message.conversationId === this._activeConversation.id) {
+            const _activeChatNow = this._activeConversation;
+            if (_activeChatNow && message.conversationId === _activeChatNow.id) {
                 this._saveMessagesToCache();
             }
             
             this._notifySubscribers();
             EventBus.emit('message:added', message);
+
+            // ── FIX: Render new message immediately in the active chat panel ──
+            try {
+                const _activeForRender = this._activeConversation;
+                const _msgChatId = String(message.chatId || message.conversationId || '');
+                if (_activeForRender && _msgChatId && String(_activeForRender.id) === _msgChatId) {
+                    const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const _chatMsgs = this._messages
+                        .filter(m => String(m.chatId || m.conversationId || '') === _msgChatId)
+                        .sort((a, b) => _tsMs2(a) - _tsMs2(b));
+                    window.dispatchEvent(new CustomEvent('renderMessages', {
+                        detail: {
+                            messages: _chatMsgs,
+                            currentChat: _activeForRender,
+                            currentUser: null
+                        }
+                    }));
+                    try {
+                        const _c = document.getElementById('messagesContainer');
+                        if (_c) requestAnimationFrame(() => { _c.scrollTop = _c.scrollHeight; });
+                    } catch (_) {}
+                }
+            } catch (_e) {}
 
             // Immediately re-render sidebar so chat bubbles up after sort
             try {
@@ -4189,9 +4224,15 @@ try {
             if (sidebar && window.innerWidth <= 768) {
                 sidebar.classList.remove('active');
             }
+            // FIX: Let CSS control back button visibility (display:flex on mobile via media query).
+            // Clear any inline style that might override CSS rules.
             if (backBtn) {
-                // Back button is hidden — device back-gesture / popstate handles navigation
-                backBtn.style.display = 'none';
+                backBtn.style.display = '';
+            }
+            
+            // FIX: Notify parent to add chat-panel-active class → hides mobile nav bar
+            if (window.innerWidth <= 768) {
+                try { window.parent.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*'); } catch (_) {}
             }
             
             const nameEl = document.getElementById('chatFriendName');

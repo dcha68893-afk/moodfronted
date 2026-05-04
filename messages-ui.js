@@ -2883,7 +2883,10 @@
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
                         const filtered = messages.filter(function(m) { return String(m.chatId || m.conversationId || '') === cid; });
+                        // FIX: Only use filtered messages — never fall back to the full array
+                        // which may contain messages from other chats (cross-chat contamination).
                         if (filtered.length > 0) messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
+                        else return; // Nothing for this chat yet — skip render
                     }
                     this.renderMessages(messages, currentChat, e.detail.currentUser);
 
@@ -10678,6 +10681,9 @@ Type: ${message.type || 'text'}`;
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
 
             UIStateManager.setState('chatVisible', false);
+
+            // FIX: Notify parent so it removes chat-panel-active → restores mobile nav bar
+            try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch (_) {}
 
             console.log('[MessageUI] Device back: returned to sidebar');
 

@@ -2115,17 +2115,15 @@ export const renderFriends = function() {
         
         console.log('[UI] renderFriends via FriendService, count:', _friendArray.length, 'cache:', cacheInfo);
         
-        // If no data in cache, try loading from FriendService
-        if (_friendArray.length === 0 && !window.FriendService.isLoading('friends')) {
-            console.log('[UI] No friends in cache, loading from FriendService...');
-            window.FriendService.loadFriends().then(friends => {
-                window.FriendService._lastFriendsData = friends;
-                if (UIState.activeSection === 'friendsSection') {
-                    renderFriends(); // Re-render after data loads
-                }
-            }).catch(error => {
-                console.warn('[UI] FriendService load failed:', error);
-            });
+        // FIX: Don't call FriendService.loadFriends() — it uses a different API path
+        // that times out. Instead, trigger loadFriendsFromBackend() which goes through
+        // the parent bridge (the same authenticated path used everywhere else).
+        if (_friendArray.length === 0) {
+            if (typeof loadFriendsFromBackend === 'function') {
+                loadFriendsFromBackend().then(() => {
+                    if (UIState.activeSection === 'friendsSection') renderFriends();
+                }).catch(() => {});
+            }
         }
     } else {
         // Fallback to window globals (legacy)

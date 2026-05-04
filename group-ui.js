@@ -2691,9 +2691,19 @@ function _rerenderActiveSection() {
  * Setup all event listeners
  */
 export function setupEventListeners() {
-    if (_UI_STATE.eventListeners.size > 10) {
+    // FIX: The old guard (eventListeners.size > 10) was wrong — by the time
+    // progressiveEnhancement fires its setTimeout, renderAllGroupsSecure() has
+    // already added group-card listeners so size >> 10, and the guard returned
+    // immediately, leaving createGroupBtnModal, tabs, cancel with no handlers.
+    // Use a proper one-time setup flag instead.
+    if (_UI_STATE._listenersSetupDone) {
+        // Already ran full setup — only re-wire the modal in case it was re-cloned
+        setupCreateGroupModal();
+        setupCreateGroupTabs();
+        setupCreateGroupForm();
         return;
     }
+    _UI_STATE._listenersSetupDone = true;
     
     setupCategoryTabs();
     setupTypeFilters();
@@ -3096,11 +3106,10 @@ export function setupCreateGroupButton() {
     
     if (createGroupBtn && createGroupModal) {
         registerUIEventListener(createGroupBtn, 'click', () => {
-            if (!getCurrentUser()) {
-                if (typeof showNotification === 'function') {
-                    showNotification('Please log in to create groups', 'error');
-                }
-                return;
+            console.log('[GroupUI] createGroupBtn clicked');
+            const user = getCurrentUser ? getCurrentUser() : window.GroupCore?.currentUser;
+            if (!user) {
+                console.warn('[GroupUI] No current user — opening modal anyway for UX');
             }
             
             createGroupModal.classList.add('active');
@@ -4385,31 +4394,12 @@ function getAuthToken() {
 }
 
 async function panelFetch(path, opts = {}) {
-    // Resolve absolute backend URL so requests from the iframe hit the backend
-    // (moodchat-fy56.onrender.com) not the frontend (moodfronted.onrender.com)
-    const backendBase = (
-        window.__apiBaseUrl ||
-        window.parent?.__apiBaseUrl ||
-        window.__getApiBase?.() ||
-        window.parent?.__getApiBase?.() ||
-        (window.__API_CORE__?.getBaseUrl?.()) ||
-        (window.parent?.__API_CORE__?.getBaseUrl?.()) ||
-        'https://moodchat-fy56.onrender.com/api'
-    );
-    // Strip leading /api from path since backendBase already ends in /api
-    const normalizedPath = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');
-    const separator = backendBase.endsWith('/') ? '' : '/';
-    const fullUrl = backendBase.replace(/\/$/, '') + (normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath);
-
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken(), ...(opts.headers||{}) };
     try {
-        const res = await fetch(fullUrl, { ...opts, headers });
-        if (!res.ok && res.status === 404) {
-            console.warn('[GROUP UI] panelFetch 404:', fullUrl);
-        }
+        const res = await fetch(path, { ...opts, headers });
         return await res.json().catch(() => ({}));
     } catch (error) {
-        console.warn('[GROUP UI] panelFetch failed:', error?.message || error, fullUrl);
+        console.warn('[GROUP UI] panelFetch failed:', error?.message || error);
         return { success: false, message: error?.message || 'Request failed' };
     }
 }
@@ -4917,7 +4907,42 @@ if (typeof document !== 'undefined') {
 /**
  * Async group creation function
  */
+// Direct API fetch — bypasses the postMessage bridge.
+// Used as fallback when createGroupOnline times out or is unavailable.
+async function _directCreateGroup(groupData) {
+    console.log('[GroupUI] _directCreateGroup: direct fetch to backend');
+    const backendBase = (
+        window.__apiBaseUrl ||
+        (window.parent && window.parent.__apiBaseUrl) ||
+        (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
+        (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
+        'https://moodchat-fy56.onrender.com/api'
+    );
+    const token = (
+        (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
+        (window.AUTH_SESSION && window.AUTH_SESSION.token) ||
+        localStorage.getItem('auth_token') ||
+        sessionStorage.getItem('auth_token') ||
+        localStorage.getItem('token') ||
+        sessionStorage.getItem('token') ||
+        null
+    );
+    if (!token) throw new Error('No auth token — please log in again');
+    const url = backendBase.replace(/\/$/, '') + '/groups';
+    console.log('[GroupUI] _directCreateGroup POST', url);
+    const res = await fetch(url, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body   : JSON.stringify(groupData),
+    });
+    const data = await res.json().catch(() => ({}));
+    console.log('[GroupUI] _directCreateGroup response:', res.status, data && data.success);
+    if (!res.ok) throw new Error((data && data.message) || 'HTTP ' + res.status);
+    return { success: true, group: (data.data && data.data.group) || data.data || data };
+}
+
 async function createGroupAsync(buttonElement) {
+    console.log('[GroupUI] createGroupAsync called');
     // ── SENDER UI: Show creating state immediately ────────────────────────
     if (buttonElement) {
         buttonElement.disabled    = true;
@@ -4927,6 +4952,7 @@ async function createGroupAsync(buttonElement) {
 
     try {
         const groupData = typeof collectGroupFormData === 'function' ? collectGroupFormData() : {};
+        console.log('[GroupUI] groupData collected:', JSON.stringify({ name: groupData.name, privacy: groupData.privacy }));
 
         // Include selected friends from members tab with invitation method tracking
         if (window._cgSelectedMembers && window._cgSelectedMembers.size > 0) {
@@ -4954,15 +4980,30 @@ async function createGroupAsync(buttonElement) {
         }
 
         // ── SENT: call backend ────────────────────────────────────────────
-        // createGroupOnline now returns { success, group, data } on success
-        // and throws on failure, so we just await it.
         let result = null;
+        console.log('[GroupUI] calling backend to create group...');
+
         if (typeof createGroupOnline === 'function') {
-            result = await createGroupOnline(groupData);
+            try {
+                result = await createGroupOnline(groupData);
+            } catch (onlineErr) {
+                console.warn('[GroupUI] createGroupOnline threw:', onlineErr.message, '— trying direct fetch fallback');
+                // Direct fetch fallback: bypasses the postMessage bridge entirely
+                result = await _directCreateGroup(groupData);
+            }
         } else if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
             const r = await window.GroupCore.createGroup(groupData);
-            result = { success: r?.success, group: r?.data?.group || r?.data };
+            if (r && r.queued) {
+                if (typeof showNotification === 'function') showNotification('Group queued — will create when connected', 'info');
+                result = { success: true, queued: true };
+            } else {
+                result = { success: r?.success, group: r?.data?.group || r?.data };
+            }
+        } else {
+            // Last resort: direct fetch
+            result = await _directCreateGroup(groupData);
         }
+        console.log('[GroupUI] create group result:', result && result.success);
 
         // Reset selection
         window._cgSelectedMembers = new Set();
