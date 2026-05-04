@@ -1189,15 +1189,19 @@ export const RenderPipeline = {
                 return;
             }
 
-            // FIX: Always render regardless of active section — functions are cheap and idempotent.
-            // Previously gated on activeSection which meant a realtime removal/addition
-            // was silently ignored if the user was on a different tab.
-            const _delay = (fromCache || isRealtime) ? 0 : 300;
+            // FIX: Debounce renders to prevent the loop:
+            // friendsUpdated → renderFriends → loadFriendsFromBackend → syncToGlobals → friendsUpdated
+            // Use a minimum 200ms debounce so rapid-fire events collapse into one render.
+            const _delay = isRealtime ? 0 : (fromCache ? 50 : 300);
             this.queueRender('friends', debounce(() => {
-                renderFriends();
-                renderAllFriendsList();
                 updateFriendCounts();
-            }, _delay));
+                if (UIState.activeSection === 'friendsSection') renderFriends();
+                else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                else {
+                    // Off-screen update: just update counts, render when user navigates here
+                    updateFriendCounts();
+                }
+            }, Math.max(_delay, 200)));
         });
 
 
@@ -2101,36 +2105,36 @@ export const renderContacts = function() {
 };
 
 export const renderFriends = function() {
-    // PRIORITY: Use FriendService if available (unified data structure)
+    // FIX: Read friends exclusively from FriendCacheManager/window globals.
+    // NEVER trigger any API call or backend fetch from inside renderFriends —
+    // doing so causes an infinite loop:
+    //   renderFriends → loadFriendsFromBackend → syncToGlobals → friendsUpdated → renderFriends
+    // The backend sync is handled by loadFriendsFromBackend() called from lifecycle events,
+    // not from within the render function itself.
     let _friendArray = [];
     let _pinnedArray = [];
-    
-    if (window.FriendService) {
-        // Get data from unified FriendService (offline-first)
-        const cacheInfo = window.FriendService.getCacheInfo();
-        _friendArray = cacheInfo.friends > 0 ? 
-            (window.FriendService._lastFriendsData || []) : 
-            (Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []));
-        _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
-        
-        console.log('[UI] renderFriends via FriendService, count:', _friendArray.length, 'cache:', cacheInfo);
-        
-        // FIX: Don't call FriendService.loadFriends() — it uses a different API path
-        // that times out. Instead, trigger loadFriendsFromBackend() which goes through
-        // the parent bridge (the same authenticated path used everywhere else).
-        if (_friendArray.length === 0) {
-            if (typeof loadFriendsFromBackend === 'function') {
-                loadFriendsFromBackend().then(() => {
-                    if (UIState.activeSection === 'friendsSection') renderFriends();
-                }).catch(() => {});
-            }
+
+    // Priority 1: FriendCacheManager (the authoritative in-memory store)
+    if (typeof FriendCacheManager !== 'undefined' && FriendCacheManager.getAllFriends) {
+        const _cached = FriendCacheManager.getAllFriends();
+        if (Array.isArray(_cached) && _cached.length > 0) {
+            _friendArray = _cached;
         }
-    } else {
-        // Fallback to window globals (legacy)
-        _friendArray = Array.isArray(window.friends) ? window.friends : (Array.isArray(friends) ? friends : []);
-        _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends : (Array.isArray(pinnedFriends) ? pinnedFriends : []);
-        console.log('[UI] renderFriends via legacy globals, count:', _friendArray.length);
     }
+    // Priority 2: window globals (set by syncToGlobals)
+    if (_friendArray.length === 0) {
+        _friendArray = Array.isArray(window.friends) ? window.friends :
+                       (Array.isArray(friends) ? friends : []);
+    }
+    // Priority 3: FriendService last data (fallback, no new fetch)
+    if (_friendArray.length === 0 && window.FriendService && window.FriendService._lastFriendsData) {
+        _friendArray = window.FriendService._lastFriendsData || [];
+    }
+
+    _pinnedArray = Array.isArray(window.pinnedFriends) ? window.pinnedFriends :
+                   (Array.isArray(pinnedFriends) ? pinnedFriends : []);
+
+    console.log('[UI] renderFriends count:', _friendArray.length);
     
     // Normalize all friends to canonical structure
     const normalizedFriends = _friendArray.map(friend => {

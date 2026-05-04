@@ -3427,9 +3427,13 @@ const FriendCacheManager = {
         window.pinnedFriends = _p;
         window.mutedFriends = _m;
         window.allUsers = _u;
-        // Notify UI to refresh counts and re-render active section whenever globals are synced
+        // FIX: Do NOT dispatch friendsUpdated here. syncToGlobals is called dozens of
+        // times per second (after every API response). Dispatching friendsUpdated from here
+        // creates an infinite loop:
+        //   syncToGlobals → friendsUpdated → renderFriends → loadFriendsFromBackend → syncToGlobals
+        // Callers that actually have new data (loadFriendsFromBackend, FRIEND_REMOVED, etc.)
+        // dispatch friendsUpdated explicitly after syncToGlobals returns.
         window.dispatchEvent(new CustomEvent('updateFriendCounts'));
-        window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: _f } }));
     },
     
     persist() {

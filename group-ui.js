@@ -4981,27 +4981,31 @@ async function createGroupAsync(buttonElement) {
 
         // ── SENT: call backend ────────────────────────────────────────────
         let result = null;
-        console.log('[GroupUI] calling backend to create group...');
+        console.log('[GroupUI] calling backend to create group directly...');
 
-        if (typeof createGroupOnline === 'function') {
-            try {
-                result = await createGroupOnline(groupData);
-            } catch (onlineErr) {
-                console.warn('[GroupUI] createGroupOnline threw:', onlineErr.message, '— trying direct fetch fallback');
-                // Direct fetch fallback: bypasses the postMessage bridge entirely
-                result = await _directCreateGroup(groupData);
-            }
-        } else if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
-            const r = await window.GroupCore.createGroup(groupData);
-            if (r && r.queued) {
-                if (typeof showNotification === 'function') showNotification('Group queued — will create when connected', 'info');
-                result = { success: true, queued: true };
-            } else {
-                result = { success: r?.success, group: r?.data?.group || r?.data };
-            }
-        } else {
-            // Last resort: direct fetch
+        // FIX: Always use direct fetch first — it is fast and reliable.
+        // createGroupOnline/GroupCore.createGroup both go through the postMessage
+        // bridge which polls up to 8s + 10s timeout = 18s hang before falling back.
+        // Direct fetch takes only as long as the actual HTTP request (1-3s when warm,
+        // 20-30s on Render cold start — but at least progress is visible immediately).
+        try {
             result = await _directCreateGroup(groupData);
+        } catch (directErr) {
+            console.warn('[GroupUI] direct fetch failed:', directErr.message);
+            // Fallback to bridge pipeline
+            if (window.GroupCore && typeof window.GroupCore.createGroup === 'function') {
+                const r = await window.GroupCore.createGroup(groupData);
+                if (r && r.queued) {
+                    if (typeof showNotification === 'function') showNotification('Group queued — will create when connected', 'info');
+                    result = { success: true, queued: true };
+                } else if (r && r.success) {
+                    result = { success: true, group: r.data?.group || r.data };
+                } else {
+                    throw new Error((r && r.error) || directErr.message);
+                }
+            } else {
+                throw directErr;
+            }
         }
         console.log('[GroupUI] create group result:', result && result.success);
 

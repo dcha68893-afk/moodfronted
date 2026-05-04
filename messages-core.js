@@ -1946,13 +1946,21 @@ try {
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
             if (activeChat && chatId && String(activeChat.id) === String(chatId)) {
                 try {
-                    window.dispatchEvent(new CustomEvent('renderMessages', {
-                        detail: {
-                            messages: ChatManager.getMessages ? ChatManager.getMessages() : [],
-                            currentChat: activeChat,
-                            currentUser: SessionManager.getUser ? SessionManager.getUser() : null
-                        }
-                    }));
+                    const _tsMs4 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    // STRICT: filter to this chat only — never pass all messages to renderMessages
+                    const _all = (ChatManager._messages || []);
+                    const _chatMsgs = _all
+                        .filter(m => String(m.chatId || m.conversationId || '') === String(chatId))
+                        .sort((a, b) => _tsMs4(a) - _tsMs4(b));
+                    if (_chatMsgs.length > 0) {
+                        window.dispatchEvent(new CustomEvent('renderMessages', {
+                            detail: {
+                                messages: _chatMsgs,
+                                currentChat: activeChat,
+                                currentUser: SessionManager.getUser ? SessionManager.getUser() : null
+                            }
+                        }));
+                    }
                 } catch (_e) {}
             }
             
@@ -5596,16 +5604,21 @@ try {
             } catch (_e) {}
 
             if (isThisChat) {
+                // Re-render the chat panel with strictly filtered messages.
+                // addMessage() above also fires renderMessages, but this acts as a
+                // safety net to ensure the UI always updates even if addMessage's
+                // active-chat check missed (e.g. _activeConversation set after addMessage ran).
                 try {
-                    const currentUser = SessionManager && SessionManager.getUser && SessionManager.getUser();
-                    const _all = ChatManager.getMessages ? ChatManager.getMessages() : (ChatManager._messages || []);
-                    // FIX: filter to this chat only + sort ASC by server timestamp
+                    const _all = ChatManager._messages || [];
+                    // STRICT: never fall back to _all — that would cross-contaminate chats.
                     const _chatMsgs = _all
                         .filter(function(m) { return String(m.chatId || m.conversationId || '') === String(chatId); })
                         .sort(function(a, b) { return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp); });
-                    window.dispatchEvent(new CustomEvent('renderMessages', {
-                        detail: { messages: _chatMsgs.length > 0 ? _chatMsgs : _all, currentChat: activeChat, currentUser: currentUser }
-                    }));
+                    if (_chatMsgs.length > 0) {
+                        window.dispatchEvent(new CustomEvent('renderMessages', {
+                            detail: { messages: _chatMsgs, currentChat: activeChat, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
+                        }));
+                    }
                 } catch (_e) {}
                 try {
                     const container = document.getElementById('messagesContainer');
