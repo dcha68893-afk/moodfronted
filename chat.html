@@ -4863,9 +4863,10 @@
                         return; // Do NOT forward as new_message
                     }
 
-                    // Forward as both event name variants so messages-core.js picks it up
-                    msgIframe.contentWindow.postMessage({ type: 'message:new',  payload: payload, source: 'ws-bridge' }, '*');
-                    msgIframe.contentWindow.postMessage({ type: 'new_message',  payload: payload, source: 'ws-bridge' }, '*');
+                    // FIX: Send only ONE message type to avoid double-processing in the iframe.
+                    // messages-core.js window.addEventListener handles both 'message:new' and 'new_message',
+                    // and its dedup set catches duplicates — but sending one is cleaner.
+                    msgIframe.contentWindow.postMessage({ type: 'message:new', payload: payload, source: 'ws-bridge' }, '*');
 
                     // Also update the sidebar unread badge by bumping conversation last message
                     if (payload && payload.chatId) {

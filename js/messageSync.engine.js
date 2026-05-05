@@ -138,9 +138,11 @@
             }
 
             // New message from server — store locally
+            const _chatIdStr = String(chatId || rawMessage.chatId || rawMessage.conversationId || '');
             const saved = await localStore.saveMessage({
                 serverId:    String(rawMessage.id),
-                chatId:      chatId || rawMessage.chatId,
+                chatId:      _chatIdStr,
+                conversationId: _chatIdStr,
                 senderId:    rawMessage.senderId || rawMessage.sender?.id,
                 content:     rawMessage.content || rawMessage.text || '',
                 type:        rawMessage.type || 'text',

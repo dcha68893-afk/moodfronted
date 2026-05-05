@@ -544,38 +544,6 @@ const GlobalCallHistory = {
     // Fix 4: Persist peer info durably
     window.__activePeerName   = callInfo.userName   || window.__activePeerName   || null;
     window.__activePeerType   = callInfo.callType   || window.__activePeerType   || 'voice';
-
-    // ── FIX 1: Caller ringback tone (two-tone 440+480 Hz, 1s on / 3s off) ──
-    (function _startCallerRingback() {
-        if (window._callerRingtone) {
-            try { window._callerRingtone.pause(); } catch(e) {}
-            if (window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(e) {} }
-            window._callerRingtone = null;
-        }
-        try {
-            var ctx = new (window.AudioContext || window.webkitAudioContext)();
-            var active = true;
-            window._callerRingtone = {
-                _ctx: ctx,
-                pause: function() { active = false; try { ctx.close(); } catch(e) {} },
-                currentTime: 0
-            };
-            (function ring() {
-                if (!active || ctx.state === 'closed') return;
-                [440, 480].forEach(function(f) {
-                    var osc = ctx.createOscillator();
-                    var g = ctx.createGain();
-                    osc.connect(g); g.connect(ctx.destination);
-                    osc.type = 'sine'; osc.frequency.value = f;
-                    g.gain.setValueAtTime(0.18, ctx.currentTime);
-                    g.gain.setValueAtTime(0.18, ctx.currentTime + 1.0);
-                    g.gain.setValueAtTime(0, ctx.currentTime + 1.0);
-                    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 1.0);
-                });
-                setTimeout(function() { if (active) ring(); }, 2000);
-            })();
-        } catch(e) { /* silent — ringback is cosmetic */ }
-    })();
     window.__activePeerAvatar = callInfo.userAvatar || window.__activePeerAvatar || null;
     window.__callAcceptedHandled = 0; // reset dedup for this new call
 
@@ -671,24 +639,15 @@ function transitionToInCall(callInfo) {
     // ── Always stop ringtones ─────────────────────────────────────────────
     if (window._incomingRingtone) {
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
-        if (window._incomingRingtone && window._incomingRingtone._ctx) { try { window._incomingRingtone._ctx.close(); } catch(e) {} }
         window._incomingRingtone = null;
     }
     if (window._callerRingtone) {
         try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
-        if (window._callerRingtone && window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(e) {} }
         window._callerRingtone = null;
     }
     if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
 
     if (window.CallOverlayManager) window.CallOverlayManager.answerCall(callInfo);
-
-    // ── CRITICAL: Make callContainer visible first (parent of all call screens) ──
-    const callContainer = document.getElementById('callContainer');
-    if (callContainer) {
-        callContainer.classList.add('active');
-        callContainer.style.display = 'flex';
-    }
 
     // ── Hide calling screen + incoming modal — be aggressive about the modal ─
     ['callingScreen', 'incomingCallModal'].forEach(id => {
@@ -878,13 +837,6 @@ function showInCallScreen(callInfo) {
 // Export so calls.html _handleCoreEvent can call transitionToInCall with the peer name
 window.transitionToInCall = transitionToInCall;
 window.showInCallScreen   = showInCallScreen;
-// Export UIEventHandlers globally so calls.html and capture-phase delegation can reach it
-// (Set lazily — UIEventHandlers is defined later in the same module file)
-setTimeout(function() {
-    if (window.UIEventHandlers === undefined && typeof UIEventHandlers !== 'undefined') {
-        window.UIEventHandlers = UIEventHandlers;
-    }
-}, 0);
 
     function showNotificationInCalls(message, type = 'info') {
         const notificationArea = document.getElementById('notificationArea') || document.getElementById('call-notification-container') || document.body;
@@ -4486,54 +4438,6 @@ case 'CALL_INITIATED':
         },
         
         addRemoteVideo: function(streamId, stream, participantName) {
-            // ── FIX 5 & 6: Always wire remote stream to the in-call screen elements first ──
-            if (stream) {
-                const hasVideo = stream.getVideoTracks().filter(function(t) { return t.readyState === 'live'; }).length > 0;
-                if (hasVideo) {
-                    // Video call: bind to #remoteVideo, hide avatar, show PiP for local
-                    const remoteVideo = document.getElementById('remoteVideo');
-                    if (remoteVideo) {
-                        remoteVideo.srcObject = stream;
-                        remoteVideo.muted = false;
-                        remoteVideo.volume = typeof window.__remoteVolume === 'number' ? window.__remoteVolume : 1;
-                        remoteVideo.style.display = 'block';
-                        remoteVideo.play().catch(function() {});
-                    }
-                    const avatarWrap = document.getElementById('incallAvatarWrap');
-                    if (avatarWrap) avatarWrap.style.display = 'none';
-                    const inCallScreen = document.getElementById('inCallScreen');
-                    if (inCallScreen) inCallScreen.classList.add('video-active');
-                    // Show local PiP
-                    if (UIState.localStream) {
-                        const pipC = document.getElementById('pipContainer');
-                        const pipV = document.getElementById('pipVideo');
-                        if (pipV) { pipV.srcObject = UIState.localStream; pipV.muted = true; pipV.play().catch(function() {}); }
-                        if (pipC) pipC.style.display = 'block';
-                    }
-                    // Participant label
-                    const nameLabel = document.getElementById('remoteParticipantLabel');
-                    if (nameLabel && participantName) { nameLabel.textContent = participantName; nameLabel.style.display = 'block'; }
-                } else {
-                    // Audio-only: bind to #remoteAudio
-                    var remoteAudio = document.getElementById('remoteAudio');
-                    if (!remoteAudio) {
-                        remoteAudio = document.createElement('audio');
-                        remoteAudio.id = 'remoteAudio';
-                        remoteAudio.autoplay = true;
-                        remoteAudio.style.display = 'none';
-                        document.body.appendChild(remoteAudio);
-                    }
-                    remoteAudio.srcObject = stream;
-                    remoteAudio.muted = false;
-                    remoteAudio.volume = typeof window.__remoteVolume === 'number' ? window.__remoteVolume : 1;
-                    remoteAudio.play().catch(function() {
-                        var resume = function() { remoteAudio.play().catch(function(){}); document.removeEventListener('click', resume); document.removeEventListener('touchstart', resume); };
-                        document.addEventListener('click', resume, { once: true });
-                        document.addEventListener('touchstart', resume, { once: true });
-                    });
-                }
-            }
-
             if (!elements.videoGrid) return;
             
             // Remove existing container for this stream if any
@@ -4818,9 +4722,6 @@ case 'CALL_INITIATED':
 
                 elements.incomingCallModal.dataset.timer = timer;
                 elements.incomingCallModal.classList.add('active'); elements.incomingCallModal.style.setProperty('display','flex','important');
-                // Ensure callContainer is visible (parent of incomingCallModal)
-                const _incomingCC = document.getElementById('callContainer');
-                if (_incomingCC) { _incomingCC.classList.add('active'); _incomingCC.style.display = 'flex'; }
                 UIState.activeModals.add('incomingCallModal');
             }
         },
@@ -5236,7 +5137,6 @@ case 'CALL_INITIATED':
             // Stop caller ringtone for offline calls
             if (window._callerRingtone) {
                 try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
-                if (window._callerRingtone && window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(e) {} }
                 window._callerRingtone = null;
             }
             // Clear offline ring timer
@@ -5323,8 +5223,6 @@ case 'CALL_INITIATED':
             // ── Navigate back to origin module (with short delay for animation) ──
             setTimeout(() => {
                 if (window.parent && window.parent !== window) {
-                    window.__callEndedSwitchSent = true;
-                    setTimeout(() => { window.__callEndedSwitchSent = false; }, 5000);
                     if (returnTo === 'messages' && chatUserId) {
                         // Return to messages module AND re-open the specific chat
                         window.parent.postMessage({
@@ -6401,15 +6299,15 @@ case 'CALL_ACCEPTED': {
             }
             
             if (elements.declineCallBtn) {
-                this.addListener(elements.declineCallBtn, 'click', UIEventHandlers.declineIncomingCall.bind(UIEventHandlers));
+                this.addListener(elements.declineCallBtn, 'click', UIEventHandlers.declineIncomingCall);
             }
             
             if (elements.acceptCallBtn) {
-                this.addListener(elements.acceptCallBtn, 'click', UIEventHandlers.acceptIncomingCall.bind(UIEventHandlers));
+                this.addListener(elements.acceptCallBtn, 'click', UIEventHandlers.acceptIncomingCall);
             }
             
             if (elements.acceptVideoCallBtn) {
-                this.addListener(elements.acceptVideoCallBtn, 'click', UIEventHandlers.acceptIncomingCallAsVideo.bind(UIEventHandlers));
+                this.addListener(elements.acceptVideoCallBtn, 'click', UIEventHandlers.acceptIncomingCallAsVideo);
             }
             
             if (elements.cancelMoodBtn) {
@@ -7844,23 +7742,18 @@ refreshCallHistoryAfterCall: function() {
             // ✅ FIX: After closing summary (by Done button or auto-timer), navigate back
             // to wherever the call originated from. Without this, the user is left on the
             // blank call container screen after dismissing the summary.
-            // Only navigate if handleCallEnded hasn't already done so (it fires SWITCH_MODULE
-            // 350 ms after the call ends; summary shows immediately after).
+            // Only navigate if we haven't already (handleCallEnded fires SWITCH_MODULE too).
             if (!window.__callSummaryNavigated) {
                 window.__callSummaryNavigated = true;
-                setTimeout(function() { window.__callSummaryNavigated = false; }, 5000);
+                setTimeout(() => { window.__callSummaryNavigated = false; }, 5000);
                 // Ensure callContainer is hidden
-                var _cc = document.getElementById('callContainer');
+                const _cc = document.getElementById('callContainer');
                 if (_cc) { _cc.classList.remove('active'); _cc.style.setProperty('display', 'none', 'important'); }
-                // Only send SWITCH_MODULE if handleCallEnded hasn't already queued one (it fires at 350 ms).
-                // We delay slightly longer (400 ms) so we never double-fire.
-                setTimeout(function() {
-                    if (!window.__callEndedSwitchSent && window.parent && window.parent !== window) {
-                        var _origin = window.__callOriginReturnTo || window.__pendingCallReturnTo || 'messages';
-                        var _mod = (_origin === 'calls' || !_origin) ? 'messages' : _origin;
-                        window.parent.postMessage({ type: 'SWITCH_MODULE', module: _mod, payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
-                    }
-                }, 400);
+                if (window.parent && window.parent !== window) {
+                    const _origin = window.__callOriginReturnTo || window.__pendingCallReturnTo || 'messages';
+                    const _mod = (_origin === 'calls' || !_origin) ? 'messages' : _origin;
+                    window.parent.postMessage({ type: 'SWITCH_MODULE', module: _mod, payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
+                }
             }
         },
         
@@ -7873,166 +7766,130 @@ acceptIncomingCallAsVideo: function() {
 },
 
 acceptIncomingCallGeneric: async function(asVideo) {
-    if (!canPerformAction('answerCall')) return;
-    
-    if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
-        showNotification('You are already in a call', 'warning');
-        return;
-    }
-    
-    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
-        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
-    }
-    // Stop ringtone
+    // ── IMMEDIATE UI TRANSITION ──────────────────────────────────────────
+    // Show the in-call screen RIGHT NOW when the user taps Accept, exactly
+    // like WhatsApp. Do NOT wait for answerCall/WebRTC — WebRTC connects in
+    // the background. The guard checks come AFTER we show the screen.
+
+    // Collect call info before any early returns
+    const callerName = (elements.incomingCallName && elements.incomingCallName.textContent)
+        || window.__incomingCallerName || 'Caller';
+    const isVideoCall = (elements.incomingCallType && elements.incomingCallType.textContent &&
+        elements.incomingCallType.textContent.includes('Video')) || false;
+    const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
+    const callId = window._currentIncomingCallId || UIState.activeCallId
+        || (coreInstance && coreInstance.getState && coreInstance.getState().activeCallId);
+
+    // Stop ringtone immediately
     if (window._incomingRingtone) {
+        try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
         window._incomingRingtone = null;
     }
-
-    const callerName = elements.incomingCallName?.textContent || 'Caller';
-    const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;
-    const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
-    const callId = window._currentIncomingCallId || UIState.activeCallId;
-    
-    if (!callId) {
-        showNotification('Unable to accept call: Missing call ID', 'error');
-        this.declineIncomingCall();
-        return;
+    // Stop decline countdown timer
+    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+        elements.incomingCallModal.dataset.timer = '';
     }
-    
+    // Stop the 180-second ring timer in calls.html
+    if (window.startDeclineTimer && window._declineIntervalId) {
+        try { clearInterval(window._declineIntervalId); } catch(e) {}
+    }
+
+    // Hide incoming modal immediately
+    const incomingModal = document.getElementById('incomingCallModal');
+    if (incomingModal) {
+        incomingModal.classList.remove('active');
+        incomingModal.style.setProperty('display', 'none', 'important');
+    }
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
         UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
     }
-    
+
+    // Hide callContainer / idleScreen so they never flash through
+    const _ccA = document.getElementById('callContainer');
+    if (_ccA) { _ccA.classList.remove('active'); _ccA.style.setProperty('display','none','important'); }
+    const _idA = document.getElementById('idleScreen');
+    if (_idA) { _idA.classList.remove('active'); _idA.style.setProperty('display','none','important'); }
+
+    // ── Set UIState so guards allow WebRTC offer through ──────────────────
+    UIState.callActive    = true;
+    UIState.callState     = 'connecting';
+    UIState.callType      = callType;
+    if (callId) UIState.activeCallId = callId;
+    if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
+        UIState.callParticipants = [{ name: callerName }];
+    }
+    // Store for transitionToInCall name resolution
+    if (!window.__incomingCallerName) window.__incomingCallerName = callerName;
+    if (!window.__callOriginReturnTo) window.__callOriginReturnTo = 'messages';
+
+    // ── SHOW IN-CALL SCREEN NOW — no waiting ─────────────────────────────
+    transitionToInCall({
+        userName:   callerName,
+        callType:   callType,
+        userAvatar: window.__incomingCallerAvatar || null
+    });
+
+    // Notify parent so caller side also transitions
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'CALL_ACCEPTED',
+            payload: { callId, callerName, callType }
+        }, '*');
+    }
+
     showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
 
-    // ── CRITICAL FIX: Use answerCall (not sendAction CALL_ACCEPT) so the WebRTC
-    // peer connection is set up BEFORE we signal acceptance to the backend.
-    // sendAction('CALL_ACCEPT') skips the local media + RTCPeerConnection setup.
-    let accepted = false;
-    if (coreInstance && coreInstance.answerCall) {
-        try {
-            const result = await coreInstance.answerCall(callId);
-            if (result && result.success) {
-                accepted = true;
-                showNotification(`Call accepted with ${callerName}`, 'success');
-            } else {
-                showNotification(result?.error || 'Failed to accept call', 'error');
-            }
-        } catch (error) {
-            console.error('[Calls UI] Accept call error:', error);
-            showNotification('Failed to accept call', 'error');
-        }
-    } else if (coreInstance && coreInstance.sendAction) {
-        // Fallback path (no answerCall available)
-        try {
-            const result = await coreInstance.sendAction('CALL_ACCEPT', {
-                callId: callId,
-                timestamp: Date.now()
-            });
-            if (result && result.success) {
-                accepted = true;
-            }
-        } catch (e) {}
-    } else {
-        showNotification('Call system not ready', 'error');
-        this.declineIncomingCall();
+    // ── Signal backend in background (non-blocking) ───────────────────────
+    if (!callId) {
+        console.warn('[UI] acceptIncomingCallGeneric: no callId — UI shown, backend not signalled');
         return;
     }
 
-    if (accepted) {
-        // ── FIX: Set navigation origin so handleCallEnded returns here after call ──
-        // On receiver side, returnTo should go back to wherever they were (calls page).
-        if (!window.__callOriginReturnTo) {
-            window.__callOriginReturnTo = 'calls'; // receiver came from calls page
-            window.__callOriginChatUserId = null;
-        }
+    // Try answerCall — but don't block the UI on it
+    const _tryAnswer = async () => {
+        const core = coreInstance || window.callCore;
+        if (!core) return;
 
-        // ── FIX: Do NOT immediately show in-call screen here.
-        // The WebRTC offer from the caller will arrive shortly via the signalling server.
-        // Once WebRTC negotiation completes, calls-core fires 'call_connected' or
-        // 'call_accepted' which triggers handleCallConnected / handleCallAccepted →
-        // transitionToInCall. Showing the screen here early caused the callState guard
-        // in handleSignalOffer to drop the offer and self-end the call.
-        //
-        // Set state so the guard allows the offer through:
-        UIState.callActive    = true;
-        UIState.callState     = 'connecting';
-        UIState.activeCallId  = callId;
-        UIState.callType      = callType;
-        // Store caller info for transitionToInCall when it fires:
-        if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
-            UIState.callParticipants = [{ name: callerName }];
-        }
-        // Dismiss modals right away
-        const incomingModal = document.getElementById('incomingCallModal');
-        if (incomingModal) {
-            incomingModal.classList.remove('active');
-            incomingModal.style.setProperty('display', 'none', 'important');
-        }
-        // Notify parent the call is active (hides banner, marks call in progress)
-        if (window.parent && window.parent !== window) {
-            window.parent.postMessage({
-                type: 'CALL_ACCEPTED',
-                payload: { callId, callerName, callType }
-            }, '*');
-        }
-        // Immediately show in-call screen on receiver side with the real caller name
-        transitionToInCall({
-            userName:  callerName || window.__incomingCallerName || 'Caller',
-            callType:  callType,
-            userAvatar: window.__incomingCallerAvatar || null
-        });
-        // Safety fallback: if transitionToInCall had a race, retry after 1 s
-        window._receiverShowFallback = setTimeout(() => {
-            const inCall = document.getElementById('inCallScreen');
-            if (!inCall || !inCall.classList.contains('active')) {
-                console.warn('[UI] Fallback: showing in-call screen for receiver');
-                transitionToInCall({
-                    userName:  callerName || window.__incomingCallerName || 'Caller',
-                    callType:  callType,
-                    userAvatar: window.__incomingCallerAvatar || null
-                });
-            }
-        }, 1000);
-    } else {
-        // ── FIX: Core returned non-success (e.g. lifecycle not ACTIVE yet).
-        // Still show the in-call screen on receiver side immediately so the UI
-        // doesn't freeze, and retry answerCall once core becomes ready.
-        console.warn('[UI] answerCall returned non-success — showing UI optimistically and retrying');
-        UIState.callActive   = true;
-        UIState.callState    = 'connecting';
-        UIState.activeCallId = callId;
-        UIState.callType     = callType;
-        if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
-            UIState.callParticipants = [{ name: callerName }];
-        }
-        const incomingModal2 = document.getElementById('incomingCallModal');
-        if (incomingModal2) {
-            incomingModal2.classList.remove('active');
-            incomingModal2.style.setProperty('display', 'none', 'important');
-        }
-        transitionToInCall({
-            userName:  callerName || window.__incomingCallerName || 'Caller',
-            callType:  callType,
-            userAvatar: window.__incomingCallerAvatar || null
-        });
-        // Retry answerCall after core becomes ready
-        let _retries = 0;
-        const _retryInterval = setInterval(async () => {
-            _retries++;
-            const _ci = window.callCore;
-            if (!_ci) { if (_retries > 20) clearInterval(_retryInterval); return; }
-            if (_ci.getLifecycleState && _ci.getLifecycleState() !== 'ACTIVE') {
-                if (_retries > 20) { clearInterval(_retryInterval); } return;
-            }
-            clearInterval(_retryInterval);
+        if (core.answerCall) {
             try {
-                const _r = await _ci.answerCall(callId);
-                console.log('[UI] Retry answerCall result:', _r && _r.success ? '✅' : '⚠', _r);
-            } catch(e) { console.warn('[UI] Retry answerCall error:', e.message); }
-        }, 300);
+                const result = await core.answerCall(callId);
+                if (result && result.success) {
+                    console.log('[UI] answerCall success');
+                    UIState.callStartTime = UIState.callStartTime || Date.now();
+                } else {
+                    // Non-success but UI is already showing — log and continue
+                    console.warn('[UI] answerCall non-success:', result);
+                }
+            } catch(err) {
+                console.warn('[UI] answerCall error:', err.message);
+            }
+        } else if (core.sendAction) {
+            try {
+                await core.sendAction('CALL_ACCEPT', { callId, timestamp: Date.now() });
+            } catch(e) {}
+        }
+    };
+
+    // If core isn't ACTIVE yet, wait up to 3 s then retry
+    const core = coreInstance || window.callCore;
+    const isActive = core && core.getLifecycleState && core.getLifecycleState() === 'ACTIVE';
+    if (isActive) {
+        _tryAnswer();
+    } else {
+        let waited = 0;
+        const poll = setInterval(() => {
+            waited += 200;
+            const c = coreInstance || window.callCore;
+            const active = c && (!c.getLifecycleState || c.getLifecycleState() === 'ACTIVE');
+            if (active || waited >= 3000) {
+                clearInterval(poll);
+                if (active) _tryAnswer();
+                else console.warn('[UI] Core never became ACTIVE after accept — UI already shown');
+            }
+        }, 200);
     }
 },
 
@@ -9742,7 +9599,7 @@ const handleContactClick = function(e) {
     }
 };
 
-// Make UIEventHandlers globally reachable for calls.html and delegation handlers
+// Export UIEventHandlers globally so calls.html onclick handlers can call it directly
 window.UIEventHandlers = UIEventHandlers;
 
 window.callsUI = {
@@ -10514,45 +10371,4 @@ if (detectExistingCore()) {
     } else {
         _signal();
     }
-})();
-
-// ── FIX 2: Capture-phase delegation for Accept / Decline / Cancel / End ──────
-// This runs in capture phase so it fires even if other handlers call stopPropagation.
-// It ensures buttons are ALWAYS responsive regardless of EventBinder timing.
-(function _wireCallButtonsDelegation() {
-    'use strict';
-    document.addEventListener('click', function(e) {
-        var btn = e.target.closest('#acceptCallBtn, #declineCallBtn, #callingCancelBtn, #endCallBtn');
-        if (!btn) return;
-        var id = btn.id;
-
-        if (id === 'acceptCallBtn') {
-            // Use UIEventHandlers if available (preferred path)
-            var UEH = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
-            if (UEH && typeof UEH.acceptIncomingCall === 'function') {
-                UEH.acceptIncomingCall.call(UEH);
-            }
-        } else if (id === 'declineCallBtn') {
-            var UEH2 = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
-            if (UEH2 && typeof UEH2.declineIncomingCall === 'function') {
-                UEH2.declineIncomingCall.call(UEH2);
-            }
-        } else if (id === 'callingCancelBtn') {
-            if (window._callerRingtone) {
-                try { window._callerRingtone.pause(); } catch(ex) {}
-                if (window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(ex) {} }
-                window._callerRingtone = null;
-            }
-            if (window.callCore && window.callCore.endCall) window.callCore.endCall().catch(function(){});
-            if (typeof window.showIdleScreen === 'function') window.showIdleScreen();
-        } else if (id === 'endCallBtn') {
-            if (window._callerRingtone) {
-                try { window._callerRingtone.pause(); } catch(ex) {}
-                if (window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(ex) {} }
-                window._callerRingtone = null;
-            }
-        }
-    }, true /* capture phase */);
-
-    console.log('[calls-ui] ✅ Call button capture-phase delegation installed');
 })();

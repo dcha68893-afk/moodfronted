@@ -2138,7 +2138,10 @@
                         if (activeChat && incomingChatId && String(activeChat.id) === incomingChatId) {
                             const allMsgs = (core && core.getMessages && core.getMessages()) || [];
                             const chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChatId; }).sort(function(a,b) { return _ts(a)-_ts(b); });
-                            UIRenderer.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, activeChat, core && core.getCurrentUser && core.getCurrentUser());
+                            // FIX: Never fall back to allMsgs — that causes cross-chat contamination.
+                            // If chatMsgs is empty (race condition), inject the new message directly.
+                            const msgsToRender = chatMsgs.length > 0 ? chatMsgs : [e.detail.message];
+                            UIRenderer.renderMessages(msgsToRender, activeChat, core && core.getCurrentUser && core.getCurrentUser());
                             try { var c2=document.getElementById('messagesContainer'); if(c2) requestAnimationFrame(function(){c2.scrollTop=c2.scrollHeight;}); } catch(_e){}
                         }
 
@@ -2885,8 +2888,15 @@
                         const filtered = messages.filter(function(m) { return String(m.chatId || m.conversationId || '') === cid; });
                         // FIX: Only use filtered messages — never fall back to the full array
                         // which may contain messages from other chats (cross-chat contamination).
-                        if (filtered.length > 0) messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
-                        else return; // Nothing for this chat yet — skip render
+                        // FIX: If filtered is empty but we have an active chat, render empty state
+                        // rather than silently bailing (which was hiding real "no messages" UI).
+                        if (filtered.length > 0) {
+                            messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
+                        } else {
+                            // No messages for this chat — render empty state (don't bail silently)
+                            this.renderMessages([], currentChat, e.detail.currentUser);
+                            return;
+                        }
                     }
                     this.renderMessages(messages, currentChat, e.detail.currentUser);
 
@@ -3047,7 +3057,9 @@
                         if (currentChat && incomingChatId && String(currentChat.id) === incomingChatId) {
                             const allMsgs = (core && core.getMessages && core.getMessages()) || [];
                             const chatMsgs = allMsgs.filter(function(m) { return String(m.chatId || m.conversationId || '') === incomingChatId; }).sort(function(a,b) { return _ts(a)-_ts(b); });
-                            this.renderMessages(chatMsgs.length > 0 ? chatMsgs : allMsgs, currentChat, core && core.getCurrentUser && core.getCurrentUser());
+                            // FIX: Never fall back to allMsgs — prevents cross-chat contamination
+                            const msgsToRender2 = chatMsgs.length > 0 ? chatMsgs : [e.detail.message];
+                            this.renderMessages(msgsToRender2, currentChat, core && core.getCurrentUser && core.getCurrentUser());
                             try { var c3=document.getElementById('messagesContainer'); if(c3) requestAnimationFrame(function(){c3.scrollTop=c3.scrollHeight;}); } catch(_e){}
                         }
 
@@ -10721,7 +10733,7 @@ Type: ${message.type || 'text'}`;
             if (active && String(active.id) === inChat) {
                 var all = (core && core.getMessages && core.getMessages()) || (core && core.ChatManager && core.ChatManager._messages) || [];
                 var msgs = all.filter(function(m) { return String(m.chatId || m.conversationId || '') === inChat; }).sort(function(a,b) { return _ts(a)-_ts(b); });
-                UIRenderer.renderMessages(msgs.length > 0 ? msgs : all, active, core && core.getCurrentUser && core.getCurrentUser());
+                UIRenderer.renderMessages(msgs.length > 0 ? msgs : [], active, core && core.getCurrentUser && core.getCurrentUser());
                 try { var el=document.getElementById('messagesContainer'); if(el) requestAnimationFrame(function(){el.scrollTop=el.scrollHeight;}); } catch(_e){}
             } else {
                 UIRenderer.renderChatsList((core && core.getConversations && core.getConversations()) || [], active, (core && core.getCurrentCategory && core.getCurrentCategory()) || 'all', {});

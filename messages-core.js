@@ -2832,19 +2832,35 @@ try {
         },
         
         setMessages: function(messages, conversationId) {
+            // FIX: When switching to a different chat, always clear the in-memory message array
+            // first so stale messages from the previous chat never bleed into the new view.
+            const _targetId = conversationId || this._activeConversation?.id;
+            const _currentFirstChatId = this._messages.length > 0
+                ? String(this._messages[0].chatId || this._messages[0].conversationId || '')
+                : null;
+            if (_targetId && _currentFirstChatId && _currentFirstChatId !== String(_targetId)) {
+                // Switching to a different chat — discard stale messages immediately
+                this._messages = [];
+                this._messagesMap.clear();
+            }
+
             // CACHE-PROTECTION: Never overwrite a populated cache with an empty array.
-            // If the incoming messages list is empty, keep whatever is already cached.
+            // If the incoming messages list is empty, keep whatever is already cached
+            // BUT only if the cache is for the SAME chat we're opening.
             const incomingMessages = ensureSafeArray(messages);
             if (incomingMessages.length === 0) {
-                const existingCache = this.loadPreviousMessages(conversationId || this._activeConversation?.id);
+                const existingCache = this.loadPreviousMessages(_targetId);
                 if (existingCache && existingCache.length > 0) {
-                    // Retain cached messages — API returned empty (likely auth issue or no new msgs)
-                    this._messages = existingCache;
-                    this._rebuildMessagesMap();
-                    this._notifySubscribers();
-                    return;
+                    // Only retain if cache is for the same chat
+                    const _cacheFirstId = String(existingCache[0]?.chatId || existingCache[0]?.conversationId || '');
+                    if (!_targetId || !_cacheFirstId || _cacheFirstId === String(_targetId)) {
+                        this._messages = existingCache;
+                        this._rebuildMessagesMap();
+                        this._notifySubscribers();
+                        return;
+                    }
                 }
-                // No cache either — allow the empty set so the UI shows "no messages"
+                // No matching cache — allow the empty set so the UI shows "no messages"
             }
             // Deduplicate: for each message, a serverId-confirmed copy wins over
             // an optimistic copy with the same localId.
@@ -2995,7 +3011,9 @@ try {
             }
             
             const _activeChatNow = this._activeConversation;
-            if (_activeChatNow && message.conversationId === _activeChatNow.id) {
+            // FIX: use String() comparison — chatId may be number on one side and string on the other
+            const _msgChatIdForSave = String(message.chatId || message.conversationId || '');
+            if (_activeChatNow && _msgChatIdForSave && String(_activeChatNow.id) === _msgChatIdForSave) {
                 this._saveMessagesToCache();
             }
             
@@ -3837,7 +3855,7 @@ try {
                             timestamp:   realMessage.createdAt || msgs[idx].timestamp || Date.now(),
                             createdAt:   realMessage.createdAt || msgs[idx].createdAt || Date.now()
                         };
-                        ChatManager.setMessages(msgs);
+                        ChatManager.setMessages(msgs, String(conversationId));
                     }
                     // Confirm in local store
                     if (window.KynectaLocalStore) {
@@ -4148,6 +4166,15 @@ try {
             if (!conversationId) return false;
             
             const actualId = typeof conversationId === 'object' ? conversationId.id : conversationId;
+
+            // FIX: Clear in-memory messages immediately when switching to a DIFFERENT chat.
+            // Without this, messages from the previous chat bleed into the new chat view
+            // while the fetch is in flight (the stale _messages array still has old data).
+            const _prevActive = ChatManager._activeConversation;
+            if (_prevActive && String(_prevActive.id) !== String(actualId)) {
+                ChatManager._messages = [];
+                ChatManager._messagesMap.clear();
+            }
             
             const conversation = ChatManager.getConversation(actualId);
             const canUseCachedConversation = !!conversation;
@@ -5611,9 +5638,20 @@ try {
                 try {
                     const _all = ChatManager._messages || [];
                     // STRICT: never fall back to _all — that would cross-contaminate chats.
-                    const _chatMsgs = _all
+                    let _chatMsgs = _all
                         .filter(function(m) { return String(m.chatId || m.conversationId || '') === String(chatId); })
                         .sort(function(a, b) { return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp); });
+                    // FIX: if the new message isn't in the array yet (race condition), inject it manually
+                    if (normalizedMessage) {
+                        const _alreadyIn = _chatMsgs.some(function(m) {
+                            return (m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id)) ||
+                                   (m.serverId && normalizedMessage.serverId && String(m.serverId) === String(normalizedMessage.serverId));
+                        });
+                        if (!_alreadyIn) {
+                            _chatMsgs = _chatMsgs.concat([normalizedMessage]);
+                            _chatMsgs.sort(function(a, b) { return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp); });
+                        }
+                    }
                     if (_chatMsgs.length > 0) {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
                             detail: { messages: _chatMsgs, currentChat: activeChat, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
@@ -5636,9 +5674,14 @@ try {
             }
         };
 
+        // FIX: Dedup set prevents the same message being processed multiple times.
+        // chat.html sends both 'message:new' AND 'new_message' to the iframe,
+        // and multiple listeners (window.message, KynectaRealtime.on, document.message:new)
+        // can all fire for the same payload — without dedup the message renders 4+ times.
+        const _realtimeProcessedIds = new Set();
+
         const handleRealtimePayload = async function(type, payload) {
             const normalizedType = String(type || '').toLowerCase();
-            const data = payload || {};
 
             if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
                 // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
@@ -5661,6 +5704,14 @@ try {
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
                 // Reject messages with no usable id to prevent corrupt dedup state
                 if (!_safeId && !_safeLocalId && !message.content) return;
+
+                // FIX: Dedup — chat.html posts 'message:new' AND 'new_message' for the same payload,
+                // and multiple event listeners can fire. Use a Set to process each message only once.
+                const _dedupKey = _safeId || _safeLocalId || (chatId + ':' + (message.content || '') + ':' + (message.createdAt || ''));
+                if (_realtimeProcessedIds.has(_dedupKey)) return;
+                _realtimeProcessedIds.add(_dedupKey);
+                // Clean up the set after 10s to prevent memory growth
+                setTimeout(function() { _realtimeProcessedIds.delete(_dedupKey); }, 10000);
 
                 // ECHO PREVENTION: WebSocket echoes our own sent messages back.
                 // The optimistic message is already in the UI — only update its status.
