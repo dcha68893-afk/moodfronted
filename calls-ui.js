@@ -633,33 +633,20 @@ function showIdleScreen() {
 function transitionToInCall(callInfo) {
     console.log('[UI] transitionToInCall → showing in-call screen for BOTH sides', callInfo);
 
-    // ── DEDUP: prevent double-transition within 2 seconds ─────────────────
-    const _now = Date.now();
-    if (window.__transitionToInCallAt && (_now - window.__transitionToInCallAt) < 2000) {
-        console.log('[UI] transitionToInCall dedup — already called', _now - window.__transitionToInCallAt, 'ms ago');
-        return;
-    }
-    window.__transitionToInCallAt = _now;
-
-    // ── CRITICAL: Hide callContainer IMMEDIATELY so it never flashes ───────
-    // callContainer wraps all screens. During the transition we don't want it
-    // to flash visible. We'll remove its active class, then show just inCallScreen.
-    const callContainer = document.getElementById('callContainer');
-    if (callContainer) {
-        callContainer.classList.remove('active');
-        callContainer.style.setProperty('display', 'none', 'important');
-    }
-
     if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
     if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
 
     // ── Always stop ringtones ─────────────────────────────────────────────
     if (window._incomingRingtone) {
+        try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+        if (window._incomingRingtone && window._incomingRingtone._ctx) { try { window._incomingRingtone._ctx.close(); } catch(e) {} }
         window._incomingRingtone = null;
     }
     if (window._callerRingtone) {
+        try { if (window._callerRingtone._interval) clearInterval(window._callerRingtone._interval); } catch(e) {}
         try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+        if (window._callerRingtone && window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(e) {} }
         window._callerRingtone = null;
     }
     if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
@@ -685,13 +672,6 @@ function transitionToInCall(callInfo) {
     if (!inCallScreen) { console.error('[UI] #inCallScreen not found'); return; }
     inCallScreen.classList.add('active');
     inCallScreen.style.setProperty('display', 'flex', 'important');
-
-    // ── Re-enable callContainer now that only inCallScreen is active ───────
-    const _cc = document.getElementById('callContainer');
-    if (_cc) {
-        _cc.classList.add('active');
-        _cc.style.setProperty('display', 'flex', 'important');
-    }
 
     // ── NUCLEAR OPTION: Watch the incoming modal and force-hide it while in-call ──
     // If anything re-adds .active to incomingCallModal, yank it off immediately.
@@ -4665,31 +4645,41 @@ case 'CALL_INITIATED':
                         try {
                             const ctx = new (window.AudioContext || window.webkitAudioContext)();
                             let ringing = true;
+                            const CYCLE_MS = 2500;
                             window._incomingRingtone = {
-                                _ctx: ctx,
-                                pause: function() { ringing = false; try { ctx.close(); } catch(e) {} },
+                                _ctx: ctx, _interval: null,
+                                pause: function() {
+                                    ringing = false;
+                                    if (this._interval) { clearInterval(this._interval); this._interval = null; }
+                                    try { ctx.close(); } catch(e) {}
+                                },
                                 currentTime: 0
                             };
-                            // Ascending chime: C5-E5-G5-C6, repeats every 2.5 s
                             const freqs = [523, 659, 784, 1047];
-                            (function chime() {
-                                if (!ringing || ctx.state === 'closed') return;
+                            function chime() {
+                                if (!ringing) return;
+                                if (ctx.state === 'suspended') ctx.resume().catch(function(){});
+                                if (ctx.state === 'closed') return;
                                 const t = ctx.currentTime;
                                 freqs.forEach(function(f, i) {
-                                    const osc  = ctx.createOscillator();
-                                    const gain = ctx.createGain();
-                                    osc.connect(gain); gain.connect(ctx.destination);
-                                    osc.type = 'sine';
-                                    osc.frequency.value = f;
-                                    gain.gain.setValueAtTime(0, t + i * 0.12);
-                                    gain.gain.linearRampToValueAtTime(0.35, t + i * 0.12 + 0.05);
-                                    gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.45);
-                                    osc.start(t + i * 0.12);
-                                    osc.stop(t + i * 0.12 + 0.5);
+                                    try {
+                                        const osc = ctx.createOscillator(), g = ctx.createGain();
+                                        osc.connect(g); g.connect(ctx.destination);
+                                        osc.type = 'sine'; osc.frequency.value = f;
+                                        g.gain.setValueAtTime(0, t + i * 0.12);
+                                        g.gain.linearRampToValueAtTime(0.38, t + i * 0.12 + 0.05);
+                                        g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.45);
+                                        osc.start(t + i * 0.12); osc.stop(t + i * 0.12 + 0.55);
+                                    } catch(ex) {}
                                 });
-                                setTimeout(function() { if (ringing) chime(); }, 2500);
-                            })();
-                        } catch(e) { /* silent fail */ }
+                            }
+                            chime();
+                            const _id = setInterval(function() {
+                                if (!ringing || ctx.state === 'closed') { clearInterval(_id); return; }
+                                chime();
+                            }, CYCLE_MS);
+                            window._incomingRingtone._interval = _id;
+                        } catch(e) {}
                     }
                 } catch(e) { /* silent fail — ringtone is cosmetic */ }
             })();
@@ -4964,38 +4954,48 @@ case 'CALL_INITIATED':
                 if (elements.callContainer) elements.callContainer.dataset.offlineTimer = window._outgoingRingTimer;
             })();
 
-            // Ringback tone for caller — plays on BOTH online and offline receiver (WhatsApp-style)
+            // Ringback tone for caller
             (function _playCallerRingback() {
                 try {
                     if (window._callerRingtone) {
-                        try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                        try { if (window._callerRingtone._interval) clearInterval(window._callerRingtone._interval); } catch(e) {}
+                        try { window._callerRingtone.pause(); } catch(e) {}
                     }
-                    // Standard telephone ringback cadence: 1s ring, 3s silence
                     const ctx = new (window.AudioContext || window.webkitAudioContext)();
                     let ringing = true;
+                    const CYCLE_MS = 4000;
                     window._callerRingtone = {
-                        _ctx: ctx,
-                        pause: function() { ringing = false; try { ctx.close(); } catch(e) {} },
+                        _ctx: ctx, _interval: null,
+                        pause: function() {
+                            ringing = false;
+                            if (this._interval) { clearInterval(this._interval); this._interval = null; }
+                            try { ctx.close(); } catch(e) {}
+                        },
                         currentTime: 0
                     };
-                    (function ring() {
-                        if (!ringing || ctx.state === 'closed') return;
-                        // Two-tone ringback (440 Hz + 480 Hz) — classic telephone sound
+                    function ring() {
+                        if (!ringing) return;
+                        if (ctx.state === 'suspended') ctx.resume().catch(function(){});
+                        if (ctx.state === 'closed') return;
                         [440, 480].forEach(function(freq) {
-                            const osc  = ctx.createOscillator();
-                            const gain = ctx.createGain();
-                            osc.connect(gain); gain.connect(ctx.destination);
-                            osc.type = 'sine';
-                            osc.frequency.value = freq;
-                            gain.gain.setValueAtTime(0.2, ctx.currentTime);
-                            gain.gain.setValueAtTime(0.2, ctx.currentTime + 1.0);
-                            gain.gain.setValueAtTime(0, ctx.currentTime + 1.0);
-                            osc.start(ctx.currentTime);
-                            osc.stop(ctx.currentTime + 1.0);
+                            try {
+                                const osc = ctx.createOscillator(), g = ctx.createGain();
+                                osc.connect(g); g.connect(ctx.destination);
+                                osc.type = 'sine'; osc.frequency.value = freq;
+                                g.gain.setValueAtTime(0.2, ctx.currentTime);
+                                g.gain.setValueAtTime(0.2, ctx.currentTime + 1.0);
+                                g.gain.setValueAtTime(0, ctx.currentTime + 1.0);
+                                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 1.0);
+                            } catch(ex) {}
                         });
-                        setTimeout(function() { if (ringing) ring(); }, 4000); // 1s on, 3s off
-                    })();
-                } catch(e) { /* silent fail */ }
+                    }
+                    ring();
+                    const _id = setInterval(function() {
+                        if (!ringing || ctx.state === 'closed') { clearInterval(_id); return; }
+                        ring();
+                    }, CYCLE_MS);
+                    window._callerRingtone._interval = _id;
+                } catch(e) {}
             })();
         },
         
@@ -5155,12 +5155,15 @@ case 'CALL_INITIATED':
 
             // Stop any playing ringtone immediately
             if (window._incomingRingtone) {
+                try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
                 try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                 window._incomingRingtone = null;
             }
-            // Stop caller ringtone for offline calls
+            // Stop caller ringtone
             if (window._callerRingtone) {
+                try { if (window._callerRingtone._interval) clearInterval(window._callerRingtone._interval); } catch(e) {}
                 try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
+                if (window._callerRingtone && window._callerRingtone._ctx) { try { window._callerRingtone._ctx.close(); } catch(e) {} }
                 window._callerRingtone = null;
             }
             // Clear offline ring timer
@@ -5229,6 +5232,19 @@ case 'CALL_INITIATED':
                 }
             }
 
+            // ── Reset screens inside iframe to idle — hide inCallScreen immediately ─
+            var _endCallingScreen = document.getElementById('callingScreen');
+            var _endInCallScreen  = document.getElementById('inCallScreen');
+            var _endIdleScreen    = document.getElementById('idleScreen');
+            var _endCallContainer = document.getElementById('callContainer');
+            var _endIncomingModal = document.getElementById('incomingCallModal');
+            if (_endCallingScreen) { _endCallingScreen.classList.remove('active'); _endCallingScreen.style.setProperty('display','none','important'); }
+            if (_endInCallScreen)  { _endInCallScreen.classList.remove('active');  _endInCallScreen.style.setProperty('display','none','important'); }
+            if (_endIncomingModal) { _endIncomingModal.classList.remove('active'); _endIncomingModal.style.setProperty('display','none','important'); }
+            // callContainer (the "Ready to Connect" panel) — NEVER show it after call
+            if (_endCallContainer) { _endCallContainer.classList.remove('active'); _endCallContainer.style.setProperty('display','none','important'); }
+            if (_endIdleScreen)    { _endIdleScreen.classList.add('active'); _endIdleScreen.style.setProperty('display','block','important'); }
+
             UIState.currentView = 'sidebar';
 
             // ── Clear navigation state variables ────────────────────────────
@@ -5238,11 +5254,11 @@ case 'CALL_INITIATED':
             window.__callOriginChatUserId = null;
             window.__callOriginChatUserName = null;
 
-            // ── Restore sidebar icons to parent shell ────────────────────────
+            // ── Tell remote peer to also reset ───────────────────────────────
+            // Post CALL_ENDED with source:'end-btn' so chat.html echoes it to remote iframe
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-                // Tell parent to echo CALL_ENDED to remote side so they also reset
                 window.parent.postMessage({
                     type: 'CALL_ENDED',
                     payload: { reason: 'ended', duration: UIState.callStartTime ? Math.floor((Date.now() - UIState.callStartTime) / 1000) : 0 },
@@ -7796,130 +7812,95 @@ acceptIncomingCallAsVideo: function() {
 },
 
 acceptIncomingCallGeneric: async function(asVideo) {
-    if (!canPerformAction('answerCall')) return;
-    
-    if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
-        showNotification('You are already in a call', 'warning');
-        return;
-    }
-    
-    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
-        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
-    }
-    // Stop ringtone
+    // ── STEP 1: Collect info immediately — before any guards ─────────────────
+    const callerName  = (elements.incomingCallName  && elements.incomingCallName.textContent)
+                        || window.__incomingCallerName || 'Caller';
+    const isVideoCall = (elements.incomingCallType  && elements.incomingCallType.textContent
+                        && elements.incomingCallType.textContent.includes('Video')) || false;
+    const callType    = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
+    const callId      = window._currentIncomingCallId || UIState.activeCallId;
+
+    // ── STEP 2: Stop ringtone & timers immediately ────────────────────────────
     if (window._incomingRingtone) {
+        try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
         window._incomingRingtone = null;
     }
-
-    const callerName = elements.incomingCallName?.textContent || 'Caller';
-    const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;
-    const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
-    const callId = window._currentIncomingCallId || UIState.activeCallId;
-    
-    if (!callId) {
-        showNotification('Unable to accept call: Missing call ID', 'error');
-        this.declineIncomingCall();
-        return;
+    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+        elements.incomingCallModal.dataset.timer = '';
     }
-    
+
+    // ── STEP 3: Hide incoming modal immediately ───────────────────────────────
+    const incomingModal = document.getElementById('incomingCallModal');
+    if (incomingModal) { incomingModal.classList.remove('active'); incomingModal.style.setProperty('display','none','important'); }
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
         UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
     }
-    
-    showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
+    // Hide callContainer / idleScreen so they never flash through
+    const _cc = document.getElementById('callContainer');
+    if (_cc) { _cc.classList.remove('active'); _cc.style.setProperty('display','none','important'); }
+    const _idle = document.getElementById('idleScreen');
+    if (_idle) { _idle.classList.remove('active'); _idle.style.setProperty('display','none','important'); }
 
-    // ── CRITICAL FIX: Use answerCall (not sendAction CALL_ACCEPT) so the WebRTC
-    // peer connection is set up BEFORE we signal acceptance to the backend.
-    // sendAction('CALL_ACCEPT') skips the local media + RTCPeerConnection setup.
-    let accepted = false;
-    if (coreInstance && coreInstance.answerCall) {
-        try {
-            const result = await coreInstance.answerCall(callId);
-            if (result && result.success) {
-                accepted = true;
-                showNotification(`Call accepted with ${callerName}`, 'success');
-            } else {
-                showNotification(result?.error || 'Failed to accept call', 'error');
-            }
-        } catch (error) {
-            console.error('[Calls UI] Accept call error:', error);
-            showNotification('Failed to accept call', 'error');
-        }
-    } else if (coreInstance && coreInstance.sendAction) {
-        // Fallback path (no answerCall available)
-        try {
-            const result = await coreInstance.sendAction('CALL_ACCEPT', {
-                callId: callId,
-                timestamp: Date.now()
-            });
-            if (result && result.success) {
-                accepted = true;
-            }
-        } catch (e) {}
-    } else {
-        showNotification('Call system not ready', 'error');
-        this.declineIncomingCall();
+    // ── STEP 4: Set UIState so WebRTC offer guard allows it through ───────────
+    UIState.callActive   = true;
+    UIState.callState    = 'connecting';
+    UIState.callType     = callType;
+    if (callId) UIState.activeCallId = callId;
+    if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
+        UIState.callParticipants = [{ name: callerName }];
+    }
+    window.__incomingCallerName    = window.__incomingCallerName || callerName;
+    window.__callOriginReturnTo    = window.__callOriginReturnTo || null; // receiver navigates back to wherever they were
+
+    // ── STEP 5: Show in-call screen NOW — do not wait for answerCall ──────────
+    // WhatsApp/Telegram pattern: UI transitions immediately on tap.
+    // answerCall + WebRTC happen in the background.
+    transitionToInCall({
+        userName:   callerName,
+        callType:   callType,
+        userAvatar: window.__incomingCallerAvatar || null
+    });
+
+    // ── STEP 6: Tell parent so caller side also transitions ───────────────────
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+            type: 'CALL_ACCEPTED',
+            payload: { callId, callerName, callType },
+            source: 'calls-iframe'
+        }, '*');
+    }
+
+    // ── STEP 7: Signal backend in background — non-blocking ──────────────────
+    if (!callId) {
+        console.warn('[UI] acceptIncomingCallGeneric: no callId — UI shown, backend not signalled');
         return;
     }
-
-    if (accepted) {
-        // ── FIX: Set navigation origin so handleCallEnded returns here after call ──
-        // On receiver side, returnTo should go back to wherever they were (calls page).
-        if (!window.__callOriginReturnTo) {
-            window.__callOriginReturnTo = 'calls'; // receiver came from calls page
-            window.__callOriginChatUserId = null;
+    (async () => {
+        // Wait for coreInstance to be ACTIVE (up to 3 s)
+        let core = coreInstance || window.callCore;
+        let waited = 0;
+        while (waited < 3000) {
+            core = coreInstance || window.callCore;
+            const isActive = core && (!core.getLifecycleState || core.getLifecycleState() === 'ACTIVE');
+            if (isActive) break;
+            await new Promise(r => setTimeout(r, 200));
+            waited += 200;
         }
-
-        // ── FIX: Do NOT immediately show in-call screen here.
-        // The WebRTC offer from the caller will arrive shortly via the signalling server.
-        // Once WebRTC negotiation completes, calls-core fires 'call_connected' or
-        // 'call_accepted' which triggers handleCallConnected / handleCallAccepted →
-        // transitionToInCall. Showing the screen here early caused the callState guard
-        // in handleSignalOffer to drop the offer and self-end the call.
-        //
-        // Set state so the guard allows the offer through:
-        UIState.callActive    = true;
-        UIState.callState     = 'connecting';
-        UIState.activeCallId  = callId;
-        UIState.callType      = callType;
-        // Store caller info for transitionToInCall when it fires:
-        if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
-            UIState.callParticipants = [{ name: callerName }];
-        }
-        // Dismiss modals right away
-        const incomingModal = document.getElementById('incomingCallModal');
-        if (incomingModal) {
-            incomingModal.classList.remove('active');
-            incomingModal.style.setProperty('display', 'none', 'important');
-        }
-        // Notify parent the call is active (hides banner, marks call in progress)
-        if (window.parent && window.parent !== window) {
-            window.parent.postMessage({
-                type: 'CALL_ACCEPTED',
-                payload: { callId, callerName, callType }
-            }, '*');
-        }
-        // Immediately show in-call screen on receiver side with the real caller name
-        transitionToInCall({
-            userName:  callerName || window.__incomingCallerName || 'Caller',
-            callType:  callType,
-            userAvatar: window.__incomingCallerAvatar || null
-        });
-        // Safety fallback: if transitionToInCall had a race, retry after 1 s
-        window._receiverShowFallback = setTimeout(() => {
-            const inCall = document.getElementById('inCallScreen');
-            if (!inCall || !inCall.classList.contains('active')) {
-                console.warn('[UI] Fallback: showing in-call screen for receiver');
-                transitionToInCall({
-                    userName:  callerName || window.__incomingCallerName || 'Caller',
-                    callType:  callType,
-                    userAvatar: window.__incomingCallerAvatar || null
-                });
+        if (!core) { console.warn('[UI] No core after waiting — skipping answerCall'); return; }
+        try {
+            const result = await core.answerCall(callId);
+            if (result && result.success) {
+                console.log('[UI] answerCall ✅');
+                UIState.callStartTime = UIState.callStartTime || Date.now();
+            } else {
+                console.warn('[UI] answerCall non-success:', result);
+                // UI is already showing — log only, do not reset
             }
-        }, 1000);
-    }
+        } catch(err) { console.warn('[UI] answerCall error:', err.message); }
+    })();
 },
 
 declineIncomingCall: async function() {
@@ -9628,7 +9609,7 @@ const handleContactClick = function(e) {
     }
 };
 
-// Export UIEventHandlers globally so calls.html onclick handlers can reach it directly
+// Export UIEventHandlers globally so calls.html onclick handlers can reach it
 window.UIEventHandlers = UIEventHandlers;
 
 window.callsUI = {

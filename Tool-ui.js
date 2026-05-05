@@ -3333,9 +3333,8 @@ function hideReactionPicker() {
 function showSavedItemsModal() {
     if (DOM.savedItemsModal) {
         DOM.savedItemsModal.classList.add('active');
-        // FIX: Sync savedItems from window globals before rendering
-        if (window.savedItems) savedItems = window.savedItems;
-        renderSavedItems();
+        _loadSavedItems();
+        setTimeout(renderSavedItems, 100); // Allow async IDB load
     }
 }
 
@@ -3371,6 +3370,7 @@ function renderSavedItems() {
 function showMyNotesModal() {
     if (DOM.myNotesModal) {
         DOM.myNotesModal.classList.add('active');
+        _loadNotes(); // Reload from storage each time
         renderMyNotes();
     }
 }
@@ -3384,19 +3384,43 @@ function hideMyNotesModal() {
 function renderMyNotes() {
     if (!DOM.myNotesList) return;
     if (!privateNotes || privateNotes.length === 0) {
-        DOM.myNotesList.innerHTML = '<div style="text-align: center; padding: 40px;">No private notes</div>';
+        DOM.myNotesList.innerHTML = `
+            <div style="text-align:center;padding:40px;color:var(--text-secondary);">
+                <i class="fas fa-sticky-note" style="font-size:36px;margin-bottom:12px;display:block;opacity:0.4;"></i>
+                <p>No private notes yet</p>
+                <p style="font-size:13px;margin-top:6px;">Tap "Add Note" to create one</p>
+            </div>`;
         return;
     }
     DOM.myNotesList.innerHTML = '';
-    privateNotes.forEach(note => {
+    privateNotes.slice().reverse().forEach((note, idx) => {
+        const realIdx = privateNotes.length - 1 - idx;
         const noteEl = document.createElement('div');
         noteEl.className = 'note-item';
+        noteEl.style.cssText = 'border:1px solid var(--border-color,#e0e0e0);border-radius:10px;padding:14px;margin-bottom:10px;';
         noteEl.innerHTML = `
-            <div style="font-weight: 500;">${escapeHtml(note.title || 'Note')}</div>
-            <div style="font-size: 14px; margin-top: 8px;">${escapeHtml(note.content || '').substring(0, 100)}</div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">${formatTimeAgo(new Date(note.createdAt))}</div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div style="font-weight:600;font-size:14px;">${escapeHtml(note.title || 'Note')}</div>
+                <button class="delete-note-btn" data-idx="${realIdx}" style="background:none;border:none;color:#f44336;cursor:pointer;padding:2px 6px;font-size:16px;" title="Delete">✕</button>
+            </div>
+            <div style="font-size:14px;line-height:1.5;">${escapeHtml(note.content || '')}</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">
+                <i class="far fa-clock"></i> ${formatTimeAgo(new Date(note.createdAt))}
+                ${note.listingId ? `<span style="margin-left:8px;"><i class="fas fa-link"></i> Linked to listing</span>` : ''}
+            </div>
         `;
         DOM.myNotesList.appendChild(noteEl);
+    });
+    // Wire delete buttons
+    DOM.myNotesList.querySelectorAll('.delete-note-btn').forEach(btn => {
+        btn.onclick = function(e) {
+            e.stopPropagation();
+            const i = parseInt(this.dataset.idx);
+            privateNotes.splice(i, 1);
+            _saveNotes();
+            renderMyNotes();
+            showNotification('Note deleted', 'info');
+        };
     });
 }
 
@@ -3479,43 +3503,104 @@ function renderTrustStats() {
 }
 
 function saveToSavedItems() {
-    if (UIState.currentListingData) {
-        const exists = savedItems.some(item => item.id === UIState.currentListingData.id);
-        if (!exists) {
-            savedItems.push(UIState.currentListingData);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-            showNotification('Item saved', 'success');
-            if (DOM.saveListingBtn) {
-                DOM.saveListingBtn.innerHTML = '<i class="fas fa-bookmark"></i>';
-                DOM.saveListingBtn.style.color = 'var(--primary-color)';
-            }
-        } else {
-            const index = savedItems.findIndex(item => item.id === UIState.currentListingData.id);
-            if (index !== -1) {
-                savedItems.splice(index, 1);
-                saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-                showNotification('Item removed from saved', 'info');
-                if (DOM.saveListingBtn) {
-                    DOM.saveListingBtn.innerHTML = '<i class="fas fa-bookmark"></i>';
-                    DOM.saveListingBtn.style.color = '';
-                }
-            }
-        }
+    if (!UIState.currentListingData) return;
+    const listing = UIState.currentListingData;
+    const exists = savedItems.some(item => item.id === listing.id);
+    if (!exists) {
+        savedItems.push(listing);
+        _persistSavedItems();
+        showNotification('Item saved', 'success');
+        if (DOM.saveListingBtn) DOM.saveListingBtn.style.color = 'var(--primary-color)';
+    } else {
+        savedItems = savedItems.filter(item => item.id !== listing.id);
+        _persistSavedItems();
+        showNotification('Removed from saved', 'info');
+        if (DOM.saveListingBtn) DOM.saveListingBtn.style.color = '';
     }
+}
+
+function _persistSavedItems() {
+    try { localStorage.setItem('mp_saved_items', JSON.stringify(savedItems)); } catch(e) {}
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.saveSavedItem) {
+            savedItems.forEach(item => LST.saveSavedItem(item).catch(() => {}));
+        }
+    } catch(e) {}
+    window.savedItems = savedItems;
+}
+
+function _loadSavedItems() {
+    try {
+        const raw = localStorage.getItem('mp_saved_items');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) { savedItems = parsed; window.savedItems = savedItems; return; }
+        }
+    } catch(e) {}
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.getAllSaved) {
+            LST.getAllSaved().then(items => {
+                if (Array.isArray(items) && items.length > 0) {
+                    savedItems = items; window.savedItems = savedItems;
+                }
+            }).catch(() => {});
+        }
+    } catch(e) {}
 }
 
 function showAddNoteDialog() {
     const note = prompt('Add a private note about this listing:');
     if (note) {
-        privateNotes.push({
-            id: UIState.currentListingId,
-            title: UIState.currentListingData?.title,
+        const entry = {
+            id: 'note_' + Date.now(),
+            listingId: UIState.currentListingId,
+            title: UIState.currentListingData?.title || 'Listing',
             content: note,
             createdAt: new Date().toISOString()
-        });
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
+        };
+        privateNotes.push(entry);
+        _saveNotes();
         showNotification('Note added', 'success');
     }
+}
+
+function _saveNotes() {
+    // Save to localStorage
+    try { localStorage.setItem('mp_private_notes', JSON.stringify(privateNotes)); } catch(e) {}
+    // Save to LocalStoreTools IDB
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.saveNote) {
+            privateNotes.forEach(n => LST.saveNote(n).catch(() => {}));
+        }
+    } catch(e) {}
+}
+
+function _loadNotes() {
+    // Load from localStorage first (fastest)
+    try {
+        const raw = localStorage.getItem('mp_private_notes');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                privateNotes = parsed;
+                return;
+            }
+        }
+    } catch(e) {}
+    // Load from LocalStoreTools IDB
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.getAllNotes) {
+            LST.getAllNotes().then(notes => {
+                if (Array.isArray(notes) && notes.length > 0) {
+                    privateNotes = notes;
+                }
+            }).catch(() => {});
+        }
+    } catch(e) {}
 }
 
 function showDetailMenu() {
@@ -3643,8 +3728,17 @@ function exportAnalytics() {
 
 function clearAllSavedItems() {
     if (confirm('Clear all saved items?')) {
-        savedItems.length = 0;
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
+        savedItems = [];
+        window.savedItems = [];
+        try { localStorage.removeItem('mp_saved_items'); } catch(e) {}
+        try {
+            const LST = window.LocalStoreTools;
+            if (LST && LST.getAllSaved) {
+                LST.getAllSaved().then(items => {
+                    (items || []).forEach(item => LST.deleteSavedItem && LST.deleteSavedItem(item.id));
+                }).catch(() => {});
+            }
+        } catch(e) {}
         renderSavedItems();
         showNotification('All saved items cleared', 'success');
     }
@@ -3653,13 +3747,14 @@ function clearAllSavedItems() {
 function addNewNote() {
     const note = prompt('Add a new note:');
     if (note) {
-        privateNotes.push({
-            id: Date.now().toString(),
-            title: 'Note',
+        const entry = {
+            id: 'note_' + Date.now(),
+            title: 'General Note',
             content: note,
             createdAt: new Date().toISOString()
-        });
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
+        };
+        privateNotes.push(entry);
+        _saveNotes();
         renderMyNotes();
         showNotification('Note added', 'success');
     }
@@ -3861,6 +3956,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     cacheDOMElements();
     UIPipeline.skeleton();
     ResponsiveEngine.init();
+
+    // Load persisted data immediately
+    _loadNotes();
+    _loadSavedItems();
 
     // Hide "Loading marketplace" banner after max 4s regardless of core state
     setTimeout(() => {

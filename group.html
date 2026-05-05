@@ -948,34 +948,35 @@
                     </div>
                 </div>
                 <div class="chat-header-actions">
-                    <button class="chat-header-btn" id="chatCallBtn" title="Start Group Call" aria-label="Call">
+                    <button class="chat-header-btn" id="chatCallBtn" title="Start Group Call">
                         <i class="fas fa-phone"></i>
                     </button>
-                    <div class="chat-more-wrapper" style="position:relative;">
-                        <button class="chat-header-btn" id="chatMoreBtn" title="More options" aria-label="More options">
+                    <div style="position:relative">
+                        <button class="chat-header-btn" id="chatMoreBtn" title="More options">
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
-                        <div id="chatMoreMenu" class="chat-more-menu" style="display:none;">
-                            <button class="chat-more-item" data-panel="members"><i class="fas fa-users"></i> Members</button>
-                            <button class="chat-more-item" data-panel="settings"><i class="fas fa-cog"></i> Settings</button>
-                            <button class="chat-more-item" data-panel="theme"><i class="fas fa-palette"></i> Theme</button>
-                            <button class="chat-more-item" data-panel="purpose"><i class="fas fa-bullseye"></i> Purpose</button>
-                            <button class="chat-more-item" data-panel="info"><i class="fas fa-info-circle"></i> Group Info</button>
-                            <hr style="margin:4px 0;border-color:var(--border-color);">
-                            <button class="chat-more-item danger" data-panel="leave"><i class="fas fa-sign-out-alt"></i> Leave Group</button>
+                        <div id="chatMoreMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;min-width:200px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:9999;padding:6px 0;">
+                            <button class="gcm-item" data-action="members"><i class="fas fa-users"></i> Members</button>
+                            <button class="gcm-item" data-action="settings"><i class="fas fa-cog"></i> Settings</button>
+                            <button class="gcm-item" data-action="theme"><i class="fas fa-palette"></i> Theme</button>
+                            <button class="gcm-item" data-action="purpose"><i class="fas fa-bullseye"></i> Purpose</button>
+                            <button class="gcm-item" data-action="info"><i class="fas fa-info-circle"></i> Group Info</button>
+                            <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
+                            <button class="gcm-item gcm-danger" data-action="delete"><i class="fas fa-trash"></i> Delete Group</button>
+                            <button class="gcm-item gcm-danger" data-action="leave"><i class="fas fa-sign-out-alt"></i> Leave Group</button>
                         </div>
                     </div>
-                    <button class="chat-header-btn" id="closeChatBtn" title="Close Chat" aria-label="Close">
+                    <button class="chat-header-btn" id="closeChatBtn" title="Close Chat">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-                <!-- Slide-in sub-panel: members / settings / theme / purpose -->
-                <div id="groupSubPanel" class="group-sub-panel" style="display:none;">
-                    <div class="group-sub-panel-header">
-                        <button id="subPanelBackBtn" class="chat-header-btn"><i class="fas fa-arrow-left"></i></button>
-                        <span id="subPanelTitle">Members</span>
+                <!-- Sub-panel for members/settings/theme/purpose/info -->
+                <div id="gcSubPanel" style="display:none;position:absolute;top:0;right:0;bottom:0;width:320px;max-width:100%;background:var(--bg-color);border-left:1px solid var(--border-color);z-index:600;display:none;flex-direction:column;box-shadow:-4px 0 16px rgba(0,0,0,.1);">
+                    <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border-color);flex-shrink:0">
+                        <button id="gcSubPanelBack" class="chat-header-btn"><i class="fas fa-arrow-left"></i></button>
+                        <span id="gcSubPanelTitle" style="font-weight:600;font-size:15px"></span>
                     </div>
-                    <div id="subPanelContent" class="group-sub-panel-content"></div>
+                    <div id="gcSubPanelContent" style="flex:1;overflow-y:auto;padding:16px"></div>
                 </div>
             </div>
             
@@ -2002,289 +2003,315 @@
     </script>
 
 <script>
-/* ============================================================
-   GROUP PANEL RUNTIME PATCH v2
-   Fixes: group display, create-button re-use, mobile transition,
-          three-dots menu, sub-panels, call button, chat messages
-   ============================================================ */
+/* ================================================================
+   GROUP PANEL RUNTIME PATCH
+   - Mobile panel open/close
+   - Three-dots menu + sub-panels (members/settings/theme/purpose/info)
+   - Working call button via parent postMessage
+   - Real message rendering + send
+   - Delete / Leave group
+   - Groups list display fix
+   ================================================================ */
 (function() {
 'use strict';
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-function gc() { return window.GroupCore || null; }
-function liveGroups()       { const g = gc(); return (g && g.groups       && g.groups.length)       ? g.groups       : []; }
-function liveMyGroups()     { const g = gc(); return (g && g.myGroups     && g.myGroups.length)     ? g.myGroups     : []; }
-function liveJoinedGroups() { const g = gc(); return (g && g.joinedGroups && g.joinedGroups.length) ? g.joinedGroups : []; }
-function esc(s) { return String(s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+/* ── Utilities ─────────────────────────────────────────────────── */
+function gc()  { return window.GroupCore || null; }
+function tok() { return localStorage.getItem('token') || localStorage.getItem('authToken') || sessionStorage.getItem('token') || ''; }
+function mob() { return window.innerWidth <= 768; }
+function esc(s) {
+    return String(s || '').replace(/[&<>"']/g, function(m) {
+        var map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+        return map[m];
+    });
+}
+function apiBase() {
+    return (window.__getApiBase && window.__getApiBase()) ||
+           (window.__API_BASE) ||
+           'https://moodchat-fy56.onrender.com/api';
+}
+function apiFetch(path, opts) {
+    var url = apiBase() + path;
+    var headers = Object.assign({ 'Authorization': 'Bearer ' + tok() }, (opts || {}).headers || {});
+    return fetch(url, Object.assign({}, opts || {}, { headers: headers }));
+}
 function fmtTime(iso) {
-    try { const d = new Date(iso); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } catch(_){ return ''; }
+    try { return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } catch(e) { return ''; }
+}
+function notify(msg, type) {
+    if (typeof showNotification === 'function') showNotification(msg, type || 'success');
+    else console.log('[GC]', msg);
 }
 
-// ── Mobile detection (live) ───────────────────────────────────────────────
-function isMob() { return window.innerWidth <= 768; }
-
-// ── Open group chat panel ─────────────────────────────────────────────────
+/* ── Open group panel ──────────────────────────────────────────── */
 function openPanel(groupData) {
     if (!groupData) return;
-    window.__currentPanelGroup = groupData;
+    window.__gcCurrentGroup = groupData;
 
-    // Update header
-    const title = document.getElementById('chatTitle');
-    const sub   = document.getElementById('chatMemberCount');
-    const av    = document.getElementById('chatAvatar');
+    // Header info
+    var el = function(id) { return document.getElementById(id); };
+    var title = el('chatTitle'), sub = el('chatMemberCount'), av = el('chatAvatar');
     if (title) title.textContent = groupData.name || 'Group Chat';
-    if (sub)   sub.textContent   = (groupData.stats?.totalMembers || groupData.memberCount || 0) + ' members';
+    if (sub) {
+        var cnt = (groupData.stats && groupData.stats.totalMembers) || groupData.memberCount || 0;
+        sub.textContent = cnt + ' members';
+    }
     if (av) {
-        const initials = (groupData.name||'G').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-        av.innerHTML = '<span style="color:#fff;font-weight:600;font-size:15px">'+esc(initials)+'</span>';
+        var init = (groupData.name || 'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);
+        av.innerHTML = '<span style="color:#fff;font-weight:700;font-size:15px">' + esc(init) + '</span>';
         av.style.background = 'linear-gradient(135deg,#0084ff,#0055cc)';
+        av.style.display = 'flex';
+        av.style.alignItems = 'center';
+        av.style.justifyContent = 'center';
+        av.style.borderRadius = '50%';
     }
 
-    // Show panel
-    const panel   = document.getElementById('groupChatPanel');
-    const sidebar = document.getElementById('sidebar');
-    if (panel) { panel.classList.add('active'); panel.style.display = 'flex'; }
-    if (isMob()) {
-        if (sidebar) { sidebar.style.display = 'none'; sidebar.classList.add('hidden'); }
+    // Show panel, hide sidebar on mobile
+    var panel   = el('groupChatPanel');
+    var sidebar = el('sidebar');
+    if (panel)  { panel.style.display = 'flex'; panel.classList.add('active'); }
+    if (mob() && sidebar) { sidebar.style.display = 'none'; sidebar.classList.add('hidden'); }
+
+    // Add mobile back-button if not already present
+    if (mob()) {
+        var hdrInfo = el('chatHeaderInfo');
+        if (hdrInfo && !hdrInfo.querySelector('.gc-back-btn')) {
+            var back = document.createElement('button');
+            back.className = 'gc-back-btn chat-header-btn';
+            back.innerHTML = '<i class="fas fa-arrow-left"></i>';
+            back.style.marginRight = '8px';
+            back.addEventListener('click', closePanel);
+            hdrInfo.insertBefore(back, hdrInfo.firstChild);
+        }
     }
+
+    // Hide sub-panel
+    var sp = el('gcSubPanel');
+    if (sp) sp.style.display = 'none';
 
     // Load messages
-    loadPanelMessages(groupData.id);
+    loadMessages(groupData.id);
 
     // Focus input
-    const inp = document.getElementById('chatInput');
-    if (inp) setTimeout(() => inp.focus(), 100);
+    var inp = el('chatInput');
+    if (inp) setTimeout(function(){ inp.focus(); }, 200);
 }
 
-// ── Close panel (mobile back) ─────────────────────────────────────────────
+/* ── Close panel ───────────────────────────────────────────────── */
 function closePanel() {
-    const panel   = document.getElementById('groupChatPanel');
-    const sidebar = document.getElementById('sidebar');
-    const sub     = document.getElementById('groupSubPanel');
-    if (panel)   { panel.classList.remove('active'); panel.style.display = 'none'; }
-    if (sub)     { sub.style.display = 'none'; }
-    if (isMob()) {
-        if (sidebar) { sidebar.style.display = ''; sidebar.classList.remove('hidden'); }
-    }
-    window.__currentPanelGroup = null;
+    var panel   = document.getElementById('groupChatPanel');
+    var sidebar = document.getElementById('sidebar');
+    var sp      = document.getElementById('gcSubPanel');
+    var back    = document.querySelector('.gc-back-btn');
+    if (panel)  { panel.style.display = 'none'; panel.classList.remove('active'); }
+    if (sp)     { sp.style.display = 'none'; }
+    if (back)   { back.remove(); }
+    if (mob() && sidebar) { sidebar.style.display = 'flex'; sidebar.classList.remove('hidden'); }
+    window.__gcCurrentGroup = null;
 }
 
-// ── Load + render messages ────────────────────────────────────────────────
-async function loadPanelMessages(groupId) {
-    const box = document.getElementById('chatMessages');
+/* ── Load & render messages ────────────────────────────────────── */
+function loadMessages(groupId) {
+    var box = document.getElementById('chatMessages');
     if (!box) return;
-    box.innerHTML = '<div class="chat-empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading messages…</p></div>';
+    box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin" style="font-size:24px"></i><p style="margin-top:8px">Loading messages...</p></div>';
 
-    try {
-        const GC = gc();
-        let msgs = [];
-        if (GC && typeof GC.loadGroupMessages === 'function') {
-            const res = await GC.loadGroupMessages(groupId, 50);
-            msgs = res || GC.messages?.[groupId] || [];
-        } else {
-            // direct fetch fallback
-            const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-            const r = await fetch('/api/groups/'+groupId+'/messages?limit=50', {
-                headers: { 'Authorization': 'Bearer '+token }
-            });
-            const d = await r.json();
-            msgs = d.data || d.messages || [];
-        }
-        renderMessages(box, msgs, groupId);
-    } catch(e) {
-        box.innerHTML = '<div class="chat-empty-state"><i class="fas fa-comments"></i><p>No messages yet. Say hello!</p></div>';
-    }
+    apiFetch('/groups/' + groupId + '/messages?limit=50')
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+            var msgs = (d.data && Array.isArray(d.data)) ? d.data
+                     : (d.data && d.data.messages) ? d.data.messages
+                     : d.messages || [];
+            renderMessages(box, msgs);
+        })
+        .catch(function() {
+            box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-comments" style="font-size:40px;opacity:.3"></i><p style="margin-top:10px">No messages yet. Say hello!</p></div>';
+        });
 }
 
-function renderMessages(box, msgs, groupId) {
+function myId() {
+    var g = gc();
+    return String((g && g.currentUser && (g.currentUser.id || g.currentUser.uid)) || '');
+}
+
+function renderMessages(box, msgs) {
     if (!msgs || !msgs.length) {
-        box.innerHTML = '<div class="chat-empty-state"><i class="fas fa-comments"></i><p>No messages yet. Say hello! 👋</p></div>';
+        box.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-comments" style="font-size:40px;opacity:.3"></i><p style="margin-top:10px">No messages yet. Say hello!</p></div>';
         return;
     }
-    const GC   = gc();
-    const myId = String(GC?.currentUser?.id || GC?.currentUser?.uid || '');
     box.innerHTML = '';
-    msgs.forEach(m => {
-        const isOwn = String(m.senderId || m.userId || '') === myId;
-        const name  = m.senderName || m.sender?.username || (isOwn ? 'You' : 'Member');
-        const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-        const el = document.createElement('div');
-        el.className = 'chat-message' + (isOwn ? ' own' : '');
-        el.innerHTML =
-            '<div class="msg-avatar">'+esc(initials)+'</div>'+
-            '<div>'+
-              '<div class="msg-bubble">'+esc(m.content||m.text||'')+'</div>'+
-              '<div class="msg-meta">'+esc(isOwn?'You':name)+' · '+fmtTime(m.createdAt||m.timestamp)+'</div>'+
-            '</div>';
-        box.appendChild(el);
+    var me = myId();
+    msgs.forEach(function(m) {
+        var isOwn = String(m.senderId || m.userId || '') === me;
+        var name  = m.senderName || (m.sender && (m.sender.firstName || m.sender.username)) || (isOwn ? 'You' : 'Member');
+        box.appendChild(makeBubble(m.content || m.text || '', name, isOwn, m.createdAt || m.timestamp));
     });
-    const cont = document.getElementById('chatMessagesContainer');
+    scrollBottom();
+}
+
+function makeBubble(text, name, isOwn, ts) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;max-width:75%;' + (isOwn ? 'align-self:flex-end;flex-direction:row-reverse;margin-left:auto' : '');
+    var init = (name||'?').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);
+    wrap.innerHTML =
+        '<div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:11px;flex-shrink:0">' + esc(init) + '</div>' +
+        '<div>' +
+          '<div style="background:' + (isOwn ? 'var(--primary-color,#0084ff);color:#fff' : 'var(--secondary-color,#f0f0f0);color:var(--text-primary)') + ';border-radius:' + (isOwn ? '16px 16px 4px 16px' : '16px 16px 16px 4px') + ';padding:8px 12px;font-size:14px;line-height:1.4;word-break:break-word">' + esc(text) + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary,#888);margin-top:3px;padding:0 4px;' + (isOwn ? 'text-align:right' : '') + '">' + esc(isOwn ? 'You' : name) + ' &middot; ' + fmtTime(ts) + '</div>' +
+        '</div>';
+    return wrap;
+}
+
+function scrollBottom() {
+    var cont = document.getElementById('chatMessagesContainer');
     if (cont) cont.scrollTop = cont.scrollHeight;
 }
 
-// ── Send message ──────────────────────────────────────────────────────────
-async function sendPanelMessage() {
-    const inp   = document.getElementById('chatInput');
-    const group = window.__currentPanelGroup;
+/* ── Send message ──────────────────────────────────────────────── */
+function sendMsg() {
+    var inp   = document.getElementById('chatInput');
+    var group = window.__gcCurrentGroup;
     if (!inp || !group) return;
-    const text = inp.value.trim();
+    var text = inp.value.trim();
     if (!text) return;
     inp.value = '';
     inp.style.height = '';
 
-    const box = document.getElementById('chatMessages');
-
-    // Optimistic render
-    const GC   = gc();
-    const myId = String(GC?.currentUser?.id || GC?.currentUser?.uid || '');
-    const name = GC?.currentUser?.username || GC?.currentUser?.displayName || 'You';
-    const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-    const tmpEl = document.createElement('div');
-    tmpEl.className = 'chat-message own';
-    tmpEl.innerHTML =
-        '<div class="msg-avatar">'+esc(initials)+'</div>'+
-        '<div>'+
-          '<div class="msg-bubble">'+esc(text)+'</div>'+
-          '<div class="msg-meta">You · now</div>'+
-        '</div>';
+    var box = document.getElementById('chatMessages');
+    var g   = gc();
+    var name = (g && g.currentUser && (g.currentUser.username || g.currentUser.displayName)) || 'You';
+    var tmpEl = makeBubble(text, name, true, new Date().toISOString());
+    tmpEl.setAttribute('data-sending', '1');
     if (box) {
-        const empty = box.querySelector('.chat-empty-state');
+        var empty = box.querySelector('[data-empty]');
         if (empty) empty.remove();
         box.appendChild(tmpEl);
-        const cont = document.getElementById('chatMessagesContainer');
-        if (cont) cont.scrollTop = cont.scrollHeight;
+        scrollBottom();
     }
 
-    try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-        await fetch('/api/groups/'+group.id+'/messages', {
-            method: 'POST',
-            headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
-            body: JSON.stringify({ content: text, type: 'text' })
-        });
-    } catch(e) {
-        tmpEl.querySelector('.msg-meta').textContent += ' (failed)';
-        tmpEl.querySelector('.msg-meta').style.color = 'red';
-    }
+    apiFetch('/groups/' + group.id + '/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text, type: 'text' })
+    }).then(function(r) {
+        tmpEl.removeAttribute('data-sending');
+    }).catch(function() {
+        var meta = tmpEl.querySelector('div > div:last-child');
+        if (meta) { meta.textContent = 'Failed to send'; meta.style.color = 'red'; }
+    });
 }
 
-// ── Three-dots menu ───────────────────────────────────────────────────────
-function setupMoreMenu() {
-    const btn  = document.getElementById('chatMoreBtn');
-    const menu = document.getElementById('chatMoreMenu');
+/* ── Three-dots menu ───────────────────────────────────────────── */
+function setupMenu() {
+    var btn  = document.getElementById('chatMoreBtn');
+    var menu = document.getElementById('chatMoreMenu');
     if (!btn || !menu) return;
 
-    btn.addEventListener('click', e => {
+    btn.addEventListener('click', function(e) {
         e.stopPropagation();
         menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
     });
-    document.addEventListener('click', () => { menu.style.display = 'none'; });
+    document.addEventListener('click', function() { if (menu) menu.style.display = 'none'; });
 
-    menu.querySelectorAll('.chat-more-item').forEach(item => {
-        item.addEventListener('click', e => {
+    menu.querySelectorAll('.gcm-item').forEach(function(item) {
+        item.addEventListener('click', function(e) {
             e.stopPropagation();
             menu.style.display = 'none';
-            const panel = item.dataset.panel;
-            if (panel === 'leave') { handleLeaveGroup(); return; }
-            openSubPanel(panel);
+            var action = item.getAttribute('data-action');
+            if (action === 'leave')   { doLeave(); return; }
+            if (action === 'delete')  { doDelete(); return; }
+            openSubPanel(action);
         });
     });
 }
 
-// ── Sub-panel (members / settings / theme / purpose / info) ───────────────
+/* ── Sub-panel ─────────────────────────────────────────────────── */
 function openSubPanel(type) {
-    const sub     = document.getElementById('groupSubPanel');
-    const title   = document.getElementById('subPanelTitle');
-    const content = document.getElementById('subPanelContent');
-    const group   = window.__currentPanelGroup;
-    if (!sub || !title || !content || !group) return;
+    var sp      = document.getElementById('gcSubPanel');
+    var title   = document.getElementById('gcSubPanelTitle');
+    var content = document.getElementById('gcSubPanelContent');
+    var group   = window.__gcCurrentGroup;
+    if (!sp || !title || !content || !group) return;
 
-    const labels = { members:'Members', settings:'Settings', theme:'Theme', purpose:'Purpose', info:'Group Info' };
+    var labels = { members:'Members', settings:'Settings', theme:'Theme', purpose:'Purpose', info:'Group Info' };
     title.textContent = labels[type] || type;
-    content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i></div>';
-    sub.style.display = 'flex';
+    content.innerHTML = '<div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin"></i></div>';
+    sp.style.display = 'flex';
 
-    setTimeout(() => buildSubPanel(type, group, content), 50);
+    setTimeout(function(){ buildSubPanel(type, group, content); }, 50);
 }
 
 function buildSubPanel(type, group, el) {
     if (type === 'info') {
+        var init2 = (group.name || 'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);
         el.innerHTML =
-            '<div style="text-align:center;padding:20px 10px">'+
-            '<div style="width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:28px;color:#fff;font-weight:700">'+
-                esc((group.name||'G').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2))+
-            '</div>'+
-            '<h3 style="margin:0 0 6px">'+esc(group.name||'Group')+'</h3>'+
-            '<p style="color:var(--text-secondary);font-size:13px;margin:0 0 10px">'+esc(group.description||'No description')+'</p>'+
-            '<span style="font-size:12px;padding:4px 10px;border-radius:10px;background:var(--secondary-color)">'+
-                (group.isPublic?'🌐 Public':'🔒 Private')+
-            '</span>'+
-            '</div>'+
-            '<hr style="border-color:var(--border-color);margin:10px 0">'+
-            '<div style="padding:0 4px">'+
-            '<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px"><span style="color:var(--text-secondary)">Purpose</span><b>'+esc(group.purpose||'general')+'</b></div>'+
-            '<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px"><span style="color:var(--text-secondary)">Members</span><b>'+(group.stats?.totalMembers||group.memberCount||0)+'</b></div>'+
-            '<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px"><span style="color:var(--text-secondary)">Created</span><b>'+fmtTime(group.createdAt)+'</b></div>'+
+            '<div style="text-align:center;padding:20px 10px">' +
+            '<div style="width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:26px;color:#fff;font-weight:700">' + esc(init2) + '</div>' +
+            '<h3 style="margin:0 0 6px">' + esc(group.name || '') + '</h3>' +
+            '<p style="color:var(--text-secondary);font-size:13px;margin:0 0 10px">' + esc(group.description || 'No description') + '</p>' +
+            '<span style="font-size:12px;padding:4px 10px;border-radius:10px;background:var(--secondary-color,#f0f0f0)">' + (group.isPublic ? '\uD83C\uDF10 Public' : '\uD83D\uDD12 Private') + '</span>' +
+            '</div><hr style="border-color:var(--border-color);margin:10px 0">' +
+            '<div style="padding:0 4px">' +
+            '<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:14px"><span style="color:var(--text-secondary)">Purpose</span><b>' + esc(group.purpose || 'general') + '</b></div>' +
+            '<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:14px"><span style="color:var(--text-secondary)">Members</span><b>' + ((group.stats && group.stats.totalMembers) || group.memberCount || 0) + '</b></div>' +
             '</div>';
         return;
     }
 
     if (type === 'members') {
-        el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin"></i><p>Loading…</p></div>';
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-        fetch('/api/groups/'+group.id+'/members?limit=50', { headers:{'Authorization':'Bearer '+token} })
-            .then(r => r.json()).then(d => {
-                const members = d.data?.members || d.members || d.data || [];
-                if (!members.length) { el.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px">No members found</p>'; return; }
-                el.innerHTML = members.map(m => {
-                    const u = m.user || m;
-                    const n = u.username || u.displayName || 'Member';
-                    const role = m.role || 'member';
-                    const roleColor = {owner:'#f59e0b',admin:'#3b82f6',moderator:'#8b5cf6',member:'#6b7280'}[role]||'#6b7280';
-                    return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color)">'+
-                        '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:13px;flex-shrink:0">'+
-                            esc(n.slice(0,2).toUpperCase())+
-                        '</div>'+
-                        '<div style="flex:1;min-width:0">'+
-                            '<div style="font-weight:500;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n)+'</div>'+
-                            '<span style="font-size:11px;padding:2px 8px;border-radius:8px;background:'+roleColor+'20;color:'+roleColor+'">'+esc(role)+'</span>'+
-                        '</div>'+
-                    '</div>';
-                }).join('');
-            }).catch(() => { el.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px">Could not load members</p>'; });
+        el.innerHTML = '<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i><p>Loading...</p></div>';
+        apiFetch('/groups/' + group.id + '/members?limit=50')
+            .then(function(r){ return r.json(); })
+            .then(function(d) {
+                var list = (d.data && d.data.members) || (d.data && Array.isArray(d.data) ? d.data : null) || d.members || [];
+                if (!list.length) { el.innerHTML = '<p style="text-align:center;padding:20px;color:var(--text-secondary)">No members found</p>'; return; }
+                var html = '';
+                var colors = {owner:'#f59e0b',admin:'#3b82f6',moderator:'#8b5cf6',member:'#6b7280'};
+                list.forEach(function(m) {
+                    var u  = m.user || m;
+                    var n  = u.username || u.firstName || 'Member';
+                    var rl = m.role || 'member';
+                    var rc = colors[rl] || '#6b7280';
+                    var ii = n.slice(0,2).toUpperCase();
+                    html += '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)">' +
+                        '<div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0">' + esc(ii) + '</div>' +
+                        '<div style="flex:1"><div style="font-size:14px;font-weight:500">' + esc(n) + '</div>' +
+                        '<span style="font-size:11px;padding:2px 7px;border-radius:8px;background:' + rc + '20;color:' + rc + '">' + esc(rl) + '</span></div></div>';
+                });
+                el.innerHTML = html;
+            }).catch(function(){ el.innerHTML = '<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load members</p>'; });
         return;
     }
 
     if (type === 'settings') {
+        var s = group.settings || {};
         el.innerHTML =
-            '<div style="display:flex;flex-direction:column;gap:14px">'+
-            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow media<input type="checkbox" '+(group.settings?.allowMedia!==false?'checked':'')+' id="stgMedia"></label>'+
-            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow reactions<input type="checkbox" '+(group.settings?.allowReactions!==false?'checked':'')+' id="stgReact"></label>'+
-            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow calls<input type="checkbox" '+(group.settings?.allowCalls!==false?'checked':'')+' id="stgCalls"></label>'+
-            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Admins only post<input type="checkbox" '+(group.settings?.onlyAdminsCanPost?'checked':'')+' id="stgAdminOnly"></label>'+
-            '<button onclick="window.__saveGroupSettings()" style="margin-top:10px;padding:10px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500">Save Settings</button>'+
+            '<div style="display:flex;flex-direction:column;gap:14px">' +
+            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow media <input type="checkbox" id="gs_media" ' + (s.allowMedia !== false ? 'checked' : '') + '></label>' +
+            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow reactions <input type="checkbox" id="gs_react" ' + (s.allowReactions !== false ? 'checked' : '') + '></label>' +
+            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Allow calls <input type="checkbox" id="gs_calls" ' + (s.allowCalls !== false ? 'checked' : '') + '></label>' +
+            '<label style="display:flex;justify-content:space-between;align-items:center;font-size:14px">Admins only post <input type="checkbox" id="gs_admin" ' + (s.onlyAdminsCanPost ? 'checked' : '') + '></label>' +
+            '<button id="gcSaveSettings" style="margin-top:8px;padding:10px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500">Save Settings</button>' +
             '</div>';
-        window.__saveGroupSettings = async function() {
-            const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-            const body = {
-                settings: {
-                    allowMedia:       document.getElementById('stgMedia')?.checked,
-                    allowReactions:   document.getElementById('stgReact')?.checked,
-                    allowCalls:       document.getElementById('stgCalls')?.checked,
-                    onlyAdminsCanPost:document.getElementById('stgAdminOnly')?.checked,
-                }
-            };
-            try {
-                await fetch('/api/groups/'+group.id+'/settings', { method:'PUT', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}, body:JSON.stringify(body) });
-                if (typeof showNotification === 'function') showNotification('Settings saved!','success');
-                else alert('Settings saved!');
-            } catch(e) { alert('Failed to save settings'); }
-        };
+        document.getElementById('gcSaveSettings').addEventListener('click', function() {
+            var body = { settings: {
+                allowMedia:        document.getElementById('gs_media').checked,
+                allowReactions:    document.getElementById('gs_react').checked,
+                allowCalls:        document.getElementById('gs_calls').checked,
+                onlyAdminsCanPost: document.getElementById('gs_admin').checked
+            }};
+            apiFetch('/groups/' + group.id + '/settings', {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body)
+            }).then(function(){ notify('Settings saved!', 'success'); })
+              .catch(function(){ notify('Failed to save', 'error'); });
+        });
         return;
     }
 
     if (type === 'theme') {
-        const themes = [
+        var themes = [
             {id:'blue',   name:'Ocean Blue',  bg:'linear-gradient(135deg,#0084ff,#0055cc)'},
             {id:'green',  name:'Forest',      bg:'linear-gradient(135deg,#22c55e,#16a34a)'},
             {id:'purple', name:'Violet',      bg:'linear-gradient(135deg,#a855f7,#7c3aed)'},
@@ -2292,128 +2319,181 @@ function buildSubPanel(type, group, el) {
             {id:'orange', name:'Sunset',      bg:'linear-gradient(135deg,#f97316,#c2410c)'},
             {id:'teal',   name:'Teal',        bg:'linear-gradient(135deg,#14b8a6,#0f766e)'},
             {id:'pink',   name:'Rose',        bg:'linear-gradient(135deg,#ec4899,#be185d)'},
-            {id:'dark',   name:'Dark',        bg:'linear-gradient(135deg,#374151,#111827)'},
+            {id:'dark',   name:'Dark',        bg:'linear-gradient(135deg,#374151,#111827)'}
         ];
-        el.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
-            themes.map(t =>
-                '<button onclick="window.__applyTheme(\''+t.id+'\')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border:2px solid '+(group.theme===t.id?'var(--primary-color,#0084ff)':'var(--border-color,#ddd)')+';border-radius:10px;cursor:pointer;background:var(--bg-color)">'+
-                '<div style="width:40px;height:40px;border-radius:50%;background:'+t.bg+'"></div>'+
-                '<span style="font-size:12px;font-weight:500">'+esc(t.name)+'</span>'+
-                '</button>'
-            ).join('')+
-        '</div>';
-        window.__applyTheme = async function(themeId) {
-            const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-            try {
-                await fetch('/api/groups/'+group.id, { method:'PUT', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}, body:JSON.stringify({settings:{theme:themeId}}) });
-                group.theme = themeId;
-                if (typeof showNotification === 'function') showNotification('Theme updated!','success');
-                buildSubPanel('theme', group, el);
-            } catch(e) { alert('Failed to update theme'); }
-        };
+        var html2 = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+        themes.forEach(function(t) {
+            var active = (group.theme === t.id) ? '2px solid var(--primary-color,#0084ff)' : '2px solid var(--border-color,#ddd)';
+            html2 += '<button data-tid="' + esc(t.id) + '" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border:' + active + ';border-radius:10px;cursor:pointer;background:var(--bg-color)">' +
+                '<div style="width:40px;height:40px;border-radius:50%;background:' + t.bg + '"></div>' +
+                '<span style="font-size:12px;font-weight:500">' + esc(t.name) + '</span></button>';
+        });
+        html2 += '</div>';
+        el.innerHTML = html2;
+        el.querySelectorAll('[data-tid]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var tid = this.getAttribute('data-tid');
+                apiFetch('/groups/' + group.id, {
+                    method: 'PUT',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({settings:{theme:tid}})
+                }).then(function(){ group.theme = tid; buildSubPanel('theme', group, el); notify('Theme updated!'); })
+                  .catch(function(){ notify('Failed', 'error'); });
+            });
+        });
         return;
     }
 
     if (type === 'purpose') {
-        const purposes = [
-            {id:'social',       name:'Social',       icon:'👥'},
-            {id:'work',         name:'Work',         icon:'💼'},
-            {id:'education',    name:'Education',    icon:'🎓'},
-            {id:'gaming',       name:'Gaming',       icon:'🎮'},
-            {id:'health',       name:'Health',       icon:'🏥'},
-            {id:'hobby',        name:'Hobby',        icon:'🎨'},
-            {id:'tech',         name:'Technology',   icon:'💻'},
-            {id:'music',        name:'Music',        icon:'🎵'},
-            {id:'sports',       name:'Sports',       icon:'⚽'},
-            {id:'travel',       name:'Travel',       icon:'✈️'},
-            {id:'support',      name:'Support',      icon:'🤝'},
-            {id:'general',      name:'General',      icon:'💬'},
+        var purposes = [
+            {id:'social',name:'Social',icon:'\uD83D\uDC65'},{id:'work',name:'Work',icon:'\uD83D\uDCBC'},
+            {id:'education',name:'Education',icon:'\uD83C\uDF93'},{id:'gaming',name:'Gaming',icon:'\uD83C\uDFAE'},
+            {id:'health',name:'Health',icon:'\uD83C\uDFE5'},{id:'hobby',name:'Hobby',icon:'\uD83C\uDFA8'},
+            {id:'tech',name:'Technology',icon:'\uD83D\uDCBB'},{id:'music',name:'Music',icon:'\uD83C\uDFB5'},
+            {id:'sports',name:'Sports',icon:'\u26BD'},{id:'travel',name:'Travel',icon:'\u2708\uFE0F'},
+            {id:'support',name:'Support',icon:'\uD83E\uDD1D'},{id:'general',name:'General',icon:'\uD83D\uDCAC'}
         ];
-        el.innerHTML = '<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px">Current: <b>'+esc(group.purpose||'general')+'</b></p>'+
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
-            purposes.map(p =>
-                '<button onclick="window.__applyPurpose(\''+p.id+'\')" style="display:flex;align-items:center;gap:8px;padding:10px;border:2px solid '+(group.purpose===p.id?'var(--primary-color,#0084ff)':'var(--border-color,#ddd)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:13px">'+
-                '<span>'+p.icon+'</span><span>'+esc(p.name)+'</span></button>'
-            ).join('')+
-        '</div>';
-        window.__applyPurpose = async function(purposeId) {
-            const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-            try {
-                await fetch('/api/groups/'+group.id, { method:'PUT', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token}, body:JSON.stringify({purpose:purposeId}) });
-                group.purpose = purposeId;
-                if (typeof showNotification === 'function') showNotification('Purpose updated!','success');
-                buildSubPanel('purpose', group, el);
-            } catch(e) { alert('Failed to update purpose'); }
-        };
+        var html3 = '<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px">Current: <b>' + esc(group.purpose||'general') + '</b></p>';
+        html3 += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+        purposes.forEach(function(p) {
+            var active2 = (group.purpose === p.id) ? '2px solid var(--primary-color,#0084ff)' : '2px solid var(--border-color,#ddd)';
+            html3 += '<button data-pid="' + esc(p.id) + '" style="display:flex;align-items:center;gap:8px;padding:10px;border:' + active2 + ';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:13px">' +
+                '<span>' + p.icon + '</span><span>' + esc(p.name) + '</span></button>';
+        });
+        html3 += '</div>';
+        el.innerHTML = html3;
+        el.querySelectorAll('[data-pid]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var pid = this.getAttribute('data-pid');
+                apiFetch('/groups/' + group.id, {
+                    method: 'PUT',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({purpose:pid})
+                }).then(function(){ group.purpose = pid; buildSubPanel('purpose', group, el); notify('Purpose updated!'); })
+                  .catch(function(){ notify('Failed', 'error'); });
+            });
+        });
         return;
     }
 }
 
-// ── Leave group ───────────────────────────────────────────────────────────
-async function handleLeaveGroup() {
-    const group = window.__currentPanelGroup;
-    if (!group) return;
-    if (!confirm('Leave "'+group.name+'"?')) return;
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-    try {
-        await fetch('/api/groups/'+group.id+'/leave', { method:'POST', headers:{'Authorization':'Bearer '+token} });
-        closePanel();
-        if (typeof showNotification === 'function') showNotification('Left group','success');
-        // Refresh list
-        const GC = gc();
-        if (GC && typeof GC.requestGroupList === 'function') GC.requestGroupList().catch(()=>{});
-    } catch(e) { alert('Failed to leave group'); }
+/* ── Leave group ───────────────────────────────────────────────── */
+function doLeave() {
+    var group = window.__gcCurrentGroup;
+    if (!group || !confirm('Leave "' + group.name + '"?')) return;
+    apiFetch('/groups/' + group.id + '/leave', {method:'POST'})
+        .then(function(){
+            closePanel();
+            notify('Left group', 'success');
+            var g = gc();
+            if (g && typeof g.requestGroupList === 'function') g.requestGroupList().catch(function(){});
+        }).catch(function(){ notify('Failed to leave', 'error'); });
 }
 
-// ── Call button ───────────────────────────────────────────────────────────
-function setupCallButton() {
-    const btn = document.getElementById('chatCallBtn');
+/* ── Delete group ──────────────────────────────────────────────── */
+function doDelete() {
+    var group = window.__gcCurrentGroup;
+    if (!group || !confirm('Delete "' + group.name + '"? This cannot be undone.')) return;
+    apiFetch('/groups/' + group.id, {method:'DELETE'})
+        .then(function(){
+            closePanel();
+            notify('Group deleted', 'success');
+            var g = gc();
+            if (g && typeof g.requestGroupList === 'function') g.requestGroupList().catch(function(){});
+        }).catch(function(){ notify('Failed to delete', 'error'); });
+}
+
+/* ── Call button ───────────────────────────────────────────────── */
+function setupCall() {
+    var btn = document.getElementById('chatCallBtn');
     if (!btn) return;
-    btn.addEventListener('click', () => {
-        const group = window.__currentPanelGroup;
+    btn.addEventListener('click', function() {
+        var group = window.__gcCurrentGroup;
         if (!group) return;
-        // Try existing call infrastructure first
-        const callFn = window.openCallWithUser || window.startCall || window.initiateCall;
-        if (typeof callFn === 'function') {
-            callFn({ groupId: group.id, groupName: group.name, type: 'group' });
-            return;
-        }
-        // Fallback: send via postMessage to parent (chat.html call system)
+
+        // Method 1: use parent's __dispatchCallToIframe via postMessage
+        var payload = {
+            userId: group.id,
+            userName: group.name,
+            callType: 'group_audio',
+            groupId: group.id,
+            groupName: group.name,
+            returnTo: 'group',
+            isGroup: true
+        };
         try {
-            window.parent.postMessage({
-                type: 'OPEN_CALL_WITH_USER',
-                payload: { groupId: group.id, groupName: group.name, callType: 'group_audio' }
-            }, '*');
-        } catch(_) {}
-        if (typeof showNotification === 'function') showNotification('Starting call…','info');
+            window.parent.postMessage({ type: 'INITIATE_CALL', payload: payload }, '*');
+        } catch(e) {}
+
+        // Method 2: direct call to parent functions if same origin
+        try {
+            if (window.parent && window.parent.__dispatchCallToIframe) {
+                window.parent.__dispatchCallToIframe(group.id, group.name, 'group_audio', 'group', group.id, 'group-module');
+            }
+        } catch(e) {}
+
+        notify('Starting call\u2026', 'info');
     });
 }
 
-// ── Sub-panel back button ─────────────────────────────────────────────────
-function setupSubPanelBack() {
-    const btn = document.getElementById('subPanelBackBtn');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-        const sub = document.getElementById('groupSubPanel');
-        if (sub) sub.style.display = 'none';
+/* ── Receive real-time messages ────────────────────────────────── */
+function hookRealtime() {
+    var g = gc();
+    if (!g || typeof g.on !== 'function') { setTimeout(hookRealtime, 600); return; }
+    g.on('group:message-received', function(payload) {
+        var groupId = payload && payload.groupId;
+        var msg     = payload && payload.message;
+        var cur     = window.__gcCurrentGroup;
+        if (!cur || String(cur.id) !== String(groupId) || !msg) return;
+        var box = document.getElementById('chatMessages');
+        if (!box) return;
+        var me    = myId();
+        var isOwn = String(msg.senderId || msg.userId || '') === me;
+        var name  = msg.senderName || (isOwn ? 'You' : 'Member');
+        var bubble = makeBubble(msg.content || msg.text || '', name, isOwn, msg.createdAt || msg.timestamp);
+        box.appendChild(bubble);
+        scrollBottom();
     });
 }
 
-// ── Close chat button ─────────────────────────────────────────────────────
-function setupCloseChat() {
-    const btn = document.getElementById('closeChatBtn');
-    if (!btn) return;
-    btn.addEventListener('click', closePanel);
+/* ── Delegate clicks on group list items ───────────────────────── */
+function hookGroupClicks() {
+    var g = gc();
+    if (!g) { setTimeout(hookGroupClicks, 400); return; }
+
+    var ids = ['allGroupsList','myGroupsList','joinedGroupsList','adminGroupsList'];
+    ids.forEach(function(listId) {
+        var listEl = document.getElementById(listId);
+        if (!listEl || listEl._gcHooked) return;
+        listEl._gcHooked = true;
+        listEl.addEventListener('click', function(e) {
+            var item = e.target.closest('[data-group-id]');
+            if (!item) return;
+            if (e.target.closest('.group-actions, .group-action-btn, .action-btn')) return;
+            var gid  = item.getAttribute('data-group-id');
+            if (!gid) return;
+            var all  = g.groups || [];
+            var found = null;
+            for (var i = 0; i < all.length; i++) {
+                if (String(all[i].id) === String(gid)) { found = all[i]; break; }
+            }
+            if (found) openPanel(found);
+        });
+    });
 }
 
-// ── Send button + Enter key ───────────────────────────────────────────────
-function setupSendMessage() {
-    const sendBtn = document.getElementById('chatSendBtn');
-    const inp     = document.getElementById('chatInput');
-    if (sendBtn) sendBtn.addEventListener('click', sendPanelMessage);
-    if (inp) {
-        inp.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPanelMessage(); }
+/* ── Chat input wiring ─────────────────────────────────────────── */
+function setupInput() {
+    var sendBtn = document.getElementById('chatSendBtn');
+    var inp     = document.getElementById('chatInput');
+    if (sendBtn && !sendBtn._gcBound) {
+        sendBtn._gcBound = true;
+        sendBtn.addEventListener('click', sendMsg);
+    }
+    if (inp && !inp._gcBound) {
+        inp._gcBound = true;
+        inp.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
         });
         inp.addEventListener('input', function() {
             this.style.height = '';
@@ -2422,112 +2502,95 @@ function setupSendMessage() {
     }
 }
 
-// ── Override group item click to use openPanel ────────────────────────────
-// Patch group-core's showGroupDetails / openGroupChat to also call openPanel
-function patchGroupCore() {
-    const GC = gc();
-    if (!GC) { setTimeout(patchGroupCore, 300); return; }
-
-    // Intercept openGroupChat
-    const _orig = window.openGroupChat;
-    window.openGroupChat = function(groupData) {
-        openPanel(groupData);
-        if (typeof _orig === 'function') {
-            try { _orig(groupData); } catch(_) {}
-        }
-    };
-
-    // Override group item click events via event delegation on all group lists
-    ['allGroupsList','myGroupsList','joinedGroupsList','adminGroupsList'].forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.addEventListener('click', function(e) {
-            const item = e.target.closest('.group-item, [data-group-id]');
-            if (!item) return;
-            if (e.target.closest('.group-actions, .group-action-btn')) return;
-            const gid = item.dataset.groupId || item.dataset.id;
-            if (!gid) return;
-            const all = GC.groups || [];
-            const found = all.find(g => String(g.id) === String(gid));
-            if (found) openPanel(found);
-        });
-    });
-}
-
-// ── Handle incoming socket messages for the open panel ───────────────────
-function hookSocketMessages() {
-    const GC = gc();
-    if (!GC || typeof GC.on !== 'function') { setTimeout(hookSocketMessages, 500); return; }
-    GC.on('group:message-received', ({ groupId, message }) => {
-        const cur = window.__currentPanelGroup;
-        if (!cur || String(cur.id) !== String(groupId)) return;
-        const box = document.getElementById('chatMessages');
-        if (!box) return;
-        const empty = box.querySelector('.chat-empty-state');
-        if (empty) empty.remove();
-        const myId = String(GC.currentUser?.id || GC.currentUser?.uid || '');
-        const isOwn = String(message.senderId||message.userId||'') === myId;
-        const name = message.senderName || (isOwn?'You':'Member');
-        const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-        const el = document.createElement('div');
-        el.className = 'chat-message' + (isOwn?' own':'');
-        el.innerHTML =
-            '<div class="msg-avatar">'+esc(initials)+'</div>'+
-            '<div><div class="msg-bubble">'+esc(message.content||message.text||'')+'</div>'+
-            '<div class="msg-meta">'+esc(name)+' · '+fmtTime(message.createdAt||message.timestamp)+'</div></div>';
-        box.appendChild(el);
-        const cont = document.getElementById('chatMessagesContainer');
-        if (cont) cont.scrollTop = cont.scrollHeight;
-    });
-}
-
-// ── Auto-refresh "My Groups" badge count ─────────────────────────────────
-function updateBadgeCounts() {
-    const GC = gc();
-    if (!GC) return;
-    const myBadge  = document.getElementById('myGroupsCount');
-    const joinBadge= document.getElementById('joinedCount');
-    if (myBadge)   myBadge.textContent   = (GC.myGroups||[]).length;
-    if (joinBadge) joinBadge.textContent = (GC.joinedGroups||[]).length;
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────
-function init() {
-    setupMoreMenu();
-    setupCallButton();
-    setupSubPanelBack();
-    setupCloseChat();
-    setupSendMessage();
-    patchGroupCore();
-    hookSocketMessages();
-
-    // Patch renderGroupsListSecure to use live GroupCore data
-    const GC = gc();
-    if (GC) {
-        GC.on('groups:list-updated', updateBadgeCounts);
-        GC.on('group:created', function(newGroup) {
-            updateBadgeCounts();
-            // Force re-render
-            if (typeof window.renderGroupsListSecure === 'function') {
-                try { window.renderGroupsListSecure(); } catch(_) {}
-            }
+/* ── Close button & sub-panel back ────────────────────────────── */
+function setupClose() {
+    var closeBtn = document.getElementById('closeChatBtn');
+    var backBtn  = document.getElementById('gcSubPanelBack');
+    if (closeBtn && !closeBtn._gcBound) {
+        closeBtn._gcBound = true;
+        closeBtn.addEventListener('click', closePanel);
+    }
+    if (backBtn && !backBtn._gcBound) {
+        backBtn._gcBound = true;
+        backBtn.addEventListener('click', function() {
+            var sp = document.getElementById('gcSubPanel');
+            if (sp) sp.style.display = 'none';
         });
     }
+}
 
-    // Expose openPanel globally so group-core openGroupChat can call it
-    window.__openGroupPanel = openPanel;
-    window.__closeGroupPanel = closePanel;
+/* ── Expose openPanel so group-core can call it directly ───────── */
+function patchCore() {
+    var g = gc();
+    if (!g) { setTimeout(patchCore, 400); return; }
+    window.__gcOpenPanel  = openPanel;
+    window.__gcClosePanel = closePanel;
+    // Override openGroupChat so clicking a group always opens our panel
+    var _orig = window.openGroupChat;
+    if (!window.__gcCorePatched) {
+        window.__gcCorePatched = true;
+        window.openGroupChat = function(groupData) {
+            openPanel(groupData);
+            if (typeof _orig === 'function') { try { _orig(groupData); } catch(e) {} }
+        };
+    }
+    hookGroupClicks();
+    hookRealtime();
+}
+
+/* ── After group created: push into GroupCore & re-render ──────── */
+function hookGroupCreated() {
+    var g = gc();
+    if (!g || typeof g.on !== 'function') { setTimeout(hookGroupCreated, 600); return; }
+    g.on('group:created', function(newGroup) {
+        if (!newGroup || !newGroup.id) return;
+        if (!g.groups.some(function(x){ return x.id === newGroup.id; })) g.groups.push(newGroup);
+        if (!g.myGroups.some(function(x){ return x.id === newGroup.id; })) g.myGroups.push(newGroup);
+        if (typeof g.saveGroups === 'function') g.saveGroups();
+        if (typeof renderGroupsListSecure === 'function') try { renderGroupsListSecure(); } catch(e) {}
+    });
+}
+
+/* ── CSS injection (menu items, sub-panel) ─────────────────────── */
+function injectCSS() {
+    if (document.getElementById('gc-patch-css')) return;
+    var style = document.createElement('style');
+    style.id  = 'gc-patch-css';
+    style.textContent =
+        '.gcm-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px 16px;background:none;border:none;font-size:14px;color:var(--text-primary);cursor:pointer;text-align:left;transition:background .15s}' +
+        '.gcm-item:hover{background:var(--secondary-color,#f5f5f5)}' +
+        '.gcm-item i{width:16px;text-align:center}' +
+        '.gcm-danger{color:#e53935!important}' +
+        '#gcSubPanel{position:absolute;top:0;right:0;bottom:0;width:320px;max-width:100%;background:var(--bg-color);border-left:1px solid var(--border-color);z-index:600;flex-direction:column;box-shadow:-4px 0 16px rgba(0,0,0,.1);animation:gcSlide .2s ease}' +
+        '@keyframes gcSlide{from{transform:translateX(100%)}to{transform:translateX(0)}}' +
+        '#chatMessages{display:flex;flex-direction:column;min-height:100%;padding:12px 16px;gap:4px}' +
+        '#chatMessagesContainer{flex:1;overflow-y:auto;min-height:0;background:var(--bg-color)}' +
+        '.chat-input-container{flex-shrink:0;display:flex;align-items:flex-end;gap:8px;padding:10px 14px;border-top:1px solid var(--border-color);background:var(--bg-color)}' +
+        '#groupChatPanel{flex-direction:column}' +
+        '#groupChatPanel.active{display:flex!important}' +
+        '@media(max-width:768px){#groupChatPanel{position:fixed!important;top:0!important;left:0!important;width:100%!important;height:100%!important;z-index:1000!important}#gcSubPanel{width:100%;border-left:none}}';
+    document.head.appendChild(style);
+}
+
+/* ── Init ──────────────────────────────────────────────────────── */
+function init() {
+    injectCSS();
+    setupMenu();
+    setupCall();
+    setupClose();
+    setupInput();
+    patchCore();
+    hookGroupCreated();
 }
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
-    // Delay slightly so group-core.js finishes loading
-    setTimeout(init, 800);
+    setTimeout(init, 600);
 }
 
 })();
-</script>
 
+</script>
 </body>
 </html>

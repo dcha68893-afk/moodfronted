@@ -2727,13 +2727,13 @@ try {
                     friendId = other?.id;
                 }
                 
-                if (friendId && seenFriendIds.has(friendId)) {
+                if (friendId && seenFriendIds.has(String(friendId))) {
                     console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
                     return;
                 }
                 
                 if (friendId) {
-                    seenFriendIds.add(friendId);
+                    seenFriendIds.add(String(friendId));
                 }
                 
                 // FIX: compare ids as strings to prevent numeric/string type mismatch
@@ -5616,34 +5616,34 @@ try {
             }
 
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-            // FIX: Also match when activeChat is a pending_ conversation for the same user.
-            // When User A opens a chat via userId (before first message), activeChat.id = "pending_X"
-            // but the real chatId comes from the server once conversation is created.
-            // We detect this case by checking if the real conversation (by chatId) involves
-            // the same user as the pending chat, and if so treat it as "this chat".
-            let isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
-            if (!isThisChat && activeChat && chatId) {
-                // Check if the confirmed chatId maps to a conversation whose friendId matches
-                // the pendingReceiverId or friendId of the activeChat
-                const _confirmedConv = ChatManager._conversationsMap &&
-                    (ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId)));
-                if (_confirmedConv) {
-                    const _activeFriendId = activeChat.friendId || activeChat.pendingReceiverId || activeChat.otherUserId;
-                    const _confirmedFriendId = _confirmedConv.friendId || _confirmedConv.otherUserId || _confirmedConv.pendingReceiverId;
-                    if (_activeFriendId && _confirmedFriendId && String(_activeFriendId) === String(_confirmedFriendId)) {
-                        isThisChat = true;
-                        // Also promote the pending conversation to the real chatId in activeChat
-                        if (activeChat.isPending || String(activeChat.id).startsWith('pending_')) {
+            // FIX: isThisChat must also match when:
+            // 1. activeChat is a pending_ conversation (chatId = "pending_X") but the
+            //    incoming message has the real server chatId (e.g. "2"). This happens
+            //    when sender opens chat before first message is confirmed by server.
+            // 2. The message's senderId is the friendId of the activeChat (receiver replies).
+            let isThisChat = !!(activeChat && chatId && String(activeChat.id) === String(chatId));
+            if (!isThisChat && activeChat && normalizedMessage) {
+                const _activeFriendId = String(
+                    activeChat.friendId || activeChat.otherUserId ||
+                    (activeChat.otherParticipant && activeChat.otherParticipant.id) ||
+                    activeChat.pendingReceiverId || ''
+                );
+                const _incomingSenderId = String(normalizedMessage.senderId || '');
+                // Case 1: sender of incoming message is the other person in activeChat
+                if (_activeFriendId && _incomingSenderId && _activeFriendId === _incomingSenderId) {
+                    isThisChat = true;
+                }
+                // Case 2: activeChat is pending_, confirmed chatId now known — promote it
+                if (!isThisChat && activeChat.isPending && chatId) {
+                    const _confirmedConv = ChatManager._conversationsMap &&
+                        (ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId)));
+                    if (_confirmedConv) {
+                        const _cfid = String(_confirmedConv.friendId || _confirmedConv.otherUserId || '');
+                        if (_activeFriendId && _cfid && _activeFriendId === _cfid) {
+                            isThisChat = true;
+                            // Promote active conversation to confirmed chatId
                             ChatManager._activeConversation = _confirmedConv;
                         }
-                    }
-                }
-                // Also check if senderId or the incoming message's participants include our peer
-                if (!isThisChat && normalizedMessage) {
-                    const _activeFriendId2 = activeChat.friendId || activeChat.pendingReceiverId || activeChat.otherUserId;
-                    const _msgSenderId = normalizedMessage.senderId;
-                    if (_activeFriendId2 && _msgSenderId && String(_activeFriendId2) === String(_msgSenderId)) {
-                        isThisChat = true;
                     }
                 }
             }
@@ -6228,6 +6228,7 @@ try {
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
         
+        makeApiRequest: (endpoint, method, body, params) => makeApiRequest(endpoint, method, body, params),
         multiSendSelectedChats: new Set(),
         getOrCreateConversationByUserId: (userId, userName) => 
             ConversationManager.getOrCreateConversationByUserId(userId, userName),

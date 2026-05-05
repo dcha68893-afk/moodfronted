@@ -30,6 +30,98 @@ let currentState = LIFECYCLE_STATE.BOOT;
 if (window.parent && window.parent !== window && !window.__TOOLS_DEBUG__) {
     window.__TOOLS_DEBUG__ = true;
 }
+
+// Deep token extractor — searches all known payload shapes
+function _deepExtractToken(data) {
+    if (!data || typeof data !== 'object') return null;
+    // Direct fields
+    const direct = data.userToken || data.token || data.accessToken || data.jwtToken;
+    if (direct && typeof direct === 'string' && direct.startsWith('eyJ')) return direct;
+    // Nested: data.user
+    if (data.user) {
+        const ut = data.user.token || data.user.userToken || data.user.accessToken;
+        if (ut && ut.startsWith('eyJ')) return ut;
+    }
+    // Nested: data.session
+    if (data.session) {
+        const st = data.session.token || data.session.userToken || data.session.accessToken;
+        if (st && st.startsWith('eyJ')) return st;
+    }
+    // Nested: data.payload
+    if (data.payload) {
+        const pt = _deepExtractToken(data.payload);
+        if (pt) return pt;
+    }
+    // Nested: data.data
+    if (data.data) {
+        const dt = _deepExtractToken(data.data);
+        if (dt) return dt;
+    }
+    // Nested: data.auth
+    if (data.auth) {
+        const at = data.auth.token || data.auth.userToken || data.auth.accessToken;
+        if (at && at.startsWith('eyJ')) return at;
+    }
+    return null;
+}
+
+function _deepExtractUserId(data) {
+    if (!data || typeof data !== 'object') return null;
+    const direct = data.userId || data.user_id || data.userid || data.id;
+    if (direct && direct !== 'user' && direct !== 'null') return direct;
+    if (data.user?.id) return data.user.id;
+    if (data.session?.userId) return data.session.userId;
+    if (data.payload) {
+        const pid = _deepExtractUserId(data.payload);
+        if (pid) return pid;
+    }
+    if (data.data) {
+        const did = _deepExtractUserId(data.data);
+        if (did) return did;
+    }
+    return null;
+}
+
+// Background token harvester — tries every 2s until we have a token
+(function _harvestToken() {
+    if (window.__kynToken) return; // already have it
+    try {
+        // Try parent's api.core getAuthSession
+        if (window.parent && window.parent !== window) {
+            if (typeof window.parent.getAuthSession === 'function') {
+                const s = window.parent.getAuthSession();
+                if (s?.token) {
+                    window.__kynToken = s.token;
+                    if (s.userId) window.__kynUserId = s.userId;
+                    sessionClient.acceptParentSession({ userId: s.userId, userToken: s.token, token: s.token });
+                    if (!window.currentUser?.id) {
+                        window.currentUser = { id: s.userId, userId: s.userId, token: s.token };
+                    }
+                    if (window.__TOOLS_DEBUG__) console.log('[TokenHarvest] Got token from parent.getAuthSession');
+                    return;
+                }
+            }
+        }
+    } catch {}
+    try {
+        // Scan sessionStorage
+        for (const key of Object.keys(sessionStorage || {})) {
+            const val = sessionStorage.getItem(key);
+            if (val && val.startsWith('eyJ')) {
+                window.__kynToken = val;
+                if (window.__TOOLS_DEBUG__) console.log('[TokenHarvest] Got token from sessionStorage key:', key);
+                return;
+            }
+            try {
+                const p = JSON.parse(val);
+                const t = p?.token || p?.userToken || p?.accessToken;
+                if (t && t.startsWith('eyJ')) { window.__kynToken = t; return; }
+            } catch {}
+        }
+    } catch {}
+    // Retry
+    setTimeout(_harvestToken, 2000);
+})();
 let childReadySent = false;
 let parentReadyReceived = false;
 let initializationLock = false;
@@ -1444,6 +1536,22 @@ acceptParentSession(sessionData) {
 
     getSession() {
         return this.currentSession;
+    }
+
+    getToken() {
+        return this.currentSession?.userToken || this.currentSession?.token || null;
+    }
+
+    getUser() {
+        if (!this.currentSession) return null;
+        return {
+            id: this.currentSession.userId || this.currentSession.id,
+            displayName: this.currentSession.displayName || 'User',
+            email: this.currentSession.email || '',
+            photoURL: this.currentSession.photoURL || '',
+            isPremium: !!this.currentSession.isPremium,
+            trustLevel: this.currentSession.trustLevel || 'new'
+        };
     }
 
     isValid() {
@@ -4295,25 +4403,60 @@ window.addEventListener('message', function directSessionListener(event) {
     // Handle SESSION_DATA directly
     if (data.type === 'SESSION_DATA') {
         if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Processing SESSION_DATA directly');
-        let sessionInfo = data.payload || data;
         
-        // Extract userId and token
-        let userId = sessionInfo.userId || sessionInfo.user_id || sessionInfo.user?.id;
-        let token = sessionInfo.userToken || sessionInfo.token || sessionInfo.user?.token;
+        // Dig into all possible payload nesting
+        // Use deep extractors for robust token/userId finding
+        let userId = _deepExtractUserId(data.payload || data);
+        let token  = _deepExtractToken(data.payload || data);
         
-        if (userId && token) {
-            if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session data:', { userId, hasToken: !!token });
+        // If no token found in payload, try parent frame
+        if (!token && window.parent && window.parent !== window) {
+            try {
+                if (typeof window.parent.getAuthSession === 'function') {
+                    const ps = window.parent.getAuthSession();
+                    if (ps?.token) token = ps.token;
+                    if (!userId && ps?.userId) userId = ps.userId;
+                }
+            } catch {}
+        }
+        // Fall back to cached
+        if (!token) token = window.__kynToken;
+        if (!userId) userId = window.__kynUserId;
+        
+        if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session data:', { userId, hasToken: !!token });
+        
+        if (userId) {
+            // Always cache userId
+            window.__kynUserId = userId;
+            if (token) window.__kynToken = token;
+            
             const session = {
                 userId: userId,
                 userToken: token,
-                displayName: sessionInfo.displayName || sessionInfo.user?.displayName || 'User',
-                email: sessionInfo.email || sessionInfo.user?.email,
-                photoURL: sessionInfo.photoURL || sessionInfo.user?.photoURL,
-                isPremium: sessionInfo.isPremium || sessionInfo.user?.isPremium || false,
-                trustLevel: sessionInfo.trustLevel || sessionInfo.user?.trustLevel || 'new'
+                token: token,
+                displayName: p.displayName || s.displayName || p.user?.displayName || 'User',
+                email: p.email || s.email || p.user?.email || '',
+                photoURL: p.photoURL || s.photoURL || p.user?.photoURL || '',
+                isPremium: p.isPremium || s.isPremium || false,
+                trustLevel: p.trustLevel || s.trustLevel || 'new'
             };
             
             const accepted = sessionClient.acceptParentSession(session);
+            
+            // Sync to window.currentUser
+            if (!window.currentUser || !window.currentUser.id) {
+                window.currentUser = {
+                    id: userId,
+                    userId: userId,
+                    displayName: session.displayName,
+                    email: session.email,
+                    photoURL: session.photoURL,
+                    token: token
+                };
+            } else if (token && !window.currentUser.token) {
+                window.currentUser.token = token;
+            }
+            
             if (accepted && currentState !== LIFECYCLE_STATE.ACTIVE) {
                 if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Session accepted, activating module');
                 transitionTo(LIFECYCLE_STATE.ACTIVE, 'direct_session_received');
@@ -4329,26 +4472,46 @@ window.addEventListener('message', function directSessionListener(event) {
     // Handle AUTH_READY directly
     if (data.type === 'AUTH_READY') {
         if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Processing AUTH_READY directly');
-        const payload = data.payload || data;
-        let sessionInfo = payload.session || payload;
+        let userId2 = _deepExtractUserId(data.payload || data);
+        let token2  = _deepExtractToken(data.payload || data);
         
-        let userId = sessionInfo.userId || sessionInfo.user_id || sessionInfo.user?.id || payload.userId;
-        let token = sessionInfo.userToken || sessionInfo.token || sessionInfo.user?.token || payload.token;
+        // Try parent if no token
+        if (!token2 && window.parent && window.parent !== window) {
+            try {
+                if (typeof window.parent.getAuthSession === 'function') {
+                    const ps2 = window.parent.getAuthSession();
+                    if (ps2?.token) token2 = ps2.token;
+                    if (!userId2 && ps2?.userId) userId2 = ps2.userId;
+                }
+            } catch {}
+        }
+        // Fallback to cached
+        if (!token2) token2 = window.__kynToken;
+        if (!userId2) userId2 = window.__kynUserId;
         
-        if (userId && token) {
-            if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session in AUTH_READY:', { userId });
-            const session = {
-                userId: userId,
-                userToken: token,
-                displayName: sessionInfo.displayName || payload.displayName || 'User',
-                email: sessionInfo.email || payload.email,
-                photoURL: sessionInfo.photoURL || payload.photoURL,
-                isPremium: sessionInfo.isPremium || payload.isPremium || false,
-                trustLevel: sessionInfo.trustLevel || payload.trustLevel || 'new'
+        if (userId2) {
+            window.__kynUserId = userId2;
+            if (token2) window.__kynToken = token2;
+            
+            if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session in AUTH_READY:', { userId: userId2, hasToken: !!token2 });
+            const session2 = {
+                userId: userId2, userToken: token2, token: token2,
+                displayName: s2.displayName || p2.displayName || 'User',
+                email: s2.email || p2.email || '',
+                photoURL: s2.photoURL || p2.photoURL || '',
+                isPremium: s2.isPremium || p2.isPremium || false,
+                trustLevel: s2.trustLevel || p2.trustLevel || 'new'
             };
             
-            const accepted = sessionClient.acceptParentSession(session);
-            if (accepted && currentState !== LIFECYCLE_STATE.ACTIVE) {
+            const accepted2 = sessionClient.acceptParentSession(session2);
+            if (!window.currentUser?.id) {
+                window.currentUser = { id: userId2, userId: userId2, token: token2,
+                    displayName: session2.displayName, email: session2.email };
+            } else if (token2 && !window.currentUser.token) {
+                window.currentUser.token = token2;
+            }
+            
+            if (accepted2 && currentState !== LIFECYCLE_STATE.ACTIVE) {
                 if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Session accepted from AUTH_READY, activating');
                 transitionTo(LIFECYCLE_STATE.ACTIVE, 'direct_auth_ready_received');
                 flushMessageQueue();
@@ -4664,9 +4827,20 @@ export function hasValidSession() {
 }
 
 export function hasValidUser() {
-    const user = sessionClient.getUser ? sessionClient.getUser() : null;
+    // Try sessionClient (lowercase - SessionClientWrapper)
+    let user = sessionClient.getUser ? sessionClient.getUser() : null;
+    // Fallback to SessionClient (capital S - old client)
+    if (!user || !user.id) user = SessionClient.getUser ? SessionClient.getUser() : null;
+    // Fallback to window globals
+    if (!user || !user.id) {
+        const wc = window.currentUser || window.userData;
+        if (wc && (wc.id || wc.userId)) {
+            user = { id: wc.id || wc.userId, displayName: wc.displayName || wc.name || 'User' };
+        }
+    }
     if (!user || !user.id) return false;
-    if (user.id === 'user' || user.id === 'default' || user.id === 'null' || user.id === 'undefined') return false;
+    const badIds = ['user', 'default', 'null', 'undefined', ''];
+    if (badIds.includes(String(user.id).toLowerCase())) return false;
     return true;
 }
 
@@ -5370,38 +5544,61 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
 
     // Get token from every possible source — do NOT gate on isActive()
     let token = null;
-    if (typeof window.getAuthSession === 'function') {
+    
+    // 1. SessionClientWrapper (primary - receives token from parent postMessage)
+    if (sessionClient.getToken) token = sessionClient.getToken();
+    
+    // 2. Old SessionClient (capital S) - also holds session
+    if (!token && SessionClient.getToken) token = SessionClient.getToken();
+    
+    // 3. window.getAuthSession (api.core.js pattern)
+    if (!token && typeof window.getAuthSession === 'function') {
         const s = window.getAuthSession();
         if (s?.token) token = s.token;
     }
-    if (!token && sessionClient.getToken) token = sessionClient.getToken();
+    
+    // 4. Cached token on window
+    if (!token && window.__kynToken) token = window.__kynToken;
+    if (!token && window.currentUser?.token) token = window.currentUser.token;
+    if (!token && window.sessionData?.userToken) token = window.sessionData.userToken;
+    if (!token && window.sessionData?.token) token = window.sessionData.token;
+    
+    // 5. Parent frame
     if (!token) {
-        // Try parent frame token sources
         try {
             if (window.parent && window.parent !== window) {
                 if (typeof window.parent.getAuthSession === 'function') {
                     const ps = window.parent.getAuthSession();
                     if (ps?.token) token = ps.token;
                 }
+                // Also check parent's AppState
+                if (!token && window.parent.AppState?.getToken) {
+                    token = window.parent.AppState.getToken();
+                }
             }
         } catch {}
     }
+    
+    // 6. localStorage scan for JWT
     if (!token) {
-        // Last resort: scan sessionStorage/localStorage for jwt
         try {
-            for (const key of Object.keys(localStorage)) {
-                if (key.includes('token') || key.includes('auth') || key.includes('session')) {
+            const scanKeys = Object.keys(localStorage);
+            for (const key of scanKeys) {
+                if (key.includes('token') || key.includes('auth') || key.includes('kyn')) {
                     const val = localStorage.getItem(key);
                     if (val && val.startsWith('eyJ')) { token = val; break; }
                     try {
                         const parsed = JSON.parse(val);
-                        if (parsed?.token?.startsWith('eyJ')) { token = parsed.token; break; }
-                        if (parsed?.userToken?.startsWith('eyJ')) { token = parsed.userToken; break; }
+                        const t = parsed?.userToken || parsed?.token || parsed?.accessToken;
+                        if (t && t.startsWith('eyJ')) { token = t; break; }
                     } catch {}
                 }
             }
         } catch {}
     }
+    
+    // Cache the found token for fast re-use
+    if (token) window.__kynToken = token;
 
     if (!token) {
         // Offline fallback for GET requests
@@ -6352,9 +6549,19 @@ export function formatFileSize(bytes) {
 export async function createServiceListing(title, description, options = {}) {
     if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 1: UI triggered — createServiceListing', { title });
 
-    if (!hasValidUser()) {
-        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing: user not authenticated');
-        showNotification('Please log in to create a listing.', 'error');
+    // Auth check using all possible token sources
+    const _tok = sessionClient.getToken?.() || window.__kynToken ||
+        window.sessionData?.userToken || window.currentUser?.token;
+    const _uid = sessionClient.getUser?.()?.id || window.__kynUserId ||
+        window.currentUser?.id || window.currentUser?.userId ||
+        sessionClient.getSession?.()?.userId;
+    // Sync token to window for secureApiCall to find
+    if (_tok) window.__kynToken = _tok;
+    if (_uid) window.__kynUserId = _uid;
+
+    if (!_tok || !_uid) {
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing: no auth', {tok:!!_tok, uid:_uid});
+        showNotification('Not authenticated. Tap another page then return to marketplace.', 'error');
         return null;
     }
     // Wait up to 4s for module to become active (handles slow parent handshake)
@@ -6373,9 +6580,14 @@ export async function createServiceListing(title, description, options = {}) {
         if (window.__TOOLS_DEBUG__) console.warn('[TOOLS FLOW] createServiceListing: proceeding without ACTIVE state');
     }
 
-    const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
-    const userId = user?.id;
-    const userObj = { id: userId, displayName: user?.displayName || user?.name || 'User', photoURL: user?.photoURL || '' };
+    // Build user object from resolved auth
+    const userId = _userId;
+    const _u = sessionClient.getUser?.() || window.currentUser || {};
+    const userObj = {
+        id: userId,
+        displayName: _u.displayName || _u.name || _u.username || 'User',
+        photoURL: _u.photoURL || _u.avatar || ''
+    };
 
     const fakeId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 
@@ -6477,9 +6689,13 @@ export async function createServiceListing(title, description, options = {}) {
 export async function createDigitalListing(title, description, fileData, options = {}) {
     if (window.__TOOLS_DEBUG__) console.log('[TOOLS FLOW] Step 1: UI triggered — createDigitalListing', { title });
 
-    if (!hasValidUser()) {
-        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing: user not authenticated');
-        showNotification('Please log in to create a listing.', 'error');
+    const _tok2 = sessionClient.getToken?.() || window.__kynToken || window.currentUser?.token;
+    const _uid2 = sessionClient.getUser?.()?.id || window.__kynUserId || window.currentUser?.id;
+    if (_tok2) window.__kynToken = _tok2;
+    if (_uid2) window.__kynUserId = _uid2;
+    if (!_tok2 || !_uid2) {
+        if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing: no auth');
+        showNotification('Not authenticated. Tap another page then return to marketplace.', 'error');
         return null;
     }
     // Wait up to 4s for module to become active
@@ -6494,9 +6710,14 @@ export async function createDigitalListing(title, description, fileData, options
         });
     }
 
-    const user = sessionClient.getUser ? sessionClient.getUser() : window.currentUser || null;
-    const userId = user?.id;
-    const userObj = { id: userId, displayName: user?.displayName || user?.name || 'User', photoURL: user?.photoURL || '' };
+    // Build user object from resolved auth
+    const userId = _userId;
+    const _u = sessionClient.getUser?.() || window.currentUser || {};
+    const userObj = {
+        id: userId,
+        displayName: _u.displayName || _u.name || _u.username || 'User',
+        photoURL: _u.photoURL || _u.avatar || ''
+    };
 
     const fakeId = 'listing_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 

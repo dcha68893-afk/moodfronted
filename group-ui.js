@@ -2190,7 +2190,7 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         
         const _gc = window.GroupCore;
         const _live = (_gc && _gc.groups && _gc.groups.length > 0) ? _gc.groups : (groups || []);
-        if (!_live || _live.length === 0) {
+        if (!_live.length) {
             allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
             return;
         }
@@ -2241,7 +2241,7 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         
         const _gcMy = window.GroupCore;
         const _liveMy = (_gcMy && _gcMy.myGroups && _gcMy.myGroups.length > 0) ? _gcMy.myGroups : (myGroups || []);
-        if (!_liveMy || _liveMy.length === 0) {
+        if (!_liveMy.length) {
             myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));
             return;
         }
@@ -2276,14 +2276,14 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         
         joinedList.innerHTML = '';
         
-        const _gcJ = window.GroupCore;
-        const _liveJ = (_gcJ && _gcJ.joinedGroups && _gcJ.joinedGroups.length > 0) ? _gcJ.joinedGroups : (joinedGroups || []);
-        if (!_liveJ || _liveJ.length === 0) {
+        const _gcJn = window.GroupCore;
+        const _liveJn = (_gcJn && _gcJn.joinedGroups && _gcJn.joinedGroups.length > 0) ? _gcJn.joinedGroups : (joinedGroups || []);
+        if (!_liveJn.length) {
             joinedList.appendChild(createSecureEmptyStateElement('joined'));
             return;
         }
         const fragment = document.createDocumentFragment();
-        _liveJ.forEach(group => {
+        _liveJn.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'joined');
                 if (groupItem) fragment.appendChild(groupItem);
@@ -3529,28 +3529,25 @@ function bindCreateGroupModalEvents() {
         console.warn('[GroupUI] Cancel button not found in DOM');
     }
 
-    // FIX: bind create button with a submitting-flag instead of cloneNode.
-    // cloneNode removed the button from DOM so after the first submission
-    // safeGetElement('#createGroupBtnModal') returned null and the button
-    // was permanently dead. Now we use a module-level flag to guard re-entry.
-    (function _bindCreateGroupBtn() {
-        const btn = document.getElementById('createGroupBtnModal');
-        if (!btn) { console.warn('[GroupUI] Create Group button not found'); return; }
-        if (btn.__gcBound) return; // already bound
-        btn.__gcBound = true;
-        btn.addEventListener('click', async function(e) {
+    // FIXED: Create Group button - direct event binding
+    // FIX: use submitting flag instead of cloneNode - cloneNode orphaned the button
+    const createGroupBtnModal = document.getElementById('createGroupBtnModal');
+    if (createGroupBtnModal && !createGroupBtnModal.__bound) {
+        createGroupBtnModal.__bound = true;
+        createGroupBtnModal.addEventListener('click', async function(e) {
             e.preventDefault(); e.stopPropagation();
-            if (this._gcSubmitting) return;
+            if (this.__submitting) return;
             const nameInput = document.getElementById('groupNameInput');
             if (!nameInput || !nameInput.value.trim()) {
                 if (typeof showNotification === 'function') showNotification('Please enter a group name', 'error');
-                nameInput && nameInput.focus(); return;
+                if (nameInput) nameInput.focus();
+                return;
             }
-            this._gcSubmitting = true;
+            this.__submitting = true;
             try { await createGroupAsync(this); }
-            finally { this._gcSubmitting = false; }
+            finally { this.__submitting = false; }
         });
-    })();
+    }
 
     // Theme option selection (visual feedback)
     safeGetElements('.theme-option').forEach(opt => {
@@ -4271,7 +4268,6 @@ export function registerUICoreEvents() {
             }
         });
 
-        // groups:list-updated
         GC.on('groups:list-updated', () => {
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
@@ -5032,12 +5028,11 @@ async function createGroupAsync(buttonElement) {
             showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
         }
     } finally {
+        // ── SENDER: restore button ────────────────────────────────────────
         if (buttonElement) {
-            buttonElement.disabled = false;
+            buttonElement.disabled    = false;
             buttonElement.textContent = 'Create Group';
             buttonElement.classList && buttonElement.classList.remove('btn-loading');
-            buttonElement._gcSubmitting = false;
         }
-        try { if (typeof resetCreateGroupForm === 'function') resetCreateGroupForm(); } catch(_) {}
     }
 }

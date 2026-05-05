@@ -2124,11 +2124,9 @@ const GroupCore = {
             SafeStorage.setItem('groupInvites', this.groupInvites);
             SafeStorage.setItem('adminGroups', this.adminGroups);
             SafeStorage.setItem('lastCacheTime', Date.now().toString());
-            // FIX: reassign module-level let vars so ES live bindings update
-            groups = this.groups;
-            myGroups = this.myGroups;
-            joinedGroups = this.joinedGroups;
-            adminGroups = this.adminGroups;
+            // Sync module-level let vars so ES live bindings update in group-ui.js
+            groups = this.groups; myGroups = this.myGroups;
+            joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
             groupInvites = this.groupInvites;
         } catch (error) {
             console.error('Error saving groups:', error);
@@ -2231,6 +2229,9 @@ const GroupCore = {
                     this.myGroups = cachedGroups.filter(g => g.isCreator === true || g.role === 'owner' || (_cuid && String(g.createdBy) === String(_cuid)));
                     this.joinedGroups = cachedGroups.filter(g => !g.isCreator && g.role !== 'owner' && !(_cuid && String(g.createdBy) === String(_cuid)));
                     this.adminGroups = cachedGroups.filter(g => g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
+                    // Sync let vars after cache load
+                    groups = this.groups; myGroups = this.myGroups;
+                    joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
                     
                     this.emit('groups:list-updated', {
                         groups: this.groups,
@@ -2241,8 +2242,6 @@ const GroupCore = {
                     });
                     
                     debugLog(`Loaded ${this.groups.length} groups from cache - OFFLINE-FIRST`);
-                    groups = this.groups; myGroups = this.myGroups;
-                    joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
                     return true;
                 }
             }
@@ -2287,10 +2286,10 @@ const GroupCore = {
                 g.isLocalOnly || serverMap.has(g.id)
             );
             
-            // Re-categorize groups using server-provided isCreator/isAdmin/role fields
-            const _uid = this.currentUser?.uid || this.currentUser?.id;
-            this.myGroups = this.groups.filter(g => g.isCreator === true || g.role === 'owner' || (_uid && String(g.createdBy) === String(_uid)));
-            this.joinedGroups = this.groups.filter(g => !g.isCreator && g.role !== 'owner' && !(_uid && String(g.createdBy) === String(_uid)));
+            // Re-categorize groups
+            const _muid = this.currentUser?.uid || this.currentUser?.id;
+            this.myGroups = this.groups.filter(g => g.isCreator === true || g.role === 'owner' || (_muid && String(g.createdBy) === String(_muid)));
+            this.joinedGroups = this.groups.filter(g => !g.isCreator && g.role !== 'owner' && !(_muid && String(g.createdBy) === String(_muid)));
             this.adminGroups = this.groups.filter(g => g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
             
         } catch (error) {
@@ -4515,7 +4514,10 @@ const openGroupChat = async function(groupData) {
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
         if (isMobile) {
-            if (sidebar) sidebar.style.display = 'none';
+            if (sidebar) {
+                sidebar.style.display = 'none';
+                sidebar.classList.add('hidden');
+            }
             if (groupChatPanel) {
                 groupChatPanel.style.display = 'flex';
                 groupChatPanel.classList.add('active');
@@ -4543,13 +4545,10 @@ const openGroupChat = async function(groupData) {
         
         loadGroupChatMessages(groupData.id);
         setupTypingListener(groupData.id);
+        
         loadUniqueFeaturesPanels(groupData.id);
         checkPostingRules(groupData);
-
-        // FIX: also call our runtime patch panel so mobile transition works
-        if (typeof window.__openGroupPanel === 'function') {
-            window.__openGroupPanel(groupData);
-        }
+        
     } catch (error) {}
 };
 
@@ -4991,16 +4990,13 @@ function closeGroupChatMobile() {
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
         if (isMobile) {
-            if (sidebar) sidebar.style.display = 'flex';
+            if (sidebar) { sidebar.style.display = 'flex'; sidebar.classList.remove('hidden'); }
             if (groupChatPanel) {
                 groupChatPanel.style.display = 'none';
                 groupChatPanel.classList.remove('active');
             }
-            
             const mobileBackBtn = document.querySelector('.mobile-back-btn');
-            if (mobileBackBtn) {
-                mobileBackBtn.remove();
-            }
+            if (mobileBackBtn) mobileBackBtn.remove();
         }
     } catch (error) {}
 }
@@ -7367,11 +7363,8 @@ function setupUIEventListeners() {
 
 function setupResponsiveBehavior() {
     try {
-        // FIX: set isMobile immediately on load, not only on resize
         isMobile = window.innerWidth <= 768;
-        window.addEventListener('resize', () => {
-            isMobile = window.innerWidth <= 768;
-        });
+        window.addEventListener('resize', () => { isMobile = window.innerWidth <= 768; });
     } catch (error) {}
 }
 

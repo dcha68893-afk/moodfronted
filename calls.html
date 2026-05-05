@@ -83,7 +83,7 @@ window.__CALLS_IFRAME__ = {
         var overlay  = document.getElementById('callOverlay');
         var cc       = document.getElementById('callContainer');
 
-        // callOverlay — always suppressed (causes the "call panel" bug)
+        // callOverlay — always suppressed
         if (overlay) {
             overlay.setAttribute('data-state', 'idle');
             overlay.style.pointerEvents = 'none';
@@ -91,9 +91,9 @@ window.__CALLS_IFRAME__ = {
             overlay.style.visibility = 'hidden';
         }
 
-        // callContainer (the "Ready to Connect" panel) — NEVER show it.
-        // callingScreen and inCallScreen are position:fixed overlays that don't need it.
-        // After a call ends the parent navigates away via SWITCH_MODULE anyway.
+        // callContainer (the "Ready to Connect" panel) — ALWAYS hidden.
+        // callingScreen and inCallScreen are position:fixed fullscreen overlays
+        // that work without callContainer being visible. We NEVER show it.
         if (cc) { cc.classList.remove('active'); cc.style.setProperty('display','none','important'); }
 
         // Reset all screens
@@ -105,9 +105,10 @@ window.__CALLS_IFRAME__ = {
         if (screenName === 'calling') {
             if (calling) { calling.classList.add('active'); calling.style.setProperty('display','flex','important'); }
             document.body.classList.add('call-active');
+
         } else if (screenName === 'in-call') {
             if (incoming) { incoming.classList.remove('active'); incoming.style.setProperty('display','none','important'); }
-            if (inCall) { inCall.classList.add('active'); inCall.style.setProperty('display','flex','important'); }
+            if (inCall)   { inCall.classList.add('active');   inCall.style.setProperty('display','flex','important'); }
             document.body.classList.add('call-active');
             _stopDeclineTimer();
             // Populate peer name
@@ -119,8 +120,9 @@ window.__CALLS_IFRAME__ = {
                     || null;
                 if (_resolved && _resolved !== 'User') _nameEl.textContent = _resolved;
             }
+
         } else {
-            // idle — callContainer stays hidden, no panel shown
+            // idle — everything hidden, callContainer stays hidden
             if (incoming) { incoming.classList.remove('active'); incoming.style.setProperty('display','none','important'); }
             _stopDeclineTimer();
         }
@@ -292,32 +294,13 @@ window.__CALLS_IFRAME__ = {
     // ── Navigate back to origin after call ends ───────────────────────────────
     function _navigateAfterCall() {
         try {
-            // Determine where to go — NEVER back to 'calls' panel (shows blank call container)
-            var origin = window._callOrigin || window.__pendingCallOrigin || null;
-            var returnTo = (origin && origin !== 'calls') ? origin : 'messages';
+            var origin = window._callOrigin || window.__pendingCallOrigin || 'calls';
             if (window.parent && window.parent !== window) {
-                // Send both CALL_ENDED_RETURN (for handlers that listen to it)
-                // and SWITCH_MODULE (direct navigation — more reliable)
                 window.parent.postMessage({
                     type: 'CALL_ENDED_RETURN',
-                    payload: { origin: returnTo, timestamp: Date.now() }
-                }, '*');
-                window.parent.postMessage({
-                    type: 'SWITCH_MODULE',
-                    module: returnTo,
-                    payload: { returnFromCall: true },
-                    timestamp: Date.now()
+                    payload: { origin: origin, timestamp: Date.now() }
                 }, '*');
             }
-            // Hide all call screens immediately — never show call panel/container
-            var cc = document.getElementById('callContainer');
-            var cs = document.getElementById('callingScreen');
-            var ic = document.getElementById('inCallScreen');
-            var im = document.getElementById('incomingCallModal');
-            if (cc) { cc.classList.remove('active'); cc.style.setProperty('display','none','important'); }
-            if (cs) { cs.classList.remove('active'); cs.style.setProperty('display','none','important'); }
-            if (ic) { ic.classList.remove('active'); ic.style.setProperty('display','none','important'); }
-            if (im) { im.classList.remove('active'); im.style.setProperty('display','none','important'); }
             // Reset origin
             window._callOrigin = null;
         } catch(e) {}
@@ -575,9 +558,11 @@ function _declineVideoUpgrade() {
         var t = evt.data.type;
         if (!t) return;
 
-        // Accept call from parent (e.g. Android notification tap)
-        if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted'
-            || (t === 'CALL_ACCEPTED' && evt.data.source === 'parent-echo')) {
+        // CALL_ACCEPTED — only act when parent echoes it back (source='parent-echo' or 'ws-bridge')
+        // This means: CALLER transitions to in-call. The RECEIVER already showed in-call
+        // directly in acceptIncomingCallGeneric — they must NOT be navigated away here.
+        if ((t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted')
+            || (t === 'CALL_ACCEPTED' && (evt.data.source === 'parent-echo' || evt.data.source === 'ws-bridge'))) {
             var _UEH = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
             if (_UEH && typeof _UEH.handleCallAccepted === 'function') {
                 _UEH.handleCallAccepted(evt.data.payload || {});
@@ -585,7 +570,8 @@ function _declineVideoUpgrade() {
                 var _pn = window.__activePeerName || window.__incomingCallerName
                     || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
                     || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || 'User';
-                var _pt = (window.UIState && window.UIState.callType) || (evt.data.payload && evt.data.payload.callType) || 'voice';
+                var _pt = (window.UIState && window.UIState.callType)
+                    || (evt.data.payload && evt.data.payload.callType) || 'voice';
                 if (typeof window.transitionToInCall === 'function') {
                     window.transitionToInCall({ userName: _pn, callType: _pt });
                 } else {
@@ -593,29 +579,31 @@ function _declineVideoUpgrade() {
                 }
             }
         }
+
         // Incoming call notification from parent
         if (t === 'CALL_INCOMING' || t === 'call:incoming' || t === 'incoming_call') {
             _handleCoreEvent('incoming_call', evt.data.payload || evt.data.data || evt.data);
         }
-        // Call ended from either side — ALWAYS reset this iframe
-        // source='parent-echo' = remote side ended, source='end-btn' = we ended it (handleCallEnded already ran)
+
+        // CALL_ENDED — reset this side UNLESS we were the one who triggered it (source='end-btn')
         if (t === 'CALL_ENDED' || t === 'call:ended' || t === 'call_ended') {
             if (evt.data.source !== 'end-btn') {
-                // Remote ended: reset our UI
-                var _UEH2 = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
-                if (_UEH2 && typeof _UEH2.handleCallEnded === 'function') {
-                    _UEH2.handleCallEnded(evt.data.payload || { reason: 'remote_ended' });
+                // Remote side ended — reset our UI via UIEventHandlers if available
+                var _UEH3 = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
+                if (_UEH3 && typeof _UEH3.handleCallEnded === 'function') {
+                    _UEH3.handleCallEnded(evt.data.payload || { reason: 'remote_ended' });
                 } else {
                     _navigateAfterCall();
                     showScreen('idle');
                 }
             }
         }
+
         // Store call origin so we can navigate back after call
         if (t === 'CALL_ORIGIN') {
-            window._callOrigin = (evt.data.payload && evt.data.payload.origin) || evt.data.origin || 'calls';
+            window._callOrigin = (evt.data.payload && evt.data.payload.origin) || evt.data.origin || null;
         }
-        // Handle video upgrade request from remote peer
+        // Handle video upgrade request from remote peer (only when echoed from parent)
         if (t === 'VIDEO_UPGRADE_REQUEST' && evt.data.source === 'parent-echo') {
             _handleVideoUpgradeRequest(evt.data.payload);
         }
@@ -3078,14 +3066,14 @@ function _declineVideoUpgrade() {
             <div class="unified-call-actions">
                 <div class="unified-action-item">
                     <button class="unified-btn unified-btn-decline" id="declineCallBtn"
-                        onclick="(function(){var H=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(H&&H.declineIncomingCall)H.declineIncomingCall.call(H);else{if(window._incomingRingtone){try{if(window._incomingRingtone._interval)clearInterval(window._incomingRingtone._interval);}catch(e){}try{window._incomingRingtone.pause();}catch(e){}window._incomingRingtone=null;}document.getElementById('incomingCallModal').classList.remove('active');_navigateAfterCall&&_navigateAfterCall();showScreen&&showScreen('idle');}})()">
+                        onclick="(function(){var H=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(H&&H.declineIncomingCall){H.declineIncomingCall.call(H);}else{if(window._incomingRingtone){try{if(window._incomingRingtone._interval)clearInterval(window._incomingRingtone._interval);}catch(e){}try{window._incomingRingtone.pause();}catch(e){}window._incomingRingtone=null;}var m=document.getElementById('incomingCallModal');if(m){m.classList.remove('active');m.style.setProperty('display','none','important');}if(window.callCore&&window.callCore.endCall)window.callCore.endCall().catch(function(){});if(window.parent&&window.parent!==window)window.parent.postMessage({type:'CALL_ENDED',payload:{reason:'declined'},source:'end-btn'},'*');showScreen&&showScreen('idle');}})()">
                         <i class="fas fa-phone-slash"></i>
                     </button>
                     <span>Decline</span>
                 </div>
                 <div class="unified-action-item">
                     <button class="unified-btn unified-btn-accept" id="acceptCallBtn"
-                        onclick="(function(){var H=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(H&&H.acceptIncomingCall)H.acceptIncomingCall.call(H);else{if(window._incomingRingtone){try{if(window._incomingRingtone._interval)clearInterval(window._incomingRingtone._interval);}catch(e){}try{window._incomingRingtone.pause();}catch(e){}window._incomingRingtone=null;}document.getElementById('incomingCallModal').classList.remove('active');showScreen&&showScreen('in-call');}})()">
+                        onclick="(function(){var H=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(H&&H.acceptIncomingCall){H.acceptIncomingCall.call(H);}else{if(window._incomingRingtone){try{if(window._incomingRingtone._interval)clearInterval(window._incomingRingtone._interval);}catch(e){}try{window._incomingRingtone.pause();}catch(e){}window._incomingRingtone=null;}var m=document.getElementById('incomingCallModal');if(m){m.classList.remove('active');m.style.setProperty('display','none','important');}showScreen&&showScreen('in-call');}})()">
                         <i class="fas fa-phone"></i>
                     </button>
                     <span>Accept</span>
@@ -3657,7 +3645,7 @@ function _declineVideoUpgrade() {
                     <p class="unified-call-type" id="callingType">Voice Call</p>
                     <div class="unified-call-actions">
                         <div class="unified-action-item">
-                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="(function(){if(window._callerRingtone){try{if(window._callerRingtone._interval)clearInterval(window._callerRingtone._interval);}catch(e){}try{window._callerRingtone.pause();}catch(e){}window._callerRingtone=null;}if(window.callCore&&window.callCore.endCall)window.callCore.endCall().catch(function(){});if(window.parent&&window.parent!==window){window.parent.postMessage({type:'CALL_ENDED',payload:{reason:'cancelled'},source:'end-btn'},'*');}; _navigateAfterCall&&_navigateAfterCall();showScreen&&showScreen('idle');})()">
+                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="(function(){if(window._callerRingtone){try{if(window._callerRingtone._interval)clearInterval(window._callerRingtone._interval);}catch(e){}try{window._callerRingtone.pause();}catch(e){}window._callerRingtone=null;}if(window.callCore&&window.callCore.endCall)window.callCore.endCall().catch(function(){});if(window.parent&&window.parent!==window)window.parent.postMessage({type:'CALL_ENDED',payload:{reason:'cancelled'},source:'end-btn'},'*');showScreen&&showScreen('idle');})()">
                                 <i class="fas fa-phone-slash"></i>
                             </button>
                             <span>Cancel</span>

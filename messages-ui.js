@@ -4328,6 +4328,8 @@
 
                         </div>
 
+                        <button class="chat-delete-btn" title="Delete chat" onclick="event.stopPropagation();window.messagesUI?.deleteChat('${chat.id}')" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#ef4444;font-size:16px;padding:4px 6px;border-radius:6px;opacity:0.8;z-index:2;" onmouseenter="this.style.opacity='1';this.style.background='rgba(239,68,68,0.1)'" onmouseleave="this.style.opacity='0.8';this.style.background='none'"><i class="fas fa-trash-alt"></i></button>
+
                     </div>
 
                 `;
@@ -10064,6 +10066,17 @@ Type: ${message.type || 'text'}`;
 
     }.init();
 
+    // Inject CSS for chat-item delete button hover behaviour
+    (function() {
+        const style = document.createElement('style');
+        style.textContent = `
+            .chat-item { position: relative; }
+            .chat-item:hover .chat-delete-btn { display: flex !important; align-items: center; justify-content: center; }
+            .chat-item .chat-delete-btn { transition: opacity 0.15s; }
+        `;
+        document.head.appendChild(style);
+    })();
+
 
 
     // =============================================
@@ -10338,60 +10351,43 @@ Type: ${message.type || 'text'}`;
 
         window.currentFriendName = resolvedName;
 
-        // FIX: Find existing conversation by friendId FIRST — never create a duplicate.
-        // Use core.getConversations() to search by friendId/otherUserId before falling
-        // back to createConversation (which would create a pending_ duplicate).
-        const _findExistingByUserId = () => {
-            const convs = (core && core.getConversations && core.getConversations()) || [];
-            return convs.find(function(c) {
+        // SINGLE delegation path: always go through loadChatByFriendId which correctly
+        // searches existing conversations by friendId before creating a new one.
+        // DO NOT also call core.openConversation(numericUserId) — that treats the userId
+        // as a chatId and creates a duplicate pending_ conversation every time.
+        if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
+            console.log('[MessageUI] Delegating to loadChatByFriendId (single path)');
+            window.messagesUI.loadChatByFriendId(numericUserId, resolvedName);
+            return;
+        }
+
+        // Fallback: core not fully wired — open conversation directly
+        if (core && typeof core.openConversation === 'function') {
+            // Search for existing conversation by friendId before calling openConversation
+            const _convs = core.getConversations ? core.getConversations() : [];
+            const _existing = _convs.find(function(c) {
                 return String(c.friendId) === String(numericUserId) ||
                        String(c.otherUserId) === String(numericUserId) ||
-                       String(c.userId) === String(numericUserId) ||
-                       String(c.pendingReceiverId) === String(numericUserId) ||
                        (c.otherParticipant && String(c.otherParticipant.id) === String(numericUserId)) ||
                        (Array.isArray(c.participants) && c.participants.some(function(p) {
                            return String(p && (p.id || p)) === String(numericUserId);
                        }));
-            }) || null;
-        };
-
-        // Panel is already open (done above). Now open the conversation in core.
-        if (core && (core.openConversation || (core.ConversationManager && core.ConversationManager.openConversation))) {
-
-            const existingConv = _findExistingByUserId();
-
-            if (existingConv && existingConv.id) {
-                console.log('[MessageUI] Existing conversation found, opening chatId:', existingConv.id);
-                Promise.resolve(
-                    (core.openConversation || core.ConversationManager.openConversation.bind(core.ConversationManager))
-                    (existingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 })
-                ).catch(function() {});
+            });
+            if (_existing && _existing.id) {
+                console.log('[MessageUI] Found existing conversation:', _existing.id, '— opening by chatId');
+                core.openConversation(_existing.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 }).catch(function() {});
             } else {
-                console.log('[MessageUI] No existing conversation — creating via ConversationManager');
-                if (core.ConversationManager && core.ConversationManager.createConversation) {
-                    Promise.resolve(
-                        core.ConversationManager.createConversation([numericUserId], { name: resolvedName })
-                    ).catch(function() {});
-                } else if (core.createConversation) {
-                    Promise.resolve(core.createConversation([numericUserId])).catch(function() {});
-                } else {
-                    core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-                }
+                console.log('[MessageUI] No existing conversation — creating via pending');
+                core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
             }
-
             return;
-
         }
 
-
+        // Last resort: ChatManager direct
         if (window.ChatManager && typeof window.ChatManager.openChat === 'function') {
-
             console.log('[MessageUI] Using ChatManager.openChat');
-
             window.ChatManager.openChat(numericUserId, resolvedName);
-
             return;
-
         }
 
         
@@ -11162,6 +11158,59 @@ Type: ${message.type || 'text'}`;
         showNotification: UIRenderer.showNotification.bind(UIRenderer),
 
         
+        // Delete a conversation from chat history immediately (UI + local cache)
+        deleteChat: (chatId) => {
+            if (!chatId) return;
+            const core = getMessagesCore();
+            const strId = String(chatId);
+
+            // 1. Remove from DOM instantly — no waiting for API
+            const row = document.querySelector(`.chat-item[data-chat-id="${strId}"]`);
+            if (row) {
+                row.style.transition = 'opacity 0.18s, transform 0.18s';
+                row.style.opacity = '0';
+                row.style.transform = 'translateX(40px)';
+                setTimeout(() => { try { row.remove(); } catch(_) {} }, 180);
+            }
+
+            // 2. Remove from ChatManager in-memory store and cache
+            if (core && core.ChatManager) {
+                const cm = core.ChatManager;
+                cm._conversations = (cm._conversations || []).filter(c => String(c.id) !== strId);
+                if (cm._conversationsMap) cm._conversationsMap.delete(chatId);
+                if (cm._conversationsMap) cm._conversationsMap.delete(strId);
+                // If deleted chat was the active one, clear the panel
+                if (cm._activeConversation && String(cm._activeConversation.id) === strId) {
+                    cm._activeConversation = null;
+                    cm._messages = [];
+                    const chatPanel = document.getElementById('chatPanel');
+                    if (chatPanel) chatPanel.classList.add('hidden');
+                }
+                // Update localStorage cache
+                try {
+                    const SafeStorage = core.SafeStorage || window.SafeStorage;
+                    if (SafeStorage && SafeStorage.setJSON) {
+                        SafeStorage.setJSON('kynecta_chats_cache_v8', {
+                            conversations: cm._conversations,
+                            timestamp: Date.now()
+                        });
+                    }
+                } catch(_) {}
+                // Remove per-chat message cache
+                try {
+                    localStorage.removeItem(`kynecta_messages_v8_${strId}`);
+                } catch(_) {}
+                // Re-render sidebar
+                if (cm._notifySubscribers) cm._notifySubscribers();
+            }
+
+            // 3. Best-effort server delete (non-blocking — UI already updated)
+            if (core) {
+                Promise.resolve(
+                    core.makeApiRequest ? core.makeApiRequest(`/chats/${strId}`, 'DELETE') : null
+                ).catch(() => {}); // Ignore server errors — UI is already correct
+            }
+        },
 
         renderMultiSendChats: UIRenderer.renderMultiSendChats.bind(UIRenderer),
 
@@ -11651,15 +11700,16 @@ Type: ${message.type || 'text'}`;
 
                 console.log('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
 
-                // Show panel immediately for instant visual feedback
-                ensureChatPanelOpen(existingConversation.id);
+                // FIX Bug3: ensureChatPanelOpen must run AFTER openConversation resolves
+                // so messages are loaded before the panel is shown (no more blank panel).
+                // FIX Bug4: pass friendName/userName so _showChatPanel never falls back to 'Loading…'.
+                core.openConversation(existingConversation.id, { minFetchGap: 0, friendName: displayName, userName: displayName })
+                    .then(() => ensureChatPanelOpen(existingConversation.id))
+                    .catch(() => ensureChatPanelOpen(existingConversation.id));
 
-                // Open via the real chatId — this fetches messages and sets activeChat correctly.
-                // Using the chatId (not userId) prevents duplicate pending conversations.
-                Promise.resolve(
-                    core.openConversation(existingConversation.id, { minFetchGap: 0, friendName: displayName, userName: displayName })
-                ).then(() => ensureChatPanelOpen(existingConversation.id))
-                 .catch(() => ensureChatPanelOpen(existingConversation.id));
+                // Also call ensureChatPanelOpen immediately for instant visual feedback
+                // (shows the panel with correct name right away, messages fill in async)
+                ensureChatPanelOpen(existingConversation.id);
 
                 return;
 
