@@ -2000,16 +2000,22 @@
                     recipientName: targetUserName
                 };
 
-                // If core is ACTIVE open immediately; otherwise queue with retries
+                // If core is ACTIVE open immediately; otherwise queue with retries.
+                // FIX: stop retrying as soon as we fire — do NOT keep re-dispatching
+                // messages:openChat after the panel is already open (causes flicker).
+                let _openDispatched = false;
                 const tryOpen = (attempts) => {
+                    if (_openDispatched) return; // already fired — stop all retries
                     const core = window.messagesCore;
-                    const coreActive = core && (typeof core.getState === 'function' ? core.getState() === 'ACTIVE' : !!core.isActive);
-                    if (coreActive) {
+                    const coreActive = core && (typeof core.getState === 'function'
+                        ? (core.getState() === 'ACTIVE' || (core.getState() && core.getState().state === 'ACTIVE'))
+                        : !!core.isActive);
+                    if (coreActive || attempts >= 15) {
+                        if (_openDispatched) return;
+                        _openDispatched = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
-                    } else if (attempts < 15) {
-                        setTimeout(() => tryOpen(attempts + 1), 300);
                     } else {
-                        window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
+                        setTimeout(() => tryOpen(attempts + 1), 200);
                     }
                 };
                 tryOpen(0);
@@ -2026,13 +2032,22 @@
             if (chatId) {
                 console.log('[Message HTML] Found chat in URL params:', { chatId, userName, type, environment });
                 // URL params are an explicit deep-link trigger - open via tryOpen when core is ready
+                // NOTE: tryOpenUrl fires exactly once; no additional dispatch needed here.
                 const _urlDetail = { userId: parseInt(chatId), userName: userName || 'User', recipientId: parseInt(chatId), recipientName: userName || 'User' };
+                let _urlOpenDispatched = false;
                 const tryOpenUrl = (attempts) => {
+                    if (_urlOpenDispatched) return;
                     const core = window.messagesCore;
-                    const coreActive = core && (typeof core.getState === 'function' ? core.getState() === 'ACTIVE' : !!core.isActive);
-                    if (coreActive) { window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail })); }
-                    else if (attempts < 20) { setTimeout(() => tryOpenUrl(attempts + 1), 300); }
-                    else { window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail })); }
+                    const coreActive = core && (typeof core.getState === 'function'
+                        ? (core.getState() === 'ACTIVE' || (core.getState() && core.getState().state === 'ACTIVE'))
+                        : !!core.isActive);
+                    if (coreActive || attempts >= 20) {
+                        if (_urlOpenDispatched) return;
+                        _urlOpenDispatched = true;
+                        window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail }));
+                    } else {
+                        setTimeout(() => tryOpenUrl(attempts + 1), 200);
+                    }
                 };
                 setTimeout(() => tryOpenUrl(0), 200);
                 // Keep sessionStorage only as last-resort fallback (no-op since checkSessionStorage is now a no-op)
@@ -2050,17 +2065,7 @@
                 const newUrl = window.location.pathname + (window.location.hash || '');
                 window.history.replaceState({}, document.title, newUrl);
                 
-                // Dispatch event after short delay to allow core to initialize
-                setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('messages:openChat', {
-                        detail: {
-                            userId: parseInt(chatId),
-                            userName: userName || 'User',
-                            recipientId: parseInt(chatId),
-                            recipientName: userName || 'User'
-                        }
-                    }));
-                }, 500);
+                // NOTE: No second dispatch here — tryOpenUrl handles the single open.
             }
         }
         

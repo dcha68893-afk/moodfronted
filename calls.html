@@ -81,8 +81,9 @@ window.__CALLS_IFRAME__ = {
         var inCall   = document.getElementById('inCallScreen');
         var incoming = document.getElementById('incomingCallModal');
         var overlay  = document.getElementById('callOverlay');
+        var cc       = document.getElementById('callContainer');
 
-        // Always keep the callOverlay hidden — it causes the "call panel" bug
+        // callOverlay — always suppressed (causes the "call panel" bug)
         if (overlay) {
             overlay.setAttribute('data-state', 'idle');
             overlay.style.pointerEvents = 'none';
@@ -90,41 +91,37 @@ window.__CALLS_IFRAME__ = {
             overlay.style.visibility = 'hidden';
         }
 
-        if (idle)    idle.classList.remove('active');
-        if (calling) calling.classList.remove('active');
-        if (inCall)  inCall.classList.remove('active');
+        // callContainer (the "Ready to Connect" panel) — NEVER show it.
+        // callingScreen and inCallScreen are position:fixed overlays that don't need it.
+        // After a call ends the parent navigates away via SWITCH_MODULE anyway.
+        if (cc) { cc.classList.remove('active'); cc.style.setProperty('display','none','important'); }
+
+        // Reset all screens
+        if (idle)    { idle.classList.remove('active');    idle.style.setProperty('display','none','important'); }
+        if (calling) { calling.classList.remove('active'); calling.style.setProperty('display','none','important'); }
+        if (inCall)  { inCall.classList.remove('active');  inCall.style.setProperty('display','none','important'); }
         document.body.classList.remove('call-active');
 
         if (screenName === 'calling') {
-            if (calling) calling.classList.add('active');
+            if (calling) { calling.classList.add('active'); calling.style.setProperty('display','flex','important'); }
             document.body.classList.add('call-active');
         } else if (screenName === 'in-call') {
-            // Hide incoming modal too
-            if (incoming) {
-                incoming.classList.remove('active');
-                incoming.style.display = 'none';
-            }
-            if (inCall) inCall.classList.add('active');
+            if (incoming) { incoming.classList.remove('active'); incoming.style.setProperty('display','none','important'); }
+            if (inCall) { inCall.classList.add('active'); inCall.style.setProperty('display','flex','important'); }
             document.body.classList.add('call-active');
-            // Stop ring countdown — 3-min timer is only for ringing, NOT for in-call
             _stopDeclineTimer();
-            // Populate peer name from globals so it's never "User"
+            // Populate peer name
             var _nameEl = document.getElementById('callWithName');
             if (_nameEl) {
-                var _resolved = window.__activePeerName
-                    || window.__incomingCallerName
+                var _resolved = window.__activePeerName || window.__incomingCallerName
                     || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
                     || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
                     || null;
                 if (_resolved && _resolved !== 'User') _nameEl.textContent = _resolved;
             }
         } else {
-            // idle: show idle screen
-            if (idle) idle.classList.add('active');
-            if (incoming) {
-                incoming.classList.remove('active');
-                incoming.style.display = 'none';
-            }
+            // idle — callContainer stays hidden, no panel shown
+            if (incoming) { incoming.classList.remove('active'); incoming.style.setProperty('display','none','important'); }
             _stopDeclineTimer();
         }
     };
@@ -295,13 +292,32 @@ window.__CALLS_IFRAME__ = {
     // ── Navigate back to origin after call ends ───────────────────────────────
     function _navigateAfterCall() {
         try {
-            var origin = window._callOrigin || window.__pendingCallOrigin || 'calls';
+            // Determine where to go — NEVER back to 'calls' panel (shows blank call container)
+            var origin = window._callOrigin || window.__pendingCallOrigin || null;
+            var returnTo = (origin && origin !== 'calls') ? origin : 'messages';
             if (window.parent && window.parent !== window) {
+                // Send both CALL_ENDED_RETURN (for handlers that listen to it)
+                // and SWITCH_MODULE (direct navigation — more reliable)
                 window.parent.postMessage({
                     type: 'CALL_ENDED_RETURN',
-                    payload: { origin: origin, timestamp: Date.now() }
+                    payload: { origin: returnTo, timestamp: Date.now() }
+                }, '*');
+                window.parent.postMessage({
+                    type: 'SWITCH_MODULE',
+                    module: returnTo,
+                    payload: { returnFromCall: true },
+                    timestamp: Date.now()
                 }, '*');
             }
+            // Hide all call screens immediately — never show call panel/container
+            var cc = document.getElementById('callContainer');
+            var cs = document.getElementById('callingScreen');
+            var ic = document.getElementById('inCallScreen');
+            var im = document.getElementById('incomingCallModal');
+            if (cc) { cc.classList.remove('active'); cc.style.setProperty('display','none','important'); }
+            if (cs) { cs.classList.remove('active'); cs.style.setProperty('display','none','important'); }
+            if (ic) { ic.classList.remove('active'); ic.style.setProperty('display','none','important'); }
+            if (im) { im.classList.remove('active'); im.style.setProperty('display','none','important'); }
             // Reset origin
             window._callOrigin = null;
         } catch(e) {}
@@ -559,27 +575,19 @@ function _declineVideoUpgrade() {
         var t = evt.data.type;
         if (!t) return;
 
-        // Accept call from parent echo — caller side transitions to in-call
-        // source='parent-echo' means the parent forwarded it back; 'calls-iframe' means
-        // we sent it ourselves (receiver side already handled it directly).
+        // Accept call from parent (e.g. Android notification tap)
         if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted'
             || (t === 'CALL_ACCEPTED' && evt.data.source === 'parent-echo')) {
-            // Use UIEventHandlers.handleCallAccepted if available — it stops ringtones
-            // and resolves the peer name before calling transitionToInCall.
             var _UEH = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
             if (_UEH && typeof _UEH.handleCallAccepted === 'function') {
                 _UEH.handleCallAccepted(evt.data.payload || {});
             } else {
                 var _pn = window.__activePeerName || window.__incomingCallerName
                     || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
-                    || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.pendingCallUser && window.callsUI.UIState.pendingCallUser.userName)
-                    || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || null;
-                var _pt = (window.UIState && window.UIState.callType)
-                    || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.callType)
-                    || (evt.data.payload && evt.data.payload.callType) || 'voice';
-                var _pa = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+                    || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || 'User';
+                var _pt = (window.UIState && window.UIState.callType) || (evt.data.payload && evt.data.payload.callType) || 'voice';
                 if (typeof window.transitionToInCall === 'function') {
-                    window.transitionToInCall({ userName: _pn || 'User', callType: _pt, userAvatar: _pa });
+                    window.transitionToInCall({ userName: _pn, callType: _pt });
                 } else {
                     showScreen('in-call');
                 }
@@ -589,13 +597,18 @@ function _declineVideoUpgrade() {
         if (t === 'CALL_INCOMING' || t === 'call:incoming' || t === 'incoming_call') {
             _handleCoreEvent('incoming_call', evt.data.payload || evt.data.data || evt.data);
         }
-        // Call ended from parent — only reset if we are NOT actively in-call
+        // Call ended from either side — ALWAYS reset this iframe
+        // source='parent-echo' = remote side ended, source='end-btn' = we ended it (handleCallEnded already ran)
         if (t === 'CALL_ENDED' || t === 'call:ended' || t === 'call_ended') {
-            var _activeInCall = document.getElementById('inCallScreen');
-            // Allow reset only if in-call screen is NOT active
-            // (prevents stale WS echoes from killing an established call)
-            if (!_activeInCall || !_activeInCall.classList.contains('active')) {
-                showScreen('idle');
+            if (evt.data.source !== 'end-btn') {
+                // Remote ended: reset our UI
+                var _UEH2 = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
+                if (_UEH2 && typeof _UEH2.handleCallEnded === 'function') {
+                    _UEH2.handleCallEnded(evt.data.payload || { reason: 'remote_ended' });
+                } else {
+                    _navigateAfterCall();
+                    showScreen('idle');
+                }
             }
         }
         // Store call origin so we can navigate back after call
@@ -603,7 +616,7 @@ function _declineVideoUpgrade() {
             window._callOrigin = (evt.data.payload && evt.data.payload.origin) || evt.data.origin || 'calls';
         }
         // Handle video upgrade request from remote peer
-        if (t === 'VIDEO_UPGRADE_REQUEST') {
+        if (t === 'VIDEO_UPGRADE_REQUEST' && evt.data.source === 'parent-echo') {
             _handleVideoUpgradeRequest(evt.data.payload);
         }
     });
@@ -3064,13 +3077,15 @@ function _declineVideoUpgrade() {
             <p class="unified-auto-decline">Auto declining in <span id="declineTimer">180</span>s</p>
             <div class="unified-call-actions">
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-decline" id="declineCallBtn">
+                    <button class="unified-btn unified-btn-decline" id="declineCallBtn"
+                        onclick="(function(){var H=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(H&&H.declineIncomingCall)H.declineIncomingCall.call(H);else{if(window._incomingRingtone){try{if(window._incomingRingtone._interval)clearInterval(window._incomingRingtone._interval);}catch(e){}try{window._incomingRingtone.pause();}catch(e){}window._incomingRingtone=null;}document.getElementById('incomingCallModal').classList.remove('active');_navigateAfterCall&&_navigateAfterCall();showScreen&&showScreen('idle');}})()">
                         <i class="fas fa-phone-slash"></i>
                     </button>
                     <span>Decline</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn">
+                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn"
+                        onclick="(function(){var H=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(H&&H.acceptIncomingCall)H.acceptIncomingCall.call(H);else{if(window._incomingRingtone){try{if(window._incomingRingtone._interval)clearInterval(window._incomingRingtone._interval);}catch(e){}try{window._incomingRingtone.pause();}catch(e){}window._incomingRingtone=null;}document.getElementById('incomingCallModal').classList.remove('active');showScreen&&showScreen('in-call');}})()">
                         <i class="fas fa-phone"></i>
                     </button>
                     <span>Accept</span>
@@ -3642,7 +3657,7 @@ function _declineVideoUpgrade() {
                     <p class="unified-call-type" id="callingType">Voice Call</p>
                     <div class="unified-call-actions">
                         <div class="unified-action-item">
-                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="if(window.showScreen) window.showScreen('idle');">
+                            <button class="unified-btn unified-btn-decline" id="callingCancelBtn" onclick="(function(){if(window._callerRingtone){try{if(window._callerRingtone._interval)clearInterval(window._callerRingtone._interval);}catch(e){}try{window._callerRingtone.pause();}catch(e){}window._callerRingtone=null;}if(window.callCore&&window.callCore.endCall)window.callCore.endCall().catch(function(){});if(window.parent&&window.parent!==window){window.parent.postMessage({type:'CALL_ENDED',payload:{reason:'cancelled'},source:'end-btn'},'*');}; _navigateAfterCall&&_navigateAfterCall();showScreen&&showScreen('idle');})()">
                                 <i class="fas fa-phone-slash"></i>
                             </button>
                             <span>Cancel</span>

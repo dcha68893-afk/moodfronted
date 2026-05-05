@@ -2247,14 +2247,19 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         
         myGroupsList.innerHTML = '';
         
-        if (!myGroups || myGroups.length === 0) {
+        // FIX: read live data from GroupCore instead of stale imported myGroups
+        const _liveMyGroups = (window.GroupCore && window.GroupCore.myGroups && window.GroupCore.myGroups.length > 0)
+            ? window.GroupCore.myGroups
+            : (window.__gcMyGroups && window.__gcMyGroups.length > 0 ? window.__gcMyGroups : (myGroups || []));
+
+        if (!_liveMyGroups || _liveMyGroups.length === 0) {
             myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));
             return;
         }
         
         const fragment = document.createDocumentFragment();
         
-        myGroups.forEach(group => {
+        _liveMyGroups.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'my_group');
                 if (groupItem) fragment.appendChild(groupItem);
@@ -2284,14 +2289,19 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         
         joinedList.innerHTML = '';
         
-        if (!joinedGroups || joinedGroups.length === 0) {
+        // FIX: read live data from GroupCore instead of stale imported joinedGroups
+        const _liveJoinedGroups = (window.GroupCore && window.GroupCore.joinedGroups && window.GroupCore.joinedGroups.length > 0)
+            ? window.GroupCore.joinedGroups
+            : (window.__gcJoinedGroups && window.__gcJoinedGroups.length > 0 ? window.__gcJoinedGroups : (joinedGroups || []));
+
+        if (!_liveJoinedGroups || _liveJoinedGroups.length === 0) {
             joinedList.appendChild(createSecureEmptyStateElement('joined'));
             return;
         }
         
         const fragment = document.createDocumentFragment();
         
-        joinedGroups.forEach(group => {
+        _liveJoinedGroups.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'joined');
                 if (groupItem) fragment.appendChild(groupItem);

@@ -2414,10 +2414,11 @@ async function optimisticAcceptRequest(requestData, button) {
     console.log('[UI] Connection ready, proceeding with API call');
     
     try {
-        // FIX: Route through FriendRequestManager instead of calling authorizedRequest directly.
-        // This ensures offline queuing, retry logic, and cache updates all apply consistently,
-        // matching the same code path used by decline/cancel.
-        const response = await FriendRequestManager.acceptFriendRequest(requestId, senderId);
+        // FIX: Use the imported acceptFriendRequestOnline from friend-core.js.
+        // FriendRequestManager is an internal class inside friend-core and is not
+        // exported — calling it here caused "FriendRequestManager is not defined".
+        // acceptFriendRequestOnline is the correct public API for this operation.
+        const response = await acceptFriendRequestOnline(requestId, senderId);
         
         console.log('[UI] Accept request API response:', response);
         
@@ -3444,10 +3445,10 @@ function createFriendRequestItemElement(requestData, type) {
         if (type === 'incoming') {
     actionsHtml = `
         <button class="friend-action-btn success accept-request-btn" data-action="accept" data-request-id="${requestData.id}" data-friend-id="${userId}" title="Accept">
-            <i class="fas fa-check"></i> Accept
+            <i class="fas fa-check"></i>
         </button>
         <button class="friend-action-btn danger decline-request-btn" data-action="decline" data-request-id="${requestData.id}" title="Decline">
-            <i class="fas fa-times"></i> Decline
+            <i class="fas fa-times"></i>
         </button>
         <button class="friend-action-btn" data-action="view-profile" title="View Profile">
             <i class="fas fa-eye"></i>
@@ -4951,7 +4952,7 @@ export const handleRequestAction = function(action, requestData, button) {
                 // Disable button to prevent double-click
                 if (button) {
                     button.disabled = true;
-                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Accepting...';
+                    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
                 }
                 
                 const requestId = requestData.id;
@@ -4986,7 +4987,7 @@ export const handleRequestAction = function(action, requestData, button) {
                     } else {
                         if (button) {
                             button.disabled = false;
-                            button.innerHTML = '<i class="fas fa-check"></i> Accept';
+                            button.innerHTML = '<i class="fas fa-check"></i>';
                         }
                         showNotification(result?.error || 'Failed to accept request', 'error');
                     }
@@ -4994,7 +4995,7 @@ export const handleRequestAction = function(action, requestData, button) {
                     console.error('[UI] Accept error:', error);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '<i class="fas fa-check"></i> Accept';
+                        button.innerHTML = '<i class="fas fa-check"></i>';
                     }
                     showNotification(error.message || 'Failed to accept request', 'error');
                 }
@@ -5017,7 +5018,7 @@ export const handleRequestAction = function(action, requestData, button) {
                     console.error('[UI] Decline error:', error);
                     if (button) {
                         button.disabled = false;
-                        button.innerHTML = '<i class="fas fa-times"></i> Decline';
+                        button.innerHTML = '<i class="fas fa-times"></i>';
                     }
                     showNotification('Failed to decline request', 'error');
                 }

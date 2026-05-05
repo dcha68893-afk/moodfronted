@@ -9098,6 +9098,20 @@ Type: ${message.type || 'text'}`;
 
 
 
+            // Build an optimistic message object immediately so the sender/receiver always sees
+            // their bubble right away — even if core.getMessages() is empty on the receiver side.
+            const _optimisticMsg = {
+                id: 'optimistic_' + Date.now(),
+                content: content,
+                type: (attachment && attachment.type) || 'text',
+                attachment: attachment || null,
+                senderId: getCurrentUserId(),
+                chatId: (core && core.getCurrentConversation && core.getCurrentConversation() && core.getCurrentConversation().id) || '',
+                createdAt: new Date().toISOString(),
+                status: 'sending',
+                _optimistic: true
+            };
+
             const _renderNow = () => {
 
                 try {
@@ -9110,7 +9124,19 @@ Type: ${message.type || 'text'}`;
 
                         const messages = core?.getMessages?.() || [];
 
-                        UIRenderer.renderMessages(messages, currentChat, currentUser);
+                        // FIX: if core.getMessages() is empty (receiver-side race condition),
+                        // inject the optimistic message so the sent bubble always shows instantly.
+                        if (messages.length === 0) {
+                            UIRenderer.renderMessages([_optimisticMsg], currentChat, currentUser);
+                        } else {
+                            const myId = String(_optimisticMsg.senderId || '');
+                            const alreadyIn = messages.some(function(m) {
+                                return m.id === _optimisticMsg.id ||
+                                    (m._optimistic && m.content === content) ||
+                                    (m.content === content && String(m.senderId) === myId && Date.now() - new Date(m.createdAt).getTime() < 8000);
+                            });
+                            UIRenderer.renderMessages(alreadyIn ? messages : messages.concat([_optimisticMsg]), currentChat, currentUser);
+                        }
 
                     }
 
@@ -9154,9 +9180,18 @@ Type: ${message.type || 'text'}`;
 
                     }
 
-                    // Re-render with confirmed status from server
-
-                    setTimeout(_renderNow, 0);
+                    // Re-render with confirmed server data — core.getMessages() now has the real message,
+                    // so this replaces the optimistic bubble with the confirmed one.
+                    setTimeout(() => {
+                        try {
+                            const currentChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
+                            const currentUser = core?.getCurrentUser?.();
+                            if (currentChat && currentUser) {
+                                const messages = (core?.getMessages?.() || []).filter(function(m) { return !m._optimistic; });
+                                UIRenderer.renderMessages(messages.length > 0 ? messages : core?.getMessages?.() || [], currentChat, currentUser);
+                            }
+                        } catch (_e) {}
+                    }, 0);
 
                 }).catch((error) => {
 

@@ -2124,8 +2124,18 @@ const GroupCore = {
             SafeStorage.setItem('groupInvites', this.groupInvites);
             SafeStorage.setItem('adminGroups', this.adminGroups);
             SafeStorage.setItem('lastCacheTime', Date.now().toString());
-            
-            // DO NOT save user data to storage
+
+            // FIX: Reassign the module-level `let` variables so ES module live
+            // bindings stay in sync with GroupCore's object properties.
+            // group-ui.js imports `groups`, `myGroups` etc. by name. ES exports
+            // are live only when THIS module reassigns them with =.
+            // GroupCore mutates `this.groups` (object prop) which does NOT update
+            // the exported `let groups` binding, so the UI always saw [].
+            groups       = this.groups;
+            myGroups     = this.myGroups;
+            joinedGroups = this.joinedGroups;
+            adminGroups  = this.adminGroups;
+            groupInvites = this.groupInvites;
         } catch (error) {
             console.error('Error saving groups:', error);
         }
@@ -2250,6 +2260,11 @@ const GroupCore = {
                     });
                     
                     debugLog(`Loaded ${this.groups.length} groups from cache - OFFLINE-FIRST`);
+                    // FIX: sync module-level let vars so imports in group-ui.js see the data
+                    groups       = this.groups;
+                    myGroups     = this.myGroups;
+                    joinedGroups = this.joinedGroups;
+                    adminGroups  = this.adminGroups;
                     return true;
                 }
             }
