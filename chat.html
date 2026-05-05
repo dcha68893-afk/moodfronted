@@ -1876,16 +1876,28 @@
                             });
                         } catch(e) {}
                     }
-                    navigateToPage('calls');
-                    setTimeout(() => {
-                        const callsIframe = document.getElementById('callsIframe');
-                        if (callsIframe && callsIframe.contentWindow) {
-                            callsIframe.contentWindow.postMessage({
-                                type: 'AUTO_ACCEPT_CALL',
-                                payload: pendingIncomingCall
-                            }, '*');
-                        }
-                    }, 400);
+                    // ── FIX: Do NOT navigate to 'calls' page here.
+                    // Navigating to 'calls' destroys/reloads the iframe, wiping all call state.
+                    // The calls iframe is ALREADY active (it received the incoming call).
+                    // Just mark the call as active and send AUTO_ACCEPT_CALL to the live iframe.
+                    document.body.classList.add('call-screen-active');
+                    window.__activeCallInProgress = true;
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        callsIframe.contentWindow.postMessage({
+                            type: 'AUTO_ACCEPT_CALL',
+                            payload: pendingIncomingCall
+                        }, '*');
+                    } else {
+                        // Fallback: iframe not ready, navigate then send
+                        navigateToPage('calls');
+                        setTimeout(() => {
+                            const _f = document.getElementById('callsIframe');
+                            if (_f && _f.contentWindow) {
+                                _f.contentWindow.postMessage({ type: 'AUTO_ACCEPT_CALL', payload: pendingIncomingCall }, '*');
+                            }
+                        }, 800);
+                    }
                     hideBanner();
                 }
             };
@@ -1931,11 +1943,13 @@
                         } catch (_) {}
                     }
                 } else {
-                    // Visible / inside app: show only the call screen, not the banner.
+                    // Visible / inside app: mark call-screen-active but do NOT navigate to
+                    // 'calls' page — that would reload the iframe and lose call state.
+                    // The calls iframe is always loaded in the background and has already
+                    // received the incoming call event.
                     document.body.classList.add('call-screen-active');
                     window.__activeCallInProgress = true;
                     window.__lastActivePage = window.__currentPage || 'messages';
-                    if (!_onCallsPage) navigateToPage('calls');
                     banner.style.display = 'none';
                 }
 

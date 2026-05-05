@@ -5616,7 +5616,37 @@ try {
             }
 
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-            const isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
+            // FIX: Also match when activeChat is a pending_ conversation for the same user.
+            // When User A opens a chat via userId (before first message), activeChat.id = "pending_X"
+            // but the real chatId comes from the server once conversation is created.
+            // We detect this case by checking if the real conversation (by chatId) involves
+            // the same user as the pending chat, and if so treat it as "this chat".
+            let isThisChat = activeChat && chatId && String(activeChat.id) === String(chatId);
+            if (!isThisChat && activeChat && chatId) {
+                // Check if the confirmed chatId maps to a conversation whose friendId matches
+                // the pendingReceiverId or friendId of the activeChat
+                const _confirmedConv = ChatManager._conversationsMap &&
+                    (ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId)));
+                if (_confirmedConv) {
+                    const _activeFriendId = activeChat.friendId || activeChat.pendingReceiverId || activeChat.otherUserId;
+                    const _confirmedFriendId = _confirmedConv.friendId || _confirmedConv.otherUserId || _confirmedConv.pendingReceiverId;
+                    if (_activeFriendId && _confirmedFriendId && String(_activeFriendId) === String(_confirmedFriendId)) {
+                        isThisChat = true;
+                        // Also promote the pending conversation to the real chatId in activeChat
+                        if (activeChat.isPending || String(activeChat.id).startsWith('pending_')) {
+                            ChatManager._activeConversation = _confirmedConv;
+                        }
+                    }
+                }
+                // Also check if senderId or the incoming message's participants include our peer
+                if (!isThisChat && normalizedMessage) {
+                    const _activeFriendId2 = activeChat.friendId || activeChat.pendingReceiverId || activeChat.otherUserId;
+                    const _msgSenderId = normalizedMessage.senderId;
+                    if (_activeFriendId2 && _msgSenderId && String(_activeFriendId2) === String(_msgSenderId)) {
+                        isThisChat = true;
+                    }
+                }
+            }
 
             // Always update sidebar (unread badge, online status, last message)
             try {

@@ -633,6 +633,23 @@ function showIdleScreen() {
 function transitionToInCall(callInfo) {
     console.log('[UI] transitionToInCall → showing in-call screen for BOTH sides', callInfo);
 
+    // ── DEDUP: prevent double-transition within 2 seconds ─────────────────
+    const _now = Date.now();
+    if (window.__transitionToInCallAt && (_now - window.__transitionToInCallAt) < 2000) {
+        console.log('[UI] transitionToInCall dedup — already called', _now - window.__transitionToInCallAt, 'ms ago');
+        return;
+    }
+    window.__transitionToInCallAt = _now;
+
+    // ── CRITICAL: Hide callContainer IMMEDIATELY so it never flashes ───────
+    // callContainer wraps all screens. During the transition we don't want it
+    // to flash visible. We'll remove its active class, then show just inCallScreen.
+    const callContainer = document.getElementById('callContainer');
+    if (callContainer) {
+        callContainer.classList.remove('active');
+        callContainer.style.setProperty('display', 'none', 'important');
+    }
+
     if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
     if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
 
@@ -668,6 +685,13 @@ function transitionToInCall(callInfo) {
     if (!inCallScreen) { console.error('[UI] #inCallScreen not found'); return; }
     inCallScreen.classList.add('active');
     inCallScreen.style.setProperty('display', 'flex', 'important');
+
+    // ── Re-enable callContainer now that only inCallScreen is active ───────
+    const _cc = document.getElementById('callContainer');
+    if (_cc) {
+        _cc.classList.add('active');
+        _cc.style.setProperty('display', 'flex', 'important');
+    }
 
     // ── NUCLEAR OPTION: Watch the incoming modal and force-hide it while in-call ──
     // If anything re-adds .active to incomingCallModal, yank it off immediately.

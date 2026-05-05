@@ -1275,19 +1275,21 @@ export const RenderPipeline = {
             const { friendId } = event.detail || {};
             console.log('[UI] Friend request accepted for:', friendId);
             
-            // Force refresh both lists
+            // FIX: Always refresh and render unconditionally — don't gate on activeSection.
+            // If the accept happens while the user is on the requests tab, the friends list
+            // would never update and the count would stay 0.
             setTimeout(() => {
                 loadFriendsFromBackend().then(() => {
-                    if (UIState.activeSection === 'friendsSection') {
-                        renderFriends();
-                    }
-                    if (UIState.activeSection === 'allFriendsSection') {
-                        renderAllFriendsList();
-                    }
+                    renderFriends();
+                    renderAllFriendsList();
                     updateFriendCounts();
+                    if (window.FriendCacheManager && typeof window.FriendCacheManager.syncToGlobals === 'function') {
+                        window.FriendCacheManager.syncToGlobals();
+                    }
                 });
-                loadFriendRequestsFromBackend();
-            }, 500);
+                loadFriendRequestsFromBackend().then(() => renderFriendRequests());
+                loadSentRequestsFromBackend().then(() => renderSentRequests());
+            }, 300);
         });
         
         // Listen for global search results
@@ -1649,20 +1651,26 @@ export const CoreIntegration = {
         
         this.subscribe('friendRequestAccepted', (event) => {
             const data = this.validateEventData(event);
-            // FIX: Render both friend list and requests list instantly from updated cache,
-            // then also trigger a background sync for authoritative data.
+            // FIX: Always reload and re-render the friends list unconditionally.
+            // Previously renderFriends/renderAllFriendsList were only called when the
+            // activeSection matched — so if the user was on the requests tab when the
+            // accept completed, the friends list stayed empty and the count stayed 0.
             updateFriendCounts();
-            if (UIState.activeSection === 'friendsSection' || UIState.activeSection === 'allFriendsSection') {
-                renderFriends();
-                renderAllFriendsList();
-            }
-            if (UIState.activeSection === 'requestsSection') {
-                renderFriendRequests();
-                renderSentRequests();
-            }
+            renderFriends();
+            renderAllFriendsList();
+            renderFriendRequests();
+            renderSentRequests();
             if (data?.friendId) {
-                loadFriendsFromBackend().catch(() => {});
+                loadFriendsFromBackend().then(() => {
+                    renderFriends();
+                    renderAllFriendsList();
+                    updateFriendCounts();
+                    if (window.FriendCacheManager && typeof window.FriendCacheManager.syncToGlobals === 'function') {
+                        window.FriendCacheManager.syncToGlobals();
+                    }
+                }).catch(() => {});
                 loadSentRequestsFromBackend().catch(() => {});
+                loadFriendRequestsFromBackend().catch(() => {});
             }
         });
         
@@ -2435,20 +2443,28 @@ async function optimisticAcceptRequest(requestData, button) {
                 if (idx !== -1) window.friendRequests.splice(idx, 1);
             }
             
-            // Immediately re-render
+            // Immediately re-render requests list
             renderFriendRequests();
             updateFriendCounts();
+            showNotification(`You are now friends with ${displayName}!`, 'success');
             
-            // Refresh in background
+            // Refresh all data and re-render friends list unconditionally.
+            // Previously renderFriends() was only called when UIState.activeSection matched,
+            // so after accepting from the requests tab the friend count stayed at 0.
             setTimeout(async () => {
                 try {
                     await loadFriendsFromBackend();
                     await loadFriendRequestsFromBackend();
                     await loadSentRequestsFromBackend();
+                    // Always re-render all lists — the user may switch tabs
                     renderFriends();
                     renderAllFriendsList();
                     renderFriendRequests();
                     updateFriendCounts();
+                    // Sync to globals so badge counts are immediately correct
+                    if (window.FriendCacheManager && typeof window.FriendCacheManager.syncToGlobals === 'function') {
+                        window.FriendCacheManager.syncToGlobals();
+                    }
                 } catch (refreshError) {
                     console.error('[UI] Background refresh error:', refreshError);
                 }
@@ -4238,7 +4254,18 @@ export const showFriendRequestProfile = function(requestData) {
         const category = requestData.category || null;
         const categoryInfo = category ? friendCategories[category] : null;
 
-        const isIncoming = requestData.type === 'incoming_request' || requestData.status === 'pending';
+        // FIX: requestData.type is the server status ('pending'), NOT 'incoming_request'.
+        // The only reliable way to tell if this is incoming is to check whether the
+        // requester (senderId/requesterId) is someone OTHER than the current user.
+        // dataset.type on the card element is set to 'incoming_request' or 'sent_request'
+        // but we don't have the element here — use senderId instead.
+        const _reqSenderId = requestData.senderId || requestData.requesterId || requestData.user?.id || requestData.sender?.id;
+        const _myId = (currentUser && (currentUser.id || currentUser.userId)) ||
+                      (window.__session && window.__session.userId) ||
+                      (window.currentUser && (window.currentUser.id || window.currentUser.userId));
+        const isIncoming = _reqSenderId && _myId
+            ? String(_reqSenderId) !== String(_myId)
+            : (requestData.type === 'incoming_request' || requestData.status === 'pending');
 
         const profileModal = document.createElement('div');
         profileModal.className = 'add-friend-modal active';
@@ -4968,17 +4995,22 @@ export const handleRequestAction = function(action, requestData, button) {
                     
                     if (result && result.success) {
                         
-                        // Refresh all data
+                        // FIX: Refresh all data unconditionally — don't gate on activeSection.
                         await Promise.all([
                             loadFriendsFromBackend(),
                             loadFriendRequestsFromBackend(),
                             loadSentRequestsFromBackend()
                         ]);
                         
-                        // Update UI
+                        // Always re-render every list and update counts
                         renderFriends();
                         renderAllFriendsList();
+                        renderFriendRequests();
+                        renderSentRequests();
                         updateFriendCounts();
+                        if (window.FriendCacheManager && typeof window.FriendCacheManager.syncToGlobals === 'function') {
+                            window.FriendCacheManager.syncToGlobals();
+                        }
                         
                         // Close any open modals
                         if (domElements.friendRequestModal) {

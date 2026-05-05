@@ -9098,20 +9098,6 @@ Type: ${message.type || 'text'}`;
 
 
 
-            // Build an optimistic message object immediately so the sender/receiver always sees
-            // their bubble right away — even if core.getMessages() is empty on the receiver side.
-            const _optimisticMsg = {
-                id: 'optimistic_' + Date.now(),
-                content: content,
-                type: (attachment && attachment.type) || 'text',
-                attachment: attachment || null,
-                senderId: getCurrentUserId(),
-                chatId: (core && core.getCurrentConversation && core.getCurrentConversation() && core.getCurrentConversation().id) || '',
-                createdAt: new Date().toISOString(),
-                status: 'sending',
-                _optimistic: true
-            };
-
             const _renderNow = () => {
 
                 try {
@@ -9124,19 +9110,7 @@ Type: ${message.type || 'text'}`;
 
                         const messages = core?.getMessages?.() || [];
 
-                        // FIX: if core.getMessages() is empty (receiver-side race condition),
-                        // inject the optimistic message so the sent bubble always shows instantly.
-                        if (messages.length === 0) {
-                            UIRenderer.renderMessages([_optimisticMsg], currentChat, currentUser);
-                        } else {
-                            const myId = String(_optimisticMsg.senderId || '');
-                            const alreadyIn = messages.some(function(m) {
-                                return m.id === _optimisticMsg.id ||
-                                    (m._optimistic && m.content === content) ||
-                                    (m.content === content && String(m.senderId) === myId && Date.now() - new Date(m.createdAt).getTime() < 8000);
-                            });
-                            UIRenderer.renderMessages(alreadyIn ? messages : messages.concat([_optimisticMsg]), currentChat, currentUser);
-                        }
+                        UIRenderer.renderMessages(messages, currentChat, currentUser);
 
                     }
 
@@ -9180,18 +9154,9 @@ Type: ${message.type || 'text'}`;
 
                     }
 
-                    // Re-render with confirmed server data — core.getMessages() now has the real message,
-                    // so this replaces the optimistic bubble with the confirmed one.
-                    setTimeout(() => {
-                        try {
-                            const currentChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
-                            const currentUser = core?.getCurrentUser?.();
-                            if (currentChat && currentUser) {
-                                const messages = (core?.getMessages?.() || []).filter(function(m) { return !m._optimistic; });
-                                UIRenderer.renderMessages(messages.length > 0 ? messages : core?.getMessages?.() || [], currentChat, currentUser);
-                            }
-                        } catch (_e) {}
-                    }, 0);
+                    // Re-render with confirmed status from server
+
+                    setTimeout(_renderNow, 0);
 
                 }).catch((error) => {
 
@@ -10373,189 +10338,51 @@ Type: ${message.type || 'text'}`;
 
         window.currentFriendName = resolvedName;
 
+        // FIX: Find existing conversation by friendId FIRST — never create a duplicate.
+        // Use core.getConversations() to search by friendId/otherUserId before falling
+        // back to createConversation (which would create a pending_ duplicate).
+        const _findExistingByUserId = () => {
+            const convs = (core && core.getConversations && core.getConversations()) || [];
+            return convs.find(function(c) {
+                return String(c.friendId) === String(numericUserId) ||
+                       String(c.otherUserId) === String(numericUserId) ||
+                       String(c.userId) === String(numericUserId) ||
+                       String(c.pendingReceiverId) === String(numericUserId) ||
+                       (c.otherParticipant && String(c.otherParticipant.id) === String(numericUserId)) ||
+                       (Array.isArray(c.participants) && c.participants.some(function(p) {
+                           return String(p && (p.id || p)) === String(numericUserId);
+                       }));
+            }) || null;
+        };
 
+        // Panel is already open (done above). Now open the conversation in core.
+        if (core && (core.openConversation || (core.ConversationManager && core.ConversationManager.openConversation))) {
 
-        if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
+            const existingConv = _findExistingByUserId();
 
-            console.log('[MessageUI] Using messagesUI.loadChatByFriendId');
-
-            window.messagesUI.loadChatByFriendId(numericUserId, resolvedName);
-
-            return;
-
-        }
-
-
-
-        if (core && typeof core.openConversation === 'function') {
-
-            console.log('[MessageUI] Using core.openConversation');
-
-            
-
-            // ✅ FIXED: Check for existing conversation if findExisting is true
-
-            if (findExisting && typeof core.findExistingConversation === 'function') {
-
-                const existingConv = core.findExistingConversation(numericUserId);
-
-                if (existingConv) {
-
-                    console.log('[MessageUI] Found existing conversation:', existingConv.id);
-
-                    // FIX Bug5: pass name so header never shows Loading...
-                    core.openConversation(existingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-
+            if (existingConv && existingConv.id) {
+                console.log('[MessageUI] Existing conversation found, opening chatId:', existingConv.id);
+                Promise.resolve(
+                    (core.openConversation || core.ConversationManager.openConversation.bind(core.ConversationManager))
+                    (existingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 })
+                ).catch(function() {});
+            } else {
+                console.log('[MessageUI] No existing conversation — creating via ConversationManager');
+                if (core.ConversationManager && core.ConversationManager.createConversation) {
+                    Promise.resolve(
+                        core.ConversationManager.createConversation([numericUserId], { name: resolvedName })
+                    ).catch(function() {});
+                } else if (core.createConversation) {
+                    Promise.resolve(core.createConversation([numericUserId])).catch(function() {});
                 } else {
-
-                    console.log('[MessageUI] No existing conversation found, creating new one');
-
                     core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-
                 }
-
-            } else {
-
-                // FIX Bug5: pass name so header never shows Loading...
-                core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-
-            }
-
-            
-
-            setTimeout(() => {
-
-                const _nameEl2 = document.getElementById('chatFriendName');
-
-                if (_nameEl2 && _nameEl2.textContent !== resolvedName) _nameEl2.textContent = resolvedName;
-
-                const statusEl = document.getElementById('chatStatusText');
-
-                if (statusEl) {
-
-                    const _core2 = getMessagesCore();
-
-                    let _realOnline = false;
-
-                    if (_core2 && _core2.FriendManager) {
-
-                        const _f = _core2.FriendManager.getFriend(numericUserId)
-                                || _core2.FriendManager.getFriend(String(numericUserId));
-
-                        if (_f) _realOnline = !!(_f.online || _f.status === 'online');
-
-                    }
-
-                    statusEl.textContent = _realOnline ? 'Active now' : 'Offline';
-
-                }
-
-                const indicatorEl = document.getElementById('chatStatusIndicator');
-
-                if (indicatorEl) {
-                    const _isNowOnline = document.getElementById('chatStatusText')?.textContent === 'Active now';
-                    indicatorEl.className = `chat-status ${_isNowOnline ? 'online' : 'offline'}`;
-                }
-
-
-
-                const messagesContainer = document.getElementById('messagesContainer');
-
-                if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
-
-                    messagesContainer.innerHTML = `
-
-                        <div class="empty-chat">
-
-                            <i class="fas fa-comment-dots empty-chat-icon"></i>
-
-                            <div class="empty-chat-title">No messages yet</div>
-
-                            <div class="empty-chat-message">Type your first message below to start the conversation with ${resolvedName}</div>
-
-                        </div>
-
-                    `;
-
-                }
-
-            }, 100);
-
-            return;
-
-        }
-
-        
-
-        if (core && core.ConversationManager && typeof core.ConversationManager.createConversation === 'function') {
-
-            console.log('[MessageUI] Using ConversationManager.createConversation');
-
-            const result = core.ConversationManager.createConversation([numericUserId]);
-
-            
-
-            const openPanel = () => {
-
-                setTimeout(() => {
-
-                    const _nameEl3 = document.getElementById('chatFriendName');
-
-                    if (_nameEl3) _nameEl3.textContent = resolvedName;
-
-                    const messagesContainer = document.getElementById('messagesContainer');
-
-                    if (messagesContainer && messagesContainer.innerHTML.includes('loading-chat')) {
-
-                        messagesContainer.innerHTML = `
-
-                            <div class="empty-chat">
-
-                                <i class="fas fa-comment-dots empty-chat-icon"></i>
-
-                                <div class="empty-chat-title">No messages yet</div>
-
-                                <div class="empty-chat-message">Type your first message below to start the conversation with ${resolvedName}</div>
-
-                            </div>
-
-                        `;
-
-                    }
-
-                }, 100);
-
-            };
-
-            
-
-            if (result && typeof result.then === 'function') {
-
-                result.then((conversation) => {
-
-                    console.log('[MessageUI] Conversation opened:', conversation);
-
-                    openPanel();
-
-                }).catch((error) => {
-
-                    console.error('[MessageUI] Failed to open conversation:', error);
-
-                    openPanel();
-
-                });
-
-            } else {
-
-                openPanel();
-
             }
 
             return;
 
         }
 
-        
 
         if (window.ChatManager && typeof window.ChatManager.openChat === 'function') {
 
@@ -11824,16 +11651,15 @@ Type: ${message.type || 'text'}`;
 
                 console.log('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
 
-                // FIX Bug3: ensureChatPanelOpen must run AFTER openConversation resolves
-                // so messages are loaded before the panel is shown (no more blank panel).
-                // FIX Bug4: pass friendName/userName so _showChatPanel never falls back to 'Loading…'.
-                core.openConversation(existingConversation.id, { minFetchGap: 0, friendName: displayName, userName: displayName })
-                    .then(() => ensureChatPanelOpen(existingConversation.id))
-                    .catch(() => ensureChatPanelOpen(existingConversation.id));
-
-                // Also call ensureChatPanelOpen immediately for instant visual feedback
-                // (shows the panel with correct name right away, messages fill in async)
+                // Show panel immediately for instant visual feedback
                 ensureChatPanelOpen(existingConversation.id);
+
+                // Open via the real chatId — this fetches messages and sets activeChat correctly.
+                // Using the chatId (not userId) prevents duplicate pending conversations.
+                Promise.resolve(
+                    core.openConversation(existingConversation.id, { minFetchGap: 0, friendName: displayName, userName: displayName })
+                ).then(() => ensureChatPanelOpen(existingConversation.id))
+                 .catch(() => ensureChatPanelOpen(existingConversation.id));
 
                 return;
 

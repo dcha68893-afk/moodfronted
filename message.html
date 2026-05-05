@@ -2000,18 +2000,16 @@
                     recipientName: targetUserName
                 };
 
-                // If core is ACTIVE open immediately; otherwise queue with retries.
-                // FIX: stop retrying as soon as we fire — do NOT keep re-dispatching
-                // messages:openChat after the panel is already open (causes flicker).
+                // If core is ACTIVE open immediately; otherwise wait (max 3s) then open anyway.
+                // FIX: Use a dispatched flag so the event fires EXACTLY ONCE — never on retry.
+                // The old retry loop re-fired every 300ms, causing the panel to open/close repeatedly.
                 let _openDispatched = false;
                 const tryOpen = (attempts) => {
-                    if (_openDispatched) return; // already fired — stop all retries
+                    if (_openDispatched) return;
                     const core = window.messagesCore;
-                    const coreActive = core && (typeof core.getState === 'function'
-                        ? (core.getState() === 'ACTIVE' || (core.getState() && core.getState().state === 'ACTIVE'))
-                        : !!core.isActive);
+                    const coreState = core && typeof core.getState === 'function' ? core.getState() : null;
+                    const coreActive = coreState === 'ACTIVE' || (coreState && coreState.state === 'ACTIVE') || (core && !!core.isActive);
                     if (coreActive || attempts >= 15) {
-                        if (_openDispatched) return;
                         _openDispatched = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
                     } else {
@@ -2031,19 +2029,17 @@
             
             if (chatId) {
                 console.log('[Message HTML] Found chat in URL params:', { chatId, userName, type, environment });
-                // URL params are an explicit deep-link trigger - open via tryOpen when core is ready
-                // NOTE: tryOpenUrl fires exactly once; no additional dispatch needed here.
+                // URL params are an explicit deep-link trigger - open via tryOpen when core is ready.
+                // FIX: fire EXACTLY ONCE using _urlDispatched flag.
                 const _urlDetail = { userId: parseInt(chatId), userName: userName || 'User', recipientId: parseInt(chatId), recipientName: userName || 'User' };
-                let _urlOpenDispatched = false;
+                let _urlDispatched = false;
                 const tryOpenUrl = (attempts) => {
-                    if (_urlOpenDispatched) return;
+                    if (_urlDispatched) return;
                     const core = window.messagesCore;
-                    const coreActive = core && (typeof core.getState === 'function'
-                        ? (core.getState() === 'ACTIVE' || (core.getState() && core.getState().state === 'ACTIVE'))
-                        : !!core.isActive);
+                    const coreState = core && typeof core.getState === 'function' ? core.getState() : null;
+                    const coreActive = coreState === 'ACTIVE' || (coreState && coreState.state === 'ACTIVE') || (core && !!core.isActive);
                     if (coreActive || attempts >= 20) {
-                        if (_urlOpenDispatched) return;
-                        _urlOpenDispatched = true;
+                        _urlDispatched = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail }));
                     } else {
                         setTimeout(() => tryOpenUrl(attempts + 1), 200);
@@ -2064,8 +2060,7 @@
                 // Clear URL params to avoid duplicate opens on refresh (preserve hash if any)
                 const newUrl = window.location.pathname + (window.location.hash || '');
                 window.history.replaceState({}, document.title, newUrl);
-                
-                // NOTE: No second dispatch here — tryOpenUrl handles the single open.
+                // NOTE: tryOpenUrl above fires the single open — no second dispatch needed.
             }
         }
         
