@@ -2188,22 +2188,14 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         
         allGroupsList.innerHTML = '';
         
-        // FIX: `groups` is an imported copy that goes stale. Always read the live
-        // array from GroupCore (authoritative) or the window mirror set by the
-        // groups:list-updated handler, falling back to the import only if neither exists.
-        const _liveGroups = (window.GroupCore && window.GroupCore.groups && window.GroupCore.groups.length > 0)
-            ? window.GroupCore.groups
-            : (window.__gcGroups && window.__gcGroups.length > 0)
-                ? window.__gcGroups
-                : (groups || []);
-
-        if (!_liveGroups || _liveGroups.length === 0) {
+        const _gc = window.GroupCore;
+        const _live = (_gc && _gc.groups && _gc.groups.length > 0) ? _gc.groups : (groups || []);
+        if (!_live || _live.length === 0) {
             allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
             return;
         }
-
         const fragment = document.createDocumentFragment();
-        const groupsToRender = _liveGroups.slice(0, 20);
+        const groupsToRender = _live.slice(0, 20);
         
         groupsToRender.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2218,9 +2210,9 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
             allGroupsList.appendChild(createSecureEmptyStateElement('no-matches'));
         }
         
-        if (_liveGroups.length > 20) {
+        if (_live.length > 20) {
             const timer = setTimeout(() => {
-                _liveGroups.slice(20).forEach(group => {
+                _live.slice(20).forEach(group => {
                     if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                         const groupItem = createSecureGroupItemElement(group, 'group');
                         if (groupItem) allGroupsList.appendChild(groupItem);
@@ -2247,19 +2239,14 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         
         myGroupsList.innerHTML = '';
         
-        // FIX: read live data from GroupCore instead of stale imported myGroups
-        const _liveMyGroups = (window.GroupCore && window.GroupCore.myGroups && window.GroupCore.myGroups.length > 0)
-            ? window.GroupCore.myGroups
-            : (window.__gcMyGroups && window.__gcMyGroups.length > 0 ? window.__gcMyGroups : (myGroups || []));
-
-        if (!_liveMyGroups || _liveMyGroups.length === 0) {
+        const _gcMy = window.GroupCore;
+        const _liveMy = (_gcMy && _gcMy.myGroups && _gcMy.myGroups.length > 0) ? _gcMy.myGroups : (myGroups || []);
+        if (!_liveMy || _liveMy.length === 0) {
             myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));
             return;
         }
-        
         const fragment = document.createDocumentFragment();
-        
-        _liveMyGroups.forEach(group => {
+        _liveMy.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'my_group');
                 if (groupItem) fragment.appendChild(groupItem);
@@ -2289,19 +2276,14 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         
         joinedList.innerHTML = '';
         
-        // FIX: read live data from GroupCore instead of stale imported joinedGroups
-        const _liveJoinedGroups = (window.GroupCore && window.GroupCore.joinedGroups && window.GroupCore.joinedGroups.length > 0)
-            ? window.GroupCore.joinedGroups
-            : (window.__gcJoinedGroups && window.__gcJoinedGroups.length > 0 ? window.__gcJoinedGroups : (joinedGroups || []));
-
-        if (!_liveJoinedGroups || _liveJoinedGroups.length === 0) {
+        const _gcJ = window.GroupCore;
+        const _liveJ = (_gcJ && _gcJ.joinedGroups && _gcJ.joinedGroups.length > 0) ? _gcJ.joinedGroups : (joinedGroups || []);
+        if (!_liveJ || _liveJ.length === 0) {
             joinedList.appendChild(createSecureEmptyStateElement('joined'));
             return;
         }
-        
         const fragment = document.createDocumentFragment();
-        
-        _liveJoinedGroups.forEach(group => {
+        _liveJ.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'joined');
                 if (groupItem) fragment.appendChild(groupItem);
@@ -3547,35 +3529,28 @@ function bindCreateGroupModalEvents() {
         console.warn('[GroupUI] Cancel button not found in DOM');
     }
 
-    // FIXED: Create Group button - direct event binding
-    const createGroupBtnModal = safeGetElement('#createGroupBtnModal');
-    if (createGroupBtnModal) {
-        // Remove any existing listeners by cloning
-        const newCreateBtn = createGroupBtnModal.cloneNode(true);
-        createGroupBtnModal.parentNode.replaceChild(newCreateBtn, createGroupBtnModal);
-        
-        newCreateBtn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            const nameInput = safeGetElement('#groupNameInput');
+    // FIX: bind create button with a submitting-flag instead of cloneNode.
+    // cloneNode removed the button from DOM so after the first submission
+    // safeGetElement('#createGroupBtnModal') returned null and the button
+    // was permanently dead. Now we use a module-level flag to guard re-entry.
+    (function _bindCreateGroupBtn() {
+        const btn = document.getElementById('createGroupBtnModal');
+        if (!btn) { console.warn('[GroupUI] Create Group button not found'); return; }
+        if (btn.__gcBound) return; // already bound
+        btn.__gcBound = true;
+        btn.addEventListener('click', async function(e) {
+            e.preventDefault(); e.stopPropagation();
+            if (this._gcSubmitting) return;
+            const nameInput = document.getElementById('groupNameInput');
             if (!nameInput || !nameInput.value.trim()) {
-                if (typeof showNotification === 'function') {
-                    showNotification('Please enter a group name', 'error');
-                }
-                nameInput?.focus();
-                return;
+                if (typeof showNotification === 'function') showNotification('Please enter a group name', 'error');
+                nameInput && nameInput.focus(); return;
             }
-
-            // Delegate everything (member collection, session wait, API call,
-            // modal close, notifications, button reset) to createGroupAsync.
-            await createGroupAsync(newCreateBtn);
+            this._gcSubmitting = true;
+            try { await createGroupAsync(this); }
+            finally { this._gcSubmitting = false; }
         });
-        
-        // (log suppressed)
-    } else {
-        console.warn('[GroupUI] Create Group button not found in DOM');
-    }
+    })();
 
     // Theme option selection (visual feedback)
     safeGetElements('.theme-option').forEach(opt => {
@@ -4296,16 +4271,8 @@ export function registerUICoreEvents() {
             }
         });
 
-        // groups:list-updated — after full sync from server
-        // FIX: imported `groups` is a stale copy. Pull live data from GroupCore before render.
-        GC.on('groups:list-updated', (payload) => {
-            try {
-                // Mirror GroupCore arrays to window so renderAllGroupsSecure can read them
-                window.__gcGroups       = GC.groups       || [];
-                window.__gcMyGroups     = GC.myGroups     || [];
-                window.__gcJoinedGroups = GC.joinedGroups || [];
-                window.__gcAdminGroups  = GC.adminGroups  || [];
-            } catch (_) {}
+        // groups:list-updated
+        GC.on('groups:list-updated', () => {
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
             }
@@ -4965,54 +4932,7 @@ async function _directCreateGroup(groupData) {
     const data = await res.json().catch(() => ({}));
     console.log('[GroupUI] _directCreateGroup response:', res.status, data && data.success);
     if (!res.ok) throw new Error((data && data.message) || 'HTTP ' + res.status);
-
-    // FIX: Extract the created group and immediately push it into GroupCore state
-    // so that renderGroupsListSecure() (which reads GroupCore.groups) shows it
-    // right away without waiting for the next requestGroupList() poll.
-    const newGroup = (data.data && data.data.group) || data.data || null;
-    if (newGroup && newGroup.id) {
-        const GC = window.GroupCore;
-        if (GC) {
-            // Push into all-groups list if not already there
-            if (!GC.groups.some(g => g.id === newGroup.id)) {
-                GC.groups.push(newGroup);
-            }
-            // Always add to myGroups — the creator owns it
-            if (!GC.myGroups.some(g => g.id === newGroup.id)) {
-                GC.myGroups.push(newGroup);
-            }
-            // Also add to adminGroups
-            if (!GC.adminGroups.some(g => g.id === newGroup.id)) {
-                GC.adminGroups.push(newGroup);
-            }
-            // Persist and emit so the UI reacts
-            if (typeof GC.saveGroups === 'function') GC.saveGroups();
-            if (typeof GC.emit === 'function') {
-                GC.emit('group:created', newGroup);
-                GC.emit('groups:list-updated', {
-                    groups      : GC.groups,
-                    myGroups    : GC.myGroups,
-                    joinedGroups: GC.joinedGroups,
-                    adminGroups : GC.adminGroups,
-                    fromServer  : true,
-                });
-            }
-        }
-
-        // Also store in LocalGroupStore (IDB) so it survives page refresh
-        if (window.LocalGroupStore && typeof window.LocalGroupStore.saveGroup === 'function') {
-            window.LocalGroupStore.saveGroup(newGroup).catch(() => {});
-        }
-
-        // Schedule a full server sync after 1.5s to confirm the group is persisted
-        setTimeout(() => {
-            if (window.GroupCore && typeof window.GroupCore.requestGroupList === 'function') {
-                window.GroupCore.requestGroupList().catch(() => {});
-            }
-        }, 1500);
-    }
-
-    return { success: true, group: newGroup || data };
+    return { success: true, group: (data.data && data.data.group) || data.data || data };
 }
 
 async function createGroupAsync(buttonElement) {
@@ -5112,11 +5032,12 @@ async function createGroupAsync(buttonElement) {
             showNotification('Failed to create group: ' + (e.message || 'Unknown error'), 'error');
         }
     } finally {
-        // ── SENDER: restore button ────────────────────────────────────────
         if (buttonElement) {
-            buttonElement.disabled    = false;
+            buttonElement.disabled = false;
             buttonElement.textContent = 'Create Group';
             buttonElement.classList && buttonElement.classList.remove('btn-loading');
+            buttonElement._gcSubmitting = false;
         }
+        try { if (typeof resetCreateGroupForm === 'function') resetCreateGroupForm(); } catch(_) {}
     }
 }

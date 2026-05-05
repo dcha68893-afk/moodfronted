@@ -1195,7 +1195,12 @@ export const RenderPipeline = {
             const _delay = isRealtime ? 0 : (fromCache ? 50 : 300);
             this.queueRender('friends', debounce(() => {
                 updateFriendCounts();
-                if (UIState.activeSection === 'friendsSection') renderFriends();
+                // FIX: For realtime events (accept, remove, etc.) always render both friend lists
+                // regardless of which section is active — the user may switch tabs immediately.
+                if (isRealtime) {
+                    renderFriends();
+                    renderAllFriendsList();
+                } else if (UIState.activeSection === 'friendsSection') renderFriends();
                 else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
                 else {
                     // Off-screen update: just update counts, render when user navigates here
@@ -1272,12 +1277,26 @@ export const RenderPipeline = {
         // Listen for friend request accepted events
         window.addEventListener('friendRequestAccepted', (event) => {
             if (!isUIActive()) return;
-            const { friendId } = event.detail || {};
+            const { friendId, friend } = event.detail || {};
             console.log('[UI] Friend request accepted for:', friendId);
             
+            // FIX: If the accepted friend object is available, immediately inject it
+            // into window.friends so counts are correct even before loadFriendsFromBackend
+            // completes. This prevents the "0 friends" state that occurs when the backend
+            // hasn't returned the new friend yet in the reload triggered by acceptFriendRequest.
+            if (friend && friend.id) {
+                if (!Array.isArray(window.friends)) window.friends = [];
+                const existsIdx = window.friends.findIndex(f => String(f.id) === String(friend.id));
+                if (existsIdx === -1) {
+                    window.friends = [...window.friends, { ...friend, status: friend.status || 'offline' }];
+                }
+            }
+
             // FIX: Always refresh and render unconditionally — don't gate on activeSection.
             // If the accept happens while the user is on the requests tab, the friends list
             // would never update and the count would stay 0.
+            updateFriendCounts(); // immediate count update from injected friend above
+
             setTimeout(() => {
                 loadFriendsFromBackend().then(() => {
                     renderFriends();
@@ -2442,10 +2461,36 @@ async function optimisticAcceptRequest(requestData, button) {
                 const idx = window.friendRequests.findIndex(r => r.id === requestId);
                 if (idx !== -1) window.friendRequests.splice(idx, 1);
             }
+
+            // FIX: Immediately inject the accepted friend into window.friends so
+            // updateFriendCounts() reads a non-zero value right away — before the
+            // async loadFriendsFromBackend() completes. Without this, the friend
+            // count stays at 0 while the reload is in flight.
+            const _newFriendObj = response.friend || {
+                id:          String(senderId),
+                displayName: displayName,
+                username:    requestData.senderUsername || requestData.user?.username || '',
+                avatar:      requestData.senderAvatar  || requestData.user?.avatar  || '',
+                photoURL:    requestData.senderAvatar  || requestData.user?.avatar  || '',
+                status:      'offline',
+                addedAt:     Date.now()
+            };
+            if (!Array.isArray(window.friends)) window.friends = [];
+            const _existsInWindow = window.friends.findIndex(f => String(f.id) === String(_newFriendObj.id));
+            if (_existsInWindow === -1) {
+                window.friends = [...window.friends, _newFriendObj];
+            }
+            // Also push into FriendCacheManager in-memory cache
+            if (window.FriendCacheManager && typeof window.FriendCacheManager.setFriend === 'function') {
+                window.FriendCacheManager.setFriend(_newFriendObj);
+                window.FriendCacheManager.syncToGlobals();
+            }
             
             // Immediately re-render requests list
             renderFriendRequests();
             updateFriendCounts();
+            renderFriends();
+            renderAllFriendsList();
             showNotification(`You are now friends with ${displayName}!`, 'success');
             
             // Refresh all data and re-render friends list unconditionally.

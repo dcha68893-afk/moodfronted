@@ -2124,17 +2124,11 @@ const GroupCore = {
             SafeStorage.setItem('groupInvites', this.groupInvites);
             SafeStorage.setItem('adminGroups', this.adminGroups);
             SafeStorage.setItem('lastCacheTime', Date.now().toString());
-
-            // FIX: Reassign the module-level `let` variables so ES module live
-            // bindings stay in sync with GroupCore's object properties.
-            // group-ui.js imports `groups`, `myGroups` etc. by name. ES exports
-            // are live only when THIS module reassigns them with =.
-            // GroupCore mutates `this.groups` (object prop) which does NOT update
-            // the exported `let groups` binding, so the UI always saw [].
-            groups       = this.groups;
-            myGroups     = this.myGroups;
+            // FIX: reassign module-level let vars so ES live bindings update
+            groups = this.groups;
+            myGroups = this.myGroups;
             joinedGroups = this.joinedGroups;
-            adminGroups  = this.adminGroups;
+            adminGroups = this.adminGroups;
             groupInvites = this.groupInvites;
         } catch (error) {
             console.error('Error saving groups:', error);
@@ -2233,23 +2227,10 @@ const GroupCore = {
                 if (cachedGroups && cachedGroups.length > 0) {
                     // Process cached groups into arrays
                     this.groups = cachedGroups;
-                    // FIX: Server response includes isCreator/isAdmin/role on each group
-                    // (set by groupService.getUserGroups). Using members?.some() always
-                    // returned false because the API never embeds a members[] array on
-                    // the group list response — only groupMembers relation via Sequelize.
-                    const uid = this.currentUser?.uid || this.currentUser?.id;
-                    this.myGroups     = cachedGroups.filter(g =>
-                        g.isCreator === true || g.role === 'owner' ||
-                        (uid && String(g.createdBy) === String(uid))
-                    );
-                    this.joinedGroups = cachedGroups.filter(g =>
-                        !g.isCreator && g.role !== 'owner' &&
-                        !(uid && String(g.createdBy) === String(uid))
-                    );
-                    this.adminGroups  = cachedGroups.filter(g =>
-                        g.isAdmin === true || g.isCreator === true ||
-                        ['owner','admin'].includes(g.role)
-                    );
+                    const _cuid = this.currentUser?.uid || this.currentUser?.id;
+                    this.myGroups = cachedGroups.filter(g => g.isCreator === true || g.role === 'owner' || (_cuid && String(g.createdBy) === String(_cuid)));
+                    this.joinedGroups = cachedGroups.filter(g => !g.isCreator && g.role !== 'owner' && !(_cuid && String(g.createdBy) === String(_cuid)));
+                    this.adminGroups = cachedGroups.filter(g => g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
                     
                     this.emit('groups:list-updated', {
                         groups: this.groups,
@@ -2260,11 +2241,8 @@ const GroupCore = {
                     });
                     
                     debugLog(`Loaded ${this.groups.length} groups from cache - OFFLINE-FIRST`);
-                    // FIX: sync module-level let vars so imports in group-ui.js see the data
-                    groups       = this.groups;
-                    myGroups     = this.myGroups;
-                    joinedGroups = this.joinedGroups;
-                    adminGroups  = this.adminGroups;
+                    groups = this.groups; myGroups = this.myGroups;
+                    joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
                     return true;
                 }
             }
@@ -2309,22 +2287,11 @@ const GroupCore = {
                 g.isLocalOnly || serverMap.has(g.id)
             );
             
-            // Re-categorize groups
-            // FIX: Use isCreator/isAdmin/role fields set by groupService.getUserGroups.
-            // members?.some() was always false — the list endpoint never embeds members[].
-            const uid = this.currentUser?.uid || this.currentUser?.id;
-            this.myGroups     = this.groups.filter(g =>
-                g.isCreator === true || g.role === 'owner' ||
-                (uid && String(g.createdBy) === String(uid))
-            );
-            this.joinedGroups = this.groups.filter(g =>
-                !g.isCreator && g.role !== 'owner' &&
-                !(uid && String(g.createdBy) === String(uid))
-            );
-            this.adminGroups  = this.groups.filter(g =>
-                g.isAdmin === true || g.isCreator === true ||
-                ['owner','admin'].includes(g.role)
-            );
+            // Re-categorize groups using server-provided isCreator/isAdmin/role fields
+            const _uid = this.currentUser?.uid || this.currentUser?.id;
+            this.myGroups = this.groups.filter(g => g.isCreator === true || g.role === 'owner' || (_uid && String(g.createdBy) === String(_uid)));
+            this.joinedGroups = this.groups.filter(g => !g.isCreator && g.role !== 'owner' && !(_uid && String(g.createdBy) === String(_uid)));
+            this.adminGroups = this.groups.filter(g => g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
             
         } catch (error) {
             debugLog('Failed to merge server data:', error);
@@ -4576,10 +4543,13 @@ const openGroupChat = async function(groupData) {
         
         loadGroupChatMessages(groupData.id);
         setupTypingListener(groupData.id);
-        
         loadUniqueFeaturesPanels(groupData.id);
         checkPostingRules(groupData);
-        
+
+        // FIX: also call our runtime patch panel so mobile transition works
+        if (typeof window.__openGroupPanel === 'function') {
+            window.__openGroupPanel(groupData);
+        }
     } catch (error) {}
 };
 
@@ -7397,6 +7367,8 @@ function setupUIEventListeners() {
 
 function setupResponsiveBehavior() {
     try {
+        // FIX: set isMobile immediately on load, not only on resize
+        isMobile = window.innerWidth <= 768;
         window.addEventListener('resize', () => {
             isMobile = window.innerWidth <= 768;
         });

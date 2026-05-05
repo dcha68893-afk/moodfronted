@@ -63,7 +63,7 @@ const EXPECTED_PARENT_ORIGIN = window.location.origin;
 // =============================================
 
 const POLLING_CONFIG = {
-    INCOMING_REQUESTS_INTERVAL: 120000, // 2 minutes - reduced from 30s to avoid noise
+    INCOMING_REQUESTS_INTERVAL: 30000, // 30 seconds — fast enough to detect accepts promptly
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 5000,
     ENABLED: true
@@ -302,9 +302,10 @@ const PollingManager = {
     },
 
     async _fetchSentRequests() {
-        if (this._fetchInFlight) return;
+        // FIX: Use a dedicated guard so this doesn't block _fetchIncomingRequests
+        if (this._fetchSentInFlight) return;
         if (!authReadyReceived || !__session.ready || !__session.token) return;
-        this._fetchInFlight = true;
+        this._fetchSentInFlight = true;
         try {
             const response = await authorizedRequest('/api/friends/sent', { timeout: 10000 });
             if (response?.success) {
@@ -314,7 +315,29 @@ const PollingManager = {
                 else if (Array.isArray(d?.data?.requests)) sentData = d.data.requests;
                 else if (Array.isArray(d))                 sentData = d;
 
+                // FIX: detect requests that were accepted and add them to friends list
                 const current = FriendCacheManager.getAllSentRequests?.() || [];
+                const currentIds = new Set(current.map(r => String(r.receiverId || r.friendId || r.userId || '')));
+                const nowIds = new Set(sentData.map(r => String(r.receiverId || r.friendId || r.userId || '')));
+                // Requests that were in sent but are no longer there = accepted (or rejected)
+                const disappeared = current.filter(r => {
+                    const rid = String(r.receiverId || r.friendId || r.userId || '');
+                    return rid && !nowIds.has(rid);
+                });
+                for (const gone of disappeared) {
+                    const goneId = String(gone.receiverId || gone.friendId || gone.userId || '');
+                    if (!goneId) continue;
+                    // Check if they're now a friend
+                    const existing = FriendCacheManager.getByFriendId?.(goneId)
+                        || Array.from(FriendCacheManager._cache?.friends?.values() || []).find(f => String(f.id) === goneId);
+                    if (!existing) {
+                        // Not yet a friend — they may have accepted; reload friends from backend
+                        Logger.info('PollingManager._fetchSentRequests', 'Sent request disappeared — reloading friends', { goneId });
+                        loadFriendsFromBackend().catch(() => {});
+                        break;
+                    }
+                }
+
                 if (!ShallowCompare.areRequestsEqual(current, sentData)) {
                     FriendCacheManager.setSentRequests?.(sentData);
                     FriendCacheManager.syncToGlobals();
@@ -326,7 +349,7 @@ const PollingManager = {
         } catch (_) {
             // Non-fatal — socket events are the primary mechanism
         } finally {
-            this._fetchInFlight = false;
+            this._fetchSentInFlight = false;
         }
     },
 
@@ -4159,12 +4182,24 @@ const FriendRequestManager = {
                           .catch(() => {});
                 }
 
-                await loadFriendsFromBackend();
+                // FIX: Guarantee the newFriend is in FriendCacheManager BEFORE we dispatch
+                // friendRequestAccepted. loadFriendsFromBackend may return 0 friends if the
+                // server hasn't committed yet — that triggers the "keep cache" safety guard and
+                // does NOT add newFriend. So we explicitly set it first, then reload.
+                FriendCacheManager.setFriend(newFriend);
+                FriendCacheManager.syncToGlobals();
+                FriendCacheManager.persist();
+
+                // Now attempt a backend reload (best-effort; result doesn't gate the events below)
+                loadFriendsFromBackend().catch(() => {});
 
                 window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
                     detail: { requestId, friendId, success: true, friend: newFriend }
                 }));
                 window.dispatchEvent(new CustomEvent('friendAdded', { detail: { friend: newFriend } }));
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: { friends: FriendCacheManager.getAllFriends(), realtime: true }
+                }));
 
                 // ── FIX: include targetUserId so the parent/server knows which
                 //    user (the original sender) to push FRIEND_REQUEST_ACCEPTED to.
@@ -4190,12 +4225,19 @@ const FriendRequestManager = {
                     }
                 });
 
-                setTimeout(() => {
-                    PollingManager._fetchIncomingRequests();
-                    loadFriendsFromBackend();
-                    loadSentRequestsFromBackend();
-                    loadFriendRequestsFromBackend();
-                }, 500);
+                // FIX: After a short delay, do a full authoritative reload and re-fire events
+                // to ensure the UI reflects the new friend even if the first reload was a race.
+                setTimeout(async () => {
+                    await loadFriendsFromBackend().catch(() => {});
+                    await loadSentRequestsFromBackend().catch(() => {});
+                    await loadFriendRequestsFromBackend().catch(() => {});
+                    FriendCacheManager.syncToGlobals();
+                    FriendCacheManager.persist();
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                        detail: { friends: FriendCacheManager.getAllFriends(), realtime: true, delayed: true }
+                    }));
+                    window.dispatchEvent(new CustomEvent('updateFriendCounts'));
+                }, 1500);
 
                 if (typeof showNotification === 'function') {
                     showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
