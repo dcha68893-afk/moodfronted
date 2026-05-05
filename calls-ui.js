@@ -4995,10 +4995,12 @@ case 'CALL_INITIATED':
 
             // ── Stop ringtones immediately ────────────────────────────────────
             if (window._incomingRingtone) {
+                try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
                 try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                 window._incomingRingtone = null;
             }
             if (window._callerRingtone) {
+                try { if (window._callerRingtone._interval) clearInterval(window._callerRingtone._interval); } catch(e) {}
                 try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
                 window._callerRingtone = null;
             }
@@ -5074,21 +5076,22 @@ case 'CALL_INITIATED':
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             }
-            // Reset screens inside iframe to idle
+            // Reset screens inside iframe to idle — hide inCallScreen immediately
             const callingScreen = document.getElementById('callingScreen');
             const inCallScreen  = document.getElementById('inCallScreen');
             const idleScreen    = document.getElementById('idleScreen');
             const callContainer = document.getElementById('callContainer');
             if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
             if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
-            // ✅ FIX: Do NOT show callContainer after call ends — it shows a blank dark screen.
-            // The parent shell navigates away (SWITCH_MODULE) so this iframe becomes hidden.
-            // If somehow still visible, keep callContainer hidden and only show idleScreen inside it.
+            // Also hide incoming modal in case it was still showing
+            const incomingModal = document.getElementById('incomingCallModal');
+            if (incomingModal) { incomingModal.classList.remove('active'); incomingModal.style.setProperty('display', 'none', 'important'); }
+            // Keep callContainer hidden — parent shell navigates away via SWITCH_MODULE
             if (callContainer) {
                 callContainer.classList.remove('active');
                 callContainer.style.setProperty('display', 'none', 'important');
             }
-            if (idleScreen)    { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
+            if (idleScreen) { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
             (function _saveEndedLocally() {
@@ -5110,11 +5113,13 @@ case 'CALL_INITIATED':
             })();
 
             // ── Capture navigation target BEFORE clearing state ───────────────
+            // For receiver side: __callOriginReturnTo is often not set (they were just
+            // using the app when the call came in). Default to 'messages', NEVER 'calls'.
             const returnTo = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
                 ? window.__callOriginReturnTo
                 : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
                     ? window.__pendingCallReturnTo
-                    : 'messages'; // NEVER default to calls panel
+                    : 'messages'; // NEVER default to calls panel — always go to messages
             const chatUserId = window.__callOriginChatUserId
                 || window.__pendingCallChatUserId
                 || null;
@@ -6912,18 +6917,18 @@ case 'CALL_ACCEPTED': {
                             }
                         }
 
-                        // Notify remote peer to show "Switch to video?" prompt
-                        // This goes via postMessage to parent which routes it through WS
+                        // Notify remote peer they should prepare remote video area
+                        // Parent echoes this back to the same iframe so the other
+                        // side's VIDEO_UPGRADE_REQUEST handler fires.
                         if (window.parent && window.parent !== window) {
                             window.parent.postMessage({
                                 type: 'VIDEO_UPGRADE_REQUEST',
-                                payload: { enabled: true, callId: callId },
+                                payload: { enabled: true, callId: callId, peerName: window.__activePeerName || window.__incomingCallerName || 'Caller' },
                                 source: 'calls-iframe'
                             }, '*');
                         }
-                        // Store track ref for possible rollback if remote declines
                         UIState._videoUpgradeTrack = vTrack;
-                        showNotification('Camera on — waiting for remote to accept video', 'info');
+                        showNotification('Camera on', 'info');
                     })
                     .catch(err => {
                         if (err.name === 'NotAllowedError') showNotification('Camera permission denied', 'error');
@@ -7766,130 +7771,129 @@ acceptIncomingCallAsVideo: function() {
 },
 
 acceptIncomingCallGeneric: async function(asVideo) {
-    // ── IMMEDIATE UI TRANSITION ──────────────────────────────────────────
-    // Show the in-call screen RIGHT NOW when the user taps Accept, exactly
-    // like WhatsApp. Do NOT wait for answerCall/WebRTC — WebRTC connects in
-    // the background. The guard checks come AFTER we show the screen.
-
-    // Collect call info before any early returns
-    const callerName = (elements.incomingCallName && elements.incomingCallName.textContent)
-        || window.__incomingCallerName || 'Caller';
-    const isVideoCall = (elements.incomingCallType && elements.incomingCallType.textContent &&
-        elements.incomingCallType.textContent.includes('Video')) || false;
-    const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
-    const callId = window._currentIncomingCallId || UIState.activeCallId
-        || (coreInstance && coreInstance.getState && coreInstance.getState().activeCallId);
-
-    // Stop ringtone immediately
+    if (!canPerformAction('answerCall')) return;
+    
+    if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
+        showNotification('You are already in a call', 'warning');
+        return;
+    }
+    
+    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+    }
+    // Stop ringtone
     if (window._incomingRingtone) {
-        try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
         window._incomingRingtone = null;
     }
-    // Stop decline countdown timer
-    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
-        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
-        elements.incomingCallModal.dataset.timer = '';
-    }
-    // Stop the 180-second ring timer in calls.html
-    if (window.startDeclineTimer && window._declineIntervalId) {
-        try { clearInterval(window._declineIntervalId); } catch(e) {}
-    }
 
-    // Hide incoming modal immediately
-    const incomingModal = document.getElementById('incomingCallModal');
-    if (incomingModal) {
-        incomingModal.classList.remove('active');
-        incomingModal.style.setProperty('display', 'none', 'important');
+    const callerName = elements.incomingCallName?.textContent || 'Caller';
+    const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;
+    const callType = asVideo ? 'video' : (isVideoCall ? 'video' : 'voice');
+    const callId = window._currentIncomingCallId || UIState.activeCallId;
+    
+    if (!callId) {
+        showNotification('Unable to accept call: Missing call ID', 'error');
+        this.declineIncomingCall();
+        return;
     }
+    
     if (elements.incomingCallModal) {
         elements.incomingCallModal.classList.remove('active');
         UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
     }
-
-    // Hide callContainer / idleScreen so they never flash through
-    const _ccA = document.getElementById('callContainer');
-    if (_ccA) { _ccA.classList.remove('active'); _ccA.style.setProperty('display','none','important'); }
-    const _idA = document.getElementById('idleScreen');
-    if (_idA) { _idA.classList.remove('active'); _idA.style.setProperty('display','none','important'); }
-
-    // ── Set UIState so guards allow WebRTC offer through ──────────────────
-    UIState.callActive    = true;
-    UIState.callState     = 'connecting';
-    UIState.callType      = callType;
-    if (callId) UIState.activeCallId = callId;
-    if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
-        UIState.callParticipants = [{ name: callerName }];
-    }
-    // Store for transitionToInCall name resolution
-    if (!window.__incomingCallerName) window.__incomingCallerName = callerName;
-    if (!window.__callOriginReturnTo) window.__callOriginReturnTo = 'messages';
-
-    // ── SHOW IN-CALL SCREEN NOW — no waiting ─────────────────────────────
-    transitionToInCall({
-        userName:   callerName,
-        callType:   callType,
-        userAvatar: window.__incomingCallerAvatar || null
-    });
-
-    // Notify parent so caller side also transitions
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-            type: 'CALL_ACCEPTED',
-            payload: { callId, callerName, callType }
-        }, '*');
-    }
-
+    
     showNotification(`Accepting ${callType} call from ${callerName}...`, 'info');
 
-    // ── Signal backend in background (non-blocking) ───────────────────────
-    if (!callId) {
-        console.warn('[UI] acceptIncomingCallGeneric: no callId — UI shown, backend not signalled');
+    // ── CRITICAL FIX: Use answerCall (not sendAction CALL_ACCEPT) so the WebRTC
+    // peer connection is set up BEFORE we signal acceptance to the backend.
+    // sendAction('CALL_ACCEPT') skips the local media + RTCPeerConnection setup.
+    let accepted = false;
+    if (coreInstance && coreInstance.answerCall) {
+        try {
+            const result = await coreInstance.answerCall(callId);
+            if (result && result.success) {
+                accepted = true;
+                showNotification(`Call accepted with ${callerName}`, 'success');
+            } else {
+                showNotification(result?.error || 'Failed to accept call', 'error');
+            }
+        } catch (error) {
+            console.error('[Calls UI] Accept call error:', error);
+            showNotification('Failed to accept call', 'error');
+        }
+    } else if (coreInstance && coreInstance.sendAction) {
+        // Fallback path (no answerCall available)
+        try {
+            const result = await coreInstance.sendAction('CALL_ACCEPT', {
+                callId: callId,
+                timestamp: Date.now()
+            });
+            if (result && result.success) {
+                accepted = true;
+            }
+        } catch (e) {}
+    } else {
+        showNotification('Call system not ready', 'error');
+        this.declineIncomingCall();
         return;
     }
 
-    // Try answerCall — but don't block the UI on it
-    const _tryAnswer = async () => {
-        const core = coreInstance || window.callCore;
-        if (!core) return;
-
-        if (core.answerCall) {
-            try {
-                const result = await core.answerCall(callId);
-                if (result && result.success) {
-                    console.log('[UI] answerCall success');
-                    UIState.callStartTime = UIState.callStartTime || Date.now();
-                } else {
-                    // Non-success but UI is already showing — log and continue
-                    console.warn('[UI] answerCall non-success:', result);
-                }
-            } catch(err) {
-                console.warn('[UI] answerCall error:', err.message);
-            }
-        } else if (core.sendAction) {
-            try {
-                await core.sendAction('CALL_ACCEPT', { callId, timestamp: Date.now() });
-            } catch(e) {}
+    if (accepted) {
+        // ── FIX: Set navigation origin so handleCallEnded returns here after call ──
+        // On receiver side, returnTo should go back to wherever they were (calls page).
+        if (!window.__callOriginReturnTo) {
+            window.__callOriginReturnTo = 'calls'; // receiver came from calls page
+            window.__callOriginChatUserId = null;
         }
-    };
 
-    // If core isn't ACTIVE yet, wait up to 3 s then retry
-    const core = coreInstance || window.callCore;
-    const isActive = core && core.getLifecycleState && core.getLifecycleState() === 'ACTIVE';
-    if (isActive) {
-        _tryAnswer();
-    } else {
-        let waited = 0;
-        const poll = setInterval(() => {
-            waited += 200;
-            const c = coreInstance || window.callCore;
-            const active = c && (!c.getLifecycleState || c.getLifecycleState() === 'ACTIVE');
-            if (active || waited >= 3000) {
-                clearInterval(poll);
-                if (active) _tryAnswer();
-                else console.warn('[UI] Core never became ACTIVE after accept — UI already shown');
+        // ── FIX: Do NOT immediately show in-call screen here.
+        // The WebRTC offer from the caller will arrive shortly via the signalling server.
+        // Once WebRTC negotiation completes, calls-core fires 'call_connected' or
+        // 'call_accepted' which triggers handleCallConnected / handleCallAccepted →
+        // transitionToInCall. Showing the screen here early caused the callState guard
+        // in handleSignalOffer to drop the offer and self-end the call.
+        //
+        // Set state so the guard allows the offer through:
+        UIState.callActive    = true;
+        UIState.callState     = 'connecting';
+        UIState.activeCallId  = callId;
+        UIState.callType      = callType;
+        // Store caller info for transitionToInCall when it fires:
+        if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
+            UIState.callParticipants = [{ name: callerName }];
+        }
+        // Dismiss modals right away
+        const incomingModal = document.getElementById('incomingCallModal');
+        if (incomingModal) {
+            incomingModal.classList.remove('active');
+            incomingModal.style.setProperty('display', 'none', 'important');
+        }
+        // Notify parent the call is active (hides banner, marks call in progress)
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'CALL_ACCEPTED',
+                payload: { callId, callerName, callType }
+            }, '*');
+        }
+        // Immediately show in-call screen on receiver side with the real caller name
+        transitionToInCall({
+            userName:  callerName || window.__incomingCallerName || 'Caller',
+            callType:  callType,
+            userAvatar: window.__incomingCallerAvatar || null
+        });
+        // Safety fallback: if transitionToInCall had a race, retry after 1 s
+        window._receiverShowFallback = setTimeout(() => {
+            const inCall = document.getElementById('inCallScreen');
+            if (!inCall || !inCall.classList.contains('active')) {
+                console.warn('[UI] Fallback: showing in-call screen for receiver');
+                transitionToInCall({
+                    userName:  callerName || window.__incomingCallerName || 'Caller',
+                    callType:  callType,
+                    userAvatar: window.__incomingCallerAvatar || null
+                });
             }
-        }, 200);
+        }, 1000);
     }
 },
 
@@ -9181,43 +9185,43 @@ setupFriendsListListener();
     window.addEventListener('message', function(event) {
         const data = event.data;
 
-        // ── VIDEO_UPGRADE_REQUEST: remote turned on camera → show receiver toast ──
+        // ── VIDEO_UPGRADE_REQUEST: remote turned on camera ─────────────────
         if (data && data.type === 'VIDEO_UPGRADE_REQUEST') {
-            // Only show if we're currently in a call
+            // Only handle if we're in a call AND this came from parent echo (not our own send)
             if (!UIState.callActive) return;
-            // Show a toast with option to enable camera
+            // Ignore our own outgoing VIDEO_UPGRADE_REQUEST (source='calls-iframe')
+            // Only process when parent echoes it back (source='parent-echo')
+            if (data.source !== 'parent-echo') return;
+
+            const peerName = (data.payload && data.payload.peerName)
+                || UIState.callPeerName || window.__activePeerName || window.__incomingCallerName || 'Remote';
+
+            // ── Immediately prepare remote video area so ontrack renders into it ──
+            const remoteVideo = document.getElementById('remoteVideo');
+            const avatarWrap  = document.getElementById('incallAvatarWrap');
+            const inCallScreen = document.getElementById('inCallScreen');
+            const nameLabel   = document.getElementById('remoteParticipantLabel');
+
+            if (remoteVideo) remoteVideo.style.display = 'block';
+            if (avatarWrap)  avatarWrap.style.display  = 'none';
+            if (inCallScreen) inCallScreen.classList.add('video-active');
+            if (nameLabel) { nameLabel.textContent = peerName; nameLabel.style.display = 'block'; }
+
+            // Show a small non-blocking toast (auto-dismisses in 4s)
             const existing = document.getElementById('videoUpgradeToast');
             if (existing) existing.remove();
-
             const toast = document.createElement('div');
             toast.id = 'videoUpgradeToast';
             toast.style.cssText = [
                 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);',
-                'background:rgba(30,30,30,0.95);color:#fff;border-radius:12px;',
-                'padding:12px 16px;z-index:99999;display:flex;align-items:center;gap:10px;',
+                'background:rgba(30,30,30,0.92);color:#fff;border-radius:12px;',
+                'padding:10px 16px;z-index:99999;display:flex;align-items:center;gap:10px;',
                 'box-shadow:0 4px 20px rgba(0,0,0,0.4);font-size:14px;',
-                'max-width:320px;width:90%;'
+                'max-width:300px;width:90%;pointer-events:none;'
             ].join('');
-
-            const peerName = UIState.callPeerName || window.__activePeerName || 'Remote';
-            toast.innerHTML = `
-                <i class="fas fa-video" style="color:#0084ff;font-size:18px;flex-shrink:0;"></i>
-                <span style="flex:1;">${peerName} turned on camera</span>
-                <button id="videoUpgradeAcceptBtn" style="background:#0084ff;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;flex-shrink:0;">Enable mine</button>
-                <button id="videoUpgradeDismissBtn" style="background:transparent;color:#aaa;border:none;cursor:pointer;font-size:18px;padding:0 4px;">×</button>
-            `;
+            toast.innerHTML = `<i class="fas fa-video" style="color:#0084ff;font-size:16px;"></i><span>${peerName} turned on camera</span>`;
             document.body.appendChild(toast);
-
-            document.getElementById('videoUpgradeAcceptBtn').onclick = function() {
-                toast.remove();
-                // Start camera on receiver side
-                UIEventHandlers.toggleVideo();
-            };
-            document.getElementById('videoUpgradeDismissBtn').onclick = function() {
-                toast.remove();
-            };
-            // Auto-dismiss after 8 seconds
-            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 8000);
+            setTimeout(() => { if (toast.parentNode) toast.remove(); }, 4000);
         }
 
         // ── VIDEO_UPGRADE_RESPONSE: remote declined → roll back camera ──────────
@@ -9599,13 +9603,9 @@ const handleContactClick = function(e) {
     }
 };
 
-// Export UIEventHandlers globally so calls.html onclick handlers can call it directly
-window.UIEventHandlers = UIEventHandlers;
-
 window.callsUI = {
     initializeUISystem,
     cacheElements,
-    UIEventHandlers,
     PanelHandlers,
     openParticipantsPanel,
     openChatPanel,

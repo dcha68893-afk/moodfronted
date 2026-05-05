@@ -2646,6 +2646,52 @@
                     typeof window._handleCallRejectFromIframe === 'function' && window._handleCallRejectFromIframe(data.payload);
                     typeof hideBanner === 'function' && hideBanner();
                 }
+
+                // ── FIX 1: Echo CALL_ACCEPTED back to calls iframe so CALLER transitions ──
+                // The receiver's acceptIncomingCallGeneric posts CALL_ACCEPTED to parent.
+                // Parent must echo it back so the caller side fires transitionToInCall.
+                if (data.type === 'CALL_ACCEPTED' && data.source !== 'parent-echo' && data.source !== 'ws-bridge') {
+                    var _callsIframe = document.getElementById('callsIframe');
+                    if (_callsIframe && _callsIframe.contentWindow) {
+                        _callsIframe.contentWindow.postMessage({
+                            type: 'CALL_ACCEPTED',
+                            payload: data.payload || {},
+                            source: 'parent-echo'
+                        }, '*');
+                    }
+                    typeof hideBanner === 'function' && hideBanner();
+                    window.__activeCallInProgress = true;
+                }
+
+                // ── FIX 2: Echo VIDEO_UPGRADE_REQUEST back so remote side sees camera-on ──
+                // When user A clicks video, it posts VIDEO_UPGRADE_REQUEST to parent.
+                // Parent echoes it back (source='parent-echo') so user B's handler fires,
+                // which prepares #remoteVideo to receive the incoming video track.
+                if (data.type === 'VIDEO_UPGRADE_REQUEST' && data.source !== 'parent-echo') {
+                    var _callsIframe2 = document.getElementById('callsIframe');
+                    if (_callsIframe2 && _callsIframe2.contentWindow) {
+                        _callsIframe2.contentWindow.postMessage({
+                            type: 'VIDEO_UPGRADE_REQUEST',
+                            payload: data.payload || {},
+                            source: 'parent-echo'
+                        }, '*');
+                    }
+                }
+
+                // ── FIX 3: Echo CALL_ENDED back so BOTH sides reset when one ends ──
+                // When end-btn fires CALL_ENDED to parent, echo it back so the remote
+                // side's iframe also resets. source='end-btn' marks the originating side
+                // so it doesn't double-reset itself.
+                if (data.type === 'CALL_ENDED' && data.source === 'end-btn') {
+                    var _callsIframe3 = document.getElementById('callsIframe');
+                    if (_callsIframe3 && _callsIframe3.contentWindow) {
+                        _callsIframe3.contentWindow.postMessage({
+                            type: 'CALL_ENDED',
+                            payload: data.payload || {},
+                            source: 'parent-echo'
+                        }, '*');
+                    }
+                }
             });
         }
         
@@ -2669,7 +2715,7 @@
         });
     </script>
     
-
+    <script>
         // ── FIX: Receiver notification + badge when message arrives off-screen ─
         // messages-core fires 'kyn:incomingMessage' when the receiver gets a new
         // message but is NOT currently viewing that chat. This listener in the
@@ -3065,7 +3111,19 @@
 
                 const fetchOptions = { method, headers, credentials: 'include' };
                 if (body && method !== 'GET') {
-                    fetchOptions.body = body instanceof FormData ? body : JSON.stringify(body);
+                    if (body instanceof FormData) {
+                        fetchOptions.body = body;
+                    } else if (typeof body === 'string') {
+                        // FIX: body is already a JSON string (friend-core.js calls JSON.stringify
+                        // before putting it in the API_REQUEST payload). Double-serializing it here
+                        // wraps it in extra quotes, making req.body arrive as undefined on the server.
+                        // Detect pre-serialized strings and pass them through as-is.
+                        fetchOptions.body = body;
+                        // Ensure Content-Type is set even when body is a pre-serialized string
+                        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+                    } else {
+                        fetchOptions.body = JSON.stringify(body);
+                    }
                 }
 
                 let response = await fetch(url, fetchOptions);

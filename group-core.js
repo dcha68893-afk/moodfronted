@@ -2223,9 +2223,23 @@ const GroupCore = {
                 if (cachedGroups && cachedGroups.length > 0) {
                     // Process cached groups into arrays
                     this.groups = cachedGroups;
-                    this.myGroups = cachedGroups.filter(g => g.createdBy === (this.currentUser?.uid || this.currentUser?.id));
-                    this.joinedGroups = cachedGroups.filter(g => g.createdBy !== (this.currentUser?.uid || this.currentUser?.id) && g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id)));
-                    this.adminGroups = cachedGroups.filter(g => g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id) && (m.role === 'admin' || m.role === 'owner')));
+                    // FIX: Server response includes isCreator/isAdmin/role on each group
+                    // (set by groupService.getUserGroups). Using members?.some() always
+                    // returned false because the API never embeds a members[] array on
+                    // the group list response — only groupMembers relation via Sequelize.
+                    const uid = this.currentUser?.uid || this.currentUser?.id;
+                    this.myGroups     = cachedGroups.filter(g =>
+                        g.isCreator === true || g.role === 'owner' ||
+                        (uid && String(g.createdBy) === String(uid))
+                    );
+                    this.joinedGroups = cachedGroups.filter(g =>
+                        !g.isCreator && g.role !== 'owner' &&
+                        !(uid && String(g.createdBy) === String(uid))
+                    );
+                    this.adminGroups  = cachedGroups.filter(g =>
+                        g.isAdmin === true || g.isCreator === true ||
+                        ['owner','admin'].includes(g.role)
+                    );
                     
                     this.emit('groups:list-updated', {
                         groups: this.groups,
@@ -2281,9 +2295,21 @@ const GroupCore = {
             );
             
             // Re-categorize groups
-            this.myGroups = this.groups.filter(g => g.createdBy === (this.currentUser?.uid || this.currentUser?.id));
-            this.joinedGroups = this.groups.filter(g => g.createdBy !== (this.currentUser?.uid || this.currentUser?.id) && g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id)));
-            this.adminGroups = this.groups.filter(g => g.members?.some(m => m.userId === (this.currentUser?.uid || this.currentUser?.id) && (m.role === 'admin' || m.role === 'owner')));
+            // FIX: Use isCreator/isAdmin/role fields set by groupService.getUserGroups.
+            // members?.some() was always false — the list endpoint never embeds members[].
+            const uid = this.currentUser?.uid || this.currentUser?.id;
+            this.myGroups     = this.groups.filter(g =>
+                g.isCreator === true || g.role === 'owner' ||
+                (uid && String(g.createdBy) === String(uid))
+            );
+            this.joinedGroups = this.groups.filter(g =>
+                !g.isCreator && g.role !== 'owner' &&
+                !(uid && String(g.createdBy) === String(uid))
+            );
+            this.adminGroups  = this.groups.filter(g =>
+                g.isAdmin === true || g.isCreator === true ||
+                ['owner','admin'].includes(g.role)
+            );
             
         } catch (error) {
             debugLog('Failed to merge server data:', error);

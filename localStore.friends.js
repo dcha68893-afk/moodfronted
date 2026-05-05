@@ -238,7 +238,10 @@
         current.filter(i => i.isLocalOnly !== true).map(i => cache.remove('friends', i.id))
       );
       // Save new server records one-by-one — AppCache.save() takes a single record
-      const normalized = (serverRecords || []).map(i => this._normalizeRecord({ ...i, isLocalOnly: false, status: 'accepted' }));
+      // FIX: Do NOT force status:'accepted' — preserve the server-provided status.
+      // Previously every record was stamped 'accepted', which silently erased
+      // 'pending_received' incoming requests from the local store on every sync.
+      const normalized = (serverRecords || []).map(i => this._normalizeRecord({ ...i, isLocalOnly: false }));
       for (const record of normalized) {
         try { await cache.save('friends', record); } catch (_) {}
       }

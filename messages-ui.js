@@ -7043,6 +7043,14 @@ Type: ${message.type || 'text'}`;
 
                         UIStateManager.setState('chatVisible', false);
 
+                        // FIX: Clear lastChatId so navigating away and back doesn't
+                        // auto-reopen the same chat — user should see the sidebar first.
+                        try {
+                            const core = getMessagesCore();
+                            if (core && core.SafeStorage) { core.SafeStorage.remove('lastChatId'); }
+                            localStorage.removeItem('lastChatId');
+                        } catch(_) {}
+
                         // Notify parent that chat list is now shown (clears chat-panel-active on mobile)
 
                         try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch(_) {}

@@ -5682,6 +5682,10 @@ try {
 
         const handleRealtimePayload = async function(type, payload) {
             const normalizedType = String(type || '').toLowerCase();
+            // FIX: 'data' was never declared — use 'payload' (the actual parameter name).
+            // This was a ReferenceError that crashed handleRealtimePayload on EVERY incoming
+            // message, which is why no messages were ever displayed in the chat panel.
+            const data = payload || {};
 
             if (normalizedType === 'new_message' || normalizedType === 'message:new' || normalizedType === 'newmessage') {
                 // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
@@ -5927,9 +5931,10 @@ try {
         _bindKynectaRealtime();
         window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: false });
 
-        window.addEventListener('kyn:message:received', function(evt) {
-            if (evt.detail) handleRealtimePayload('message:new', evt.detail);
-        });
+        // NOTE: window 'kyn:message:received' listener intentionally removed —
+        // message.html previously dispatched both document:message:new AND
+        // window:kyn:message:received for the same payload, causing handleRealtimePayload
+        // to fire twice. message.html now only dispatches document:message:new.
         document.addEventListener('message:new', function(evt) {
             if (evt.detail) handleRealtimePayload('message:new', evt.detail);
         });

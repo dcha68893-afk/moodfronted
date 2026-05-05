@@ -2188,13 +2188,22 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         
         allGroupsList.innerHTML = '';
         
-        if (!groups || groups.length === 0) {
+        // FIX: `groups` is an imported copy that goes stale. Always read the live
+        // array from GroupCore (authoritative) or the window mirror set by the
+        // groups:list-updated handler, falling back to the import only if neither exists.
+        const _liveGroups = (window.GroupCore && window.GroupCore.groups && window.GroupCore.groups.length > 0)
+            ? window.GroupCore.groups
+            : (window.__gcGroups && window.__gcGroups.length > 0)
+                ? window.__gcGroups
+                : (groups || []);
+
+        if (!_liveGroups || _liveGroups.length === 0) {
             allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
             return;
         }
-        
+
         const fragment = document.createDocumentFragment();
-        const groupsToRender = groups.slice(0, 20);
+        const groupsToRender = _liveGroups.slice(0, 20);
         
         groupsToRender.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2209,9 +2218,9 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
             allGroupsList.appendChild(createSecureEmptyStateElement('no-matches'));
         }
         
-        if (groups.length > 20) {
+        if (_liveGroups.length > 20) {
             const timer = setTimeout(() => {
-                groups.slice(20).forEach(group => {
+                _liveGroups.slice(20).forEach(group => {
                     if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                         const groupItem = createSecureGroupItemElement(group, 'group');
                         if (groupItem) allGroupsList.appendChild(groupItem);
@@ -4278,7 +4287,15 @@ export function registerUICoreEvents() {
         });
 
         // groups:list-updated — after full sync from server
-        GC.on('groups:list-updated', () => {
+        // FIX: imported `groups` is a stale copy. Pull live data from GroupCore before render.
+        GC.on('groups:list-updated', (payload) => {
+            try {
+                // Mirror GroupCore arrays to window so renderAllGroupsSecure can read them
+                window.__gcGroups       = GC.groups       || [];
+                window.__gcMyGroups     = GC.myGroups     || [];
+                window.__gcJoinedGroups = GC.joinedGroups || [];
+                window.__gcAdminGroups  = GC.adminGroups  || [];
+            } catch (_) {}
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
             }
@@ -4938,7 +4955,54 @@ async function _directCreateGroup(groupData) {
     const data = await res.json().catch(() => ({}));
     console.log('[GroupUI] _directCreateGroup response:', res.status, data && data.success);
     if (!res.ok) throw new Error((data && data.message) || 'HTTP ' + res.status);
-    return { success: true, group: (data.data && data.data.group) || data.data || data };
+
+    // FIX: Extract the created group and immediately push it into GroupCore state
+    // so that renderGroupsListSecure() (which reads GroupCore.groups) shows it
+    // right away without waiting for the next requestGroupList() poll.
+    const newGroup = (data.data && data.data.group) || data.data || null;
+    if (newGroup && newGroup.id) {
+        const GC = window.GroupCore;
+        if (GC) {
+            // Push into all-groups list if not already there
+            if (!GC.groups.some(g => g.id === newGroup.id)) {
+                GC.groups.push(newGroup);
+            }
+            // Always add to myGroups — the creator owns it
+            if (!GC.myGroups.some(g => g.id === newGroup.id)) {
+                GC.myGroups.push(newGroup);
+            }
+            // Also add to adminGroups
+            if (!GC.adminGroups.some(g => g.id === newGroup.id)) {
+                GC.adminGroups.push(newGroup);
+            }
+            // Persist and emit so the UI reacts
+            if (typeof GC.saveGroups === 'function') GC.saveGroups();
+            if (typeof GC.emit === 'function') {
+                GC.emit('group:created', newGroup);
+                GC.emit('groups:list-updated', {
+                    groups      : GC.groups,
+                    myGroups    : GC.myGroups,
+                    joinedGroups: GC.joinedGroups,
+                    adminGroups : GC.adminGroups,
+                    fromServer  : true,
+                });
+            }
+        }
+
+        // Also store in LocalGroupStore (IDB) so it survives page refresh
+        if (window.LocalGroupStore && typeof window.LocalGroupStore.saveGroup === 'function') {
+            window.LocalGroupStore.saveGroup(newGroup).catch(() => {});
+        }
+
+        // Schedule a full server sync after 1.5s to confirm the group is persisted
+        setTimeout(() => {
+            if (window.GroupCore && typeof window.GroupCore.requestGroupList === 'function') {
+                window.GroupCore.requestGroupList().catch(() => {});
+            }
+        }, 1500);
+    }
+
+    return { success: true, group: newGroup || data };
 }
 
 async function createGroupAsync(buttonElement) {

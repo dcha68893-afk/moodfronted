@@ -559,17 +559,30 @@ function _declineVideoUpgrade() {
         var t = evt.data.type;
         if (!t) return;
 
-        // Accept call from parent (e.g. Android notification tap)
-        if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted' || t === 'CALL_ACCEPTED') {
-            var _pn = window.__activePeerName || window.__incomingCallerName
-                || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
-                || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || null;
-            var _pt = (window.UIState && window.UIState.callType) || (evt.data.payload && evt.data.payload.callType) || 'voice';
-            var _pa = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
-            if (typeof window.transitionToInCall === 'function' && _pn) {
-                window.transitionToInCall({ userName: _pn, callType: _pt, userAvatar: _pa });
+        // Accept call from parent echo — caller side transitions to in-call
+        // source='parent-echo' means the parent forwarded it back; 'calls-iframe' means
+        // we sent it ourselves (receiver side already handled it directly).
+        if (t === 'CALL_ACCEPT_FROM_PARENT' || t === 'call:accepted' || t === 'call_accepted'
+            || (t === 'CALL_ACCEPTED' && evt.data.source === 'parent-echo')) {
+            // Use UIEventHandlers.handleCallAccepted if available — it stops ringtones
+            // and resolves the peer name before calling transitionToInCall.
+            var _UEH = window.UIEventHandlers || (window.callsUI && window.callsUI.UIEventHandlers);
+            if (_UEH && typeof _UEH.handleCallAccepted === 'function') {
+                _UEH.handleCallAccepted(evt.data.payload || {});
             } else {
-                showScreen('in-call');
+                var _pn = window.__activePeerName || window.__incomingCallerName
+                    || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+                    || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.pendingCallUser && window.callsUI.UIState.pendingCallUser.userName)
+                    || (evt.data.payload && (evt.data.payload.callerName || evt.data.payload.userName)) || null;
+                var _pt = (window.UIState && window.UIState.callType)
+                    || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.callType)
+                    || (evt.data.payload && evt.data.payload.callType) || 'voice';
+                var _pa = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+                if (typeof window.transitionToInCall === 'function') {
+                    window.transitionToInCall({ userName: _pn || 'User', callType: _pt, userAvatar: _pa });
+                } else {
+                    showScreen('in-call');
+                }
             }
         }
         // Incoming call notification from parent
@@ -3051,13 +3064,13 @@ function _declineVideoUpgrade() {
             <p class="unified-auto-decline">Auto declining in <span id="declineTimer">180</span>s</p>
             <div class="unified-call-actions">
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-decline" id="declineCallBtn" onclick="(function(){var UEH=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(UEH&&UEH.declineIncomingCall)UEH.declineIncomingCall.call(UEH);})()">
+                    <button class="unified-btn unified-btn-decline" id="declineCallBtn">
                         <i class="fas fa-phone-slash"></i>
                     </button>
                     <span>Decline</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn" onclick="(function(){var UEH=window.UIEventHandlers||(window.callsUI&&window.callsUI.UIEventHandlers);if(UEH&&UEH.acceptIncomingCall)UEH.acceptIncomingCall.call(UEH);})()">
+                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn">
                         <i class="fas fa-phone"></i>
                     </button>
                     <span>Accept</span>

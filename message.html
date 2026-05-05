@@ -1946,8 +1946,10 @@
             const _p  = normalizedData.payload || normalizedData;
 
             if (_nt === 'message:new' || _nt === 'new_message' || _nt === 'newMessage' || _nt === 'chat:message') {
-                try { document.dispatchEvent(new CustomEvent('message:new',           { detail: _p })); } catch(_) {}
-                try { window.dispatchEvent(new CustomEvent('kyn:message:received',    { detail: _p })); } catch(_) {}
+                // FIX: Only dispatch document:message:new. Do NOT also dispatch
+                // window:kyn:message:received — messages-core.js listens to BOTH,
+                // causing handleRealtimePayload to fire twice per incoming message.
+                try { document.dispatchEvent(new CustomEvent('message:new', { detail: _p })); } catch(_) {}
                 console.log('[Message HTML] FIX new message:', _nt);
             } else if (_nt === 'message:sent' || _nt === 'message_sent') {
                 try { document.dispatchEvent(new CustomEvent('message:sent',          { detail: _p })); } catch(_) {}

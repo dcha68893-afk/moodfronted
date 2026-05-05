@@ -1,5 +1,5 @@
 /**
- * app.realtime.socket.js — RAW WEBSOCKET FIRST v3.2.0
+ * app.realtime.socket.js — RAW WEBSOCKET FIRST v3.3.0
  *
  * FIXES IN THIS VERSION:
  *  1. acquireToken() now checks window.__kynToken FIRST (set immediately after login)
@@ -7,6 +7,13 @@
  *  3. Added pre-connect token debug log so you can confirm token is present
  *  4. Token passed in BOTH auth.token AND query.token for max compatibility
  *  5. Reconnect loop prevention: auth errors don't auto-reconnect (avoids spam)
+ *  6. [BUG 2 FIX] friend:request → now posts BOTH REALTIME_EVENT:friend:request AND
+ *     FRIEND_REQUEST_RECEIVED to every iframe. Previously only the passthrough form
+ *     was sent; if friend-core.js's REALTIME_EVENT: unwrapper wasn't matching, the
+ *     event was silently dropped and the receiver's incoming count stayed 0.
+ *  7. [BUG 2 FIX] friend:accepted → same dual-post fix: posts both
+ *     REALTIME_EVENT:friend:accepted AND FRIEND_REQUEST_ACCEPTED so the sender's
+ *     client updates its local store and friend list regardless of unwrapper path.
  */
 
 (function () {
@@ -1206,33 +1213,38 @@
 
                 const iframes = document.querySelectorAll('iframe');
 
-                // FIX: for friend:accepted we must send TWO postMessages to iframes:
-                //  1. REALTIME_EVENT:friend:accepted  — so any direct listener gets it
-                //  2. REALTIME_EVENT:FRIEND_REQUEST_ACCEPTED — the exact type that
-                //     friend-core.js's FRIEND_REQUEST_ACCEPTED handler listens for,
-                //     so the SENDER's client updates its local store and friend list.
-                //
-                //  The server (friendController.js) already emits friend:accepted to
-                //  user:${originalRequesterId} with { requestId, friendId, user }.
-                //  We just need to make sure the iframe sees both event name forms.
+                // BUG 2 FIX: Post BOTH the passthrough form AND the named-action form.
+                // friend-core.js listens for FRIEND_REQUEST_ACCEPTED (named action).
+                // Posting both forms ensures the sender's client updates its local
+                // store and friend list regardless of which unwrapper path fires.
                 if (eventType === 'friend:accepted') {
                     var _accId = 'rt_facc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
-                        try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:accepted', payload: payload || {}, id: _accId }, '*'); } catch (_) {}
+                        try {
+                            // Passthrough form (for any direct REALTIME_EVENT:friend:accepted listeners)
+                            frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:accepted', payload: payload || {}, id: _accId }, '*');
+                            // Named-action form (for friend-core.js _handleMessage FRIEND_REQUEST_ACCEPTED case)
+                            frame.contentWindow.postMessage({ type: 'FRIEND_REQUEST_ACCEPTED', payload: payload || {}, id: _accId + '_named' }, '*');
+                        } catch (_) {}
                     });
                     return;
                 }
 
-                // FIX: Send ONE message with a unique id per event.
-                // Sending multiple messages for the same event causes the dedup Set in
-                // friend-core.js to mark the first id-less message and then silently drop
-                // every subsequent one. One message + unique id = clean dedup.
-                // The REALTIME_EVENT: unwrapper in friend-core.js translates
-                // 'friend:request' → FRIEND_REQUEST_RECEIVED automatically.
+                // BUG 2 FIX: Post BOTH the passthrough form AND the named-action form.
+                // friend-core.js's _handleMessage switch-case listens for FRIEND_REQUEST_RECEIVED
+                // (the named action). If only REALTIME_EVENT:friend:request is posted, the
+                // REALTIME_EVENT: unwrapper must translate it — but if that path isn't matching,
+                // the event is silently dropped and the receiver's incoming count stays 0.
+                // Posting both forms guarantees delivery regardless of which unwrapper path fires.
                 if (eventType === 'friend:request') {
                     var _reqId = 'rt_freq_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
-                        try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:request', payload: payload || {}, id: _reqId }, '*'); } catch (_) {}
+                        try {
+                            // Passthrough form (for any direct REALTIME_EVENT:friend:request listeners)
+                            frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:request', payload: payload || {}, id: _reqId }, '*');
+                            // Named-action form (for friend-core.js _handleMessage FRIEND_REQUEST_RECEIVED case)
+                            frame.contentWindow.postMessage({ type: 'FRIEND_REQUEST_RECEIVED', payload: payload || {}, id: _reqId + '_named' }, '*');
+                        } catch (_) {}
                     });
                     return;
                 }
@@ -1272,5 +1284,5 @@
 
     realtimeManager.safeConnect = safeConnect;
 
-    console.log('[Realtime] ✅ Ready (Socket.IO compatible v3.1.0)');
+    console.log('[Realtime] ✅ Ready (Socket.IO compatible v3.3.0)');
 })();
