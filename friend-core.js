@@ -302,7 +302,6 @@ const PollingManager = {
     },
 
     async _fetchSentRequests() {
-        // FIX: Own in-flight guard — shares nothing with _fetchIncomingRequests
         if (this._fetchSentInFlight) return;
         if (!authReadyReceived || !__session.ready || !__session.token) return;
         this._fetchSentInFlight = true;
@@ -315,9 +314,8 @@ const PollingManager = {
                 else if (Array.isArray(d?.data?.requests)) sentData = d.data.requests;
                 else if (Array.isArray(d))                 sentData = d;
 
-                // FIX: detect disappeared sent requests (= accepted by the other side)
                 const current = FriendCacheManager.getAllSentRequests?.() || [];
-                const nowIds  = new Set(sentData.map(r => String(r.receiverId || r.friendId || r.userId || '')));
+                const nowIds = new Set(sentData.map(r => String(r.receiverId || r.friendId || r.userId || '')));
                 const disappeared = current.filter(r => {
                     const rid = String(r.receiverId || r.friendId || r.userId || '');
                     return rid && !nowIds.has(rid);
@@ -326,12 +324,8 @@ const PollingManager = {
                     const goneId = String(gone.receiverId || gone.friendId || gone.userId || '');
                     const alreadyFriend = (FriendCacheManager.getAllFriends?.() || [])
                         .find(f => String(f.id) === goneId);
-                    if (!alreadyFriend) {
-                        loadFriendsFromBackend().catch(() => {});
-                        break;
-                    }
+                    if (!alreadyFriend) { loadFriendsFromBackend().catch(() => {}); break; }
                 }
-
                 if (!ShallowCompare.areRequestsEqual(current, sentData)) {
                     FriendCacheManager.setSentRequests?.(sentData);
                     FriendCacheManager.syncToGlobals();
@@ -340,11 +334,7 @@ const PollingManager = {
                     }));
                 }
             }
-        } catch (_) {
-            // Non-fatal — socket events are the primary mechanism
-        } finally {
-            this._fetchSentInFlight = false;
-        }
+        } catch (_) {} finally { this._fetchSentInFlight = false; }
     },
 
     // FIXED: Added _fetchInFlight deduplication guard
@@ -3424,12 +3414,20 @@ const FriendCacheManager = {
     },
     
     syncToGlobals() {
-        const _f = this.getAllFriends();
+        const _fRaw = this.getAllFriends();
         const _r = this.getAllRequests();
         const _s = this.getAllSentRequests();
         const _p = Array.from(this._cache.pinnedFriends.values());
         const _m = Array.from(this._cache.mutedFriends.values());
         const _u = this.getAllUsers();
+
+        // FIX: Always deduplicate by String(id) before exposing to window globals.
+        // Multiple iframe instances can each write to window.friends via syncToGlobals,
+        // and our optimistic-accept code also pushes directly to window.friends.
+        // Using String(id) as key prevents int/string duplicate entries.
+        const _dedupMap = new Map();
+        _fRaw.forEach(f => { if (f && f.id) _dedupMap.set(String(f.id), f); });
+        const _f = Array.from(_dedupMap.values());
 
         friends = _f;
         friendRequests = _r;
@@ -3945,19 +3943,15 @@ const FriendRequestManager = {
             avatar:      options.avatar      || null,
         };
 
-        // FIX: Don't await saveFriendLocal here — IndexedDB write can hang silently
-        // and block the POST from ever being sent. Fire-and-forget instead.
-        saveFriendLocal(
-            { id: userId, serverId: null, createdAt: new Date().toISOString(),
-              displayName: options.displayName, username: options.username, avatar: options.avatar },
-            'pending_sent', { isLocalOnly: true }
-        ).catch(() => {});
+        // FIX: Non-blocking save — awaiting IndexedDB here was hanging the entire flow
+        saveFriendLocal({ id: userId, serverId: null, createdAt: new Date().toISOString(),
+            displayName: options.displayName, username: options.username, avatar: options.avatar },
+            'pending_sent', { isLocalOnly: true }).catch(() => {});
 
-        // ── Update in-memory cache and fire event IMMEDIATELY ─────────────────
-        // UI shows "Pending" button and sent-requests count updates right away.
         FriendCacheManager.setSentRequest(optimisticRequest);
         FriendCacheManager.syncToGlobals();
 
+        // Dispatch immediately so UI shows "Pending" button before network call
         window.dispatchEvent(new CustomEvent('friendRequestSent', {
             detail: { request: optimisticRequest, optimistic: true }
         }));
@@ -3973,32 +3967,19 @@ const FriendRequestManager = {
         }
 
         // ── Online path ──────────────────────────────────────────────────────
-        // FIX: Use direct fetch instead of postMessage bridge for POST.
-        // The bridge reliably handles GETs but POST responses can silently time
-        // out (30 s), causing the send to appear to hang. Direct fetch is instant.
+        // FIX: Use direct fetch — postMessage bridge POST can silently time out (30s).
         const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
-        const _token   = __session.token
-            || localStorage.getItem('token')
-            || localStorage.getItem('authToken')
-            || localStorage.getItem('moodchat_token')
-            || '';
-
+        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || '';
         try {
-            console.log('[FriendRequestManager] Direct POST send friend request to userId:', userId);
             let response;
             try {
                 const _res = await fetch(`${_apiBase}/friends/requests/send`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${_token}`
-                    },
-                    body: JSON.stringify({
-                        receiverId: userId,
-                        category:   options.category || 'friend',
-                        note:       options.note || ''
-                    })
-                });
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+                    body: JSON.stringify({ receiverId: userId, category: options.category || 'friend',
+                    note:       options.note || ''
+                })
+            });
                 const _json = await _res.json().catch(() => ({}));
                 const _inner = (_json && 'data' in _json) ? _json.data : _json;
                 response = { success: _res.ok, statusCode: _res.status, data: _inner,
@@ -4015,24 +3996,28 @@ const FriendRequestManager = {
             Logger.info('FriendRequestManager', 'Send request response', { success: response?.success });
 
             if (response && response.success) {
-                const requestData = response.data?.request
-                    || response.data?.data?.request
-                    || (response.data?.id ? response.data : null)
-                    || response.data;
+                let requestData = null;
+                if (response.data) {
+                    requestData = response.data.request
+                        || response.data.data?.request
+                        || (response.data.id ? response.data : null)
+                        || response.data;
+                }
 
-                // Swap temp record with confirmed server record
+                // Replace temp optimistic with confirmed server record
                 FriendCacheManager.removeSentRequest(tempId);
+
                 const confirmedData = {
-                    id:          requestData?.id          || tempId,
-                    serverId:    requestData?.id          || null,
-                    receiverId:  requestData?.receiverId  || userId,
+                    id:          requestData?.id       || tempId,
+                    serverId:    requestData?.id       || null,
+                    receiverId:  requestData?.receiverId || userId,
                     senderId:    requestData?.requesterId || __session.user?.id,
-                    status:      requestData?.status      || 'pending',
-                    createdAt:   requestData?.createdAt   || new Date().toISOString(),
-                    timestamp:   requestData?.createdAt   || Date.now(),
-                    displayName: options.displayName      || null,
-                    username:    options.username         || null,
-                    avatar:      options.avatar           || null,
+                    status:      requestData?.status   || 'pending',
+                    createdAt:   requestData?.createdAt || new Date().toISOString(),
+                    timestamp:   requestData?.createdAt || Date.now(),
+                    displayName: options.displayName   || null,
+                    username:    options.username      || null,
+                    avatar:      options.avatar        || null,
                     isLocalOnly: false,
                 };
 
@@ -4040,9 +4025,7 @@ const FriendRequestManager = {
                 FriendCacheManager.syncToGlobals();
                 FriendCacheManager.persist();
 
-                window.dispatchEvent(new CustomEvent('friendRequestSent', {
-                    detail: { request: confirmedData, success: true }
-                }));
+                window.dispatchEvent(new CustomEvent('friendRequestSent', { detail: { request: confirmedData, success: true } }));
                 window.dispatchEvent(new CustomEvent('sentRequestsUpdated', {
                     detail: { requests: FriendCacheManager.getAllSentRequests?.() || [], confirmed: true }
                 }));
@@ -4058,7 +4041,6 @@ const FriendRequestManager = {
                 return { success: true, request: confirmedData };
 
             } else {
-                // Server rejected — rollback
                 FriendCacheManager.removeSentRequest(tempId);
                 saveFriendLocal({ id: userId }, 'removed', { isLocalOnly: false }).catch(() => {});
                 FriendCacheManager.syncToGlobals();
@@ -4078,9 +4060,7 @@ const FriendRequestManager = {
             FriendCacheManager.setSentRequest(optimisticRequest);
             FriendCacheManager.syncToGlobals();
             OfflineFirstFriends.enqueueAction('add', userId, { ...options }, null).catch(() => {});
-            window.dispatchEvent(new CustomEvent('friendRequestQueued', {
-                detail: { request: optimisticRequest, error: error.message }
-            }));
+            window.dispatchEvent(new CustomEvent('friendRequestQueued', { detail: { request: optimisticRequest, error: error.message } }));
             return { success: true, queued: true, request: optimisticRequest };
         }
     },
@@ -4115,8 +4095,7 @@ const FriendRequestManager = {
         // ── Optimistic: move pending_received → accepted in all layers ───────
         FriendCacheManager.removeRequest(requestId);
 
-        // FIX: Wrap LocalStore in 2s timeout — ls.ready()/getByFriendId() hangs
-        // silently in the iframe context, blocking the POST from ever being sent.
+        // FIX: Wrap LocalStore in 2s timeout — ls.ready()/getByFriendId() hangs silently in iframe
         const ls = window.KynectaFriendsLocalStore;
         let localRecordId = null;
         try {
@@ -4139,17 +4118,10 @@ const FriendRequestManager = {
             return { success: true, queued: true };
         }
 
-        // ── Online path ──────────────────────────────────────────────────────
-        // FIX: Direct fetch — postMessage bridge POST can silently time out 30s.
+        // ── Online path (direct fetch — bridge POST silently times out) ──────
         const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
-        const _token   = __session.token
-            || localStorage.getItem('token')
-            || localStorage.getItem('authToken')
-            || localStorage.getItem('moodchat_token')
-            || '';
-
+        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || '';
         try {
-            console.log('[FriendRequestManager] Direct POST accept, requestId:', requestId);
             let response;
             try {
                 const _res = await fetch(`${_apiBase}/friends/requests/${requestId}/accept`, {
@@ -4158,8 +4130,7 @@ const FriendRequestManager = {
                 });
                 const _json = await _res.json().catch(() => ({}));
                 const _inner = (_json && 'data' in _json) ? _json.data : _json;
-                response = { success: _res.ok, statusCode: _res.status, data: _inner,
-                             error: _json.error || _json.message || null };
+                response = { success: _res.ok, statusCode: _res.status, data: _inner, error: _json.error || _json.message || null };
                 console.log('[FriendRequestManager] Direct accept result:', _res.status, response.success);
             } catch (_fetchErr) {
                 Logger.warn('acceptFriendRequest', 'Direct fetch failed, using bridge', _fetchErr.message);
@@ -4167,73 +4138,49 @@ const FriendRequestManager = {
             }
 
             console.log('[FriendRequestManager] Accept request response:', response);
-
             try {
             if (response && response.success) {
-                const _rd  = response.data || {};
+                const _rd = response.data || {};
                 const _rdf = _rd.friendRequest || _rd.friendship || {};
                 const _rdu = _rd.friend || _rd.user || {};
-
                 let newFriend = {
                     id:          String(_rdu.id || friendId),
                     serverId:    _rdf.id || null,
-                    displayName: _rdu.displayName || _rdu.username
-                                 || existingRequest?.senderName || existingRequest?.user?.displayName || 'Friend',
-                    username:    _rdu.username || existingRequest?.senderUsername
-                                 || existingRequest?.user?.username || '',
-                    avatar:      _rdu.avatar || existingRequest?.senderAvatar
-                                 || existingRequest?.user?.avatar || '',
-                    photoURL:    _rdu.avatar || existingRequest?.senderAvatar
-                                 || existingRequest?.user?.avatar || '',
+                    displayName: _rdu.displayName || _rdu.username || existingRequest?.senderName || existingRequest?.user?.displayName || 'Friend',
+                    username:    _rdu.username || existingRequest?.senderUsername || existingRequest?.user?.username || '',
+                    avatar:      _rdu.avatar || existingRequest?.senderAvatar || existingRequest?.user?.avatar || '',
+                    photoURL:    _rdu.avatar || existingRequest?.senderAvatar || existingRequest?.user?.avatar || '',
                     firstName:   _rdu.firstName || '', lastName: _rdu.lastName || '',
                     status:      _rdu.status || 'offline', lastSeen: _rdu.lastSeen || null,
                     addedAt: Date.now(), category: existingRequest?.category || 'friend', isLocalOnly: false,
                 };
-
-                // ── Update cache + dispatch events IMMEDIATELY (no awaits) ────
+                // Immediate cache update + event dispatch — NO awaits before events
                 FriendCacheManager.setFriend(newFriend);
                 FriendCacheManager.syncToGlobals();
                 FriendCacheManager.persist();
-
-                window.dispatchEvent(new CustomEvent('friendRequestAccepted', {
-                    detail: { requestId, friendId, success: true, friend: newFriend }
-                }));
+                window.dispatchEvent(new CustomEvent('friendRequestAccepted', { detail: { requestId, friendId, success: true, friend: newFriend } }));
                 window.dispatchEvent(new CustomEvent('friendAdded', { detail: { friend: newFriend } }));
-                window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                    detail: { friends: FriendCacheManager.getAllFriends(), realtime: true }
-                }));
-
-                if (typeof showNotification === 'function')
-                    showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
-
-                // ── Notify sender via WebSocket ─────────────────────────────
-                const _sid = existingRequest?.senderId || existingRequest?.sender?.id
-                    || existingRequest?.requesterId || friendId;
+                window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true } }));
+                if (typeof showNotification === 'function') showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
+                const _sid = existingRequest?.senderId || existingRequest?.sender?.id || existingRequest?.requesterId || friendId;
                 safeSend({ type: 'FRIEND_ACCEPTED', payload: {
                     requestId, friendId, friend: newFriend,
-                    targetUserId: String(_sid),
-                    acceptedById: String(__session.user?.id || ''),
+                    targetUserId: String(_sid), acceptedById: String(__session.user?.id || ''),
                     acceptedByName: __session.user?.displayName || __session.user?.username || '',
                     acceptedByAvatar: __session.user?.avatar || __session.user?.photoURL || '',
                     timestamp: Date.now()
                 }});
-
-                // ── Background: persist + authoritative reload ──────────────
                 saveFriendLocal(newFriend, 'accepted', { isLocalOnly: false }).catch(() => {});
-                if (ls && localRecordId) ls.confirm(localRecordId, newFriend.serverId,
-                    { status: 'accepted', ...newFriend }).catch(() => {});
+                if (ls && localRecordId) ls.confirm(localRecordId, newFriend.serverId, { status: 'accepted', ...newFriend }).catch(() => {});
                 setTimeout(async () => {
                     await loadFriendsFromBackend().catch(() => {});
                     await loadFriendRequestsFromBackend().catch(() => {});
                     await loadSentRequestsFromBackend().catch(() => {});
                     FriendCacheManager.syncToGlobals(); FriendCacheManager.persist();
-                    window.dispatchEvent(new CustomEvent('friendsUpdated',
-                        { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true, delayed: true } }));
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true, delayed: true } }));
                     window.dispatchEvent(new CustomEvent('updateFriendCounts'));
                 }, 1000);
-
                 return { success: true, friend: newFriend };
-
             } else {
                 const errorMsg = response?.error || response?.message || 'Accept failed';
                 if (existingRequest) FriendCacheManager.setRequest(existingRequest);
@@ -4242,17 +4189,16 @@ const FriendRequestManager = {
                 if (typeof showNotification === 'function') showNotification(errorMsg, 'error');
                 return { success: false, error: errorMsg };
             }
-            } catch (error) {
-            console.error('[FriendRequestManager] Accept request error – queuing:', error);
-            OfflineFirstFriends.enqueueAction('accept', friendId, { requestId }, localRecordId).catch(() => {});
-            if (existingRequest) FriendCacheManager.setRequest(existingRequest);
-            if (ls && localRecordId) ls.updateStatus(localRecordId, 'pending_received').catch(() => {});
-            FriendCacheManager.syncToGlobals();
-            return { success: true, queued: true, error: error.message };
+            } catch (innerError) {
+                console.error('[FriendRequestManager] Accept inner error:', innerError);
+                OfflineFirstFriends.enqueueAction('accept', friendId, { requestId }, localRecordId).catch(() => {});
+                if (existingRequest) FriendCacheManager.setRequest(existingRequest);
+                FriendCacheManager.syncToGlobals();
+                return { success: true, queued: true, error: innerError.message };
             }
-        } catch (outerError) {
-            console.error('[FriendRequestManager] Outer accept error:', outerError);
-            return { success: false, error: outerError.message };
+        } catch (error) {
+            console.error('[FriendRequestManager] Accept outer error:', error);
+            return { success: false, error: error.message };
         }
     },
 
@@ -7367,12 +7313,30 @@ function loadCachedDataInstantly() {
     }
 }
 
+// FIX: Track in-flight loadFriendsFromBackend calls. Multiple iframe instances
+// (chat.html parent + calls.html sub-iframe each with friend.html) all call this
+// within milliseconds of each other on startup. Without this guard, each call
+// independently sets window.friends and dispatches friendsUpdated, causing 3x
+// renders and duplicate list entries.
+let _loadFriendsInFlight = null;
+let _loadFriendsLastCall = 0;
+
 async function loadFriendsFromBackend() {
     if (!assertActive('loadFriendsFromBackend')) {
         if (friendsLoading) clearFriendsLoading();
         return { success: false, error: 'Module not active' };
     }
+
+    // FIX: Deduplicate concurrent calls — if a request is already in-flight,
+    // return the same promise so callers all get the same result.
+    const now = Date.now();
+    if (_loadFriendsInFlight && (now - _loadFriendsLastCall) < 3000) {
+        return _loadFriendsInFlight;
+    }
     
+    _loadFriendsLastCall = Date.now();
+    _loadFriendsInFlight = (async () => {
+    try {
     // FIX Bug#4: When offline, immediately hydrate from local stores and return.
     // Don't wait for a network error — we know it will fail.
     if (!navigator.onLine) {
@@ -7533,6 +7497,12 @@ async function loadFriendsFromBackend() {
     }
     
     return { success: false };
+    } finally {
+        // Clear the in-flight promise so the next call after this one goes through
+        _loadFriendsInFlight = null;
+    }
+    })(); // end of async IIFE
+    return _loadFriendsInFlight;
 }
 
 // =============================================

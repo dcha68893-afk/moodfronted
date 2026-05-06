@@ -2000,18 +2000,17 @@
                     recipientName: targetUserName
                 };
 
-                // FIX: core.getState() returns {state:'ACTIVE',...} — NOT a bare string.
-                // Old check `getState() === 'ACTIVE'` was always false → fired 15 times.
+                // FIX: getState() returns {state:'ACTIVE',...} not a string.
+                // Old `getState() === 'ACTIVE'` was ALWAYS false → fired 15 times.
                 let _fired = false;
                 const tryOpen = (attempts) => {
                     if (_fired) return;
-                    const _core = window.messagesCore;
-                    let _active = false;
-                    if (_core && typeof _core.getState === 'function') {
-                        const _st = _core.getState();
-                        _active = (_st === 'ACTIVE') || !!(_st && _st.state === 'ACTIVE');
-                    } else if (_core) { _active = !!_core.isActive; }
-                    if (_active || attempts >= 15) {
+                    const _c = window.messagesCore;
+                    let _ok = false;
+                    if (_c && typeof _c.getState === 'function') {
+                        try { const _st = _c.getState(); _ok = _st === 'ACTIVE' || !!(_st && _st.state === 'ACTIVE'); } catch(_) {}
+                    } else if (_c) { _ok = !!_c.isActive; }
+                    if (_ok || attempts >= 15) {
                         if (_fired) return;
                         _fired = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
@@ -2036,13 +2035,12 @@
                 let _urlFired = false;
                 const tryOpenUrl = (attempts) => {
                     if (_urlFired) return;
-                    const _core = window.messagesCore;
-                    let _active = false;
-                    if (_core && typeof _core.getState === 'function') {
-                        const _st = _core.getState();
-                        _active = (_st === 'ACTIVE') || !!(_st && _st.state === 'ACTIVE');
-                    } else if (_core) { _active = !!_core.isActive; }
-                    if (_active || attempts >= 20) {
+                    const _c = window.messagesCore;
+                    let _ok = false;
+                    if (_c && typeof _c.getState === 'function') {
+                        try { const _st = _c.getState(); _ok = _st === 'ACTIVE' || !!(_st && _st.state === 'ACTIVE'); } catch(_) {}
+                    } else if (_c) { _ok = !!_c.isActive; }
+                    if (_ok || attempts >= 20) {
                         if (_urlFired) return;
                         _urlFired = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail }));

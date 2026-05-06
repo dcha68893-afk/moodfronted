@@ -82,46 +82,78 @@ function _deepExtractUserId(data) {
     return null;
 }
 
-// Background token harvester — tries every 2s until we have a token
-(function _harvestToken() {
-    if (window.__kynToken) return; // already have it
+// Background token harvester — defined here, started after sessionClient is ready
+function _harvestToken() {
+    if (window.__kynToken) return;
+    let found = false;
+    
+    // 1. Parent's getAuthSession (api.core.js exposes this)
     try {
-        // Try parent's api.core getAuthSession
         if (window.parent && window.parent !== window) {
             if (typeof window.parent.getAuthSession === 'function') {
                 const s = window.parent.getAuthSession();
-                if (s?.token) {
+                if (s?.token && s.token.startsWith('eyJ')) {
                     window.__kynToken = s.token;
                     if (s.userId) window.__kynUserId = s.userId;
-                    sessionClient.acceptParentSession({ userId: s.userId, userToken: s.token, token: s.token });
-                    if (!window.currentUser?.id) {
-                        window.currentUser = { id: s.userId, userId: s.userId, token: s.token };
-                    }
-                    if (window.__TOOLS_DEBUG__) console.log('[TokenHarvest] Got token from parent.getAuthSession');
-                    return;
+                    found = true;
                 }
             }
-        }
-    } catch {}
-    try {
-        // Scan sessionStorage
-        for (const key of Object.keys(sessionStorage || {})) {
-            const val = sessionStorage.getItem(key);
-            if (val && val.startsWith('eyJ')) {
-                window.__kynToken = val;
-                if (window.__TOOLS_DEBUG__) console.log('[TokenHarvest] Got token from sessionStorage key:', key);
-                return;
+            // Also try parent's AppState
+            if (!found && window.parent.AppState?.getToken) {
+                const t = window.parent.AppState.getToken();
+                if (t && t.startsWith('eyJ')) { window.__kynToken = t; found = true; }
             }
-            try {
-                const p = JSON.parse(val);
-                const t = p?.token || p?.userToken || p?.accessToken;
-                if (t && t.startsWith('eyJ')) { window.__kynToken = t; return; }
-            } catch {}
         }
     } catch {}
-    // Retry
-    setTimeout(_harvestToken, 2000);
-})();
+    
+    // 2. Scan localStorage for JWT (api.core.js stores token here)
+    if (!found) {
+        try {
+            for (const key of Object.keys(localStorage)) {
+                const val = localStorage.getItem(key);
+                if (!val) continue;
+                if (val.startsWith('eyJ')) { window.__kynToken = val; found = true; break; }
+                if (val.charAt(0) === '{') {
+                    try {
+                        const p = JSON.parse(val);
+                        const t = p?.token || p?.userToken || p?.accessToken || p?.jwtToken;
+                        if (t && t.startsWith('eyJ')) { window.__kynToken = t; found = true; break; }
+                        // nested session objects
+                        const nested = p?.session || p?.auth || p?.data;
+                        if (nested) {
+                            const nt = nested?.token || nested?.userToken || nested?.accessToken;
+                            if (nt && nt.startsWith('eyJ')) { window.__kynToken = nt; found = true; break; }
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+    }
+    
+    // 3. Scan sessionStorage
+    if (!found) {
+        try {
+            for (const key of Object.keys(sessionStorage || {})) {
+                const val = sessionStorage.getItem(key);
+                if (!val) continue;
+                if (val.startsWith('eyJ')) { window.__kynToken = val; found = true; break; }
+                try {
+                    const p = JSON.parse(val);
+                    const t = p?.token || p?.userToken || p?.accessToken;
+                    if (t && t.startsWith('eyJ')) { window.__kynToken = t; found = true; break; }
+                } catch {}
+            }
+        } catch {}
+    }
+    
+    if (found && window.__TOOLS_DEBUG__) {
+        console.log('[TokenHarvest] ✅ Token found, length:', window.__kynToken?.length);
+    }
+    
+    if (!found) {
+        setTimeout(_harvestToken, 1500);
+    }
+}
 let childReadySent = false;
 let parentReadyReceived = false;
 let initializationLock = false;
@@ -880,6 +912,11 @@ export let myListings = [];
 export let allListings = [];
 export let savedItems = [];
 export let privateNotes = [];
+
+// Expose on window immediately for Tool-ui.js access
+if (!window.allListings) window.allListings = allListings;
+if (!window.myListings) window.myListings = myListings;
+if (!window.savedItems) window.savedItems = savedItems;
 export let userGroups = [];
 export let userFriends = [];
 export let currentMoodFilter = null;
@@ -1597,6 +1634,9 @@ acceptParentSession(sessionData) {
 }
 
 const sessionClient = new SessionClientWrapper();
+
+// Start background token harvester NOW that sessionClient exists
+_harvestToken();
 
 // =============================================
 // MODULE 4 - HEARTBEAT RESPONDER (PASSIVE)
@@ -4136,9 +4176,11 @@ function onModuleActive() {
         }
     }));
 
-    // Bind UI directly now that we are active — no gate needed
-    setTimeout(function() { forceBindAllUIEvents(); }, 50);
-    setTimeout(function() { forceBindAllUIEvents(); }, 500);
+    // Bind UI directly now that we are active — once only
+    if (!window._coreActiveBound) {
+        window._coreActiveBound = true;
+        setTimeout(function() { forceBindAllUIEvents(); }, 300);
+    }
 }
 
 let _bindLogShown = false;
@@ -4580,7 +4622,7 @@ setTimeout(() => {
         }
         // Force UI binding after activation
         setTimeout(() => {
-            forceBindAllUIEvents();
+            if (!window._coreActiveBound) { window._coreActiveBound = true; forceBindAllUIEvents(); }
         }, 100);
     }
 }, 3000);
@@ -5597,8 +5639,69 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         } catch {}
     }
     
+    // Final attempt: known localStorage keys used by auth.session.manager.js
+    if (!token) {
+        try {
+            const knownKeys = [
+                'kynecta_session', 'kyn_session', 'auth_token', 'user_token',
+                'kynecta_auth', 'kyn_auth', 'session_token', 'accessToken',
+                'kynecta_user', 'kyn_user_session'
+            ];
+            for (const key of knownKeys) {
+                const raw = localStorage.getItem(key);
+                if (!raw) continue;
+                if (raw.startsWith('eyJ')) { token = raw; break; }
+                try {
+                    const p = JSON.parse(raw);
+                    const t = p?.token || p?.userToken || p?.accessToken || p?.jwtToken;
+                    if (t && t.startsWith('eyJ')) { token = t; break; }
+                    if (p?.session) {
+                        const st = p.session?.token || p.session?.userToken;
+                        if (st && st.startsWith('eyJ')) { token = st; break; }
+                    }
+                    if (p?.data) {
+                        const dt = p.data?.token || p.data?.userToken;
+                        if (dt && dt.startsWith('eyJ')) { token = dt; break; }
+                    }
+                } catch {}
+            }
+            // Brute-force scan all localStorage keys
+            if (!token) {
+                for (const key of Object.keys(localStorage)) {
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (!raw || raw.length < 20) continue;
+                        if (raw.startsWith('eyJ')) { token = raw; break; }
+                        if (raw.charAt(0) === '{') {
+                            const p = JSON.parse(raw);
+                            const candidates = [
+                                p?.token, p?.userToken, p?.accessToken, p?.jwtToken,
+                                p?.session?.token, p?.session?.userToken,
+                                p?.data?.token, p?.data?.userToken,
+                                p?.auth?.token, p?.user?.token
+                            ];
+                            for (const c of candidates) {
+                                if (c && typeof c === 'string' && c.startsWith('eyJ')) {
+                                    token = c; break;
+                                }
+                            }
+                            if (token) break;
+                        }
+                    } catch {}
+                }
+            }
+        } catch {}
+    }
+    
     // Cache the found token for fast re-use
-    if (token) window.__kynToken = token;
+    if (token) {
+        window.__kynToken = token;
+        // Also store in sessionClient so future calls are fast
+        if (!sessionClient.getToken()) {
+            const uid = window.__kynUserId || sessionClient.getSession()?.userId;
+            if (uid) sessionClient.acceptParentSession({ userId: uid, userToken: token, token });
+        }
+    }
 
     if (!token) {
         // Offline fallback for GET requests
@@ -5633,6 +5736,17 @@ export async function secureApiCall(method, endpoint, data = null, options = {})
         if (res.status === 401) {
             safeSend('REQUEST_SESSION', { reason: '401_unauthorized' });
             const err = new Error('Unauthorized'); err.status = 401; throw err;
+        }
+        if (res.status === 500 || res.status === 502 || res.status === 503) {
+            // Server error - try cache for GET requests
+            if (method === 'GET') {
+                if (window.__TOOLS_DEBUG__) console.warn('[secureApiCall] Server error ' + res.status + ' for ' + normalizedEndpoint + ' — checking cache');
+                // Return null to trigger cache fallback in caller
+                const err = new Error('Internal server error'); err.status = res.status; throw err;
+            }
+            let msg = 'Server error (' + res.status + ')';
+            try { const j = await res.json(); msg = j?.message || msg; } catch {}
+            const err = new Error(msg); err.status = res.status; throw err;
         }
         if (!res.ok) {
             let msg = 'HTTP ' + res.status;

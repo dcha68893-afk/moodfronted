@@ -2007,7 +2007,7 @@ const renderers = {
             return;
         }
 
-        let filtered = [...allListings];
+        let filtered = Array.isArray(allListings) ? [...allListings] : [];
         if (currentMoodFilter) {
             filtered = filterListingsByMood(filtered, currentMoodFilter);
         }
@@ -4094,13 +4094,20 @@ if (document.readyState === 'loading') {
 
 // Also run when module becomes active
 window.addEventListener('tools:active', () => {
-    console.log('[Tool-ui] tools:active received, re-binding UI events');
-    setTimeout(forceBindAllUIEvents, 200);
+    if (!window._toolsActiveHandled) {
+        window._toolsActiveHandled = true;
+        console.log('[Tool-ui] tools:active received, re-binding UI events');
+        setTimeout(forceBindAllUIEvents, 200);
+        setTimeout(() => { window._toolsActiveHandled = false; }, 5000);
+    }
 });
 
 window.addEventListener('marketplaceCoreReady', () => {
-    console.log('[Tool-ui] marketplaceCoreReady received, re-binding UI events');
-    setTimeout(forceBindAllUIEvents, 200);
+    if (!window._coreReadyHandled) {
+        window._coreReadyHandled = true;
+        console.log('[Tool-ui] marketplaceCoreReady received, re-binding UI events');
+        setTimeout(forceBindAllUIEvents, 200);
+    }
 });
 
 // =============================================
@@ -4267,12 +4274,9 @@ function directAttachHandlers() {
     console.log('[DIRECT] All handlers attached');
 }
 
-// Run immediately and repeatedly
+// Run once and after DOM ready only
 directAttachHandlers();
-setTimeout(directAttachHandlers, 500);
-setTimeout(directAttachHandlers, 1000);
-setTimeout(directAttachHandlers, 2000);
-setTimeout(directAttachHandlers, 5000);
+setTimeout(directAttachHandlers, 800);
 
 // Also run when DOM is ready
 if (document.readyState === 'loading') {

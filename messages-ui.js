@@ -2885,7 +2885,7 @@
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
-                        // Accept if chatId matches OR chatId is empty (optimistic before server confirms)
+                        // Accept: chatId matches cid, OR chatId is empty (optimistic/unconfirmed)
                         const filtered = messages.filter(function(m) {
                             const mid = String(m.chatId || m.conversationId || '');
                             return mid === cid || mid === '';
@@ -3047,44 +3047,46 @@
 
                 UIFailsafe.queueAction(() => {
 
-                    if (e.detail && e.detail.message) {
+                    if (!e.detail || !e.detail.message) return;
 
-                        const core = getMessagesCore();
-                        const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
-                        const msg = e.detail.message;
-                        const incomingChatId = String(msg.chatId || msg.conversationId || '');
-                        const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const core = getMessagesCore();
+                    const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
+                    if (!currentChat) return;
 
-                        // PRIMARY: chatId match
-                        let shouldRender = !!(currentChat && incomingChatId && String(currentChat.id) === incomingChatId);
+                    const msg = e.detail.message;
+                    const incomingChatId = String(msg.chatId || msg.conversationId || '');
+                    const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
-                        // SECONDARY: friendId match (receiver-reply case)
-                        if (!shouldRender && currentChat && msg.senderId) {
-                            const _afid = String(
-                                currentChat.friendId || currentChat.otherUserId ||
-                                (currentChat.otherParticipant && currentChat.otherParticipant.id) ||
-                                currentChat.pendingReceiverId || ''
-                            );
-                            if (_afid && String(msg.senderId) === _afid) shouldRender = true;
-                        }
+                    // PRIMARY: chatId match
+                    let shouldRender = !!(incomingChatId && String(currentChat.id) === incomingChatId);
 
-                        if (shouldRender && currentChat) {
-                            const allMsgs = (core && core.getMessages && core.getMessages()) || [];
-                            const cid = String(currentChat.id);
-                            const chatMsgs = allMsgs.filter(function(m) {
-                                const mid = String(m.chatId || m.conversationId || '');
-                                return mid === cid || mid === incomingChatId || mid === '';
-                            }).sort(function(a,b) { return _ts(a)-_ts(b); });
-
-                            // Inject incoming msg if not yet in store
-                            const _already = chatMsgs.some(function(m) { return msg.id && String(m.id) === String(msg.id); });
-                            const msgsToRender = _already ? chatMsgs : chatMsgs.concat([msg]).sort(function(a,b){return _ts(a)-_ts(b);});
-
-                            this.renderMessages(msgsToRender, currentChat, core && core.getCurrentUser && core.getCurrentUser());
-                            try { var c3=document.getElementById('messagesContainer'); if(c3) requestAnimationFrame(function(){c3.scrollTop=c3.scrollHeight;}); } catch(_e){}
-                        }
-
+                    // SECONDARY: friendId match — receiver-reply, pending→real chatId
+                    if (!shouldRender && msg.senderId) {
+                        const _afid = String(
+                            currentChat.friendId || currentChat.otherUserId ||
+                            (currentChat.otherParticipant && currentChat.otherParticipant.id) || ''
+                        );
+                        if (_afid && String(msg.senderId) === _afid) shouldRender = true;
                     }
+
+                    if (!shouldRender) return;
+
+                    const allMsgs = (core && core.getMessages && core.getMessages()) || [];
+                    const cid = String(currentChat.id);
+                    let chatMsgs = allMsgs.filter(function(m) {
+                        const mid = String(m.chatId || m.conversationId || '');
+                        return mid === cid || mid === incomingChatId || mid === '';
+                    }).sort(function(a,b) { return _ts(a)-_ts(b); });
+
+                    // Always include the incoming msg even if store hasn't updated yet
+                    const _has = chatMsgs.some(function(m) { return msg.id && m.id && String(m.id) === String(msg.id); });
+                    if (!_has) chatMsgs = chatMsgs.concat([msg]).sort(function(a,b){return _ts(a)-_ts(b);});
+
+                    this.renderMessages(chatMsgs, currentChat, core && core.getCurrentUser && core.getCurrentUser());
+                    try {
+                        var _c2 = document.getElementById('messagesContainer');
+                        if (_c2) requestAnimationFrame(function(){ _c2.scrollTop = _c2.scrollHeight; });
+                    } catch(_e){}
 
                 });
 
@@ -3142,12 +3144,10 @@
 
             const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
 
-            // FIX: also allow render when core is ACTIVE (getState returns an object)
-            // or when core has an open conversation (user is clearly interacting)
-            const coreIsActive = core && (
-                (typeof core.getState === 'function' && (() => { const st = core.getState(); return st === 'ACTIVE' || (st && st.state === 'ACTIVE'); })()) ||
+            const coreIsActive = !!(core && (
+                (typeof core.getState === 'function' && (() => { try { const st = core.getState(); return st === 'ACTIVE' || !!(st && st.state === 'ACTIVE'); } catch(_){return false;} })()) ||
                 (core.getCurrentConversation && !!core.getCurrentConversation())
-            );
+            ));
 
             return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession || coreIsActive;
 
@@ -10095,11 +10095,8 @@ Type: ${message.type || 'text'}`;
 
     }.init();
 
-    // ── Delete-chat: CSS + capture-phase delegation ────────────────────────────
-    // Using capture phase means our handler runs BEFORE the chat-item's onclick,
-    // so stopPropagation() reliably prevents the chat from opening on delete click.
-    (function initDeleteChat() {
-        // Inject hover CSS
+    // ── Delete chat: CSS + capture-phase event delegation ────────────────────
+    (function() {
         var _s = document.createElement('style');
         _s.textContent =
             '.chat-item { position:relative; }' +
@@ -10107,58 +10104,52 @@ Type: ${message.type || 'text'}`;
             '.chat-delete-btn:hover { background:rgba(239,68,68,0.12) !important; }';
         document.head.appendChild(_s);
 
+        // Capture phase — fires before the chat-item onclick bubble handler
         document.addEventListener('click', function(ev) {
-            // Walk up from click target to find [data-delete-chat-id]
             var el = ev.target;
-            while (el && el !== document.body) {
+            // Walk up to find the button with data-delete-chat-id
+            for (var i = 0; i < 5 && el && el !== document.body; i++, el = el.parentElement) {
                 if (el.dataset && el.dataset.deleteChatId) break;
-                el = el.parentElement;
             }
             if (!el || !el.dataset || !el.dataset.deleteChatId) return;
 
-            // Block the click from reaching the parent chat-item onclick
             ev.stopPropagation();
             ev.preventDefault();
-
             var chatId = el.dataset.deleteChatId;
 
             // Animate row out immediately
-            var row = el.closest ? el.closest('.chat-item') : null;
+            var row = el.parentElement;
+            while (row && !row.classList.contains('chat-item')) row = row.parentElement;
             if (row) {
                 row.style.transition = 'opacity 0.15s, max-height 0.2s, padding 0.2s, margin 0.2s';
-                row.style.opacity = '0';
-                row.style.maxHeight = '0';
-                row.style.overflow = 'hidden';
-                row.style.paddingTop = '0';
-                row.style.paddingBottom = '0';
-                row.style.marginTop = '0';
-                row.style.marginBottom = '0';
+                row.style.opacity = '0'; row.style.maxHeight = '0';
+                row.style.overflow = 'hidden'; row.style.paddingTop = '0';
+                row.style.paddingBottom = '0'; row.style.marginTop = '0'; row.style.marginBottom = '0';
                 setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
             }
 
-            // Delegate to core.deleteConversation which persists the deletion to
-            // localStorage so it survives refresh (server fetch is filtered against it)
+            // Persist deletion via core — survives refresh
             var core = window.messagesCore;
             if (core && core.deleteConversation) {
                 core.deleteConversation(chatId);
             } else {
-                // Fallback: manual cleanup when core not wired yet
+                // Fallback if core not ready
                 try {
-                    var _del = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
-                    if (!_del.includes(String(chatId))) { _del.push(String(chatId)); }
-                    localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(_del));
+                    var _d = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
+                    if (!_d.includes(String(chatId))) _d.push(String(chatId));
+                    localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(_d));
                 } catch(_) {}
             }
 
-            // Hide panel if deleted chat was the active one
-            var panel = document.getElementById('chatPanel');
-            var sidebar = document.getElementById('sidebar');
-            var activeChatId = (core && core.getCurrentConversation && core.getCurrentConversation() && core.getCurrentConversation().id) || null;
-            if (activeChatId && String(activeChatId) === String(chatId)) {
+            // Clear panel if it was the active chat
+            var activeId = core && core.getCurrentConversation && core.getCurrentConversation() && core.getCurrentConversation().id;
+            if (activeId && String(activeId) === String(chatId)) {
+                var panel = document.getElementById('chatPanel');
+                var sidebar = document.getElementById('sidebar');
                 if (panel) panel.classList.add('hidden');
                 if (sidebar) sidebar.classList.add('active');
             }
-        }, true); // true = capture phase
+        }, true); // capture = true
     })();
 
 

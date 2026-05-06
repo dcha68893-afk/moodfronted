@@ -2301,14 +2301,13 @@ try {
                 console.log('[LOCAL LOAD]', LOCAL_STORAGE_KEYS.CHATS_CACHE);
                 const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
                 if (cached && Array.isArray(cached.conversations)) {
-                    // Filter out chats the user has deleted
-                    let _deletedIds = new Set();
+                    let _deleted = new Set();
                     try {
                         const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8');
-                        if (_d && Array.isArray(_d)) _deletedIds = new Set(_d.map(String));
+                        if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
                     } catch(_) {}
                     this._conversations = ensureSafeArray(cached.conversations)
-                        .filter(c => c && c.id && !_deletedIds.has(String(c.id)));
+                        .filter(function(c) { return c && c.id && !_deleted.has(String(c.id)); });
                     this._rebuildMap();
                     this._loaded = true;
                     if (!this._activeConversation && this._conversations.length > 0) {
@@ -2722,18 +2721,16 @@ try {
             const uniqueMap = new Map();
             const seenFriendIds = new Set();
 
-            // Load persisted deleted chat IDs so they survive refresh
-            let _deletedIds = new Set();
+            // Filter out chats the user has explicitly deleted — persists across refresh
+            let _deleted = new Set();
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8');
-                if (_d && Array.isArray(_d)) _deletedIds = new Set(_d.map(String));
+                if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
             } catch(_) {}
             
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
-
-                // Skip chats the user has explicitly deleted
-                if (_deletedIds.has(String(chat.id))) return;
+                if (_deleted.has(String(chat.id))) return; // skip deleted
                 
                 let friendId = chat.friendId || chat.otherParticipantId;
                 if (!friendId && chat.otherParticipant) {
@@ -3037,39 +3034,31 @@ try {
             this._notifySubscribers();
             EventBus.emit('message:added', message);
 
-            // ── FIX: Render new message immediately in the active chat panel ──
+            // ── Render into active chat panel if this message belongs there ──
             try {
-                const _activeForRender = this._activeConversation;
-                if (_activeForRender) {
-                    const _msgChatId = String(message.chatId || message.conversationId || '');
-                    const _activeChatId = String(_activeForRender.id || '');
-                    // PRIMARY: chatId match
-                    let _shouldRender = !!(  _msgChatId && _activeChatId && _activeChatId === _msgChatId);
-                    // SECONDARY: friendId match — receiver-reply case where sender's
-                    // activeChat.id = "2" but incoming message.senderId = friend's userId
-                    if (!_shouldRender && message.senderId) {
-                        const _afid = String(
-                            _activeForRender.friendId || _activeForRender.otherUserId ||
-                            (_activeForRender.otherParticipant && _activeForRender.otherParticipant.id) ||
-                            _activeForRender.pendingReceiverId || ''
-                        );
-                        if (_afid && String(message.senderId) === _afid) _shouldRender = true;
+                const _ar = this._activeConversation;
+                if (_ar) {
+                    const _msgCid = String(message.chatId || message.conversationId || '');
+                    const _actCid = String(_ar.id || '');
+                    let _render = !!(_msgCid && _actCid && _msgCid === _actCid);
+                    if (!_render && message.senderId) {
+                        const _afid = String(_ar.friendId || _ar.otherUserId ||
+                            (_ar.otherParticipant && _ar.otherParticipant.id) || '');
+                        if (_afid && String(message.senderId) === _afid) _render = true;
                     }
-                    if (_shouldRender) {
-                        const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-                        const _filterCid = _msgChatId || _activeChatId;
-                        const _chatMsgs = this._messages
-                            .filter(m => {
-                                const mid = String(m.chatId || m.conversationId || '');
-                                return mid === _filterCid || mid === _activeChatId || mid === '';
-                            })
-                            .sort((a, b) => _tsMs2(a) - _tsMs2(b));
+                    if (_render) {
+                        const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        const _fid = _msgCid || _actCid;
+                        const _msgs = this._messages.filter(function(m) {
+                            const mid = String(m.chatId || m.conversationId || '');
+                            return mid === _fid || mid === _actCid;
+                        }).sort(function(a, b) { return _tsF(a) - _tsF(b); });
                         window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: { messages: _chatMsgs, currentChat: _activeForRender, currentUser: null }
+                            detail: { messages: _msgs, currentChat: _ar, currentUser: null }
                         }));
                         try {
                             const _c = document.getElementById('messagesContainer');
-                            if (_c) requestAnimationFrame(() => { _c.scrollTop = _c.scrollHeight; });
+                            if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
                         } catch (_) {}
                     }
                 }
@@ -5648,32 +5637,19 @@ try {
             }
 
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-
-            // Resolve best chatId — WS payload may only have conversationId
-            const resolvedChatId = chatId ||
-                (normalizedMessage && String(normalizedMessage.chatId || normalizedMessage.conversationId || '')) || '';
-
-            // PRIMARY: direct id match
-            let isThisChat = !!(activeChat && resolvedChatId && String(activeChat.id) === resolvedChatId);
-
-            // SECONDARY: friendId match — handles receiver-reply on sender side
-            // and pending→real chatId transitions
-            if (!isThisChat && activeChat && normalizedMessage && normalizedMessage.senderId) {
+            // FIX: Use loose equality via String() on both sides.
+            // Also match by friendId so receiver sees sender's message even if chatId
+            // type is number vs string, or activeChat is a pending_ conversation.
+            const _acId = activeChat ? String(activeChat.id || '') : '';
+            const _rcId = chatId ? String(chatId) : '';
+            let isThisChat = !!(_acId && _rcId && _acId === _rcId);
+            if (!isThisChat && activeChat) {
                 const _afid = String(
                     activeChat.friendId || activeChat.otherUserId ||
-                    (activeChat.otherParticipant && activeChat.otherParticipant.id) ||
-                    activeChat.pendingReceiverId || ''
+                    (activeChat.otherParticipant && activeChat.otherParticipant.id) || ''
                 );
-                if (_afid && String(normalizedMessage.senderId) === _afid) {
-                    isThisChat = true;
-                    // Promote pending→real when chatId is now confirmed
-                    if (resolvedChatId && (activeChat.isPending || String(activeChat.id).startsWith('pending_'))) {
-                        const _real = ChatManager._conversationsMap &&
-                            (ChatManager._conversationsMap.get(resolvedChatId) ||
-                             ChatManager._conversationsMap.get(String(resolvedChatId)));
-                        if (_real) ChatManager._activeConversation = _real;
-                    }
-                }
+                const _sid = normalizedMessage ? String(normalizedMessage.senderId || '') : '';
+                if (_afid && _sid && _afid === _sid) isThisChat = true;
             }
 
             // Always update sidebar (unread badge, online status, last message)
@@ -5691,22 +5667,22 @@ try {
             if (isThisChat) {
                 try {
                     const _all = ChatManager._messages || [];
-                    const _activeCid = String(activeChat ? activeChat.id : '');
-                    const _matchCid = resolvedChatId || _activeCid;
-                    let _chatMsgs = _all
-                        .filter(function(m) {
-                            const mid = String(m.chatId || m.conversationId || '');
-                            return mid === _matchCid || mid === _activeCid || mid === '';
-                        })
-                        .sort(function(a, b) { return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp); });
-                    // Inject new message if not yet in store (race guard)
+                    const _matchId = _rcId || _acId;
+                    let _chatMsgs = _all.filter(function(m) {
+                        const mid = String(m.chatId || m.conversationId || '');
+                        return mid === _matchId || mid === _acId;
+                    }).sort(function(a, b) {
+                        return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
+                    });
+                    // Inject message if not yet stored (race between addMessage and this)
                     if (normalizedMessage) {
-                        const _already = _chatMsgs.some(function(m) {
-                            return (m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id));
+                        const _has = _chatMsgs.some(function(m) {
+                            return m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id);
                         });
-                        if (!_already) {
-                            _chatMsgs = _chatMsgs.concat([normalizedMessage]);
-                            _chatMsgs.sort(function(a, b) { return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp); });
+                        if (!_has) {
+                            _chatMsgs = _chatMsgs.concat([normalizedMessage]).sort(function(a, b) {
+                                return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
+                            });
                         }
                     }
                     if (_chatMsgs.length > 0) {
@@ -5717,12 +5693,12 @@ try {
                                 currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser()
                             }
                         }));
+                        try {
+                            const _c = document.getElementById('messagesContainer');
+                            if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
+                        } catch (_) {}
                     }
-                } catch (_e) {}
-                try {
-                    const container = document.getElementById('messagesContainer');
-                    if (container) requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; });
-                } catch (_e) {}
+                } catch (_e) { console.error('[renderRealtimeUpdate] render error', _e); }
             } else if (normalizedMessage) {
                 try {
                     const _sid = normalizedMessage.senderId;
@@ -6259,37 +6235,29 @@ try {
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
 
-        // Permanently delete a conversation from local state + persist deletion so it
-        // survives refresh (the server fetch is filtered against kynecta_deleted_chats_v8).
         deleteConversation: function(chatId) {
             if (!chatId) return;
-            const strId = String(chatId);
-            // 1. Persist to deleted-ids list
+            const sid = String(chatId);
+            // 1. Persist to deleted list — survives refresh + server re-fetch
             try {
-                const _existing = SafeStorage.getJSON('kynecta_deleted_chats_v8') || [];
-                if (!_existing.includes(strId)) {
-                    _existing.push(strId);
-                    SafeStorage.setJSON('kynecta_deleted_chats_v8', _existing);
-                }
+                const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8') || [];
+                if (!_d.includes(sid)) { _d.push(sid); SafeStorage.setJSON('kynecta_deleted_chats_v8', _d); }
             } catch(_) {}
-            // 2. Remove from in-memory state
-            ChatManager._conversations = (ChatManager._conversations || []).filter(c => String(c.id) !== strId);
-            if (ChatManager._conversationsMap) {
-                ChatManager._conversationsMap.delete(chatId);
-                ChatManager._conversationsMap.delete(strId);
+            // 2. Remove from memory
+            ChatManager._conversations = (ChatManager._conversations || []).filter(c => String(c.id) !== sid);
+            if (ChatManager._conversationsMap) { ChatManager._conversationsMap.delete(chatId); ChatManager._conversationsMap.delete(sid); }
+            if (ChatManager._activeConversation && String(ChatManager._activeConversation.id) === sid) {
+                ChatManager._activeConversation = null; ChatManager._messages = [];
             }
-            if (ChatManager._activeConversation && String(ChatManager._activeConversation.id) === strId) {
-                ChatManager._activeConversation = null;
-                ChatManager._messages = [];
-            }
-            // 3. Update localStorage cache
+            // 3. Update cache
             ChatManager._saveToCache();
-            // 4. Remove per-chat message cache
-            try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${strId}`); } catch(_) {}
-            // 5. Notify subscribers (re-renders sidebar)
+            // 4. Remove message cache for this chat
+            try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`); } catch(_) {}
+            try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
+            // 5. Re-render sidebar
             ChatManager._notifySubscribers();
-            // 6. Best-effort server delete (non-blocking)
-            makeApiRequest(`/chats/${strId}`, 'DELETE').catch(() => {});
+            // 6. Best-effort server delete
+            makeApiRequest(`/chats/${sid}`, 'DELETE').catch(function(){});
         },
 
         multiSendSelectedChats: new Set(),
