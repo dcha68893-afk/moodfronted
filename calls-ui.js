@@ -319,45 +319,13 @@ const GlobalCallHistory = {
     
     showNotificationInCalls(`Calling ${userName}...`, 'info');
     
-    // ========== STEP 4: Start 2-minute timer ==========
-    let callActive = false;
-    let timeLeft = 180; // 3 minutes
-    let ringTimer = null;
-    
-    const startRingTimer = () => {
-        if (ringTimer) clearInterval(ringTimer);
-        
-        ringTimer = setInterval(() => {
-            if (callActive) return;
-            
-            timeLeft--;
-            const mins = Math.floor(timeLeft / 60);
-            const secs = timeLeft % 60;
-            
-            if (statusEl && !callActive) {
-                statusEl.textContent = `Ringing... (${mins}:${String(secs).padStart(2, '0')})`;
-            }
-            
-            if (timeLeft <= 0) {
-                if (ringTimer) clearInterval(ringTimer);
-                ringTimer = null;
-                if (!callActive) {
-                    console.log('[Calls UI] Call timed out after 3 minutes');
-                    if (window.callCore && window.callCore.endCall) {
-                        window.callCore.endCall();
-                    }
-                    showIdleScreen();
-                    showNotificationInCalls('Call ended - no answer after 3 minutes', 'info');
-                }
-            }
-        }, 1000);
-    };
-    
-    startRingTimer();
-    
-    // Store timer for cleanup
-    window._currentCallTimer = ringTimer;
-    
+    // ========== STEP 4: (ring timer handled by _outgoingRingTimer in handleOutgoingCall) ==========
+    // Bug 4 fix: the early local ringTimer was a duplicate of _outgoingRingTimer and
+    // called endCall() unconditionally when the timeout fired — navigating away even
+    // when the receiver had already accepted. Removed. The authoritative timer
+    // (_outgoingRingTimer, started inside handleOutgoingCall) guards itself with
+    // UIState.callState before auto-dismissing.
+
     // ========== STEP 5: Initiate the actual call ==========
     try {
         let result = null;
@@ -421,7 +389,7 @@ const GlobalCallHistory = {
         
         // Wait a moment then go back to idle
         setTimeout(() => {
-            if (ringTimer) clearInterval(ringTimer);
+            if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
             showIdleScreen();
         }, 2000);
     }
@@ -5126,11 +5094,11 @@ case 'CALL_INITIATED':
             })();
 
             // ── Capture navigation target BEFORE clearing state ───────────────
-            const returnTo = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
-                ? window.__callOriginReturnTo
-                : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
-                    ? window.__pendingCallReturnTo
-                    : 'messages'; // NEVER default to calls panel
+            // Bug 1 fix: allow 'calls' as a valid returnTo when the call was started
+            // from the calls module itself. Only fall back to 'messages' when no origin
+            // is recorded at all (i.e. both variables are null/undefined).
+            const _rawReturnTo = window.__callOriginReturnTo || window.__pendingCallReturnTo || null;
+            const returnTo = _rawReturnTo ? _rawReturnTo : 'messages';
             const chatUserId = window.__callOriginChatUserId
                 || window.__pendingCallChatUserId
                 || null;
@@ -5236,9 +5204,25 @@ case 'CALL_INITIATED':
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
             }
 
+            // ── Bug 6 fix: Only navigate away when the call ended without being
+            // accepted (user hit end, 3-min timeout with no answer, declined,
+            // cancelled, failed). When the receiver DID accept and the call ran
+            // its normal course, we stay on the calls module — the user is
+            // already there and a forced redirect is jarring / incorrect.
+            // A call was "accepted" if callStartTime was recorded (set in
+            // handleCallAccepted) AND the reason is NOT a pre-answer failure.
+            const _callWasAccepted = !!UIState.callStartTime;
+            const _preAnswerReasons = ['declined', 'rejected', 'cancelled', 'missed', 'timeout', 'failed', 'no_answer'];
+            const _reason = (callData && (callData.reason || callData.status)) || '';
+            const _endedBeforeAnswer = !_callWasAccepted || _preAnswerReasons.some(r => _reason.includes(r));
+            // If the call was accepted (connected) and ended normally, stay on the
+            // calls panel (or wherever returnTo says) but do NOT force a module
+            // switch — the parent shell already knows which module is active.
+            const _shouldNavigate = _endedBeforeAnswer || (returnTo !== 'calls');
+
             // ── Navigate back to origin module (with short delay for animation) ──
             setTimeout(() => {
-                if (window.parent && window.parent !== window) {
+                if (_shouldNavigate && window.parent && window.parent !== window) {
                     if (returnTo === 'messages' && chatUserId) {
                         // Return to messages module AND re-open the specific chat
                         window.parent.postMessage({
@@ -5255,7 +5239,10 @@ case 'CALL_INITIATED':
                             payload: { returnFromCall: true },
                             timestamp: Date.now()
                         }, '*');
-                    } else if (returnTo && returnTo !== 'calls') {
+                    } else if (returnTo === 'calls') {
+                        // Call originated from the calls module — stay here, no navigation needed
+                        console.log('[Calls UI] Call originated from calls module — staying on calls panel');
+                    } else if (returnTo) {
                         // Return to any other named module
                         window.parent.postMessage({
                             type: 'SWITCH_MODULE',
@@ -5264,7 +5251,7 @@ case 'CALL_INITIATED':
                             timestamp: Date.now()
                         }, '*');
                     } else {
-                        // Fallback: always go to messages, never the calls panel
+                        // Fallback: go to messages
                         window.parent.postMessage({
                             type: 'SWITCH_MODULE',
                             module: 'messages',
@@ -7361,8 +7348,10 @@ case 'CALL_ACCEPTED': {
             setTimeout(() => {
                 if (window.parent && window.parent !== window) {
                     const rawReturn = window.__callOriginReturnTo || window.__pendingCallReturnTo;
-                    // Never navigate back to 'calls' panel — fall back to last real page
-                    const returnTo = (rawReturn && rawReturn !== 'calls')
+                    // Bug 2 fix: allow 'calls' as returnTo when the call was started from
+                    // the calls module. Only fall back to __lastActivePage / 'messages'
+                    // when no origin was recorded at all.
+                    const returnTo = rawReturn
                         ? rawReturn
                         : (window.__lastActivePage && window.__lastActivePage !== 'calls')
                             ? window.__lastActivePage
@@ -7389,6 +7378,9 @@ case 'CALL_ACCEPTED': {
                             payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: window.__callOriginChatUserName || null },
                             timestamp: Date.now()
                         }, '*');
+                    } else if (returnTo === 'calls') {
+                        // Call originated from the calls module — stay here, no SWITCH_MODULE needed
+                        console.log('[CallOverlayManager] Call originated from calls module — staying on calls panel');
                     } else {
                         // Navigate back to wherever the user was (friends, status, tools, messages, etc.)
                         window.parent.postMessage({

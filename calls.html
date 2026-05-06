@@ -3959,8 +3959,10 @@
 
                     if (returnTo === 'friends-page' || returnTo === 'friend') returnTo = 'friends';
                     else if (returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-                    // Never store 'calls' as returnTo — always fall back to last real page
-                    else if (returnTo !== 'messages' && returnTo !== 'friends') {
+                    // Bug 3 fix: 'calls' is a valid returnTo — the call was started FROM
+                    // the calls panel, so we should return there after it ends.
+                    // Only fall back to __lastActivePage when returnTo is genuinely absent.
+                    else if (!returnTo) {
                         returnTo = (window.__lastActivePage && window.__lastActivePage !== 'calls')
                             ? window.__lastActivePage
                             : 'messages';
@@ -4047,10 +4049,10 @@
                     window.__callEndedNavAt = _ceNow;
                     setTimeout(() => { window.__callEndedNavAt = 0; }, 5000);
 
-                    // NEVER navigate back to 'calls' panel — always go to origin or messages.
-                    // For receiver side (ctx is null — they never set returnContext), fall back to
-                    // __lastActivePage so they return to wherever they were before the call arrived.
-                    const returnTo = (ctx?.returnTo && ctx.returnTo !== 'calls')
+                    // Bug 5 fix: allow 'calls' as returnTo when the call was started from
+                    // the calls module. For receiver side (ctx is null), fall back to
+                    // __lastActivePage so they return to wherever they were before the call.
+                    const returnTo = ctx?.returnTo
                         ? ctx.returnTo
                         : (window.__lastActivePage && window.__lastActivePage !== 'calls')
                             ? window.__lastActivePage
@@ -4080,9 +4082,13 @@
                                 friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
                             }, 300);
                         }
+                    } else if (returnTo === 'calls') {
+                        // Call originated from the calls module — stay here, just show idle screen
+                        console.log('[Parent] Call originated from calls module — staying on calls panel');
+                        navigateToPage('calls');
                     } else {
-                        // Any other origin — navigate to it; but never the calls panel
-                        navigateToPage(returnTo !== 'calls' ? returnTo : 'messages');
+                        // Any other origin — navigate to it
+                        navigateToPage(returnTo);
                     }
                 }
 
