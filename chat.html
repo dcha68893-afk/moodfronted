@@ -2643,11 +2643,7 @@
                 if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
-                    // Only clear activeCallInProgress when source is definitive end signals
-                    // NOT during setup echoes (parent-echo is used for syncing, not ending)
-                    if (data.source !== 'parent-echo') {
-                        window.__activeCallInProgress = false;
-                    }
+                    window.__activeCallInProgress = false;
                 }
 
                 // CALLS_IFRAME_READY handshake - calls iframe signals it is ready to receive CALL_INCOMING
@@ -3946,14 +3942,15 @@
                     }
                     window.__callDispatchLock = { ts: Date.now(), userId: String(userId) };
 
+                    // Normalise returnTo — map aliases to canonical module names
                     if (returnTo === 'friends-page' || returnTo === 'friend') returnTo = 'friends';
                     else if (returnTo === 'chat' || returnTo === 'message') returnTo = 'messages';
-                    // Never store 'calls' as returnTo — always fall back to last real page
-                    else if (returnTo !== 'messages' && returnTo !== 'friends') {
-                        returnTo = (window.__lastActivePage && window.__lastActivePage !== 'calls')
-                            ? window.__lastActivePage
-                            : 'messages';
+                    // If caller didn't specify returnTo, use where the user currently is
+                    else if (!returnTo || returnTo === 'undefined') {
+                        returnTo = window.__currentPage || window.__lastActivePage || 'calls';
                     }
+                    // 'calls' is a valid returnTo — user started call from calls module
+                    // and should return there after call ends
 
                     const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now() };
                     window.__callReturnContext = ctx;
@@ -3961,11 +3958,11 @@
 
                     console.log(`[Parent] 📞 Dispatching call → user=${userName}(${userId}) type=${callType} returnTo=${returnTo}`);
 
-                    // CRITICAL: Set __activeCallInProgress BEFORE navigating so that
-                    // navigateToPage does NOT strip call-screen-active.
+                    // Set __activeCallInProgress BEFORE navigating
                     window.__activeCallInProgress = true;
                     document.body.classList.add('call-screen-active');
 
+                    // Always navigate to calls module to show calling screen
                     navigateToPage('calls');
 
                     const callsIframe = document.getElementById('callsIframe');
@@ -3975,21 +3972,19 @@
 
                     try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
 
-                    setTimeout(() => {
+                    // Send CALL_ORIGIN then OPEN_CALL_WITH_USER after iframe has settled
+                    const _sendCall = () => {
                         if (callsIframe.contentWindow) {
-                            // Tell calls.html its return origin BEFORE the call opens
-                            callsIframe.contentWindow.postMessage({
-                                type: 'CALL_ORIGIN',
-                                origin: returnTo,
-                                source: 'parent-frame'
-                            }, '*');
-                            callsIframe.contentWindow.postMessage({
-                                type: 'OPEN_CALL_WITH_USER',
-                                payload,
-                                source: 'parent-frame'
-                            }, '*');
+                            callsIframe.contentWindow.postMessage({ type: 'CALL_ORIGIN', origin: returnTo, source: 'parent-frame' }, '*');
+                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload, source: 'parent-frame' }, '*');
                         }
-                    }, 400);
+                    };
+                    // If iframe is ready, send immediately; otherwise wait 400ms
+                    if (window.__callsIframeReady) {
+                        setTimeout(_sendCall, 150);
+                    } else {
+                        setTimeout(_sendCall, 400);
+                    }
                 }
 
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
@@ -4022,13 +4017,6 @@
                 }
 
                 if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
-                    // Guard: if a call is actively in progress (user just started it),
-                    // ignore spurious CALL_ENDED_RETURN signals that arrive during setup.
-                    if (window.__activeCallInProgress) {
-                        console.warn('[Parent] CALL_ENDED_RETURN ignored — call still in progress');
-                        return;
-                    }
-
                     let ctx = window.__callReturnContext;
                     if (!ctx) {
                         try { const s = sessionStorage.getItem('call_return_ctx'); if (s) ctx = JSON.parse(s); } catch(e) {}
@@ -4037,23 +4025,30 @@
                     window.__callDispatchLock = { ts: 0, userId: null };
                     try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
 
-                    // Debounce: ignore duplicate navigation within 3s (CALL_ENDED fires 6+ times from WS bridge)
+                    // Debounce: ignore duplicate navigation within 3s
                     const _ceNow = Date.now();
                     if (window.__callEndedNavAt && (_ceNow - window.__callEndedNavAt) < 3000) return;
                     window.__callEndedNavAt = _ceNow;
                     setTimeout(() => { window.__callEndedNavAt = 0; }, 5000);
 
-                    // NEVER navigate back to 'calls' panel — always go to origin or messages.
-                    // For receiver side (ctx is null — they never set returnContext), fall back to
-                    // __lastActivePage so they return to wherever they were before the call arrived.
-                    const returnTo = (ctx?.returnTo && ctx.returnTo !== 'calls')
-                        ? ctx.returnTo
-                        : (window.__lastActivePage && window.__lastActivePage !== 'calls')
-                            ? window.__lastActivePage
-                            : 'messages';
+                    // Call is truly ended — clear in-progress flag
+                    window.__activeCallInProgress = false;
+                    document.body.classList.remove('call-screen-active');
+
+                    // Navigate back to where the call was triggered from:
+                    //   'calls'    → calls sidebar (call started from calls module)
+                    //   'messages' → messages, re-open specific chat
+                    //   'friends'  → friends sidebar
+                    // Receiver side has no ctx — fall back to __lastActivePage
+                    const returnTo = ctx?.returnTo
+                        || (window.__lastActivePage || 'messages');
+
                     console.log(`[Parent] 📞 Call ended → returnTo=${returnTo}`);
 
-                    if (returnTo === 'messages') {
+                    if (returnTo === 'calls') {
+                        // Return to calls sidebar to show call history
+                        navigateToPage('calls');
+                    } else if (returnTo === 'messages') {
                         navigateToPage('messages');
                         if (ctx?.chatUserId) {
                             const msgIframe = document.getElementById('messagesIframe');
@@ -4077,8 +4072,7 @@
                             }, 300);
                         }
                     } else {
-                        // Any other origin — navigate to it; but never the calls panel
-                        navigateToPage(returnTo !== 'calls' ? returnTo : 'messages');
+                        navigateToPage(returnTo || 'messages');
                     }
                 }
 

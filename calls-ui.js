@@ -5214,50 +5214,14 @@ case 'CALL_INITIATED':
             window.__callOriginChatUserId = null;
             window.__callOriginChatUserName = null;
 
-            // ── Restore sidebar icons to parent shell ────────────────────────
+            // ── Signal parent to navigate back to call origin ─────────────────
+            // CALL_ENDED_RETURN is the single signal. chat.html handles navigation
+            // using __callReturnContext which was set when the call was dispatched.
+            // We do NOT send SWITCH_MODULE here — that caused double navigation.
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
             }
-
-            // ── Navigate back to origin module (with short delay for animation) ──
-            setTimeout(() => {
-                if (window.parent && window.parent !== window) {
-                    if (returnTo === 'messages' && chatUserId) {
-                        // Return to messages module AND re-open the specific chat
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE',
-                            module: 'messages',
-                            payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: window.__callOriginChatUserName || null },
-                            timestamp: Date.now()
-                        }, '*');
-                    } else if (returnTo === 'friends') {
-                        // Return to friends/contacts page
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE',
-                            module: 'friends',
-                            payload: { returnFromCall: true },
-                            timestamp: Date.now()
-                        }, '*');
-                    } else if (returnTo && returnTo !== 'calls') {
-                        // Return to any other named module
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE',
-                            module: returnTo,
-                            payload: { returnFromCall: true },
-                            timestamp: Date.now()
-                        }, '*');
-                    } else {
-                        // Fallback: always go to messages, never the calls panel
-                        window.parent.postMessage({
-                            type: 'SWITCH_MODULE',
-                            module: 'messages',
-                            payload: { returnFromCall: true },
-                            timestamp: Date.now()
-                        }, '*');
-                    }
-                }
-
                 // NEVER hide sidebar or main content - always use overlay
                 const sidebar = document.getElementById('sidebar');
                 if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
@@ -5266,20 +5230,11 @@ case 'CALL_INITIATED':
                 if (typeof showIdleScreen === 'function') {
                     showIdleScreen();
                 } else {
-                    // Fallback: manually show idle screen
                     const idleScreen = document.getElementById('idleScreen');
-                    const callingOverlay = document.getElementById('callingScreen'); // unified screen
-                    if (idleScreen) {
-                        idleScreen.classList.add('active');
-                        idleScreen.style.display = 'flex';
-                    }
-                    if (callingOverlay) {
-                        callingOverlay.classList.remove('active');
-                        callingOverlay.style.display = 'none';
-                    }
+                    const callingOverlay = document.getElementById('callingScreen');
+                    if (idleScreen) { idleScreen.classList.add('active'); idleScreen.style.display = 'flex'; }
+                    if (callingOverlay) { callingOverlay.classList.remove('active'); callingOverlay.style.display = 'none'; }
                 }
-                UIState.currentView = 'sidebar';
-            }, 350); // 350ms — enough for overlay fade but snappy UX
 
             // ── Refresh call history ─────────────────────────────────────────
             setTimeout(() => {
@@ -5558,15 +5513,14 @@ case 'CALL_ACCEPTED': {
                     }
                     case 'CALL_ENDED':
                     case 'CALL_FORCE_ENDED':
+                    case 'parent-end-broadcast':
                     case 'CALL_REJECTED': {
                         // ── ALWAYS stop ringtones immediately, regardless of state ──
                         if (window._incomingRingtone) {
-                            try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
                             try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                             window._incomingRingtone = null;
                         }
                         if (window._callerRingtone) {
-                            try { if (window._callerRingtone._interval) clearInterval(window._callerRingtone._interval); } catch(e) {}
                             try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
                             window._callerRingtone = null;
                         }
@@ -5580,11 +5534,13 @@ case 'CALL_ACCEPTED': {
                             if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
                             break;
                         }
-                        // Parent broadcast CALL_ENDED/REJECTED to this iframe — reset UI immediately
-                        console.log('[Calls UI] CALL_ENDED/REJECTED received from parent — resetting UI');
+                        // Parent broadcast CALL_ENDED to this iframe — reset UI immediately
+                        console.log('[Calls UI] CALL_ENDED received from parent — resetting UI');
                         if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
                         if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
+                        // Clear the accept dedup lock so next call works
                         window.__callAcceptedHandled = 0;
+                        // Clear window globals for peer info
                         window.__activePeerName = null;
                         window.__activePeerType = null;
                         window.__activePeerAvatar = null;
@@ -5613,41 +5569,9 @@ case 'CALL_ACCEPTED': {
                     case 'CALL_REJECTED':
                         UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
                         break;
-                    case 'CALL_ENDED': {
-                        // Guard: only reset UI if we are actually in a call/calling state.
-                        // During setup, parent may echo back CALL_ENDED from old sessions —
-                        // ignore those so the calling screen is not killed immediately.
-                        const _callIsActive = UIState.callActive
-                            || UIState.callState === 'calling'
-                            || UIState.callState === 'connecting'
-                            || UIState.callState === 'connected'
-                            || (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active'))
-                            || (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))
-                            || (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active'));
-                        if (!_callIsActive) {
-                            console.warn('[Calls UI] CALL_ENDED ignored — no active call UI visible');
-                            break;
-                        }
-                        // Stop ringtones
-                        if (window._incomingRingtone) {
-                            try { if (window._incomingRingtone._interval) clearInterval(window._incomingRingtone._interval); } catch(e) {}
-                            try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
-                            window._incomingRingtone = null;
-                        }
-                        if (window._callerRingtone) {
-                            try { if (window._callerRingtone._interval) clearInterval(window._callerRingtone._interval); } catch(e) {}
-                            try { window._callerRingtone.pause(); window._callerRingtone.currentTime = 0; } catch(e) {}
-                            window._callerRingtone = null;
-                        }
-                        if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
-                        if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
-                        window.__callAcceptedHandled = 0;
-                        window.__activePeerName = null;
-                        window.__activePeerType = null;
-                        window.__activePeerAvatar = null;
+                    case 'CALL_ENDED':
                         UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
                         break;
-                    }
                     case 'OPEN_CALL_WITH_USER':
                     case 'START_CALL':
                     case 'CALL_USER':
