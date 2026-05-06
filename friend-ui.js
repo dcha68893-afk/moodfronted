@@ -1195,16 +1195,13 @@ export const RenderPipeline = {
             const _delay = isRealtime ? 0 : (fromCache ? 50 : 300);
             this.queueRender('friends', debounce(() => {
                 updateFriendCounts();
-                // FIX: For realtime events (accept/remove) always render both friend lists
-                // regardless of which section is active — the user may switch tabs immediately.
+                // FIX: For realtime events always render both lists — user may switch tabs
                 if (isRealtime) {
                     renderFriends();
                     renderAllFriendsList();
                 } else if (UIState.activeSection === 'friendsSection') renderFriends();
                 else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
-                else {
-                    updateFriendCounts();
-                }
+                else { updateFriendCounts(); }
             }, Math.max(_delay, 200)));
         });
 
@@ -1212,12 +1209,12 @@ export const RenderPipeline = {
         // Catch any data load completion events and update counts
         window.addEventListener('requestsUpdated', () => updateFriendCounts());
         window.addEventListener('sentRequestsUpdated', () => updateFriendCounts());
-        // FIX: friendRequestSent fires immediately on optimistic send — re-render sent list instantly
+        // FIX: friendRequestSent fires immediately (optimistic) — always re-render
+        // sent list and update counts regardless of active section so "Pending"
+        // button and outgoing count update the instant the user clicks "Add".
         window.addEventListener('friendRequestSent', (event) => {
             updateFriendCounts();
-            if (UIState.activeSection === 'requestsSection') {
-                renderSentRequests();
-            }
+            renderSentRequests();   // always — user may be on discover/all-users tab
         });
         window.addEventListener('pinnedFriendsUpdated', () => updateFriendCounts());
         window.addEventListener('mutedFriendsUpdated', () => updateFriendCounts());
@@ -1241,17 +1238,24 @@ export const RenderPipeline = {
             }, isRealtime ? 0 : 300));
         });
 
-        // FIXED: sentRequestsUpdated listener - also update counts
-        window.addEventListener('sentRequestsUpdated', () => {
+        // FIX: sentRequestsUpdated — render immediately for optimistic events,
+        // debounced for polling updates. Never gate on section — user may be on
+        // discover tab when they clicked "Add".
+        window.addEventListener('sentRequestsUpdated', (event) => {
             updateFriendCounts();
-            const hasSent = (window.sentRequests?.length || sentRequests?.length || 0) > 0;
-            if (!isUIActive() && !hasSent) return;
-            
-            // FIX: Always render sent requests list regardless of active section
-            this.queueRender('sentRequests', debounce(() => {
+            const isOptimistic = event.detail?.optimistic === true || event.detail?.confirmed === true;
+            if (isOptimistic) {
+                // Immediate render — this is the user's own just-sent request
                 renderSentRequests();
                 updateFriendCounts();
-            }, 300));
+            } else {
+                const hasSent = (window.sentRequests?.length || sentRequests?.length || 0) > 0;
+                if (!isUIActive() && !hasSent) return;
+                this.queueRender('sentRequests', debounce(() => {
+                    renderSentRequests();
+                    updateFriendCounts();
+                }, 200));
+            }
         });
 
         window.addEventListener('contactsUpdated', () => {
@@ -1279,31 +1283,31 @@ export const RenderPipeline = {
             const { friendId, friend } = event.detail || {};
             console.log('[UI] Friend request accepted for:', friendId);
 
-            // FIX: If the core already injected the friend into FriendCacheManager,
-            // immediately update window.friends and re-render so counts update NOW.
+            // FIX: Immediately inject friend into window.friends from event payload
+            // so counts update to 1 before the async backend reload completes.
             if (friend && friend.id) {
                 if (!Array.isArray(window.friends)) window.friends = [];
                 if (!window.friends.find(f => String(f.id) === String(friend.id))) {
                     window.friends = [...window.friends, friend];
                 }
             }
-            // Render and update counts immediately from current window.friends
+            // Render everything right now — don't wait for backend
             updateFriendCounts();
             renderFriends();
             renderAllFriendsList();
+            renderFriendRequests();
 
+            // Background reload for authoritative data
             setTimeout(() => {
                 loadFriendsFromBackend().then(() => {
                     renderFriends();
                     renderAllFriendsList();
                     updateFriendCounts();
-                    if (window.FriendCacheManager && typeof window.FriendCacheManager.syncToGlobals === 'function') {
-                        window.FriendCacheManager.syncToGlobals();
-                    }
-                });
-                loadFriendRequestsFromBackend().then(() => renderFriendRequests());
-                loadSentRequestsFromBackend().then(() => renderSentRequests());
-            }, 300);
+                    if (window.FriendCacheManager?.syncToGlobals) window.FriendCacheManager.syncToGlobals();
+                }).catch(() => {});
+                loadFriendRequestsFromBackend().then(() => renderFriendRequests()).catch(() => {});
+                loadSentRequestsFromBackend().then(() => renderSentRequests()).catch(() => {});
+            }, 500);
         });
         
         // Listen for global search results
@@ -2446,63 +2450,50 @@ async function optimisticAcceptRequest(requestData, button) {
         
         if (response && response.success) {
             
-            // Force immediate removal from ALL caches
+            // Remove from ALL request caches immediately
             if (friendRequests && Array.isArray(friendRequests)) {
                 const idx = friendRequests.findIndex(r => r.id === requestId);
                 if (idx !== -1) friendRequests.splice(idx, 1);
             }
-            
             if (window.friendRequests && Array.isArray(window.friendRequests)) {
                 const idx = window.friendRequests.findIndex(r => r.id === requestId);
                 if (idx !== -1) window.friendRequests.splice(idx, 1);
             }
 
-            // FIX: Immediately inject the accepted friend into window.friends so
-            // updateFriendCounts() reads a non-zero value right away.
-            // The friend object comes from friend-core's acceptFriendRequest return value.
-            const _newFriendObj = response.friend || {
-                id:          String(senderId),
-                displayName: displayName,
-                username:    requestData.senderUsername || requestData.user?.username || '',
-                avatar:      requestData.senderAvatar  || requestData.user?.avatar  || '',
-                photoURL:    requestData.senderAvatar  || requestData.user?.avatar  || '',
-                status:      'offline',
-                addedAt:     Date.now()
+            // FIX: Immediately inject accepted friend into window.friends so counts
+            // update to 1 right away (before the async reload completes).
+            const _newFriend = response.friend || {
+                id: String(senderId), displayName: displayName,
+                username: requestData.senderUsername || requestData.user?.username || '',
+                avatar:   requestData.senderAvatar  || requestData.user?.avatar  || '',
+                status: 'offline', addedAt: Date.now()
             };
             if (!Array.isArray(window.friends)) window.friends = [];
-            if (!window.friends.find(f => String(f.id) === String(_newFriendObj.id))) {
-                window.friends = [...window.friends, _newFriendObj];
+            if (!window.friends.find(f => String(f.id) === String(_newFriend.id))) {
+                window.friends = [...window.friends, _newFriend];
             }
-            // Mirror into FriendCacheManager
-            if (window.FriendCacheManager && typeof window.FriendCacheManager.setFriend === 'function') {
-                window.FriendCacheManager.setFriend(_newFriendObj);
+            if (window.FriendCacheManager?.setFriend) {
+                window.FriendCacheManager.setFriend(_newFriend);
                 window.FriendCacheManager.syncToGlobals();
             }
-            
-            // Immediately re-render everything
+
+            // Render everything immediately
             renderFriendRequests();
             renderFriends();
             renderAllFriendsList();
             updateFriendCounts();
             showNotification(`You are now friends with ${displayName}!`, 'success');
-            
-            // Background reload to get authoritative data from server
+
+            // Background reload for authoritative data
             setTimeout(async () => {
                 try {
                     await loadFriendsFromBackend();
                     await loadFriendRequestsFromBackend();
                     await loadSentRequestsFromBackend();
-                    renderFriends();
-                    renderAllFriendsList();
-                    renderFriendRequests();
-                    updateFriendCounts();
-                    if (window.FriendCacheManager && typeof window.FriendCacheManager.syncToGlobals === 'function') {
-                        window.FriendCacheManager.syncToGlobals();
-                    }
-                } catch (refreshError) {
-                    console.error('[UI] Background refresh error:', refreshError);
-                }
-            }, 1000);
+                    renderFriends(); renderAllFriendsList(); renderFriendRequests(); updateFriendCounts();
+                    if (window.FriendCacheManager?.syncToGlobals) window.FriendCacheManager.syncToGlobals();
+                } catch (_) {}
+            }, 800);
             
         } else {
             console.error('[UI] Accept request API failed:', response?.error);
