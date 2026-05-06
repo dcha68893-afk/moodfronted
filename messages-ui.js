@@ -2885,16 +2885,15 @@
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
-                        // FIX: A message belongs to this chat if:
-                        //   - its chatId/conversationId matches the currentChat.id (string compare), OR
-                        //   - it has NO chatId/conversationId set (optimistic messages before server confirms)
+                        // Accept message if: chatId matches, OR chatId is empty (optimistic/pending)
                         const filtered = messages.filter(function(m) {
-                            const msgCid = String(m.chatId || m.conversationId || '');
-                            return msgCid === cid || msgCid === '';
+                            const mid = String(m.chatId || m.conversationId || '');
+                            return mid === cid || mid === '';
                         });
                         if (filtered.length > 0) {
                             messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
                         } else {
+                            // All messages have a different chatId — render empty rather than wrong chat
                             this.renderMessages([], currentChat, e.detail.currentUser);
                             return;
                         }
@@ -3053,31 +3052,38 @@
 
                         const core = getMessagesCore();
                         const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
-                        const incomingMsg = e.detail.message;
-                        const incomingChatId = String(incomingMsg.chatId || incomingMsg.conversationId || '');
+                        const msg = e.detail.message;
+                        const incomingChatId = String(msg.chatId || msg.conversationId || '');
                         const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
-                        // Match: direct chatId equality OR friendId match (for receiver-replies and pending→real)
+                        // PRIMARY match: chatId
                         let shouldRender = !!(currentChat && incomingChatId && String(currentChat.id) === incomingChatId);
-                        if (!shouldRender && currentChat && incomingMsg.senderId) {
-                            const _activeFriendId = String(currentChat.friendId || currentChat.otherUserId ||
+
+                        // SECONDARY match: senderId === friendId (receiver-reply, pending→real)
+                        if (!shouldRender && currentChat && msg.senderId) {
+                            const _afid = String(
+                                currentChat.friendId || currentChat.otherUserId ||
                                 (currentChat.otherParticipant && currentChat.otherParticipant.id) ||
-                                currentChat.pendingReceiverId || '');
-                            if (_activeFriendId && String(incomingMsg.senderId) === _activeFriendId) {
-                                shouldRender = true;
-                            }
+                                currentChat.pendingReceiverId || ''
+                            );
+                            if (_afid && String(msg.senderId) === _afid) shouldRender = true;
                         }
 
                         if (shouldRender && currentChat) {
                             const allMsgs = (core && core.getMessages && core.getMessages()) || [];
-                            // Use incomingChatId if available, else fall back to currentChat.id
-                            const _matchId = incomingChatId || String(currentChat.id);
+                            const cid = String(currentChat.id);
                             const chatMsgs = allMsgs.filter(function(m) {
-                                return String(m.chatId || m.conversationId || '') === _matchId ||
-                                       String(m.chatId || m.conversationId || '') === String(currentChat.id);
+                                const mid = String(m.chatId || m.conversationId || '');
+                                return mid === cid || mid === incomingChatId || mid === '';
                             }).sort(function(a,b) { return _ts(a)-_ts(b); });
-                            const msgsToRender2 = chatMsgs.length > 0 ? chatMsgs : [incomingMsg];
-                            this.renderMessages(msgsToRender2, currentChat, core && core.getCurrentUser && core.getCurrentUser());
+
+                            // Always include the incoming message even if not yet in store
+                            const _alreadyIn = chatMsgs.some(function(m) {
+                                return msg.id && String(m.id) === String(msg.id);
+                            });
+                            const msgsToRender = _alreadyIn ? chatMsgs : chatMsgs.concat([msg]).sort(function(a,b){return _ts(a)-_ts(b);});
+
+                            this.renderMessages(msgsToRender, currentChat, core && core.getCurrentUser && core.getCurrentUser());
                             try { var c3=document.getElementById('messagesContainer'); if(c3) requestAnimationFrame(function(){c3.scrollTop=c3.scrollHeight;}); } catch(_e){}
                         }
 
@@ -3139,7 +3145,11 @@
 
             const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
 
-            const coreIsActive = core?.getState?.()?.state === 'ACTIVE';
+            const coreIsActive = core && (
+                (core.getState && (core.getState() === 'ACTIVE' || (core.getState() && core.getState().state === 'ACTIVE'))) ||
+                (core.isReady && core.isReady()) ||
+                (core.getCurrentConversation && !!core.getCurrentConversation())
+            );
 
             return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession || coreIsActive;
 
@@ -4346,10 +4356,9 @@
 
                         </div>
 
-                        <button class="chat-delete-btn" title="Delete chat"
-                            onclick="event.stopPropagation();window.messagesUI&&window.messagesUI.deleteChat&&window.messagesUI.deleteChat('${chat.id}')"
-                            style="display:none;border:none;background:none;cursor:pointer;color:#ef4444;padding:6px 8px;border-radius:8px;font-size:15px;flex-shrink:0;align-items:center;justify-content:center;">
-                            <i class="fas fa-trash-alt"></i>
+                        <button class="chat-delete-btn" data-delete-chat-id="${chat.id}" title="Delete chat"
+                            style="display:none;border:none;background:none;cursor:pointer;color:#ef4444;padding:6px 8px;border-radius:8px;font-size:15px;flex-shrink:0;">
+                            <i class="fas fa-trash-alt" style="pointer-events:none;"></i>
                         </button>
 
                     </div>
@@ -9680,46 +9689,16 @@ Type: ${message.type || 'text'}`;
             if (!selectedChats || selectedChats.size === 0) { UIRenderer.showNotification('Select at least one chat', 'error'); return; }
             const chatIds = Array.from(selectedChats);
             let ok = 0, fail = 0;
-
-            // Get auth token
+            // FIX: direct API call per target chat — core.sendMessage() binds to active chat
             let token = null;
-            try {
-                const sess = core && core.getSession && core.getSession();
-                token = (sess && sess.token) ||
-                    localStorage.getItem('authToken') || localStorage.getItem('token') ||
-                    localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
-            } catch(_e) {}
-
-            // Get full backend URL from core (avoids relative-URL failure in iframe context)
-            let baseUrl = '';
-            try {
-                baseUrl = (core && core.getBaseUrl && core.getBaseUrl()) ||
-                    (window.AppConfig && window.AppConfig.apiUrl) || '';
-                // Strip trailing /api if present — we add it below
-                baseUrl = baseUrl.replace(/\/api\/?$/, '');
-            } catch(_e) {}
-
+            try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
             for (const chatId of chatIds) {
                 try {
-                    // Use core.makeApiRequest if available (goes through parent bridge correctly)
-                    if (core && core.makeApiRequest) {
-                        const result = await core.makeApiRequest('/messages', 'POST', { chatId: chatId, content: msgContent, type: 'text' });
-                        if (result && result.success !== false) { ok++; }
-                        else { fail++; console.warn('[MultiSend] Failed chatId=' + chatId, result); }
-                    } else {
-                        const url = baseUrl ? (baseUrl + '/api/messages') : '/api/messages';
-                        const resp = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
-                            body: JSON.stringify({ chatId: chatId, content: msgContent, type: 'text' })
-                        });
-                        const result = await resp.json().catch(function() { return {}; });
-                        if (resp.ok && result.success !== false) { ok++; }
-                        else { fail++; console.warn('[MultiSend] Failed chatId=' + chatId, result); }
-                    }
+                    const resp = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify({ chatId: chatId, content: msgContent, type: 'text' }) });
+                    const result = await resp.json().catch(function() { return {}; });
+                    if (resp.ok && result.success !== false) { ok++; } else { fail++; console.warn('[MultiSend] Failed chatId=' + chatId, result); }
                 } catch(e) { fail++; console.warn('[MultiSend] Error chatId=' + chatId, e); }
             }
-
             if (ok > 0) {
                 UIRenderer.showNotification('\u2713 Sent to ' + ok + ' chat' + (ok > 1 ? 's' : '') + (fail > 0 ? ' (' + fail + ' failed)' : ''));
                 this._closeMultiSend();
@@ -10118,16 +10097,65 @@ Type: ${message.type || 'text'}`;
 
     }.init();
 
-    // ── CSS: show delete button on chat-item hover ──────────────────────────
-    (function injectDeleteBtnCss() {
-        const s = document.createElement('style');
-        s.id = 'chat-delete-btn-styles';
-        s.textContent = [
-            '.chat-item { position:relative; display:flex; align-items:center; }',
-            '.chat-item:hover .chat-delete-btn { display:flex !important; }',
-            '.chat-delete-btn:hover { background:rgba(239,68,68,0.1) !important; }'
-        ].join('\n');
+    // ── Delete chat: CSS + event delegation (works even before messagesUI is fully init'd) ──
+    (function() {
+        // Inject hover CSS
+        var s = document.createElement('style');
+        s.textContent =
+            '.chat-item { position:relative; }' +
+            '.chat-item:hover .chat-delete-btn { display:flex !important; align-items:center; justify-content:center; }' +
+            '.chat-delete-btn:hover { background:rgba(239,68,68,0.12) !important; }';
         document.head.appendChild(s);
+
+        // Global delegated listener — catches clicks even when button innerHTML is an <i> tag
+        document.addEventListener('click', function(e) {
+            var btn = e.target.closest
+                ? e.target.closest('[data-delete-chat-id]')
+                : null;
+            if (!btn) return;
+            e.stopPropagation();
+            e.preventDefault();
+            var chatId = btn.getAttribute('data-delete-chat-id');
+            if (!chatId) return;
+
+            // Animate row out immediately
+            var row = btn.closest('.chat-item');
+            if (row) {
+                row.style.transition = 'opacity 0.15s, max-height 0.2s, padding 0.2s';
+                row.style.opacity = '0';
+                row.style.maxHeight = '0';
+                row.style.overflow = 'hidden';
+                row.style.padding = '0';
+                setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
+            }
+
+            // Remove from core state + localStorage
+            var core = window.messagesCore || window.MessagesCore;
+            if (core && core.ChatManager) {
+                var cm = core.ChatManager;
+                cm._conversations = (cm._conversations || []).filter(function(c) { return String(c.id) !== String(chatId); });
+                if (cm._conversationsMap) { cm._conversationsMap.delete(chatId); cm._conversationsMap.delete(String(chatId)); }
+                if (cm._activeConversation && String(cm._activeConversation.id) === String(chatId)) {
+                    cm._activeConversation = null;
+                    cm._messages = [];
+                    var panel = document.getElementById('chatPanel');
+                    if (panel) panel.classList.add('hidden');
+                    var sidebar = document.getElementById('sidebar');
+                    if (sidebar) sidebar.classList.add('active');
+                }
+                try { localStorage.removeItem('kynecta_messages_v8_' + chatId); } catch(_) {}
+                try {
+                    var ss = core.SafeStorage || window.SafeStorage;
+                    if (ss && ss.setJSON) ss.setJSON('kynecta_chats_cache_v8', { conversations: cm._conversations, timestamp: Date.now() });
+                } catch(_) {}
+                if (cm._notifySubscribers) cm._notifySubscribers();
+            }
+
+            // Best-effort server delete
+            if (core && core.makeApiRequest) {
+                core.makeApiRequest('/chats/' + chatId, 'DELETE').catch(function() {});
+            }
+        }, true); // capture phase so stopPropagation happens before chat-item onclick
     })();
 
 
@@ -10288,10 +10316,8 @@ Type: ${message.type || 'text'}`;
 
         if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
 
-        // FIX: sidebar.add('active') on mobile hides the chat panel. Remove it instead.
-        if (sidebar && window.innerWidth <= 768) {
-            sidebar.classList.remove('active');
-        }
+        // FIX: On mobile sidebar+panel are exclusive; show panel by hiding sidebar
+        if (sidebar && window.innerWidth <= 768) sidebar.classList.remove('active');
 
         if (chatPanel) {
 
@@ -11368,48 +11394,7 @@ Type: ${message.type || 'text'}`;
 
         showNotification: UIRenderer.showNotification.bind(UIRenderer),
 
-        // ── deleteChat: remove from history immediately on click ─────────────
-        deleteChat: function(chatId) {
-            if (!chatId) return;
-            const strId = String(chatId);
-
-            // 1. Animate out instantly
-            const row = document.querySelector('.chat-item[data-chat-id="' + strId + '"]');
-            if (row) {
-                row.style.transition = 'opacity 0.15s, max-height 0.2s';
-                row.style.opacity = '0';
-                row.style.maxHeight = '0';
-                row.style.overflow = 'hidden';
-                setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
-            }
-
-            // 2. Remove from ChatManager in-memory state + localStorage
-            const core = getMessagesCore();
-            if (core && core.ChatManager) {
-                const cm = core.ChatManager;
-                cm._conversations = (cm._conversations || []).filter(function(c) { return String(c.id) !== strId; });
-                if (cm._conversationsMap) { cm._conversationsMap.delete(chatId); cm._conversationsMap.delete(strId); }
-                if (cm._activeConversation && String(cm._activeConversation.id) === strId) {
-                    cm._activeConversation = null;
-                    cm._messages = [];
-                    const panel = document.getElementById('chatPanel');
-                    if (panel) panel.classList.add('hidden');
-                    const sidebar = document.getElementById('sidebar');
-                    if (sidebar) sidebar.classList.add('active');
-                }
-                try {
-                    const _ss = core.SafeStorage || window.SafeStorage;
-                    if (_ss && _ss.setJSON) _ss.setJSON('kynecta_chats_cache_v8', { conversations: cm._conversations, timestamp: Date.now() });
-                } catch(_) {}
-                try { localStorage.removeItem('kynecta_messages_v8_' + strId); } catch(_) {}
-                if (cm._notifySubscribers) cm._notifySubscribers();
-            }
-
-            // 3. Best-effort server delete (non-blocking)
-            if (core && core.makeApiRequest) {
-                core.makeApiRequest('/chats/' + strId, 'DELETE').catch(function() {});
-            }
-        },
+        
 
         renderMultiSendChats: UIRenderer.renderMultiSendChats.bind(UIRenderer),
 
@@ -11645,24 +11630,19 @@ Type: ${message.type || 'text'}`;
 
 
 
-            // Search for existing conversation by friendId — check BOTH real and pending entries.
-            // Priority: real server conversation > pending conversation (avoids duplicates).
-            const _allConvs = core.getConversations?.() || [];
-            const _realConv = _allConvs.find((conversation) =>
-                !conversation?.isPending && (
-                    String(conversation?.friendId) === String(id) ||
-                    String(conversation?.otherParticipant?.id) === String(id) ||
-                    String(conversation?.otherUserId) === String(id) ||
-                    (Array.isArray(conversation?.participants) && conversation.participants.some((p) => String(p?.id || p) === String(id)))
-                )
+            const existingConversation = core.getConversations?.()?.find?.((conversation) =>
+
+                String(conversation?.friendId) === String(id) ||
+
+                String(conversation?.otherParticipant?.id) === String(id) ||
+
+                String(conversation?.otherUserId) === String(id) ||
+
+                String(conversation?.userId) === String(id) ||
+
+                (Array.isArray(conversation?.participants) && conversation.participants.some((participant) => String(participant?.id || participant) === String(id)))
+
             );
-            const _pendingConv = !_realConv && _allConvs.find((conversation) =>
-                conversation?.isPending && (
-                    String(conversation?.friendId) === String(id) ||
-                    String(conversation?.pendingReceiverId) === String(id)
-                )
-            );
-            const existingConversation = _realConv || _pendingConv || null;
 
 
 
@@ -11676,11 +11656,9 @@ Type: ${message.type || 'text'}`;
 
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
 
-            // FIX: On mobile, showing sidebar (add 'active') hides the chat panel — opposite of what we want.
-            // When opening a chat we need to HIDE the sidebar on mobile so the chat panel is visible.
-            if (sidebar && window.innerWidth <= 768) {
-                sidebar.classList.remove('active');
-            }
+            // FIX: On mobile sidebar + chatPanel are mutually exclusive.
+            // Adding 'active' to sidebar hides the chat panel — we want the opposite.
+            if (sidebar && window.innerWidth <= 768) sidebar.classList.remove('active');
 
             
 

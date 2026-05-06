@@ -2000,23 +2000,21 @@
                     recipientName: targetUserName
                 };
 
-                // FIX: getState() returns {state:'ACTIVE',...} — NOT a bare string.
-                // Old check `getState() === 'ACTIVE'` was ALWAYS false (object ≠ string),
-                // so the loop fired all 15 retries → panel opened/closed 15 times.
-                let _chatOpenFired = false;
+                // FIX: getState() returns {state:'ACTIVE',...} — not a bare string.
+                // The old check `getState() === 'ACTIVE'` was ALWAYS false, so the loop
+                // fired all 15 retries and dispatched 'messages:openChat' 15 times.
+                let _openOnce = false;
                 const tryOpen = (attempts) => {
-                    if (_chatOpenFired) return;
+                    if (_openOnce) return;
                     const core = window.messagesCore;
-                    let coreActive = false;
+                    let active = false;
                     if (core && typeof core.getState === 'function') {
                         const st = core.getState();
-                        coreActive = (st === 'ACTIVE') || !!(st && st.state === 'ACTIVE');
-                    } else if (core) {
-                        coreActive = !!core.isActive;
-                    }
-                    if (coreActive || attempts >= 15) {
-                        if (_chatOpenFired) return; // race guard
-                        _chatOpenFired = true;
+                        active = (st === 'ACTIVE') || !!(st && st.state === 'ACTIVE');
+                    } else if (core) { active = !!core.isActive; }
+                    if (active || attempts >= 15) {
+                        if (_openOnce) return;
+                        _openOnce = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
                     } else {
                         setTimeout(() => tryOpen(attempts + 1), 200);
@@ -2036,23 +2034,23 @@
             if (chatId) {
                 console.log('[Message HTML] Found chat in URL params:', { chatId, userName, type, environment });
                 const _urlDetail = { userId: parseInt(chatId), userName: userName || 'User', recipientId: parseInt(chatId), recipientName: userName || 'User' };
-                let _urlFired = false;
+                let _urlOnce = false;
                 const tryOpenUrl = (attempts) => {
-                    if (_urlFired) return;
+                    if (_urlOnce) return;
                     const core = window.messagesCore;
-                    let coreActive = false;
+                    let active = false;
                     if (core && typeof core.getState === 'function') {
                         const st = core.getState();
-                        coreActive = (st === 'ACTIVE') || !!(st && st.state === 'ACTIVE');
-                    } else if (core) { coreActive = !!core.isActive; }
-                    if (coreActive || attempts >= 20) {
-                        if (_urlFired) return;
-                        _urlFired = true;
+                        active = (st === 'ACTIVE') || !!(st && st.state === 'ACTIVE');
+                    } else if (core) { active = !!core.isActive; }
+                    if (active || attempts >= 20) {
+                        if (_urlOnce) return;
+                        _urlOnce = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail }));
                     } else { setTimeout(() => tryOpenUrl(attempts + 1), 200); }
                 };
                 setTimeout(() => tryOpenUrl(0), 200);
-                sessionStorage.setItem('open_chat_on_load', JSON.stringify({ userId: parseInt(chatId), userName: userName || 'User', type: type, timestamp: Date.now(), source: 'url-params', environment: environment }));
+                sessionStorage.setItem('open_chat_on_load', JSON.stringify({ userId: parseInt(chatId), userName: userName || 'User', type, timestamp: Date.now(), source: 'url-params', environment }));
                 const newUrl = window.location.pathname + (window.location.hash || '');
                 window.history.replaceState({}, document.title, newUrl);
             }

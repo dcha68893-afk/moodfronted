@@ -3024,10 +3024,24 @@ try {
             try {
                 const _activeForRender = this._activeConversation;
                 const _msgChatId = String(message.chatId || message.conversationId || '');
-                if (_activeForRender && _msgChatId && String(_activeForRender.id) === _msgChatId) {
+                const _activeChatId = String(_activeForRender ? _activeForRender.id : '');
+
+                // Match by chatId OR by friendId (receiver-reply case)
+                let _shouldRenderNow = !!(_activeForRender && _msgChatId && _activeChatId === _msgChatId);
+                if (!_shouldRenderNow && _activeForRender && message.senderId) {
+                    const _afid = String(_activeForRender.friendId || _activeForRender.otherUserId ||
+                        (_activeForRender.otherParticipant && _activeForRender.otherParticipant.id) || '');
+                    if (_afid && String(message.senderId) === _afid) _shouldRenderNow = true;
+                }
+
+                if (_shouldRenderNow && _activeForRender) {
                     const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const _filterCid = _msgChatId || _activeChatId;
                     const _chatMsgs = this._messages
-                        .filter(m => String(m.chatId || m.conversationId || '') === _msgChatId)
+                        .filter(m => {
+                            const mid = String(m.chatId || m.conversationId || '');
+                            return mid === _filterCid || mid === _activeChatId;
+                        })
                         .sort((a, b) => _tsMs2(a) - _tsMs2(b));
                     window.dispatchEvent(new CustomEvent('renderMessages', {
                         detail: {
@@ -5616,33 +5630,32 @@ try {
             }
 
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-            // FIX: Direct chatId match OR match by friendId (handles pending→real chatId promotion
-            // and the case where receiver replies and sender's activeChat has a different key).
-            let isThisChat = !!(activeChat && chatId && String(activeChat.id) === String(chatId));
+
+            // Resolve the best chatId from the message — server may put it in chatId OR conversationId
+            const resolvedChatId = chatId ||
+                (normalizedMessage && String(normalizedMessage.chatId || normalizedMessage.conversationId || '')) || '';
+
+            // PRIMARY match: chatId equality
+            let isThisChat = !!(activeChat && resolvedChatId && String(activeChat.id) === resolvedChatId);
+
+            // SECONDARY match: friendId — catches receiver-reply case where sender's activeChat.id
+            // is the real chatId but the incoming message was built with a different chatId field,
+            // OR when activeChat is still a pending_ conv and the real chatId just arrived.
             if (!isThisChat && activeChat && normalizedMessage) {
-                // Check if incoming message is from/to the person we're chatting with
-                const _activeFriendId = String(
-                    activeChat.friendId || activeChat.pendingReceiverId ||
-                    activeChat.otherUserId ||
-                    (activeChat.otherParticipant && activeChat.otherParticipant.id) || ''
+                const _afid = String(
+                    activeChat.friendId || activeChat.otherUserId ||
+                    (activeChat.otherParticipant && activeChat.otherParticipant.id) ||
+                    activeChat.pendingReceiverId || ''
                 );
-                const _msgSenderId = String(normalizedMessage.senderId || '');
-                if (_activeFriendId && _msgSenderId && _activeFriendId === _msgSenderId) {
+                const _msid = String(normalizedMessage.senderId || '');
+                if (_afid && _msid && _afid === _msid) {
                     isThisChat = true;
-                    // Also promote: if activeChat is pending_ but chatId is now real, update it
-                    if (chatId && (activeChat.isPending || String(activeChat.id).startsWith('pending_'))) {
+                    // Promote pending→real if applicable
+                    if (resolvedChatId && (activeChat.isPending || String(activeChat.id).startsWith('pending_'))) {
                         const _real = ChatManager._conversationsMap &&
-                            (ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId)));
+                            (ChatManager._conversationsMap.get(resolvedChatId) ||
+                             ChatManager._conversationsMap.get(String(resolvedChatId)));
                         if (_real) ChatManager._activeConversation = _real;
-                    }
-                }
-                // Also match if activeChat is the real conversation for this chatId
-                if (!isThisChat && chatId) {
-                    const _conv = ChatManager._conversationsMap &&
-                        (ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId)));
-                    if (_conv && _activeFriendId) {
-                        const _cFriendId = String(_conv.friendId || _conv.otherUserId || '');
-                        if (_cFriendId && _activeFriendId === _cFriendId) isThisChat = true;
                     }
                 }
             }
@@ -5660,17 +5673,16 @@ try {
             } catch (_e) {}
 
             if (isThisChat) {
-                // Re-render the chat panel with strictly filtered messages.
-                // addMessage() above also fires renderMessages, but this acts as a
-                // safety net to ensure the UI always updates even if addMessage's
-                // active-chat check missed (e.g. _activeConversation set after addMessage ran).
                 try {
                     const _all = ChatManager._messages || [];
-                    // STRICT: never fall back to _all — that would cross-contaminate chats.
+                    const _matchId = resolvedChatId || String(activeChat ? activeChat.id : '');
                     let _chatMsgs = _all
-                        .filter(function(m) { return String(m.chatId || m.conversationId || '') === String(chatId); })
+                        .filter(function(m) {
+                            const mid = String(m.chatId || m.conversationId || '');
+                            return mid === _matchId || mid === String(activeChat ? activeChat.id : '');
+                        })
                         .sort(function(a, b) { return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp); });
-                    // FIX: if the new message isn't in the array yet (race condition), inject it manually
+                    // Inject new message if not already present (race guard)
                     if (normalizedMessage) {
                         const _alreadyIn = _chatMsgs.some(function(m) {
                             return (m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id)) ||
@@ -5683,7 +5695,11 @@ try {
                     }
                     if (_chatMsgs.length > 0) {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: { messages: _chatMsgs, currentChat: activeChat, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
+                            detail: {
+                                messages: _chatMsgs,
+                                currentChat: ChatManager._activeConversation || activeChat,
+                                currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser()
+                            }
                         }));
                     }
                 } catch (_e) {}
@@ -6226,12 +6242,8 @@ try {
         isAuthenticated: () => SessionManager.isAuthenticated(),
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
-        
-        makeApiRequest: (endpoint, method, data, params) => makeApiRequest(endpoint, method, data, params),
-        getBaseUrl: () => {
-            // Returns the backend base URL (without /api) for direct fetch calls
-            try { return window.location.origin === 'null' ? 'https://moodchat-fy56.onrender.com' : (window.__backendUrl || 'https://moodchat-fy56.onrender.com'); } catch(_) { return ''; }
-        },
+
+        makeApiRequest: (endpoint, method, data, params) => makeApiRequest(endpoint, method || 'GET', data, params),
         getSession: () => _storedSession,
         multiSendSelectedChats: new Set(),
         getOrCreateConversationByUserId: (userId, userName) => 

@@ -2643,7 +2643,11 @@
                 if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
-                    window.__activeCallInProgress = false;
+                    // Only clear activeCallInProgress when source is definitive end signals
+                    // NOT during setup echoes (parent-echo is used for syncing, not ending)
+                    if (data.source !== 'parent-echo') {
+                        window.__activeCallInProgress = false;
+                    }
                 }
 
                 // CALLS_IFRAME_READY handshake - calls iframe signals it is ready to receive CALL_INCOMING
@@ -4018,6 +4022,13 @@
                 }
 
                 if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
+                    // Guard: if a call is actively in progress (user just started it),
+                    // ignore spurious CALL_ENDED_RETURN signals that arrive during setup.
+                    if (window.__activeCallInProgress) {
+                        console.warn('[Parent] CALL_ENDED_RETURN ignored — call still in progress');
+                        return;
+                    }
+
                     let ctx = window.__callReturnContext;
                     if (!ctx) {
                         try { const s = sessionStorage.getItem('call_return_ctx'); if (s) ctx = JSON.parse(s); } catch(e) {}
