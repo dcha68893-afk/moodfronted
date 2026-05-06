@@ -4513,9 +4513,13 @@ const openGroupChat = async function(groupData) {
         const sidebar = safeGetElement('#sidebar');
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
-        if (isMobile) {
+        // Refresh isMobile at call time — resize may have occurred
+        const _mobile = window.innerWidth <= 768;
+        
+        if (_mobile) {
             if (sidebar) {
                 sidebar.style.display = 'none';
+                sidebar.style.visibility = 'hidden';
                 sidebar.classList.add('hidden');
             }
             if (groupChatPanel) {
@@ -4989,8 +4993,14 @@ function closeGroupChatMobile() {
         const sidebar = safeGetElement('#sidebar');
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
-        if (isMobile) {
-            if (sidebar) { sidebar.style.display = 'flex'; sidebar.classList.remove('hidden'); }
+        const _mobile = window.innerWidth <= 768;
+        
+        if (_mobile) {
+            if (sidebar) {
+                sidebar.style.display = '';
+                sidebar.style.visibility = '';
+                sidebar.classList.remove('hidden');
+            }
             if (groupChatPanel) {
                 groupChatPanel.style.display = 'none';
                 groupChatPanel.classList.remove('active');
@@ -7192,7 +7202,9 @@ function addGroupItem(groupData, container, type) {
         
         groupItem.addEventListener('click', (e) => {
             if (!e.target.closest('.group-actions')) {
-                showGroupDetails(safeGroupData, type);
+                // Open chat directly; fall back to details if chat fails
+                try { openGroupChat(safeGroupData); }
+                catch(_) { showGroupDetails(safeGroupData, type); }
             }
         });
         

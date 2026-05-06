@@ -1325,4 +1325,405 @@
         setTimeout(boot, 0);
     }
 
+    /* ══════════════════════════════════════════════════════════════════════
+       EXTENDED FIXES
+       1. Group counts — force saveGroups → updateGroupCounts after every sync
+       2. Discover: smart buttons (Open/Delete vs Join) based on membership
+       3. Public groups visible to all users (inject from /groups/search)
+       4. Invite: search all users, not just friends
+       5. Mobile: group click opens panel, sidebar hides reliably
+       ══════════════════════════════════════════════════════════════════════ */
+
+    function _myUserId() {
+        try {
+            const gc = window.GroupCore;
+            if (gc) {
+                const u = gc.currentUser || (gc.getCurrentUser && gc.getCurrentUser());
+                if (u) return String(u.id || u.uid || u.userId || '');
+            }
+        } catch (_) {}
+        return '';
+    }
+
+    function _myRoleInGroup(group) {
+        if (!group) return null;
+        const uid = _myUserId();
+        if (!uid) return null;
+        if (String(group.createdBy) === uid || group.isCreator) return 'owner';
+        if (group.isAdmin) return 'admin';
+        if (group.role && group.role !== 'none') return group.role;
+        if (group.isMember) return 'member';
+        const members = group.members || [];
+        for (const m of members) {
+            if (String(m.userId || m.id || '') === uid) return m.role || 'member';
+        }
+        return null;
+    }
+
+    function _openGroupChat(gData) {
+        if (typeof openGroupChat === 'function') {
+            try { openGroupChat(gData); return; } catch (_) {}
+        }
+        if (typeof window.__gcOpenPanel === 'function') {
+            try { window.__gcOpenPanel(gData); } catch (_) {}
+        }
+    }
+
+    function _hideSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar) return;
+        sidebar.style.display = 'none';
+        sidebar.style.visibility = 'hidden';
+        sidebar.classList.add('hidden');
+    }
+
+    function _showSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        if (!sidebar) return;
+        sidebar.style.display = '';
+        sidebar.style.visibility = '';
+        sidebar.classList.remove('hidden');
+    }
+
+    /* FIX 1 — Group counts */
+    (function patchGroupCounts() {
+        function forceSync() {
+            const gc = window.GroupCore;
+            if (!gc) return;
+            try { if (typeof gc.saveGroups === 'function') gc.saveGroups(); } catch (_) {}
+            try { if (typeof updateGroupCounts === 'function') updateGroupCounts(); } catch (_) {}
+            try { if (typeof updateCurrentSection === 'function') updateCurrentSection(); } catch (_) {}
+        }
+        function wireGCEvents() {
+            const gc = window.GroupCore;
+            if (!gc || typeof gc.on !== 'function') { setTimeout(wireGCEvents, 600); return; }
+            gc.on('groups:list-updated', forceSync);
+            gc.on('groups:loaded', forceSync);
+        }
+        wireGCEvents();
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.category-btn')) setTimeout(forceSync, 80);
+        }, true);
+        let ticks = 0;
+        const timer = setInterval(() => {
+            ticks++;
+            const gc = window.GroupCore;
+            if (gc && gc.groups && gc.groups.length > 0) forceSync();
+            if (ticks >= 10) clearInterval(timer);
+        }, 3000);
+    })();
+
+    /* FIX 2 — Discover smart buttons */
+    (function patchDiscoverButtons() {
+        function upgradeCard(card) {
+            if (!card || card.dataset.discoverPatched) return;
+            card.dataset.discoverPatched = '1';
+            const btn = card.querySelector('[data-action="join"], [data-id]');
+            if (!btn) return;
+            const gid = btn.dataset.id || btn.dataset.gid;
+            if (!gid) return;
+            const gc = window.GroupCore;
+            const gData = gc && gc.getGroupById ? gc.getGroupById(parseInt(gid) || gid) : null;
+            const role = _myRoleInGroup(gData || {});
+            if (role) {
+                btn.textContent = '▶ Open';
+                btn.style.background = '#43a047';
+                btn.onclick = (e) => { e.stopPropagation(); if (gData) _openGroupChat(gData); };
+                if ((role === 'owner' || role === 'admin') && !btn.parentNode.querySelector('[data-del-gid]')) {
+                    const del = document.createElement('button');
+                    del.dataset.delGid = gid;
+                    del.style.cssText = 'padding:7px 10px;border-radius:8px;border:none;background:#e53935;color:#fff;cursor:pointer;font-size:12px;margin-left:6px';
+                    del.innerHTML = '<i class="fas fa-trash"></i>';
+                    del.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (!confirm('Delete this group?')) return;
+                        const gc2 = window.GroupCore;
+                        const doIt = gc2 && gc2.deleteGroup
+                            ? () => gc2.deleteGroup(parseInt(gid) || gid)
+                            : () => apiFetch('/groups/' + gid, { method: 'DELETE' });
+                        doIt().then(() => toast('Group deleted')).catch(err => toast(err.message || 'Failed', 'error'));
+                    });
+                    btn.parentNode.appendChild(del);
+                }
+            } else {
+                const newBtn = btn.cloneNode(true);
+                btn.parentNode.replaceChild(newBtn, btn);
+                newBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    newBtn.disabled = true;
+                    newBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                    try {
+                        await apiFetch('/groups/' + gid + '/join', { method: 'POST' });
+                        newBtn.innerHTML = '<i class="fas fa-check"></i>';
+                        newBtn.style.background = '#43a047';
+                        toast('Join request sent!');
+                        const gc2 = window.GroupCore;
+                        if (gc2 && gc2.requestGroupList) gc2.requestGroupList().catch(() => {});
+                    } catch (err) {
+                        newBtn.disabled = false;
+                        newBtn.innerHTML = '<i class="fas fa-user-plus"></i>';
+                        toast(err.message || 'Failed', 'error');
+                    }
+                });
+            }
+        }
+        const obs = new MutationObserver((muts) => {
+            for (const m of muts) {
+                for (const n of m.addedNodes) {
+                    if (n.nodeType !== 1) continue;
+                    const btn = qs('[data-action="join"], [data-id]', n);
+                    if (btn) upgradeCard(n.closest('.group-item') || n);
+                    else qsa('[data-action="join"], [data-id]', n).forEach(b => upgradeCard(b.closest('.group-item') || b.parentElement));
+                }
+            }
+        });
+        function watchDiscover() {
+            const el = qs('#discoverResults') || qs('#discoverGroupsList');
+            if (el) obs.observe(el, { childList: true, subtree: true });
+            else {
+                const dObs = new MutationObserver(() => {
+                    const found = qs('#discoverResults') || qs('#discoverGroupsList');
+                    if (found) { obs.observe(found, { childList: true, subtree: true }); dObs.disconnect(); }
+                });
+                dObs.observe(document.body, { childList: true, subtree: true });
+            }
+        }
+        watchDiscover();
+    })();
+
+    /* FIX 3 — Public groups visible to all users */
+    (function patchPublicGroups() {
+        let _loaded = false;
+        function injectPublicGroups() {
+            const gc = window.GroupCore;
+            apiFetch('/groups/search?isPublic=true&limit=30')
+                .then(d => {
+                    const publicGroups = d?.data?.groups || d?.data || d?.groups || [];
+                    if (!publicGroups.length) return;
+                    const allList = document.getElementById('allGroupsList');
+                    if (!allList) return;
+                    _loaded = true;
+                    publicGroups.forEach(pg => {
+                        if (gc && gc.groups && gc.groups.some(g => String(g.id) === String(pg.id))) return;
+                        if (allList.querySelector('[data-group-id="' + pg.id + '"]')) return;
+                        const initials = (pg.name || 'G').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+                        const item = document.createElement('div');
+                        item.className = 'group-item';
+                        item.dataset.groupId = pg.id;
+                        item.dataset.publicInjected = '1';
+                        item.innerHTML =
+                            '<div class="group-avatar" style="background:linear-gradient(135deg,#667eea,#764ba2)">' +
+                            '<span>' + initials + '</span></div>' +
+                            '<div class="group-info">' +
+                            '<div class="group-name"><span class="group-name-text">' + (pg.name || 'Unnamed') + '</span>' +
+                            '<span class="group-details"><span style="padding:2px 7px;border-radius:10px;font-size:11px;background:#4caf5020;color:#4caf50;font-weight:600">Public</span></span></div>' +
+                            '<div class="group-details">' +
+                            '<span class="member-count"><i class="fas fa-users"></i> ' + (pg.memberCount || (pg.stats && pg.stats.totalMembers) || 0) + '</span>' +
+                            (pg.purpose ? '<span class="group-purpose-tag">' + pg.purpose + '</span>' : '') + '</div>' +
+                            (pg.description ? '<div style="font-size:13px;color:var(--text-secondary);margin-top:4px">' + String(pg.description).slice(0, 80) + '</div>' : '') +
+                            '</div>' +
+                            '<div class="group-actions">' +
+                            '<button class="group-action-btn" data-pub-join="' + pg.id + '" title="Join Group"><i class="fas fa-user-plus"></i></button>' +
+                            '</div>';
+                        item.querySelector('[data-pub-join]').addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            const b = e.currentTarget;
+                            b.disabled = true;
+                            b.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                            try {
+                                await apiFetch('/groups/' + pg.id + '/join', { method: 'POST' });
+                                b.innerHTML = '<i class="fas fa-check"></i>';
+                                b.style.background = '#43a047';
+                                toast('Join request sent!');
+                                const gc2 = window.GroupCore;
+                                if (gc2 && gc2.requestGroupList) gc2.requestGroupList().catch(() => {});
+                            } catch (err) {
+                                b.disabled = false;
+                                b.innerHTML = '<i class="fas fa-user-plus"></i>';
+                                toast(err.message || 'Failed', 'error');
+                            }
+                        });
+                        item.addEventListener('click', (e) => {
+                            if (!e.target.closest('.group-actions')) toast('Join this group to open chat', 'info');
+                        });
+                        const empty = allList.querySelector('.empty-state');
+                        if (empty) empty.remove();
+                        allList.appendChild(item);
+                    });
+                })
+                .catch(() => {});
+        }
+        function tryLoad() {
+            const gc = window.GroupCore;
+            if (gc && gc.groups !== undefined) injectPublicGroups();
+            else setTimeout(tryLoad, 800);
+        }
+        setTimeout(tryLoad, 1500);
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.category-btn');
+            if (!btn) return;
+            const t = btn.dataset.section || btn.dataset.tab || btn.id || '';
+            if (t === 'all' || t === 'allTab' || t === 'allGroups') {
+                _loaded = false;
+                setTimeout(injectPublicGroups, 350);
+            }
+        });
+        function wireEvent() {
+            const gc = window.GroupCore;
+            if (!gc || typeof gc.on !== 'function') { setTimeout(wireEvent, 600); return; }
+            gc.on('groups:list-updated', () => { _loaded = false; setTimeout(injectPublicGroups, 400); });
+        }
+        wireEvent();
+    })();
+
+    /* FIX 4 — Invite: search all users */
+    (function patchInviteSearch() {
+        function injectUserSearch() {
+            const invBody = document.getElementById('inviteBody');
+            if (!invBody || !invBody.children.length) return;
+            if (invBody.querySelector('#_patchUserSearchWrap')) return;
+            const wrap = document.createElement('div');
+            wrap.id = '_patchUserSearchWrap';
+            wrap.style.cssText = 'margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color)';
+            wrap.innerHTML =
+                '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;font-weight:600">' +
+                '<i class="fas fa-search"></i> Search all users</div>' +
+                '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+                '<input id="_patchUserSearchInput" placeholder="Name or @username\u2026" autocomplete="off"' +
+                ' style="flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--border-color);' +
+                'background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:13px;outline:none">' +
+                '<button id="_patchUserSearchBtn" style="padding:9px 14px;border-radius:8px;border:none;' +
+                'background:var(--primary-color,#6c63ff);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Search</button>' +
+                '</div>' +
+                '<div id="_patchUserResults" style="max-height:220px;overflow-y:auto"></div>';
+            invBody.appendChild(wrap);
+
+            const input   = wrap.querySelector('#_patchUserSearchInput');
+            const btn     = wrap.querySelector('#_patchUserSearchBtn');
+            const results = wrap.querySelector('#_patchUserResults');
+
+            function doSearch() {
+                const q = input.value.trim();
+                if (!q || q.length < 2) { results.innerHTML = ''; return; }
+                results.innerHTML = '<div style="padding:10px;color:var(--text-secondary);font-size:13px"><i class="fas fa-spinner fa-spin"></i> Searching\u2026</div>';
+                apiFetch('/users/search?query=' + encodeURIComponent(q) + '&limit=10')
+                    .then(d => {
+                        const users = d?.data?.users || d?.data || d?.users || [];
+                        if (!users.length) { results.innerHTML = '<div style="padding:10px;color:var(--text-secondary);font-size:13px">No users found</div>'; return; }
+                        results.innerHTML = '';
+                        const gid = window.selectedGroup?.id || document.getElementById('invGroupSel')?.value;
+                        users.forEach(u => {
+                            const name = u.displayName || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.username || 'User';
+                            const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || 'U';
+                            const row = document.createElement('div');
+                            row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border-color)';
+                            row.innerHTML =
+                                '<div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);' +
+                                'flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:12px">' + initials + '</div>' +
+                                '<div style="flex:1"><div style="font-weight:500;font-size:13px">' + name + '</div>' +
+                                (u.username ? '<div style="font-size:11px;color:var(--text-secondary)">@' + u.username + '</div>' : '') + '</div>' +
+                                '<button data-uid="' + u.id + '" style="padding:5px 12px;border-radius:8px;border:none;' +
+                                'background:var(--primary-color,#6c63ff);color:#fff;font-size:12px;font-weight:600;cursor:pointer">Invite</button>';
+                            row.querySelector('[data-uid]').addEventListener('click', async (e) => {
+                                const ib = e.currentTarget;
+                                const currentGid = gid || window.selectedGroup?.id || document.getElementById('invGroupSel')?.value;
+                                if (!currentGid) { toast('Select a group first', 'error'); return; }
+                                ib.disabled = true; ib.textContent = '\u2026';
+                                try {
+                                    await apiFetch('/group-members/' + currentGid + '/invitations', {
+                                        method: 'POST',
+                                        body: { inviteeId: parseInt(u.id) || u.id, role: 'member' }
+                                    });
+                                    ib.textContent = '\u2713 Invited';
+                                    ib.style.background = '#43a047';
+                                    toast('Invitation sent to ' + name);
+                                } catch (err) {
+                                    ib.disabled = false; ib.textContent = 'Invite';
+                                    toast(err.message || 'Failed', 'error');
+                                }
+                            });
+                            results.appendChild(row);
+                        });
+                    })
+                    .catch(err => { results.innerHTML = '<div style="padding:10px;color:var(--text-secondary);font-size:13px">' + (err.message || 'Search failed') + '</div>'; });
+            }
+            btn.addEventListener('click', doSearch);
+            let deb;
+            input.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') { doSearch(); return; }
+                clearTimeout(deb); deb = setTimeout(doSearch, 380);
+            });
+        }
+
+        const obs = new MutationObserver(() => {
+            const ib = document.getElementById('inviteBody');
+            if (ib && ib.children.length && !ib.querySelector('#_patchUserSearchWrap')) setTimeout(injectUserSearch, 80);
+        });
+        function startWatch() {
+            const ib = document.getElementById('inviteBody');
+            if (ib) obs.observe(ib, { childList: true });
+            else {
+                const dObs = new MutationObserver(() => {
+                    const found = document.getElementById('inviteBody');
+                    if (found) { obs.observe(found, { childList: true }); dObs.disconnect(); }
+                });
+                dObs.observe(document.body, { childList: true, subtree: true });
+            }
+        }
+        startWatch();
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#groupInvitesBtn') || e.target.closest('[data-tab="invite"]') ||
+                e.target.closest('[data-inv-tab="friends"]')) setTimeout(injectUserSearch, 400);
+        });
+    })();
+
+    /* FIX 5 — Mobile: group click opens panel, sidebar hides */
+    (function patchMobileGroupOpen() {
+        // Capture phase so we run before module click handlers
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.group-actions') || e.target.closest('[data-action]') ||
+                e.target.closest('[data-pub-join]')) return;
+
+            const item = e.target.closest('.group-item');
+            if (!item || item.dataset.publicInjected) return;
+
+            const gid = item.dataset.groupId || item.dataset.gid;
+            if (!gid) return;
+
+            const gc = window.GroupCore;
+            let gData = gc && gc.getGroupById ? gc.getGroupById(parseInt(gid) || gid) : null;
+            if (!gData) {
+                for (const k of ['groups', 'myGroups', 'joinedGroups', 'adminGroups']) {
+                    if (!gData && gc && Array.isArray(gc[k])) {
+                        gData = gc[k].find(g => String(g.id) === String(gid));
+                    }
+                }
+            }
+            if (!gData) return;
+
+            if (window.innerWidth <= 768) {
+                _hideSidebar();
+                const panel = document.getElementById('groupChatPanel');
+                if (panel) { panel.style.display = 'flex'; panel.classList.add('active'); }
+            }
+
+            _openGroupChat(gData);
+        }, true);
+
+        // Back/close buttons restore sidebar
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.mobile-back-btn, .gc-back-btn, #closeChatBtn, #backBtn')) return;
+            if (window.innerWidth <= 768) {
+                _showSidebar();
+                const panel = document.getElementById('groupChatPanel');
+                if (panel) { panel.style.display = 'none'; panel.classList.remove('active'); }
+            }
+        });
+
+        // Restore sidebar when user rotates/resizes back to desktop
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) _showSidebar();
+        });
+    })();
+
 })();

@@ -2000,21 +2000,20 @@
                     recipientName: targetUserName
                 };
 
-                // FIX: getState() returns {state:'ACTIVE',...} — not a bare string.
-                // The old check `getState() === 'ACTIVE'` was ALWAYS false, so the loop
-                // fired all 15 retries and dispatched 'messages:openChat' 15 times.
-                let _openOnce = false;
+                // FIX: core.getState() returns {state:'ACTIVE',...} — NOT a bare string.
+                // Old check `getState() === 'ACTIVE'` was always false → fired 15 times.
+                let _fired = false;
                 const tryOpen = (attempts) => {
-                    if (_openOnce) return;
-                    const core = window.messagesCore;
-                    let active = false;
-                    if (core && typeof core.getState === 'function') {
-                        const st = core.getState();
-                        active = (st === 'ACTIVE') || !!(st && st.state === 'ACTIVE');
-                    } else if (core) { active = !!core.isActive; }
-                    if (active || attempts >= 15) {
-                        if (_openOnce) return;
-                        _openOnce = true;
+                    if (_fired) return;
+                    const _core = window.messagesCore;
+                    let _active = false;
+                    if (_core && typeof _core.getState === 'function') {
+                        const _st = _core.getState();
+                        _active = (_st === 'ACTIVE') || !!(_st && _st.state === 'ACTIVE');
+                    } else if (_core) { _active = !!_core.isActive; }
+                    if (_active || attempts >= 15) {
+                        if (_fired) return;
+                        _fired = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
                     } else {
                         setTimeout(() => tryOpen(attempts + 1), 200);
@@ -2034,18 +2033,18 @@
             if (chatId) {
                 console.log('[Message HTML] Found chat in URL params:', { chatId, userName, type, environment });
                 const _urlDetail = { userId: parseInt(chatId), userName: userName || 'User', recipientId: parseInt(chatId), recipientName: userName || 'User' };
-                let _urlOnce = false;
+                let _urlFired = false;
                 const tryOpenUrl = (attempts) => {
-                    if (_urlOnce) return;
-                    const core = window.messagesCore;
-                    let active = false;
-                    if (core && typeof core.getState === 'function') {
-                        const st = core.getState();
-                        active = (st === 'ACTIVE') || !!(st && st.state === 'ACTIVE');
-                    } else if (core) { active = !!core.isActive; }
-                    if (active || attempts >= 20) {
-                        if (_urlOnce) return;
-                        _urlOnce = true;
+                    if (_urlFired) return;
+                    const _core = window.messagesCore;
+                    let _active = false;
+                    if (_core && typeof _core.getState === 'function') {
+                        const _st = _core.getState();
+                        _active = (_st === 'ACTIVE') || !!(_st && _st.state === 'ACTIVE');
+                    } else if (_core) { _active = !!_core.isActive; }
+                    if (_active || attempts >= 20) {
+                        if (_urlFired) return;
+                        _urlFired = true;
                         window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail }));
                     } else { setTimeout(() => tryOpenUrl(attempts + 1), 200); }
                 };

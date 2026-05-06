@@ -5050,6 +5050,22 @@ case 'CALL_INITIATED':
         },
 
         handleCallEnded: function(callData) {
+            // ── Guard: ignore if no call was actually active ─────────────────
+            // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
+            // is visible and UIState says idle, this is a ghost signal — drop it.
+            const _anyScreenActive =
+                UIState.callActive ||
+                UIState.callState === 'calling' ||
+                UIState.callState === 'connecting' ||
+                UIState.callState === 'connected' ||
+                (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active')) ||
+                (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
+                (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active'));
+            if (!_anyScreenActive) {
+                console.warn('[Calls UI] handleCallEnded ignored — no active call screen visible (stale echo)');
+                return;
+            }
+
             // ── Debounce: ignore duplicate CALL_ENDED within 3 seconds ──────
             const now = Date.now();
             if (window.__callEndedHandledAt && (now - window.__callEndedHandledAt) < 3000) {
@@ -5057,7 +5073,7 @@ case 'CALL_INITIATED':
                 return;
             }
             window.__callEndedHandledAt = now;
-            setTimeout(() => { window.__callEndedHandledAt = 0; }, 5000); // reset after 5s for next call
+            setTimeout(() => { window.__callEndedHandledAt = 0; }, 5000);
 
             // ── FIX: Immediately restore parent layout + reset to idle screen ──
             window.__callActive = false;
@@ -5214,14 +5230,50 @@ case 'CALL_INITIATED':
             window.__callOriginChatUserId = null;
             window.__callOriginChatUserName = null;
 
-            // ── Signal parent to navigate back to call origin ─────────────────
-            // CALL_ENDED_RETURN is the single signal. chat.html handles navigation
-            // using __callReturnContext which was set when the call was dispatched.
-            // We do NOT send SWITCH_MODULE here — that caused double navigation.
+            // ── Restore sidebar icons to parent shell ────────────────────────
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
             }
+
+            // ── Navigate back to origin module (with short delay for animation) ──
+            setTimeout(() => {
+                if (window.parent && window.parent !== window) {
+                    if (returnTo === 'messages' && chatUserId) {
+                        // Return to messages module AND re-open the specific chat
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: window.__callOriginChatUserName || null },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo === 'friends') {
+                        // Return to friends/contacts page
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'friends',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo && returnTo !== 'calls') {
+                        // Return to any other named module
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: returnTo,
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else {
+                        // Fallback: always go to messages, never the calls panel
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    }
+                }
+
                 // NEVER hide sidebar or main content - always use overlay
                 const sidebar = document.getElementById('sidebar');
                 if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
@@ -5230,11 +5282,20 @@ case 'CALL_INITIATED':
                 if (typeof showIdleScreen === 'function') {
                     showIdleScreen();
                 } else {
+                    // Fallback: manually show idle screen
                     const idleScreen = document.getElementById('idleScreen');
-                    const callingOverlay = document.getElementById('callingScreen');
-                    if (idleScreen) { idleScreen.classList.add('active'); idleScreen.style.display = 'flex'; }
-                    if (callingOverlay) { callingOverlay.classList.remove('active'); callingOverlay.style.display = 'none'; }
+                    const callingOverlay = document.getElementById('callingScreen'); // unified screen
+                    if (idleScreen) {
+                        idleScreen.classList.add('active');
+                        idleScreen.style.display = 'flex';
+                    }
+                    if (callingOverlay) {
+                        callingOverlay.classList.remove('active');
+                        callingOverlay.style.display = 'none';
+                    }
                 }
+                UIState.currentView = 'sidebar';
+            }, 350); // 350ms — enough for overlay fade but snappy UX
 
             // ── Refresh call history ─────────────────────────────────────────
             setTimeout(() => {

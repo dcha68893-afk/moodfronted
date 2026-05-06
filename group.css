@@ -299,6 +299,10 @@
                 z-index: auto !important;
             }
             
+            .sidebar.hidden {
+                display: none !important;
+            }
+            
             .group-details-panel {
                 position: relative !important;
                 width: 100% !important;
@@ -569,11 +573,19 @@
     }
     
     .sidebar {
-        transition: transform 0.3s ease;
+        transition: transform 0.3s ease, opacity 0.2s ease;
     }
     
     .sidebar.hidden {
+        display: none !important;
         transform: translateX(-100%);
+        opacity: 0;
+        pointer-events: none;
+    }
+    
+    .group-chat-panel.active ~ .sidebar,
+    body.chat-open .sidebar {
+        display: none !important;
     }
     
     .chat-header {

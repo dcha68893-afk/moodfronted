@@ -2139,6 +2139,10 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         
         registerUIEventListener(groupItem, 'click', (e) => {
             if (!e.target.closest('.group-actions')) {
+                // Open chat directly; fall back to details panel if unavailable
+                if (typeof openGroupChat === 'function') {
+                    try { openGroupChat(groupData); return; } catch(_) {}
+                }
                 if (typeof showGroupDetails === 'function') {
                     showGroupDetails(groupData, safeType);
                 }
@@ -2148,6 +2152,9 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         registerUIEventListener(groupItem, 'keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
+                if (typeof openGroupChat === 'function') {
+                    try { openGroupChat(groupData); return; } catch(_) {}
+                }
                 if (typeof showGroupDetails === 'function') {
                     showGroupDetails(groupData, safeType);
                 }
