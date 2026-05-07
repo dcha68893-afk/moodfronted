@@ -468,6 +468,10 @@
             right: 0 !important;
             z-index: 10000 !important;
             background: transparent !important;
+            /* Override .hidden — the iframe MUST be visible during a call */
+            visibility: visible !important;
+            pointer-events: auto !important;
+            display: block !important;
         }
         body.call-screen-active #globalHeader {
             opacity: 0 !important;
@@ -1056,6 +1060,10 @@
                 left: 0 !important;
                 right: 0 !important;
                 z-index: 10000 !important;
+                /* Override .hidden — the iframe MUST be visible during a call */
+                visibility: visible !important;
+                pointer-events: auto !important;
+                display: block !important;
             }
 
             #globalHeader {
@@ -1882,6 +1890,9 @@
                     // Just mark the call as active and send AUTO_ACCEPT_CALL to the live iframe.
                     document.body.classList.add('call-screen-active');
                     window.__activeCallInProgress = true;
+                    // ── FIX: remove .hidden so callsContent iframe is actually visible ──
+                    var _bannerCC = document.getElementById('callsContent');
+                    if (_bannerCC) _bannerCC.classList.remove('hidden');
                     const callsIframe = document.getElementById('callsIframe');
                     if (callsIframe && callsIframe.contentWindow) {
                         callsIframe.contentWindow.postMessage({
@@ -1951,6 +1962,12 @@
                     window.__activeCallInProgress = true;
                     window.__lastActivePage = window.__currentPage || 'messages';
                     banner.style.display = 'none';
+                    // ── FIX: callsContent visibility — .hidden sets visibility:hidden
+                    // which hides the iframe even with call-screen-active fullscreen CSS.
+                    // Must make the callsContent actually visible for the receiver's
+                    // incoming call screen to show.
+                    var _incCC = document.getElementById('callsContent');
+                    if (_incCC) _incCC.classList.remove('hidden');
                 }
 
                 // ── RELIABLE DELIVERY: wait for iframe to signal it's ready ──
@@ -2630,6 +2647,11 @@
                     if (data.payload && data.payload.active === true) {
                         window.__activeCallInProgress = true;
                         document.body.classList.add('call-screen-active');
+                        // ── FIX: callsContent must NOT have .hidden when a call is active.
+                        // .hidden applies visibility:hidden which hides the iframe even
+                        // when body.call-screen-active expands it to full screen.
+                        var _cc = document.getElementById('callsContent');
+                        if (_cc) _cc.classList.remove('hidden');
                         logProcessStatus('call-screen', true, 'active');
                     } else {
                         window.__activeCallInProgress = false;
@@ -2641,6 +2663,12 @@
                                 
                 // Handle call termination events from child
                 if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
+                    // ── Guard: ignore stale echoes within 15s of call dispatch ──
+                    var _sinceDispatchCE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
+                    if (_sinceDispatchCE < 15000 && data.source !== 'end-btn' && data.source !== 'parent-echo') {
+                        console.warn('[Parent] Early CALL_ENDED/FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchCE/1000)+'s ago');
+                        return;
+                    }
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
@@ -3650,6 +3678,13 @@
                 // ==================================================================
                 if (data.type === 'CALL_ENDED' && data.source !== 'ws-bridge') {
                     const callId = data.payload?.callId || data.callId;
+                    // ── Guard: ignore stale CALL_ENDED echoes within 15s of call dispatch,
+                    // UNLESS this came from the end-btn (user deliberately ended the call).
+                    var _sinceDispatchWS = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
+                    if (_sinceDispatchWS < 15000 && data.source !== 'end-btn') {
+                        console.warn('[Parent] CALL_ENDED (non-ws) ignored — call dispatched only', Math.round(_sinceDispatchWS/1000)+'s ago (stale echo)');
+                        return;
+                    }
                     if (callId) {
                         const baseUrl = window.__getApiBase();
                         const token = localStorage.getItem('authToken') || localStorage.getItem('token') || cachedToken;
@@ -3745,11 +3780,25 @@
                 }
                 
                 if (data.type === 'CALL_FORCE_ENDED') {
+                    // ── GUARD: stale WS echoes arrive within seconds of call:initiate.
+                    // If we dispatched a call less than 15s ago, this is a ghost signal
+                    // from a previous session — ignore it so the new call isn't killed.
+                    var _sinceDispatchFE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
+                    if (_sinceDispatchFE < 15000) {
+                        console.warn('[Parent] CALL_FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchFE/1000)+'s ago (stale echo)');
+                        return;
+                    }
                     handleForceEnded(data.payload, data.source);
                     return;
                 }
                 
                 if (data.type === 'call:force_end' || data.type === 'call_force_ended') {
+                    // ── Same stale-echo guard for alias event names ──
+                    var _sinceDispatchFE2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
+                    if (_sinceDispatchFE2 < 15000) {
+                        console.warn('[Parent] call_force_ended alias ignored — call dispatched only', Math.round(_sinceDispatchFE2/1000)+'s ago (stale echo)');
+                        return;
+                    }
                     console.log('[Parent] Force end alias received:', data.type);
                     handleForceEnded(data.payload, 'alias');
                     return;
@@ -3760,21 +3809,20 @@
                 // ==================================================================
                 if (data.type === 'NAVIGATE_TO_CALLS_FOR_CALL') {
                     console.log('[Parent] Navigation request for call:', data.payload);
-                    console.log('[Parent] Current page before navigation:', window.__currentPage);
-                    console.log('[Parent] callsContent element before:', document.getElementById('callsContent')?.className);
                     
-                    // CRITICAL: Set __activeCallInProgress BEFORE navigating so that
-                    // navigateToPage() does NOT strip call-screen-active when switching pages.
+                    // CRITICAL: Set __activeCallInProgress BEFORE navigating
                     window.__activeCallInProgress = true;
-                    window.__callDispatchedAt = Date.now(); // timestamp guard for CALL_ENDED_RETURN
+                    window.__callDispatchedAt = Date.now();
                     document.body.classList.add('call-screen-active');
 
                     // Navigate to calls page so the iframe becomes visible
                     navigateToPage('calls');
+
+                    // ── FIX: ensure callsContent is NOT hidden after navigation ──
+                    var _navCC = document.getElementById('callsContent');
+                    if (_navCC) _navCC.classList.remove('hidden');
                     
-                    console.log('[Parent] Current page after navigation:', window.__currentPage);
-                    console.log('[Parent] callsContent element after:', document.getElementById('callsContent')?.className);
-                    console.log('[Parent] call-screen-active class applied');
+                    console.log('[Parent] callsContent visible:', document.getElementById('callsContent')?.className);
                     return;
                 }
                 
@@ -3818,6 +3866,9 @@
                     if (data.payload && data.payload.active === true) {
                         window.__activeCallInProgress = true;
                         document.body.classList.add('call-screen-active');
+                        // ── FIX: remove .hidden so callsContent is actually visible ──
+                        var _cc2 = document.getElementById('callsContent');
+                        if (_cc2) _cc2.classList.remove('hidden');
                         if (typeof logProcessStatus === 'function') {
                             logProcessStatus('call-screen', true, 'active');
                         }
@@ -3964,6 +4015,11 @@
                     document.body.classList.add('call-screen-active');
 
                     navigateToPage('calls');
+
+                    // ── FIX: navigateToPage removes .hidden from callsContent but
+                    // body.call-screen-active also needs callsContent visible (no hidden class).
+                    var _callsCC = document.getElementById('callsContent');
+                    if (_callsCC) _callsCC.classList.remove('hidden');
 
                     const callsIframe = document.getElementById('callsIframe');
                     if (!callsIframe) return;

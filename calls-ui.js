@@ -266,6 +266,9 @@ const GlobalCallHistory = {
     // ========== STEP 1: SHOW CALLING SCREEN IMMEDIATELY ==========
     console.log('[Calls UI] Showing calling screen IMMEDIATELY');
     
+    // Mark dispatch timestamp so stale CALL_ENDED echoes can be detected
+    window.__callDispatchedAt = Date.now();
+    
     // Get avatar if available
     let userAvatar = null;
     const contacts = window.__cachedCallContacts || [];
@@ -5050,7 +5053,20 @@ case 'CALL_INITIATED':
         },
 
         handleCallEnded: function(callData) {
-            // ── Guard: ignore if no call was actually active ─────────────────
+            // ── Guard 1: ignore stale echoes within 15s of call initiation ──────
+            // CALL_FORCE_ENDED / CALL_ENDED arrive from stale WS events right as the
+            // new call is being established. Only let them through if the call was
+            // initiated more than 15 seconds ago, OR if callData explicitly marks
+            // it as a user-initiated end (source: 'end-btn').
+            const _callDispatchedAt = window.__callDispatchedAt || 0;
+            const _sinceDispatch = Date.now() - _callDispatchedAt;
+            const _isUserEnd = callData && (callData.source === 'end-btn' || callData.reason === 'ended' || callData.reason === 'rejected');
+            if (_sinceDispatch < 15000 && !_isUserEnd && _callDispatchedAt > 0) {
+                console.warn('[Calls UI] handleCallEnded BLOCKED — call dispatched only', Math.round(_sinceDispatch/1000)+'s ago (stale echo). callData:', callData);
+                return;
+            }
+
+            // ── Guard 2: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.
             const _anyScreenActive =
@@ -5586,13 +5602,17 @@ case 'CALL_ACCEPTED': {
                             window._callerRingtone = null;
                         }
                         // ── If CALL_FORCE_ENDED arrives but we just transitioned to in-call,
-                        // it's a stale WS echo — ignore the UI reset, only stop ringtone ──
+                        // OR we are still in the calling/initiating state, it's a stale WS
+                        // echo from a previous session — ignore the UI reset ──
                         const _isAlreadyInCall = UIState.callState === 'connected'
                             || (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'));
-                        if (data.type === 'CALL_FORCE_ENDED' && _isAlreadyInCall) {
-                            console.warn('[Calls UI] CALL_FORCE_ENDED ignored — already in-call screen active');
-                            if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
-                            if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
+                        const _isStillCalling = UIState.callState === 'calling'
+                            || UIState.callState === 'initiating'
+                            || UIState.callState === 'connecting'
+                            || (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active'));
+                        // Protect both calling and in-call states from stale echoes
+                        if (data.type === 'CALL_FORCE_ENDED' && (_isAlreadyInCall || _isStillCalling)) {
+                            console.warn('[Calls UI] CALL_FORCE_ENDED ignored — call active (state:', UIState.callState + ')');
                             break;
                         }
                         // Parent broadcast CALL_ENDED to this iframe — reset UI immediately
