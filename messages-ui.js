@@ -2882,7 +2882,6 @@
 
                     const currentChat = e.detail.currentChat;
                     let messages = e.detail.messages || [];
-                    // Build fallback currentUser so isSent always works
                     let currentUser = e.detail.currentUser;
                     if (!currentUser) {
                         const _uid = getCurrentUserId();
@@ -2891,7 +2890,6 @@
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
-                        // Accept: chatId matches OR chatId empty (optimistic before server confirms)
                         const filtered = messages.filter(function(m) {
                             const mid = String(m.chatId || m.conversationId || '');
                             return mid === cid || mid === '';
@@ -3062,21 +3060,14 @@
                     const incomingChatId = String(msg.chatId || msg.conversationId || '');
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
-                    // PRIMARY: chatId match
                     let shouldRender = !!(incomingChatId && String(currentChat.id) === incomingChatId);
-
-                    // SECONDARY: friendId match
                     if (!shouldRender && msg.senderId) {
-                        const _afid = String(
-                            currentChat.friendId || currentChat.otherUserId ||
-                            (currentChat.otherParticipant && currentChat.otherParticipant.id) || ''
-                        );
-                        if (_afid && String(msg.senderId) === _afid) shouldRender = true;
+                        const _afid = String(currentChat.friendId || currentChat.otherUserId ||
+                            (currentChat.otherParticipant && currentChat.otherParticipant.id) || '');
+                        if (_afid && _afid === String(msg.senderId)) shouldRender = true;
                     }
-
                     if (!shouldRender) return;
 
-                    // Build currentUser fallback so isSent works correctly
                     let currentUser = core && core.getCurrentUser && core.getCurrentUser();
                     if (!currentUser) {
                         const _uid = getCurrentUserId();
@@ -3090,14 +3081,13 @@
                         return mid === cid || mid === incomingChatId || mid === '';
                     }).sort(function(a,b) { return _ts(a)-_ts(b); });
 
-                    // Always include incoming msg even if store not yet updated
                     const _has = chatMsgs.some(function(m) { return msg.id && m.id && String(m.id) === String(msg.id); });
                     if (!_has) chatMsgs = chatMsgs.concat([msg]).sort(function(a,b){return _ts(a)-_ts(b);});
 
                     this.renderMessages(chatMsgs, currentChat, currentUser);
                     try {
-                        var _c2 = document.getElementById('messagesContainer');
-                        if (_c2) requestAnimationFrame(function(){ _c2.scrollTop = _c2.scrollHeight; });
+                        var _c = document.getElementById('messagesContainer');
+                        if (_c) requestAnimationFrame(function(){ _c.scrollTop = _c.scrollHeight; });
                     } catch(_e){}
 
                 });
@@ -3161,7 +3151,7 @@
                     try { const st = core.getState(); return st === 'ACTIVE' || !!(st && st.state === 'ACTIVE'); } catch(_){ return false; }
                 })()) ||
                 (core.getCurrentConversation && !!core.getCurrentConversation()) ||
-                (core.ChatManager && core.ChatManager._activeConversation)
+                (core.ChatManager && !!core.ChatManager._activeConversation)
             ));
 
             return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession || coreIsActive;
@@ -3250,9 +3240,6 @@
 
             if (this._lastRenderedMessagesSignature === renderSignature) {
 
-                // FIX: Only skip if chat is the same AND the message count hasn't changed.
-                // If count changed (new message arrived), always re-render even if
-                // other fields match — prevents the dedup blocking incoming messages.
                 return;
 
             }
@@ -9153,12 +9140,10 @@ Type: ${message.type || 'text'}`;
 
                     const currentChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
 
-                    // FIX: currentUser can be null when session.user is not populated.
-                    // Build a minimal fallback from userId so isSent works correctly.
                     let currentUser = core?.getCurrentUser?.();
                     if (!currentUser) {
-                        const uid = core?.getCurrentUserId?.() || getCurrentUserId();
-                        if (uid) currentUser = { id: uid, userId: uid };
+                        const _uid = core?.getCurrentUserId?.() || getCurrentUserId();
+                        if (_uid) currentUser = { id: _uid, userId: _uid };
                     }
 
                     if (currentChat) {
@@ -10119,59 +10104,60 @@ Type: ${message.type || 'text'}`;
 
     }.init();
 
-    // ── Delete chat: CSS hover + capture-phase delegation ─────────────────────
+    // ── Delete chat: CSS hover + capture-phase click delegation ───────────────
     (function() {
         var _s = document.createElement('style');
         _s.textContent =
-            '.chat-item { position:relative; }' +
-            '.chat-item:hover .chat-delete-btn { display:flex !important; align-items:center; justify-content:center; }' +
-            '.chat-delete-btn:hover { background:rgba(239,68,68,0.12) !important; }';
+            '.chat-item{position:relative;}' +
+            '.chat-item:hover .chat-delete-btn{display:flex!important;align-items:center;justify-content:center;}' +
+            '.chat-delete-btn:hover{background:rgba(239,68,68,0.12)!important;}';
         document.head.appendChild(_s);
 
-        // Capture phase — fires BEFORE the chat-item onclick handler
         document.addEventListener('click', function(ev) {
+            // Walk up to find [data-delete-chat-id]
             var el = ev.target;
-            for (var i = 0; i < 6 && el && el !== document.body; i++, el = el.parentElement) {
+            for (var i = 0; i < 5; i++) {
+                if (!el || el === document.body) return;
                 if (el.dataset && el.dataset.deleteChatId) break;
-                el = el; // keep for next iteration
+                el = el.parentElement;
             }
             if (!el || !el.dataset || !el.dataset.deleteChatId) return;
+
             ev.stopPropagation();
             ev.preventDefault();
-            var chatId = el.dataset.deleteChatId;
+            var chatId = String(el.dataset.deleteChatId);
 
-            // Animate row out
+            // Animate row out immediately
             var row = el.parentElement;
             while (row && !row.classList.contains('chat-item')) row = row.parentElement;
             if (row) {
-                row.style.transition = 'opacity 0.15s, max-height 0.2s, padding 0.2s, margin 0.2s';
+                row.style.transition = 'opacity 0.15s,max-height 0.2s,padding 0.2s,margin 0.2s';
                 row.style.opacity = '0'; row.style.maxHeight = '0';
-                row.style.overflow = 'hidden'; row.style.paddingTop = '0';
-                row.style.paddingBottom = '0'; row.style.marginTop = '0'; row.style.marginBottom = '0';
+                row.style.overflow = 'hidden'; row.style.padding = '0'; row.style.margin = '0';
                 setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
             }
 
-            // Persist + remove via core
+            // Persist + remove via core (survives refresh)
             var core = window.messagesCore;
             if (core && core.deleteConversation) {
                 core.deleteConversation(chatId);
             } else {
                 try {
                     var _d = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
-                    if (!_d.includes(String(chatId))) _d.push(String(chatId));
+                    if (!_d.includes(chatId)) _d.push(chatId);
                     localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(_d));
                 } catch(_) {}
             }
 
-            // Clear panel if deleted chat was active
-            var activeId = core && core.getCurrentConversation && core.getCurrentConversation() && core.getCurrentConversation().id;
-            if (activeId && String(activeId) === String(chatId)) {
+            // Hide panel if deleted chat was active
+            var activeId = core && core.getCurrentConversation && core.getCurrentConversation() && String(core.getCurrentConversation().id);
+            if (activeId && activeId === chatId) {
                 var panel = document.getElementById('chatPanel');
                 var sidebar = document.getElementById('sidebar');
                 if (panel) panel.classList.add('hidden');
                 if (sidebar) sidebar.classList.add('active');
             }
-        }, true); // capture = true: fires before bubble handlers
+        }, true); // capture phase — fires before chat-item onclick
     })();
 
 

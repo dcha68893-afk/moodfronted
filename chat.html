@@ -2692,7 +2692,7 @@
                 // ── FIX 1: Echo CALL_ACCEPTED back to calls iframe so CALLER transitions ──
                 // The receiver's acceptIncomingCallGeneric posts CALL_ACCEPTED to parent.
                 // Parent must echo it back so the caller side fires transitionToInCall.
-                if (data.type === 'CALL_ACCEPTED' && data.source !== 'parent-echo' && data.source !== 'ws-bridge') {
+                if (data.type === 'CALL_ACCEPTED' && data.source !== 'parent-echo' && data.source !== 'ws-bridge' && data.source !== 'parent-accept-broadcast') {
                     var _callsIframe = document.getElementById('callsIframe');
                     if (_callsIframe && _callsIframe.contentWindow) {
                         _callsIframe.contentWindow.postMessage({
@@ -2703,6 +2703,10 @@
                     }
                     typeof hideBanner === 'function' && hideBanner();
                     window.__activeCallInProgress = true;
+                    // ── Ensure callsContent is visible for in-call screen ──
+                    var _earlyCC = document.getElementById('callsContent');
+                    if (_earlyCC) _earlyCC.classList.remove('hidden');
+                    document.body.classList.add('call-screen-active');
                 }
 
                 // ── FIX 2: Echo VIDEO_UPGRADE_REQUEST back so remote side sees camera-on ──
@@ -3740,13 +3744,19 @@
                 // CALL ANSWERED HANDLER
                 // ==================================================================
                 if (data.type === 'CALL_ANSWERED' || data.type === 'CALL_ACCEPTED') {
-                    console.log('[Parent] Call answered - dismissing banner, broadcasting to all iframes');
+                    console.log('[Parent] Call answered - dismissing banner, broadcasting CALL_ACCEPTED to ALL iframes');
                     hideGlobalBanner();
-                    // Broadcast CALL_ACCEPTED to all iframes so the CALLER's calling
-                    // screen transitions to in-call (not just the receiver's)
+                    window.__activeCallInProgress = true;
+                    document.body.classList.add('call-screen-active');
+                    // ── Remove .hidden from callsContent so the screen is visible ──
+                    var _ansCC = document.getElementById('callsContent');
+                    if (_ansCC) _ansCC.classList.remove('hidden');
+                    // Broadcast CALL_ACCEPTED to ALL iframes — both caller and receiver
+                    // must transition to in-call. Do NOT filter by event.source here:
+                    // both sides live in the same calls iframe instance.
                     const _acceptPayload = data.payload || {};
                     document.querySelectorAll('iframe').forEach(f => {
-                        if (f.contentWindow && f.contentWindow !== event.source) {
+                        if (f.contentWindow) {
                             f.contentWindow.postMessage({
                                 type: 'CALL_ACCEPTED',
                                 payload: _acceptPayload,

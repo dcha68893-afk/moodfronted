@@ -541,6 +541,13 @@ const GlobalCallHistory = {
         sidebar.style.display = 'flex';
     }
     
+    // ── CRITICAL: Tell parent to show callsContent and go fullscreen ──────
+    // Without this, callsContent stays visibility:hidden (from .hidden class)
+    // and the caller never sees the calling screen.
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+    }
+
     UIState.callActive = true;
     UIState.callState  = 'calling';
     window.__callActive = true;
@@ -649,6 +656,13 @@ function transitionToInCall(callInfo) {
         window._callerRingtone = null;
     }
     if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
+
+    // ── CRITICAL: Tell parent to make callsContent visible BEFORE showing the screen ──
+    // This ensures the parent removes .hidden from callsContent so the iframe is
+    // actually visible when we flip to the in-call screen.
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+    }
 
     if (window.CallOverlayManager) window.CallOverlayManager.answerCall(callInfo);
 
@@ -786,12 +800,28 @@ function transitionToInCall(callInfo) {
     }
 
     // ── Ensure remote audio is playing ───────────────────────────────────
-    setTimeout(() => {
-        const remoteAudio = document.getElementById('remoteAudio');
-        if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
-            remoteAudio.play().catch(() => {});
+    // Try immediately and retry up to 5x with increasing delays
+    (function _ensureRemoteAudio() {
+        var _tries = 0;
+        function _tryPlay() {
+            _tries++;
+            var remoteAudio = document.getElementById('remoteAudio');
+            if (remoteAudio) {
+                // Restore volume from window.__remoteVolume (set by speaker toggle)
+                remoteAudio.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
+                remoteAudio.muted = false;
+                if (remoteAudio.srcObject && remoteAudio.paused) {
+                    remoteAudio.play().catch(function(e) {
+                        if (_tries < 6) setTimeout(_tryPlay, 500 * _tries);
+                    });
+                } else if (!remoteAudio.srcObject && _tries < 6) {
+                    // srcObject not yet set (track arriving shortly) — keep retrying
+                    setTimeout(_tryPlay, 500 * _tries);
+                }
+            }
         }
-    }, 500);
+        _tryPlay();
+    })();
 
     UIState.callActive = true;
     UIState.callState  = 'connected';
@@ -799,9 +829,7 @@ function transitionToInCall(callInfo) {
     document.body.classList.add('call-active');
     document.body.classList.add('call-connected'); // suppresses callingScreen + incomingModal via CSS
 
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-    }
+    // CALL_SCREEN_ACTIVE already sent at the top of this function before the screen showed.
 
     // ── Volume slider: inject once into incall controls ───────────────────
     if (!document.getElementById('remoteVolumeSlider')) {

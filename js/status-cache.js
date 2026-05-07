@@ -321,6 +321,34 @@ class StatusCache {
         return new Date(status.expiresAt) < new Date();
     }
 
+    // purgeExpired: delete all expired statuses from IndexedDB so they cannot
+    // be rehydrated into UI state on the next page load.
+    // Called by checkAndCleanExpiredStatuses() in status-core.js after each sweep.
+    async purgeExpired() {
+        await this._ensureDB();
+        return new Promise((resolve) => {
+            try {
+                const tx    = this.db.transaction([this.storeName], 'readwrite');
+                const store = tx.objectStore(this.storeName);
+                const now   = Date.now();
+                const req   = store.openCursor();
+                req.onsuccess = (e) => {
+                    const cursor = e.target.result;
+                    if (cursor) {
+                        const s = cursor.value;
+                        if (s.expiresAt && new Date(s.expiresAt).getTime() <= now) {
+                            cursor.delete();
+                        }
+                        cursor.continue();
+                    } else {
+                        resolve();
+                    }
+                };
+                req.onerror = () => resolve(); // non-fatal
+            } catch (_) { resolve(); }
+        });
+    }
+
     async cleanupCache() {
         await this._ensureDB();
 

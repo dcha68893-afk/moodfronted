@@ -2307,7 +2307,7 @@ try {
                         if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
                     } catch(_) {}
                     this._conversations = ensureSafeArray(cached.conversations)
-                        .filter(function(c) { return c && c.id && !_deleted.has(String(c.id)); });
+                        .filter(c => c && c.id && !_deleted.has(String(c.id)));
                     this._rebuildMap();
                     this._loaded = true;
                     if (!this._activeConversation && this._conversations.length > 0) {
@@ -2720,17 +2720,15 @@ try {
             const currentUserId = SessionManager.getUserId();
             const uniqueMap = new Map();
             const seenFriendIds = new Set();
-
-            // Filter permanently deleted chats — survived across refresh via localStorage
             let _deleted = new Set();
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8');
                 if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
             } catch(_) {}
-            
+
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
-                if (_deleted.has(String(chat.id))) return; // permanently deleted
+                if (_deleted.has(String(chat.id))) return;
                 
                 let friendId = chat.friendId || chat.otherParticipantId;
                 if (!friendId && chat.otherParticipant) {
@@ -2908,24 +2906,19 @@ try {
             this._notifySubscribers();
 
             try {
-                const _renderChatId = conversationId || this._activeConversation?.id;
+                const _renderChatId = conversationId || (this._activeConversation && this._activeConversation.id);
                 if (_renderChatId) {
-                    let _activeForRender = this._activeConversation;
                     const _aid = String(_renderChatId);
-
-                    // If _activeConversation is null but panel is open, promote from map
-                    if (!_activeForRender) {
+                    let _activeForRender = this._activeConversation;
+                    if (!_activeForRender && this._conversationsMap) {
                         const _p = document.getElementById('chatPanel');
                         if (_p && !_p.classList.contains('hidden')) {
-                            _activeForRender = this._conversationsMap &&
-                                (this._conversationsMap.get(_aid) || this._conversationsMap.get(Number(_aid)));
+                            _activeForRender = this._conversationsMap.get(_aid) || this._conversationsMap.get(Number(_aid));
                             if (_activeForRender) this._activeConversation = _activeForRender;
                         }
                     }
-
                     if (_activeForRender && String(_activeForRender.id) === _aid) {
                         const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-                        // Accept messages for this chat OR with no chatId (optimistic)
                         const _filtered = this._messages
                             .filter(m => {
                                 const mid = String(m.chatId || m.conversationId || '');
@@ -3039,49 +3032,36 @@ try {
             this._notifySubscribers();
             EventBus.emit('message:added', message);
 
-            // ── Render new message immediately if this chat is currently open ──
+            // ── Render new message into the active chat panel immediately ──
             try {
                 const _ar = this._activeConversation;
                 const _msgCid = String(message.chatId || message.conversationId || '');
                 const _actCid = _ar ? String(_ar.id || '') : '';
-
-                // PRIMARY: chatId equality
                 let _render = !!(_msgCid && _actCid && _msgCid === _actCid);
-
-                // SECONDARY: friendId match (receiver-reply, pending→real)
+                // Fallback: friendId match for receiver-reply
                 if (!_render && _ar && message.senderId) {
                     const _afid = String(_ar.friendId || _ar.otherUserId ||
                         (_ar.otherParticipant && _ar.otherParticipant.id) || '');
-                    if (_afid && String(message.senderId) === _afid) _render = true;
+                    if (_afid && _afid === String(message.senderId)) _render = true;
                 }
-
-                // TERTIARY: if no active conversation but chatPanel is visible and the
-                // DOM shows a conversation with this chatId — render anyway.
-                // This covers the race where _activeConversation is set after addMessage runs.
+                // Fallback: panel open but _activeConversation cleared — recover from map
                 if (!_render && _msgCid) {
-                    const _panel = document.getElementById('chatPanel');
-                    const _panelVisible = _panel && !_panel.classList.contains('hidden');
-                    if (_panelVisible) {
-                        // Try to match via the _conversationsMap
-                        const _conv = this._conversationsMap && (this._conversationsMap.get(_msgCid) || this._conversationsMap.get(Number(_msgCid)));
-                        if (_conv) {
-                            // Set as active so subsequent events match correctly
-                            this._activeConversation = _conv;
-                            _render = true;
-                        }
+                    const _p = document.getElementById('chatPanel');
+                    if (_p && !_p.classList.contains('hidden') && this._conversationsMap) {
+                        const _conv = this._conversationsMap.get(_msgCid) || this._conversationsMap.get(Number(_msgCid));
+                        if (_conv) { this._activeConversation = _conv; _render = true; }
                     }
                 }
-
                 if (_render) {
                     const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                     const _fid = _msgCid || _actCid;
                     const _renderConv = this._activeConversation;
-                    const _msgs = this._messages.filter(function(m) {
+                    const _chatMsgs = this._messages.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
                         return mid === _fid || mid === _actCid;
                     }).sort(function(a, b) { return _tsF(a) - _tsF(b); });
                     window.dispatchEvent(new CustomEvent('renderMessages', {
-                        detail: { messages: _msgs, currentChat: _renderConv, currentUser: null }
+                        detail: { messages: _chatMsgs, currentChat: _renderConv, currentUser: null }
                     }));
                     try {
                         const _c = document.getElementById('messagesContainer');
@@ -5663,31 +5643,22 @@ try {
             }
 
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-            const _rcId = chatId ? String(chatId) : '';
+            const _rcId = String(chatId || '');
             const _acId = activeChat ? String(activeChat.id || '') : '';
-
-            // PRIMARY: chatId equality
             let isThisChat = !!(_rcId && _acId && _rcId === _acId);
-
-            // SECONDARY: friendId match (receiver-reply on sender side)
+            // SECONDARY: friendId match — when User A receives User B's reply, senderId=B
+            // and activeChat.friendId=B, so we match even if chatId check somehow fails
             if (!isThisChat && activeChat && normalizedMessage && normalizedMessage.senderId) {
-                const _afid = String(
-                    activeChat.friendId || activeChat.otherUserId ||
-                    (activeChat.otherParticipant && activeChat.otherParticipant.id) || ''
-                );
-                if (_afid && String(normalizedMessage.senderId) === _afid) isThisChat = true;
+                const _afid = String(activeChat.friendId || activeChat.otherUserId ||
+                    (activeChat.otherParticipant && activeChat.otherParticipant.id) || '');
+                if (_afid && _afid === String(normalizedMessage.senderId)) isThisChat = true;
             }
-
-            // TERTIARY: no active chat but panel is open — promote from conversationsMap
+            // TERTIARY: panel is open but _activeConversation cleared — recover from map
             if (!isThisChat && _rcId) {
                 const _panel = document.getElementById('chatPanel');
-                const _panelOpen = _panel && !_panel.classList.contains('hidden');
-                if (_panelOpen && ChatManager._conversationsMap) {
+                if (_panel && !_panel.classList.contains('hidden') && ChatManager._conversationsMap) {
                     const _conv = ChatManager._conversationsMap.get(_rcId) || ChatManager._conversationsMap.get(Number(_rcId));
-                    if (_conv) {
-                        ChatManager._activeConversation = _conv;
-                        isThisChat = true;
-                    }
+                    if (_conv) { ChatManager._activeConversation = _conv; isThisChat = true; }
                 }
             }
 
@@ -5707,26 +5678,26 @@ try {
                 try {
                     const _all = ChatManager._messages || [];
                     const _now = ChatManager._activeConversation || activeChat;
-                    const _matchId = _rcId || _acId;
-                    let _chatMsgs = _all.filter(function(m) {
+                    const _mid = _rcId || _acId;
+                    let _msgs = _all.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
-                        return mid === _matchId || mid === _acId;
+                        return mid === _mid || mid === _acId;
                     }).sort(function(a, b) {
                         return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                     });
                     if (normalizedMessage) {
-                        const _has = _chatMsgs.some(function(m) {
+                        const _has = _msgs.some(function(m) {
                             return m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id);
                         });
                         if (!_has) {
-                            _chatMsgs = _chatMsgs.concat([normalizedMessage]).sort(function(a, b) {
+                            _msgs = _msgs.concat([normalizedMessage]).sort(function(a, b) {
                                 return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                             });
                         }
                     }
-                    if (_chatMsgs.length > 0 && _now) {
+                    if (_msgs.length > 0 && _now) {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: { messages: _chatMsgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
+                            detail: { messages: _msgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
                         }));
                         try {
                             const _c = document.getElementById('messagesContainer');
@@ -6286,7 +6257,7 @@ try {
             try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`); } catch(_) {}
             try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
             ChatManager._notifySubscribers();
-            makeApiRequest(`/chats/${sid}`, 'DELETE').catch(function(){});
+            makeApiRequest(`/chats/${sid}`, 'DELETE').catch(() => {});
         },
 
         multiSendSelectedChats: new Set(),

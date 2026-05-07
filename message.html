@@ -2000,8 +2000,8 @@
                     recipientName: targetUserName
                 };
 
-                // FIX: getState() returns {state:'ACTIVE',...} NOT a bare string.
-                // Old check `getState() === 'ACTIVE'` was always false → fired 15 times.
+                // FIX: getState() returns {state:'ACTIVE',...} not a bare string.
+                // Old check fired 15× causing panel flicker.
                 let _fired = false;
                 const tryOpen = (attempts) => {
                     if (_fired) return;

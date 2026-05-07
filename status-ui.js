@@ -469,15 +469,33 @@ function subscribeToStatusChanges() {
     // Also listen to custom events
     document.addEventListener('statusStateChanged', (e) => {
         if (e.detail && e.detail.state) {
-            if (e.detail.state.statuses) {
+            // Sync the module-level arrays so every render function sees fresh data
+            if (e.detail.state.statuses && e.detail.state.statuses.length > 0) {
                 statuses = e.detail.state.statuses;
-                renderStatusListInstantlyUI();
             }
-            if (e.detail.state.myStatuses) {
+            if (e.detail.state.myStatuses && e.detail.state.myStatuses.length > 0) {
                 myStatuses = e.detail.state.myStatuses;
-                updateMyStatusPreviewUI();
             }
+            // Re-render the active list so new/expired statuses appear instantly
+            renderStatusListInstantlyUI();
+            updateMyStatusPreviewUI();
         }
+    });
+
+    // statusExpired fires when a single status hits its expiry — remove it instantly
+    document.addEventListener('statusExpired', (e) => {
+        const expiredId = e.detail && e.detail.statusId;
+        if (!expiredId) return;
+        const idStr = String(expiredId);
+        statuses   = (statuses   || []).filter(s => String(s.id) !== idStr);
+        myStatuses = (myStatuses || []).filter(s => String(s.id) !== idStr);
+        renderStatusListInstantlyUI();
+        updateMyStatusPreviewUI();
+    });
+
+    // statusUpdate (bulk) — re-render after a cleanup sweep
+    document.addEventListener('statusUpdate', () => {
+        renderStatusListInstantlyUI();
     });
     
     document.addEventListener('sessionReady', (e) => {
@@ -550,11 +568,12 @@ const privacySettings = {
 };
 
 const durationOptions = {
-    '3600': '1 hour',
-    '21600': '6 hours',
-    '43200': '12 hours',
-    '86400': '24 hours',
-    '0': 'Permanent'
+    '3600':   '1 hour',
+    '21600':  '6 hours',
+    '43200':  '12 hours',
+    '86400':  '24 hours',
+    '604800': '1 week',
+    '0':      'Permanent'
 };
 
 const reportReasons = {
@@ -5059,8 +5078,21 @@ async function handlePostStatus() {
     if (intent) statusData.intent = intent;
     if (mood) statusData.mood = mood;
     if (category) statusData.category = category;
-    if (privacy) statusData.privacy = privacy;
-    if (duration) statusData.duration = duration;
+    // Default privacy to 'friends' — statuses are friends-only unless user picks otherwise
+    statusData.privacy = privacy || 'friends';
+    if (duration) {
+        statusData.duration = duration;
+        // Also pre-compute expiresAt so postStatus payload always has a real date
+        const durSecs = parseInt(duration, 10);
+        if (durSecs > 0) {
+            statusData.expiresAt = new Date(Date.now() + durSecs * 1000).toISOString();
+        }
+        // durSecs === 0 means "Permanent" — no expiresAt
+    } else {
+        // No duration selected: default to 24 hours
+        statusData.duration  = '86400';
+        statusData.expiresAt = new Date(Date.now() + 86400 * 1000).toISOString();
+    }
     if (actions.length > 0) statusData.actionButtons = actions;
     const sensitive = UIElements.getElement('sensitiveContentToggle');
     const silent = UIElements.getElement('silentModeToggle');

@@ -1388,26 +1388,44 @@ function updateStatusState(updates) {
 
 function addStatus(status) {
     if (!status || !status.id) return false;
-    
+
     if (statusCache.has(status.id)) {
         debugLog(`Duplicate status ignored: ${status.id}`);
         return false;
     }
-    
+
     statusCache.add(status.id);
-    
+
     statusState.statuses.unshift(status);
-    
+
     const currentUserId = getSessionUserId();
-    if (currentUserId && status.userId === currentUserId) {
+    if (currentUserId && String(status.userId) === String(currentUserId)) {
         statusState.myStatuses.unshift(status);
+        myStatuses = statusState.myStatuses;
+    } else if (currentUserId) {
+        // Friend's status — add to friendsStatuses silo too
+        if (!friendsStatuses.some(s => String(s.id) === String(status.id))) {
+            friendsStatuses.unshift(status);
+            friendsStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        }
     }
-    
+
     statusState.statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     statusState.myStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    
+
+    // Keep module-level alias in sync so status-ui.js renderAllStatuses() sees new entries
+    statuses = statusState.statuses;
+
+    // Always persist to IDB so the status survives a page refresh
+    const expiryForIDB = status.expiresAt || new Date(Date.now() + 86400000).toISOString();
+    StatusDB.put({ ...status, expiresAt: expiryForIDB }).catch(() => {});
+    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+
+    // Schedule a precision countdown so the status disappears at the exact right moment
+    if (typeof schedulePrecisionExpiry === 'function') schedulePrecisionExpiry(status);
+
     notifyStatusObservers();
-    
+
     logStatus('SUCCESS', `Status added: ${status.id}`);
     return true;
 }
@@ -1583,8 +1601,33 @@ async function postStatus(statusData) {
     if (statusData.background) payload.background = statusData.background;
 
     // privacy: send the string form the backend expects
-    payload.privacy = statusData.privacy || (statusData.isPublic === false ? 'friends' : 'public');
+    // Default is 'friends' — visible only to accepted friends
+    payload.privacy = statusData.privacy || (statusData.isPublic === false ? 'friends' : 'friends');
     payload.isPublic = (payload.privacy === 'public' || payload.privacy === 'everyone');
+
+    // ── Convert duration → expiresAt ───────────────────────────────────────
+    // The UI sends statusData.duration as seconds ('86400', '604800', etc.).
+    // We convert to an ISO expiresAt string so the server stores the real date.
+    const DURATION_MAP = {
+        '3600':  3600,
+        '21600': 21600,
+        '43200': 43200,
+        '86400': 86400,
+        '604800': 604800,  // 1 week
+        '0':      null      // permanent (no expiry — rare)
+    };
+    if (statusData.duration !== undefined && statusData.duration !== null) {
+        const secs = DURATION_MAP[String(statusData.duration)];
+        if (secs !== undefined) {
+            payload.expiresAt = secs ? new Date(Date.now() + secs * 1000).toISOString() : undefined;
+            payload.duration  = String(statusData.duration);
+        }
+    } else if (statusData.expiresAt) {
+        payload.expiresAt = statusData.expiresAt;
+    } else {
+        // Default: 24 h
+        payload.expiresAt = new Date(Date.now() + 86400 * 1000).toISOString();
+    }
 
     if (statusData.location) payload.location = statusData.location;
     if (statusData.latitude != null) payload.latitude = statusData.latitude;
@@ -7939,11 +7982,39 @@ async function loadFreshDataInBackground() {
         }
 
         const loadPromises = [];
-        if (typeof loadStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
-        if (typeof loadMyStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
-        if (typeof loadHighlightsInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
-        if (typeof loadUserDataInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
+        if (typeof loadStatusesInBackground       !== 'undefined') loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
+        if (typeof loadMyStatusesInBackground     !== 'undefined') loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
+        if (typeof loadFriendsStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadFriendsStatusesInBackground()));
+        if (typeof loadHighlightsInBackground     !== 'undefined') loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
+        if (typeof loadUserDataInBackground       !== 'undefined') loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
         await Promise.allSettled(loadPromises);
+
+        // ── Final dedup-merge: combine all three silos into one unified list ──
+        // Each loader writes to its own array (statuses / myStatuses / friendsStatuses).
+        // After all settle, we merge them into a single deduplicated, sorted list so
+        // every tab (All / Friends / Close Friends) has complete data to render from.
+        const allIds = new Set();
+        const merged = [...(myStatuses || []), ...(friendsStatuses || []), ...(statuses || [])]
+            .filter(s => {
+                if (!s || !s.id) return false;
+                const key = String(s.id);
+                if (allIds.has(key)) return false;
+                allIds.add(key);
+                return true;
+            })
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        if (merged.length > 0) {
+            statuses             = merged;
+            statusState.statuses = merged;
+            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, merged);
+        }
+
+        // Schedule precision expiry countdowns for every loaded status
+        if (typeof scheduleAllPrecisionExpiries === 'function') scheduleAllPrecisionExpiries(merged);
+
+        // Single unified notify after everything is merged (avoids multiple re-renders)
+        notifyStatusObservers();
 
         // Stamp the sync time
         SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_SYNC, String(Date.now()));
@@ -8054,14 +8125,30 @@ async function loadMyStatusesInBackground() {
     }
     
     try {
-        // Use makeApiRequest directly (same as messages module)
-        const response = await makeApiRequest('/api/status/my', 'GET');
+        // Use secureApiCall which has a bridge→direct-fetch fallback so it works
+        // even when the parent iframe bridge is temporarily slow on load.
+        // makeApiRequest() was bridge-only and timed out, causing "status gone after refresh".
+        const response = await secureApiCall('/api/status/my');
         const list = response?.statuses || response?.data?.statuses || [];
         if (Array.isArray(list)) {
             myStatuses = list;
             SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-            // Persist to IndexedDB so my statuses survive offline
+            // Persist to IndexedDB so my statuses survive page reload
             StatusDB.putMany(myStatuses).catch(() => {});
+
+            // Merge own statuses into unified statusState.statuses
+            const existingIds = new Set((statusState.statuses || []).map(s => String(s.id)));
+            const myNew = myStatuses.filter(s => s && s.id && !existingIds.has(String(s.id)));
+            if (myNew.length > 0) {
+                statusState.statuses = [...(statusState.statuses || []), ...myNew]
+                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                statuses = statusState.statuses;
+            }
+            statusState.myStatuses = myStatuses;
+
+            // Schedule precision expiry countdowns for all own statuses
+            if (typeof scheduleAllPrecisionExpiries === 'function') scheduleAllPrecisionExpiries(myStatuses);
+
             logStatus('SUCCESS', `Loaded ${myStatuses.length} my statuses`);
         }
     } catch (error) {
@@ -8086,16 +8173,30 @@ async function loadMyStatusesInBackground() {
                 }
             }
         } catch (_) {}
-        throw error;
     }
 }
 async function loadFriendsStatusesInBackground() {
     try {
         const response = await secureApiCall('/api/status/friends');
         const list = response?.statuses || response?.data?.statuses || [];
-        if (list) {
+        if (Array.isArray(list) && list.length > 0) {
             friendsStatuses = list;
             logStatus('SUCCESS', `Loaded ${friendsStatuses.length} friends statuses`);
+
+            // Merge into unified statusState.statuses (deduplicated)
+            const existingIds = new Set((statusState.statuses || []).map(s => String(s.id)));
+            const newOnes = friendsStatuses.filter(s => s && s.id && !existingIds.has(String(s.id)));
+            if (newOnes.length > 0) {
+                statusState.statuses = [...(statusState.statuses || []), ...newOnes]
+                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                statuses = statusState.statuses;
+                StatusDB.putMany(newOnes).catch(() => {});
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+            }
+
+            // Schedule precision expiry countdowns for all loaded friend statuses
+            if (typeof scheduleAllPrecisionExpiries === 'function') scheduleAllPrecisionExpiries(list);
+
             notifyStatusObservers();
         }
     } catch (error) {
@@ -8845,13 +8946,50 @@ function stopExpirationMonitoring() {
         clearInterval(expirationCheckInterval);
         expirationCheckInterval = null;
         state.intervals.delete(expirationCheckInterval);
-        
+
         const stopKey = 'expiration_monitoring_stop';
         if (!_loggedMessages.has(stopKey)) {
             _loggedMessages.add(stopKey);
             logStatus('INFO', 'Expiration monitoring stopped');
         }
     }
+}
+
+// ─── Precision per-status countdown timers ────────────────────────────────────
+// The 60-second polling interval in startExpirationMonitoring() is good for
+// catch-all cleanup, but statuses should disappear at the *exact* moment they
+// expire — not up to 60 seconds late.  This function schedules a one-shot
+// setTimeout for each status that fires at the precise expiresAt timestamp.
+//
+// Called once when a status is added (addStatus) and once during background
+// init after all statuses are loaded.
+const _scheduledExpiryTimers = new Map(); // statusId → timer handle
+
+function schedulePrecisionExpiry(status) {
+    if (!status || !status.id || !status.expiresAt) return;
+    const id = String(status.id);
+    if (_scheduledExpiryTimers.has(id)) return; // already scheduled
+
+    const msUntilExpiry = new Date(status.expiresAt).getTime() - Date.now();
+    if (msUntilExpiry <= 0) {
+        // Already expired — clean up immediately on next tick
+        setTimeout(() => checkAndCleanExpiredStatuses(), 0);
+        return;
+    }
+
+    const timer = setTimeout(() => {
+        _scheduledExpiryTimers.delete(id);
+        logStatus('EXPIRE', `Precision expiry fired for status ${id}`);
+        checkAndCleanExpiredStatuses();
+    }, msUntilExpiry);
+
+    _scheduledExpiryTimers.set(id, timer);
+    if (state && state.timeouts) state.timeouts.add(timer);
+}
+
+function scheduleAllPrecisionExpiries(statusList) {
+    if (!Array.isArray(statusList)) return;
+    statusList.forEach(s => schedulePrecisionExpiry(s));
 }
 
 function checkAndCleanExpiredStatuses() {
@@ -8956,15 +9094,26 @@ function checkAndCleanExpiredStatuses() {
                 }
             }
         });
-        
+
         DiagnosticsAgent.metrics.statusExpired += expiredCount;
-        
+
+        // ── Keep statusState in sync with module-level arrays ─────────────────
+        statusState.statuses   = statuses;
+        statusState.myStatuses = myStatuses;
+
+        // ── Persist cleaned lists ──────────────────────────────────────────────
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
         SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
-        
+
+        // ── Remove expired statuses from IndexedDB so they don't resurrect ────
+        StatusDB.purgeExpired().catch(() => {});
+
+        // ── Notify all UI subscribers so tabs re-render without the expired items
+        notifyStatusObservers();
+
         document.dispatchEvent(new CustomEvent('statusUpdate', {
-            detail: { type: 'bulk', statuses: statuses.slice(0, 10) }
+            detail: { type: 'expired', statuses: statuses.slice(0, 10) }
         }));
     }
 }
@@ -10415,6 +10564,17 @@ const StatusCore = {
 
 // Add additional exports to window for status-ui.js to import
 window.StatusCore = StatusCore;
+
+// Export addStatus / removeStatus so status-websocket.js can call window.addStatus(status)
+// to inject a friend's real-time status into live state. Previously these were
+// module-scoped only so window.addStatus was always undefined (silent no-op).
+window.addStatus    = addStatus;
+window.removeStatus = removeStatus;
+window.schedulePrecisionExpiry      = schedulePrecisionExpiry;
+window.scheduleAllPrecisionExpiries = scheduleAllPrecisionExpiries;
+
+// Expose statusState as a live getter so external readers always see current data
+Object.defineProperty(window, 'statusState', { get: () => statusState, configurable: true });
 window.__STATUS_MODULE_NAME__ = MODULE_NAME;
 window.__STATUS_VERSION__ = MODULE_VERSION;
 window.DiagnosticsAgent = DiagnosticsAgent;
