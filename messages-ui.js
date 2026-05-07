@@ -2882,10 +2882,16 @@
 
                     const currentChat = e.detail.currentChat;
                     let messages = e.detail.messages || [];
+                    // Build fallback currentUser so isSent always works
+                    let currentUser = e.detail.currentUser;
+                    if (!currentUser) {
+                        const _uid = getCurrentUserId();
+                        if (_uid) currentUser = { id: _uid, userId: _uid };
+                    }
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
-                        // Accept: chatId matches cid, OR chatId is empty (optimistic/unconfirmed)
+                        // Accept: chatId matches OR chatId empty (optimistic before server confirms)
                         const filtered = messages.filter(function(m) {
                             const mid = String(m.chatId || m.conversationId || '');
                             return mid === cid || mid === '';
@@ -2893,11 +2899,11 @@
                         if (filtered.length > 0) {
                             messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
                         } else {
-                            this.renderMessages([], currentChat, e.detail.currentUser);
+                            this.renderMessages([], currentChat, currentUser);
                             return;
                         }
                     }
-                    this.renderMessages(messages, currentChat, e.detail.currentUser);
+                    this.renderMessages(messages, currentChat, currentUser);
 
                 });
 
@@ -3048,7 +3054,6 @@
                 UIFailsafe.queueAction(() => {
 
                     if (!e.detail || !e.detail.message) return;
-
                     const core = getMessagesCore();
                     const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
                     if (!currentChat) return;
@@ -3060,7 +3065,7 @@
                     // PRIMARY: chatId match
                     let shouldRender = !!(incomingChatId && String(currentChat.id) === incomingChatId);
 
-                    // SECONDARY: friendId match — receiver-reply, pending→real chatId
+                    // SECONDARY: friendId match
                     if (!shouldRender && msg.senderId) {
                         const _afid = String(
                             currentChat.friendId || currentChat.otherUserId ||
@@ -3071,6 +3076,13 @@
 
                     if (!shouldRender) return;
 
+                    // Build currentUser fallback so isSent works correctly
+                    let currentUser = core && core.getCurrentUser && core.getCurrentUser();
+                    if (!currentUser) {
+                        const _uid = getCurrentUserId();
+                        if (_uid) currentUser = { id: _uid, userId: _uid };
+                    }
+
                     const allMsgs = (core && core.getMessages && core.getMessages()) || [];
                     const cid = String(currentChat.id);
                     let chatMsgs = allMsgs.filter(function(m) {
@@ -3078,11 +3090,11 @@
                         return mid === cid || mid === incomingChatId || mid === '';
                     }).sort(function(a,b) { return _ts(a)-_ts(b); });
 
-                    // Always include the incoming msg even if store hasn't updated yet
+                    // Always include incoming msg even if store not yet updated
                     const _has = chatMsgs.some(function(m) { return msg.id && m.id && String(m.id) === String(msg.id); });
                     if (!_has) chatMsgs = chatMsgs.concat([msg]).sort(function(a,b){return _ts(a)-_ts(b);});
 
-                    this.renderMessages(chatMsgs, currentChat, core && core.getCurrentUser && core.getCurrentUser());
+                    this.renderMessages(chatMsgs, currentChat, currentUser);
                     try {
                         var _c2 = document.getElementById('messagesContainer');
                         if (_c2) requestAnimationFrame(function(){ _c2.scrollTop = _c2.scrollHeight; });
@@ -3145,8 +3157,11 @@
             const core = typeof getMessagesCore === 'function' ? getMessagesCore() : null;
 
             const coreIsActive = !!(core && (
-                (typeof core.getState === 'function' && (() => { try { const st = core.getState(); return st === 'ACTIVE' || !!(st && st.state === 'ACTIVE'); } catch(_){return false;} })()) ||
-                (core.getCurrentConversation && !!core.getCurrentConversation())
+                (typeof core.getState === 'function' && (() => {
+                    try { const st = core.getState(); return st === 'ACTIVE' || !!(st && st.state === 'ACTIVE'); } catch(_){ return false; }
+                })()) ||
+                (core.getCurrentConversation && !!core.getCurrentConversation()) ||
+                (core.ChatManager && core.ChatManager._activeConversation)
             ));
 
             return (lifecycleState === LIFECYCLE_STATES.ACTIVE && sessionValid) || coreHasSession || coreIsActive;
@@ -3235,6 +3250,9 @@
 
             if (this._lastRenderedMessagesSignature === renderSignature) {
 
+                // FIX: Only skip if chat is the same AND the message count hasn't changed.
+                // If count changed (new message arrived), always re-render even if
+                // other fields match — prevents the dedup blocking incoming messages.
                 return;
 
             }
@@ -9135,9 +9153,15 @@ Type: ${message.type || 'text'}`;
 
                     const currentChat = core?.getCurrentConversation?.() || core?.ChatManager?.getActiveChat?.();
 
-                    const currentUser = core?.getCurrentUser?.();
+                    // FIX: currentUser can be null when session.user is not populated.
+                    // Build a minimal fallback from userId so isSent works correctly.
+                    let currentUser = core?.getCurrentUser?.();
+                    if (!currentUser) {
+                        const uid = core?.getCurrentUserId?.() || getCurrentUserId();
+                        if (uid) currentUser = { id: uid, userId: uid };
+                    }
 
-                    if (currentChat && currentUser) {
+                    if (currentChat) {
 
                         const messages = core?.getMessages?.() || [];
 
@@ -10095,7 +10119,7 @@ Type: ${message.type || 'text'}`;
 
     }.init();
 
-    // ── Delete chat: CSS + capture-phase event delegation ────────────────────
+    // ── Delete chat: CSS hover + capture-phase delegation ─────────────────────
     (function() {
         var _s = document.createElement('style');
         _s.textContent =
@@ -10104,20 +10128,19 @@ Type: ${message.type || 'text'}`;
             '.chat-delete-btn:hover { background:rgba(239,68,68,0.12) !important; }';
         document.head.appendChild(_s);
 
-        // Capture phase — fires before the chat-item onclick bubble handler
+        // Capture phase — fires BEFORE the chat-item onclick handler
         document.addEventListener('click', function(ev) {
             var el = ev.target;
-            // Walk up to find the button with data-delete-chat-id
-            for (var i = 0; i < 5 && el && el !== document.body; i++, el = el.parentElement) {
+            for (var i = 0; i < 6 && el && el !== document.body; i++, el = el.parentElement) {
                 if (el.dataset && el.dataset.deleteChatId) break;
+                el = el; // keep for next iteration
             }
             if (!el || !el.dataset || !el.dataset.deleteChatId) return;
-
             ev.stopPropagation();
             ev.preventDefault();
             var chatId = el.dataset.deleteChatId;
 
-            // Animate row out immediately
+            // Animate row out
             var row = el.parentElement;
             while (row && !row.classList.contains('chat-item')) row = row.parentElement;
             if (row) {
@@ -10128,12 +10151,11 @@ Type: ${message.type || 'text'}`;
                 setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
             }
 
-            // Persist deletion via core — survives refresh
+            // Persist + remove via core
             var core = window.messagesCore;
             if (core && core.deleteConversation) {
                 core.deleteConversation(chatId);
             } else {
-                // Fallback if core not ready
                 try {
                     var _d = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
                     if (!_d.includes(String(chatId))) _d.push(String(chatId));
@@ -10141,7 +10163,7 @@ Type: ${message.type || 'text'}`;
                 } catch(_) {}
             }
 
-            // Clear panel if it was the active chat
+            // Clear panel if deleted chat was active
             var activeId = core && core.getCurrentConversation && core.getCurrentConversation() && core.getCurrentConversation().id;
             if (activeId && String(activeId) === String(chatId)) {
                 var panel = document.getElementById('chatPanel');
@@ -10149,7 +10171,7 @@ Type: ${message.type || 'text'}`;
                 if (panel) panel.classList.add('hidden');
                 if (sidebar) sidebar.classList.add('active');
             }
-        }, true); // capture = true
+        }, true); // capture = true: fires before bubble handlers
     })();
 
 

@@ -2124,7 +2124,7 @@ const GroupCore = {
             SafeStorage.setItem('groupInvites', this.groupInvites);
             SafeStorage.setItem('adminGroups', this.adminGroups);
             SafeStorage.setItem('lastCacheTime', Date.now().toString());
-            // Sync module-level let vars so ES live bindings update in group-ui.js
+            // Sync module-level let vars so ES live bindings update
             groups = this.groups; myGroups = this.myGroups;
             joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
             groupInvites = this.groupInvites;
@@ -2226,10 +2226,12 @@ const GroupCore = {
                     // Process cached groups into arrays
                     this.groups = cachedGroups;
                     const _cuid = this.currentUser?.uid || this.currentUser?.id;
-                    this.myGroups = cachedGroups.filter(g => g.isCreator === true || g.role === 'owner' || (_cuid && String(g.createdBy) === String(_cuid)));
-                    this.joinedGroups = cachedGroups.filter(g => !g.isCreator && g.role !== 'owner' && !(_cuid && String(g.createdBy) === String(_cuid)));
-                    this.adminGroups = cachedGroups.filter(g => g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
-                    // Sync let vars after cache load
+                    this.myGroups = cachedGroups.filter(g =>
+                        g.isCreator === true || g.role === 'owner' || (_cuid && String(g.createdBy) === String(_cuid)));
+                    this.joinedGroups = cachedGroups.filter(g =>
+                        !g.isCreator && g.role !== 'owner' && !(_cuid && String(g.createdBy) === String(_cuid)));
+                    this.adminGroups = cachedGroups.filter(g =>
+                        g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
                     groups = this.groups; myGroups = this.myGroups;
                     joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
                     
@@ -2286,11 +2288,17 @@ const GroupCore = {
                 g.isLocalOnly || serverMap.has(g.id)
             );
             
-            // Re-categorize groups
-            const _muid = this.currentUser?.uid || this.currentUser?.id;
-            this.myGroups = this.groups.filter(g => g.isCreator === true || g.role === 'owner' || (_muid && String(g.createdBy) === String(_muid)));
-            this.joinedGroups = this.groups.filter(g => !g.isCreator && g.role !== 'owner' && !(_muid && String(g.createdBy) === String(_muid)));
-            this.adminGroups = this.groups.filter(g => g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
+            // Re-categorize using server-provided isCreator/isAdmin/role fields
+            const _uid = this.currentUser?.uid || this.currentUser?.id;
+            this.myGroups = this.groups.filter(g =>
+                g.isCreator === true || g.role === 'owner' || (_uid && String(g.createdBy) === String(_uid)));
+            this.joinedGroups = this.groups.filter(g =>
+                !g.isCreator && g.role !== 'owner' && !(_uid && String(g.createdBy) === String(_uid)));
+            this.adminGroups = this.groups.filter(g =>
+                g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
+            // Sync module-level let vars
+            groups = this.groups; myGroups = this.myGroups;
+            joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
             
         } catch (error) {
             debugLog('Failed to merge server data:', error);
@@ -4513,26 +4521,18 @@ const openGroupChat = async function(groupData) {
         const sidebar = safeGetElement('#sidebar');
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
-        // Refresh isMobile at call time — resize may have occurred
-        const _mobile = window.innerWidth <= 768;
-        
-        if (_mobile) {
-            if (sidebar) {
-                sidebar.style.display = 'none';
-                sidebar.style.visibility = 'hidden';
-                sidebar.classList.add('hidden');
-            }
+        if (isMobile) {
+            if (sidebar) { sidebar.style.display = 'none'; sidebar.classList.add('hidden'); }
             if (groupChatPanel) {
                 groupChatPanel.style.display = 'flex';
                 groupChatPanel.classList.add('active');
             }
-            
             const chatHeaderInfo = safeGetElement('#chatHeaderInfo');
             if (chatHeaderInfo && !chatHeaderInfo.querySelector('.mobile-back-btn')) {
                 const backBtn = document.createElement('button');
                 backBtn.className = 'mobile-back-btn';
                 backBtn.innerHTML = '<i class="fas fa-arrow-left"></i>';
-                backBtn.style.cssText = 'background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 18px; margin-right: 10px;';
+                backBtn.style.cssText = 'background:none;border:none;color:var(--text-primary);cursor:pointer;font-size:18px;margin-right:10px;padding:0';
                 backBtn.addEventListener('click', closeGroupChatMobile);
                 chatHeaderInfo.insertBefore(backBtn, chatHeaderInfo.firstChild);
             }
@@ -4993,19 +4993,13 @@ function closeGroupChatMobile() {
         const sidebar = safeGetElement('#sidebar');
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
-        const _mobile = window.innerWidth <= 768;
-        
-        if (_mobile) {
-            if (sidebar) {
-                sidebar.style.display = '';
-                sidebar.style.visibility = '';
-                sidebar.classList.remove('hidden');
-            }
+        if (isMobile) {
+            if (sidebar) { sidebar.style.display = 'flex'; sidebar.classList.remove('hidden'); }
             if (groupChatPanel) {
                 groupChatPanel.style.display = 'none';
                 groupChatPanel.classList.remove('active');
             }
-            const mobileBackBtn = document.querySelector('.mobile-back-btn');
+            const mobileBackBtn = document.querySelector('.mobile-back-btn, .gc-back');
             if (mobileBackBtn) mobileBackBtn.remove();
         }
     } catch (error) {}
@@ -7202,9 +7196,7 @@ function addGroupItem(groupData, container, type) {
         
         groupItem.addEventListener('click', (e) => {
             if (!e.target.closest('.group-actions')) {
-                // Open chat directly; fall back to details if chat fails
-                try { openGroupChat(safeGroupData); }
-                catch(_) { showGroupDetails(safeGroupData, type); }
+                showGroupDetails(safeGroupData, type);
             }
         });
         

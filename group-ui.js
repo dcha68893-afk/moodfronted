@@ -2139,10 +2139,6 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         
         registerUIEventListener(groupItem, 'click', (e) => {
             if (!e.target.closest('.group-actions')) {
-                // Open chat directly; fall back to details panel if unavailable
-                if (typeof openGroupChat === 'function') {
-                    try { openGroupChat(groupData); return; } catch(_) {}
-                }
                 if (typeof showGroupDetails === 'function') {
                     showGroupDetails(groupData, safeType);
                 }
@@ -2152,9 +2148,6 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         registerUIEventListener(groupItem, 'keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                if (typeof openGroupChat === 'function') {
-                    try { openGroupChat(groupData); return; } catch(_) {}
-                }
                 if (typeof showGroupDetails === 'function') {
                     showGroupDetails(groupData, safeType);
                 }
@@ -2195,14 +2188,11 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         
         allGroupsList.innerHTML = '';
         
-        const _gc = window.GroupCore;
-        const _live = (_gc && _gc.groups && _gc.groups.length > 0) ? _gc.groups : (groups || []);
-        if (!_live.length) {
-            allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
-            return;
-        }
+        const _gcR = window.GroupCore;
+        const _liveAll = (_gcR && _gcR.groups && _gcR.groups.length > 0) ? _gcR.groups : (groups || []);
+        if (!_liveAll.length) { allGroupsList.appendChild(createSecureEmptyStateElement('groups')); return; }
         const fragment = document.createDocumentFragment();
-        const groupsToRender = _live.slice(0, 20);
+        const groupsToRender = _liveAll.slice(0, 20);
         
         groupsToRender.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2217,9 +2207,9 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
             allGroupsList.appendChild(createSecureEmptyStateElement('no-matches'));
         }
         
-        if (_live.length > 20) {
+        if (_liveAll.length > 20) {
             const timer = setTimeout(() => {
-                _live.slice(20).forEach(group => {
+                _liveAll.slice(20).forEach(group => {
                     if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                         const groupItem = createSecureGroupItemElement(group, 'group');
                         if (groupItem) allGroupsList.appendChild(groupItem);
@@ -2248,10 +2238,7 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         
         const _gcMy = window.GroupCore;
         const _liveMy = (_gcMy && _gcMy.myGroups && _gcMy.myGroups.length > 0) ? _gcMy.myGroups : (myGroups || []);
-        if (!_liveMy.length) {
-            myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));
-            return;
-        }
+        if (!_liveMy.length) { myGroupsList.appendChild(createSecureEmptyStateElement('myGroups')); return; }
         const fragment = document.createDocumentFragment();
         _liveMy.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2285,10 +2272,7 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         
         const _gcJn = window.GroupCore;
         const _liveJn = (_gcJn && _gcJn.joinedGroups && _gcJn.joinedGroups.length > 0) ? _gcJn.joinedGroups : (joinedGroups || []);
-        if (!_liveJn.length) {
-            joinedList.appendChild(createSecureEmptyStateElement('joined'));
-            return;
-        }
+        if (!_liveJn.length) { joinedList.appendChild(createSecureEmptyStateElement('joined')); return; }
         const fragment = document.createDocumentFragment();
         _liveJn.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2982,7 +2966,7 @@ export function renderFriendsPickerList(friends) {
         item.innerHTML = `
             <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
             <div style="flex:1;min-width:0">
-                <div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div>
+                <div style="font-weight:600;font-size:13px;color:var(--text-primary)"${f.isFriend?' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#48bb7820;color:#48bb78">friend</span>':''}>${f.displayName}</div>
                 <div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}${inviteMode ? ' · Invite required' : ' · Add directly'}</div>
             </div>
             <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;">${sel?'✓':''}</div>
@@ -3537,10 +3521,9 @@ function bindCreateGroupModalEvents() {
     }
 
     // FIXED: Create Group button - direct event binding
-    // FIX: use submitting flag instead of cloneNode - cloneNode orphaned the button
     const createGroupBtnModal = document.getElementById('createGroupBtnModal');
-    if (createGroupBtnModal && !createGroupBtnModal.__bound) {
-        createGroupBtnModal.__bound = true;
+    if (createGroupBtnModal && !createGroupBtnModal.__gcBound) {
+        createGroupBtnModal.__gcBound = true;
         createGroupBtnModal.addEventListener('click', async function(e) {
             e.preventDefault(); e.stopPropagation();
             if (this.__submitting) return;
@@ -4275,6 +4258,7 @@ export function registerUICoreEvents() {
             }
         });
 
+        // groups:list-updated — after full sync from server
         GC.on('groups:list-updated', () => {
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
@@ -4431,7 +4415,7 @@ export async function loadDiscoverGroups(query = '', purpose = 'all') {
     if (!container) return;
     container.innerHTML = panelLoader();
     try {
-        let url = '/api/groups/search?limit=20';
+        let url = '/api/groups/public?limit=30&isPublic=true';
         if (query) url += '&query=' + encodeURIComponent(query);
         if (purpose && purpose !== 'all') url += '&purpose=' + purpose;
         const data = await panelFetch(url);
@@ -4451,19 +4435,37 @@ export async function loadDiscoverGroups(query = '', purpose = 'all') {
                             ${g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':''}
                         </div>
                     </div>
-                    <button data-gid="${g.id}" data-gname="${g.name}" style="padding:7px 14px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;flex-shrink:0">Join</button>
+                    <div style="display:flex;gap:6px;flex-shrink:0">
+                        <button data-gid="${g.id}" data-gname="${g.name}" data-action="open" title="Open" style="padding:7px 10px;border-radius:8px;background:none;border:1px solid var(--primary-color,#6c63ff);color:var(--primary-color,#6c63ff);cursor:pointer;font-size:13px"><i class="fas fa-door-open"></i></button>
+                        <button data-gid="${g.id}" data-gname="${g.name}" data-action="join" style="padding:7px 12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">Join</button>
+                    </div>
                 </div>
             `);
-            card.querySelector('[data-gid]').addEventListener('click', async function() {
-                const btn = this; btn.disabled = true; btn.textContent = 'Joining…';
-                try {
-                    const res = await panelFetch('/api/groups/' + btn.dataset.gid + '/join', { method:'POST', body:'{}' });
-                    if (res.success) {
-                        btn.textContent = '✓ Joined'; btn.style.background = '#48bb78';
-                        if (typeof showNotification === 'function') showNotification('Joined "' + btn.dataset.gname + '"!', 'success');
-                        if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(()=>{});
-                    } else { btn.disabled = false; btn.textContent = 'Join'; if (typeof showNotification === 'function') showNotification(res.message||'Failed', 'error'); }
-                } catch (_) { btn.disabled = false; btn.textContent = 'Join'; }
+                        card.querySelectorAll('[data-gid]').forEach(function(btn) {
+                btn.addEventListener('click', async function() {
+                    const action = this.dataset.action;
+                    if (action === 'open') {
+                        const gid = this.dataset.gid;
+                        const GC = window.GroupCore;
+                        let found = GC && (GC.groups||[]).find(x => String(x.id)===String(gid));
+                        if (!found) { try { const d = await panelFetch('/api/groups/'+gid); found = d?.data?.group||d?.group||d?.data; } catch(e){} }
+                        if (found) {
+                            var dp = document.getElementById('discoverPanel'); if(dp) dp.style.display='none';
+                            if (typeof window.openGroupChat==='function') window.openGroupChat(found);
+                        }
+                        return;
+                    }
+                    const btn2=this; btn2.disabled=true; btn2.textContent='Joining…';
+                    try {
+                        const res = await panelFetch('/api/groups/'+btn2.dataset.gid+'/join',{method:'POST',body:'{}'});
+                        if (res.success!==false) {
+                            btn2.textContent='✓ Joined'; btn2.style.background='#48bb78';
+                            if(typeof showNotification==='function') showNotification('Joined "'+btn2.dataset.gname+'"!','success');
+                            if(typeof syncGroupsFromServer==='function') syncGroupsFromServer().catch(()=>{});
+                            var GC2=window.GroupCore; if(GC2&&typeof GC2.requestGroupList==='function') GC2.requestGroupList().catch(()=>{});
+                        } else { btn2.disabled=false; btn2.textContent='Join'; if(typeof showNotification==='function') showNotification(res.message||'Failed','error'); }
+                    } catch(_) { btn2.disabled=false; btn2.textContent='Join'; }
+                });
             });
             container.appendChild(card);
         });
@@ -4595,7 +4597,7 @@ export async function loadInviteFriendsTab() {
     const gid = window.selectedGroup?.id;
     body.innerHTML = `
         ${!gid ? '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Select Group</label><select id="invGroupSel" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"><option value="">Loading groups…</option></select></div>' : ''}
-        <input id="invFriendSearch" placeholder="Search friends…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+        <input id="invFriendSearch" placeholder="Search users…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
         <div id="invFriendsList" style="max-height:260px;overflow-y:auto;">${panelLoader()}</div>
         <div id="invSelBar" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:30px;"></div>
         <button id="invSendBtn" style="display:none;width:100%;padding:12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;margin-top:10px">Send Invitations</button>
@@ -4608,10 +4610,17 @@ export async function loadInviteFriendsTab() {
         }).catch(()=>{});
     }
     try {
-        const data = await panelFetch('/api/friends');
-        window._invFriendsAll = (data?.data?.friends || data?.data || data?.friends || []).map(f => ({
-            id: f.id, displayName: f.displayName || [f.firstName,f.lastName].filter(Boolean).join(' ') || f.username || 'Unknown',
-            username: f.username||'', avatar: f.avatar||null, online: f.status==='online',
+        // Load both friends and all users so non-friends can also be invited
+        const [fr, au] = await Promise.allSettled([
+            panelFetch('/api/friends'),
+            panelFetch('/api/friends/users/all?limit=200'),
+        ]);
+        const _friends = (fr.status==='fulfilled' ? (fr.value?.data?.friends||fr.value?.friends||[]) : []).map(f=>({...f,_isFriend:true}));
+        const _fids = new Set(_friends.map(f=>String(f.id)));
+        const _others = (au.status==='fulfilled' ? (au.value?.data?.users||au.value?.users||au.value?.data||[]) : []).filter(u=>!_fids.has(String(u.id)));
+        window._invFriendsAll = [..._friends, ..._others].map(f => ({
+            id: f.id, displayName: f.displayName||[f.firstName,f.lastName].filter(Boolean).join(' ')||f.username||'Unknown',
+            username: f.username||'', avatar: f.avatar||null, online: f.status==='online', isFriend: !!f._isFriend,
         }));
         renderInvFriendsList(window._invFriendsAll);
     } catch (_) {
@@ -5005,6 +5014,19 @@ async function createGroupAsync(buttonElement) {
             }
         }
         console.log('[GroupUI] create group result:', result && result.success);
+        // Push into GroupCore immediately so lists update without page reload
+        const _ncg = result && result.group;
+        if (_ncg && _ncg.id) {
+            const _GC = window.GroupCore;
+            if (_GC) {
+                if (!_GC.groups.some(function(g){return g.id===_ncg.id;})) _GC.groups.push(_ncg);
+                if (!_GC.myGroups.some(function(g){return g.id===_ncg.id;})) _GC.myGroups.push(_ncg);
+                if (typeof _GC.saveGroups==='function') _GC.saveGroups();
+                if (typeof _GC.emit==='function') _GC.emit('groups:list-updated',{groups:_GC.groups,myGroups:_GC.myGroups,joinedGroups:_GC.joinedGroups,fromServer:false});
+            }
+            if (typeof renderGroupsListSecure==='function') try{renderGroupsListSecure();}catch(e){}
+            setTimeout(function(){var g=window.GroupCore;if(g&&typeof g.requestGroupList==='function')g.requestGroupList().catch(function(){});},1500);
+        }
 
         // Reset selection
         window._cgSelectedMembers = new Set();

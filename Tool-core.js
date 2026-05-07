@@ -6695,7 +6695,7 @@ export async function createServiceListing(title, description, options = {}) {
     }
 
     // Build user object from resolved auth
-    const userId = _userId;
+    const userId = _uid;
     const _u = sessionClient.getUser?.() || window.currentUser || {};
     const userObj = {
         id: userId,
@@ -6825,7 +6825,7 @@ export async function createDigitalListing(title, description, fileData, options
     }
 
     // Build user object from resolved auth
-    const userId = _userId;
+    const userId = _uid;
     const _u = sessionClient.getUser?.() || window.currentUser || {};
     const userObj = {
         id: userId,

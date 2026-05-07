@@ -184,6 +184,7 @@ window.__CALLS_IFRAME__ = {
 
     function _handleCoreEvent(event, data) {
         switch(event) {
+            case 'call_initiated':   // ← FIX: calls-core fires 'call_initiated', not 'call_initiating'
             case 'call_initiating':
             case 'call_started':
                 showScreen('calling');
@@ -210,6 +211,7 @@ window.__CALLS_IFRAME__ = {
                         // Store globally so transitionToInCall can use it on receiver side
                         window.__incomingCallerName  = callerName;
                         window.__incomingCallerAvatar = data.callerAvatar || data.callerPhoto || null;
+                        window.__incomingCallId       = data.callId || data.id || null;
                     }
                 }
                 // Start 180-second countdown, auto-decline on expiry
@@ -595,7 +597,57 @@ function _declineVideoUpgrade() {
         }
     });
 
+    // ── Duration timer ───────────────────────────────────────────────────────
+    var _durationInterval = null;
+    var _durationSeconds  = 0;
+
+    function _startDurationTimer() {
+        _stopDurationTimerInternal();
+        _durationSeconds = 0;
+        var el = document.getElementById('callDuration');
+        if (el) el.textContent = '0:00';
+        _durationInterval = setInterval(function() {
+            _durationSeconds++;
+            var m = Math.floor(_durationSeconds / 60);
+            var s = _durationSeconds % 60;
+            if (el) el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+        }, 1000);
+    }
+
+    function _stopDurationTimerInternal() {
+        if (_durationInterval) { clearInterval(_durationInterval); _durationInterval = null; }
+    }
+
+    // ── transitionToInCall — defined globally so _handleCoreEvent & postMessage handler can call it ──
+    window.transitionToInCall = function(callInfo) {
+        callInfo = callInfo || {};
+        var name   = callInfo.userName   || window.__activePeerName || window.__incomingCallerName || 'User';
+        var avatar = callInfo.userAvatar || window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+
+        // Populate name
+        var nameEl = document.getElementById('callWithName');
+        if (nameEl) nameEl.textContent = name;
+
+        // Populate avatar initial
+        var avatarEl = document.getElementById('incallAvatar');
+        if (avatarEl) avatarEl.textContent = name.charAt(0).toUpperCase();
+
+        // Restore remote audio volume
+        var remoteAudio = document.getElementById('remoteAudio');
+        if (remoteAudio) {
+            remoteAudio.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
+            remoteAudio.muted  = false;
+        }
+
+        showScreen('in-call');
+        _startDurationTimer();
+        console.log('[ScreenMgr] transitionToInCall → in-call screen shown for:', name);
+    };
+
     // ── Boot sequence ────────────────────────────────────────────────────────
+    // NOTE: Button wiring (mute/video/speaker/end/accept/decline) is handled
+    // entirely by calls-ui.js UIBridge._attachCallControls and UIEventHandlers.
+    // Do NOT attach duplicate onclick handlers here — it causes double-fire.
     document.addEventListener('DOMContentLoaded', function() {
         _suppressCallOverlay();
         // Start the idle screen by default
@@ -611,7 +663,7 @@ function _declineVideoUpgrade() {
         _hookCoreListeners();
     }
 
-    console.log('[ScreenMgr] Screen manager v3.0 loaded — callOverlay suppressed, 3-min timer active');
+    console.log('[ScreenMgr] Screen manager v3.1 loaded — all fixes applied');
 })();
 </script>
     <script src="/js/kynecta.safety.layer.js"></script>

@@ -2721,7 +2721,7 @@ try {
             const uniqueMap = new Map();
             const seenFriendIds = new Set();
 
-            // Filter out chats the user has explicitly deleted — persists across refresh
+            // Filter permanently deleted chats — survived across refresh via localStorage
             let _deleted = new Set();
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8');
@@ -2730,7 +2730,7 @@ try {
             
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
-                if (_deleted.has(String(chat.id))) return; // skip deleted
+                if (_deleted.has(String(chat.id))) return; // permanently deleted
                 
                 let friendId = chat.friendId || chat.otherParticipantId;
                 if (!friendId && chat.otherParticipant) {
@@ -2908,28 +2908,33 @@ try {
             this._notifySubscribers();
 
             try {
-                // FIX: Only render if we have a conversationId to scope against.
-                // Using _activeConversation alone is unreliable when fetchMessages
-                // resolves async after the user has already switched to a different chat.
                 const _renderChatId = conversationId || this._activeConversation?.id;
                 if (_renderChatId) {
-                    const _activeForRender = this._activeConversation;
-                    // Only paint the panel if the user is still viewing this chat
-                    if (_activeForRender && String(_activeForRender.id) === String(_renderChatId)) {
-                        const _aid = String(_renderChatId);
+                    let _activeForRender = this._activeConversation;
+                    const _aid = String(_renderChatId);
+
+                    // If _activeConversation is null but panel is open, promote from map
+                    if (!_activeForRender) {
+                        const _p = document.getElementById('chatPanel');
+                        if (_p && !_p.classList.contains('hidden')) {
+                            _activeForRender = this._conversationsMap &&
+                                (this._conversationsMap.get(_aid) || this._conversationsMap.get(Number(_aid)));
+                            if (_activeForRender) this._activeConversation = _activeForRender;
+                        }
+                    }
+
+                    if (_activeForRender && String(_activeForRender.id) === _aid) {
                         const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-                        // Strict filter — NEVER fall back to the full _messages array
-                        // which may contain messages from other chats.
+                        // Accept messages for this chat OR with no chatId (optimistic)
                         const _filtered = this._messages
-                            .filter(m => String(m.chatId || m.conversationId || '') === _aid)
+                            .filter(m => {
+                                const mid = String(m.chatId || m.conversationId || '');
+                                return mid === _aid || mid === '';
+                            })
                             .sort((a, b) => _tsMs2(a) - _tsMs2(b));
                         if (_filtered.length > 0) {
                             window.dispatchEvent(new CustomEvent('renderMessages', {
-                                detail: {
-                                    messages: _filtered,
-                                    currentChat: _activeForRender,
-                                    currentUser: null
-                                }
+                                detail: { messages: _filtered, currentChat: _activeForRender, currentUser: null }
                             }));
                         }
                     }
@@ -3034,33 +3039,54 @@ try {
             this._notifySubscribers();
             EventBus.emit('message:added', message);
 
-            // ── Render into active chat panel if this message belongs there ──
+            // ── Render new message immediately if this chat is currently open ──
             try {
                 const _ar = this._activeConversation;
-                if (_ar) {
-                    const _msgCid = String(message.chatId || message.conversationId || '');
-                    const _actCid = String(_ar.id || '');
-                    let _render = !!(_msgCid && _actCid && _msgCid === _actCid);
-                    if (!_render && message.senderId) {
-                        const _afid = String(_ar.friendId || _ar.otherUserId ||
-                            (_ar.otherParticipant && _ar.otherParticipant.id) || '');
-                        if (_afid && String(message.senderId) === _afid) _render = true;
+                const _msgCid = String(message.chatId || message.conversationId || '');
+                const _actCid = _ar ? String(_ar.id || '') : '';
+
+                // PRIMARY: chatId equality
+                let _render = !!(_msgCid && _actCid && _msgCid === _actCid);
+
+                // SECONDARY: friendId match (receiver-reply, pending→real)
+                if (!_render && _ar && message.senderId) {
+                    const _afid = String(_ar.friendId || _ar.otherUserId ||
+                        (_ar.otherParticipant && _ar.otherParticipant.id) || '');
+                    if (_afid && String(message.senderId) === _afid) _render = true;
+                }
+
+                // TERTIARY: if no active conversation but chatPanel is visible and the
+                // DOM shows a conversation with this chatId — render anyway.
+                // This covers the race where _activeConversation is set after addMessage runs.
+                if (!_render && _msgCid) {
+                    const _panel = document.getElementById('chatPanel');
+                    const _panelVisible = _panel && !_panel.classList.contains('hidden');
+                    if (_panelVisible) {
+                        // Try to match via the _conversationsMap
+                        const _conv = this._conversationsMap && (this._conversationsMap.get(_msgCid) || this._conversationsMap.get(Number(_msgCid)));
+                        if (_conv) {
+                            // Set as active so subsequent events match correctly
+                            this._activeConversation = _conv;
+                            _render = true;
+                        }
                     }
-                    if (_render) {
-                        const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-                        const _fid = _msgCid || _actCid;
-                        const _msgs = this._messages.filter(function(m) {
-                            const mid = String(m.chatId || m.conversationId || '');
-                            return mid === _fid || mid === _actCid;
-                        }).sort(function(a, b) { return _tsF(a) - _tsF(b); });
-                        window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: { messages: _msgs, currentChat: _ar, currentUser: null }
-                        }));
-                        try {
-                            const _c = document.getElementById('messagesContainer');
-                            if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
-                        } catch (_) {}
-                    }
+                }
+
+                if (_render) {
+                    const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const _fid = _msgCid || _actCid;
+                    const _renderConv = this._activeConversation;
+                    const _msgs = this._messages.filter(function(m) {
+                        const mid = String(m.chatId || m.conversationId || '');
+                        return mid === _fid || mid === _actCid;
+                    }).sort(function(a, b) { return _tsF(a) - _tsF(b); });
+                    window.dispatchEvent(new CustomEvent('renderMessages', {
+                        detail: { messages: _msgs, currentChat: _renderConv, currentUser: null }
+                    }));
+                    try {
+                        const _c = document.getElementById('messagesContainer');
+                        if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
+                    } catch (_) {}
                 }
             } catch (_e) {}
 
@@ -5637,19 +5663,32 @@ try {
             }
 
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-            // FIX: Use loose equality via String() on both sides.
-            // Also match by friendId so receiver sees sender's message even if chatId
-            // type is number vs string, or activeChat is a pending_ conversation.
-            const _acId = activeChat ? String(activeChat.id || '') : '';
             const _rcId = chatId ? String(chatId) : '';
-            let isThisChat = !!(_acId && _rcId && _acId === _rcId);
-            if (!isThisChat && activeChat) {
+            const _acId = activeChat ? String(activeChat.id || '') : '';
+
+            // PRIMARY: chatId equality
+            let isThisChat = !!(_rcId && _acId && _rcId === _acId);
+
+            // SECONDARY: friendId match (receiver-reply on sender side)
+            if (!isThisChat && activeChat && normalizedMessage && normalizedMessage.senderId) {
                 const _afid = String(
                     activeChat.friendId || activeChat.otherUserId ||
                     (activeChat.otherParticipant && activeChat.otherParticipant.id) || ''
                 );
-                const _sid = normalizedMessage ? String(normalizedMessage.senderId || '') : '';
-                if (_afid && _sid && _afid === _sid) isThisChat = true;
+                if (_afid && String(normalizedMessage.senderId) === _afid) isThisChat = true;
+            }
+
+            // TERTIARY: no active chat but panel is open — promote from conversationsMap
+            if (!isThisChat && _rcId) {
+                const _panel = document.getElementById('chatPanel');
+                const _panelOpen = _panel && !_panel.classList.contains('hidden');
+                if (_panelOpen && ChatManager._conversationsMap) {
+                    const _conv = ChatManager._conversationsMap.get(_rcId) || ChatManager._conversationsMap.get(Number(_rcId));
+                    if (_conv) {
+                        ChatManager._activeConversation = _conv;
+                        isThisChat = true;
+                    }
+                }
             }
 
             // Always update sidebar (unread badge, online status, last message)
@@ -5667,6 +5706,7 @@ try {
             if (isThisChat) {
                 try {
                     const _all = ChatManager._messages || [];
+                    const _now = ChatManager._activeConversation || activeChat;
                     const _matchId = _rcId || _acId;
                     let _chatMsgs = _all.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
@@ -5674,7 +5714,6 @@ try {
                     }).sort(function(a, b) {
                         return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                     });
-                    // Inject message if not yet stored (race between addMessage and this)
                     if (normalizedMessage) {
                         const _has = _chatMsgs.some(function(m) {
                             return m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id);
@@ -5685,20 +5724,16 @@ try {
                             });
                         }
                     }
-                    if (_chatMsgs.length > 0) {
+                    if (_chatMsgs.length > 0 && _now) {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: {
-                                messages: _chatMsgs,
-                                currentChat: ChatManager._activeConversation || activeChat,
-                                currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser()
-                            }
+                            detail: { messages: _chatMsgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
                         }));
                         try {
                             const _c = document.getElementById('messagesContainer');
                             if (_c) requestAnimationFrame(function() { _c.scrollTop = _c.scrollHeight; });
                         } catch (_) {}
                     }
-                } catch (_e) { console.error('[renderRealtimeUpdate] render error', _e); }
+                } catch (_e) {}
             } else if (normalizedMessage) {
                 try {
                     const _sid = normalizedMessage.senderId;
@@ -6238,25 +6273,19 @@ try {
         deleteConversation: function(chatId) {
             if (!chatId) return;
             const sid = String(chatId);
-            // 1. Persist to deleted list — survives refresh + server re-fetch
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8') || [];
                 if (!_d.includes(sid)) { _d.push(sid); SafeStorage.setJSON('kynecta_deleted_chats_v8', _d); }
             } catch(_) {}
-            // 2. Remove from memory
             ChatManager._conversations = (ChatManager._conversations || []).filter(c => String(c.id) !== sid);
             if (ChatManager._conversationsMap) { ChatManager._conversationsMap.delete(chatId); ChatManager._conversationsMap.delete(sid); }
             if (ChatManager._activeConversation && String(ChatManager._activeConversation.id) === sid) {
                 ChatManager._activeConversation = null; ChatManager._messages = [];
             }
-            // 3. Update cache
             ChatManager._saveToCache();
-            // 4. Remove message cache for this chat
             try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`); } catch(_) {}
             try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
-            // 5. Re-render sidebar
             ChatManager._notifySubscribers();
-            // 6. Best-effort server delete
             makeApiRequest(`/chats/${sid}`, 'DELETE').catch(function(){});
         },
 
