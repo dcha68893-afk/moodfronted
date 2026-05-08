@@ -88,7 +88,18 @@ export async function getGroupInvitations(groupId) {
  * Get all invitations sent TO the current user (across all groups)
  */
 export async function getMyInvitations(status = 'pending') {
-    return secureApiFetch(`/api/groups/invitations?status=${status}`);
+    // FIX: also try /api/group-members/invitations which is the groupMembersController route
+    return secureApiFetch(`/api/group-members/invitations?status=${status}`)
+        .catch(() => secureApiFetch(`/api/groups/invitations?status=${status}`));
+}
+
+/**
+ * Get all invitations SENT by the current user (across all groups)
+ */
+export async function getMySentInvitations() {
+    // FIX: use /api/groups/invitations/sent — handled by group.js route
+    return secureApiFetch(`/api/groups/invitations/sent`)
+        .catch(() => secureApiFetch(`/api/group-members/invitations?type=sent`));
 }
 
 /**

@@ -361,11 +361,7 @@ const GlobalCallHistory = {
     // ========== STEP 5: Initiate the actual call ==========
     try {
         let result = null;
-        // Stamp initiation time — used to suppress stale call_force_ended echoes (Bug 1)
-        window.__callInitiatedAt = Date.now();
-        // Reset CALL_ENDED debounce so next call's end is not suppressed (Bug 4)
-        window.__callEndedHandledAt = 0;
-
+        
         if (window.callCore && window.callCore.startCall) {
             console.log('[Calls UI] Using callCore.startCall');
             result = await window.callCore.startCall(parseInt(userId), callType);
@@ -452,6 +448,11 @@ const GlobalCallHistory = {
     function showCallingScreen(callInfo) {
     console.log('[Calls UI] ========== SHOWING CALLING SCREEN ==========');
     console.log('[Calls UI] callInfo:', callInfo);
+
+    // Stamp NOW — before any network activity — so stale CALL_ENDED/CALL_FORCE_ENDED
+    // echoes from the server (from the previous call) are suppressed for 8 seconds.
+    window.__callInitiatedAt    = Date.now();
+    window.__callEndedHandledAt = 0;  // reset debounce so next real end is not skipped
     
     // Get all screen elements
     const idleScreen = document.getElementById('idleScreen');
@@ -670,6 +671,21 @@ function transitionToInCall(callInfo) {
 
     const inCallScreen = document.getElementById('inCallScreen');
     if (!inCallScreen) { console.error('[UI] #inCallScreen not found'); return; }
+
+    // ── CRITICAL: ensure callContainer (parent of all screens) is visible ──
+    const _callContainer = document.getElementById('callContainer');
+    if (_callContainer) {
+        _callContainer.classList.add('active');
+        _callContainer.style.removeProperty('display');
+        _callContainer.style.setProperty('display', 'flex', 'important');
+    }
+    // Also ensure idleScreen is hidden
+    const _idleScreen = document.getElementById('idleScreen');
+    if (_idleScreen) {
+        _idleScreen.classList.remove('active');
+        _idleScreen.style.setProperty('display', 'none', 'important');
+    }
+
     inCallScreen.classList.add('active');
     inCallScreen.style.setProperty('display', 'flex', 'important');
 
@@ -4064,23 +4080,10 @@ case 'CALL_INITIATED':
                     // Skip reset if we're already in-call (stale WS echo after accept)
                     if (UIState.callState === 'connected' ||
                         (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
-                        console.warn('[Calls UI] call_force_ended ignored — already in-call');
+                        console.warn('[Calls UI] call_force_ended core event ignored — already in-call');
+                        // Only stop ringtones
                         if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
                         if (window._callerRingtone)   { try { window._callerRingtone.pause();   window._callerRingtone.currentTime   = 0; } catch(e) {} window._callerRingtone   = null; }
-                        break;
-                    }
-                    // Skip reset if we JUST initiated a call in the last 8 s (server echo of old stale call)
-                    // This prevents call_force_ended from the previous call wiping the calling screen
-                    // that was just shown for the new call.
-                    if (window.__callInitiatedAt && (Date.now() - window.__callInitiatedAt) < 8000) {
-                        console.warn('[Calls UI] call_force_ended ignored — new call initiated ' + (Date.now() - window.__callInitiatedAt) + 'ms ago (stale echo)');
-                        break;
-                    }
-                    // Skip if calling screen is actively visible (new outgoing call in progress)
-                    if (UIState.callState === 'calling' &&
-                        document.getElementById('callingScreen') &&
-                        document.getElementById('callingScreen').classList.contains('active')) {
-                        console.warn('[Calls UI] call_force_ended ignored — calling screen is active (new call in progress)');
                         break;
                     }
                     this.handleCallEnded(data);
@@ -5070,11 +5073,7 @@ case 'CALL_INITIATED':
             // ── Guard: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.
-            // EXCEPTION: if __callInitiatedAt is recent, a call IS in progress even
-            // if force_ended already wiped UIState — don't drop in that case.
-            const _recentInit = window.__callInitiatedAt && (Date.now() - window.__callInitiatedAt) < 8000;
             const _anyScreenActive =
-                _recentInit ||
                 UIState.callActive ||
                 UIState.callState === 'calling' ||
                 UIState.callState === 'connecting' ||
@@ -5101,7 +5100,6 @@ case 'CALL_INITIATED':
             // Clear the CALL_ACCEPTED dedup lock and peer globals so next call works
             window.__callAcceptedHandled = 0;
             window.__callReceiverAccepted = false;  // reset ICE timeout guard
-            window.__callInitiatedAt      = 0;      // reset stale-echo guard so next force_ended is not suppressed
             window.__activePeerName   = null;
             window.__activePeerType   = null;
             window.__activePeerAvatar = null;
@@ -5531,30 +5529,20 @@ case 'CALL_ACCEPTED': {
 }
                     case 'CALL_INCOMING': {
                         const _incomingPayload = data.payload || {};
-                        // Store globally so accept/decline can reference it even if handler fires late
+                        // Store so late-arriving callCore listeners can still pick it up
                         window.__pendingIncomingCallData = _incomingPayload;
-                        window._currentIncomingCallId   = _incomingPayload.callId || _incomingPayload.id;
-                        window.__incomingCallerName     = _incomingPayload.callerName || _incomingPayload.userName || _incomingPayload.name || 'Unknown';
-                        window.__incomingCallerAvatar   = _incomingPayload.callerAvatar || _incomingPayload.callerPhoto || null;
-                        window.__incomingCallType       = _incomingPayload.callType || 'voice';
-
-                        const _getHandler = () =>
-                            (typeof UIEventHandlers !== 'undefined' && UIEventHandlers && UIEventHandlers.handleIncomingCall)
-                            || (window.UIEventHandlers && window.UIEventHandlers.handleIncomingCall);
-
-                        if (_getHandler()) {
-                            _getHandler()(_incomingPayload);
+                        if (UIEventHandlers.handleIncomingCall) {
+                            UIEventHandlers.handleIncomingCall(_incomingPayload);
                         } else {
-                            // UIEventHandlers defined later in module — retry every 300ms up to 10s
+                            // callCore or UI not fully ready — retry up to 3x with 300ms gaps
                             let _retries = 0;
                             const _retryIncoming = setInterval(() => {
                                 _retries++;
-                                const _h = _getHandler();
-                                if (_h) {
+                                if (UIEventHandlers.handleIncomingCall) {
                                     clearInterval(_retryIncoming);
-                                    _h(_incomingPayload);
+                                    UIEventHandlers.handleIncomingCall(_incomingPayload);
                                     window.__pendingIncomingCallData = null;
-                                } else if (_retries >= 33) {
+                                } else if (_retries >= 3) {
                                     clearInterval(_retryIncoming);
                                     console.warn('[Calls UI] handleIncomingCall still not ready after retries');
                                 }
@@ -5627,6 +5615,15 @@ case 'CALL_ACCEPTED': {
                             if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
                             break;
                         }
+                        // ── Suppress stale echo: if we just started a new call within 8s,
+                        // this CALL_ENDED is from the previous session — do NOT reset calling screen ──
+                        const _recentCallStart = window.__callInitiatedAt && (Date.now() - window.__callInitiatedAt) < 8000;
+                        const _callingScreenActive = document.getElementById('callingScreen') &&
+                            document.getElementById('callingScreen').classList.contains('active');
+                        if ((data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_ENDED') && _recentCallStart && _callingScreenActive) {
+                            console.warn('[Calls UI] ' + data.type + ' suppressed — new call initiated ' + (Date.now() - window.__callInitiatedAt) + 'ms ago (stale echo)');
+                            break;
+                        }
                         // Parent broadcast CALL_ENDED to this iframe — reset UI immediately
                         console.log('[Calls UI] CALL_ENDED received from parent — resetting UI');
                         if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
@@ -5682,6 +5679,13 @@ case 'CALL_ACCEPTED': {
                         if (UIState.callState === 'connected' ||
                             (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
                             console.warn('[Calls UI] CALL_FORCE_ENDED (2nd handler) ignored — already in-call');
+                            break;
+                        }
+                        // Suppress stale echo: if calling screen is active and call was just initiated
+                        if (window.__callInitiatedAt && (Date.now() - window.__callInitiatedAt) < 8000 &&
+                            document.getElementById('callingScreen') &&
+                            document.getElementById('callingScreen').classList.contains('active')) {
+                            console.warn('[Calls UI] CALL_FORCE_ENDED (2nd handler) suppressed — new call in progress (' + (Date.now() - window.__callInitiatedAt) + 'ms ago)');
                             break;
                         }
                         console.warn('[Calls UI] CALL_FORCE_ENDED received — resetting state');
@@ -9616,10 +9620,6 @@ const processPayment = safeBind(UIEventHandlers.processPayment, UIEventHandlers)
 const closePremiumLimitModal = safeBind(UIEventHandlers.closePremiumLimitModal, UIEventHandlers);
 const sendReaction = safeBind(UIEventHandlers.sendReaction, UIEventHandlers);
 const handleLogout = safeBind(UIEventHandlers.handleLogout, UIEventHandlers);
-
-// Export UIEventHandlers globally so early postMessage handlers (before module
-// fully evaluates) can find handleIncomingCall via window.UIEventHandlers
-window.UIEventHandlers = UIEventHandlers;
 
 const requestMediaPermissionsFnExport = requestMediaPermissionsFn;
 

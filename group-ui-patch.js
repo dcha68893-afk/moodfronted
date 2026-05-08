@@ -1104,6 +1104,7 @@
         container.innerHTML = '';
         groups.forEach(g => {
             const initials = (g.name || 'G').slice(0,2).toUpperCase();
+            const count = g.memberCount || 0;
             const card = document.createElement('div');
             card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color)';
             const actionBtn = isMine
@@ -1115,7 +1116,7 @@
                 '<div style="flex:1;min-width:0">' +
                 '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (g.name||'Unnamed') + '</div>' +
                 '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px"><i class="fas fa-users"></i> ' +
-                (g.memberCount||0) + ' members' + (g.purpose ? ' · ' + g.purpose : '') + '</div>' +
+                '<span data-member-count>' + count + '</span> member' + (count!==1?'s':'') + (g.purpose ? ' · ' + g.purpose : '') + '</div>' +
                 (g.description ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + String(g.description).slice(0,60) + '</div>' : '') +
                 '</div>' + actionBtn;
 
@@ -1137,12 +1138,25 @@
                     joinBtn.disabled = true; joinBtn.textContent = '…';
                     try {
                         await apiFetch('/groups/' + g.id + '/join', { method: 'POST' });
-                        joinBtn.textContent = '✓ Sent'; joinBtn.style.background = '#43a047';
-                        toast('Join request sent!');
-                        const gc2 = window.GroupCore; if (gc2?.requestGroupList) gc2.requestGroupList().catch(()=>{});
+                        // Update member count in this card immediately
+                        const countEl = card.querySelector('[data-member-count]');
+                        if (countEl) {
+                            const newCount = (parseInt(countEl.textContent) || 0) + 1;
+                            g.memberCount = newCount;
+                            const parentDiv = countEl.parentNode;
+                            countEl.textContent = newCount;
+                            // also fix the "member/members" suffix
+                            parentDiv.innerHTML = '<i class="fas fa-users"></i> <span data-member-count>' + newCount + '</span> member' + (newCount!==1?'s':'') + (g.purpose?' · '+g.purpose:'');
+                        }
+                        joinBtn.textContent = '✓ Joined'; joinBtn.style.background = '#43a047';
+                        toast('Join request sent! You will be added once approved.');
+                        const gc2 = window.GroupCore;
+                        if (gc2?.requestGroupList) gc2.requestGroupList().catch(()=>{});
+                        // Broadcast to parent so other users' panels can refresh
+                        try { window.parent.postMessage({ type: 'GROUP_MEMBER_JOINED', groupId: g.id }, '*'); } catch(_) {}
                     } catch(err) {
                         joinBtn.disabled = false; joinBtn.textContent = 'Join';
-                        toast(err.message||'Failed', 'error');
+                        toast(err.message || 'Failed to send join request', 'error');
                     }
                 });
             }
@@ -1226,7 +1240,8 @@
                 if (!invites.length) { bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)"><i class="fas fa-envelope" style="font-size:28px;opacity:.4;display:block;margin-bottom:10px"></i>No pending invitations</div>'; return; }
                 bodyEl.innerHTML = '';
                 invites.forEach(inv => {
-                    const gname = (inv.group && inv.group.name) || inv.groupName || 'Group';
+                    // FIX: groupMembersService returns inv.userGroup; group.js returns inv.inviteGroup or inv.group
+                    const gname = (inv.userGroup && inv.userGroup.name) || (inv.inviteGroup && inv.inviteGroup.name) || (inv.group && inv.group.name) || inv.groupName || 'Group';
                     const sname = (inv.inviter && inv.inviter.username) || inv.inviterName || 'Someone';
                     const row = document.createElement('div');
                     row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--border-color)';
@@ -1249,13 +1264,13 @@
             } catch(err) { bodyEl.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-secondary)">'+(err.message||'Failed to load')+'</div>'; }
         } else if (tab === 'sent') {
             try {
-                const data    = await apiFetch('/group-members/invitations?status=pending&sent=true');
+                const data    = await apiFetch('/groups/invitations/sent').catch(() => apiFetch('/group-members/invitations?status=pending&type=sent'));
                 const invites = (data.data && (data.data.invitations || data.data)) || data.invitations || [];
                 if (!invites.length) { bodyEl.innerHTML='<div style="padding:24px;text-align:center;color:var(--text-secondary)">No sent invitations</div>'; return; }
                 bodyEl.innerHTML='';
                 invites.forEach(inv => {
-                    const uname = (inv.invitee && inv.invitee.username) || inv.inviteeName || 'User';
-                    const gname = (inv.group && inv.group.name) || 'Group';
+                    const uname = (inv.invitee && inv.invitee.username) || (inv.targetUser && inv.targetUser.username) || inv.inviteeName || 'User';
+                    const gname = (inv.inviteGroup && inv.inviteGroup.name) || (inv.userGroup && inv.userGroup.name) || (inv.group && inv.group.name) || 'Group';
                     const row = document.createElement('div');
                     row.style.cssText='display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--border-color)';
                     row.innerHTML=`<div style="flex:1"><div style="font-weight:600">${uname}</div><div style="font-size:12px;color:var(--text-secondary)">${gname} · Pending</div></div>`
@@ -1314,18 +1329,43 @@
                 });
             }catch(err){fDiv.innerHTML='<div style="padding:16px;text-align:center;color:var(--text-secondary)">'+err.message+'</div>';}
             qs('#_inv_send').addEventListener('click',async()=>{
-                const gid=gsel.value;
-                if(!gid){toast('Select a group','error');return;}
-                if(!_selFriends.length){toast('Select at least one friend','error');return;}
-                const btn=qs('#_inv_send');btn.disabled=true;btn.textContent='Sending...';
-                let ok=0,fail=0;
-                for(const fid of _selFriends){
-                    try{await apiFetch('/group-members/'+gid+'/invitations',{method:'POST',body:{inviteeId:parseInt(fid),role:'member'}});ok++;}
-                    catch(_){fail++;}
+                const gid = gsel.value;
+                if (!gid) { toast('Select a group first', 'error'); return; }
+                if (!_selFriends.length) { toast('Select at least one friend', 'error'); return; }
+                const btn = qs('#_inv_send'); btn.disabled = true; btn.textContent = 'Sending…';
+                let ok = 0, fail = 0, failMsgs = [];
+                for (const fid of _selFriends) {
+                    try {
+                        // POST /group-members/:groupId/invitations  { inviteeId, role }
+                        await apiFetch('/group-members/' + gid + '/invitations', {
+                            method: 'POST',
+                            body: { inviteeId: parseInt(fid) || fid, role: 'member' }
+                        });
+                        ok++;
+                    } catch(err) {
+                        fail++;
+                        failMsgs.push(err.message || 'Unknown error');
+                    }
                 }
-                btn.disabled=false;btn.textContent='Send Invitations';
-                toast(ok+' invitation'+(ok!==1?'s':'')+' sent'+(fail?' ('+fail+' failed)':''));
-                _selFriends=[];
+                btn.disabled = false; btn.textContent = 'Send Invitations';
+                if (ok > 0) {
+                    toast(ok + ' invitation' + (ok !== 1 ? 's' : '') + ' sent! The friend(s) will see it in their Invitations tab.');
+                }
+                if (fail > 0) {
+                    toast(fail + ' failed: ' + failMsgs.slice(0,2).join('; '), 'error');
+                }
+                _selFriends = [];
+                // Uncheck all friend rows visually
+                qs('#_inv_friends') && qs('#_inv_friends').querySelectorAll('div[style]').forEach(row => {
+                    row.style.background = '';
+                    const chk = row.querySelector('._chk');
+                    if (chk) { chk.style.background=''; chk.style.borderColor='var(--border-color)'; chk.textContent=''; }
+                });
+                // Also notify GroupCore to push a real-time invite notification to the other user
+                try {
+                    const gc2 = window.GroupCore;
+                    if (gc2 && typeof gc2.requestGroupList === 'function') gc2.requestGroupList().catch(()=>{});
+                } catch(_) {}
             });
         }
     }

@@ -1960,6 +1960,7 @@
                     // received the incoming call event.
                     document.body.classList.add('call-screen-active');
                     window.__activeCallInProgress = true;
+                    window.__callDispatchedAt = Date.now(); // suppress stale CALL_FORCE_ENDED echoes for 15s
                     window.__lastActivePage = window.__currentPage || 'messages';
                     banner.style.display = 'none';
                     // ── FIX: callsContent visibility — .hidden sets visibility:hidden
@@ -2648,15 +2649,21 @@
                         window.__activeCallInProgress = true;
                         document.body.classList.add('call-screen-active');
                         // ── FIX: callsContent must NOT have .hidden when a call is active.
-                        // .hidden applies visibility:hidden which hides the iframe even
-                        // when body.call-screen-active expands it to full screen.
                         var _cc = document.getElementById('callsContent');
                         if (_cc) _cc.classList.remove('hidden');
                         logProcessStatus('call-screen', true, 'active');
                     } else {
-                        window.__activeCallInProgress = false;
-                        document.body.classList.remove('call-screen-active');
-                        logProcessStatus('call-screen', true, 'inactive');
+                        // ── Guard: if a call was just dispatched within 15s, this inactive
+                        // signal is a stale echo from the iframe resetting after a prior
+                        // CALL_FORCE_ENDED — do NOT remove call-screen-active.
+                        var _sinceDispatchCSA = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
+                        if (_sinceDispatchCSA < 15000) {
+                            console.warn('[Parent] CALL_SCREEN_ACTIVE(false) ignored — call dispatched only ' + Math.round(_sinceDispatchCSA/1000) + 's ago (stale idle reset)');
+                        } else {
+                            window.__activeCallInProgress = false;
+                            document.body.classList.remove('call-screen-active');
+                            logProcessStatus('call-screen', true, 'inactive');
+                        }
                     }
                 }
                 
@@ -3883,10 +3890,16 @@
                             logProcessStatus('call-screen', true, 'active');
                         }
                     } else {
-                        window.__activeCallInProgress = false;
-                        document.body.classList.remove('call-screen-active');
-                        if (typeof logProcessStatus === 'function') {
-                            logProcessStatus('call-screen', true, 'inactive');
+                        // Guard: suppress stale idle-reset within 15s of call dispatch
+                        var _sinceDispatchCSA2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
+                        if (_sinceDispatchCSA2 < 15000) {
+                            console.warn('[Parent] CALL_SCREEN_ACTIVE(false) #2 ignored — call dispatched only ' + Math.round(_sinceDispatchCSA2/1000) + 's ago');
+                        } else {
+                            window.__activeCallInProgress = false;
+                            document.body.classList.remove('call-screen-active');
+                            if (typeof logProcessStatus === 'function') {
+                                logProcessStatus('call-screen', true, 'inactive');
+                            }
                         }
                     }
                     return;
