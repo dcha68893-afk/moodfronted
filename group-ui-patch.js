@@ -465,7 +465,25 @@
     });
 
     function patchCreateGroupModal() {
-        // Event delegation handles everything — this is kept so boot() can call it
+        // FIX: createGroupBtn must open the modal on EVERY click, not just the first.
+        // group-ui.js registers the handler via registerUIEventListener but the lifecycle
+        // guard (_protocolReady && _parentReadyReceived) can block setupEventListeners()
+        // when running standalone/iframe.  We use capture-phase delegation so this always fires.
+        if (!window.__cgBtnDelegated) {
+            window.__cgBtnDelegated = true;
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('#createGroupBtn')) return;
+                e.stopImmediatePropagation();
+                const modal = document.getElementById('createGroupModal');
+                if (!modal) return;
+                // Force-show every single time regardless of current state
+                modal.style.display = 'flex';
+                modal.classList.add('active');
+                // Reset to Basic tab for a fresh feel
+                qsa('.create-group-tab', modal).forEach((t, i) => t.classList.toggle('active', i === 0));
+                qsa('.create-group-tab-content', modal).forEach((s, i) => s.classList.toggle('active', i === 0));
+            }, true); // capture = true fires before any bubbling handler
+        }
     }
 
     function closeCreateGroupModal() {
@@ -974,10 +992,29 @@
     }
 
     /* ─── Discover panel loader (targets #discoverPanel in group.html) ─────── */
+    /* ─── Discover panel loader — two sub-sections: My Groups / Others ─────── */
+    let _discoverCurrentTab = 'mine';
+
     async function loadDiscoverPanel() {
+        const panel = qs('#discoverPanel');
         const resultsEl = qs('#discoverResults');
         if (!resultsEl) { loadDiscoverGroups(); return; }
-        resultsEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+
+        // Inject sub-section toggle tabs once
+        if (!qs('#_discoverTabWrap')) {
+            const wrap = document.createElement('div');
+            wrap.id = '_discoverTabWrap';
+            wrap.style.cssText = 'display:flex;gap:8px;padding:0 20px 12px;flex-shrink:0;';
+            wrap.innerHTML =
+                '<button id="_discMine" style="flex:1;padding:8px 14px;border-radius:10px;border:none;cursor:pointer;' +
+                'font-weight:700;font-size:13px;background:var(--primary-color,#6c63ff);color:#fff;">👤 My Groups</button>' +
+                '<button id="_discOthers" style="flex:1;padding:8px 14px;border-radius:10px;border:none;cursor:pointer;' +
+                'font-weight:700;font-size:13px;background:var(--bg-tertiary,#2a2a3e);color:var(--text-secondary);">🌐 Discover Others</button>';
+            resultsEl.parentNode.insertBefore(wrap, resultsEl);
+
+            qs('#_discMine').addEventListener('click', () => _discoverSetTab('mine', resultsEl));
+            qs('#_discOthers').addEventListener('click', () => _discoverSetTab('others', resultsEl));
+        }
 
         // Wire search input
         const searchInput = qs('#discoverSearchInput');
@@ -986,41 +1023,131 @@
             let _timer;
             searchInput.addEventListener('input', () => {
                 clearTimeout(_timer);
-                _timer = setTimeout(() => _doDiscoverSearch(searchInput.value, resultsEl), 350);
+                _timer = setTimeout(() => _discoverSetTab(_discoverCurrentTab, resultsEl), 350);
             });
         }
-        await _doDiscoverSearch('', resultsEl);
+
+        _discoverSetTab('mine', resultsEl);
+    }
+
+    function _discoverSetTab(tab, resultsEl) {
+        _discoverCurrentTab = tab;
+        const mine   = qs('#_discMine');
+        const others = qs('#_discOthers');
+        if (mine && others) {
+            if (tab === 'mine') {
+                mine.style.background   = 'var(--primary-color,#6c63ff)'; mine.style.color = '#fff';
+                others.style.background = 'var(--bg-tertiary,#2a2a3e)';  others.style.color = 'var(--text-secondary)';
+            } else {
+                others.style.background = 'var(--primary-color,#6c63ff)'; others.style.color = '#fff';
+                mine.style.background   = 'var(--bg-tertiary,#2a2a3e)';   mine.style.color = 'var(--text-secondary)';
+            }
+        }
+        if (tab === 'mine') _renderMyGroups(resultsEl);
+        else _doDiscoverSearch((qs('#discoverSearchInput') || {}).value || '', resultsEl);
+    }
+
+    async function _renderMyGroups(resultsEl) {
+        resultsEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+        const gc  = window.GroupCore;
+        const uid = _myUserId();
+        let myGroups = [];
+        if (gc) {
+            const seen = new Set();
+            const candidates = [
+                ...(gc.myGroups    || []),
+                ...(gc.adminGroups || []),
+                ...(gc.groups      || []).filter(g => String(g.createdBy) === uid || g.isCreator || g.isAdmin || g.role === 'owner' || g.role === 'admin'),
+            ];
+            candidates.forEach(g => { const k = String(g.id); if (!seen.has(k)) { seen.add(k); myGroups.push(g); } });
+        }
+        if (!myGroups.length) {
+            try {
+                const data = await apiFetch('/groups?myGroups=true&limit=50');
+                myGroups = data?.data?.groups || data?.data || data?.groups || [];
+            } catch (_) {}
+        }
+        if (!myGroups.length) {
+            resultsEl.innerHTML =
+                '<div style="text-align:center;padding:36px 20px;color:var(--text-secondary)">' +
+                '<i class="fas fa-users" style="font-size:36px;opacity:.3;display:block;margin-bottom:12px"></i>' +
+                '<div style="font-weight:600;margin-bottom:6px">No groups yet</div>' +
+                '<div style="font-size:13px">Groups you create or manage appear here</div></div>';
+            return;
+        }
+        _renderDiscoverCards(myGroups, resultsEl, true);
     }
 
     async function _doDiscoverSearch(q, resultsEl) {
+        resultsEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+        const uid     = _myUserId();
         const purpose = (qs('.discover-filter.active') || qs('.discover-filter[data-purpose="all"]'))?.dataset?.purpose || 'all';
-        const params  = new URLSearchParams({ limit: '30' });
+        const params  = new URLSearchParams({ limit: '40' });
         if (q) params.set('search', q);
         if (purpose && purpose !== 'all') params.set('purpose', purpose);
         try {
             const data   = await apiFetch('/groups?' + params.toString());
-            const groups = (data.data && (data.data.groups || data.data)) || data.groups || [];
-            if (!groups.length) { resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">No groups found</div>'; return; }
-            resultsEl.innerHTML = '';
-            groups.forEach(g => {
-                const card = document.createElement('div');
-                card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color)';
-                const initials = (g.name || 'G').slice(0,2).toUpperCase();
-                card.innerHTML = `<div style="width:42px;height:42px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700">${initials}</div>`
-                    + `<div style="flex:1;min-width:0"><div style="font-weight:600">${g.name||'Unnamed'}</div>`
-                    + `<div style="font-size:12px;color:var(--text-secondary)">${g.memberCount||0} members${g.purpose?' · '+g.purpose:''}</div>`
-                    + `<div style="font-size:12px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(g.description||'').slice(0,60)}</div></div>`
-                    + `<button data-gid="${g.id}" style="padding:7px 14px;border-radius:8px;border:none;background:var(--primary-color,#6c63ff);color:#fff;font-weight:600;cursor:pointer;white-space:nowrap;font-size:13px">Join</button>`;
-                card.querySelector('button').addEventListener('click', async (e) => {
-                    e.currentTarget.disabled = true; e.currentTarget.textContent = '...';
-                    try { await apiFetch('/groups/'+g.id+'/join',{method:'POST'}); toast('Join request sent!'); e.currentTarget.textContent='✓ Sent'; }
-                    catch(err) { toast(err.message||'Failed','error'); e.currentTarget.disabled=false; e.currentTarget.textContent='Join'; }
-                });
-                resultsEl.appendChild(card);
-            });
+            let groups   = (data.data && (data.data.groups || data.data)) || data.groups || [];
+            // Exclude groups the user owns/admins so they appear only in "My Groups"
+            if (uid) groups = groups.filter(g => String(g.createdBy) !== uid && !g.isCreator && !g.isAdmin);
+            if (!groups.length) {
+                resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">No public groups found</div>';
+                return;
+            }
+            _renderDiscoverCards(groups, resultsEl, false);
         } catch(err) {
             resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">' + (err.message||'Failed to load') + '</div>';
         }
+    }
+
+    function _renderDiscoverCards(groups, container, isMine) {
+        container.innerHTML = '';
+        groups.forEach(g => {
+            const initials = (g.name || 'G').slice(0,2).toUpperCase();
+            const card = document.createElement('div');
+            card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border-color)';
+            const actionBtn = isMine
+                ? '<button data-open-gid="' + g.id + '" style="padding:7px 14px;border-radius:8px;border:none;background:#43a047;color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;font-size:13px">▶ Open</button>'
+                : '<button data-join-gid="' + g.id + '" style="padding:7px 14px;border-radius:8px;border:none;background:var(--primary-color,#6c63ff);color:#fff;font-weight:700;cursor:pointer;white-space:nowrap;font-size:13px">Join</button>';
+            card.innerHTML =
+                '<div style="width:42px;height:42px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,#667eea,#764ba2);' +
+                'display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px">' + initials + '</div>' +
+                '<div style="flex:1;min-width:0">' +
+                '<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + (g.name||'Unnamed') + '</div>' +
+                '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px"><i class="fas fa-users"></i> ' +
+                (g.memberCount||0) + ' members' + (g.purpose ? ' · ' + g.purpose : '') + '</div>' +
+                (g.description ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + String(g.description).slice(0,60) + '</div>' : '') +
+                '</div>' + actionBtn;
+
+            const openBtn = card.querySelector('[data-open-gid]');
+            if (openBtn) {
+                openBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const gc   = window.GroupCore;
+                    const gData = (gc && gc.getGroupById ? gc.getGroupById(parseInt(g.id)||g.id) : null) || g;
+                    const dp = qs('#discoverPanel'); if (dp) dp.style.display = 'none';
+                    if (typeof window.__gcOpenPanel === 'function') window.__gcOpenPanel(gData);
+                    else try { openGroupChat(gData); } catch(_) {}
+                });
+            }
+            const joinBtn = card.querySelector('[data-join-gid]');
+            if (joinBtn) {
+                joinBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    joinBtn.disabled = true; joinBtn.textContent = '…';
+                    try {
+                        await apiFetch('/groups/' + g.id + '/join', { method: 'POST' });
+                        joinBtn.textContent = '✓ Sent'; joinBtn.style.background = '#43a047';
+                        toast('Join request sent!');
+                        const gc2 = window.GroupCore; if (gc2?.requestGroupList) gc2.requestGroupList().catch(()=>{});
+                    } catch(err) {
+                        joinBtn.disabled = false; joinBtn.textContent = 'Join';
+                        toast(err.message||'Failed', 'error');
+                    }
+                });
+            }
+            container.appendChild(card);
+        });
     }
 
     /* ─── Events panel loader (targets #eventsPanel in group.html) ─────────── */
@@ -1145,8 +1272,24 @@
             // Show friend list to invite to a group
             bodyEl.innerHTML = '<div style="padding:14px 0"><select id="_inv_group" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-tertiary,#252537);color:var(--text-primary);font-size:14px;margin-bottom:12px"><option value="">Select group to invite to...</option></select><div id="_inv_friends" style="max-height:300px;overflow-y:auto"></div><button id="_inv_send" style="width:100%;padding:11px;margin-top:14px;border-radius:8px;border:none;background:var(--primary-color,#6c63ff);color:#fff;font-weight:700;font-size:14px;cursor:pointer">Send Invitations</button></div>';
             const gsel = qs('#_inv_group');
-            const myGroups = (window.GroupCore && window.GroupCore.myGroups) || (window.GroupCore && window.GroupCore.adminGroups) || [];
-            myGroups.forEach(g=>{const o=document.createElement('option');o.value=g.id;o.textContent=g.name;gsel.appendChild(o);});
+            // FIX: populate group select from cache OR API fallback
+            (async () => {
+                const gc = window.GroupCore;
+                const uid = _myUserId();
+                let myGroups = [];
+                if (gc) {
+                    const seen = new Set();
+                    const cands = [...(gc.myGroups||[]),...(gc.adminGroups||[]),...(gc.groups||[]).filter(g=>String(g.createdBy)===uid||g.isCreator||g.isAdmin)];
+                    cands.forEach(g=>{const k=String(g.id);if(!seen.has(k)){seen.add(k);myGroups.push(g);}});
+                }
+                if (!myGroups.length) {
+                    try { const d=await apiFetch('/groups?myGroups=true&limit=50'); myGroups=d?.data?.groups||d?.data||d?.groups||[]; } catch(_) {}
+                }
+                myGroups.forEach(g=>{const o=document.createElement('option');o.value=g.id;o.textContent=g.name||('Group '+g.id);gsel.appendChild(o);});
+                if (!myGroups.length) {
+                    const o=document.createElement('option'); o.disabled=true; o.textContent='No groups available — create a group first'; gsel.appendChild(o);
+                }
+            })();
             // Load friends
             const fDiv = qs('#_inv_friends');
             fDiv.innerHTML='<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin"></i></div>';
@@ -1479,13 +1622,27 @@
         });
         function watchDiscover() {
             const el = qs('#discoverResults') || qs('#discoverGroupsList');
-            if (el) obs.observe(el, { childList: true, subtree: true });
-            else {
-                const dObs = new MutationObserver(() => {
+            if (el && el.nodeType === 1) {
+                obs.observe(el, { childList: true, subtree: true });
+            } else {
+                // defer until body exists and the element appears
+                function tryWatch() {
                     const found = qs('#discoverResults') || qs('#discoverGroupsList');
-                    if (found) { obs.observe(found, { childList: true, subtree: true }); dObs.disconnect(); }
-                });
-                dObs.observe(document.body, { childList: true, subtree: true });
+                    if (found && found.nodeType === 1) {
+                        obs.observe(found, { childList: true, subtree: true });
+                        return;
+                    }
+                    if (!document.body || document.body.nodeType !== 1) {
+                        setTimeout(tryWatch, 200);
+                        return;
+                    }
+                    const dObs = new MutationObserver(() => {
+                        const f = qs('#discoverResults') || qs('#discoverGroupsList');
+                        if (f && f.nodeType === 1) { obs.observe(f, { childList: true, subtree: true }); dObs.disconnect(); }
+                    });
+                    dObs.observe(document.body, { childList: true, subtree: true });
+                }
+                tryWatch();
             }
         }
         watchDiscover();
