@@ -469,33 +469,26 @@ function subscribeToStatusChanges() {
     // Also listen to custom events
     document.addEventListener('statusStateChanged', (e) => {
         if (e.detail && e.detail.state) {
-            // Sync the module-level arrays so every render function sees fresh data
             if (e.detail.state.statuses && e.detail.state.statuses.length > 0) {
                 statuses = e.detail.state.statuses;
             }
             if (e.detail.state.myStatuses && e.detail.state.myStatuses.length > 0) {
                 myStatuses = e.detail.state.myStatuses;
             }
-            // Re-render the active list so new/expired statuses appear instantly
             renderStatusListInstantlyUI();
             updateMyStatusPreviewUI();
         }
     });
 
-    // statusExpired fires when a single status hits its expiry — remove it instantly
+    // statusExpired fires when a status hits its countdown — remove it from UI instantly
     document.addEventListener('statusExpired', (e) => {
-        const expiredId = e.detail && e.detail.statusId;
+        const expiredId = e.detail && (e.detail.statusId || e.detail.id);
         if (!expiredId) return;
         const idStr = String(expiredId);
         statuses   = (statuses   || []).filter(s => String(s.id) !== idStr);
         myStatuses = (myStatuses || []).filter(s => String(s.id) !== idStr);
         renderStatusListInstantlyUI();
         updateMyStatusPreviewUI();
-    });
-
-    // statusUpdate (bulk) — re-render after a cleanup sweep
-    document.addEventListener('statusUpdate', () => {
-        renderStatusListInstantlyUI();
     });
     
     document.addEventListener('sessionReady', (e) => {
@@ -5078,18 +5071,17 @@ async function handlePostStatus() {
     if (intent) statusData.intent = intent;
     if (mood) statusData.mood = mood;
     if (category) statusData.category = category;
-    // Default privacy to 'friends' — statuses are friends-only unless user picks otherwise
+    // Default privacy to 'friends' so statuses are friends-only unless explicitly changed
     statusData.privacy = privacy || 'friends';
+    // Resolve duration → also compute expiresAt so the server has a real date
     if (duration) {
         statusData.duration = duration;
-        // Also pre-compute expiresAt so postStatus payload always has a real date
-        const durSecs = parseInt(duration, 10);
-        if (durSecs > 0) {
-            statusData.expiresAt = new Date(Date.now() + durSecs * 1000).toISOString();
+        const secs = parseInt(duration, 10);
+        if (secs > 0) {
+            statusData.expiresAt = new Date(Date.now() + secs * 1000).toISOString();
         }
-        // durSecs === 0 means "Permanent" — no expiresAt
     } else {
-        // No duration selected: default to 24 hours
+        // Default: 24 hours
         statusData.duration  = '86400';
         statusData.expiresAt = new Date(Date.now() + 86400 * 1000).toISOString();
     }

@@ -321,9 +321,8 @@ class StatusCache {
         return new Date(status.expiresAt) < new Date();
     }
 
-    // purgeExpired: delete all expired statuses from IndexedDB so they cannot
-    // be rehydrated into UI state on the next page load.
-    // Called by checkAndCleanExpiredStatuses() in status-core.js after each sweep.
+    // purgeExpired: delete all expired entries from IndexedDB.
+    // Called after each expiry sweep so they can't resurrect on next page load.
     async purgeExpired() {
         await this._ensureDB();
         return new Promise((resolve) => {
@@ -344,8 +343,21 @@ class StatusCache {
                         resolve();
                     }
                 };
-                req.onerror = () => resolve(); // non-fatal
+                req.onerror = () => resolve();
             } catch (_) { resolve(); }
+        });
+    }
+
+    // delete: remove a single status by id
+    async delete(statusId) {
+        await this._ensureDB();
+        return new Promise((resolve) => {
+            try {
+                const tx  = this.db.transaction([this.storeName], 'readwrite');
+                const req = tx.objectStore(this.storeName).delete(statusId);
+                req.onsuccess = () => resolve(true);
+                req.onerror   = () => resolve(false);
+            } catch (_) { resolve(false); }
         });
     }
 

@@ -181,35 +181,25 @@ class StatusWebSocket {
         console.log(`[StatusWebSocket] 📥 STATUS RECEIVED id=${status.id} userId=${status.userId}`);
 
         // ── Update in-memory state via status-core ──────────────────────────
-        // window.addStatus is now exported from status-core.js.
-        // Fall back through StatusCore and direct statusState injection for resilience.
+        // window.addStatus is now exported from status-core.js
         const _addFn = window.addStatus
             || (window.StatusCore && window.StatusCore.addStatus)
             || null;
-
         if (typeof _addFn === 'function') {
             _addFn(status);
             console.log(`[STATUS FLOW] WS → UI updated: status added id=${status.id}`);
         } else if (window.statusState && Array.isArray(window.statusState.statuses)) {
-            // Last-resort: inject directly into statusState and fire event
-            const alreadyIn = window.statusState.statuses.some(s => String(s.id) === String(status.id));
-            if (!alreadyIn) {
+            // Last-resort direct injection
+            if (!window.statusState.statuses.some(s => String(s.id) === String(status.id))) {
                 window.statusState.statuses.unshift(status);
                 window.statusState.statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 document.dispatchEvent(new CustomEvent('statusStateChanged', {
                     detail: { state: window.statusState }
                 }));
-                console.log(`[StatusWebSocket] ℹ️ Status injected via statusState fallback id=${status.id}`);
             }
-        } else {
-            console.warn(`[StatusWebSocket] ⚠️ No addStatus available for id=${status.id}`);
         }
-
-        // Schedule precision expiry so it disappears at the exact right moment
-        const _schedFn = window.schedulePrecisionExpiry
-            || (window.StatusCore && window.StatusCore.schedulePrecisionExpiry)
-            || null;
-        if (typeof _schedFn === 'function') _schedFn(status);
+        // Schedule precision expiry for the arriving status
+        if (typeof window.schedulePrecisionExpiry === 'function') window.schedulePrecisionExpiry(status);
 
         // ── Update cache ────────────────────────────────────────────────────
         if (window.StatusCache) {
@@ -330,49 +320,26 @@ class StatusWebSocket {
     // ── STATUS EXPIRED ────────────────────────────────────────────────────────
     _handleStatusExpired(data) {
         if (!data) return;
-        const statusId = data.statusId || data.id;
-        if (!statusId) return;
-        console.log('[StatusWebSocket] status:expired', statusId);
+        console.log('[StatusWebSocket] status:expired', data.statusId);
 
-        // Remove from core state using exported window.removeStatus
-        const _removeFn = window.removeStatus
-            || (window.StatusCore && window.StatusCore.removeStatus)
-            || null;
-        if (typeof _removeFn === 'function') {
-            _removeFn(statusId);
-        } else if (window.statusState && Array.isArray(window.statusState.statuses)) {
-            // Direct fallback: remove from statusState and notify
-            window.statusState.statuses = window.statusState.statuses.filter(
-                s => String(s.id) !== String(statusId)
-            );
-            document.dispatchEvent(new CustomEvent('statusStateChanged', {
-                detail: { state: window.statusState }
-            }));
+        if (typeof window.removeStatus === 'function') {
+            window.removeStatus(data.statusId);
         }
 
-        // Fire statusExpired event so status-ui.js removes it from local arrays
-        document.dispatchEvent(new CustomEvent('statusExpired', {
-            detail: { statusId }
-        }));
-
-        // Mark as expired in IDB (don't delete — keeps audit trail; isActive=false)
         if (window.StatusCache) {
-            window.StatusCache.getCachedStatus(statusId).then(status => {
+            window.StatusCache.getCachedStatus(data.statusId).then(status => {
                 if (status) {
                     status.isExpired = true;
-                    status.isActive  = false;
                     window.StatusCache.cacheStatus(status).catch(console.error);
                 }
-            }).catch(() => {});
+            }).catch(console.error);
         }
 
-        // Notify the owner their status expired
-        const currentUser = window.currentUser
-            || (window.StatusCore && window.StatusCore.getSessionUser && window.StatusCore.getSessionUser());
-        const currentId = currentUser && (currentUser.id || currentUser.userId);
-        if (currentId && data.userId && String(data.userId) === String(currentId)) {
+        const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
+        const currentId   = currentUser && (currentUser.id || currentUser.userId);
+        if (currentId && String(data.userId) === String(currentId)) {
             if (typeof window.showNotification === 'function') {
-                window.showNotification('Your status has expired and been removed', 'info');
+                window.showNotification('Your status has expired', 'info');
             }
         }
 

@@ -2188,11 +2188,11 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         
         allGroupsList.innerHTML = '';
         
-        const _gcR = window.GroupCore;
-        const _liveAll = (_gcR && _gcR.groups && _gcR.groups.length > 0) ? _gcR.groups : (groups || []);
-        if (!_liveAll.length) { allGroupsList.appendChild(createSecureEmptyStateElement('groups')); return; }
-        const fragment = document.createDocumentFragment();
-        const groupsToRender = _liveAll.slice(0, 20);
+        const _gcR=window.GroupCore;
+        const _liveAll=(_gcR&&_gcR.groups&&_gcR.groups.length>0)?_gcR.groups:(groups||[]);
+        if(!_liveAll.length){allGroupsList.appendChild(createSecureEmptyStateElement('groups'));return;}
+        const fragment=document.createDocumentFragment();
+        const groupsToRender=_liveAll.slice(0,20);
         
         groupsToRender.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2236,10 +2236,10 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         
         myGroupsList.innerHTML = '';
         
-        const _gcMy = window.GroupCore;
-        const _liveMy = (_gcMy && _gcMy.myGroups && _gcMy.myGroups.length > 0) ? _gcMy.myGroups : (myGroups || []);
-        if (!_liveMy.length) { myGroupsList.appendChild(createSecureEmptyStateElement('myGroups')); return; }
-        const fragment = document.createDocumentFragment();
+        const _gcMy=window.GroupCore;
+        const _liveMy=(_gcMy&&_gcMy.myGroups&&_gcMy.myGroups.length>0)?_gcMy.myGroups:(myGroups||[]);
+        if(!_liveMy.length){myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));return;}
+        const fragment=document.createDocumentFragment();
         _liveMy.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'my_group');
@@ -2270,10 +2270,10 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         
         joinedList.innerHTML = '';
         
-        const _gcJn = window.GroupCore;
-        const _liveJn = (_gcJn && _gcJn.joinedGroups && _gcJn.joinedGroups.length > 0) ? _gcJn.joinedGroups : (joinedGroups || []);
-        if (!_liveJn.length) { joinedList.appendChild(createSecureEmptyStateElement('joined')); return; }
-        const fragment = document.createDocumentFragment();
+        const _gcJn=window.GroupCore;
+        const _liveJn=(_gcJn&&_gcJn.joinedGroups&&_gcJn.joinedGroups.length>0)?_gcJn.joinedGroups:(joinedGroups||[]);
+        if(!_liveJn.length){joinedList.appendChild(createSecureEmptyStateElement('joined'));return;}
+        const fragment=document.createDocumentFragment();
         _liveJn.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'joined');
@@ -2689,7 +2689,7 @@ export function setupEventListeners() {
     // immediately, leaving createGroupBtnModal, tabs, cancel with no handlers.
     // Use a proper one-time setup flag instead.
     if (_UI_STATE._listenersSetupDone) {
-        // Already ran full setup — only re-wire the modal in case it was re-cloned
+        setupCreateGroupButton();
         setupCreateGroupModal();
         setupCreateGroupTabs();
         setupCreateGroupForm();
@@ -2966,7 +2966,7 @@ export function renderFriendsPickerList(friends) {
         item.innerHTML = `
             <div style="width:36px;height:36px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;flex-shrink:0;${f.avatar?'background-image:url('+f.avatar+');background-size:cover;':''}">${f.avatar?'':initials}</div>
             <div style="flex:1;min-width:0">
-                <div style="font-weight:600;font-size:13px;color:var(--text-primary)"${f.isFriend?' <span style="font-size:10px;padding:1px 5px;border-radius:6px;background:#48bb7820;color:#48bb78">friend</span>':''}>${f.displayName}</div>
+                <div style="font-weight:600;font-size:13px;color:var(--text-primary)">${f.displayName}</div>
                 <div style="font-size:11px;color:var(--text-secondary)">${f.username?'@'+f.username:''} · <span style="color:${f.online?'#48bb78':'var(--text-secondary)'}">●</span> ${f.online?'Online':'Offline'}${inviteMode ? ' · Invite required' : ' · Add directly'}</div>
             </div>
             <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${sel?'var(--primary-color,#6c63ff)':'var(--border-color)'};background:${sel?'var(--primary-color,#6c63ff)':'none'};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:#fff;">${sel?'✓':''}</div>
@@ -3096,21 +3096,13 @@ export function setupCreateGroupButton() {
     const createGroupBtn = safeGetElement('#createGroupBtn');
     const createGroupModal = safeGetElement('#createGroupModal');
     
-    if (createGroupBtn && createGroupModal) {
-        registerUIEventListener(createGroupBtn, 'click', () => {
-            console.log('[GroupUI] createGroupBtn clicked');
-            const user = getCurrentUser ? getCurrentUser() : window.GroupCore?.currentUser;
-            if (!user) {
-                console.warn('[GroupUI] No current user — opening modal anyway for UX');
-            }
-            
-            createGroupModal.classList.add('active');
-            createGroupModal.style.display = 'flex';
-            
-            const basicTab = safeGetElement('.create-group-tab[data-tab="basic"]');
-            if (basicTab) basicTab.click();
-            
-            resetCreateGroupForm();
+    if (createGroupBtn && createGroupModal && !createGroupBtn.__gcOpenBound) {
+        createGroupBtn.__gcOpenBound = true;
+        createGroupBtn.addEventListener('click', function() {
+            var m=document.getElementById('createGroupModal'); if(!m)return;
+            m.classList.add('active'); m.style.display='flex';
+            var bt=m.querySelector('.create-group-tab[data-tab="basic"]'); if(bt)bt.click();
+            if(typeof resetCreateGroupForm==='function')resetCreateGroupForm();
         });
     }
 }
@@ -3522,20 +3514,18 @@ function bindCreateGroupModalEvents() {
 
     // FIXED: Create Group button - direct event binding
     const createGroupBtnModal = document.getElementById('createGroupBtnModal');
-    if (createGroupBtnModal && !createGroupBtnModal.__gcBound) {
-        createGroupBtnModal.__gcBound = true;
+    if (createGroupBtnModal && !createGroupBtnModal.__gcSubmitBound) {
+        createGroupBtnModal.__gcSubmitBound = true;
         createGroupBtnModal.addEventListener('click', async function(e) {
             e.preventDefault(); e.stopPropagation();
-            if (this.__submitting) return;
-            const nameInput = document.getElementById('groupNameInput');
-            if (!nameInput || !nameInput.value.trim()) {
-                if (typeof showNotification === 'function') showNotification('Please enter a group name', 'error');
-                if (nameInput) nameInput.focus();
-                return;
+            if (this.__gcSubmitting) return;
+            const ni=document.getElementById('groupNameInput');
+            if(!ni||!ni.value.trim()){
+                if(typeof showNotification==='function')showNotification('Please enter a group name','error');
+                if(ni)ni.focus(); return;
             }
-            this.__submitting = true;
-            try { await createGroupAsync(this); }
-            finally { this.__submitting = false; }
+            this.__gcSubmitting=true;
+            try{await createGroupAsync(this);}finally{this.__gcSubmitting=false;}
         });
     }
 
@@ -4410,71 +4400,28 @@ function timeAgo(d) {
 }
 
 // ── DISCOVER ──────────────────────────────────────────────────
-export async function loadDiscoverGroups(query = '', purpose = 'all') {
-    const container = document.getElementById('discoverResults');
-    if (!container) return;
-    container.innerHTML = panelLoader();
-    try {
-        let url = '/api/groups/public?limit=30&isPublic=true';
-        if (query) url += '&query=' + encodeURIComponent(query);
-        if (purpose && purpose !== 'all') url += '&purpose=' + purpose;
-        const data = await panelFetch(url);
-        const groups = data?.data?.groups || data?.groups || [];
-        if (!groups.length) { container.innerHTML = panelEmpty('fas fa-search', 'No public groups found.'); return; }
-        container.innerHTML = '';
-        groups.forEach(g => {
-            const initials = (g.name||'G').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-            const card = panelCard(`
-                <div style="display:flex;align-items:center;gap:12px">
-                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;flex-shrink:0;${g.avatar?'background-image:url('+g.avatar+');background-size:cover;':''}">${g.avatar?'':initials}</div>
-                    <div style="flex:1;min-width:0">
-                        <div style="font-weight:700;font-size:14px;color:var(--text-primary)">${g.name}</div>
-                        <div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${(g.description||'').slice(0,70)}</div>
-                        <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
-                            <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--primary-color,#6c63ff)22;color:var(--primary-color,#6c63ff)">👥 ${g.stats?.totalMembers||0}</span>
-                            ${g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':''}
-                        </div>
-                    </div>
-                    <div style="display:flex;gap:6px;flex-shrink:0">
-                        <button data-gid="${g.id}" data-gname="${g.name}" data-action="open" title="Open" style="padding:7px 10px;border-radius:8px;background:none;border:1px solid var(--primary-color,#6c63ff);color:var(--primary-color,#6c63ff);cursor:pointer;font-size:13px"><i class="fas fa-door-open"></i></button>
-                        <button data-gid="${g.id}" data-gname="${g.name}" data-action="join" style="padding:7px 12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">Join</button>
-                    </div>
-                </div>
-            `);
-                        card.querySelectorAll('[data-gid]').forEach(function(btn) {
-                btn.addEventListener('click', async function() {
-                    const action = this.dataset.action;
-                    if (action === 'open') {
-                        const gid = this.dataset.gid;
-                        const GC = window.GroupCore;
-                        let found = GC && (GC.groups||[]).find(x => String(x.id)===String(gid));
-                        if (!found) { try { const d = await panelFetch('/api/groups/'+gid); found = d?.data?.group||d?.group||d?.data; } catch(e){} }
-                        if (found) {
-                            var dp = document.getElementById('discoverPanel'); if(dp) dp.style.display='none';
-                            if (typeof window.openGroupChat==='function') window.openGroupChat(found);
-                        }
-                        return;
-                    }
-                    const btn2=this; btn2.disabled=true; btn2.textContent='Joining…';
-                    try {
-                        const res = await panelFetch('/api/groups/'+btn2.dataset.gid+'/join',{method:'POST',body:'{}'});
-                        if (res.success!==false) {
-                            btn2.textContent='✓ Joined'; btn2.style.background='#48bb78';
-                            if(typeof showNotification==='function') showNotification('Joined "'+btn2.dataset.gname+'"!','success');
-                            if(typeof syncGroupsFromServer==='function') syncGroupsFromServer().catch(()=>{});
-                            var GC2=window.GroupCore; if(GC2&&typeof GC2.requestGroupList==='function') GC2.requestGroupList().catch(()=>{});
-                        } else { btn2.disabled=false; btn2.textContent='Join'; if(typeof showNotification==='function') showNotification(res.message||'Failed','error'); }
-                    } catch(_) { btn2.disabled=false; btn2.textContent='Join'; }
-                });
-            });
-            container.appendChild(card);
-        });
-    } catch (_) { container.innerHTML = panelEmpty('fas fa-exclamation-circle', 'Failed to load groups.'); }
+export async function loadDiscoverGroups(query, purpose) {
+    query=query||''; purpose=purpose||'all';
+    var container=document.getElementById('discoverResults');
+    if(!container)return;
+    container.innerHTML=panelLoader();
+    container.innerHTML=[
+        '<div style="display:flex;border-bottom:2px solid var(--border-color);margin-bottom:14px">',
+        '<button id="dscMyTab" style="flex:1;padding:10px;background:none;border:none;border-bottom:3px solid var(--primary-color,#6c63ff);font-weight:700;font-size:14px;color:var(--primary-color,#6c63ff);cursor:pointer">My Groups</button>',
+        '<button id="dscOtherTab" style="flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:var(--text-secondary);cursor:pointer">Explore Public</button>',
+        '</div><div id="dscMyList"></div><div id="dscOtherList" style="display:none"></div>'
+    ].join('');
+    function setTab(w){var mt=document.getElementById('dscMyTab'),ot=document.getElementById('dscOtherTab'),ml=document.getElementById('dscMyList'),ol=document.getElementById('dscOtherList');if(!mt)return;var pc='var(--primary-color,#6c63ff)',ts='var(--text-secondary)';if(w==='my'){mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='';ol.style.display='none';}else{ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='none';ol.style.display='';}}
+    function makeCard(g,isOwn){var ii=(g.name||'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);var mc=(g.stats&&g.stats.totalMembers)||g.memberCount||0;var ob='<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="open" style="padding:7px 10px;border-radius:8px;background:none;border:1px solid var(--primary-color,#6c63ff);color:var(--primary-color,#6c63ff);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px"><i class="fas fa-door-open"></i> Open</button>';var jb=isOwn?'':'<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="join" style="padding:7px 10px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">Join</button>';var h='<div style="display:flex;align-items:center;gap:12px"><div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;flex-shrink:0">'+ii+'</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+g.name+'</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+((g.description||'').slice(0,55)||'No description')+'</div><div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(108,99,255,.13);color:var(--primary-color,#6c63ff)">\uD83D\uDC65 '+mc+'</span>'+(g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':'')+'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#eee;color:#666">'+(g.isPublic?'\uD83C\uDF10 Public':'\uD83D\uDD12 Private')+'</span></div></div><div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'+ob+jb+'</div></div>';var card=panelCard(h);card.querySelectorAll('[data-gid]').forEach(function(btn){btn.addEventListener('click',async function(){var action=this.dataset.action,gid2=this.dataset.gid,gname=this.dataset.gname;if(action==='open'){var GC=window.GroupCore;var found=GC&&(GC.groups||[]).find(function(x){return String(x.id)===String(gid2);});if(!found){try{var d=await panelFetch('/api/groups/'+gid2);found=d&&(d.data&&d.data.group||d.group||d.data);}catch(e){}}if(found&&typeof window.openGroupChat==='function'){var dp=document.getElementById('discoverPanel');if(dp)dp.style.display='none';window.openGroupChat(found);}return;}var b2=this;b2.disabled=true;b2.textContent='Joining…';try{var res=await panelFetch('/api/groups/'+gid2+'/join',{method:'POST',body:'{}'});if(res.success!==false){b2.textContent='✓ Joined';b2.style.background='#48bb78';if(typeof showNotification==='function')showNotification('Joined "'+gname+'"!','success');var gc3=window.GroupCore;if(gc3&&typeof gc3.requestGroupList==='function')gc3.requestGroupList().catch(function(){});}else{b2.disabled=false;b2.textContent='Join';if(typeof showNotification==='function')showNotification(res.message||'Failed','error');}}catch(e){b2.disabled=false;b2.textContent='Join';}});});return card;}
+    async function loadMyGroups(){var list=document.getElementById('dscMyList');if(!list)return;list.innerHTML=panelLoader();try{var GC=window.GroupCore;var myGrps=(GC&&GC.groups&&GC.groups.length)?GC.groups:[];if(!myGrps.length){var data=await panelFetch('/api/groups/user');myGrps=data&&(data.data&&(data.data.groups||data.data.myGroups)||data.groups)||[];}if(!myGrps.length){list.innerHTML=panelEmpty('fas fa-users','You have no groups yet.');return;}list.innerHTML='';myGrps.forEach(function(g){list.appendChild(makeCard(g,true));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Could not load groups.');}}
+    async function loadPublicGroups(){var list=document.getElementById('dscOtherList');if(!list)return;list.innerHTML=panelLoader();try{var url='/api/groups/public?limit=30';if(query)url+='&query='+encodeURIComponent(query);if(purpose&&purpose!=='all')url+='&purpose='+purpose;var data=await panelFetch(url);var grps=data&&(data.data&&data.data.groups||data.groups)||[];var GC=window.GroupCore;var myIds=new Set((GC&&GC.myGroups||[]).map(function(g){return String(g.id);}));var others=grps.filter(function(g){return !myIds.has(String(g.id));});if(!others.length){list.innerHTML=panelEmpty('fas fa-search','No public groups from other users.');return;}list.innerHTML='';others.forEach(function(g){list.appendChild(makeCard(g,false));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Failed to load public groups.');}}
+    var mt2=document.getElementById('dscMyTab'),ot2=document.getElementById('dscOtherTab');
+    if(mt2)mt2.addEventListener('click',function(){setTab('my');loadMyGroups();});
+    if(ot2)ot2.addEventListener('click',function(){setTab('other');loadPublicGroups();});
+    loadMyGroups();
 }
 
-// ── EVENTS ────────────────────────────────────────────────────
-// Alias so setupToolbarButtons can call loadGroupEventsPanel without
-// clashing with the loadGroupEvents imported from group-core.js
+
 export const loadGroupEventsPanel = async function(filter) {
     return _loadGroupEventsPanelImpl(filter);
 };
@@ -4597,7 +4544,7 @@ export async function loadInviteFriendsTab() {
     const gid = window.selectedGroup?.id;
     body.innerHTML = `
         ${!gid ? '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text-secondary);display:block;margin-bottom:4px">Select Group</label><select id="invGroupSel" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;"><option value="">Loading groups…</option></select></div>' : ''}
-        <input id="invFriendSearch" placeholder="Search users…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
+        <input id="invFriendSearch" placeholder="Search friends…" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--bg-tertiary,#252537);border:1px solid var(--border-color);color:var(--text-primary);font-size:14px;outline:none;box-sizing:border-box;margin-bottom:10px;">
         <div id="invFriendsList" style="max-height:260px;overflow-y:auto;">${panelLoader()}</div>
         <div id="invSelBar" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:30px;"></div>
         <button id="invSendBtn" style="display:none;width:100%;padding:12px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:14px;font-weight:600;margin-top:10px">Send Invitations</button>
@@ -4610,18 +4557,14 @@ export async function loadInviteFriendsTab() {
         }).catch(()=>{});
     }
     try {
-        // Load both friends and all users so non-friends can also be invited
-        const [fr, au] = await Promise.allSettled([
-            panelFetch('/api/friends'),
-            panelFetch('/api/friends/users/all?limit=200'),
-        ]);
-        const _friends = (fr.status==='fulfilled' ? (fr.value?.data?.friends||fr.value?.friends||[]) : []).map(f=>({...f,_isFriend:true}));
-        const _fids = new Set(_friends.map(f=>String(f.id)));
-        const _others = (au.status==='fulfilled' ? (au.value?.data?.users||au.value?.users||au.value?.data||[]) : []).filter(u=>!_fids.has(String(u.id)));
-        window._invFriendsAll = [..._friends, ..._others].map(f => ({
-            id: f.id, displayName: f.displayName||[f.firstName,f.lastName].filter(Boolean).join(' ')||f.username||'Unknown',
-            username: f.username||'', avatar: f.avatar||null, online: f.status==='online', isFriend: !!f._isFriend,
-        }));
+        const [fr,au]=await Promise.allSettled([panelFetch('/api/friends'),panelFetch('/api/friends/users/all?limit=200')]);
+        const _frs=(fr.status==='fulfilled'?(fr.value?.data?.friends||fr.value?.friends||[]):[]).map(f=>({...f,_isFriend:true}));
+        const _fids=new Set(_frs.map(f=>String(f.id)));
+        const _oth=(au.status==='fulfilled'?(au.value?.data?.users||au.value?.users||au.value?.data||[]):[]).filter(u=>!_fids.has(String(u.id)));
+        const _GC2=window.GroupCore;
+        const _mg=(_GC2&&_GC2.groups&&_GC2.groups.length)?_GC2.groups:[];
+        if(!gid){const sel=document.getElementById('invGroupSel');if(sel&&_mg.length)sel.innerHTML='<option value="">\u2014 Pick a group \u2014</option>'+_mg.map(g=>'<option value="'+g.id+'">'+g.name+'</option>').join('');}
+        window._invFriendsAll=[..._frs,..._oth].map(f=>({id:f.id,displayName:f.displayName||[f.firstName,f.lastName].filter(Boolean).join(' ')||f.username||'Unknown',username:f.username||'',avatar:f.avatar||null,online:f.status==='online',isFriend:!!f._isFriend}));
         renderInvFriendsList(window._invFriendsAll);
     } catch (_) {
         const el = document.getElementById('invFriendsList');
@@ -5014,19 +4957,8 @@ async function createGroupAsync(buttonElement) {
             }
         }
         console.log('[GroupUI] create group result:', result && result.success);
-        // Push into GroupCore immediately so lists update without page reload
-        const _ncg = result && result.group;
-        if (_ncg && _ncg.id) {
-            const _GC = window.GroupCore;
-            if (_GC) {
-                if (!_GC.groups.some(function(g){return g.id===_ncg.id;})) _GC.groups.push(_ncg);
-                if (!_GC.myGroups.some(function(g){return g.id===_ncg.id;})) _GC.myGroups.push(_ncg);
-                if (typeof _GC.saveGroups==='function') _GC.saveGroups();
-                if (typeof _GC.emit==='function') _GC.emit('groups:list-updated',{groups:_GC.groups,myGroups:_GC.myGroups,joinedGroups:_GC.joinedGroups,fromServer:false});
-            }
-            if (typeof renderGroupsListSecure==='function') try{renderGroupsListSecure();}catch(e){}
-            setTimeout(function(){var g=window.GroupCore;if(g&&typeof g.requestGroupList==='function')g.requestGroupList().catch(function(){});},1500);
-        }
+        const _ncg=result&&result.group;
+        if(_ncg&&_ncg.id){const _GC=window.GroupCore;if(_GC){if(!_GC.groups.some(function(g){return g.id===_ncg.id;}))_GC.groups.push(_ncg);if(!_GC.myGroups.some(function(g){return g.id===_ncg.id;}))_GC.myGroups.push(_ncg);if(typeof _GC.saveGroups==='function')_GC.saveGroups();if(typeof _GC.emit==='function')_GC.emit('groups:list-updated',{groups:_GC.groups,myGroups:_GC.myGroups,joinedGroups:_GC.joinedGroups,fromServer:false});}if(typeof renderGroupsListSecure==='function')try{renderGroupsListSecure();}catch(e){}setTimeout(function(){var g=window.GroupCore;if(g&&typeof g.requestGroupList==='function')g.requestGroupList().catch(function(){});},1500);}
 
         // Reset selection
         window._cgSelectedMembers = new Set();

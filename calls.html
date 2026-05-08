@@ -184,7 +184,6 @@ window.__CALLS_IFRAME__ = {
 
     function _handleCoreEvent(event, data) {
         switch(event) {
-            case 'call_initiated':   // ← FIX: calls-core fires 'call_initiated', not 'call_initiating'
             case 'call_initiating':
             case 'call_started':
                 showScreen('calling');
@@ -211,7 +210,6 @@ window.__CALLS_IFRAME__ = {
                         // Store globally so transitionToInCall can use it on receiver side
                         window.__incomingCallerName  = callerName;
                         window.__incomingCallerAvatar = data.callerAvatar || data.callerPhoto || null;
-                        window.__incomingCallId       = data.callId || data.id || null;
                     }
                 }
                 // Start 180-second countdown, auto-decline on expiry
@@ -597,57 +595,7 @@ function _declineVideoUpgrade() {
         }
     });
 
-    // ── Duration timer ───────────────────────────────────────────────────────
-    var _durationInterval = null;
-    var _durationSeconds  = 0;
-
-    function _startDurationTimer() {
-        _stopDurationTimerInternal();
-        _durationSeconds = 0;
-        var el = document.getElementById('callDuration');
-        if (el) el.textContent = '0:00';
-        _durationInterval = setInterval(function() {
-            _durationSeconds++;
-            var m = Math.floor(_durationSeconds / 60);
-            var s = _durationSeconds % 60;
-            if (el) el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
-        }, 1000);
-    }
-
-    function _stopDurationTimerInternal() {
-        if (_durationInterval) { clearInterval(_durationInterval); _durationInterval = null; }
-    }
-
-    // ── transitionToInCall — defined globally so _handleCoreEvent & postMessage handler can call it ──
-    window.transitionToInCall = function(callInfo) {
-        callInfo = callInfo || {};
-        var name   = callInfo.userName   || window.__activePeerName || window.__incomingCallerName || 'User';
-        var avatar = callInfo.userAvatar || window.__activePeerAvatar || window.__incomingCallerAvatar || null;
-
-        // Populate name
-        var nameEl = document.getElementById('callWithName');
-        if (nameEl) nameEl.textContent = name;
-
-        // Populate avatar initial
-        var avatarEl = document.getElementById('incallAvatar');
-        if (avatarEl) avatarEl.textContent = name.charAt(0).toUpperCase();
-
-        // Restore remote audio volume
-        var remoteAudio = document.getElementById('remoteAudio');
-        if (remoteAudio) {
-            remoteAudio.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
-            remoteAudio.muted  = false;
-        }
-
-        showScreen('in-call');
-        _startDurationTimer();
-        console.log('[ScreenMgr] transitionToInCall → in-call screen shown for:', name);
-    };
-
     // ── Boot sequence ────────────────────────────────────────────────────────
-    // NOTE: Button wiring (mute/video/speaker/end/accept/decline) is handled
-    // entirely by calls-ui.js UIBridge._attachCallControls and UIEventHandlers.
-    // Do NOT attach duplicate onclick handlers here — it causes double-fire.
     document.addEventListener('DOMContentLoaded', function() {
         _suppressCallOverlay();
         // Start the idle screen by default
@@ -663,7 +611,7 @@ function _declineVideoUpgrade() {
         _hookCoreListeners();
     }
 
-    console.log('[ScreenMgr] Screen manager v3.1 loaded — all fixes applied');
+    console.log('[ScreenMgr] Screen manager v3.0 loaded — callOverlay suppressed, 3-min timer active');
 })();
 </script>
     <script src="/js/kynecta.safety.layer.js"></script>
@@ -4294,6 +4242,388 @@ function _declineVideoUpgrade() {
         navigator.serviceWorker.addEventListener('controllerchange', function() {
             console.log('[calls.html] SW controller changed — reload suppressed to protect call state');
         });
+    })();
+    </script>
+
+    <!-- ================================================================
+         CALL SCREEN FIX — inlined patch (no extra file needed)
+         Fixes:
+           1. transitionToInCall definition (was missing → in-call screen never showed)
+           2. call_initiated → showScreen('calling') mapping (caller never saw calling screen)
+           3. Accept / Decline button wiring on #incomingCallModal
+           4. In-call button wiring: #muteBtn, #videoBtn, #speakerBtn, #endCallBtn
+           5. Call-duration timer for #callDuration
+           6. Speaker / volume toggle on #remoteAudio
+           7. Video call: local camera PiP + remote video track display
+         ================================================================ -->
+    <script>
+    (function () {
+        'use strict';
+
+        function _el(id) { return document.getElementById(id); }
+
+        /* ── Duration timer ── */
+        var _durTimer = null;
+        var _durStart = 0;
+
+        function _startDur() {
+            _stopDur();
+            _durStart = Date.now();
+            var t = _el('callDuration');
+            _durTimer = setInterval(function () {
+                var s = Math.floor((Date.now() - _durStart) / 1000);
+                var m = Math.floor(s / 60); s = s % 60;
+                if (t) t.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+            }, 1000);
+        }
+
+        function _stopDur() {
+            if (_durTimer) { clearInterval(_durTimer); _durTimer = null; }
+            var t = _el('callDuration');
+            if (t) t.textContent = '0:00';
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * 1. transitionToInCall — was called but never defined.
+         *    Populates the in-call screen, starts timer, shows screen.
+         * ─────────────────────────────────────────────────────────────*/
+        window.transitionToInCall = function (info) {
+            info = info || {};
+            var peerName   = info.userName   || window.__activePeerName   || window.__incomingCallerName || 'User';
+            var peerAvatar = info.userAvatar || window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+            var callType   = info.callType   || window.__activePeerType   || 'voice';
+
+            /* Peer name in top bar */
+            var nameEl = _el('callWithName');
+            if (nameEl && peerName !== 'User') nameEl.textContent = peerName;
+
+            /* Avatar */
+            var avEl = _el('incallAvatar');
+            if (avEl) {
+                if (peerAvatar && (peerAvatar.startsWith('http') || peerAvatar.startsWith('/'))) {
+                    avEl.innerHTML = '<img src="' + peerAvatar + '" alt="' + peerName +
+                        '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                } else if (peerAvatar && peerAvatar.startsWith('<img')) {
+                    avEl.innerHTML = peerAvatar;
+                } else {
+                    avEl.textContent = peerName ? peerName.charAt(0).toUpperCase() : 'U';
+                }
+            }
+
+            /* Hide incoming modal */
+            var modal = _el('incomingCallModal');
+            if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; }
+
+            /* Show in-call screen */
+            if (typeof window.showScreen === 'function') window.showScreen('in-call');
+            _startDur();
+
+            /* Auto-start camera for video calls */
+            if (callType === 'video') _startCam();
+
+            /* Ensure speaker is on and audio plays */
+            var audioEl = _el('remoteAudio');
+            if (audioEl) {
+                audioEl.muted  = false;
+                audioEl.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
+                if (audioEl.srcObject && audioEl.paused) audioEl.play().catch(function(){});
+            }
+
+            console.log('[CallsFix] transitionToInCall:', peerName, callType);
+        };
+
+        /* ─────────────────────────────────────────────────────────────
+         * 2. Map 'call_initiated' event → showScreen('calling')
+         *    calls-core fires 'call_initiated' but the screen manager
+         *    only handled 'call_initiating' / 'call_started'.
+         *    Also maps call_accepted / call_connected → transitionToInCall.
+         * ─────────────────────────────────────────────────────────────*/
+        function _patchCoreRouter() {
+            if (!window.callCore || typeof window.callCore.addListener !== 'function') {
+                setTimeout(_patchCoreRouter, 400); return;
+            }
+            window.callCore.addListener(function (event, data) {
+                switch (event) {
+                    case 'call_initiated':
+                        if (typeof window.showScreen === 'function') window.showScreen('calling');
+                        break;
+                    case 'call_accepted':
+                    case 'call_connected': {
+                        var n = window.__activePeerName || window.__incomingCallerName
+                            || (data && (data.callerName || data.userName || data.name)) || null;
+                        var t = window.__activePeerType || (data && data.callType) || 'voice';
+                        var a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
+                        window.transitionToInCall({ userName: n, callType: t, userAvatar: a });
+                        break;
+                    }
+                    case 'incoming_call':
+                        if (data) {
+                            window._currentIncomingCallId = data.callId || data.id;
+                            window.__incomingCallerName   = data.callerName || data.userName || data.name || 'Unknown';
+                            window.__incomingCallerAvatar = data.callerAvatar || data.callerPhoto || null;
+                            window.__incomingCallType     = data.callType || 'voice';
+                        }
+                        break;
+                    case 'call_ended':
+                    case 'call_rejected':
+                    case 'call_cancelled':
+                    case 'call_force_ended':
+                    case 'call_timeout':
+                        _stopDur();
+                        _stopCam();
+                        if (typeof window.showScreen === 'function') window.showScreen('idle');
+                        break;
+                    case 'remote_stream_added': {
+                        var aud = _el('remoteAudio');
+                        if (aud && aud.paused && aud.srcObject) aud.play().catch(function(){});
+                        break;
+                    }
+                }
+            });
+            console.log('[CallsFix] Core router patched');
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * 3. Accept / Decline incoming call buttons
+         * ─────────────────────────────────────────────────────────────*/
+        function _wireIncoming() {
+            var acceptBtn  = _el('acceptCallBtn');
+            var declineBtn = _el('declineCallBtn');
+
+            if (acceptBtn && !acceptBtn._fx) {
+                acceptBtn._fx = true;
+                acceptBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var cid = window._currentIncomingCallId
+                        || (window.callCore && window.callCore.getState && window.callCore.getState().activeCallId);
+                    console.log('[CallsFix] Accept →', cid);
+                    window.__callReceiverAccepted = Date.now();
+                    if (window.callCore && window.callCore.answerCall) {
+                        window.callCore.answerCall(cid).then(function (r) {
+                            if (r && r.success) {
+                                window.transitionToInCall({
+                                    userName:  window.__incomingCallerName  || 'User',
+                                    callType:  window.__incomingCallType    || 'voice',
+                                    userAvatar:window.__incomingCallerAvatar || null
+                                });
+                            } else {
+                                console.warn('[CallsFix] answerCall failed:', r);
+                            }
+                        });
+                    }
+                });
+            }
+
+            if (declineBtn && !declineBtn._fx) {
+                declineBtn._fx = true;
+                declineBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var cid = window._currentIncomingCallId
+                        || (window.callCore && window.callCore.getState && window.callCore.getState().activeCallId);
+                    console.log('[CallsFix] Decline →', cid);
+                    if (window.callCore && window.callCore.declineCall) {
+                        window.callCore.declineCall(cid, 'declined');
+                    }
+                    var m = _el('incomingCallModal');
+                    if (m) { m.classList.remove('active'); m.style.display = 'none'; }
+                    if (typeof window.showScreen === 'function') window.showScreen('idle');
+                });
+            }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * 4. In-call control buttons
+         * ─────────────────────────────────────────────────────────────*/
+        var _muted      = false;
+        var _videoOn    = false;
+        var _speakerOn  = true;
+
+        function _wireInCall() {
+            /* Mute */
+            var muteBtn = _el('muteBtn');
+            if (muteBtn && !muteBtn._fx) {
+                muteBtn._fx = true;
+                muteBtn.addEventListener('click', function () {
+                    _muted = !_muted;
+                    /* Toggle via callCore if available, else directly on tracks */
+                    if (window.callCore && window.callCore.toggleMic) {
+                        window.callCore.toggleMic();
+                    } else {
+                        var ls = window.UIState && window.UIState.localStream;
+                        if (ls) ls.getAudioTracks().forEach(function (t) { t.enabled = !_muted; });
+                    }
+                    var ic = muteBtn.querySelector('i');
+                    if (ic) ic.className = _muted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+                    muteBtn.classList.toggle('active', _muted);
+                    muteBtn.title = _muted ? 'Unmute' : 'Mute';
+                });
+            }
+
+            /* Speaker / volume */
+            var spkBtn = _el('speakerBtn');
+            if (spkBtn && !spkBtn._fx) {
+                spkBtn._fx = true;
+                spkBtn.addEventListener('click', function () {
+                    _speakerOn = !_speakerOn;
+                    var aud = _el('remoteAudio');
+                    if (aud) {
+                        aud.muted  = !_speakerOn;
+                        aud.volume = _speakerOn ? 1.0 : 0;
+                        window.__remoteVolume = aud.volume;
+                    }
+                    var ic = spkBtn.querySelector('i');
+                    if (ic) ic.className = _speakerOn ? 'fas fa-volume-up' : 'fas fa-volume-mute';
+                    spkBtn.classList.toggle('active', !_speakerOn);
+                    spkBtn.title = _speakerOn ? 'Mute speaker' : 'Unmute speaker';
+                });
+            }
+
+            /* Video toggle */
+            var vidBtn = _el('videoBtn');
+            if (vidBtn && !vidBtn._fx) {
+                vidBtn._fx = true;
+                vidBtn.addEventListener('click', function () {
+                    _videoOn = !_videoOn;
+                    if (_videoOn) _startCam(); else _stopCam();
+                    var ic = vidBtn.querySelector('i');
+                    if (ic) ic.className = _videoOn ? 'fas fa-video' : 'fas fa-video-slash';
+                    vidBtn.classList.toggle('active', _videoOn);
+                    vidBtn.title = _videoOn ? 'Turn off camera' : 'Turn on camera';
+                });
+            }
+
+            /* End call */
+            var endBtn = _el('endCallBtn');
+            if (endBtn && !endBtn._fx) {
+                endBtn._fx = true;
+                endBtn.addEventListener('click', function () {
+                    _stopDur(); _stopCam();
+                    if (window.callCore && window.callCore.endCall) window.callCore.endCall();
+                    if (typeof window.showScreen === 'function') window.showScreen('idle');
+                });
+            }
+
+            /* Collapse (minimize without ending) */
+            var colBtn = _el('incallCollapseBtn');
+            if (colBtn && !colBtn._fx) {
+                colBtn._fx = true;
+                colBtn.addEventListener('click', function () {
+                    var ics = _el('inCallScreen');
+                    var ids = _el('idleScreen');
+                    if (ics) ics.classList.remove('active');
+                    if (ids) ids.classList.add('active');
+                });
+            }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * 5. Local camera start / stop
+         * ─────────────────────────────────────────────────────────────*/
+        var _camStream = null;
+
+        function _startCam() {
+            if (_camStream) return;
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+            navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false
+            }).then(function (s) {
+                _camStream = s;
+                var vTrack = s.getVideoTracks()[0];
+                /* Add to peer connection */
+                var pc = window.callCore && window.callCore.WebRTCManager && window.callCore.WebRTCManager._peerConnection;
+                if (pc && vTrack) { try { pc.addTrack(vTrack, s); } catch(e){} }
+                /* PiP preview */
+                var pip = _el('pipContainer'), pipV = _el('pipVideo');
+                if (pipV) { pipV.srcObject = s; pipV.muted = true; pipV.autoplay = true; pipV.playsInline = true; pipV.play().catch(function(){}); }
+                if (pip)  pip.style.display = 'block';
+                /* Update button */
+                _videoOn = true;
+                var vb = _el('videoBtn');
+                if (vb) { var ic = vb.querySelector('i'); if (ic) ic.className = 'fas fa-video'; vb.classList.add('active'); }
+                console.log('[CallsFix] Camera started');
+            }).catch(function (err) {
+                _videoOn = false;
+                var vb = _el('videoBtn');
+                if (vb) { var ic = vb.querySelector('i'); if (ic) ic.className = 'fas fa-video-slash'; vb.classList.remove('active'); }
+                console.warn('[CallsFix] Camera error:', err.name);
+            });
+        }
+
+        function _stopCam() {
+            if (_camStream) { _camStream.getTracks().forEach(function(t){ t.stop(); }); _camStream = null; }
+            var pip = _el('pipContainer');
+            if (pip) pip.style.display = 'none';
+            _videoOn = false;
+            var vb = _el('videoBtn');
+            if (vb) { var ic = vb.querySelector('i'); if (ic) ic.className = 'fas fa-video-slash'; vb.classList.remove('active'); }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * 6. Watch remote audio srcObject and auto-play when it arrives.
+         *    Also respect __remoteVolume set by speaker button.
+         * ─────────────────────────────────────────────────────────────*/
+        function _watchAudio() {
+            var aud = _el('remoteAudio');
+            if (!aud) return;
+            var _lastSrc = null;
+            setInterval(function () {
+                if (!aud.srcObject || aud.srcObject === _lastSrc) return;
+                _lastSrc = aud.srcObject;
+                aud.muted  = !_speakerOn;
+                aud.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
+                if (aud.paused) aud.play().catch(function (err) {
+                    console.warn('[CallsFix] remoteAudio autoplay blocked, waiting for gesture:', err.message);
+                    var retry = function () { aud.play().catch(function(){}); document.removeEventListener('click', retry); document.removeEventListener('touchstart', retry); };
+                    document.addEventListener('click',      retry, { once: true });
+                    document.addEventListener('touchstart', retry, { once: true });
+                });
+            }, 800);
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * 7. Remote video: when a video track arrives via ontrack,
+         *    calls-core.js already puts it on #remoteVideo.
+         *    We just make sure the avatar hides and video shows.
+         * ─────────────────────────────────────────────────────────────*/
+        function _watchRemoteVideo() {
+            var vid = _el('remoteVideo');
+            if (!vid) return;
+            var _lastVSrc = null;
+            setInterval(function () {
+                if (!vid.srcObject || vid.srcObject === _lastVSrc) return;
+                _lastVSrc = vid.srcObject;
+                vid.style.display = 'block';
+                var wrap = _el('incallAvatarWrap');
+                if (wrap) wrap.style.display = 'none';
+                var lbl = _el('remoteParticipantLabel');
+                if (lbl) {
+                    lbl.textContent = window.__activePeerName || window.__incomingCallerName || '';
+                    lbl.style.display = lbl.textContent ? 'block' : 'none';
+                }
+                /* Mark screen as video-active for CSS layout */
+                var ics = _el('inCallScreen');
+                if (ics) ics.classList.add('video-active');
+                console.log('[CallsFix] Remote video track appeared');
+            }, 800);
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+         * Boot
+         * ─────────────────────────────────────────────────────────────*/
+        function _boot() {
+            _wireIncoming();
+            _wireInCall();
+            _watchAudio();
+            _watchRemoteVideo();
+            _patchCoreRouter();
+            /* Re-wire after a delay in case DOM settles late */
+            setTimeout(function () { _wireIncoming(); _wireInCall(); }, 2000);
+            console.log('[CallsFix] ✅ Inline call screen fix loaded');
+        }
+
+        if (document.readyState !== 'loading') _boot();
+        else document.addEventListener('DOMContentLoaded', _boot);
     })();
     </script>
 </body>

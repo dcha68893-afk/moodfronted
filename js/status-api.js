@@ -120,33 +120,31 @@ class StatusAPI {
         console.log('[STATUS FLOW] API → request sending');
 
         try {
-            // Resolve privacy: default friends-only so statuses don't go public by accident
+            // Resolve privacy — default friends-only
             const resolvedPrivacy = statusData.privacy || 'friends';
+            const isPublicVal = (resolvedPrivacy === 'public' || resolvedPrivacy === 'everyone');
 
-            // Resolve expiresAt from duration (seconds string) if not already set
+            // Resolve expiresAt from duration if not already provided
             let resolvedExpiresAt = statusData.expiresAt;
             if (!resolvedExpiresAt && statusData.duration) {
-                const durSecs = parseInt(statusData.duration, 10);
-                if (durSecs > 0) {
-                    resolvedExpiresAt = new Date(Date.now() + durSecs * 1000).toISOString();
-                }
+                const secs = parseInt(statusData.duration, 10);
+                if (secs > 0) resolvedExpiresAt = new Date(Date.now() + secs * 1000).toISOString();
             }
             if (!resolvedExpiresAt) {
-                // Default 24 h so every status has a real server-side expiry
-                resolvedExpiresAt = new Date(Date.now() + 86400 * 1000).toISOString();
+                resolvedExpiresAt = new Date(Date.now() + 86400 * 1000).toISOString(); // 24h default
             }
 
             const payload = {
                 content:    statusData.text || statusData.content || '',
                 type:       statusData.type || 'text',
-                mediaUrl:   statusData.mediaUrl  || undefined,
-                mediaType:  statusData.mediaType || undefined,
+                mediaUrl:   statusData.mediaUrl   || undefined,
+                mediaType:  statusData.mediaType  || undefined,
+                isPublic:   isPublicVal,
                 privacy:    resolvedPrivacy,
-                isPublic:   resolvedPrivacy === 'public' || resolvedPrivacy === 'everyone',
+                duration:   statusData.duration   || undefined,
                 expiresAt:  resolvedExpiresAt,
-                duration:   statusData.duration  || undefined,
                 moodType:   statusData.mood || statusData.moodType || undefined,
-                location:   statusData.location  || undefined,
+                location:   statusData.location   || undefined,
                 background: statusData.background || undefined
             };
 

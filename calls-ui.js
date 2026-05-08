@@ -266,9 +266,6 @@ const GlobalCallHistory = {
     // ========== STEP 1: SHOW CALLING SCREEN IMMEDIATELY ==========
     console.log('[Calls UI] Showing calling screen IMMEDIATELY');
     
-    // Mark dispatch timestamp so stale CALL_ENDED echoes can be detected
-    window.__callDispatchedAt = Date.now();
-    
     // Get avatar if available
     let userAvatar = null;
     const contacts = window.__cachedCallContacts || [];
@@ -541,13 +538,6 @@ const GlobalCallHistory = {
         sidebar.style.display = 'flex';
     }
     
-    // ── CRITICAL: Tell parent to show callsContent and go fullscreen ──────
-    // Without this, callsContent stays visibility:hidden (from .hidden class)
-    // and the caller never sees the calling screen.
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-    }
-
     UIState.callActive = true;
     UIState.callState  = 'calling';
     window.__callActive = true;
@@ -656,13 +646,6 @@ function transitionToInCall(callInfo) {
         window._callerRingtone = null;
     }
     if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
-
-    // ── CRITICAL: Tell parent to make callsContent visible BEFORE showing the screen ──
-    // This ensures the parent removes .hidden from callsContent so the iframe is
-    // actually visible when we flip to the in-call screen.
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-    }
 
     if (window.CallOverlayManager) window.CallOverlayManager.answerCall(callInfo);
 
@@ -800,28 +783,12 @@ function transitionToInCall(callInfo) {
     }
 
     // ── Ensure remote audio is playing ───────────────────────────────────
-    // Try immediately and retry up to 5x with increasing delays
-    (function _ensureRemoteAudio() {
-        var _tries = 0;
-        function _tryPlay() {
-            _tries++;
-            var remoteAudio = document.getElementById('remoteAudio');
-            if (remoteAudio) {
-                // Restore volume from window.__remoteVolume (set by speaker toggle)
-                remoteAudio.volume = (typeof window.__remoteVolume === 'number') ? window.__remoteVolume : 1.0;
-                remoteAudio.muted = false;
-                if (remoteAudio.srcObject && remoteAudio.paused) {
-                    remoteAudio.play().catch(function(e) {
-                        if (_tries < 6) setTimeout(_tryPlay, 500 * _tries);
-                    });
-                } else if (!remoteAudio.srcObject && _tries < 6) {
-                    // srcObject not yet set (track arriving shortly) — keep retrying
-                    setTimeout(_tryPlay, 500 * _tries);
-                }
-            }
+    setTimeout(() => {
+        const remoteAudio = document.getElementById('remoteAudio');
+        if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
+            remoteAudio.play().catch(() => {});
         }
-        _tryPlay();
-    })();
+    }, 500);
 
     UIState.callActive = true;
     UIState.callState  = 'connected';
@@ -829,7 +796,9 @@ function transitionToInCall(callInfo) {
     document.body.classList.add('call-active');
     document.body.classList.add('call-connected'); // suppresses callingScreen + incomingModal via CSS
 
-    // CALL_SCREEN_ACTIVE already sent at the top of this function before the screen showed.
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+    }
 
     // ── Volume slider: inject once into incall controls ───────────────────
     if (!document.getElementById('remoteVolumeSlider')) {
@@ -5081,20 +5050,7 @@ case 'CALL_INITIATED':
         },
 
         handleCallEnded: function(callData) {
-            // ── Guard 1: ignore stale echoes within 15s of call initiation ──────
-            // CALL_FORCE_ENDED / CALL_ENDED arrive from stale WS events right as the
-            // new call is being established. Only let them through if the call was
-            // initiated more than 15 seconds ago, OR if callData explicitly marks
-            // it as a user-initiated end (source: 'end-btn').
-            const _callDispatchedAt = window.__callDispatchedAt || 0;
-            const _sinceDispatch = Date.now() - _callDispatchedAt;
-            const _isUserEnd = callData && (callData.source === 'end-btn' || callData.reason === 'ended' || callData.reason === 'rejected');
-            if (_sinceDispatch < 15000 && !_isUserEnd && _callDispatchedAt > 0) {
-                console.warn('[Calls UI] handleCallEnded BLOCKED — call dispatched only', Math.round(_sinceDispatch/1000)+'s ago (stale echo). callData:', callData);
-                return;
-            }
-
-            // ── Guard 2: ignore if no call was actually active ─────────────────
+            // ── Guard: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.
             const _anyScreenActive =
@@ -5630,17 +5586,13 @@ case 'CALL_ACCEPTED': {
                             window._callerRingtone = null;
                         }
                         // ── If CALL_FORCE_ENDED arrives but we just transitioned to in-call,
-                        // OR we are still in the calling/initiating state, it's a stale WS
-                        // echo from a previous session — ignore the UI reset ──
+                        // it's a stale WS echo — ignore the UI reset, only stop ringtone ──
                         const _isAlreadyInCall = UIState.callState === 'connected'
                             || (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'));
-                        const _isStillCalling = UIState.callState === 'calling'
-                            || UIState.callState === 'initiating'
-                            || UIState.callState === 'connecting'
-                            || (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active'));
-                        // Protect both calling and in-call states from stale echoes
-                        if (data.type === 'CALL_FORCE_ENDED' && (_isAlreadyInCall || _isStillCalling)) {
-                            console.warn('[Calls UI] CALL_FORCE_ENDED ignored — call active (state:', UIState.callState + ')');
+                        if (data.type === 'CALL_FORCE_ENDED' && _isAlreadyInCall) {
+                            console.warn('[Calls UI] CALL_FORCE_ENDED ignored — already in-call screen active');
+                            if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
+                            if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
                             break;
                         }
                         // Parent broadcast CALL_ENDED to this iframe — reset UI immediately
@@ -7822,14 +7774,14 @@ refreshCallHistoryAfterCall: function() {
         },
         
         acceptIncomingCall: function() {
-    this.acceptIncomingCallGeneric(false);
-},
+            this.acceptIncomingCallGeneric(false);
+        },
 
-acceptIncomingCallAsVideo: function() {
-    this.acceptIncomingCallGeneric(true);
-},
+        acceptIncomingCallAsVideo: function() {
+            this.acceptIncomingCallGeneric(true);
+        },
 
-acceptIncomingCallGeneric: async function(asVideo) {
+        acceptIncomingCallGeneric: async function(asVideo) {
     if (!canPerformAction('answerCall')) return;
     
     if (coreInstance && coreInstance.isInCall && coreInstance.isInCall()) {
@@ -7953,92 +7905,92 @@ acceptIncomingCallGeneric: async function(asVideo) {
                 });
             }
         }, 1000);
-    }
-},
-
-declineIncomingCall: async function() {
-    if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
-        clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
-    }
-    // Stop ringtone
-    if (window._incomingRingtone) {
-        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
-        window._incomingRingtone = null;
-    }
-
-    const callId = window._currentIncomingCallId || UIState.activeCallId;
-    
-    // Hide incoming call modal
-    if (elements.incomingCallModal) {
-        elements.incomingCallModal.classList.remove('active');
-        UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
-    }
-    
-    // Reset all call state so the UI unfreezes
-    UIState.activeCallId = null;
-    UIState.callActive = false;
-    UIState.callState = 'idle';
-    UIState.callParticipants = [];
-    UIState.callStartTime = null;
-    window._currentIncomingCallId = null;
-
-    // Hide call container, show sidebar
-    if (elements.callContainer) elements.callContainer.classList.remove('active');
-    if (elements.sidebar) elements.sidebar.style.display = 'flex';
-
-    // Stop local stream if acquired
-    if (UIState.localStream) {
-        UIState.localStream.getTracks().forEach(t => t.stop());
-        UIState.localStream = null;
-    }
-
-    // Stop call timer
-    if (UIState.callDurationInterval) {
-        clearInterval(UIState.callDurationInterval);
-        UIState.callDurationInterval = null;
-    }
-
-    // Clear video grid
-    if (elements.videoGrid) {
-        elements.videoGrid.innerHTML = '';
-        if (elements.offlineCallPlaceholder) elements.offlineCallPlaceholder.style.display = 'flex';
-    }
-
-    // Restore parent sidebar icons
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
-    }
-
-    if (callId) {
-        if (coreInstance && coreInstance.sendAction) {
-            await coreInstance.sendAction('CALL_REJECT', {
-                callId: callId,
-                reason: 'declined',
-                timestamp: Date.now()
-            });
-        } else if (coreInstance && coreInstance.declineCall) {
-            await coreInstance.declineCall(callId, 'declined');
         }
-    }
-    
-    // Reset core state
-    if (coreInstance && coreInstance.resetCallState) {
-        coreInstance.resetCallState();
-    }
+        },
 
-    // ── Tell parent to broadcast CALL_ENDED to all iframes so the CALLER resets too ──
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-            type: 'CALL_REJECT',
-            payload: { callId: callId, reason: 'declined', timestamp: Date.now() }
-        }, '*');
-    }
+        declineIncomingCall: async function() {
+            if (elements.incomingCallModal && elements.incomingCallModal.dataset.timer) {
+                clearInterval(parseInt(elements.incomingCallModal.dataset.timer));
+            }
+            // Stop ringtone
+            if (window._incomingRingtone) {
+                try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                window._incomingRingtone = null;
+            }
 
-    showIdleScreen();
-    showNotification('Call declined', 'info');
+            const callId = window._currentIncomingCallId || UIState.activeCallId;
 
-    setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);
-},
+            // Hide incoming call modal
+            if (elements.incomingCallModal) {
+                elements.incomingCallModal.classList.remove('active');
+                UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
+            }
+
+            // Reset all call state so the UI unfreezes
+            UIState.activeCallId = null;
+            UIState.callActive = false;
+            UIState.callState = 'idle';
+            UIState.callParticipants = [];
+            UIState.callStartTime = null;
+            window._currentIncomingCallId = null;
+
+            // Hide call container, show sidebar
+            if (elements.callContainer) elements.callContainer.classList.remove('active');
+            if (elements.sidebar) elements.sidebar.style.display = 'flex';
+
+            // Stop local stream if acquired
+            if (UIState.localStream) {
+                UIState.localStream.getTracks().forEach(t => t.stop());
+                UIState.localStream = null;
+            }
+
+            // Stop call timer
+            if (UIState.callDurationInterval) {
+                clearInterval(UIState.callDurationInterval);
+                UIState.callDurationInterval = null;
+            }
+
+            // Clear video grid
+            if (elements.videoGrid) {
+                elements.videoGrid.innerHTML = '';
+                if (elements.offlineCallPlaceholder) elements.offlineCallPlaceholder.style.display = 'flex';
+            }
+
+            // Restore parent sidebar icons
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+            }
+
+            if (callId) {
+                if (coreInstance && coreInstance.sendAction) {
+                    await coreInstance.sendAction('CALL_REJECT', {
+                        callId: callId,
+                        reason: 'declined',
+                        timestamp: Date.now()
+                    });
+                } else if (coreInstance && coreInstance.declineCall) {
+                    await coreInstance.declineCall(callId, 'declined');
+                }
+            }
+
+            // Reset core state
+            if (coreInstance && coreInstance.resetCallState) {
+                coreInstance.resetCallState();
+            }
+
+            // ── Tell parent to broadcast CALL_ENDED to all iframes so the CALLER resets too ──
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'CALL_REJECT',
+                    payload: { callId: callId, reason: 'declined', timestamp: Date.now() }
+                }, '*');
+            }
+
+            showIdleScreen();
+            showNotification('Call declined', 'info');
+
+            setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);
+        },
         generateVoiceCallLink: function() {
             UIEventHandlers.generateCallLink('voice');
         },

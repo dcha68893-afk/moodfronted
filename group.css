@@ -3348,10 +3348,138 @@ input:focus + .toggle-slider,
   border-color: var(--color-primary) !important;
 }
 /* =====================================================
-   GROUP PANEL v5 — Mobile + WhatsApp-style layout
+   GROUP PANEL FINAL — WhatsApp-style complete fix
    ===================================================== */
 
-/* Mobile: sidebar hidden state */
+/* Panel base */
+#groupChatPanel {
+    display: none;
+    flex-direction: column !important;
+    background: var(--bg-color);
+    overflow: hidden;
+}
+#groupChatPanel.active {
+    display: flex !important;
+}
+
+/* Messages area */
+#chatMessagesContainer {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    min-height: 0 !important;
+}
+#chatMessages {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    min-height: 100% !important;
+}
+
+/* Sent bubble - blue like WhatsApp */
+.msg-sent {
+    align-self: flex-end;
+    max-width: 72%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    margin-bottom: 2px;
+}
+.msg-sent .bubble {
+    background: #0084ff;
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+    padding: 9px 13px;
+    font-size: 15px;
+    line-height: 1.4;
+    word-break: break-word;
+}
+/* Received bubble - white */
+.msg-recv {
+    align-self: flex-start;
+    max-width: 72%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 2px;
+}
+.msg-recv .bubble {
+    background: #fff;
+    color: #111;
+    border-radius: 18px 18px 18px 4px;
+    padding: 9px 13px;
+    font-size: 15px;
+    line-height: 1.4;
+    word-break: break-word;
+    box-shadow: 0 1px 2px rgba(0,0,0,.09);
+}
+/* Dark mode adjustments */
+[data-theme="dark"] .msg-recv .bubble,
+body.dark .msg-recv .bubble {
+    background: #2d2d2d;
+    color: #f0f0f0;
+}
+[data-theme="dark"] #chatMessagesContainer,
+body.dark #chatMessagesContainer {
+    background: #1a1a2e !important;
+}
+.msg-recv-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #0084ff;
+    margin-bottom: 2px;
+    padding: 0 4px;
+}
+.msg-time {
+    font-size: 11px;
+    color: rgba(0,0,0,.4);
+    margin-top: 3px;
+    padding: 0 4px;
+    text-align: right;
+}
+.msg-recv .msg-time { text-align: left; }
+[data-theme="dark"] .msg-time,
+body.dark .msg-time { color: rgba(255,255,255,.4); }
+
+/* Three-dots dropdown */
+.gcm-item:hover { background: var(--secondary-color, #f5f5f5) !important; }
+
+/* Sub-panel animation */
+#gcSubPanel {
+    animation: gcSubSlide .2s ease;
+}
+@keyframes gcSubSlide {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+
+/* Call banner */
+#gcCallBanner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: linear-gradient(135deg, #0084ff, #0055cc);
+    color: #fff;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 9999;
+    box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    animation: gcBannerDrop .3s ease;
+}
+@keyframes gcBannerDrop {
+    from { transform: translateY(-100%); }
+    to   { transform: translateY(0); }
+}
+#gcCallBanner button {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+/* ── MOBILE ── */
 @media (max-width: 768px) {
     #sidebar.hidden {
         display: none !important;
@@ -3361,102 +3489,31 @@ input:focus + .toggle-slider,
         top: 0 !important; left: 0 !important;
         width: 100% !important; height: 100% !important;
         z-index: 1000 !important;
-        display: flex !important;
-        flex-direction: column !important;
-        background: var(--bg-color) !important;
     }
     #gcSubPanel {
         width: 100% !important;
         border-left: none !important;
+        bottom: 0 !important;
+    }
+    /* Fix sub-panel height on mobile - it needs its own stacking */
+    #gcSubPanel {
+        position: fixed !important;
+        top: 0 !important; right: 0 !important;
+        height: 100% !important;
+    }
+    /* Create group modal scrollable on mobile */
+    .create-group-container {
+        max-height: 95vh !important;
+        overflow-y: auto !important;
+    }
+    /* Ensure chat header buttons are accessible */
+    .chat-header-btn {
+        min-width: 40px;
+        min-height: 40px;
     }
 }
 
-/* Force flex layout on panel */
-#groupChatPanel {
-    display: none;
-    flex-direction: column;
-    background: var(--bg-color);
-}
-#groupChatPanel.active {
-    display: flex !important;
-}
-
-/* Messages area fills remaining space */
-#chatMessagesContainer {
-    flex: 1 !important;
-    overflow-y: auto !important;
-    min-height: 0 !important;
-    background: var(--secondary-color, #f0f2f5) !important;
-    padding: 12px 16px !important;
-}
-
-/* Input bar pinned to bottom */
-.chat-input-container {
-    flex-shrink: 0 !important;
-    display: flex !important;
-    align-items: flex-end !important;
-    gap: 8px !important;
-    padding: 8px 12px !important;
-    border-top: 1px solid var(--border-color) !important;
-    background: var(--bg-color) !important;
-}
-
-/* Override any existing message styles with WhatsApp-style bubbles */
-.message {
-    display: flex;
-    flex-direction: column;
-    max-width: 72%;
-    margin-bottom: 4px;
-}
-.message.sent {
-    align-self: flex-end;
-}
-.message.received {
-    align-self: flex-start;
-}
-.message.system {
-    align-self: center;
-    max-width: 85%;
-    text-align: center;
-}
-.message-content {
-    padding: 8px 12px;
-    border-radius: 18px;
-    font-size: 15px;
-    line-height: 1.4;
-    word-break: break-word;
-}
-.message.sent .message-content {
-    background: var(--primary-color, #0084ff);
-    color: #fff;
-    border-radius: 18px 18px 4px 18px;
-}
-.message.received .message-content {
-    background: #fff;
-    color: var(--text-primary, #111);
-    border-radius: 18px 18px 18px 4px;
-    box-shadow: 0 1px 2px rgba(0,0,0,.08);
-}
-.message.system .message-content {
-    background: rgba(0,0,0,.06);
-    color: var(--text-secondary);
-    font-size: 12px;
-    border-radius: 12px;
-    padding: 4px 10px;
-}
-.message-sender {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--primary-color, #0084ff);
-    margin-bottom: 2px;
-    padding: 0 2px;
-}
-.message-time {
-    font-size: 11px;
-    color: var(--text-secondary, #888);
-    margin-top: 3px;
-    padding: 0 4px;
-}
-.message.sent .message-time {
-    text-align: right;
+/* Chat header button hover */
+.chat-header-btn:hover {
+    background: var(--secondary-color, #f0f0f0) !important;
 }

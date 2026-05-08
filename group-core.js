@@ -2124,10 +2124,9 @@ const GroupCore = {
             SafeStorage.setItem('groupInvites', this.groupInvites);
             SafeStorage.setItem('adminGroups', this.adminGroups);
             SafeStorage.setItem('lastCacheTime', Date.now().toString());
-            // Sync module-level let vars so ES live bindings update
-            groups = this.groups; myGroups = this.myGroups;
-            joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
-            groupInvites = this.groupInvites;
+            groups=this.groups; myGroups=this.myGroups;
+            joinedGroups=this.joinedGroups; adminGroups=this.adminGroups;
+            groupInvites=this.groupInvites;
         } catch (error) {
             console.error('Error saving groups:', error);
         }
@@ -2225,15 +2224,11 @@ const GroupCore = {
                 if (cachedGroups && cachedGroups.length > 0) {
                     // Process cached groups into arrays
                     this.groups = cachedGroups;
-                    const _cuid = this.currentUser?.uid || this.currentUser?.id;
-                    this.myGroups = cachedGroups.filter(g =>
-                        g.isCreator === true || g.role === 'owner' || (_cuid && String(g.createdBy) === String(_cuid)));
-                    this.joinedGroups = cachedGroups.filter(g =>
-                        !g.isCreator && g.role !== 'owner' && !(_cuid && String(g.createdBy) === String(_cuid)));
-                    this.adminGroups = cachedGroups.filter(g =>
-                        g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
-                    groups = this.groups; myGroups = this.myGroups;
-                    joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
+                    const _cuid=this.currentUser?.uid||this.currentUser?.id;
+                    this.myGroups=cachedGroups.filter(g=>g.isCreator===true||g.role==='owner'||(_cuid&&String(g.createdBy)===String(_cuid)));
+                    this.joinedGroups=cachedGroups.filter(g=>!g.isCreator&&g.role!=='owner'&&!(_cuid&&String(g.createdBy)===String(_cuid)));
+                    this.adminGroups=cachedGroups.filter(g=>g.isAdmin===true||g.isCreator===true||['owner','admin'].includes(g.role));
+                    groups=this.groups; myGroups=this.myGroups; joinedGroups=this.joinedGroups; adminGroups=this.adminGroups;
                     
                     this.emit('groups:list-updated', {
                         groups: this.groups,
@@ -2288,17 +2283,11 @@ const GroupCore = {
                 g.isLocalOnly || serverMap.has(g.id)
             );
             
-            // Re-categorize using server-provided isCreator/isAdmin/role fields
-            const _uid = this.currentUser?.uid || this.currentUser?.id;
-            this.myGroups = this.groups.filter(g =>
-                g.isCreator === true || g.role === 'owner' || (_uid && String(g.createdBy) === String(_uid)));
-            this.joinedGroups = this.groups.filter(g =>
-                !g.isCreator && g.role !== 'owner' && !(_uid && String(g.createdBy) === String(_uid)));
-            this.adminGroups = this.groups.filter(g =>
-                g.isAdmin === true || g.isCreator === true || ['owner','admin'].includes(g.role));
-            // Sync module-level let vars
-            groups = this.groups; myGroups = this.myGroups;
-            joinedGroups = this.joinedGroups; adminGroups = this.adminGroups;
+            const _uid=this.currentUser?.uid||this.currentUser?.id;
+            this.myGroups=this.groups.filter(g=>g.isCreator===true||g.role==='owner'||(_uid&&String(g.createdBy)===String(_uid)));
+            this.joinedGroups=this.groups.filter(g=>!g.isCreator&&g.role!=='owner'&&!(_uid&&String(g.createdBy)===String(_uid)));
+            this.adminGroups=this.groups.filter(g=>g.isAdmin===true||g.isCreator===true||['owner','admin'].includes(g.role));
+            groups=this.groups; myGroups=this.myGroups; joinedGroups=this.joinedGroups; adminGroups=this.adminGroups;
             
         } catch (error) {
             debugLog('Failed to merge server data:', error);
@@ -4522,17 +4511,18 @@ const openGroupChat = async function(groupData) {
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
         if (isMobile) {
-            if (sidebar) { sidebar.style.display = 'none'; sidebar.classList.add('hidden'); }
+            if (sidebar) { sidebar.style.display='none'; sidebar.classList.add('hidden'); }
             if (groupChatPanel) {
-                groupChatPanel.style.display = 'flex';
+                groupChatPanel.style.display='flex';
                 groupChatPanel.classList.add('active');
             }
+            
             const chatHeaderInfo = safeGetElement('#chatHeaderInfo');
             if (chatHeaderInfo && !chatHeaderInfo.querySelector('.mobile-back-btn')) {
                 const backBtn = document.createElement('button');
                 backBtn.className = 'mobile-back-btn';
                 backBtn.innerHTML = '<i class="fas fa-arrow-left"></i>';
-                backBtn.style.cssText = 'background:none;border:none;color:var(--text-primary);cursor:pointer;font-size:18px;margin-right:10px;padding:0';
+                backBtn.style.cssText = 'background: none; border: none; color: var(--text-primary); cursor: pointer; font-size: 18px; margin-right: 10px;';
                 backBtn.addEventListener('click', closeGroupChatMobile);
                 chatHeaderInfo.insertBefore(backBtn, chatHeaderInfo.firstChild);
             }
@@ -4994,13 +4984,9 @@ function closeGroupChatMobile() {
         const groupChatPanel = safeGetElement('#groupChatPanel');
         
         if (isMobile) {
-            if (sidebar) { sidebar.style.display = 'flex'; sidebar.classList.remove('hidden'); }
-            if (groupChatPanel) {
-                groupChatPanel.style.display = 'none';
-                groupChatPanel.classList.remove('active');
-            }
-            const mobileBackBtn = document.querySelector('.mobile-back-btn, .gc-back');
-            if (mobileBackBtn) mobileBackBtn.remove();
+            if (sidebar) { sidebar.style.display=''; sidebar.classList.remove('hidden'); }
+            if (groupChatPanel) { groupChatPanel.style.display='none'; groupChatPanel.classList.remove('active'); }
+            const mb=document.querySelector('.mobile-back-btn,.gc-mb'); if(mb)mb.remove();
         }
     } catch (error) {}
 }
@@ -7605,7 +7591,7 @@ if (typeof window !== 'undefined') {
     secureExpose('deleteMessage', deleteMessage);
     secureExpose('removeSelectedFriend', removeSelectedFriend);
     secureExpose('showGroupDetails', showGroupDetails);
-    secureExpose('openGroupChat', openGroupChat);
+    window.openGroupChat = openGroupChat; // writable so patches can intercept
     secureExpose('acceptGroupInvite', acceptGroupInvite);
     secureExpose('declineGroupInvite', declineGroupInvite);
     secureExpose('leaveGroupConfirm', leaveGroupConfirm);
