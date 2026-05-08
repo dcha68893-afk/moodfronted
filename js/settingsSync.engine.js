@@ -108,7 +108,7 @@
      * so we never get double /api/api/...
      */
     function _directFetch(endpoint, method, body) {
-        const rawBase = (window.__getApiBase && window.__getApiBase()) || 'http://localhost:3000/api';
+        const rawBase = (window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api';
         // Normalize: remove trailing /api or /api/ so we can cleanly re-add it
         const baseOrigin = rawBase.replace(/\/api\/?$/, '');
         const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;

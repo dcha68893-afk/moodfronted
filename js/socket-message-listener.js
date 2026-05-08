@@ -112,7 +112,7 @@
 
             _fallbackSocket.on('disconnect', function () { _fallbackConnected = false; });
 
-            const MESSAGE_EVENTS = ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED'];
+            const MESSAGE_EVENTS = ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED', 'message:deleted', 'message_deleted', 'message:seen', 'message_seen', 'message:read', 'message_read', 'message:delivered', 'message_delivered'];
             MESSAGE_EVENTS.forEach(function (evt) {
                 _fallbackSocket.on(evt, _handleFallbackMessage);
             });

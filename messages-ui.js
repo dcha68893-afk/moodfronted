@@ -9713,6 +9713,7 @@ Type: ${message.type || 'text'}`;
                 const chats = core?.getConversations?.() || [];
 
                 UIRenderer.renderMultiSendChats(chats);
+                this.loadMultiSendHistory();
 
                 UIFailsafe.safeAddClass(panel, 'active');
 
@@ -12463,5 +12464,182 @@ Type: ${message.type || 'text'}`;
         }
 
     } catch(e) {}
+
+    window.messagesUI = window.messagesUI || {};
+
+    UIRenderer.renderMultiSendHistory = function(historyItems) {
+        const listEl = UIFailsafe.safeGetElement('multiSendHistoryList');
+        if (!listEl) return;
+
+        const items = Array.isArray(historyItems) ? historyItems : [];
+        if (items.length === 0) {
+            UIFailsafe.safeSetStyle(listEl, 'display', 'none');
+            return;
+        }
+
+        const html = items.slice(0, 10).map((item) => {
+            const recipients = Array.isArray(item.recipients) ? item.recipients.length : (Array.isArray(item.recipientIds) ? item.recipientIds.length : 0);
+            return `
+                <button type="button" data-batch-id="${item.batchId || item.id}" class="multi-send-history-item"
+                    style="width:100%;text-align:left;border:none;background:#fff;padding:10px 12px;border-radius:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(15,23,42,0.08);cursor:pointer;">
+                    <div style="font-weight:600;color:#0f172a;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.content || ''}</div>
+                    <div style="font-size:11px;color:#64748b;margin-top:4px;">${recipients} recipients · ${item.deliveryCount || 0} delivered · ${item.seenCount || 0} seen</div>
+                </button>
+            `;
+        }).join('');
+
+        UIFailsafe.safeSetHTML(listEl, html);
+        UIFailsafe.safeSetStyle(listEl, 'display', 'block');
+
+        listEl.querySelectorAll('[data-batch-id]').forEach((button) => {
+            button.addEventListener('click', () => {
+                window.messagesUI?.openMultiSendHistory?.(button.dataset.batchId);
+            });
+        });
+    };
+
+    UIRenderer.renderMultiSendHistoryDetail = function(detail) {
+        const detailEl = UIFailsafe.safeGetElement('multiSendHistoryDetail');
+        if (!detailEl) return;
+        if (!detail) {
+            UIFailsafe.safeSetStyle(detailEl, 'display', 'none');
+            return;
+        }
+
+        const recipients = Array.isArray(detail.recipients) ? detail.recipients : [];
+        const recipientHtml = recipients.map((item) => {
+            const status = item.readAt ? 'Seen' : (item.deliveredAt ? 'Delivered' : 'Sent');
+            return `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid rgba(148,163,184,0.18);">
+                <span style="color:#0f172a;">${item.displayName || item.username || item.userId}</span>
+                <span style="color:#64748b;font-size:12px;">${status}</span>
+            </div>`;
+        }).join('');
+
+        UIFailsafe.safeSetHTML(detailEl, `
+            <div style="font-weight:700;color:#0f172a;margin-bottom:6px;">Sent To Multiple History</div>
+            <div style="font-size:13px;color:#334155;margin-bottom:10px;">${detail.content || ''}</div>
+            <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Reply mode: ${detail.replyVisibility === 'creator_only' ? 'Creator only' : 'Public'}</div>
+            <div>${recipientHtml || '<div style="color:#64748b;font-size:12px;">No recipients</div>'}</div>
+        `);
+        UIFailsafe.safeSetStyle(detailEl, 'display', 'block');
+    };
+
+    window.messagesUI.loadMultiSendHistory = async function() {
+        const listEl = UIFailsafe.safeGetElement('multiSendHistoryList');
+        if (!listEl) return;
+        const core = getMessagesCore();
+        let token = null;
+        try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
+        try {
+            const resp = await fetch('/api/messages/bulk/history', {
+                headers: token ? { Authorization: 'Bearer ' + token } : {}
+            });
+            const result = await resp.json().catch(function() { return {}; });
+            UIRenderer.renderMultiSendHistory(Array.isArray(result.data) ? result.data : []);
+        } catch (error) {
+            console.warn('[MultiSend] Failed to load history:', error);
+            UIFailsafe.safeSetStyle(listEl, 'display', 'none');
+        }
+    };
+
+    window.messagesUI.openMultiSendHistory = async function(batchId) {
+        if (!batchId) return;
+        const core = getMessagesCore();
+        let token = null;
+        try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
+        try {
+            const resp = await fetch('/api/messages/bulk/history/' + encodeURIComponent(batchId), {
+                headers: token ? { Authorization: 'Bearer ' + token } : {}
+            });
+            const result = await resp.json().catch(function() { return {}; });
+            if (!resp.ok || result.success === false) {
+                throw new Error(result.message || 'Failed to load history detail');
+            }
+            UIRenderer.renderMultiSendHistoryDetail(result.data || null);
+        } catch (error) {
+            console.warn('[MultiSend] Failed to load history detail:', error);
+            UIRenderer.showNotification(error.message || 'Failed to open history', 'error');
+        }
+    };
+
+    const bindMultiSendEnhancements = function() {
+        const historyBtn = document.getElementById('multiSendHistoryBtn');
+        if (historyBtn && !historyBtn.dataset.boundHistory) {
+            historyBtn.dataset.boundHistory = 'true';
+            historyBtn.addEventListener('click', function() {
+                window.messagesUI?.loadMultiSendHistory?.();
+            });
+        }
+
+        const toggleBtn = document.getElementById('multiSendToggleBtn');
+        if (toggleBtn && !toggleBtn.dataset.boundHistoryLoad) {
+            toggleBtn.dataset.boundHistoryLoad = 'true';
+            toggleBtn.addEventListener('click', function() {
+                setTimeout(function() {
+                    window.messagesUI?.loadMultiSendHistory?.();
+                }, 50);
+            }, true);
+        }
+
+        const multiSendBtn = document.getElementById('multiSendBtn');
+        if (multiSendBtn && !multiSendBtn.dataset.boundBulkOverride) {
+            multiSendBtn.dataset.boundBulkOverride = 'true';
+            multiSendBtn.addEventListener('click', async function(event) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+
+                const input = document.getElementById('multiSendInput');
+                const msgContent = (input && input.value && input.value.trim()) || '';
+                const core = getMessagesCore();
+                const replyVisibility = document.getElementById('multiSendReplyVisibility')?.value || 'public';
+                if (!msgContent) {
+                    UIRenderer.showNotification('Please type a message first', 'error');
+                    return;
+                }
+                const selectedChats = core && core.multiSendSelectedChats;
+                if (!(selectedChats instanceof Set) || selectedChats.size === 0) {
+                    UIRenderer.showNotification('Select at least one chat', 'error');
+                    return;
+                }
+
+                let token = null;
+                try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
+
+                try {
+                    const resp = await fetch('/api/messages/bulk', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+                        body: JSON.stringify({
+                            conversationIds: Array.from(selectedChats),
+                            content: msgContent,
+                            type: 'text',
+                            replyVisibility
+                        })
+                    });
+                    const result = await resp.json().catch(function() { return {}; });
+                    if (!resp.ok || result.success === false) {
+                        throw new Error(result.message || result.error || 'Failed to send');
+                    }
+                    const sentCount = Array.isArray(result.data?.messages) ? result.data.messages.length : selectedChats.size;
+                    UIRenderer.showNotification('Sent to ' + sentCount + ' chats');
+                    window.messagesUI?.loadMultiSendHistory?.();
+                    if (input) input.value = '';
+                    if (core?.multiSendSelectedChats) core.multiSendSelectedChats.clear();
+                    const panel = document.getElementById('multiSendPanel');
+                    if (panel) panel.classList.remove('active');
+                    UIStateManager.setState('multiSendVisible', false);
+                } catch (error) {
+                    console.warn('[MultiSend] Error sending bulk message:', error);
+                    UIRenderer.showNotification(error.message || 'Failed to send', 'error');
+                }
+            }, true);
+        }
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindMultiSendEnhancements);
+    } else {
+        bindMultiSendEnhancements();
+    }
 
 })();

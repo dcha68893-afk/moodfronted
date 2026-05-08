@@ -12,7 +12,7 @@ window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) 
 
 window.__getApiOrigin = window.__getApiOrigin || function() {
     const host = String(window.location?.hostname || '').toLowerCase();
-    if (window.__isLocalEnvironment(host)) return 'http://localhost:3000';
+    if (window.__isLocalEnvironment(host)) return 'http://localhost:4000';
     if (host.includes('moodfronted.onrender.com')) return 'https://moodchat-fy56.onrender.com';
     return 'https://moodchat-fy56.onrender.com';
 };
@@ -20,6 +20,55 @@ window.__getApiOrigin = window.__getApiOrigin || function() {
 window.__getApiBase = window.__getApiBase || function() {
     return `${window.__getApiOrigin()}/api`;
 };
+
+window.__rewriteApiUrl = window.__rewriteApiUrl || function(input) {
+    const apiOrigin = String(window.__getApiOrigin ? window.__getApiOrigin() : '').replace(/\/+$/, '');
+    if (!apiOrigin || !input) return input;
+
+    const normalize = function(rawUrl) {
+        if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+        if (/^\/api(\/|$)/i.test(rawUrl)) return `${apiOrigin}${rawUrl}`;
+        if (/^api(\/|$)/i.test(rawUrl)) return `${apiOrigin}/${rawUrl.replace(/^\/+/, '')}`;
+
+        try {
+            const parsed = new URL(rawUrl, window.location.origin);
+            const isApiPath = /^\/api(\/|$)/i.test(parsed.pathname);
+            const isLegacyLocalOrigin = /^(localhost|127\.0\.0\.1)$/i.test(parsed.hostname) && parsed.port === '3000';
+            const isSameOriginApi = parsed.origin === window.location.origin && isApiPath;
+
+            if (isApiPath && (isLegacyLocalOrigin || isSameOriginApi)) {
+                return `${apiOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+            }
+        } catch (_error) {}
+
+        return rawUrl;
+    };
+
+    if (typeof Request !== 'undefined' && input instanceof Request) {
+        const rewrittenUrl = normalize(input.url);
+        if (!rewrittenUrl || rewrittenUrl === input.url) return input;
+        return new Request(rewrittenUrl, input);
+    }
+
+    return normalize(input);
+};
+
+if (!window.__KYNECTA_API_FETCH_PATCHED__ && typeof window.fetch === 'function') {
+    window.__KYNECTA_API_FETCH_PATCHED__ = true;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+        return nativeFetch(window.__rewriteApiUrl(input), init);
+    };
+}
+
+if (!window.__KYNECTA_API_XHR_PATCHED__ && typeof XMLHttpRequest !== 'undefined') {
+    window.__KYNECTA_API_XHR_PATCHED__ = true;
+    const nativeOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+        const rewrittenUrl = window.__rewriteApiUrl ? window.__rewriteApiUrl(url) : url;
+        return nativeOpen.apply(this, [method, rewrittenUrl].concat(Array.prototype.slice.call(arguments, 2)));
+    };
+}
 
 // Helper function
 window.apiCall = async function(endpoint, options = {}) {

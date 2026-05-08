@@ -225,7 +225,7 @@
                 window.__getApiBase?.() ||
                 window.AppConfig?.apiBase ||
                 window.Environment?.apiBaseUrl ||
-                'http://localhost:3000/api';
+                'http://localhost:4000/api';
 
             let url = `${baseUrl}/messages?chatId=${chatId}&limit=${limit}`;
             if (since) url += `&after=${new Date(since).toISOString()}`;

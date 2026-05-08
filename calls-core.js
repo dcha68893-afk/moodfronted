@@ -18465,7 +18465,7 @@ endCall: async function(callId, options = {}) {
 
 
 
-                callsState.activeCallId = callData.callId;  // ← CRITICAL: Set activeCallId for incoming calls
+                callsState.activeCallId = callData.callId || callData.id || callsState.activeCallId;  // ← CRITICAL: Set activeCallId for incoming calls
 
 
 
@@ -27965,7 +27965,7 @@ _escapeHtml: function(text) {
 
 
 
-        callsState.activeCallId = callData.callId;  // ← CRITICAL: Set activeCallId for incoming calls
+        callsState.activeCallId = callData.callId || callData.id || callsState.activeCallId;  // ← CRITICAL: Set activeCallId for incoming calls
 
 
 
@@ -28525,7 +28525,16 @@ _escapeHtml: function(text) {
 
 
 
+        const acceptedCallId = callData && (callData.callId || callData.id);
+        if (acceptedCallId) {
+            callsState.activeCallId = acceptedCallId;
+            callsState.serverCallId = callsState.serverCallId || acceptedCallId;
+        }
+        if (callData && (callData.callType || callData.type)) {
+            callsState.callType = callData.callType || callData.type;
+        }
         callsState.callState = 'connecting';
+        callsState.callActive = true;
 
 
 
@@ -28553,19 +28562,40 @@ _escapeHtml: function(text) {
 
 
 
-        const isCaller = callData &&
+        const currentUserId = callsState.session && callsState.session.userId;
+        const isCaller = !!(callData &&
 
 
 
-            (callData.callerId === (callsState.session && callsState.session.userId) ||
+            currentUserId != null &&
 
 
 
-             callsState.callState === 'connecting');
+            callData.callerId != null &&
+
+
+
+            String(callData.callerId) === String(currentUserId));
 
 
 
 
+
+
+
+        if (!isCaller) {
+
+
+
+            console.log('[CallsCore] ℹ️ CALL ACCEPTED received on receiver side — waiting for caller offer');
+
+
+
+            return;
+
+
+
+        }
 
 
 

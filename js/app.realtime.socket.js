@@ -82,7 +82,7 @@
         if (!detectLocalEnvironment()) {
             return 'https://moodchat-fy56.onrender.com';
         }
-        return 'http://localhost:3000';
+        return 'http://localhost:4000';
     }
 
     // ── FIX #1: Token acquisition — check globals FIRST (set right after login) ──
@@ -953,6 +953,7 @@
             const messageEvents = [
                 'message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
                 'message:delivered', 'message:read', 'message_delivered', 'message_read',
+                'message:seen', 'message_seen', 'message:deleted', 'message_deleted',
             ];
 
             const callEvents = [
@@ -1200,7 +1201,9 @@
             'message:new', 'new_message', 'newMessage', 'chat:message',
             'message:sent', 'message_sent',
             'message:delivered', 'message_delivered',
-            'message:read', 'message_read'
+            'message:read', 'message_read',
+            'message:seen', 'message_seen',
+            'message:deleted', 'message_deleted'
         ]);
 
         realtimeManager.on('*', function (payload, fullMessage) {

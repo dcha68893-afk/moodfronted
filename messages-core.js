@@ -4063,7 +4063,7 @@ try {
             }
         },
         
-        deleteMessage: function(messageId, forEveryone = false) {
+        deleteMessage: async function(messageId, forEveryone = false) {
             const guardResult = window.__guardAction('deleteMessage', MODULE_NAME, currentState, false);
             if (guardResult !== null) {
                 return guardResult;
@@ -4071,35 +4071,44 @@ try {
             
             if (!canSendUserMessages()) return false;
             if (!SessionManager.isAuthenticated()) return false;
-            
-            const result = safeSend(OUTGOING_ACTIONS.DELETE_MESSAGE, {
-                messageId,
-                forEveryone
-            }, { requireAck: false });
-            
-            if (result.blocked) {
+
+            const message = (ChatManager.getMessages() || []).find((entry) =>
+                String(entry.id) === String(messageId)
+                || String(entry.localId || '') === String(messageId)
+                || String(entry.serverId || '') === String(messageId)
+            );
+            const targetId = message?.serverId || message?.id || messageId;
+
+            try {
+                await makeApiRequest(`/messages/${targetId}`, 'DELETE', {
+                    forEveryone
+                });
+            } catch (error) {
+                console.error('[MessageHandler] deleteMessage failed:', error);
                 return false;
             }
-            
-            const messages = ChatManager.getMessages();
-            const index = messages.findIndex(m => m.id === messageId);
-            if (index !== -1) {
-                if (forEveryone) {
-                    messages[index].deleted = true;
-                    messages[index].deletedAt = Date.now();
-                } else {
-                    messages.splice(index, 1);
-                }
-                
-                if (ChatManager.getActiveChat()) {
-                    try {
-                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
-                    } catch (e) {}
-                }
-                
-                EventBus.emit('message:deleted', { messageId, forEveryone });
+
+            const filteredMessages = (ChatManager.getMessages() || []).filter((entry) =>
+                String(entry.id) !== String(messageId)
+                && String(entry.localId || '') !== String(messageId)
+                && String(entry.serverId || '') !== String(targetId)
+            );
+
+            if (ChatManager.getActiveChat()) {
+                ChatManager.setMessages(filteredMessages, ChatManager.getActiveChat().id);
+                try {
+                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, filteredMessages);
+                } catch (e) {}
             }
-            
+
+            if (window.KynectaLocalStore) {
+                window.KynectaLocalStore.deleteMessage(messageId).catch(() => {});
+                if (String(targetId) !== String(messageId)) {
+                    window.KynectaLocalStore.deleteMessage(targetId).catch(() => {});
+                }
+            }
+
+            EventBus.emit('message:deleted', { messageId: targetId, forEveryone });
             return true;
         },
         
@@ -4276,6 +4285,14 @@ try {
             if (!conversationId) return false;
             
             const actualId = typeof conversationId === 'object' ? conversationId.id : conversationId;
+            const openKey = String(actualId);
+            const now = Date.now();
+            if (this._lastOpenRequest
+                && this._lastOpenRequest.id === openKey
+                && (now - this._lastOpenRequest.timestamp) < 700) {
+                return true;
+            }
+            this._lastOpenRequest = { id: openKey, timestamp: now };
 
             // FIX: Clear in-memory messages immediately when switching to a DIFFERENT chat.
             // Without this, messages from the previous chat bleed into the new chat view
@@ -4466,10 +4483,21 @@ try {
             if (!conversationId) return;
             if (!canSendUserMessages()) return;
             if (!SessionManager.isAuthenticated()) return;
-            
-            safeSend(OUTGOING_ACTIONS.MARK_AS_READ, {
-                conversationId: conversationId
-            }, { requireAck: false });
+
+            const currentUserId = SessionManager.getUserId();
+            const pendingReadIds = (ChatManager.getMessages() || [])
+                .filter((message) => String(message.chatId || message.conversationId || '') === String(conversationId))
+                .filter((message) => String(message.senderId || message.sender?.id || '') !== String(currentUserId))
+                .filter((message) => !['read', 'seen'].includes(String(message.status || '').toLowerCase()))
+                .map((message) => message.serverId || message.id)
+                .filter(Boolean);
+
+            if (pendingReadIds.length > 0) {
+                makeApiRequest('/messages/mark-read/batch', 'POST', {
+                    chatId: conversationId,
+                    messageIds: pendingReadIds
+                }).catch(() => {});
+            }
             
             const conversation = ChatManager.getConversation(conversationId);
             if (conversation) {
@@ -5931,17 +5959,43 @@ try {
                 return;
             }
 
-            if (normalizedType === 'message_read' || normalizedType === 'message:read') {
+            if (normalizedType === 'message_read' || normalizedType === 'message:read' || normalizedType === 'message_seen' || normalizedType === 'message:seen') {
                 // ✅ FIX 9: Unwrap postMessage bridge wrapper
                 const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
-                const messageId = d.localId || d.messageId || d.serverId || d.id;
-                if (messageId && ChatManager.updateMessageStatus) {
-                    ChatManager.updateMessageStatus(messageId, 'read', {
-                        readAt:   d.readAt   || d.timestamp || Date.now(),
-                        localId:  d.localId  || null,
-                        serverId: d.serverId || d.messageId || d.id || null
-                    });
+                const ids = Array.isArray(d.messageIds) && d.messageIds.length > 0
+                    ? d.messageIds
+                    : [d.localId || d.messageId || d.serverId || d.id].filter(Boolean);
+                ids.forEach((messageId) => {
+                    if (messageId && ChatManager.updateMessageStatus) {
+                        ChatManager.updateMessageStatus(messageId, 'read', {
+                            readAt:   d.readAt   || d.timestamp || Date.now(),
+                            localId:  d.localId  || null,
+                            serverId: d.serverId || d.messageId || d.id || null
+                        });
+                    }
+                });
+                return;
+            }
+
+            if (normalizedType === 'message_deleted' || normalizedType === 'message:deleted') {
+                const d = (data.payload && (data.payload.messageId || data.payload.messageIds)) ? data.payload : data;
+                const ids = Array.isArray(d.messageIds) && d.messageIds.length > 0
+                    ? d.messageIds.map(String)
+                    : [d.messageId || d.id].filter(Boolean).map(String);
+                if (ids.length === 0) return;
+
+                const remaining = (ChatManager.getMessages() || []).filter((message) => {
+                    const currentId = String(message.serverId || message.id || message.localId || '');
+                    return !ids.includes(currentId);
+                });
+                const activeChatId = d.chatId || d.conversationId || ChatManager.getActiveChat()?.id || null;
+                if (activeChatId) {
+                    ChatManager.setMessages(remaining, activeChatId);
                 }
+                if (window.KynectaLocalStore) {
+                    ids.forEach((id) => window.KynectaLocalStore.deleteMessage(id).catch(() => {}));
+                }
+                EventBus.emit('message:deleted', { messageIds: ids, chatId: activeChatId, forEveryone: !!d.deleteForEveryone });
                 return;
             }
 
@@ -5983,7 +6037,11 @@ try {
             // previously caused duplicates and ghost messages
             const _rt = String(data.type || '').toLowerCase();
             if (_rt === 'message:new' || _rt === 'new_message' || _rt === 'newmessage' ||
-                _rt === 'chat:message' || _rt === 'message_received') {
+                _rt === 'chat:message' || _rt === 'message_received' ||
+                _rt === 'message:deleted' || _rt === 'message_deleted' ||
+                _rt === 'message:seen' || _rt === 'message_seen' ||
+                _rt === 'message:read' || _rt === 'message_read' ||
+                _rt === 'message:delivered' || _rt === 'message_delivered') {
                 handleRealtimePayload(data.type, data);
             }
             if (data.type === 'message:reaction' || data.type === 'REACTION_UPDATED') {
@@ -6032,7 +6090,7 @@ try {
 
         if (!hasRealtimeBinding && window.wsService?.on) {
             hasRealtimeBinding = true;
-            ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read'].forEach((eventName) => {
+            ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {
                 window.wsService.on(eventName, (payload) => {
                     handleRealtimePayload(eventName, payload);
                 });
@@ -6047,7 +6105,7 @@ try {
             if (!rt || !rt.on || rt.__msgCoreBound) return;
             rt.__msgCoreBound = true;
             ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
-             'message:delivered', 'message:read'].forEach((eventName) => {
+             'message:delivered', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {
                 rt.on(eventName, (payload) => {
                     handleRealtimePayload(eventName, payload);
                 });
@@ -6073,6 +6131,9 @@ try {
         });
         document.addEventListener('message:read', function(evt) {
             if (evt.detail) handleRealtimePayload('message:read', evt.detail);
+        });
+        document.addEventListener('message:deleted', function(evt) {
+            if (evt.detail) handleRealtimePayload('message:deleted', evt.detail);
         });
         document.addEventListener('message:reaction', function(evt) {
             if (evt.detail) handleRealtimePayload('message:reaction', evt.detail);

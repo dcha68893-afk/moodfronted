@@ -1466,7 +1466,7 @@
         };
         window.__getApiOrigin = window.__getApiOrigin || function() {
             const host = String(window.location?.hostname || '').toLowerCase();
-            if (window.__isLocalEnvironment(host)) return 'http://localhost:3000';
+            if (window.__isLocalEnvironment(host)) return 'http://localhost:4000';
             if (host.includes('moodfronted.onrender.com')) return 'https://moodchat-fy56.onrender.com';
             return 'https://moodchat-fy56.onrender.com';
         };
@@ -2716,19 +2716,12 @@
                     document.body.classList.add('call-screen-active');
                 }
 
-                // ── FIX 2: Echo VIDEO_UPGRADE_REQUEST back so remote side sees camera-on ──
-                // When user A clicks video, it posts VIDEO_UPGRADE_REQUEST to parent.
-                // Parent echoes it back (source='parent-echo') so user B's handler fires,
-                // which prepares #remoteVideo to receive the incoming video track.
-                if (data.type === 'VIDEO_UPGRADE_REQUEST' && data.source !== 'parent-echo') {
-                    var _callsIframe2 = document.getElementById('callsIframe');
-                    if (_callsIframe2 && _callsIframe2.contentWindow) {
-                        _callsIframe2.contentWindow.postMessage({
-                            type: 'VIDEO_UPGRADE_REQUEST',
-                            payload: data.payload || {},
-                            source: 'parent-echo'
-                        }, '*');
-                    }
+                // Do not echo VIDEO_UPGRADE_REQUEST back into the same iframe.
+                // The actual remote upgrade now rides on the WebRTC renegotiation
+                // offer/answer flow; local echoing caused the caller to see their own
+                // "incoming video" notification and mis-render the preview.
+                if (data.type === 'VIDEO_UPGRADE_REQUEST') {
+                    return;
                 }
 
                 // ── FIX 3: Echo CALL_ENDED back so BOTH sides reset when one ends ──
@@ -3129,7 +3122,7 @@
             }
 
             async function directApiRequest(endpoint, method, body, params, token) {
-                const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:3000/api';
+                const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
                 let url = baseUrl + endpoint;
                 if (method === 'GET' && params && typeof params === 'object') {
                     const queryString = new URLSearchParams(params).toString();
@@ -3527,7 +3520,7 @@
                 }
                 try {
                     console.log('[Parent] Refreshing call history for user:', userId);
-                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:3000/api';
+                    const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
 
                     if (callsIframe && callsIframe.contentWindow && navigator.onLine) {
                         callsIframe.contentWindow.postMessage({
@@ -4429,7 +4422,7 @@
                         try { if (replySource && replySource.postMessage) replySource.postMessage({ type: 'FILE_UPLOAD_RESULT', requestId, ...payload }, '*'); } catch(e) {}
                     };
                     try {
-                        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:3000/api';
+                        const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
                         let token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
                         const [meta, b64] = base64Data.split(',');
                         const mime = (meta.match(/:(.*?);/) || [])[1] || fileType || 'application/octet-stream';
@@ -4982,6 +4975,12 @@
                 // ── Cancelled ─────────────────────────────────────────────────
                 window.wsService.on('call:cancelled', _fwdCancelled);
                 window.wsService.on('call_cancelled', _fwdCancelled);
+
+                // ── Participant lifecycle ────────────────────────────────────
+                window.wsService.on('call_participant_joined', d => _fwdToCallsIframe('CALL_PARTICIPANT_JOINED', d));
+                window.wsService.on('call:participant_joined', d => _fwdToCallsIframe('CALL_PARTICIPANT_JOINED', d));
+                window.wsService.on('call_participant_left', d => _fwdToCallsIframe('CALL_PARTICIPANT_LEFT', d));
+                window.wsService.on('call:participant_left', d => _fwdToCallsIframe('CALL_PARTICIPANT_LEFT', d));
 
                 // ── WebRTC Signaling Bridge ────────────────────────────────────
                 window.wsService.on('call_offer',          d => _fwdToCallsIframe('SIGNAL_OFFER',   d));

@@ -80,6 +80,87 @@ const UIState = {
     pendingCallUser: null
 };
 
+function normalizeParticipantId(value) {
+    if (value === undefined || value === null || value === '') return null;
+    return String(value);
+}
+
+function normalizeParticipantEntry(participant) {
+    if (participant === undefined || participant === null) return null;
+
+    if (typeof participant === 'string' || typeof participant === 'number') {
+        const id = normalizeParticipantId(participant);
+        return {
+            id,
+            userId: id,
+            name: id ? `User ${id}` : 'User',
+            avatar: null,
+            isOnline: true,
+            isMuted: false,
+            isSpeaking: false
+        };
+    }
+
+    const id = normalizeParticipantId(participant.id || participant.userId || participant.participantId);
+    const name = participant.name
+        || participant.userName
+        || participant.username
+        || participant.displayName
+        || (id ? `User ${id}` : 'User');
+
+    return {
+        ...participant,
+        id,
+        userId: id,
+        name,
+        avatar: participant.avatar || participant.photo || participant.userAvatar || null,
+        isOnline: participant.isOnline !== false,
+        isMuted: !!participant.isMuted,
+        isSpeaking: !!participant.isSpeaking
+    };
+}
+
+function syncParticipantBadge() {
+    const badge = document.getElementById('participantBadge');
+    if (badge) badge.textContent = String((UIState.callParticipants || []).length);
+}
+
+function setCallParticipants(participants = [], { merge = false } = {}) {
+    const next = merge ? [...(UIState.callParticipants || [])] : [];
+    const byKey = new Map();
+
+    next.forEach((participant, index) => {
+        const normalized = normalizeParticipantEntry(participant);
+        if (!normalized) return;
+        const key = normalized.id || `name:${normalized.name || index}`;
+        byKey.set(key, normalized);
+    });
+
+    (Array.isArray(participants) ? participants : [participants]).forEach((participant, index) => {
+        const normalized = normalizeParticipantEntry(participant);
+        if (!normalized) return;
+        const key = normalized.id || `name:${normalized.name || index}`;
+        byKey.set(key, { ...(byKey.get(key) || {}), ...normalized });
+    });
+
+    UIState.callParticipants = Array.from(byKey.values());
+    syncParticipantBadge();
+    return UIState.callParticipants;
+}
+
+function upsertCallParticipant(participant) {
+    return setCallParticipants([participant], { merge: true });
+}
+
+function removeCallParticipant(userId) {
+    const normalizedId = normalizeParticipantId(userId);
+    UIState.callParticipants = (UIState.callParticipants || []).filter(participant => {
+        const participantId = normalizeParticipantId(participant && (participant.id || participant.userId));
+        return participantId !== normalizedId;
+    });
+    syncParticipantBadge();
+}
+
 function showCallingScreenViaPatch(callInfo) {
     console.log('[UI] showCallingScreenViaPatch → caller outgoing screen', callInfo);
 
@@ -729,12 +810,24 @@ function transitionToInCall(callInfo) {
         || (UIState.callData && (UIState.callData.callerName || UIState.callData.fromUserName))
         || 'User';
     const callType = callInfo.callType || UIState.callType || 'voice';
+    UIState.callType = callType;
+    if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
+        setCallParticipants([{
+            id: callInfo.userId || null,
+            userId: callInfo.userId || null,
+            name,
+            avatar: callInfo.userAvatar || null,
+            isOnline: true
+        }], { merge: false });
+    } else {
+        syncParticipantBadge();
+    }
 
     // ── Populate name + timer fields ──────────────────────────────────────
     const callWithName = document.getElementById('callWithName');
     const callDuration = document.getElementById('callDuration');
     if (callWithName) callWithName.textContent = name;
-    if (callDuration) callDuration.textContent = '0:00';
+    if (callDuration) callDuration.textContent = '00:00';
 
     // ── Avatar (initial letter or photo) ─────────────────────────────────
     const incallAvatar = document.getElementById('incallAvatar') || document.getElementById('callAvatar');
@@ -755,7 +848,7 @@ function transitionToInCall(callInfo) {
         if (!UIState.callActive) { clearInterval(window._currentCallTimer); return; }
         const elapsed = Math.floor((Date.now() - UIState.callStartTime) / 1000);
         const m = Math.floor(elapsed / 60), s = elapsed % 60;
-        if (callDuration) callDuration.textContent = `${m}:${String(s).padStart(2,'0')}`;
+        if (callDuration) callDuration.textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     }, 1000);
 
     // ── End-call button: terminates call on BOTH sides ────────────────────
@@ -3923,11 +4016,12 @@ handleContactItemClick: function(e) {
                     UIState.callActive = !!state.callActive;
                     UIState.activeCallId = state.activeCallId;
                     UIState.callType = state.callType;
-                    UIState.callParticipants = state.callParticipants || [];
+                    setCallParticipants(state.callParticipants || [], { merge: false });
                     UIState.callStartTime = state.callStartTime;
                     if (!state.callActive && (!state.callState || state.callState === 'idle')) {
                         UIState.activeCallId = null;
                         UIState.callParticipants = [];
+                        syncParticipantBadge();
                         UIState.callStartTime = null;
                     }
                     
@@ -4043,6 +4137,12 @@ handleContactItemClick: function(e) {
                 case 'call_connected':
                     this.handleCallConnected(data);
                     break;
+                case 'call_participant_joined':
+                    this.handleParticipantJoined(data);
+                    break;
+                case 'call_participant_left':
+                    this.handleParticipantLeft(data);
+                    break;
                 case 'call_ended':
                 case 'call_rejected':
                 case 'call_failed':
@@ -4063,8 +4163,10 @@ handleContactItemClick: function(e) {
                     break;
                 case 'call_force_ended':
                     // Skip reset if we're already in-call (stale WS echo after accept)
-                    if (UIState.callState === 'connected' ||
-                        (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) {
+                    if ((UIState.callState === 'connected' ||
+                        (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'))) &&
+                        window.__callAcceptedHandled &&
+                        (Date.now() - window.__callAcceptedHandled) < 5000) {
                         console.warn('[Calls UI] call_force_ended core event ignored — already in-call');
                         // Only stop ringtones
                         if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
@@ -4566,17 +4668,29 @@ handleContactItemClick: function(e) {
         handleIncomingCall: function(callData) {
             // Store caller name durably so transitionToInCall can use it on receiver side
             const _callerName = (callData && (callData.callerName || callData.fromUserName || callData.userName || callData.name)) || null;
+            const incomingId = callData.callId || callData.id || null;
+            const incomingType = callData.callType || callData.type || 'voice';
+            const callerParticipant = {
+                id: callData.callerId || callData.userId || null,
+                userId: callData.callerId || callData.userId || null,
+                name: _callerName || 'Caller',
+                avatar: callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto || null,
+                isOnline: true
+            };
             if (_callerName) {
                 window.__incomingCallerName = _callerName;
                 // Also persist in UIState so transitionToInCall fallbacks find it
                 UIState.callData = UIState.callData || {};
                 UIState.callData.callerName = _callerName;
-                if (!UIState.callParticipants || UIState.callParticipants.length === 0) {
-                    UIState.callParticipants = [{ name: _callerName }];
-                }
             }
             // Store caller avatar globally so transitionToInCall can use it on receiver side
             window.__incomingCallerAvatar = (callData && (callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto)) || null;
+            UIState.callData = { ...(UIState.callData || {}), ...callData };
+            UIState.callType = incomingType;
+            UIState.callState = 'ringing';
+            UIState.callActive = false;
+            UIState.activeCallId = incomingId;
+            setCallParticipants([callerParticipant], { merge: false });
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
             if (!elements.incomingCallModal) {
                 if (typeof cacheElements === 'function') cacheElements();
@@ -4600,7 +4714,6 @@ handleContactItemClick: function(e) {
             }
 
             // ── DEDUP: ignore if same call already ringing ───────────────────
-            const incomingId = callData.callId || callData.id || null;
             if (window._currentIncomingCallId && window._currentIncomingCallId === incomingId) {
                 return; // already showing this call
             }
@@ -4750,7 +4863,13 @@ handleContactItemClick: function(e) {
                     createdAt: callData.timestamp || Date.now()
                 }).catch(() => {});
             })();
-            const participant = (callData.participants && callData.participants[0]) || {};
+            const participant = normalizeParticipantEntry((callData.participants && callData.participants[0]) || {
+                id: callData.receiverId || callData.userId || null,
+                userId: callData.receiverId || callData.userId || null,
+                name: callData.calleeName || callData.userName || callData.receiverName || 'User',
+                avatar: callData.userAvatar || null,
+                isOnline: callData.receiverOnline !== false
+            }) || {};
             const participantName = participant.name || callData.calleeName || callData.userName || callData.receiverName || 'User';
             const participantAvatar = participant.avatar || participant.photo || callData.userAvatar || null;
             window.__callInitiatedAt = Date.now();
@@ -4759,7 +4878,7 @@ handleContactItemClick: function(e) {
             window.__activePeerType = callData.callType || callData.type || UIState.callType || 'voice';
             window.__activePeerAvatar = participantAvatar;
             UIState.activeCallId = callData.callId;
-            UIState.callParticipants = callData.participants || [];
+            setCallParticipants(callData.participants && callData.participants.length ? callData.participants : [participant], { merge: false });
             // ⚠ DO NOT set callStartTime here — timer only starts when receiver answers.
             // callStartTime stays null until handleCallAccepted fires.
             UIState.callStartTime = null;
@@ -5021,6 +5140,7 @@ handleContactItemClick: function(e) {
             UIState.callActive    = true;
             UIState.callState     = 'connected';
             UIState.callStartTime = Date.now();
+            UIState.activeCallId  = (callData && (callData.callId || callData.id)) || UIState.activeCallId;
             window.__callActive   = true;
 
             // ── Resolve name: on caller side use __activePeerName (set at dial time) ──
@@ -5032,6 +5152,15 @@ handleContactItemClick: function(e) {
                 || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
                 || 'User';
             const type = window.__activePeerType || (callData && callData.callType) || UIState.callType || 'voice';
+            setCallParticipants((callData && callData.participants && callData.participants.length)
+                ? callData.participants
+                : [{
+                    id: (callData && (callData.receiverId || callData.userId || callData.callerId)) || null,
+                    userId: (callData && (callData.receiverId || callData.userId || callData.callerId)) || null,
+                    name,
+                    avatar: window.__activePeerAvatar || window.__incomingCallerAvatar || null,
+                    isOnline: true
+                }], { merge: false });
 
             transitionToInCall({ userName: name, callType: type });
         },
@@ -5045,6 +5174,9 @@ handleContactItemClick: function(e) {
             UIState.callState     = 'connected';
             UIState.callActive    = true;
             UIState.callStartTime = UIState.callStartTime || Date.now();
+            if (callData && callData.participants && callData.participants.length) {
+                setCallParticipants(callData.participants, { merge: false });
+            }
 
             // Only transition if in-call screen isn't already showing
             const inCallEl = document.getElementById('inCallScreen');
@@ -5062,7 +5194,36 @@ handleContactItemClick: function(e) {
             }
         },
 
+        handleParticipantJoined: function(payload) {
+            if (!payload) return;
+            upsertCallParticipant({
+                id: payload.userId || payload.participantId || payload.id || null,
+                userId: payload.userId || payload.participantId || payload.id || null,
+                name: payload.userName || payload.name || `User ${payload.userId || payload.participantId || ''}`.trim(),
+                avatar: payload.userAvatar || payload.avatar || null,
+                isOnline: true,
+                isMuted: !!payload.isMuted,
+                isSpeaking: !!payload.isSpeaking
+            });
+        },
+
+        handleParticipantLeft: function(payload) {
+            if (!payload) return;
+            removeCallParticipant(payload.userId || payload.participantId || payload.id || null);
+        },
+
         handleCallEnded: function(callData) {
+            const endedCallId = (callData && (callData.callId || callData.id)) || null;
+            if (endedCallId && UIState.activeCallId && String(endedCallId) !== String(UIState.activeCallId)) {
+                console.warn('[Calls UI] handleCallEnded ignored - mismatched callId', endedCallId, UIState.activeCallId);
+                return;
+            }
+            if (!endedCallId && UIState.activeCallId && window.__callInitiatedAt &&
+                (Date.now() - window.__callInitiatedAt) < 8000 &&
+                (UIState.callState === 'calling' || UIState.callState === 'initiating' || UIState.callState === 'connecting')) {
+                console.warn('[Calls UI] handleCallEnded ignored - stale end event during fresh call setup');
+                return;
+            }
             // ── Guard: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.
@@ -5147,6 +5308,7 @@ handleContactItemClick: function(e) {
             const chatUserId = window.__callOriginChatUserId
                 || window.__pendingCallChatUserId
                 || null;
+            const chatUserName = window.__callOriginChatUserName || null;
 
             // Reset state FIRST
             UIState.activeCallId = null;
@@ -5157,6 +5319,7 @@ handleContactItemClick: function(e) {
             UIState.callType = null;
             window._currentIncomingCallId = null;
             document.body.classList.remove('call-connected');
+            syncParticipantBadge();
 
             // Stop any playing ringtone immediately
             if (window._incomingRingtone) {
@@ -5257,7 +5420,7 @@ handleContactItemClick: function(e) {
                         window.parent.postMessage({
                             type: 'SWITCH_MODULE',
                             module: 'messages',
-                            payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: window.__callOriginChatUserName || null },
+                            payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: chatUserName },
                             timestamp: Date.now()
                         }, '*');
                     } else if (returnTo === 'friends') {
@@ -5574,6 +5737,14 @@ handleContactItemClick: function(e) {
                         }
                         break;
                     }
+                    case 'CALL_PARTICIPANT_JOINED':
+                    case 'call_participant_joined':
+                        UIEventHandlers.handleParticipantJoined && UIEventHandlers.handleParticipantJoined(data.payload || data);
+                        break;
+                    case 'CALL_PARTICIPANT_LEFT':
+                    case 'call_participant_left':
+                        UIEventHandlers.handleParticipantLeft && UIEventHandlers.handleParticipantLeft(data.payload || data);
+                        break;
                     case 'AUTO_ACCEPT_CALL':
                     case 'ANSWER_CALL': {
                         // Parent banner/overlay accepted — answer the call
@@ -5633,7 +5804,9 @@ handleContactItemClick: function(e) {
                         // it's a stale WS echo — ignore the UI reset, only stop ringtone ──
                         const _isAlreadyInCall = UIState.callState === 'connected'
                             || (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active'));
-                        if (data.type === 'CALL_FORCE_ENDED' && _isAlreadyInCall) {
+                        if (data.type === 'CALL_FORCE_ENDED' && _isAlreadyInCall &&
+                            window.__callAcceptedHandled &&
+                            (Date.now() - window.__callAcceptedHandled) < 5000) {
                             console.warn('[Calls UI] CALL_FORCE_ENDED ignored — already in-call screen active');
                             if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
                             if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
@@ -6936,20 +7109,6 @@ handleContactItemClick: function(e) {
                         }
                         if (pipContainer) pipContainer.style.display = 'block';
 
-                        // Prepare remote video area + participant name label
-                        const avatarWrap  = document.getElementById('incallAvatarWrap');
-                        const remoteVideo = document.getElementById('remoteVideo');
-                        const nameLabel   = document.getElementById('remoteParticipantLabel');
-                        if (avatarWrap)  avatarWrap.style.display  = 'none';
-                        if (remoteVideo) remoteVideo.style.display = 'block';
-                        if (nameLabel) {
-                            nameLabel.textContent = UIState.callPeerName || window.__activePeerName || 'Remote';
-                            nameLabel.style.display = 'block';
-                        }
-                        // Switch to full-screen video layout
-                        const inCallScreen = document.getElementById('inCallScreen');
-                        if (inCallScreen) inCallScreen.classList.add('video-active');
-
                         const icon = elements.videoBtn && elements.videoBtn.querySelector('i');
                         if (icon) icon.className = 'fas fa-video';
                         if (elements.videoBtn) elements.videoBtn.classList.add('active');
@@ -6961,7 +7120,12 @@ handleContactItemClick: function(e) {
                                 || (window.KynectaCallSession && window.KynectaCallSession.peerConnection);
                         if (pc && pc.addTrack) {
                             try {
-                                pc.addTrack(vTrack, UIState.localStream);
+                                const existingVideoSender = pc.getSenders && pc.getSenders().find(sender => sender.track && sender.track.kind === 'video');
+                                if (existingVideoSender && existingVideoSender.replaceTrack) {
+                                    existingVideoSender.replaceTrack(vTrack);
+                                } else {
+                                    pc.addTrack(vTrack, UIState.localStream);
+                                }
                                 // Renegotiate: create new offer with video and send via core signaling
                                 pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
                                     .then(offer => pc.setLocalDescription(offer))
@@ -6988,18 +7152,12 @@ handleContactItemClick: function(e) {
                             }
                         }
 
-                        // Notify remote peer to show "Switch to video?" prompt
-                        // This goes via postMessage to parent which routes it through WS
-                        if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'VIDEO_UPGRADE_REQUEST',
-                                payload: { enabled: true, callId: callId },
-                                source: 'calls-iframe'
-                            }, '*');
-                        }
+                        // Remote video upgrade now rides on the SDP renegotiation offer.
+                        UIState.callType = 'video';
+                        window.__activePeerType = 'video';
                         // Store track ref for possible rollback if remote declines
                         UIState._videoUpgradeTrack = vTrack;
-                        showNotification('Camera on — waiting for remote to accept video', 'info');
+                        showNotification('Camera on', 'info');
                     })
                     .catch(err => {
                         if (err.name === 'NotAllowedError') showNotification('Camera permission denied', 'error');

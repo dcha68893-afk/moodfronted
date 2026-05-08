@@ -455,7 +455,7 @@ function _acceptVideoUpgrade() {
                                     // Send answer via signaling
                                     if (window.callCore && window.callCore.sendToParent) {
                                         window.callCore.sendToParent('SIGNAL_ANSWER', {
-                                            sdp: pc.localDescription,
+                                            answer: pc.localDescription,
                                             callId: (window.callsState && window.callsState.serverCallId) || (window.callsState && window.callsState.activeCallId)
                                         });
                                     }
@@ -478,12 +478,9 @@ function _acceptVideoUpgrade() {
                     videoBtn.classList.add('active');
                 }
                 
-                // Hide avatar, show video + participant name label
-                var avatarWrap = document.getElementById('incallAvatarWrap');
-                var remoteVideo = document.getElementById('remoteVideo');
+                // Keep the main view reserved for the remote stream.
+                // Local camera belongs in the PiP preview until a remote video track arrives.
                 var nameLabel = document.getElementById('remoteParticipantLabel');
-                if (avatarWrap) avatarWrap.style.display = 'none';
-                if (remoteVideo) remoteVideo.style.display = 'block';
                 if (nameLabel) {
                     var peerName = window.__activePeerName
                         || (window.UIState && window.UIState.callPeerName)

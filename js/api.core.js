@@ -318,7 +318,7 @@ function resolveBaseURL() {
         const env = CURRENT_ENVIRONMENT === ENVIRONMENTS.AUTO ? detectEnvironment() : CURRENT_ENVIRONMENT;
         
         if (env === ENVIRONMENTS.LOCAL || env === ENVIRONMENTS.DEVELOPMENT) {
-            return 'http://localhost:3000/api';  
+            return 'http://localhost:4000/api';  
         } else {
             return 'https://moodchat-fy56.onrender.com/api';  
         }
@@ -330,11 +330,11 @@ function resolveBaseURL() {
 
 BASE_URLS = {
     [ENVIRONMENTS.PRODUCTION]: 'https://moodchat-fy56.onrender.com/api',
-    [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:3000/api',
+    [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:4000/api',
     [ENVIRONMENTS.DEMO]: 'https://demo.moodchat.onrender.com/api',
     [ENVIRONMENTS.STAGING]: 'https://staging.moodchat.onrender.com/api',
     [ENVIRONMENTS.TEST]: 'https://test.moodchat.onrender.com/api',
-    [ENVIRONMENTS.LOCAL]: 'http://localhost:3000/api',  // ADD /api HERE
+    [ENVIRONMENTS.LOCAL]: 'http://localhost:4000/api',  // ADD /api HERE
     [ENVIRONMENTS.AUTO]: null
 };
 
@@ -559,7 +559,7 @@ getBaseUrl = function() {
         
     } catch (error) {
         console.error('[ENV] Get base URL error:', error);
-        return 'http://localhost:3000/api';  // CHANGE THIS - add /api
+        return 'http://localhost:4000/api';  // CHANGE THIS - add /api
     }
 };
 
@@ -2370,14 +2370,14 @@ window.addEventListener('message', async (event) => {
 
         // Build full URL using the backend base URL, NOT the live-server origin.
         // window.location.origin points to the dev server (e.g. 127.0.0.1:5500)
-        // which does not host the API — the API is always at localhost:3000.
+        // which does not host the API — the API is always at localhost:4000.
         const getBackendBase = () => {
             if (typeof window.__getApiBase === 'function') {
                 return window.__getApiBase().replace(/\/api\/?$/, '');
             }
             // Fallback: detect by hostname
             const h = window.location.hostname;
-            if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:3000';
+            if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:4000';
             return window.location.origin; // production: same origin
         };
 
@@ -6778,7 +6778,7 @@ checkNetworkStatus = async function() {
             ['/api/users/%2e%2e/config', false],
             ['https://evil.com/api/steal', false],
             ['https://moodchat-fy56.onrender.com/api/users', true],
-            ['http://localhost:3000/api/users', isLocalhost()]
+            ['http://localhost:4000/api/users', isLocalhost()]
         ];
         
         let securityPassed = 0;

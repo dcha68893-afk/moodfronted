@@ -1,0 +1,649 @@
+{
+  "users": [
+    [
+      "101",
+      {
+        "id": "101",
+        "username": "101",
+        "displayName": "101",
+        "email": "101@local.dev"
+      }
+    ],
+    [
+      "102",
+      {
+        "id": "102",
+        "username": "102",
+        "displayName": "102",
+        "email": "102@local.dev"
+      }
+    ],
+    [
+      "103",
+      {
+        "id": "103",
+        "username": "103",
+        "displayName": "103",
+        "email": "103@local.dev"
+      }
+    ]
+  ],
+  "settings": [
+    [
+      "101",
+      {
+        "userId": "101",
+        "theme": "light",
+        "language": "en",
+        "notifications": {
+          "messages": true,
+          "calls": true,
+          "groups": true
+        },
+        "privacy": {
+          "lastSeen": "everyone",
+          "readReceipts": true,
+          "statusVisibility": "everyone"
+        },
+        "chat": {
+          "autoDownloadMedia": true,
+          "fontSize": "medium"
+        },
+        "syncEnabled": false,
+        "updatedAt": "2026-05-08T10:48:28.766Z"
+      }
+    ],
+    [
+      "102",
+      {
+        "userId": "102",
+        "theme": "light",
+        "language": "en",
+        "notifications": {
+          "messages": true,
+          "calls": true,
+          "groups": true
+        },
+        "privacy": {
+          "lastSeen": "everyone",
+          "readReceipts": true,
+          "statusVisibility": "everyone"
+        },
+        "chat": {
+          "autoDownloadMedia": true,
+          "fontSize": "medium"
+        },
+        "syncEnabled": false,
+        "updatedAt": "2026-05-08T10:48:28.767Z"
+      }
+    ],
+    [
+      "103",
+      {
+        "userId": "103",
+        "theme": "light",
+        "language": "en",
+        "notifications": {
+          "messages": true,
+          "calls": true,
+          "groups": true
+        },
+        "privacy": {
+          "lastSeen": "everyone",
+          "readReceipts": true,
+          "statusVisibility": "everyone"
+        },
+        "chat": {
+          "autoDownloadMedia": true,
+          "fontSize": "medium"
+        },
+        "syncEnabled": false,
+        "updatedAt": "2026-05-08T10:48:28.767Z"
+      }
+    ]
+  ],
+  "friends": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "friendRequestsIncoming": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "friendRequestsSent": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "friendRequestRecords": [],
+  "groups": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "groupInvites": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "statuses": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "chats": [
+    [
+      "101",
+      [
+        {
+          "id": "101__102",
+          "participantIds": [
+            "101",
+            "102"
+          ],
+          "messages": [
+            {
+              "id": "msg_1778237313906_aa9b5c09",
+              "localId": "loc-a1",
+              "serverId": "msg_1778237313906_aa9b5c09",
+              "chatId": "101__102",
+              "conversationId": "101__102",
+              "senderId": "101",
+              "receiverId": "102",
+              "recipientIds": [
+                "102"
+              ],
+              "content": "hello from 101",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:33.906Z",
+              "updatedAt": "2026-05-08T10:48:34.418Z",
+              "sentAt": "2026-05-08T10:48:33.906Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "deleted",
+              "deletedFor": [],
+              "deletedForEveryone": true,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": null,
+              "replyVisibility": "public",
+              "deletedAt": "2026-05-08T10:48:34.418Z"
+            },
+            {
+              "id": "msg_1778237314389_c6c5e3b5",
+              "localId": "loc-b1",
+              "serverId": "msg_1778237314389_c6c5e3b5",
+              "chatId": "101__102",
+              "conversationId": "101__102",
+              "senderId": "102",
+              "receiverId": "101",
+              "recipientIds": [
+                "101"
+              ],
+              "content": "reply from 102",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.389Z",
+              "updatedAt": "2026-05-08T10:48:34.412Z",
+              "sentAt": "2026-05-08T10:48:34.389Z",
+              "deliveredAt": null,
+              "readAt": "2026-05-08T10:48:34.412Z",
+              "status": "read",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [
+                "101"
+              ],
+              "seenBy": [
+                "102",
+                "101"
+              ],
+              "batchId": null,
+              "replyVisibility": "public"
+            },
+            {
+              "id": "msg_1778237314434_b14a222d",
+              "serverId": "msg_1778237314434_b14a222d",
+              "localId": null,
+              "chatId": "101__102",
+              "conversationId": "101__102",
+              "senderId": "101",
+              "receiverId": "102",
+              "recipientIds": [
+                "102"
+              ],
+              "content": "bulk hello",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.434Z",
+              "updatedAt": "2026-05-08T10:48:34.434Z",
+              "sentAt": "2026-05-08T10:48:34.434Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "sent",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": "batch_1778237314434_f1640c61",
+              "replyVisibility": "creator_only"
+            }
+          ],
+          "unreadCount": 0,
+          "updatedAt": "2026-05-08T10:48:34.434Z",
+          "type": "direct",
+          "replyVisibility": "creator_only",
+          "lastMessage": "bulk hello",
+          "lastMessageAt": "2026-05-08T10:48:34.434Z",
+          "createdAt": "2026-05-08T10:48:33.906Z"
+        },
+        {
+          "id": "101__103",
+          "participantIds": [
+            "101",
+            "103"
+          ],
+          "messages": [
+            {
+              "id": "msg_1778237314429_298f3eb0",
+              "localId": null,
+              "serverId": "msg_1778237314429_298f3eb0",
+              "chatId": "101__103",
+              "conversationId": "101__103",
+              "senderId": "101",
+              "receiverId": "103",
+              "recipientIds": [
+                "103"
+              ],
+              "content": "seed chat 103",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.429Z",
+              "updatedAt": "2026-05-08T10:48:34.429Z",
+              "sentAt": "2026-05-08T10:48:34.429Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "sent",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": null,
+              "replyVisibility": "public"
+            },
+            {
+              "id": "msg_1778237314434_cfe0f450",
+              "serverId": "msg_1778237314434_cfe0f450",
+              "localId": null,
+              "chatId": "101__103",
+              "conversationId": "101__103",
+              "senderId": "101",
+              "receiverId": "103",
+              "recipientIds": [
+                "103"
+              ],
+              "content": "bulk hello",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.434Z",
+              "updatedAt": "2026-05-08T10:48:34.434Z",
+              "sentAt": "2026-05-08T10:48:34.434Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "sent",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": "batch_1778237314434_f1640c61",
+              "replyVisibility": "creator_only"
+            }
+          ],
+          "unreadCount": 0,
+          "updatedAt": "2026-05-08T10:48:34.434Z",
+          "type": "direct",
+          "replyVisibility": "creator_only",
+          "lastMessage": "bulk hello",
+          "lastMessageAt": "2026-05-08T10:48:34.434Z",
+          "createdAt": "2026-05-08T10:48:34.429Z"
+        }
+      ]
+    ],
+    [
+      "102",
+      [
+        {
+          "id": "101__102",
+          "participantIds": [
+            "101",
+            "102"
+          ],
+          "messages": [
+            {
+              "id": "msg_1778237313906_aa9b5c09",
+              "localId": "loc-a1",
+              "serverId": "msg_1778237313906_aa9b5c09",
+              "chatId": "101__102",
+              "conversationId": "101__102",
+              "senderId": "101",
+              "receiverId": "102",
+              "recipientIds": [
+                "102"
+              ],
+              "content": "hello from 101",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:33.906Z",
+              "updatedAt": "2026-05-08T10:48:34.418Z",
+              "sentAt": "2026-05-08T10:48:33.906Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "deleted",
+              "deletedFor": [],
+              "deletedForEveryone": true,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": null,
+              "replyVisibility": "public",
+              "deletedAt": "2026-05-08T10:48:34.418Z"
+            },
+            {
+              "id": "msg_1778237314389_c6c5e3b5",
+              "localId": "loc-b1",
+              "serverId": "msg_1778237314389_c6c5e3b5",
+              "chatId": "101__102",
+              "conversationId": "101__102",
+              "senderId": "102",
+              "receiverId": "101",
+              "recipientIds": [
+                "101"
+              ],
+              "content": "reply from 102",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.389Z",
+              "updatedAt": "2026-05-08T10:48:34.412Z",
+              "sentAt": "2026-05-08T10:48:34.389Z",
+              "deliveredAt": null,
+              "readAt": "2026-05-08T10:48:34.412Z",
+              "status": "read",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [
+                "101"
+              ],
+              "seenBy": [
+                "102",
+                "101"
+              ],
+              "batchId": null,
+              "replyVisibility": "public"
+            },
+            {
+              "id": "msg_1778237314434_b14a222d",
+              "serverId": "msg_1778237314434_b14a222d",
+              "localId": null,
+              "chatId": "101__102",
+              "conversationId": "101__102",
+              "senderId": "101",
+              "receiverId": "102",
+              "recipientIds": [
+                "102"
+              ],
+              "content": "bulk hello",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.434Z",
+              "updatedAt": "2026-05-08T10:48:34.434Z",
+              "sentAt": "2026-05-08T10:48:34.434Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "sent",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": "batch_1778237314434_f1640c61",
+              "replyVisibility": "creator_only"
+            }
+          ],
+          "unreadCount": 0,
+          "updatedAt": "2026-05-08T10:48:34.434Z",
+          "type": "direct",
+          "replyVisibility": "creator_only",
+          "lastMessage": "bulk hello",
+          "lastMessageAt": "2026-05-08T10:48:34.434Z",
+          "createdAt": "2026-05-08T10:48:33.906Z"
+        }
+      ]
+    ],
+    [
+      "103",
+      [
+        {
+          "id": "101__103",
+          "participantIds": [
+            "101",
+            "103"
+          ],
+          "messages": [
+            {
+              "id": "msg_1778237314429_298f3eb0",
+              "localId": null,
+              "serverId": "msg_1778237314429_298f3eb0",
+              "chatId": "101__103",
+              "conversationId": "101__103",
+              "senderId": "101",
+              "receiverId": "103",
+              "recipientIds": [
+                "103"
+              ],
+              "content": "seed chat 103",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.429Z",
+              "updatedAt": "2026-05-08T10:48:34.429Z",
+              "sentAt": "2026-05-08T10:48:34.429Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "sent",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": null,
+              "replyVisibility": "public"
+            },
+            {
+              "id": "msg_1778237314434_cfe0f450",
+              "serverId": "msg_1778237314434_cfe0f450",
+              "localId": null,
+              "chatId": "101__103",
+              "conversationId": "101__103",
+              "senderId": "101",
+              "receiverId": "103",
+              "recipientIds": [
+                "103"
+              ],
+              "content": "bulk hello",
+              "type": "text",
+              "attachment": null,
+              "replyToId": null,
+              "replyTo": null,
+              "mentions": [],
+              "createdAt": "2026-05-08T10:48:34.434Z",
+              "updatedAt": "2026-05-08T10:48:34.434Z",
+              "sentAt": "2026-05-08T10:48:34.434Z",
+              "deliveredAt": null,
+              "readAt": null,
+              "status": "sent",
+              "deletedFor": [],
+              "deletedForEveryone": false,
+              "deliveredTo": [],
+              "seenBy": [
+                "101"
+              ],
+              "batchId": "batch_1778237314434_f1640c61",
+              "replyVisibility": "creator_only"
+            }
+          ],
+          "unreadCount": 0,
+          "updatedAt": "2026-05-08T10:48:34.434Z",
+          "type": "direct",
+          "replyVisibility": "creator_only",
+          "lastMessage": "bulk hello",
+          "lastMessageAt": "2026-05-08T10:48:34.434Z",
+          "createdAt": "2026-05-08T10:48:34.429Z"
+        }
+      ]
+    ]
+  ],
+  "calls": [
+    [
+      "101",
+      []
+    ],
+    [
+      "102",
+      []
+    ],
+    [
+      "103",
+      []
+    ]
+  ],
+  "callRecords": [],
+  "idempotencyKeys": [],
+  "messageBatches": [
+    {
+      "id": "batch_1778237314434_f1640c61",
+      "senderId": "101",
+      "recipientIds": [
+        "102",
+        "103"
+      ],
+      "replyVisibility": "creator_only",
+      "content": "bulk hello",
+      "type": "text",
+      "createdAt": "2026-05-08T10:48:34.434Z",
+      "updatedAt": "2026-05-08T10:48:34.434Z",
+      "messages": [
+        {
+          "id": "msg_1778237314434_b14a222d",
+          "chatId": "101__102",
+          "receiverId": "102",
+          "deliveredAt": null,
+          "readAt": null
+        },
+        {
+          "id": "msg_1778237314434_cfe0f450",
+          "chatId": "101__103",
+          "receiverId": "103",
+          "deliveredAt": null,
+          "readAt": null
+        }
+      ]
+    }
+  ],
+  "marketplace": [],
+  "purchases": [],
+  "payments": []
+}

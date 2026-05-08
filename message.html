@@ -1219,6 +1219,17 @@
                 </div>
                 <div class="selected-count" id="selectedCount">0 selected</div>
             </div>
+            <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:0 16px 12px;">
+                <select id="multiSendReplyVisibility" style="flex:1;padding:10px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:12px;background:#fff;">
+                    <option value="public">Replies visible to everyone</option>
+                    <option value="creator_only">Replies visible only to creator</option>
+                </select>
+                <button type="button" id="multiSendHistoryBtn" style="padding:10px 14px;border:none;border-radius:12px;background:#eef2ff;color:#4338ca;font-weight:600;cursor:pointer;">
+                    History
+                </button>
+            </div>
+            <div id="multiSendHistoryList" style="display:none;padding:0 16px 12px;max-height:180px;overflow:auto;"></div>
+            <div id="multiSendHistoryDetail" style="display:none;margin:0 16px 12px;padding:12px;border-radius:14px;background:#f8fafc;border:1px solid rgba(15,23,42,0.08);"></div>
             <div class="chats-list" id="multiSendChatsList">
                 <!-- Chats for multi-send will be loaded here -->
             </div>

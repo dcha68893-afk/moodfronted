@@ -3,6 +3,7 @@
  */
 
 import express from "express";
+import fs from "fs";
 import http from "http";
 import path from "path";
 import compression from "compression";
@@ -55,6 +56,29 @@ function normalizeApiBody(body, fallbackMessage = "OK") {
 // Fix __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const DEV_STATE_DIR = path.join(__dirname, "data");
+const DEV_STATE_FILE = path.join(DEV_STATE_DIR, "dev-state.json");
+
+function ensureDevStateDir() {
+  try {
+    fs.mkdirSync(DEV_STATE_DIR, { recursive: true });
+  } catch (error) {
+    console.warn("[DEV-STATE] Failed to ensure data directory:", error.message);
+  }
+}
+
+function serializeMap(map) {
+  return Array.from((map instanceof Map ? map : new Map()).entries());
+}
+
+function hydrateMap(entries, fallbackFactory = () => new Map()) {
+  const map = fallbackFactory();
+  if (!Array.isArray(entries)) return map;
+  entries.forEach(([key, value]) => {
+    map.set(String(key), value);
+  });
+  return map;
+}
 
 // --- CLOUDINARY CONFIG ---
 // Configure Cloudinary (v1 API)
@@ -291,10 +315,76 @@ const devState = {
   calls: new Map(),
   callRecords: new Map(),
   idempotencyKeys: new Map(),
+  messageBatches: [],
   marketplace: [],
   purchases: [],
   payments: [],
 };
+
+let devStatePersistTimer = null;
+
+function snapshotDevState() {
+  return {
+    users: serializeMap(devState.users),
+    settings: serializeMap(devState.settings),
+    friends: serializeMap(devState.friends),
+    friendRequestsIncoming: serializeMap(devState.friendRequestsIncoming),
+    friendRequestsSent: serializeMap(devState.friendRequestsSent),
+    friendRequestRecords: serializeMap(devState.friendRequestRecords),
+    groups: serializeMap(devState.groups),
+    groupInvites: serializeMap(devState.groupInvites),
+    statuses: serializeMap(devState.statuses),
+    chats: serializeMap(devState.chats),
+    calls: serializeMap(devState.calls),
+    callRecords: serializeMap(devState.callRecords),
+    idempotencyKeys: serializeMap(devState.idempotencyKeys),
+    messageBatches: Array.isArray(devState.messageBatches) ? devState.messageBatches : [],
+    marketplace: Array.isArray(devState.marketplace) ? devState.marketplace : [],
+    purchases: Array.isArray(devState.purchases) ? devState.purchases : [],
+    payments: Array.isArray(devState.payments) ? devState.payments : [],
+  };
+}
+
+function persistDevStateNow() {
+  ensureDevStateDir();
+  try {
+    fs.writeFileSync(DEV_STATE_FILE, JSON.stringify(snapshotDevState(), null, 2), "utf8");
+  } catch (error) {
+    console.warn("[DEV-STATE] Failed to persist:", error.message);
+  }
+}
+
+function scheduleDevStatePersist() {
+  clearTimeout(devStatePersistTimer);
+  persistDevStateNow();
+}
+
+function hydrateDevState() {
+  ensureDevStateDir();
+  if (!fs.existsSync(DEV_STATE_FILE)) return;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(DEV_STATE_FILE, "utf8"));
+    devState.users = hydrateMap(parsed.users);
+    devState.settings = hydrateMap(parsed.settings);
+    devState.friends = hydrateMap(parsed.friends);
+    devState.friendRequestsIncoming = hydrateMap(parsed.friendRequestsIncoming);
+    devState.friendRequestsSent = hydrateMap(parsed.friendRequestsSent);
+    devState.friendRequestRecords = hydrateMap(parsed.friendRequestRecords);
+    devState.groups = hydrateMap(parsed.groups);
+    devState.groupInvites = hydrateMap(parsed.groupInvites);
+    devState.statuses = hydrateMap(parsed.statuses);
+    devState.chats = hydrateMap(parsed.chats);
+    devState.calls = hydrateMap(parsed.calls);
+    devState.callRecords = hydrateMap(parsed.callRecords);
+    devState.idempotencyKeys = hydrateMap(parsed.idempotencyKeys);
+    devState.messageBatches = Array.isArray(parsed.messageBatches) ? parsed.messageBatches : [];
+    devState.marketplace = Array.isArray(parsed.marketplace) ? parsed.marketplace : [];
+    devState.purchases = Array.isArray(parsed.purchases) ? parsed.purchases : [];
+    devState.payments = Array.isArray(parsed.payments) ? parsed.payments : [];
+  } catch (error) {
+    console.warn("[DEV-STATE] Failed to hydrate:", error.message);
+  }
+}
 
 function base64url(input) {
   return Buffer.from(input).toString("base64url");
@@ -421,6 +511,103 @@ function resolveChatContext(userId, body = {}) {
     ? buildDirectChatId(senderId, receiverId)
     : buildDirectChatId(senderId, senderId));
   return { chatId, senderId, receiverId, participantIds };
+}
+
+function getParticipantIdsForChat(chatId, fallback = []) {
+  for (const chats of devState.chats.values()) {
+    const chat = Array.isArray(chats)
+      ? chats.find((item) => String(item.id) === String(chatId))
+      : null;
+    if (chat?.participantIds?.length) {
+      return Array.from(new Set(chat.participantIds.map(String)));
+    }
+  }
+  return Array.from(new Set((fallback || []).map(String).filter(Boolean)));
+}
+
+function isMessageHiddenForUser(message, userId) {
+  if (!message) return true;
+  if (message.deletedForEveryone === true) return true;
+  const deletedFor = Array.isArray(message.deletedFor) ? message.deletedFor.map(String) : [];
+  return deletedFor.includes(String(userId));
+}
+
+function getVisibleChatMessages(chat, userId) {
+  return (Array.isArray(chat?.messages) ? chat.messages : []).filter((message) => !isMessageHiddenForUser(message, userId));
+}
+
+function syncChatMessage(chatId, participantIds, updater) {
+  Array.from(new Set((participantIds || []).map(String).filter(Boolean))).forEach((participantId) => {
+    const chat = ensureChatRecord(participantId, chatId, participantIds);
+    chat.messages = (chat.messages || []).map((message) => {
+      if (!message) return message;
+      return updater(cloneMessage(message), participantId) || message;
+    });
+    const visible = getVisibleChatMessages(chat, participantId);
+    const lastVisible = visible[visible.length - 1] || null;
+    chat.lastMessage = lastVisible?.content || "";
+    chat.lastMessageAt = lastVisible?.createdAt || chat.lastMessageAt || new Date().toISOString();
+    chat.updatedAt = new Date().toISOString();
+  });
+}
+
+function buildChatSummaryForUser(userId, chat) {
+  const participants = Array.isArray(chat?.participantIds)
+    ? chat.participantIds.map(String).filter((id) => id !== String(userId))
+    : [];
+  const visibleMessages = getVisibleChatMessages(chat, userId);
+  const lastMessage = visibleMessages[visibleMessages.length - 1] || null;
+  const unreadCount = visibleMessages.filter((message) => {
+    const seenBy = Array.isArray(message.seenBy) ? message.seenBy.map(String) : [];
+    return String(message.senderId) !== String(userId) && !seenBy.includes(String(userId));
+  }).length;
+  const participantProfiles = participants.map((participantId) => getUserProfile(participantId) || ensureSeedUser(participantId));
+  const primary = participantProfiles[0] || null;
+
+  return {
+    id: String(chat.id),
+    chatId: String(chat.id),
+    type: chat.type || (participants.length > 1 ? "group" : "direct"),
+    chatType: chat.type || (participants.length > 1 ? "group" : "direct"),
+    name: chat.name || primary?.displayName || primary?.username || "Chat",
+    chatName: chat.name || primary?.displayName || primary?.username || "Chat",
+    friendId: primary?.id ? String(primary.id) : null,
+    friendName: primary?.displayName || primary?.username || "Chat",
+    friendAvatar: primary?.avatar || null,
+    participants: participantProfiles.map((profile) => ({
+      id: String(profile.id),
+      username: profile.username || String(profile.id),
+      displayName: profile.displayName || profile.username || String(profile.id),
+      avatar: profile.avatar || null,
+      online: !!profile.online,
+      status: profile.online ? "online" : "offline",
+    })),
+    lastMessage,
+    lastMessageContent: lastMessage?.content || "",
+    lastMessageAt: lastMessage?.createdAt || chat.updatedAt || new Date().toISOString(),
+    unreadCount,
+    updatedAt: chat.updatedAt || lastMessage?.createdAt || new Date().toISOString(),
+    createdAt: chat.createdAt || chat.updatedAt || new Date().toISOString(),
+    replyVisibility: chat.replyVisibility || "public",
+  };
+}
+
+function emitMessageToParticipants(participantIds, message, { includeSender = false } = {}) {
+  const normalizedParticipants = Array.from(new Set((participantIds || []).map(String).filter(Boolean)));
+  normalizedParticipants.forEach((participantId) => {
+    const isSender = String(participantId) === String(message.senderId);
+    if (!includeSender && isSender) return;
+    const eventPayload = cloneMessage({
+      ...message,
+      status: isSender
+        ? (message.status || "sent")
+        : ((Array.isArray(message.seenBy) && message.seenBy.includes(String(participantId))) ? "read"
+          : ((Array.isArray(message.deliveredTo) && message.deliveredTo.includes(String(participantId))) ? "delivered" : "sent")),
+    });
+    webSocketService.sendToUser(participantId, "message:new", eventPayload);
+    webSocketService.sendToUser(participantId, "new_message", eventPayload);
+    webSocketService.sendToUser(participantId, "receive_message", eventPayload);
+  });
 }
 
 function inferReceiverIdFromChat(userId, chat) {
@@ -629,6 +816,8 @@ function ensureSeedUser(userId, overrides = {}) {
   ensureUserBucket(devState.calls, normalizedUserId, () => []);
   return userRecord;
 }
+
+hydrateDevState();
 
 [
   { id: "101", username: "alex", displayName: "Alex Morgan", email: "alex@local.dev" },
@@ -927,21 +1116,35 @@ function apiDataForPath(req, user) {
 
   if (routePath === "/messages" || routePath.startsWith("/messages") || routePath.startsWith("/chats") || routePath.startsWith("/conversations")) {
     if (!user) return { status: 401, body: { success: false, error: "Unauthorized", data: null } };
-    const chatId = req.query.chatId || req.body?.chatId || req.params?.chatId || "default";
     const chats = ensureUserBucket(devState.chats, user.id, () => []);
-    const existing = chats.find((chat) => chat.id === chatId) || { id: chatId, messages: [] };
-    if (!chats.find((chat) => chat.id === chatId)) chats.push(existing);
-    if (method === "POST" && req.body?.content) {
-      existing.messages.push({
-        id: `msg_${Date.now()}`,
-        chatId,
-        senderId: user.id,
-        content: req.body.content,
-        type: req.body.type || "text",
-        createdAt: new Date().toISOString(),
+    const summaries = chats
+      .map((chat) => buildChatSummaryForUser(user.id, chat))
+      .sort((left, right) => Date.parse(right.updatedAt || 0) - Date.parse(left.updatedAt || 0));
+
+    if (routePath === "/messages/unread-counts") {
+      const counts = {};
+      summaries.forEach((summary) => {
+        counts[String(summary.chatId)] = summary.unreadCount || 0;
       });
+      return { body: { success: true, data: counts } };
     }
-    return { body: { success: true, data: { chats, messages: existing.messages, unread: 0 } } };
+
+    if (routePath === "/messages/chats" || routePath === "/chats" || routePath === "/conversations") {
+      return { body: { success: true, data: summaries, chats: summaries } };
+    }
+
+    const chatId = req.query.chatId || req.body?.chatId || req.params?.chatId || "default";
+    const existing = chats.find((chat) => String(chat.id) === String(chatId)) || ensureChatRecord(user.id, chatId, [user.id]);
+    return {
+      body: {
+        success: true,
+        data: {
+          chats: summaries,
+          messages: getVisibleChatMessages(existing, user.id),
+          unread: buildChatSummaryForUser(user.id, existing).unreadCount || 0,
+        },
+      },
+    };
   }
 
   if (routePath === "/calls" || routePath.startsWith("/calls/")) {
@@ -1858,9 +2061,29 @@ app.use("/api/calls", apiLimiter, createCallRouter({
   controller: callController,
 }));
 
+app.get("/api/messages/chats", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const chats = ensureUserBucket(devState.chats, userId, () => []);
+  const summaries = chats
+    .map((chat) => buildChatSummaryForUser(userId, chat))
+    .sort((left, right) => Date.parse(right.updatedAt || 0) - Date.parse(left.updatedAt || 0));
+  return sendSuccess(res, summaries, 200, "Chats loaded");
+});
+
+app.get("/api/messages/unread-counts", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const chats = ensureUserBucket(devState.chats, userId, () => []);
+  const counts = {};
+  chats.forEach((chat) => {
+    const summary = buildChatSummaryForUser(userId, chat);
+    counts[String(chat.id)] = summary.unreadCount || 0;
+  });
+  return sendSuccess(res, counts, 200, "Unread counts loaded");
+});
+
 app.get("/api/messages", apiLimiter, authMiddleware, (req, res) => {
   const userId = String(req.user.id);
-  const chatId = normalizeEntityId(req.query.chatId);
+  const chatId = normalizeEntityId(req.query.chatId || req.query.conversationId);
   if (!chatId) {
     return sendError(res, "chatId is required", 400);
   }
@@ -1871,7 +2094,19 @@ app.get("/api/messages", apiLimiter, authMiddleware, (req, res) => {
   const after = req.query.after ? Date.parse(req.query.after) : null;
   const limit = Math.max(1, Number(req.query.limit || 100));
 
-  let messages = Array.isArray(chat.messages) ? [...chat.messages] : [];
+  let messages = getVisibleChatMessages(chat, userId).map((message) => {
+    const seenBy = Array.isArray(message.seenBy) ? message.seenBy.map(String) : [];
+    const deliveredTo = Array.isArray(message.deliveredTo) ? message.deliveredTo.map(String) : [];
+    return {
+      ...message,
+      status: seenBy.includes(userId) && String(message.senderId) !== userId
+        ? "read"
+        : deliveredTo.includes(userId) && String(message.senderId) !== userId
+          ? "delivered"
+          : (message.status || "sent"),
+    };
+  });
+
   if (Number.isFinite(before)) {
     messages = messages.filter((message) => Date.parse(message.createdAt) < before);
   }
@@ -1884,7 +2119,7 @@ app.get("/api/messages", apiLimiter, authMiddleware, (req, res) => {
   return sendSuccess(res, {
     chatId,
     messages,
-    unread: chat.unreadCount || 0,
+    unread: buildChatSummaryForUser(userId, chat).unreadCount || 0,
   }, 200, "Messages loaded");
 });
 
@@ -1893,6 +2128,8 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
   const content = String(req.body?.content || "").trim();
   const type = req.body?.type || "text";
   const localId = normalizeEntityId(req.body?.localId);
+  const replyToId = normalizeEntityId(req.body?.replyToId || req.body?.replyTo);
+  const replyVisibility = req.body?.replyVisibility === "creator_only" ? "creator_only" : "public";
 
   if (!content && !req.body?.attachment) {
     return sendError(res, "Message content is required", 400);
@@ -1900,43 +2137,65 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
 
   const createdAt = new Date().toISOString();
   const messageId = `msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
-  const recipientIds = participantIds.filter((participantId) => String(participantId) !== senderId);
-  const delivered = recipientIds.length > 0
-    ? recipientIds.every((participantId) => webSocketService.isUserOnline(participantId))
-    : false;
+  const normalizedParticipants = Array.from(new Set(participantIds.map(String)));
+  const recipientIds = normalizedParticipants.filter((participantId) => String(participantId) !== senderId);
+  const deliveredTo = recipientIds.filter((participantId) => webSocketService.isUserOnline(participantId));
+  const replyTo = replyToId
+    ? (ensureUserBucket(devState.chats, senderId, () => [])
+      .flatMap((chat) => chat.messages || [])
+      .find((message) => String(message.id) === String(replyToId)) || null)
+    : null;
+
   const message = {
     id: messageId,
     localId,
+    serverId: messageId,
     chatId,
     conversationId: chatId,
     senderId,
     receiverId,
+    recipientIds,
     content,
     type,
     attachment: req.body?.attachment || null,
-    replyToId: req.body?.replyToId || null,
+    replyToId,
+    replyTo: replyTo ? {
+      id: replyTo.id,
+      messageId: replyTo.id,
+      content: replyTo.content,
+      type: replyTo.type || "text",
+      senderId: replyTo.senderId,
+      senderName: getUserProfile(replyTo.senderId)?.displayName || getUserProfile(replyTo.senderId)?.username || String(replyTo.senderId),
+    } : null,
     mentions: Array.isArray(req.body?.mentions) ? req.body.mentions : [],
     createdAt,
     updatedAt: createdAt,
-    status: delivered ? "delivered" : "sent",
+    sentAt: createdAt,
+    deliveredAt: deliveredTo.length > 0 ? createdAt : null,
+    readAt: null,
+    status: deliveredTo.length > 0 ? "delivered" : "sent",
+    deletedFor: [],
+    deletedForEveryone: false,
+    deliveredTo,
+    seenBy: [senderId],
+    batchId: req.body?.batchId || null,
+    replyVisibility,
   };
 
-  participantIds.forEach((participantId) => {
-    const chat = ensureChatRecord(participantId, chatId, participantIds);
+  normalizedParticipants.forEach((participantId) => {
+    const chat = ensureChatRecord(participantId, chatId, normalizedParticipants);
+    chat.type = normalizedParticipants.length > 2 ? "group" : "direct";
+    chat.replyVisibility = replyVisibility;
     chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
     chat.messages.push(cloneMessage(message));
     chat.lastMessage = content;
     chat.lastMessageAt = createdAt;
     chat.updatedAt = createdAt;
-    if (String(participantId) !== senderId) {
-      chat.unreadCount = (chat.unreadCount || 0) + 1;
-    }
+    chat.createdAt = chat.createdAt || createdAt;
   });
 
-  recipientIds.forEach((participantId) => {
-    webSocketService.sendToUser(participantId, "new_message", message);
-    webSocketService.sendToUser(participantId, "message:new", message);
-  });
+  scheduleDevStatePersist();
+  emitMessageToParticipants(normalizedParticipants, message);
 
   webSocketService.sendToUser(senderId, "message_sent", {
     messageId,
@@ -1944,28 +2203,114 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     serverId: messageId,
     chatId,
     createdAt,
+    status: "sent",
+  });
+  webSocketService.sendToUser(senderId, "message:sent", {
+    messageId,
+    localId,
+    serverId: messageId,
+    chatId,
+    createdAt,
+    status: "sent",
   });
 
-  if (delivered) {
-    webSocketService.sendToUser(senderId, "message_delivered", {
+  if (deliveredTo.length > 0) {
+    const deliveryPayload = {
       messageId,
       localId,
       serverId: messageId,
       chatId,
       deliveredAt: createdAt,
-    });
+      deliveredTo,
+      status: "delivered",
+    };
+    webSocketService.sendToUser(senderId, "message_delivered", deliveryPayload);
+    webSocketService.sendToUser(senderId, "message:delivered", deliveryPayload);
+    webSocketService.sendToUser(senderId, "message_delivered", deliveryPayload);
   }
 
   return sendSuccess(res, {
     message,
     chatId,
-    delivered,
+    conversation: buildChatSummaryForUser(senderId, ensureChatRecord(senderId, chatId, normalizedParticipants)),
+    delivered: deliveredTo.length > 0,
   }, 201, "Message created");
+});
+
+app.delete("/api/messages/:messageId", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const messageId = String(req.params.messageId);
+  const forEveryone = req.query.deleteForEveryone === "true"
+    || req.query.forEveryone === "true"
+    || req.body?.forEveryone === true;
+
+  let targetMessage = null;
+  let participantIds = [];
+  let chatId = null;
+
+  for (const chats of devState.chats.values()) {
+    for (const chat of (chats || [])) {
+      const found = (chat.messages || []).find((message) => String(message.id) === messageId);
+      if (found) {
+        targetMessage = found;
+        participantIds = getParticipantIdsForChat(chat.id, chat.participantIds || []);
+        chatId = String(chat.id);
+        break;
+      }
+    }
+    if (targetMessage) break;
+  }
+
+  if (!targetMessage || !chatId) {
+    return sendError(res, "Message not found", 404);
+  }
+
+  if (forEveryone && String(targetMessage.senderId) !== userId) {
+    return sendError(res, "Only the sender can delete for everyone", 403);
+  }
+
+  syncChatMessage(chatId, participantIds, (message) => {
+    if (String(message.id) !== messageId) return message;
+    if (forEveryone) {
+      return {
+        ...message,
+        deletedForEveryone: true,
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: "deleted",
+      };
+    }
+    const deletedFor = Array.isArray(message.deletedFor) ? message.deletedFor.map(String) : [];
+    if (!deletedFor.includes(userId)) deletedFor.push(userId);
+    return {
+      ...message,
+      deletedFor,
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  scheduleDevStatePersist();
+
+  const payload = {
+    messageId,
+    chatId,
+    deletedBy: userId,
+    deleteForEveryone: forEveryone,
+    timestamp: new Date().toISOString(),
+  };
+
+  participantIds.forEach((participantId) => {
+    if (!forEveryone && String(participantId) !== userId) return;
+    webSocketService.sendToUser(participantId, "message:deleted", payload);
+    webSocketService.sendToUser(participantId, "message_deleted", payload);
+  });
+
+  return sendSuccess(res, payload, 200, "Message deleted");
 });
 
 app.post("/api/messages/mark-read/batch", apiLimiter, authMiddleware, (req, res) => {
   const userId = String(req.user.id);
-  const chatId = normalizeEntityId(req.body?.chatId);
+  const chatId = normalizeEntityId(req.body?.chatId || req.body?.conversationId);
   const incomingIds = Array.isArray(req.body?.messageIds) ? req.body.messageIds.map(String) : [];
   if (!chatId || incomingIds.length === 0) {
     return sendError(res, "chatId and messageIds are required", 400);
@@ -1977,57 +2322,268 @@ app.post("/api/messages/mark-read/batch", apiLimiter, authMiddleware, (req, res)
     return sendSuccess(res, { chatId, messageIds: [], updated: 0 }, 200, "Nothing to mark as read");
   }
 
+  const participantIds = getParticipantIdsForChat(chatId, chat.participantIds || [userId]);
   const readAt = new Date().toISOString();
-  const updatedMessages = [];
-  chat.messages = (chat.messages || []).map((message) => {
+  const readMessages = [];
+
+  syncChatMessage(chatId, participantIds, (message) => {
     if (!incomingIds.includes(String(message.id))) return message;
-    const next = { ...message, status: "read", readAt, updatedAt: readAt };
-    updatedMessages.push(next);
+    const seenBy = Array.isArray(message.seenBy) ? message.seenBy.map(String) : [];
+    if (!seenBy.includes(userId)) seenBy.push(userId);
+    const deliveredTo = Array.isArray(message.deliveredTo) ? message.deliveredTo.map(String) : [];
+    if (String(message.senderId) !== userId && !deliveredTo.includes(userId)) deliveredTo.push(userId);
+    const next = {
+      ...message,
+      seenBy,
+      deliveredTo,
+      readAt,
+      updatedAt: readAt,
+      status: "read",
+    };
+    if (!readMessages.some((item) => String(item.id) === String(next.id))) {
+      readMessages.push(next);
+    }
     return next;
   });
-  chat.unreadCount = 0;
-  chat.updatedAt = readAt;
 
-  const participantIds = Array.isArray(chat.participantIds) ? chat.participantIds.map(String) : [userId];
-  participantIds
-    .filter((participantId) => participantId !== userId)
-    .forEach((participantId) => {
-      const participantChat = ensureChatRecord(participantId, chatId, participantIds);
-      participantChat.messages = (participantChat.messages || []).map((message) => {
-        if (!incomingIds.includes(String(message.id))) return message;
-        return { ...message, status: "read", readAt, updatedAt: readAt };
-      });
-      participantChat.updatedAt = readAt;
+  (devState.messageBatches || []).forEach((batch) => {
+    batch.messages = (batch.messages || []).map((message) => {
+      if (!incomingIds.includes(String(message.id))) return message;
+      return {
+        ...message,
+        deliveredAt: message.deliveredAt || readAt,
+        readAt,
+      };
     });
-
-  const senderIds = new Set();
-  updatedMessages.forEach((message) => {
-    if (message.senderId && String(message.senderId) !== userId) {
-      senderIds.add(String(message.senderId));
-    }
+    batch.updatedAt = readAt;
   });
 
+  scheduleDevStatePersist();
+
+  const senderIds = Array.from(new Set(
+    readMessages
+      .map((message) => String(message.senderId || ""))
+      .filter((senderId) => senderId && senderId !== userId)
+  ));
+
   senderIds.forEach((senderId) => {
-    updatedMessages.forEach((message) => {
-      if (String(message.senderId) === senderId) {
-        webSocketService.sendToUser(senderId, "message_read", {
-          messageId: message.id,
-          localId: message.localId || null,
-          serverId: message.id,
-          chatId,
-          readAt,
-          readerId: userId,
-        });
-      }
+    const senderMessages = readMessages.filter((message) => String(message.senderId) === senderId);
+    const batchPayload = {
+      chatId,
+      messageIds: senderMessages.map((message) => message.id),
+      readBy: userId,
+      readerId: userId,
+      readAt,
+      status: "read",
+    };
+    webSocketService.sendToUser(senderId, "message:read", batchPayload);
+    webSocketService.sendToUser(senderId, "message_read", batchPayload);
+    webSocketService.sendToUser(senderId, "message_seen", batchPayload);
+    senderMessages.forEach((message) => {
+      const singlePayload = {
+        messageId: message.id,
+        localId: message.localId || null,
+        serverId: message.id,
+        chatId,
+        readAt,
+        readBy: userId,
+        readerId: userId,
+        status: "read",
+      };
+      webSocketService.sendToUser(senderId, "message_read", singlePayload);
+      webSocketService.sendToUser(senderId, "message_seen", singlePayload);
     });
   });
 
   return sendSuccess(res, {
     chatId,
-    messageIds: updatedMessages.map((message) => message.id),
-    updated: updatedMessages.length,
+    messageIds: readMessages.map((message) => message.id),
+    updated: readMessages.length,
     readAt,
   }, 200, "Messages marked as read");
+});
+
+app.post("/api/messages/bulk", apiLimiter, authMiddleware, (req, res) => {
+  const senderId = String(req.user.id);
+  const content = String(req.body?.content || "").trim();
+  const type = req.body?.type || "text";
+  const replyVisibility = req.body?.replyVisibility === "creator_only" ? "creator_only" : "public";
+  const requestedIds = Array.isArray(req.body?.conversationIds)
+    ? req.body.conversationIds.map(String)
+    : [];
+
+  if (!content) {
+    return sendError(res, "Message content is required", 400);
+  }
+  if (requestedIds.length === 0) {
+    return sendError(res, "conversationIds are required", 400);
+  }
+
+  const batchId = `batch_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+  const createdAt = new Date().toISOString();
+  const results = [];
+  const recipients = [];
+
+  requestedIds.forEach((requestedChatId) => {
+    const senderChats = ensureUserBucket(devState.chats, senderId, () => []);
+    const existingChat = senderChats.find((chat) => String(chat.id) === String(requestedChatId));
+    const inferredRecipient = existingChat
+      ? inferReceiverIdFromChat(senderId, existingChat)
+      : (String(requestedChatId).includes("__")
+        ? String(requestedChatId).split("__").find((id) => id !== senderId) || null
+        : null);
+
+    const context = resolveChatContext(senderId, {
+      chatId: requestedChatId,
+      receiverId: inferredRecipient,
+    });
+    const participantIds = Array.from(new Set(context.participantIds.map(String)));
+    const recipientId = participantIds.find((participantId) => participantId !== senderId) || inferredRecipient || null;
+    const deliveredTo = recipientId && webSocketService.isUserOnline(recipientId) ? [recipientId] : [];
+    const messageId = `msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const message = {
+      id: messageId,
+      serverId: messageId,
+      localId: null,
+      chatId: context.chatId,
+      conversationId: context.chatId,
+      senderId,
+      receiverId: recipientId,
+      recipientIds: participantIds.filter((participantId) => participantId !== senderId),
+      content,
+      type,
+      attachment: null,
+      replyToId: null,
+      replyTo: null,
+      mentions: [],
+      createdAt,
+      updatedAt: createdAt,
+      sentAt: createdAt,
+      deliveredAt: deliveredTo.length > 0 ? createdAt : null,
+      readAt: null,
+      status: deliveredTo.length > 0 ? "delivered" : "sent",
+      deletedFor: [],
+      deletedForEveryone: false,
+      deliveredTo,
+      seenBy: [senderId],
+      batchId,
+      replyVisibility,
+    };
+
+    participantIds.forEach((participantId) => {
+      const chat = ensureChatRecord(participantId, context.chatId, participantIds);
+      chat.type = "direct";
+      chat.replyVisibility = replyVisibility;
+      chat.messages = Array.isArray(chat.messages) ? chat.messages : [];
+      chat.messages.push(cloneMessage(message));
+      chat.lastMessage = content;
+      chat.lastMessageAt = createdAt;
+      chat.updatedAt = createdAt;
+      chat.createdAt = chat.createdAt || createdAt;
+    });
+
+    if (recipientId) {
+      recipients.push({
+        chatId: context.chatId,
+        userId: recipientId,
+        delivered: deliveredTo.includes(recipientId),
+        seen: false,
+      });
+    }
+    results.push(message);
+    emitMessageToParticipants(participantIds, message);
+  });
+
+  devState.messageBatches.unshift({
+    id: batchId,
+    senderId,
+    recipientIds: recipients.map((item) => item.userId),
+    replyVisibility,
+    content,
+    type,
+    createdAt,
+    updatedAt: createdAt,
+    messages: results.map((message) => ({
+      id: message.id,
+      chatId: message.chatId,
+      receiverId: message.receiverId,
+      deliveredAt: message.deliveredAt,
+      readAt: null,
+    })),
+  });
+  scheduleDevStatePersist();
+
+  return sendSuccess(res, {
+    batchId,
+    replyVisibility,
+    messages: results,
+    recipients,
+    deliveryCount: recipients.filter((item) => item.delivered).length,
+    seenCount: 0,
+  }, 201, "Bulk messages sent");
+});
+
+app.get("/api/messages/bulk/history", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const history = (devState.messageBatches || [])
+    .filter((batch) => String(batch.senderId) === userId)
+    .map((batch) => ({
+      id: batch.id,
+      batchId: batch.id,
+      senderId: batch.senderId,
+      recipientIds: batch.recipientIds || [],
+      replyVisibility: batch.replyVisibility || "public",
+      content: batch.content || "",
+      type: batch.type || "text",
+      createdAt: batch.createdAt,
+      updatedAt: batch.updatedAt || batch.createdAt,
+      deliveryCount: (batch.messages || []).filter((message) => !!message.deliveredAt).length,
+      seenCount: (batch.messages || []).filter((message) => !!message.readAt).length,
+      recipients: (batch.messages || []).map((message) => {
+        const profile = getUserProfile(message.receiverId) || ensureSeedUser(message.receiverId);
+        return {
+          chatId: message.chatId,
+          userId: String(message.receiverId),
+          displayName: profile.displayName || profile.username || String(message.receiverId),
+          username: profile.username || String(message.receiverId),
+          avatar: profile.avatar || null,
+          deliveredAt: message.deliveredAt || null,
+          readAt: message.readAt || null,
+        };
+      }),
+    }));
+  return sendSuccess(res, history, 200, "Bulk history loaded");
+});
+
+app.get("/api/messages/bulk/history/:batchId", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const batch = (devState.messageBatches || []).find((item) => String(item.id) === String(req.params.batchId));
+  if (!batch || String(batch.senderId) !== userId) {
+    return sendError(res, "Bulk history not found", 404);
+  }
+  const detail = {
+    id: batch.id,
+    batchId: batch.id,
+    senderId: batch.senderId,
+    replyVisibility: batch.replyVisibility || "public",
+    content: batch.content || "",
+    type: batch.type || "text",
+    createdAt: batch.createdAt,
+    updatedAt: batch.updatedAt || batch.createdAt,
+    recipients: (batch.messages || []).map((message) => {
+      const profile = getUserProfile(message.receiverId) || ensureSeedUser(message.receiverId);
+      return {
+        chatId: message.chatId,
+        userId: String(message.receiverId),
+        displayName: profile.displayName || profile.username || String(message.receiverId),
+        username: profile.username || String(message.receiverId),
+        avatar: profile.avatar || null,
+        deliveredAt: message.deliveredAt || null,
+        readAt: message.readAt || null,
+      };
+    }),
+  };
+  return sendSuccess(res, detail, 200, "Bulk history detail loaded");
 });
 
 app.use("/api", apiLimiter, (req, res, next) => {
@@ -2062,6 +2618,13 @@ server.on("upgrade", (req, socket, head) => {
 
   socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
   socket.destroy();
+});
+
+["SIGINT", "SIGTERM"].forEach((signalName) => {
+  process.on(signalName, () => {
+    persistDevStateNow();
+    process.exit(0);
+  });
 });
 
 server.listen(PORT, "0.0.0.0", () => {
