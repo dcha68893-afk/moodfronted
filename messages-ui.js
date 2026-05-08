@@ -316,6 +316,72 @@
 
 
 
+    function getEntityUserId(entity) {
+
+        if (entity === null || entity === undefined) return '';
+
+        if (typeof entity === 'object') {
+
+            const value = entity.id ?? entity.userId ?? entity.friendId ?? entity.otherUserId;
+
+            return value === null || value === undefined ? '' : String(value);
+
+        }
+
+        return String(entity);
+
+    }
+
+
+
+    function getConversationPeerId(conversation, currentUserId) {
+
+        if (!conversation) return '';
+
+        const explicitPeerId = (
+            conversation.friendId ??
+            conversation.otherUserId ??
+            conversation.otherParticipant?.id ??
+            conversation.otherParticipant?.userId ??
+            conversation.pendingReceiverId
+        );
+
+        if (explicitPeerId !== null && explicitPeerId !== undefined && String(explicitPeerId) !== '') {
+
+            return String(explicitPeerId);
+
+        }
+
+        const currentId = currentUserId === null || currentUserId === undefined ? '' : String(currentUserId);
+
+        const otherParticipantId = ensureSafeArray(conversation.participantIds).find((participantId) => {
+
+            const normalizedId = getEntityUserId(participantId);
+
+            return normalizedId && normalizedId !== currentId;
+
+        });
+
+        if (otherParticipantId) {
+
+            return String(otherParticipantId);
+
+        }
+
+        const otherParticipant = ensureSafeArray(conversation.participants).find((participant) => {
+
+            const participantId = getEntityUserId(participant);
+
+            return participantId && participantId !== currentId;
+
+        });
+
+        return getEntityUserId(otherParticipant);
+
+    }
+
+
+
     function sanitizeHTML(html) {
 
         if (typeof html !== 'string') return '';
@@ -11629,19 +11695,13 @@ Type: ${message.type || 'text'}`;
 
             }
 
+            const currentUserId = getCurrentUserId();
+
 
 
             const existingConversation = core.getConversations?.()?.find?.((conversation) =>
 
-                String(conversation?.friendId) === String(id) ||
-
-                String(conversation?.otherParticipant?.id) === String(id) ||
-
-                String(conversation?.otherUserId) === String(id) ||
-
-                String(conversation?.userId) === String(id) ||
-
-                (Array.isArray(conversation?.participants) && conversation.participants.some((participant) => String(participant?.id || participant) === String(id)))
+                getConversationPeerId(conversation, currentUserId) === String(id)
 
             );
 

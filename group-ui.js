@@ -769,14 +769,15 @@ export function renderSkeletonUI() {
         sidebar.innerHTML = generateSecureSidebarSkeleton();
     }
     
-    const groupDetailsPanel = safeGetElement('#groupDetailsPanel');
-    if (groupDetailsPanel && !groupDetailsPanel.classList.contains('active')) {
-        groupDetailsPanel.innerHTML = generateSecureDetailsSkeleton();
+    const groupDetailsContent = safeGetElement('#groupDetailsContent');
+    if (groupDetailsContent && groupDetailsContent.children.length === 0) {
+        groupDetailsContent.innerHTML = generateSecureDetailsSkeleton();
     }
     
     const groupChatPanel = safeGetElement('#groupChatPanel');
-    if (groupChatPanel && !groupChatPanel.classList.contains('active')) {
-        groupChatPanel.innerHTML = generateSecureChatSkeleton();
+    const chatMessages = safeGetElement('#chatMessages');
+    if (groupChatPanel && !groupChatPanel.classList.contains('active') && chatMessages && chatMessages.children.length === 0) {
+        chatMessages.innerHTML = generateSecureChatSkeleton();
     }
     
     _UI_STATE.skeletonRendered = true;
@@ -3580,7 +3581,7 @@ export function setupGroupDetailsPanel() {
  */
 export function setupChatControls() {
     const chatSendBtn = safeGetElement('#chatSendBtn');
-    if (chatSendBtn) {
+    if (chatSendBtn && !chatSendBtn._gcI) {
         registerUIEventListener(chatSendBtn, 'click', () => {
             if (typeof sendGroupMessage === 'function') {
                 sendGroupMessage();
@@ -3589,7 +3590,7 @@ export function setupChatControls() {
     }
     
     const chatInput = safeGetElement('#chatInput');
-    if (chatInput) {
+    if (chatInput && !chatInput._gcI) {
         registerUIEventListener(chatInput, 'keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -4281,14 +4282,20 @@ export function registerUICoreEvents() {
         });
 
         // group:member-added / group:member-removed
-        GC.on('group:member-added', () => {
+        GC.on('group:member-added', ({ groupId } = {}) => {
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
             }
+            if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(groupId)) {
+                try { openGroupChat?.(currentChatGroup); } catch(_) {}
+            }
         });
-        GC.on('group:member-removed', () => {
+        GC.on('group:member-removed', ({ groupId } = {}) => {
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
+            }
+            if (typeof currentChatGroup !== 'undefined' && currentChatGroup && String(currentChatGroup.id) === String(groupId)) {
+                try { openGroupChat?.(currentChatGroup); } catch(_) {}
             }
         });
 

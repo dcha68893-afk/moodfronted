@@ -1000,6 +1000,7 @@
         <div class="group-chat-panel" id="groupChatPanel">
             <div class="chat-header">
                 <div class="chat-header-info" id="chatHeaderInfo">
+                    <button class="chat-header-btn" id="chatBackBtn" title="Back"><i class="fas fa-arrow-left"></i></button>
                     <div class="chat-header-avatar" id="chatAvatar">
                         <i class="fas fa-users"></i>
                     </div>
@@ -1022,6 +1023,8 @@
                 </div>
                 <div class="chat-header-actions">
                     <button class="chat-header-btn" id="chatCallBtn" title="Voice call"><i class="fas fa-phone"></i></button>
+                    <button class="chat-header-btn" id="chatVideoCallBtn" title="Video call"><i class="fas fa-video"></i></button>
+                    <button class="chat-header-btn" id="chatDropdownBtn" title="More chat options"><i class="fas fa-caret-down"></i></button>
                     <div style="position:relative">
                         <button class="chat-header-btn" id="chatMoreBtn" title="More options"><i class="fas fa-ellipsis-v"></i></button>
                         <div id="chatMoreMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;min-width:200px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:9999;padding:6px 0">
@@ -1064,11 +1067,17 @@
                     </select>
                 </div>
                 <div class="chat-input-actions">
+                    <button class="chat-input-btn" id="chatEmojiBtn" title="Emoji">
+                        <i class="far fa-smile"></i>
+                    </button>
                     <button class="chat-input-btn" id="chatAttachBtn" title="Attach File">
                         <i class="fas fa-paperclip"></i>
                     </button>
-                    <button class="chat-input-btn" id="chatEmojiBtn" title="Emoji">
-                        <i class="far fa-smile"></i>
+                    <button class="chat-input-btn" id="chatCameraBtn" title="Camera">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                    <button class="chat-input-btn" id="chatMicBtn" title="Voice message">
+                        <i class="fas fa-microphone"></i>
                     </button>
                     <!-- EXISTING: Silent Participation Mode Toggle -->
                     <button class="chat-input-btn" id="silentModeBtn" title="Toggle Silent Mode" style="display: none;">
@@ -1081,8 +1090,11 @@
                 </div>
                 <textarea class="chat-input" id="chatInput" placeholder="Type a message..." rows="1"></textarea>
                 <button class="chat-input-btn send" id="chatSendBtn" title="Send Message">
-                    <i class="fas fa-paper-plane"></i>
+                    <i class="fas fa-microphone" id="chatPrimaryActionIcon"></i>
                 </button>
+                <input type="file" id="groupAttachmentInput" accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.zip" style="display:none" />
+                <input type="file" id="groupCameraInput" accept="image/*" capture="environment" style="display:none" />
+                <input type="file" id="groupAudioInput" accept="audio/*" capture="microphone" style="display:none" />
             </div>
             
             <!-- ========== EXISTING: Group Notes Panel ========== -->
@@ -2346,8 +2358,8 @@ function doDelete(){
 
 /* ── CALL BUTTON - wired to parent iframe call system ────────────── */
 function setupCall(){
-    var btn=document.getElementById('chatCallBtn');if(!btn||btn._gcC)return;btn._gcC=true;
-    btn.addEventListener('click',function(){
+    var btn=document.getElementById('chatCallBtn'),videoBtn=document.getElementById('chatVideoCallBtn');
+    if(btn&&!btn._gcC){btn._gcC=true;btn.addEventListener('click',function(){
         var g=window.__gcCurGroup;if(!g)return;
 
         // Method 1: use parent __dispatchCallToIframe directly (same-origin)
@@ -2367,7 +2379,23 @@ function setupCall(){
         }catch(e){}
 
         ntf('Starting group call\u2026','info');
-    });
+    });}
+    if(videoBtn&&!videoBtn._gcCV){videoBtn._gcCV=true;videoBtn.addEventListener('click',function(){
+        var g=window.__gcCurGroup;if(!g)return;
+        try{
+            if(window.parent&&window.parent.__dispatchCallToIframe){
+                window.parent.__dispatchCallToIframe(g.id, g.name, 'video', 'group', g.id, 'group-module');
+                return;
+            }
+        }catch(e){}
+        try{
+            window.parent.postMessage({
+                type:'INITIATE_CALL',
+                payload:{userId:g.id,userName:g.name,callType:'video',returnTo:'group',groupId:g.id,isGroup:true,chatUserId:g.id}
+            },'*');
+        }catch(e){}
+        ntf('Starting group video call\u2026','info');
+    });}
 }
 
 /* ── Incoming group call banner ──────────────────────────────────── */
@@ -2397,17 +2425,22 @@ function hookRT(){
     g.on('group:message-received',function(p){
         var gid=p&&p.groupId,msg=p&&p.message,cur=window.__gcCurGroup;
         if(!gid||!msg)return;
-        var box=document.getElementById('chatMessages');
-        if(cur&&String(cur.id)===String(gid)&&box){
-            appendBubble(box,msg,myId());scrollBot();
+        if(cur&&String(cur.id)===String(gid)){
+            if(typeof window.addMessageToChat==='function'){ try{ window.addMessageToChat(msg,true); return; }catch(e){} }
+            var box=document.getElementById('chatMessages');
+            if(box){appendBubble(box,msg,myId());scrollBot();}
         }
     });
     // Also listen on raw group:message event
     g.on('group:message',function(p){
         var gid=p&&(p.groupId||p.group_id),msg=p&&(p.message||p);
         if(!gid||!msg||!msg.content)return;
-        var box=document.getElementById('chatMessages'),cur=window.__gcCurGroup;
-        if(cur&&String(cur.id)===String(gid)&&box){appendBubble(box,msg,myId());scrollBot();}
+        var cur=window.__gcCurGroup;
+        if(cur&&String(cur.id)===String(gid)){
+            if(typeof window.addMessageToChat==='function'){ try{ window.addMessageToChat(msg,true); return; }catch(e){} }
+            var box=document.getElementById('chatMessages');
+            if(box){appendBubble(box,msg,myId());scrollBot();}
+        }
     });
 
     // Group call started - notify all members
@@ -2468,17 +2501,31 @@ function hookCreated(){
 /* ── Input wiring ────────────────────────────────────────────────── */
 function setupInput(){
     var sb=document.getElementById('chatSendBtn'),inp=document.getElementById('chatInput');
-    if(sb&&!sb._gcI){sb._gcI=true;sb.addEventListener('click',sendMsg);}
+    if(sb&&!sb._gcI){sb._gcI=true;sb.addEventListener('click',function(e){
+        if(typeof window.sendGroupMessage==='function'){ e.preventDefault(); try{ window.sendGroupMessage(); }catch(err){} return; }
+        sendMsg();
+    });}
     if(inp&&!inp._gcI){inp._gcI=true;
-        inp.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});
-        inp.addEventListener('input',function(){this.style.height='';this.style.height=Math.min(this.scrollHeight,120)+'px';});
+        inp.addEventListener('keydown',function(e){
+            if(e.key==='Enter'&&!e.shiftKey){
+                e.preventDefault();
+                if(typeof window.sendGroupMessage==='function'){ try{ window.sendGroupMessage(); }catch(err){} return; }
+                sendMsg();
+            }
+        });
+        inp.addEventListener('input',function(){
+            this.style.height='';this.style.height=Math.min(this.scrollHeight,120)+'px';
+            if(typeof window.adjustTextareaHeight==='function') try{ window.adjustTextareaHeight(); }catch(err){}
+            if(typeof window.updateGroupPrimaryActionState==='function') try{ window.updateGroupPrimaryActionState(); }catch(err){}
+        });
     }
 }
 
 /* ── Close + sub-panel back ──────────────────────────────────────── */
 function setupClose(){
-    var cb=document.getElementById('closeChatBtn'),bb=document.getElementById('gcSubBack');
+    var cb=document.getElementById('closeChatBtn'),bb=document.getElementById('gcSubBack'),back=document.getElementById('chatBackBtn');
     if(cb&&!cb._gcCl){cb._gcCl=true;cb.addEventListener('click',closePanel);}
+    if(back&&!back._gcCl){back._gcCl=true;back.addEventListener('click',closePanel);}
     if(bb&&!bb._gcCl){bb._gcCl=true;bb.addEventListener('click',function(){var sp=document.getElementById('gcSubPanel');if(sp)sp.style.display='none';});}
 }
 

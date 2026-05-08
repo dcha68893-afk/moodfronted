@@ -4009,26 +4009,11 @@ handleContactItemClick: function(e) {
                     this.handleIncomingCall(data);
                     break;
 
-                    case 'call_initiated':
-case 'CALL_INITIATED':
-    // Call initiated - keep calling screen visible
-    console.log('[Calls UI] Call initiated, keeping calling screen');
-    UIState.activeCallId = callData.callId;
-    UIState.callParticipants = callData.participants || [];
-    UIState.callType = callData.callType;
-    UIState.callActive = true;
-    UIState.callState = 'calling';
-    
-    // Update calling screen status
-    const statusEl = document.getElementById('callingStatus');
-    if (statusEl) {
-        if (callData.receiverOnline === false) {
-            statusEl.textContent = 'User is offline - waiting...';
-        } else {
-            statusEl.textContent = 'Ringing...';
-        }
-    }
-    break;
+                case 'call_initiated':
+                case 'CALL_INITIATED':
+                    console.log('[Calls UI] Call initiated, keeping calling screen', data);
+                    this.handleCallInitiated(data || {});
+                    break;
                 case 'call_initiation_failed':
                     // Offline fix: When receiver is offline, show call UI for 3 minutes instead of ending
                     if (data && data.offline) {
@@ -4765,6 +4750,14 @@ case 'CALL_INITIATED':
                     createdAt: callData.timestamp || Date.now()
                 }).catch(() => {});
             })();
+            const participant = (callData.participants && callData.participants[0]) || {};
+            const participantName = participant.name || callData.calleeName || callData.userName || callData.receiverName || 'User';
+            const participantAvatar = participant.avatar || participant.photo || callData.userAvatar || null;
+            window.__callInitiatedAt = Date.now();
+            window.__callEndedHandledAt = 0;
+            window.__activePeerName = participantName;
+            window.__activePeerType = callData.callType || callData.type || UIState.callType || 'voice';
+            window.__activePeerAvatar = participantAvatar;
             UIState.activeCallId = callData.callId;
             UIState.callParticipants = callData.participants || [];
             // ⚠ DO NOT set callStartTime here — timer only starts when receiver answers.
@@ -4834,11 +4827,11 @@ case 'CALL_INITIATED':
                 // Use new internal screen system instead
                 if (window.CallScreenManager && window.CallScreenManager.startCall) {
                     window.CallScreenManager.startCall({
-                        userName: 'Active Call',
-                        userId: 'active',
-                        callType: callType,
-                        status: 'In Call',
-                        userAvatar: null
+                        userName: name,
+                        userId: participant.userId || participant.id || callData.receiverId || 'active',
+                        callType: UIState.callType || (isVideo ? 'video' : 'voice'),
+                        status: UIState.callReceiverOnline ? 'Ringing...' : 'Calling...',
+                        userAvatar: participant.avatar || participant.photo || null
                     });
                 }
 
@@ -5479,8 +5472,39 @@ case 'CALL_INITIATED':
                     case 'UNAUTHORIZED':
                         this.handleAuthError();
                         break;
-                        case 'call_accepted':
-case 'CALL_ACCEPTED': {
+                    case 'call_initiated':
+                    case 'CALL_INITIATED': {
+    const payload = data.payload || data || {};
+    if (payload.success === false) {
+        showNotification(payload.error || 'Failed to start call', 'error');
+        UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(payload);
+        break;
+    }
+
+    const pendingUser = UIState.pendingCallUser || {};
+    const participantName = payload.calleeName
+        || payload.receiverName
+        || payload.userName
+        || window.__activePeerName
+        || pendingUser.userName
+        || 'User';
+    const participantAvatar = payload.userAvatar || window.__activePeerAvatar || pendingUser.userAvatar || null;
+    const participantId = payload.receiverId || pendingUser.userId || payload.userId || null;
+
+    UIEventHandlers.handleCallInitiated({
+        ...payload,
+        callId: payload.callId || payload.id || UIState.activeCallId,
+        callType: payload.callType || payload.type || UIState.callType || pendingUser.callType || 'voice',
+        participants: payload.participants || (participantName ? [{
+            name: participantName,
+            userId: participantId,
+            avatar: participantAvatar
+        }] : [])
+    });
+    break;
+}
+                    case 'call_accepted':
+                    case 'CALL_ACCEPTED': {
     // Receiver answered — transition caller to in-call screen
     // ── Dedup: ignore if we already transitioned to in-call ──────────────
     if (window.__callAcceptedHandled && (Date.now() - window.__callAcceptedHandled) < 5000) {
@@ -5739,8 +5763,8 @@ case 'CALL_ACCEPTED': {
             // 'parent-accept-broadcast' etc. Blocking these drops all call state transitions.
             const _callBroadcastSources = ['ws-bridge', 'parent-end-broadcast', 'parent-accept-broadcast',
                 'parent-ws-broadcast', 'parent-frame', 'parent-signal', 'auto-accept'];
-            const _callEventTypes = ['CALL_ACCEPTED', 'CALL_ENDED', 'CALL_FORCE_ENDED', 'CALL_REJECTED',
-                'CALL_CANCELLED', 'CALL_INCOMING', 'CALL_RINGING', 'call_accepted', 'call:accepted',
+            const _callEventTypes = ['CALL_INITIATED', 'CALL_ACCEPTED', 'CALL_ENDED', 'CALL_FORCE_ENDED', 'CALL_REJECTED',
+                'CALL_CANCELLED', 'CALL_INCOMING', 'CALL_RINGING', 'call_initiated', 'call_accepted', 'call:accepted',
                 'call:ended', 'call_ended', 'SIGNAL_OFFER', 'SIGNAL_ANSWER', 'ICE_CANDIDATE'];
             if (data.source && data.source !== 'parent') {
                 if (_callBroadcastSources.includes(data.source)) return true;

@@ -912,6 +912,92 @@ try {
         return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     }
 
+    function getEntityUserId(entity) {
+        if (entity === null || entity === undefined) return '';
+        if (typeof entity === 'object') {
+            const value = entity.id ?? entity.userId ?? entity.friendId ?? entity.otherUserId;
+            return value === null || value === undefined ? '' : String(value);
+        }
+        return String(entity);
+    }
+
+    function getConversationPeerId(conversation, currentUserId) {
+        if (!conversation) return '';
+
+        const explicitPeerId = (
+            conversation.friendId ??
+            conversation.otherUserId ??
+            conversation.otherParticipantId ??
+            conversation.pendingReceiverId ??
+            conversation.otherParticipant?.id ??
+            conversation.otherParticipant?.userId
+        );
+
+        if (explicitPeerId !== null && explicitPeerId !== undefined && String(explicitPeerId) !== '') {
+            return String(explicitPeerId);
+        }
+
+        const currentId = currentUserId === null || currentUserId === undefined ? '' : String(currentUserId);
+        const otherParticipantId = ensureSafeArray(conversation.participantIds).find((participantId) => {
+            const normalizedId = getEntityUserId(participantId);
+            return normalizedId && normalizedId !== currentId;
+        });
+        if (otherParticipantId) {
+            return String(otherParticipantId);
+        }
+        const otherParticipant = ensureSafeArray(conversation.participants).find((participant) => {
+            const participantId = getEntityUserId(participant);
+            return participantId && participantId !== currentId;
+        });
+
+        return getEntityUserId(otherParticipant);
+    }
+
+    function isConversationMatchForUser(conversation, targetUserId, currentUserId) {
+        const targetId = targetUserId === null || targetUserId === undefined ? '' : String(targetUserId);
+        if (!targetId) return false;
+        return getConversationPeerId(conversation, currentUserId) === targetId;
+    }
+
+    function upsertRealtimeConversation(chatId, normalizedMessage = null) {
+        if (!chatId || !normalizedMessage || !ChatManager) return null;
+
+        const existing = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
+        if (existing) return existing;
+
+        const myId = SessionManager && SessionManager.getUserId ? String(SessionManager.getUserId() || '') : '';
+        const senderId = normalizedMessage.senderId != null ? String(normalizedMessage.senderId) : '';
+        const receiverId = normalizedMessage.receiverId != null ? String(normalizedMessage.receiverId) : '';
+        const friendId = senderId && senderId !== myId ? senderId : (receiverId && receiverId !== myId ? receiverId : '');
+        if (!friendId) return null;
+
+        const friendRecord = FriendManager && FriendManager.getFriend
+            ? (FriendManager.getFriend(friendId) || FriendManager.getFriend(Number(friendId)))
+            : null;
+        const friendName = friendRecord?.displayName || friendRecord?.username || normalizedMessage.sender?.displayName ||
+            normalizedMessage.sender?.username || `User_${friendId}`;
+        const friendAvatar = friendRecord?.avatar || friendRecord?.photoURL || normalizedMessage.sender?.avatar || '';
+        const conversation = {
+            id: String(chatId),
+            chatId: String(chatId),
+            type: 'direct',
+            friendId,
+            participantIds: [myId, friendId].filter(Boolean),
+            friendName,
+            friendAvatar,
+            lastMessage: normalizedMessage.content || '',
+            lastMessageAt: normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now(),
+            unreadCount: senderId && senderId !== myId ? 1 : 0,
+            online: !!(friendRecord?.online || friendRecord?.status === 'online'),
+            isPending: false
+        };
+
+        ChatManager._conversations.unshift(conversation);
+        ChatManager._conversationsMap.set(conversation.id, conversation);
+        ChatManager._saveToCache();
+        return conversation;
+    }
+
     function getStorageBridge() {
         if (window.AppStorage && typeof window.AppStorage.get === 'function' && typeof window.AppStorage.set === 'function') {
             return window.AppStorage;
@@ -2730,14 +2816,7 @@ try {
                 if (!chat || !chat.id) return;
                 if (_deleted.has(String(chat.id))) return;
                 
-                let friendId = chat.friendId || chat.otherParticipantId;
-                if (!friendId && chat.otherParticipant) {
-                    friendId = chat.otherParticipant.id;
-                }
-                if (!friendId && chat.participants) {
-                    const other = chat.participants.find(p => p.id !== currentUserId);
-                    friendId = other?.id;
-                }
+                let friendId = getConversationPeerId(chat, currentUserId);
                 
                 if (friendId && seenFriendIds.has(friendId)) {
                     console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
@@ -2749,8 +2828,12 @@ try {
                 }
                 
                 // FIX: compare ids as strings to prevent numeric/string type mismatch
+                const friendRecord = friendId && FriendManager
+                    ? (FriendManager.getFriend(friendId) || FriendManager.getFriend(parseInt(friendId, 10)))
+                    : null;
                 const otherUser = chat.otherParticipant ||
-                    (chat.participants && chat.participants.find(p => String(p.id) !== String(currentUserId)));
+                    ensureSafeArray(chat.participants).find(p => getEntityUserId(p) !== String(currentUserId)) ||
+                    friendRecord;
 
                 // FIX: build real display name from firstName+lastName when available
                 const _fn = otherUser && otherUser.firstName ? otherUser.firstName.trim() : '';
@@ -2773,7 +2856,7 @@ try {
                 // otherwise fall back to the API participant status field.
                 let _convOnline = otherUser?.status === 'online';
                 if (friendId && FriendManager) {
-                    const _fm = FriendManager.getFriend(friendId) || FriendManager.getFriend(parseInt(friendId));
+                    const _fm = friendRecord || FriendManager.getFriend(friendId) || FriendManager.getFriend(parseInt(friendId));
                     if (_fm) _convOnline = !!(_fm.online || _fm.status === 'online');
                 }
                 uniqueMap.set(chat.id, {
@@ -4414,8 +4497,7 @@ try {
                 try {
                     let existing = ChatManager.getConversations().find(c =>
                         c.type === 'direct' &&
-                        (c.friendId === numericReceiverId || c.pendingReceiverId === numericReceiverId ||
-                         (c.participants && c.participants.some(p => (p.id || p) === numericReceiverId)))
+                        isConversationMatchForUser(c, numericReceiverId, SessionManager.getUserId())
                     );
 
                     if (existing) {
@@ -4553,8 +4635,7 @@ try {
             
             const existingConversation = ChatManager.getConversations().find(c =>
                 c.type === 'direct' &&
-                (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
-                 (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+                isConversationMatchForUser(c, numericUserId, SessionManager.getUserId())
             );
             
             if (existingConversation) {
@@ -4570,8 +4651,7 @@ try {
             if (result && result !== false) {
                 const newConversation = ChatManager.getConversations().find(c =>
                     c.type === 'direct' &&
-                    (c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
-                     (c.participants && c.participants.some(p => (p.id || p) === numericUserId)))
+                    isConversationMatchForUser(c, numericUserId, SessionManager.getUserId())
                 );
                 
                 if (newConversation) {
@@ -5566,8 +5646,7 @@ try {
                 if (result !== false) {
                     const conversations = MessagesCore.ChatManager.getConversations();
                     const conversation = conversations.find(c => 
-                        c.friendId === numericUserId || c.pendingReceiverId === numericUserId ||
-                        (c.participants && c.participants.some(p => (p.id || p) === numericUserId))
+                        isConversationMatchForUser(c, numericUserId, SessionManager.getUserId())
                     );
                     
                     if (conversation) {
@@ -5621,6 +5700,10 @@ try {
                     normalizedMessage.createdAt = new Date(normalizedMessage.createdAt).getTime();
                 }
                 ChatManager.addMessage(normalizedMessage);
+            }
+
+            if (normalizedMessage && chatId) {
+                upsertRealtimeConversation(chatId, normalizedMessage);
             }
 
             if (ChatManager && ChatManager._conversationsMap && chatId) {

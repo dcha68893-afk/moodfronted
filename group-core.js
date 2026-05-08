@@ -2134,10 +2134,11 @@ const GroupCore = {
     
     // Get group by ID
     getGroupById(groupId) {
-        return this.groups.find(g => g.id === groupId) || 
-               this.myGroups.find(g => g.id === groupId) || 
-               this.adminGroups.find(g => g.id === groupId) ||
-               this.joinedGroups.find(g => g.id === groupId);
+        const targetId = String(groupId);
+        return this.groups.find(g => String(g.id) === targetId) || 
+               this.myGroups.find(g => String(g.id) === targetId) || 
+               this.adminGroups.find(g => String(g.id) === targetId) ||
+               this.joinedGroups.find(g => String(g.id) === targetId);
     },
     
     // Update group in all lists
@@ -2861,7 +2862,7 @@ const GroupCore = {
             
             if (response && response.success && response.data) {
                 const messageData = response.data;
-                this.addGroupMessage(groupId, messageData);
+                this.saveGroupMessages(groupId, [messageData]);
                 this.emit('group:message-sent', { groupId, message: messageData });
                 debugLog('Message sent');
                 return { success: true, data: messageData };
@@ -2916,14 +2917,36 @@ const GroupCore = {
     // Save group messages
     saveGroupMessages(groupId, messages) {
         const existing = this.groupMessages[groupId] || [];
-        const combined = [...existing, ...messages];
+        const merged = [];
+        const seen = new Map();
         
-        // Limit to 100 messages per group
-        if (combined.length > 100) {
-            this.groupMessages[groupId] = combined.slice(-100);
-        } else {
-            this.groupMessages[groupId] = combined;
-        }
+        [...existing, ...(Array.isArray(messages) ? messages : [])].forEach(message => {
+            if (!message) return;
+            const key = String(message.id || message.localId || message.clientRequestId || `msg_${merged.length}`);
+            const normalized = {
+                ...message,
+                groupId: message.groupId || groupId,
+                createdAt: message.createdAt || message.timestamp || message.sentAt || new Date().toISOString(),
+                timestamp: message.timestamp || message.createdAt || message.sentAt || new Date().toISOString()
+            };
+            
+            if (seen.has(key)) {
+                merged[seen.get(key)] = { ...merged[seen.get(key)], ...normalized };
+                return;
+            }
+            
+            seen.set(key, merged.length);
+            merged.push(normalized);
+        });
+        
+        merged.sort((a, b) => {
+            const aTime = new Date(a.createdAt || a.timestamp || 0).getTime();
+            const bTime = new Date(b.createdAt || b.timestamp || 0).getTime();
+            if (aTime !== bTime) return aTime - bTime;
+            return Number(a.id || 0) - Number(b.id || 0);
+        });
+        
+        this.groupMessages[groupId] = merged.slice(-100);
         
         try {
             SafeStorage.setItem(`group_messages_${groupId}`, this.groupMessages[groupId]);
@@ -4459,6 +4482,464 @@ const deleteGroupOnline = async function(groupId) {
 // =============================================
 // CHAT AND GROUP MANAGEMENT FUNCTIONS (PRESERVED)
 // =============================================
+function escapeGroupChatHTML(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeGroupChatAttribute(value) {
+    return escapeGroupChatHTML(value).replace(/`/g, '&#96;');
+}
+
+function getCurrentGroupUserId() {
+    return String(session.user?.uid || session.user?.id || '');
+}
+
+function normalizeMembersPayload(raw) {
+    if (Array.isArray(raw)) {
+        return { members: raw, pagination: { totalMembers: raw.length } };
+    }
+    
+    if (raw && Array.isArray(raw.members)) {
+        return {
+            members: raw.members,
+            pagination: raw.pagination || { totalMembers: raw.members.length }
+        };
+    }
+    
+    return { members: [], pagination: { totalMembers: 0 } };
+}
+
+function getGroupMemberCount(groupData, membersPayload = null) {
+    if (membersPayload?.pagination?.totalMembers !== undefined) {
+        return Number(membersPayload.pagination.totalMembers) || 0;
+    }
+    if (Array.isArray(groupData?.members)) {
+        return groupData.members.length;
+    }
+    if (groupData?.memberCount !== undefined) {
+        return Number(groupData.memberCount) || 0;
+    }
+    if (groupData?.stats?.totalMembers !== undefined) {
+        return Number(groupData.stats.totalMembers) || 0;
+    }
+    return 0;
+}
+
+function normalizeGroupMessage(messageData, fallbackGroupId = null) {
+    if (!messageData) return null;
+    
+    const metadata = messageData.metadata || {};
+    const attachment = metadata.attachment || messageData.attachment || null;
+    const sender = messageData.sender || {};
+    const createdAt = messageData.createdAt || messageData.timestamp || messageData.sentAt || new Date().toISOString();
+    
+    return {
+        ...messageData,
+        id: messageData.id || messageData.localId || messageData.clientRequestId || `temp_${Date.now()}`,
+        groupId: messageData.groupId || fallbackGroupId || currentChatGroup?.id || null,
+        senderId: messageData.senderId || sender.id || messageData.userId || null,
+        senderName: messageData.senderName || sender.displayName || sender.username || 'User',
+        senderAvatar: messageData.senderAvatar || sender.avatar || metadata.senderAvatar || null,
+        content: messageData.content || metadata.caption || '',
+        type: messageData.type || attachment?.type || 'text',
+        topic: messageData.topic || metadata.topic || null,
+        anonymous: Boolean(messageData.anonymous),
+        createdAt,
+        timestamp: createdAt,
+        deliveredAt: messageData.deliveredAt || metadata.deliveredAt || null,
+        isRead: Boolean(messageData.isRead || metadata.isRead),
+        mediaUrl: messageData.mediaUrl || attachment?.url || metadata.mediaUrl || metadata.url || null,
+        thumbnailUrl: messageData.thumbnailUrl || attachment?.thumbnailUrl || metadata.thumbnailUrl || null,
+        fileName: messageData.fileName || attachment?.name || metadata.fileName || null,
+        mimeType: messageData.mimeType || attachment?.mimeType || metadata.mimeType || null,
+        replyTo: messageData.replyTo || metadata.replyTo || null,
+        metadata
+    };
+}
+
+function renderGroupChatPlaceholder(html, variant = '') {
+    const chatMessages = safeGetElement('#chatMessages');
+    if (!chatMessages) return;
+    chatMessages.innerHTML = `<div class="group-chat-placeholder ${variant}" style="padding: 28px 18px; text-align: center; color: var(--text-secondary);">${html}</div>`;
+}
+
+function renderGroupChatLoadingState(message = 'Loading group chat...') {
+    renderGroupChatPlaceholder(`<i class="fas fa-spinner fa-spin" style="font-size: 22px;"></i><p style="margin-top: 10px;">${escapeGroupChatHTML(message)}</p>`, 'loading');
+}
+
+function renderGroupChatEmptyState(groupData = null) {
+    const groupName = groupData?.name || currentChatGroup?.name || 'this group';
+    renderGroupChatPlaceholder(
+        `<i class="fas fa-comments" style="font-size: 34px; opacity: 0.35;"></i><p style="margin-top: 10px; font-weight: 600;">No messages yet</p><p style="margin-top: 6px;">Start the conversation in ${escapeGroupChatHTML(groupName)}.</p>`,
+        'empty'
+    );
+}
+
+function getGroupMessageStatusLabel(message, isSent) {
+    if (!isSent) return '';
+    if (message.isRead) return 'Seen';
+    if (message.deliveredAt) return 'Delivered';
+    if (String(message.id || '').startsWith('temp_')) return 'Sending';
+    return 'Sent';
+}
+
+function buildGroupMessageBody(message) {
+    const safeContent = escapeGroupChatHTML(message.content || '').replace(/\n/g, '<br>');
+    const safeFileName = escapeGroupChatHTML(message.fileName || 'Attachment');
+    
+    if (message.type === 'image' && message.mediaUrl) {
+        return `
+            <div class="group-message-media image">
+                <img src="${escapeGroupChatAttribute(message.mediaUrl)}" alt="${safeFileName}" style="max-width: 240px; width: 100%; border-radius: 14px; display: block;" />
+            </div>
+            ${safeContent ? `<div class="message-content">${safeContent}</div>` : ''}
+        `;
+    }
+    
+    if ((message.type === 'audio' || (message.mimeType || '').startsWith('audio/')) && message.mediaUrl) {
+        return `
+            <div class="group-message-media audio" style="margin-bottom: 6px;">
+                <audio controls preload="metadata" src="${escapeGroupChatAttribute(message.mediaUrl)}" style="max-width: 100%;"></audio>
+            </div>
+            ${safeContent ? `<div class="message-content">${safeContent}</div>` : ''}
+        `;
+    }
+    
+    if ((message.type === 'file' || message.type === 'document' || message.mediaUrl) && message.mediaUrl) {
+        return `
+            <div class="group-message-media file" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(0,0,0,0.05); margin-bottom: ${safeContent ? '8px' : '0'};">
+                <i class="fas fa-file-alt" style="font-size: 18px;"></i>
+                <a href="${escapeGroupChatAttribute(message.mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; word-break: break-word;">${safeFileName}</a>
+            </div>
+            ${safeContent ? `<div class="message-content">${safeContent}</div>` : ''}
+        `;
+    }
+    
+    return `<div class="message-content">${safeContent || '&nbsp;'}</div>`;
+}
+
+function buildGroupMessageMarkup(message) {
+    const currentUserId = getCurrentGroupUserId();
+    const isSystem = message.type === 'system';
+    const isSent = String(message.senderId || '') === currentUserId;
+    
+    if (isSystem) {
+        return {
+            className: 'message system',
+            html: `
+                <div class="message-content">${escapeGroupChatHTML(message.content || '')}</div>
+                <div class="message-time">${formatMessageTime(message.createdAt || message.timestamp || new Date())}</div>
+            `
+        };
+    }
+    
+    const senderInitial = escapeGroupChatHTML((message.senderName || 'U').charAt(0).toUpperCase());
+    const statusLabel = getGroupMessageStatusLabel(message, isSent);
+    const replyMarkup = message.replyTo?.content
+        ? `<div class="message-reply" style="padding: 8px 10px; margin-bottom: 6px; border-left: 3px solid rgba(255,255,255,0.45); background: rgba(0,0,0,0.08); border-radius: 10px;">
+                <div style="font-size: 11px; font-weight: 700; margin-bottom: 2px;">${escapeGroupChatHTML(message.replyTo.senderName || 'Reply')}</div>
+                <div style="font-size: 12px;">${escapeGroupChatHTML(message.replyTo.content)}</div>
+           </div>`
+        : '';
+    const senderName = message.anonymous ? 'Anonymous' : (isSent ? 'You' : (message.senderName || 'Unknown'));
+    const senderAvatarMarkup = isSent ? '' : `
+        <div class="message-avatar" style="width: 32px; height: 32px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: rgba(0,0,0,0.08); color: var(--text-primary); font-weight: 700;">
+            ${message.senderAvatar
+                ? `<img src="${escapeGroupChatAttribute(message.senderAvatar)}" alt="${escapeGroupChatAttribute(senderName)}" style="width: 100%; height: 100%; object-fit: cover;" />`
+                : `<span>${senderInitial}</span>`}
+        </div>
+    `;
+    
+    return {
+        className: `message ${isSent ? 'sent' : 'received'}${String(message.id).startsWith('temp_') ? ' pending' : ''}`,
+        html: `
+            <div class="group-message-row" style="display: flex; align-items: flex-end; gap: 8px; ${isSent ? 'justify-content: flex-end;' : ''}">
+                ${senderAvatarMarkup}
+                <div class="group-message-bubble" style="max-width: min(78%, 540px); display: flex; flex-direction: column; gap: 4px;">
+                    ${!isSent ? `<div class="message-sender" style="font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 0 4px;">${escapeGroupChatHTML(senderName)}</div>` : ''}
+                    <div class="group-message-card" style="padding: 10px 12px; border-radius: 18px; background: ${isSent ? 'var(--primary-color, #0084ff)' : 'var(--bg-color)'}; color: ${isSent ? '#fff' : 'var(--text-primary)'}; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                        ${replyMarkup}
+                        ${buildGroupMessageBody(message)}
+                        <div class="message-meta" style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; opacity: 0.8;">
+                            <span class="message-time">${formatMessageTime(message.createdAt || message.timestamp || new Date())}</span>
+                            ${isSent ? `<span class="message-status">${escapeGroupChatHTML(statusLabel)}</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `
+    };
+}
+
+function updateGroupChatHeader(groupData, membersPayload = null) {
+    if (!groupData) return;
+    
+    const chatTitle = safeGetElement('#chatTitle');
+    const chatMemberCount = safeGetElement('#chatMemberCount');
+    const chatActive = safeGetElement('#chatActive');
+    const chatAvatar = safeGetElement('#chatAvatar');
+    
+    const theme = groupData.theme || 'blue';
+    const themeInfo = groupThemes[theme] || groupThemes.blue;
+    const initials = groupData.name
+        ? groupData.name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)
+        : 'G';
+    const groupAvatar = groupData.photoURL || groupData.avatar || null;
+    const memberCount = getGroupMemberCount(groupData, membersPayload);
+    
+    if (chatTitle) chatTitle.textContent = groupData.name || 'Group Chat';
+    if (chatMemberCount) chatMemberCount.textContent = `${memberCount} member${memberCount === 1 ? '' : 's'}`;
+    if (chatActive) chatActive.textContent = memberCount > 0 ? `${memberCount} participant${memberCount === 1 ? '' : 's'}` : 'No members yet';
+    
+    if (chatAvatar) {
+        if (groupAvatar) {
+            chatAvatar.style.background = themeInfo.gradient;
+            chatAvatar.style.backgroundImage = `url('${groupAvatar}')`;
+            chatAvatar.style.backgroundSize = 'cover';
+            chatAvatar.style.backgroundPosition = 'center';
+            chatAvatar.innerHTML = '';
+        } else {
+            chatAvatar.style.backgroundImage = '';
+            chatAvatar.style.background = themeInfo.gradient;
+            chatAvatar.innerHTML = `<span style="color: white; font-size: 16px;">${escapeGroupChatHTML(initials)}</span>`;
+        }
+    }
+    
+    updateChatHeaderUniqueFeatures(groupData);
+}
+
+function renderGroupChatMessages(groupId, messages, isRealtime = false) {
+    const chatMessages = safeGetElement('#chatMessages');
+    if (!chatMessages) return;
+    
+    const normalized = Array.isArray(messages)
+        ? messages
+            .map(message => normalizeGroupMessage(message, groupId))
+            .filter(Boolean)
+            .sort((a, b) => {
+                const aTime = new Date(a.createdAt || a.timestamp || 0).getTime();
+                const bTime = new Date(b.createdAt || b.timestamp || 0).getTime();
+                if (aTime !== bTime) return aTime - bTime;
+                return Number(a.id || 0) - Number(b.id || 0);
+            })
+        : [];
+    
+    if (normalized.length === 0) {
+        renderGroupChatEmptyState(currentChatGroup);
+        return;
+    }
+    
+    chatMessages.innerHTML = '';
+    normalized.forEach(message => addMessageToChat(message, isRealtime));
+    
+    const chatMessagesContainer = safeGetElement('#chatMessagesContainer');
+    if (chatMessagesContainer) {
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    }
+}
+
+function updateGroupPrimaryActionState() {
+    try {
+        const chatInput = safeGetElement('#chatInput');
+        const chatSendBtn = safeGetElement('#chatSendBtn');
+        const icon = safeGetElement('#chatPrimaryActionIcon');
+        if (!chatSendBtn || !icon) return;
+        
+        const hasText = Boolean(chatInput && chatInput.value && chatInput.value.trim());
+        chatSendBtn.dataset.mode = hasText ? 'send' : 'mic';
+        chatSendBtn.title = hasText ? 'Send message' : 'Send audio';
+        icon.className = hasText ? 'fas fa-paper-plane' : 'fas fa-microphone';
+    } catch (error) {}
+}
+
+async function uploadGroupAttachment(file, typeHint = 'file') {
+    if (!file) return null;
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('description', file.name || 'Group attachment');
+        const response = await secureApiCall('/media/upload', {
+            method: 'POST',
+            body: formData,
+            silent: true
+        });
+        
+        if (!response || response.success === false) {
+            throw new Error(response?.message || 'Upload failed');
+        }
+        
+        const media = response.data?.media || response.data || null;
+        if (!media) throw new Error('Upload response missing media');
+        
+        const derivedType = file.type.startsWith('image/')
+            ? 'image'
+            : file.type.startsWith('audio/')
+                ? 'audio'
+                : typeHint;
+        
+        return {
+            type: derivedType,
+            content: '',
+            metadata: {
+                attachment: {
+                    id: media.id || null,
+                    url: media.url || media.fileUrl || media.path || null,
+                    thumbnailUrl: media.thumbnailUrl || null,
+                    name: media.originalName || media.fileName || file.name || 'Attachment',
+                    mimeType: media.mimeType || file.type || 'application/octet-stream',
+                    size: media.fileSize || media.size || file.size || 0
+                }
+            }
+        };
+    } catch (error) {
+        console.error('Failed to upload group attachment:', error);
+        return null;
+    }
+}
+
+async function sendGroupAttachment(file, typeHint = 'file') {
+    try {
+        if (!currentChatGroup || !file) return;
+        const uploaded = await uploadGroupAttachment(file, typeHint);
+        if (!uploaded) return;
+        
+        const response = await secureApiCall(`/groups/${currentChatGroup.id}/messages`, {
+            method: 'POST',
+            body: {
+                content: uploaded.content || '',
+                type: uploaded.type,
+                metadata: uploaded.metadata,
+                anonymous: isAnonymousMode
+            }
+        });
+        
+        const messageData = response?.data?.message || response?.data;
+        if (response && response.success && messageData) {
+            GroupCore.saveGroupMessages(currentChatGroup.id, [messageData]);
+            addMessageToChat(messageData, true);
+        }
+    } catch (error) {
+        console.error('Failed to send group attachment:', error);
+    } finally {
+        updateGroupPrimaryActionState();
+    }
+}
+
+function setupGroupAttachmentControls() {
+    try {
+        const attachBtn = safeGetElement('#chatAttachBtn');
+        const cameraBtn = safeGetElement('#chatCameraBtn');
+        const micBtn = safeGetElement('#chatMicBtn');
+        const attachInput = safeGetElement('#groupAttachmentInput');
+        const cameraInput = safeGetElement('#groupCameraInput');
+        const audioInput = safeGetElement('#groupAudioInput');
+        const dropdownBtn = safeGetElement('#chatDropdownBtn');
+        const moreBtn = safeGetElement('#chatMoreBtn');
+        const backBtn = safeGetElement('#chatBackBtn');
+        const closeBtn = safeGetElement('#closeChatBtn');
+        const callBtn = safeGetElement('#chatCallBtn');
+        const videoBtn = safeGetElement('#chatVideoCallBtn');
+        
+        if (attachBtn && !attachBtn._groupAttachBound) {
+            attachBtn._groupAttachBound = true;
+            attachBtn.addEventListener('click', () => attachInput?.click());
+        }
+        
+        if (cameraBtn && !cameraBtn._groupCameraBound) {
+            cameraBtn._groupCameraBound = true;
+            cameraBtn.addEventListener('click', () => cameraInput?.click());
+        }
+        
+        if (micBtn && !micBtn._groupMicBound) {
+            micBtn._groupMicBound = true;
+            micBtn.addEventListener('click', () => audioInput?.click());
+        }
+        
+        if (dropdownBtn && moreBtn && !dropdownBtn._groupDropdownBound) {
+            dropdownBtn._groupDropdownBound = true;
+            dropdownBtn.addEventListener('click', () => moreBtn.click());
+        }
+        
+        if (attachInput && !attachInput._groupUploadBound) {
+            attachInput._groupUploadBound = true;
+            attachInput.addEventListener('change', async event => {
+                const file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                if (file) await sendGroupAttachment(file, 'file');
+            });
+        }
+        
+        if (cameraInput && !cameraInput._groupCameraInputBound) {
+            cameraInput._groupCameraInputBound = true;
+            cameraInput.addEventListener('change', async event => {
+                const file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                if (file) await sendGroupAttachment(file, 'image');
+            });
+        }
+        
+        if (audioInput && !audioInput._groupAudioInputBound) {
+            audioInput._groupAudioInputBound = true;
+            audioInput.addEventListener('change', async event => {
+                const file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                if (file) await sendGroupAttachment(file, 'audio');
+            });
+        }
+        
+        const closeHandler = () => {
+            if (typeof hideAllPanels === 'function') hideAllPanels();
+            if (typeof closeGroupChatMobile === 'function') closeGroupChatMobile();
+            currentChatGroup = null;
+        };
+        
+        if (backBtn && !backBtn._groupBackBound && !backBtn._gcCl) {
+            backBtn._groupBackBound = true;
+            backBtn.addEventListener('click', closeHandler);
+        }
+        
+        if (closeBtn && !closeBtn._groupCloseBound && !closeBtn._gcCl) {
+            closeBtn._groupCloseBound = true;
+            closeBtn.addEventListener('click', closeHandler);
+        }
+        
+        const startCall = async (callType = 'voice') => {
+            if (!currentChatGroup) return;
+            const membersResponse = await secureApiCall(`/groups/${currentChatGroup.id}/members`, { silent: true }).catch(() => null);
+            const membersPayload = normalizeMembersPayload(membersResponse?.data);
+            const currentUserId = getCurrentGroupUserId();
+            const participantIds = membersPayload.members
+                .map(member => member.userId || member.user?.id || member.id)
+                .filter(id => id && String(id) !== currentUserId);
+            
+            if (window.parent && typeof window.parent.__dispatchCallToIframe === 'function') {
+                window.parent.__dispatchCallToIframe(currentChatGroup.id, currentChatGroup.name, callType, 'group', currentChatGroup.id, 'group-module');
+                return;
+            }
+            
+            if (window.callCore?.startGroupCall) {
+                window.callCore.startGroupCall(participantIds, callType);
+            }
+        };
+        
+        if (callBtn && !callBtn._groupVoiceBound && !callBtn._gcC) {
+            callBtn._groupVoiceBound = true;
+            callBtn.addEventListener('click', () => { startCall('voice').catch(() => {}); });
+        }
+        
+        if (videoBtn && !videoBtn._groupVideoBound && !videoBtn._gcCV) {
+            videoBtn._groupVideoBound = true;
+            videoBtn.addEventListener('click', () => { startCall('video').catch(() => {}); });
+        }
+    } catch (error) {}
+}
+
 const openGroupChat = async function(groupData) {
     if (!isGroupOperationReady()) {
         queueGroupAction(() => openGroupChat(groupData));
@@ -4474,38 +4955,10 @@ const openGroupChat = async function(groupData) {
         }
         
         currentChatGroup = groupData;
-        
         GroupCore.resetGroupUnreadCount(groupData.id);
-        
-        // Load fresh messages from backend
-        await GroupCore.loadGroupMessages(groupData.id, 50);
-        
-        const chatTitle = safeGetElement('#chatTitle');
-        const chatMemberCount = safeGetElement('#chatMemberCount');
-        const chatActive = safeGetElement('#chatActive');
-        const chatAvatar = safeGetElement('#chatAvatar');
-        
-        if (chatTitle) chatTitle.textContent = groupData.name || 'Group Chat';
-        if (chatMemberCount) chatMemberCount.textContent = `${groupData.memberCount || 0} members`;
-        if (chatActive) chatActive.textContent = 'Active now';
-        
-        const theme = groupData.theme || 'blue';
-        const themeInfo = groupThemes[theme];
-        const initials = groupData.name 
-            ? groupData.name.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)
-            : 'G';
-        
-        if (chatAvatar) {
-            if (groupData.photoURL) {
-                chatAvatar.style.backgroundImage = `url('${groupData.photoURL}')`;
-                chatAvatar.innerHTML = '';
-            } else {
-                chatAvatar.style.background = themeInfo.gradient;
-                chatAvatar.innerHTML = `<span style="color: white; font-size: 16px;">${initials}</span>`;
-            }
-        }
-        
-        updateChatHeaderUniqueFeatures(groupData);
+        updateGroupChatHeader(groupData);
+        renderGroupChatLoadingState('Loading messages...');
+        setupGroupAttachmentControls();
         
         const sidebar = safeGetElement('#sidebar');
         const groupChatPanel = safeGetElement('#groupChatPanel');
@@ -4531,17 +4984,24 @@ const openGroupChat = async function(groupData) {
             if (groupChatPanel) groupChatPanel.classList.add('active');
         }
         
-        const chatMessages = safeGetElement('#chatMessages');
-        const chatMessagesContainer = safeGetElement('#chatMessagesContainer');
+        try {
+            const [groupDetailsResponse, membersResponse] = await Promise.all([
+                GroupCore.getGroupDetails(groupData.id).catch(() => null),
+                secureApiCall(`/groups/${groupData.id}/members`, { silent: true }).catch(() => null)
+            ]);
+            const resolvedGroup = groupDetailsResponse?.data || GroupCore.getGroupById(groupData.id) || groupData;
+            const membersPayload = normalizeMembersPayload(membersResponse?.data);
+            resolvedGroup.memberCount = getGroupMemberCount(resolvedGroup, membersPayload);
+            currentChatGroup = resolvedGroup;
+            GroupCore.updateGroupInLists(resolvedGroup);
+            GroupCore.saveGroups();
+            updateGroupChatHeader(resolvedGroup, membersPayload);
+        } catch (headerError) {}
         
-        if (chatMessages) chatMessages.innerHTML = '';
-        if (chatMessagesContainer) chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
-        
-        loadGroupChatMessages(groupData.id);
+        await loadGroupChatMessages(groupData.id);
         setupTypingListener(groupData.id);
-        
         loadUniqueFeaturesPanels(groupData.id);
-        checkPostingRules(groupData);
+        checkPostingRules(currentChatGroup || groupData);
         
     } catch (error) {}
 };
@@ -5017,34 +5477,26 @@ async function loadGroupChatMessages(groupId) {
         
         const cachedMessagesKey = `group_messages_${groupId}`;
         const cachedMessages = SafeStorage.getItem(cachedMessagesKey);
+        const cachedList = Array.isArray(cachedMessages) ? cachedMessages : [];
         
-        if (cachedMessages) {
-            try {
-                const messages = cachedMessages;
-                messages.forEach(message => {
-                    addMessageToChat(message, false);
-                });
-            } catch (error) {}
-        }
-        
-        if (chatMessages.children.length === 0) {
-            addSystemMessage(`Welcome to the group chat! Start the conversation.`);
-        }
-        
-        const chatMessagesContainer = safeGetElement('#chatMessagesContainer');
-        if (chatMessagesContainer) {
-            chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+        if (cachedList.length > 0) {
+            renderGroupChatMessages(groupId, cachedList, false);
+        } else {
+            renderGroupChatLoadingState('Fetching group conversation...');
         }
         
         try {
             const response = await GroupCore.loadGroupMessages(groupId, 50);
             if (response && response.success && response.data) {
-                response.data.forEach(message => {
-                    addMessageToChat(message, true);
-                    GroupCore.saveGroupMessages(groupId, [message]);
-                });
+                renderGroupChatMessages(groupId, response.data, true);
+            } else if (cachedList.length === 0) {
+                renderGroupChatEmptyState(currentChatGroup);
             }
-        } catch (error) {}
+        } catch (error) {
+            if (cachedList.length === 0) {
+                renderGroupChatEmptyState(currentChatGroup);
+            }
+        }
     } catch (error) {}
 }
 
@@ -5053,49 +5505,28 @@ function addMessageToChat(messageData, isNew = true) {
         const chatMessages = safeGetElement('#chatMessages');
         if (!chatMessages) return;
         
-        const safeMessageData = JSON.parse(JSON.stringify(messageData));
+        const safeMessageData = normalizeGroupMessage(messageData);
+        if (!safeMessageData) return;
         
-        const messageElement = document.createElement('div');
-        messageElement.className = 'message';
-        // Required so confirmed messages can replace their temp counterpart in the DOM
-        messageElement.dataset.messageId = safeMessageData.id || '';
+        const existingPlaceholder = chatMessages.querySelector('.group-chat-placeholder');
+        if (existingPlaceholder) existingPlaceholder.remove();
         
-        const isSystem = safeMessageData.type === 'system';
-        const isSent = safeMessageData.senderId === (session.user?.uid || session.user?.id);
-        const isAnonymous = safeMessageData.anonymous === true;
-        const topic = safeMessageData.topic || '';
-        const topicInfo = topic ? groupTopics[topic] : null;
-        
-        if (isSystem) {
-            messageElement.className = 'message system';
-            messageElement.innerHTML = `
-                <div class="message-content">${safeMessageData.content}</div>
-                <div class="message-time">${formatMessageTime(safeMessageData.timestamp || new Date())}</div>
-            `;
-        } else {
-            messageElement.className = isSent ? 'message sent' : 'message received';
-            const senderName = isAnonymous ? 'Anonymous' : (isSent ? 'You' : (safeMessageData.senderName || 'Unknown'));
-            
-            messageElement.innerHTML = `
-                ${!isSent ? `<div class="message-sender">${senderName} ${isAnonymous ? '<i class="fas fa-user-secret" style="margin-left: 5px; color: var(--text-secondary); font-size: 10px;"></i>' : ''}</div>` : ''}
-                ${topicInfo ? `<div class="topic-label topic-${topic}" style="margin-bottom: 3px;">${topicInfo.icon} ${topicInfo.name}</div>` : ''}
-                <div class="message-content">${safeMessageData.content}</div>
-                <div class="message-time">${formatMessageTime(safeMessageData.timestamp || new Date())}</div>
-                <div class="message-actions">
-                    <button class="message-action-btn" title="React" onclick="window.reactToMessage('${safeMessageData.id}', this)">
-                        <i class="far fa-smile"></i>
-                    </button>
-                    <button class="message-action-btn" title="Reply" onclick="window.replyToMessage('${safeMessageData.id}', '${senderName}')">
-                        <i class="fas fa-reply"></i>
-                    </button>
-                    ${isSent ? `<button class="message-action-btn" title="Delete" onclick="window.deleteMessage('${safeMessageData.id}')">
-                        <i class="fas fa-trash"></i>
-                    </button>` : ''}
-                </div>
-            `;
+        const tempId = messageData?._tempId || messageData?.tempId || null;
+        if (tempId) {
+            const tempElement = chatMessages.querySelector(`[data-message-id="${tempId}"]`);
+            if (tempElement) tempElement.remove();
         }
         
-        chatMessages.appendChild(messageElement);
+        let messageElement = chatMessages.querySelector(`[data-message-id="${safeMessageData.id}"]`);
+        if (!messageElement) {
+            messageElement = document.createElement('div');
+            messageElement.dataset.messageId = safeMessageData.id || '';
+            chatMessages.appendChild(messageElement);
+        }
+        
+        const markup = buildGroupMessageMarkup(safeMessageData);
+        messageElement.className = markup.className;
+        messageElement.innerHTML = markup.html;
         
         const chatMessagesContainer = safeGetElement('#chatMessagesContainer');
         if (isNew && chatMessagesContainer) {
@@ -5111,8 +5542,9 @@ function addSystemMessage(content) {
         
         const messageElement = document.createElement('div');
         messageElement.className = 'message system';
+        messageElement.dataset.messageId = `system_${Date.now()}`;
         messageElement.innerHTML = `
-            <div class="message-content">${content}</div>
+            <div class="message-content">${escapeGroupChatHTML(content)}</div>
             <div class="message-time">${formatMessageTime(new Date())}</div>
         `;
         chatMessages.appendChild(messageElement);
@@ -5144,8 +5576,14 @@ const sendGroupMessage = async function() {
     try {
         const chatInput = safeGetElement('#chatInput');
         const messageTopic = safeGetElement('#messageTopic');
+        const sendBtn = safeGetElement('#chatSendBtn');
         
-        if (!currentChatGroup || !chatInput || !chatInput.value.trim()) return;
+        if (!currentChatGroup || !chatInput) return;
+        if (sendBtn?.dataset.mode === 'mic' && !chatInput.value.trim()) {
+            safeGetElement('#groupAudioInput')?.click();
+            return;
+        }
+        if (!chatInput.value.trim()) return;
         
         if (!sessionReceived) {
             requestSession();
@@ -5157,6 +5595,7 @@ const sendGroupMessage = async function() {
         
         chatInput.value = '';
         adjustTextareaHeight();
+        updateGroupPrimaryActionState();
         
         const message = {
             groupId: currentChatGroup.id,
@@ -5190,12 +5629,6 @@ const sendGroupMessage = async function() {
                 }
                 const finalMessage = { ...tempMessage, id: confirmedId };
                 GroupCore.saveGroupMessages(currentChatGroup.id, [finalMessage]);
-                // Only call addGroupMessage for cache; NOT addMessageToChat again (would duplicate)
-                GroupCore.groupMessages[currentChatGroup.id] = GroupCore.groupMessages[currentChatGroup.id] || [];
-                if (!GroupCore.groupMessages[currentChatGroup.id].some(m => m.id === confirmedId)) {
-                    GroupCore.groupMessages[currentChatGroup.id].push(finalMessage);
-                }
-                
                 if (isAnonymousMode) {
                     toggleAnonymousMode();
                 }
@@ -5262,6 +5695,7 @@ function replyToMessage(messageId, senderName) {
         if (chatInput) {
             chatInput.value = `@${senderName} `;
             chatInput.focus();
+            updateGroupPrimaryActionState();
         }
     } catch (error) {}
 }
@@ -5288,6 +5722,8 @@ function setupTypingListener(groupId) {
         
         newChatInput.addEventListener('input', () => {
             try {
+                adjustTextareaHeight();
+                updateGroupPrimaryActionState();
                 if (!isTyping) {
                     isTyping = true;
                     GroupCore.handleTyping(groupId, session.user?.uid || session.user?.id, true);
@@ -5312,6 +5748,19 @@ function setupTypingListener(groupId) {
                 }, 1000);
             } catch (error) {}
         });
+        
+        newChatInput.addEventListener('keydown', (event) => {
+            try {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    if (newChatInput.value.trim()) {
+                        sendGroupMessage().catch?.(() => {});
+                    }
+                }
+            } catch (error) {}
+        });
+        
+        updateGroupPrimaryActionState();
     } catch (error) {}
 }
 
@@ -5329,6 +5778,7 @@ function adjustTextareaHeight() {
         
         chatInput.style.height = 'auto';
         chatInput.style.height = Math.min(chatInput.scrollHeight, 100) + 'px';
+        updateGroupPrimaryActionState();
     } catch (error) {}
 }
 
@@ -5382,7 +5832,7 @@ async function loadGroupMembersForManagement(groupData) {
             const response = await secureApiCall(`/groups/${groupData.id}/members`, { silent: true });
             
             if (response && response.success && response.data) {
-                renderMembersList(response.data);
+                renderMembersList(normalizeMembersPayload(response.data).members);
             } else {
                 memberList.innerHTML = `
                     <div class="empty-state">
@@ -6092,17 +6542,20 @@ const joinGroupOnline = async function(groupId) {
             return;
         }
         
-        const updatedGroup = response.data;
+        const detailsResponse = await GroupCore.getGroupDetails(groupId).catch(() => null);
+        const updatedGroup = detailsResponse?.data || GroupCore.getGroupById(groupId) || response.data || { id: groupId };
         
-        const existingIndex = groups.findIndex(g => g.id === groupId);
+        const existingIndex = groups.findIndex(g => String(g.id) === String(groupId));
         if (existingIndex !== -1) {
             groups[existingIndex] = updatedGroup;
         } else {
             groups.push(updatedGroup);
         }
         
-        joinedGroups.push(updatedGroup);
-        groupInvites = groupInvites.filter(invite => invite.groupId !== groupId);
+        const joinedIndex = joinedGroups.findIndex(g => String(g.id) === String(groupId));
+        if (joinedIndex === -1) joinedGroups.push(updatedGroup);
+        else joinedGroups[joinedIndex] = updatedGroup;
+        groupInvites = groupInvites.filter(invite => String(invite.groupId) !== String(groupId));
         
         GroupCore.saveGroups();
         updateGroupCounts();
@@ -6199,10 +6652,16 @@ async function acceptGroupInvite(inviteData) {
         }
 
         // Update local state — add to joinedGroups
-        const groupData = response.data?.group || GroupCore.getGroupById(groupId);
+        const detailsResponse = await GroupCore.getGroupDetails(groupId).catch(() => null);
+        const groupData = detailsResponse?.data || response.data?.group || GroupCore.getGroupById(groupId);
         if (groupData) {
-            if (!joinedGroups.find(g => g.id === groupId)) joinedGroups.push(groupData);
-            if (!groups.find(g => g.id === groupId)) groups.push(groupData);
+            const upsert = (list) => {
+                const idx = list.findIndex(g => String(g.id) === String(groupId));
+                if (idx === -1) list.push(groupData);
+                else list[idx] = groupData;
+            };
+            upsert(joinedGroups);
+            upsert(groups);
         }
         groupInvites = groupInvites.filter(inv => (inv.id || inv.inviteId) !== inviteId);
         GroupCore.saveGroups();
@@ -6319,10 +6778,13 @@ async function loadGroupDetails(groupData, type) {
             const ruleInfo = postingRules[postingRule];
             
             let realMembers = [];
+            let realMemberTotal = getGroupMemberCount(groupData);
             try {
                 const response = await secureApiCall(`/groups/${groupData.id}/members`, { silent: true });
                 if (response && response.success && response.data) {
-                    realMembers = response.data.slice(0, 5);
+                    const membersPayload = normalizeMembersPayload(response.data);
+                    realMembers = membersPayload.members.slice(0, 5);
+                    realMemberTotal = getGroupMemberCount(groupData, membersPayload);
                 }
             } catch (error) {}
             
@@ -6384,7 +6846,7 @@ async function loadGroupDetails(groupData, type) {
                     
                     <div class="info-item">
                         <span class="info-label">Members:</span>
-                        <span class="info-value">${groupData.memberCount || 0}</span>
+                        <span class="info-value">${realMemberTotal}</span>
                     </div>
                     
                     <div class="info-item">
@@ -6431,29 +6893,29 @@ async function loadGroupDetails(groupData, type) {
                 <div class="group-info-section">
                     <div class="info-section-title">
                         <i class="fas fa-users"></i>
-                        <span>Members (${Math.min(groupData.memberCount || 0, 5)} shown)</span>
+                        <span>Members (${Math.min(realMemberTotal || 0, 5)} shown)</span>
                     </div>
                     <div class="member-list">
                         ${realMembers.length > 0 ? 
                             realMembers.map((member, i) => `
                                 <div class="member-item">
-                                    <div class="member-avatar" ${member.photoURL ? `style="background-image: url('${member.photoURL}')"` : 'style="background: var(--secondary-color)"'}>
-                                        ${member.photoURL ? '' : `<span style="color: var(--text-primary); font-size: 14px;">${member.displayName ? member.displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) : 'U'}</span>`}
+                                    <div class="member-avatar" ${(member.user?.avatar || member.photoURL) ? `style="background-image: url('${member.user?.avatar || member.photoURL}')"` : 'style="background: var(--secondary-color)"'}>
+                                        ${(member.user?.avatar || member.photoURL) ? '' : `<span style="color: var(--text-primary); font-size: 14px;">${((member.user?.firstName || member.user?.lastName) ? [member.user?.firstName, member.user?.lastName].filter(Boolean).join(' ') : (member.user?.username || member.displayName || '')).split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || 'U'}</span>`}
                                     </div>
                                     <div class="member-info">
                                         <div class="member-name">
-                                            <span>${member.displayName || 'Unknown User'}</span>
-                                            ${member.uid === (session.user?.uid || session.user?.id) ? `<span class="role-badge ${userRole}"><i class="${roleInfo.icon}"></i> ${roleInfo.name}</span>` : 
-                                             groupData.admins && groupData.admins.includes(member.uid) ? '<span class="role-badge admin"><i class="fas fa-crown"></i> Admin</span>' : 
+                                            <span>${((member.user?.firstName || member.user?.lastName) ? [member.user?.firstName, member.user?.lastName].filter(Boolean).join(' ') : (member.user?.username || member.displayName)) || 'Unknown User'}</span>
+                                            ${String(member.userId || member.uid || member.id) === String(session.user?.uid || session.user?.id) ? `<span class="role-badge ${userRole}"><i class="${roleInfo.icon}"></i> ${roleInfo.name}</span>` : 
+                                             ['owner', 'admin'].includes(member.role) ? '<span class="role-badge admin"><i class="fas fa-crown"></i> Admin</span>' : 
                                              '<span class="role-badge member"><i class="fas fa-user"></i> Member</span>'}
                                         </div>
                                         <div style="font-size: 12px; color: var(--text-secondary);">
-                                            ${member.uid === (session.user?.uid || session.user?.id) ? 'You' : (member.online ? 'Online' : 'Offline')}
+                                            ${String(member.userId || member.uid || member.id) === String(session.user?.uid || session.user?.id) ? 'You' : ((member.user?.status === 'online' || member.online) ? 'Online' : 'Offline')}
                                         </div>
                                     </div>
                                 </div>
                             `).join('') :
-                            Array.from({length: Math.min(groupData.memberCount || 0, 5)}, (_, i) => `
+                            Array.from({length: Math.min(realMemberTotal || 0, 5)}, (_, i) => `
                                 <div class="member-item">
                                     <div class="member-avatar" style="background: ${i === 0 ? themeInfo.gradient : 'var(--secondary-color)'}">
                                         <span style="color: ${i === 0 ? 'white' : 'var(--text-primary)'}; font-size: 14px;">${i === 0 ? 'Y' : 'M'}</span>
@@ -6473,10 +6935,10 @@ async function loadGroupDetails(groupData, type) {
                             `).join('')
                         }
                     </div>
-                    ${groupData.memberCount > 5 ? `
+                    ${realMemberTotal > 5 ? `
                         <div style="text-align: center; margin-top: 10px;">
                             <button class="action-btn secondary" id="viewAllMembersBtn" style="width: 100%;">
-                                <i class="fas fa-users"></i> View All ${groupData.memberCount} Members
+                                <i class="fas fa-users"></i> View All ${realMemberTotal} Members
                             </button>
                         </div>
                     ` : ''}
@@ -7589,6 +8051,10 @@ if (typeof window !== 'undefined') {
     secureExpose('reactToMessage', reactToMessage);
     secureExpose('replyToMessage', replyToMessage);
     secureExpose('deleteMessage', deleteMessage);
+    secureExpose('sendGroupMessage', sendGroupMessage);
+    secureExpose('adjustTextareaHeight', adjustTextareaHeight);
+    secureExpose('updateGroupPrimaryActionState', updateGroupPrimaryActionState);
+    secureExpose('addMessageToChat', addMessageToChat);
     secureExpose('removeSelectedFriend', removeSelectedFriend);
     secureExpose('showGroupDetails', showGroupDetails);
     window.openGroupChat = openGroupChat; // writable so patches can intercept
