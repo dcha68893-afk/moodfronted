@@ -528,8 +528,10 @@
         
 
         handleUIError(error) {
-
-            UILogger.error('UIFailsafe', 'UI Error caught', error);
+            const isEventLike = error && typeof error === 'object' && !error.message && !error.stack;
+            if (!isEventLike || window.__MESSAGES_DEBUG__ === true) {
+                UILogger.error('UIFailsafe', 'UI Error caught', error);
+            }
 
             
 

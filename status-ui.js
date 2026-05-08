@@ -490,6 +490,39 @@ function subscribeToStatusChanges() {
         renderStatusListInstantlyUI();
         updateMyStatusPreviewUI();
     });
+
+    document.addEventListener('viewerUpdate', (e) => {
+        const statusId = String(e.detail?.statusId || '');
+        if (!statusId) return;
+        const nextCount = Number(e.detail?.viewerCount ?? e.detail?.viewCount ?? 0);
+        const updateItems = (items) => {
+            (items || []).forEach((item) => {
+                if (String(item.id) === statusId) {
+                    item.viewCount = nextCount;
+                }
+            });
+        };
+        updateItems(statuses);
+        updateItems(myStatuses);
+        if (currentViewerStatus && String(currentViewerStatus.id) === statusId) {
+            currentViewerStatus.viewCount = nextCount;
+            const el = document.getElementById('seenCountNum');
+            if (el) el.textContent = String(nextCount);
+        }
+    });
+
+    document.addEventListener('reactionUpdate', (e) => {
+        if (typeof window.updateStatusReactionUI === 'function') {
+            window.updateStatusReactionUI(e.detail?.statusId, e.detail?.emoji, e.detail?.count);
+        }
+    });
+
+    document.addEventListener('statusReply', (e) => {
+        const payload = e.detail || {};
+        if (payload.statusId && currentViewerStatus && String(currentViewerStatus.id) === String(payload.statusId)) {
+            showNotification('New status reply received', 'info');
+        }
+    });
     
     document.addEventListener('sessionReady', (e) => {
         if (e.detail && e.detail.user) {
@@ -3322,11 +3355,13 @@ function createMediaStatusSlide(statusData) {
     const rawUrl = statusData.mediaUrl || statusData.media || '';
     const resolveMediaType = () => {
         if (statusData.mediaType) return statusData.mediaType;
-        if (statusData.type === 'image' || statusData.type === 'video') return statusData.type;
+        if (statusData.type === 'image' || statusData.type === 'video' || statusData.type === 'audio') return statusData.type;
         if (/\.(mp4|webm|ogg|mov|avi|mkv)(\?|$)/i.test(rawUrl)) return 'video';
+        if (/\.(mp3|wav|m4a|aac|oga|opus)(\?|$)/i.test(rawUrl)) return 'audio';
         if (/\.(jpg|jpeg|png|gif|webp|svg|avif|bmp)(\?|$)/i.test(rawUrl)) return 'image';
         // Data-URL sniff
         if (rawUrl.startsWith('data:video')) return 'video';
+        if (rawUrl.startsWith('data:audio')) return 'audio';
         if (rawUrl.startsWith('data:image')) return 'image';
         return 'image'; // safe default
     };
@@ -3343,6 +3378,16 @@ function createMediaStatusSlide(statusData) {
             autoplay muted loop playsinline controls
             onerror="this.style.display='none';this.insertAdjacentHTML('afterend','<div class=\\'media-error\\'><i class=\\'fas fa-exclamation-circle\\'></i> Video failed to load</div>')"
         ></video>`;
+    } else if (mediaType === 'audio') {
+        mediaContent = `<div class="audio-status-shell">
+            <div class="audio-status-icon"><i class="fas fa-microphone-alt"></i></div>
+            <audio
+                src="${safeUrl}"
+                class="media-status-content audio-status-content"
+                autoplay controls playsinline
+                onerror="this.style.display='none';this.parentNode.insertAdjacentHTML('beforeend','<div class=\\'media-error\\'><i class=\\'fas fa-exclamation-circle\\'></i> Audio failed to load</div>')"
+            ></audio>
+        </div>`;
     } else {
         mediaContent = `<img
             src="${safeUrl}"
@@ -5068,11 +5113,23 @@ async function handlePostStatus() {
     const privacy = UIElements.querySelector('.privacy-option.selected')?.dataset.privacy;
     const duration = UIElements.querySelector('.duration-option.selected')?.dataset.duration;
     const actions = Array.from(UIElements.querySelectorAll('.action-button-option.selected')).map(opt => opt.dataset.action);
+    const selectedFriendIds = Array.from(document.querySelectorAll('#friendsListContainer .friend-select-item.selected'))
+        .map(el => parseInt(el.dataset.friendId, 10))
+        .filter(id => Number.isInteger(id) && id > 0);
     if (intent) statusData.intent = intent;
     if (mood) statusData.mood = mood;
     if (category) statusData.category = category;
     // Default privacy to 'friends' so statuses are friends-only unless explicitly changed
     statusData.privacy = privacy || 'friends';
+    statusData.allowReplies = true;
+    if (selectedFriendIds.length > 0) {
+        if (statusData.privacy === 'except') {
+            statusData.excludedUserIds = selectedFriendIds;
+        } else if (statusData.privacy === 'specific' || statusData.privacy === 'micro-circle' || statusData.privacy === 'close-friends') {
+            statusData.allowedUserIds = selectedFriendIds;
+            statusData.selectedFriendIds = selectedFriendIds;
+        }
+    }
     // Resolve duration → also compute expiresAt so the server has a real date
     if (duration) {
         statusData.duration = duration;
@@ -5127,7 +5184,11 @@ async function handlePostStatus() {
             try {
                 const uploadedUrl = await uploadMediaFile(file);
                 statusData.mediaUrl = uploadedUrl;
-                statusData.mediaType = file.type.startsWith('video') ? 'video' : 'image';
+                statusData.mediaType = file.type.startsWith('video')
+                    ? 'video'
+                    : file.type.startsWith('audio')
+                        ? 'audio'
+                        : 'image';
                 statusData.type = statusData.mediaType;
             } catch (uploadErr) {
                 showNotification('Media upload failed: ' + (uploadErr.message || 'Unknown error'), 'error');
@@ -5663,8 +5724,8 @@ function handleMediaUpload(event) {
     for (let i = 0; i < Math.min(files.length, 5); i++) {
         const file = files[i];
         const fileType = file.type.split('/')[0];
-        if (fileType !== 'image' && fileType !== 'video') {
-            showNotification('Only images and videos are supported', 'error');
+        if (fileType !== 'image' && fileType !== 'video' && fileType !== 'audio') {
+            showNotification('Only images, videos, and voice clips are supported', 'error');
             continue;
         }
         const reader = new FileReader();
@@ -5681,6 +5742,16 @@ function handleMediaUpload(event) {
             } else if (fileType === 'video') {
                 item.innerHTML = `
                     <video src="${e.target.result}" class="media-preview-image" controls></video>
+                    <button class="remove-media-btn" type="button" aria-label="Remove media">
+                        <i class="fas fa-times"></i>
+                    </button>
+                `;
+            } else if (fileType === 'audio') {
+                item.innerHTML = `
+                    <div class="audio-preview-card">
+                        <i class="fas fa-microphone-alt"></i>
+                        <audio src="${e.target.result}" class="media-preview-audio" controls></audio>
+                    </div>
                     <button class="remove-media-btn" type="button" aria-label="Remove media">
                         <i class="fas fa-times"></i>
                     </button>
@@ -6007,6 +6078,7 @@ function loadStatsContent() {
     
     updateStatsChart();
     loadRecentViewers();
+    setTimeout(refreshRecentViewersPanel, 0);
 }
 
 function updateStatsChart() {
@@ -6085,6 +6157,47 @@ function loadRecentViewers() {
         item.innerHTML = '<div class="viewer-avatar" style="background:var(--primary-color);color:#fff;font-size:11px">' + viewCount + '</div><div class="viewer-info"><div class="viewer-name">' + UISanitizer.sanitizeHTML(preview) + '</div><div class="viewer-time">' + date + ' · ' + viewCount + ' views</div></div>';
         list.appendChild(item);
     });
+}
+
+function refreshRecentViewersPanel() {
+    const list = UIElements.getElement('recentViewersList');
+    if (!list) return;
+
+    const sourceStatus = currentViewerStatus && myStatuses.some(function(s) { return String(s.id) === String(currentViewerStatus.id); })
+        ? currentViewerStatus
+        : (myStatuses || [])
+            .filter(function(s) { return (s.viewCount || s.views || 0) > 0; })
+            .sort(function(a, b) { return (b.viewCount || b.views || 0) - (a.viewCount || a.views || 0); })[0];
+
+    const api = window.StatusAPI;
+    if (!(api && api.getViewers && sourceStatus && sourceStatus.id)) {
+        return;
+    }
+
+    api.getViewers(sourceStatus.id).then(function(result) {
+        if (!result || !result.success || !Array.isArray(result.viewers) || result.viewers.length === 0) {
+            return;
+        }
+
+        list.innerHTML = '';
+        result.viewers.slice(0, 8).forEach(function(entry) {
+            const item = document.createElement('div');
+            item.className = 'viewer-item';
+            const name = entry.viewer?.displayName || entry.viewer?.username || ('User ' + entry.viewerId);
+            const avatarText = name ? name.charAt(0).toUpperCase() : 'U';
+            const viewedAt = entry.viewedAt ? formatTimeAgo(entry.viewedAt) : 'Just now';
+            const reaction = entry.reaction ? ' Â· ' + entry.reaction : '';
+            const replies = entry.replyCount ? ' Â· ' + entry.replyCount + ' repl' + (entry.replyCount === 1 ? 'y' : 'ies') : '';
+            item.innerHTML = '<div class="viewer-avatar" style="background:var(--primary-color);color:#fff;font-size:11px">' +
+                UISanitizer.sanitizeHTML(avatarText) +
+                '</div><div class="viewer-info"><div class="viewer-name">' +
+                UISanitizer.sanitizeHTML(name) +
+                '</div><div class="viewer-time">' +
+                UISanitizer.sanitizeHTML(viewedAt + reaction + replies) +
+                '</div></div>';
+            list.appendChild(item);
+        });
+    }).catch(function() {});
 }
 
 function showDraftsModal() {

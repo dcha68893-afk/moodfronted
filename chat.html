@@ -5407,7 +5407,8 @@
                 ['kyn:status:created','kyn:new_status','kyn:status_created',
                  'kyn:status:updated','kyn:status_updated',
                  'kyn:status:deleted','kyn:status_deleted',
-                 'kyn:status:viewed', 'kyn:status:viewer_update'].forEach(evt => {
+                 'kyn:status:viewed', 'kyn:status:viewer_update',
+                 'kyn:status:reaction', 'kyn:status:reply', 'kyn:status:expired'].forEach(evt => {
                     window.addEventListener(evt, (e) => {
                         _post('statusIframe', 'STATUS_UPDATE', e.detail || {});
                         _post('statusIframe', evt.replace('kyn:', ''), e.detail || {});

@@ -1485,7 +1485,7 @@ try {
             
             const sessionId = __getSessionId(sessionData);
             if (sessionId && this._lastSessionId === sessionId) {
-                console.log('[SessionManager] Duplicate session ignored');
+                if (DEBUG) console.log('[SessionManager] Duplicate session ignored');
                 return false;
             }
             
@@ -1919,11 +1919,21 @@ try {
                     }
                 }
             } else {
-                console.warn('[ParentConnectionManager] Ignored invalid session data from parent', {
-                    hasToken: !!sessionData?.token,
-                    userId: sessionData?.userId,
-                    userIdType: typeof sessionData?.userId
-                });
+                const currentUserId = SessionManager.getCurrentUserId ? SessionManager.getCurrentUserId() : null;
+                const sameAuthenticatedUser =
+                    SessionManager.isAuthenticated &&
+                    SessionManager.isAuthenticated() &&
+                    currentUserId !== null &&
+                    currentUserId !== undefined &&
+                    String(currentUserId) === String(sessionData?.userId || '');
+
+                if (!sameAuthenticatedUser) {
+                    console.warn('[ParentConnectionManager] Ignored invalid session data from parent', {
+                        hasToken: !!sessionData?.token,
+                        userId: sessionData?.userId,
+                        userIdType: typeof sessionData?.userId
+                    });
+                }
                 // FIX: Never inject fake demo tokens. Show cached data only.
                 if (!SessionManager.isAuthenticated() && window.KynectaLocalStore) {
                     window.KynectaLocalStore.getAllConversations().then(convs => {

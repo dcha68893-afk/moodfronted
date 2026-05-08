@@ -10,6 +10,11 @@ window.__isLocalEnvironment = window.__isLocalEnvironment || function(hostname) 
     return /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
 };
 
+window.__isProductionConsoleHost = window.__isProductionConsoleHost || function() {
+    const host = String(window.location?.hostname || '').toLowerCase();
+    return !!host && !window.__isLocalEnvironment(host);
+};
+
 window.__getApiOrigin = window.__getApiOrigin || function() {
     const host = String(window.location?.hostname || '').toLowerCase();
     if (window.__isLocalEnvironment(host)) return 'http://localhost:4000';
@@ -20,6 +25,75 @@ window.__getApiOrigin = window.__getApiOrigin || function() {
 window.__getApiBase = window.__getApiBase || function() {
     return `${window.__getApiOrigin()}/api`;
 };
+
+window.__kynShouldFilterConsole = window.__kynShouldFilterConsole || function(level, args) {
+    if (!window.__isProductionConsoleHost || !window.__isProductionConsoleHost()) return false;
+    if (window.__ALLOW_VERBOSE_CONSOLE__ === true) return false;
+
+    const first = args && args.length ? String(args[0] ?? '') : '';
+    const second = args && args.length > 1 ? String(args[1] ?? '') : '';
+    const joined = `${first} ${second}`.trim();
+
+    const noisyPatterns = [
+        /^\[SW\] Cache hit:/,
+        /^\[LOCAL SAVE]/,
+        /^\[LOCAL LOAD]/,
+        /^\[SAIC] Stage /,
+        /^\[ENV] ✅ Detected PRODUCTION environment/,
+        /^\[PARENT-SYNC] Parent ready signal received/,
+        /^\[Message HTML] Received message:/,
+        /^\[Navigation] (Attaching|Found navigation|Setting up listener|Navigation element clicked|navigateToPage called with:|Page changed from|Hiding all iframe containers|Hiding:|Target element:|Target before|Target after)/,
+        /^\[authorizedRequest] /,
+        /^\[[0-9]{4}-.*\[FriendCore:authorizedRequest] \[INFO]/,
+        /^\[[0-9]{4}-.*\[FriendCore:ParentCommunication] \[INFO] API_RESPONSE received/,
+        /^\[Tool-ui] Force binding all UI events/,
+        /^\[Tool-ui] Force binding complete/,
+        /^\[DIRECT]/,
+        /^\[ToolUIPatch]/,
+        /^\[ToolPatch] Using fresh tool cache/,
+        /^\[Calls UI] Received CONTACTS_UPDATE:/,
+        /^\[messagesUI] (Lifecycle:|Core not ACTIVE yet|Triggering real data fetch from backend|Ensuring chat panel open with ID:|Opening existing conversation instantly:|loadChatByFriendId called with:)/,
+        /^\[ChatManager] (Skipping duplicate conversation for friend|📥 Received conversations response:|📥 Extracted \d+ chats from response|Set \d+ unique conversations)/,
+        /^\[FriendManager] (📤 Fetching friends from backend|📥 Received \d+ friends from backend)/,
+        /^\[SessionManager] Duplicate session ignored/,
+        /^\[Lifecycle] PARENT_READY already received/,
+        /^\[KynSyncGuard] Stale lock released/,
+        /^\[status] ⚠️ WARNING: Duplicate /,
+        /^\[status] ⚠️ WARNING: secureApiCall: bridge failed/,
+        /^\[ParentConnectionManager] Ignored invalid session data from parent/,
+        /^\[KeepAlive] Ping sent, status:/,
+        /^\[UI] allUsersLoaded event/,
+        /^\[Init] Loading all users for discovery/,
+        /^\[Init] All users loaded:/,
+        /^\[FriendSync] Starting full sync/,
+        /^\[Tools]\[DirectListener] Received:/,
+        /^\[Tools]\[DirectListener] Processing /
+    ];
+
+    return noisyPatterns.some((pattern) => pattern.test(joined));
+};
+
+if (!window.__KYNECTA_CONSOLE_FILTER_PATCHED__) {
+    window.__KYNECTA_CONSOLE_FILTER_PATCHED__ = true;
+    window.__kynOriginalConsole = window.__kynOriginalConsole || {
+        log: console.log.bind(console),
+        info: console.info.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console),
+        debug: console.debug ? console.debug.bind(console) : console.log.bind(console)
+    };
+
+    ['log', 'info', 'warn', 'debug'].forEach(function(level) {
+        const original = window.__kynOriginalConsole[level];
+        console[level] = function() {
+            const args = Array.prototype.slice.call(arguments);
+            if (window.__kynShouldFilterConsole && window.__kynShouldFilterConsole(level, args)) {
+                return;
+            }
+            return original.apply(console, args);
+        };
+    });
+}
 
 window.__rewriteApiUrl = window.__rewriteApiUrl || function(input) {
     const apiOrigin = String(window.__getApiOrigin ? window.__getApiOrigin() : '').replace(/\/+$/, '');

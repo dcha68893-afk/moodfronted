@@ -1358,7 +1358,7 @@ const APIGateway = {
 
 const Logger = {
     levels: { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3, NONE: 4 },
-    currentLevel: PRODUCTION ? 1 : 0,
+    currentLevel: PRODUCTION ? 2 : 0,
     module: 'FriendCore',
     onceTracker: new Set(),
     

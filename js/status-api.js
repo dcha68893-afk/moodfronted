@@ -145,7 +145,15 @@ class StatusAPI {
                 expiresAt:  resolvedExpiresAt,
                 moodType:   statusData.mood || statusData.moodType || undefined,
                 location:   statusData.location   || undefined,
-                background: statusData.background || undefined
+                background: statusData.background || undefined,
+                allowReplies: statusData.allowReplies !== false,
+                allowedUserIds: statusData.allowedUserIds || statusData.selectedFriendIds || undefined,
+                excludedUserIds: statusData.excludedUserIds || undefined,
+                specificUserIds: statusData.specificUserIds || undefined,
+                actionButtons: statusData.actionButtons || undefined,
+                caption: statusData.caption || undefined,
+                fontFamily: statusData.fontFamily || undefined,
+                textColor: statusData.textColor || undefined
             };
 
             // Strip undefined fields so express-validator's .optional() works
@@ -540,6 +548,25 @@ class StatusAPI {
         } catch (error) {
             console.warn('[StatusAPI] getReactions error:', error.message);
             return { success: false, reactions: [] };
+        }
+    }
+
+    async getViewers(statusId) {
+        try {
+            const response = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/${statusId}/viewers`),
+                { headers: this.getAuthHeaders() }
+            );
+            if (!response.ok) return { success: false, viewers: [], totalViews: 0 };
+            const result = await this._parseJSON(response);
+            return {
+                success: true,
+                viewers: result.data?.viewers || [],
+                totalViews: result.data?.totalViews || 0,
+            };
+        } catch (error) {
+            console.warn('[StatusAPI] getViewers error:', error.message);
+            return { success: false, viewers: [], totalViews: 0, error: error.message };
         }
     }
 

@@ -1862,6 +1862,81 @@ function handleRealtimeStatusEvent(eventName, data) {
                 break;
             }
 
+            case 'status:viewed':
+            case 'status:viewer_update': {
+                const statusId = data?.statusId || data?.id;
+                if (!statusId) break;
+                const viewCount = data?.viewerCount ?? data?.viewCount;
+                if (viewCount !== undefined) {
+                    updateStatus(statusId, { viewCount });
+                }
+                document.dispatchEvent(new CustomEvent('viewerUpdate', {
+                    detail: {
+                        statusId,
+                        viewerId: data?.viewerId || null,
+                        viewerCount: viewCount ?? 0,
+                        viewedAt: data?.viewedAt || data?.timestamp || Date.now()
+                    }
+                }));
+                break;
+            }
+
+            case 'status:reaction': {
+                const statusId = data?.statusId || data?.id;
+                if (!statusId) break;
+                const target = statuses.find(s => String(s.id) === String(statusId))
+                    || myStatuses.find(s => String(s.id) === String(statusId));
+                if (target) {
+                    const summary = target.reactionSummary && typeof target.reactionSummary === 'object'
+                        ? { ...target.reactionSummary }
+                        : {};
+                    if (data?.removed) {
+                        Object.keys(summary).forEach((key) => {
+                            if (!summary[key]) delete summary[key];
+                        });
+                    } else if (data?.emoji) {
+                        summary[data.emoji] = data.count || 0;
+                    }
+                    target.reactionSummary = summary;
+                }
+                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
+                document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                    detail: {
+                        statusId,
+                        emoji: data?.emoji || null,
+                        count: data?.count ?? 0,
+                        reactorId: data?.reactorId || null,
+                        removed: !!data?.removed
+                    }
+                }));
+                break;
+            }
+
+            case 'status:reply': {
+                if (data) {
+                    pendingReplies.push(data);
+                    if (pendingReplies.length > 50) pendingReplies.shift();
+                }
+                document.dispatchEvent(new CustomEvent('statusReply', {
+                    detail: data || {}
+                }));
+                break;
+            }
+
+            case 'status:expired': {
+                const statusId = data?.statusId || data?.id;
+                if (!statusId) break;
+                removeStatus(statusId);
+                StatusDB.remove(statusId).catch(() => {});
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
+                document.dispatchEvent(new CustomEvent('statusExpired', {
+                    detail: { statusId, userId: data?.userId || null }
+                }));
+                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
+                break;
+            }
+
             default:
                 break;
         }
@@ -3800,6 +3875,40 @@ if (msg.type === 'AUTH_READY') {
                 msg.type === 'status_updated'
             ) {
                 handleRealtimeStatusEvent('status_updated', msg.payload || msg.data || msg);
+                return;
+            }
+
+            if (
+                msg.type === 'status:viewed'        ||
+                msg.type === 'status:viewer_update' ||
+                msg.type === 'status:reaction'      ||
+                msg.type === 'status:reply'         ||
+                msg.type === 'status:expired'
+            ) {
+                handleRealtimeStatusEvent(msg.type, msg.payload || msg.data || msg);
+                return;
+            }
+
+            if (
+                msg.type === 'FRIENDS_LIST_UPDATE' ||
+                msg.type === 'FRIENDS_LIST_RESPONSE' ||
+                msg.type === 'friend:accepted' ||
+                msg.type === 'friend:removed' ||
+                msg.type === 'FRIEND_REQUEST_ACCEPTED' ||
+                msg.type === 'FRIEND_REMOVED'
+            ) {
+                const payload = msg.payload || msg.data || {};
+                if (Array.isArray(payload.friends)) {
+                    try {
+                        localStorage.setItem('friends', JSON.stringify(payload.friends));
+                    } catch (_error) {}
+                }
+                if (typeof loadStatuses === 'function') {
+                    loadStatuses().catch(() => {});
+                }
+                if (typeof loadFriendsStatusesInBackground === 'function') {
+                    loadFriendsStatusesInBackground().catch(() => {});
+                }
                 return;
             }
 

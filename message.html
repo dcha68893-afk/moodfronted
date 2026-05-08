@@ -1921,7 +1921,9 @@
             const data = event.data;
             if (!data || typeof data !== 'object') return;
             
-            console.log('[Message HTML] Received message:', data.type, data, 'Environment:', environment);
+            if (window.__MESSAGES_DEBUG__ === true) {
+                console.log('[Message HTML] Received message:', data.type, data, 'Environment:', environment);
+            }
             
             // Handle opening chat with specific user
             // FIX: Only open chat panel on explicit user-triggered OPEN_CHAT_WITH_USER.

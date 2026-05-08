@@ -79,6 +79,9 @@
 
     var __localSaveLogState = global.__kynLocalSaveLogState || (global.__kynLocalSaveLogState = Object.create(null));
     function shouldLogLocalSave(key) {
+        if (global.__isProductionConsoleHost && global.__isProductionConsoleHost() && global.__ALLOW_VERBOSE_CONSOLE__ !== true) {
+            return false;
+        }
         var now = Date.now();
         var last = __localSaveLogState[key] || 0;
         if (now - last < 15000) return false;
