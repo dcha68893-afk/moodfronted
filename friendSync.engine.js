@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    const SYNC_INTERVAL      = 60_000;   // Full sync every 60 s
+    const SYNC_INTERVAL      = 120_000;  // Full sync every 120s — socket handles realtime updates
     const SYNC_DEBOUNCE      = 400;      // Debounce rapid consecutive calls
     const REQUEST_TIMEOUT_MS = 15_000;
     const MAX_BACKOFF_MS     = 300_000;  // Max 5 minutes backoff
@@ -116,7 +116,7 @@
             this._emit('FRIEND_SYNC_STARTED');
             // FIXED: Reduced noise - only log sync start if not recently synced
             if (Date.now() - this._lastSync > SYNC_INTERVAL) {
-                console.log('[FriendSync] Starting full sync…');
+                // console.log('[FriendSync] Starting full sync…');
             }
 
             try {

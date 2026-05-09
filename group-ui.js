@@ -2246,7 +2246,24 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         myGroupsList.innerHTML = '';
         
         const _gcMy=window.GroupCore;
-        const _liveMy=(_gcMy&&_gcMy.myGroups&&_gcMy.myGroups.length>0)?_gcMy.myGroups:(myGroups||[]);
+        // Try from GroupCore first; if empty, trigger API fetch and wait
+        let _liveMy=(_gcMy&&_gcMy.myGroups&&_gcMy.myGroups.length>0)?_gcMy.myGroups:
+                    (_gcMy&&_gcMy.groups&&_gcMy.groups.length>0)?
+                        _gcMy.groups.filter(g=>String(g.createdBy)===String(_gcMy.currentUser&&(_gcMy.currentUser.id||_gcMy.currentUser.uid||''))):
+                    (typeof myGroups!=='undefined'?myGroups:[]);
+        if(!_liveMy.length&&_gcMy&&typeof _gcMy.requestGroupList==='function'){
+            myGroupsList.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin" style="font-size:20px"></i><p style="margin-top:8px;font-size:13px">Loading your groups…</p></div>';
+            _gcMy.requestGroupList().then(()=>{
+                _liveMy=(_gcMy.myGroups&&_gcMy.myGroups.length)?_gcMy.myGroups:
+                    _gcMy.groups.filter(g=>String(g.createdBy)===String(_gcMy.currentUser&&(_gcMy.currentUser.id||_gcMy.currentUser.uid||'')));
+                if(!_liveMy.length){myGroupsList.innerHTML='';myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));return;}
+                myGroupsList.innerHTML='';
+                const frag=document.createDocumentFragment();
+                _liveMy.forEach(group=>{const item=createSecureGroupItemElement(group,'my_group');if(item)frag.appendChild(item);});
+                myGroupsList.appendChild(frag);
+            }).catch(()=>{myGroupsList.innerHTML='';myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));});
+            return;
+        }
         if(!_liveMy.length){myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));return;}
         const fragment=document.createDocumentFragment();
         _liveMy.forEach(group => {
@@ -2289,6 +2306,19 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
                    !_jnRaw.some(function(j){return String(j.id)===String(g.id);});
         });
         const _liveJn=[..._jnRaw,..._grpJoined];
+        if(!_liveJn.length&&_gcJn&&typeof _gcJn.requestGroupList==='function'){
+            joinedList.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin" style="font-size:20px"></i><p style="margin-top:8px;font-size:13px">Loading joined groups…</p></div>';
+            _gcJn.requestGroupList().then(()=>{
+                const newJn=(_gcJn.joinedGroups&&_gcJn.joinedGroups.length)?_gcJn.joinedGroups:
+                    _gcJn.groups.filter(g=>String(g.createdBy)!==_myUid);
+                if(!newJn.length){joinedList.innerHTML='';joinedList.appendChild(createSecureEmptyStateElement('joined'));return;}
+                joinedList.innerHTML='';
+                const frag=document.createDocumentFragment();
+                newJn.forEach(group=>{const item=createSecureGroupItemElement(group,'joined');if(item)frag.appendChild(item);});
+                joinedList.appendChild(frag);
+            }).catch(()=>{joinedList.innerHTML='';joinedList.appendChild(createSecureEmptyStateElement('joined'));});
+            return;
+        }
         if(!_liveJn.length){joinedList.appendChild(createSecureEmptyStateElement('joined'));return;}
         const fragment=document.createDocumentFragment();
         _liveJn.forEach(group => {

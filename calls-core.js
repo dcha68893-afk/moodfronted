@@ -12753,34 +12753,13 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        // FIXED: Send ICE candidate directly, not as ACTION
-
-
-
+        // ✅ FIX: Send ICE via direct postMessage + safeSend (bypasses state queue)
         if (this._currentCallId) {
-
-
-
-            safeSend('ICE_CANDIDATE', {
-
-
-
-                callId: this._currentCallId,
-
-
-
-                candidate: event.candidate,
-
-
-
-                timestamp: Date.now()
-
-
-
-            }, false);
-
-
-
+            var _icePayload = { callId: this._currentCallId, candidate: event.candidate, timestamp: Date.now() };
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'ICE_CANDIDATE', payload: _icePayload, source: 'calls-core-direct' }, '*');
+            }
+            safeSend('ICE_CANDIDATE', _icePayload, false);
         }
 
 
@@ -28603,27 +28582,13 @@ _escapeHtml: function(text) {
 
 
 
-                    safeSend('SIGNAL_OFFER', {
-
-
-
-                        callId: callId,
-
-
-
-                        offer:  offer,
-
-
-
-                        timestamp: Date.now()
-
-
-
-                    }, false);
-
-
-
-                    console.log('[CallsCore] ✅ OFFER SENT to remote peer');
+                    // ✅ FIX: Send via direct postMessage (bypasses safeSend state check) + safeSend for reliability
+                    var _offerPayload = { callId: callId, offer: offer, timestamp: Date.now() };
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'SIGNAL_OFFER', payload: _offerPayload, source: 'calls-core-direct' }, '*');
+                    }
+                    safeSend('SIGNAL_OFFER', _offerPayload, false);
+                    console.log('[CallsCore] ✅ OFFER SENT to remote peer (direct + safeSend)');
 
 
 
@@ -29981,35 +29946,14 @@ window.CallHandlers = {
 
 
 
-        safeSend('SIGNAL_ANSWER', {
-
-
-
-            callId: payload.callId || callsState.activeCallId,
-
-
-
-            answer: answer,
-
-
-
-            timestamp: Date.now()
-
-
-
-        }, false);
-
-
-
-        
-
-
-
+        // ✅ FIX: Direct postMessage for SIGNAL_ANSWER + safeSend
+        var _answerPayload = { callId: payload.callId || callsState.activeCallId, answer: answer, timestamp: Date.now() };
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'SIGNAL_ANSWER', payload: _answerPayload, source: 'calls-core-direct' }, '*');
+        }
+        safeSend('SIGNAL_ANSWER', _answerPayload, false);
         DiagnosticsAgent.record('signaling_send');
-
-
-
-        console.log('[CallsCore] ✅ ANSWER SENT to remote peer');
+        console.log('[CallsCore] ✅ ANSWER SENT to remote peer (direct + safeSend)');
 
 
 

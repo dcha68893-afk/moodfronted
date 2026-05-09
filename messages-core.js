@@ -3044,13 +3044,13 @@ try {
         
         addMessage: function(message) {
             if (!message || !message.id) return;
+            // Always use string keys in the map to avoid number/string mismatch
+            const msgId = String(message.id);
+            const msgLocalId = message.localId ? String(message.localId) : null;
 
             // ── OFFLINE-FIRST deduplication ──────────────────────────────────
-            // Check by id AND by localId so confirmed server messages
-            // replace their optimistic counterpart instead of duplicating.
-            const existingById = this._messagesMap.get(message.id);
+            const existingById = this._messagesMap.get(msgId);
             if (existingById) {
-                // Merge server data into existing (status, id, etc.)
                 Object.assign(existingById, message);
                 this._rebuildMessagesMap();
                 this._saveMessagesToCache();
@@ -3064,15 +3064,14 @@ try {
                 return;
             }
             // Also check if we have an optimistic copy by localId
-            if (message.localId) {
-                const existingByLocalId = this._messagesMap.get(message.localId);
+            if (msgLocalId) {
+                const existingByLocalId = this._messagesMap.get(msgLocalId);
                 if (existingByLocalId) {
-                    // Replace the optimistic message in-place
-                    const idx = this._messages.findIndex(m => m.id === message.localId);
-                    const merged = { ...existingByLocalId, ...message, id: message.id || existingByLocalId.id };
+                    const idx = this._messages.findIndex(m => String(m.id) === msgLocalId || String(m.localId) === msgLocalId);
+                    const merged = { ...existingByLocalId, ...message, id: msgId };
                     if (idx !== -1) this._messages[idx] = merged;
-                    this._messagesMap.delete(message.localId);
-                    this._messagesMap.set(merged.id, merged);
+                    this._messagesMap.delete(msgLocalId);
+                    this._messagesMap.set(msgId, merged);
                     this._saveMessagesToCache();
                     this._notifySubscribers();
                     if (window.KynectaLocalStore) {
@@ -3097,7 +3096,7 @@ try {
             }
 
             this._messages.push(message);
-            this._messagesMap.set(message.id, message);
+            this._messagesMap.set(msgId, message);
             
             // FIX: parse ISO createdAt to numeric ms for correct ASC sort
             const _tsMs = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
@@ -4112,13 +4111,9 @@ try {
             }
 
             if (window.KynectaLocalStore) {
-                const currentUserId = SessionManager?.getUserId?.() || null;
-                const deleteOpts = forEveryone
-                    ? { forEveryone: true }
-                    : { forEveryone: false, userId: currentUserId };
-                window.KynectaLocalStore.deleteMessage(messageId, deleteOpts).catch(() => {});
+                window.KynectaLocalStore.deleteMessage(messageId).catch(() => {});
                 if (String(targetId) !== String(messageId)) {
-                    window.KynectaLocalStore.deleteMessage(targetId, deleteOpts).catch(() => {});
+                    window.KynectaLocalStore.deleteMessage(targetId).catch(() => {});
                 }
             }
 
@@ -4308,11 +4303,11 @@ try {
             }
             this._lastOpenRequest = { id: openKey, timestamp: now };
 
-            // FIX: Clear in-memory messages immediately when switching to a DIFFERENT chat.
-            // Without this, messages from the previous chat bleed into the new chat view
-            // while the fetch is in flight (the stale _messages array still has old data).
+            // FIX: Clear in-memory messages ONLY when switching to a DIFFERENT chat.
+            // If the same chat is re-opened (e.g. returning from call), keep the messages.
             const _prevActive = ChatManager._activeConversation;
-            if (_prevActive && String(_prevActive.id) !== String(actualId)) {
+            const _switchingChat = _prevActive && String(_prevActive.id) !== String(actualId);
+            if (_switchingChat) {
                 ChatManager._messages = [];
                 ChatManager._messagesMap.clear();
             }
@@ -5731,9 +5726,6 @@ try {
     // REAL-TIME MESSAGE HANDLER
     // =============================================
     function setupRealtimeMessageListener() {
-        // MODULE-LEVEL guard — must survive across repeated calls (e.g. reconnect hooks)
-        if (window.__msgCoreRealtimeBound) return;
-        window.__msgCoreRealtimeBound = true;
         let hasRealtimeBinding = false;
 
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
@@ -5813,9 +5805,11 @@ try {
                     }).sort(function(a, b) {
                         return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                     });
+                    // Always include the incoming message even if not yet in ChatManager._messages
                     if (normalizedMessage) {
                         const _has = _msgs.some(function(m) {
-                            return m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id);
+                            return (m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id))
+                                || (m.localId && normalizedMessage.localId && String(m.localId) === String(normalizedMessage.localId));
                         });
                         if (!_has) {
                             _msgs = _msgs.concat([normalizedMessage]).sort(function(a, b) {
@@ -5823,9 +5817,11 @@ try {
                             });
                         }
                     }
-                    if (_msgs.length > 0 && _now) {
+                    // Always render if we have at least the new message
+                    if (_now && (_msgs.length > 0 || normalizedMessage)) {
+                        const _renderMsgs = _msgs.length > 0 ? _msgs : (normalizedMessage ? [normalizedMessage] : []);
                         window.dispatchEvent(new CustomEvent('renderMessages', {
-                            detail: { messages: _msgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
+                            detail: { messages: _renderMsgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
                         }));
                         try {
                             const _c = document.getElementById('messagesContainer');
@@ -5849,7 +5845,11 @@ try {
         // chat.html sends both 'message:new' AND 'new_message' to the iframe,
         // and multiple listeners (window.message, KynectaRealtime.on, document.message:new)
         // can all fire for the same payload — without dedup the message renders 4+ times.
-        const _realtimeProcessedIds = new Set();
+        // Use window-level Set so it persists even if setupRealtimeMessageListener were called again
+        if (!window.__realtimeProcessedIds) window.__realtimeProcessedIds = new Set();
+        if (!window.__realtimeSentIds) window.__realtimeSentIds = new Set();
+        const _realtimeProcessedIds = window.__realtimeProcessedIds;
+        const _realtimeSentIds = window.__realtimeSentIds;
 
         const handleRealtimePayload = async function(type, payload) {
             const normalizedType = String(type || '').toLowerCase();
@@ -5952,6 +5952,13 @@ try {
                 // ✅ FIX 9: Unwrap postMessage bridge wrapper { type, payload, source }
                 const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
                 const messageId = d.localId || d.messageId || d.serverId || d.id;
+                // DEDUP: message:sent fires once per listener — deduplicate by localId+serverId
+                const _sentKey = String(d.localId || '') + ':' + String(d.serverId || d.messageId || d.id || '');
+                if (_sentKey !== ':' && _realtimeSentIds.has(_sentKey)) return;
+                if (_sentKey !== ':') {
+                    _realtimeSentIds.add(_sentKey);
+                    setTimeout(function() { _realtimeSentIds.delete(_sentKey); }, 15000);
+                }
                 console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'sent', {
@@ -6001,33 +6008,18 @@ try {
                     : [d.messageId || d.id].filter(Boolean).map(String);
                 if (ids.length === 0) return;
 
-                const currentUserId = SessionManager?.getUserId?.() ? String(SessionManager.getUserId()) : null;
-                const isForEveryone = !!d.deleteForEveryone;
-                // deleteForMe — only applies to the user who requested it
-                const isDeletedForMe = !isForEveryone && Array.isArray(d.deletedFor)
-                    && currentUserId && d.deletedFor.map(String).includes(currentUserId);
-
-                // Remove from UI only if: deleteForEveryone, OR this is the user it was deleted for
-                if (isForEveryone || isDeletedForMe) {
-                    const remaining = (ChatManager.getMessages() || []).filter((message) => {
-                        const currentId = String(message.serverId || message.id || message.localId || '');
-                        return !ids.includes(currentId);
-                    });
-                    const activeChatId = d.chatId || d.conversationId || ChatManager.getActiveChat()?.id || null;
-                    if (activeChatId) {
-                        ChatManager.setMessages(remaining, activeChatId);
-                    }
+                const remaining = (ChatManager.getMessages() || []).filter((message) => {
+                    const currentId = String(message.serverId || message.id || message.localId || '');
+                    return !ids.includes(currentId);
+                });
+                const activeChatId = d.chatId || d.conversationId || ChatManager.getActiveChat()?.id || null;
+                if (activeChatId) {
+                    ChatManager.setMessages(remaining, activeChatId);
                 }
-
                 if (window.KynectaLocalStore) {
-                    ids.forEach((id) => {
-                        const deleteOpts = isForEveryone
-                            ? { forEveryone: true }
-                            : { forEveryone: false, userId: currentUserId };
-                        window.KynectaLocalStore.deleteMessage(id, deleteOpts).catch(() => {});
-                    });
+                    ids.forEach((id) => window.KynectaLocalStore.deleteMessage(id).catch(() => {}));
                 }
-                EventBus.emit('message:deleted', { messageIds: ids, chatId: d.chatId, forEveryone: isForEveryone });
+                EventBus.emit('message:deleted', { messageIds: ids, chatId: activeChatId, forEveryone: !!d.deleteForEveryone });
                 return;
             }
 

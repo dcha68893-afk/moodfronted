@@ -1035,7 +1035,8 @@ const UIFailsafe = {
             'shareStatusBtn': shareCurrentStatus,
             'saveStatusBtn': handleSaveStatus,
             'reportStatusBtn': showReportModal,
-            'closeReportModal': () => closeModal('reportModal'),
+            'closeReportModal': () => { const m = document.getElementById('reportModal'); if (m) { m.classList.remove('active'); } },
+            'cancelReportBtn':   () => { const m = document.getElementById('reportModal'); if (m) { m.classList.remove('active'); } },
             'submitReportBtn': handleSubmitReport,
             'sendReplyBtn': sendReply,
             'retryConnectionBtn': retryConnection,
@@ -1428,11 +1429,39 @@ const UISanitizer = {
         if (sanitized.caption) sanitized.caption = String(sanitized.caption).slice(0, 1000);
         if (sanitized.question) sanitized.question = String(sanitized.question).slice(0, 500);
         if (sanitized.user) {
+            // Build displayName from all possible fields (backend uses statusUser with firstName/lastName)
+            const u = sanitized.user;
+            const firstName = u.firstName || '';
+            const lastName = u.lastName || '';
+            const fullName = (firstName + ' ' + lastName).trim();
+            const displayName = u.displayName || fullName || u.username || u.name || 'Unknown';
             sanitized.user = {
-                id: String(sanitized.user.id || ''),
-                displayName: String(sanitized.user.displayName || '').slice(0, 100),
-                photoURL: String(sanitized.user.photoURL || '').slice(0, 500),
-                isGuest: !!sanitized.user.isGuest
+                id: String(u.id || ''),
+                displayName: String(displayName).slice(0, 100),
+                username: String(u.username || '').slice(0, 50),
+                firstName: String(firstName).slice(0, 50),
+                lastName: String(lastName).slice(0, 50),
+                photoURL: String(u.photoURL || u.avatar || u.profilePicture || '').slice(0, 500),
+                avatar: String(u.avatar || u.photoURL || '').slice(0, 500),
+                isGuest: !!u.isGuest
+            };
+        }
+        // Also normalise statusUser (backend field name) → user
+        if (!sanitized.user && sanitized.statusUser) {
+            const u = sanitized.statusUser;
+            const firstName = u.firstName || '';
+            const lastName = u.lastName || '';
+            const fullName = (firstName + ' ' + lastName).trim();
+            const displayName = u.displayName || fullName || u.username || 'Unknown';
+            sanitized.user = {
+                id: String(u.id || ''),
+                displayName: String(displayName).slice(0, 100),
+                username: String(u.username || '').slice(0, 50),
+                firstName: String(firstName).slice(0, 50),
+                lastName: String(lastName).slice(0, 50),
+                photoURL: String(u.avatar || u.photoURL || '').slice(0, 500),
+                avatar: String(u.avatar || u.photoURL || '').slice(0, 500),
+                isGuest: false
             };
         }
         return sanitized;
@@ -3139,15 +3168,42 @@ function _prevSlide(isOwner, group) {
 function _setupTapZones() {
     const prev = document.getElementById('viewerTapPrev');
     const next = document.getElementById('viewerTapNext');
-    if (prev && !prev._bound) {
-        prev._bound = true;
-        prev.addEventListener('click', () => _prevSlide(
-            _isCurrentOwner(), currentViewerGroup));
+    const viewerPanel = document.getElementById('statusViewerPanel');
+
+    // Always reassign onclick (no stale _bound issue)
+    if (prev) {
+        prev.onclick = () => _prevSlide(_isCurrentOwner(), currentViewerGroup);
     }
-    if (next && !next._bound) {
-        next._bound = true;
-        next.addEventListener('click', () => _advanceSlide(
-            _isCurrentOwner(), currentViewerGroup));
+    if (next) {
+        next.onclick = () => _advanceSlide(_isCurrentOwner(), currentViewerGroup);
+    }
+
+    // ── Hold-to-pause: press+hold anywhere on viewer pauses; release resumes ──
+    if (viewerPanel && !viewerPanel._holdBound) {
+        viewerPanel._holdBound = true;
+
+        const pauseSlide = () => {
+            if (!isAutoAdvancePaused) {
+                isAutoAdvancePaused = true;
+                _clearSlideTimer();
+            }
+        };
+        const resumeSlide = () => {
+            if (isAutoAdvancePaused) {
+                isAutoAdvancePaused = false;
+                _startSlideTimer(_isCurrentOwner(), currentViewerGroup);
+            }
+        };
+
+        // Mouse
+        viewerPanel.addEventListener('mousedown', pauseSlide);
+        viewerPanel.addEventListener('mouseup',   resumeSlide);
+        viewerPanel.addEventListener('mouseleave',resumeSlide);
+
+        // Touch
+        viewerPanel.addEventListener('touchstart', pauseSlide, { passive: true });
+        viewerPanel.addEventListener('touchend',   resumeSlide, { passive: true });
+        viewerPanel.addEventListener('touchcancel',resumeSlide, { passive: true });
     }
 }
 
@@ -3179,11 +3235,13 @@ function _loadSlot(index, isOwner, group) {
             const ring = groupItem.querySelector('.status-group-ring');
             if (ring && viewed === ids.length) ring.classList.add('viewed');
         }
-        // Call real API
+        // Call real API — record view on server
         const api = window.StatusAPI;
         if (api && api.viewStatus) {
             api.viewStatus(status.id).then(result => {
-                if (result?.success && result.viewCount !== undefined && isOwner) {
+                // viewCount update is pushed to owner via status:viewed socket event
+                // but as fallback, update if visible in our own panel (owner may have opened viewer on another tab)
+                if (result?.success && result.viewCount !== undefined) {
                     const el = document.getElementById('seenCountNum');
                     if (el) el.textContent = result.viewCount;
                 }
@@ -3207,47 +3265,118 @@ function _applyViewerMode(isOwner, status) {
     if (isOwner) {
         footer.classList.add('owner-mode');
         footer.classList.remove('friend-mode');
+        // Load viewers list for owner
+        _loadViewersForOwner(status);
     } else {
         footer.classList.add('friend-mode');
         footer.classList.remove('owner-mode');
+        // Load reaction buttons for friend
+        _loadReactionsForFriend(status);
     }
+    // Hide pause button - hold-to-pause is used instead
+    const pauseBtn = document.getElementById('pauseResumeBtn');
+    if (pauseBtn) pauseBtn.style.display = 'none';
+    // Show/hide report button (only for non-owners)
+    const reportBtn = document.getElementById('reportStatusBtn');
+    if (reportBtn) reportBtn.style.display = isOwner ? 'none' : '';
+}
+
+function _loadViewersForOwner(status) {
+    // Update seen count number immediately
+    const seenEl = document.getElementById('seenCountNum');
+    if (seenEl) seenEl.textContent = status.viewCount || 0;
+
+    // Create/find inline viewer list below seen count
+    const ownerControls = document.getElementById('ownerControls');
+    if (!ownerControls) return;
+
+    let viewersList = document.getElementById('inlineViewersList');
+    if (!viewersList) {
+        viewersList = document.createElement('div');
+        viewersList.id = 'inlineViewersList';
+        viewersList.style.cssText = 'margin-top:8px;max-height:180px;overflow-y:auto;';
+        ownerControls.appendChild(viewersList);
+    }
+    viewersList.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0;">Loading viewers...</div>';
+
+    const api = window.StatusAPI;
+    if (!api || !api.getViewers || !status || !status.id) {
+        viewersList.innerHTML = '';
+        return;
+    }
+    api.getViewers(status.id).then(result => {
+        if (!result || !result.success) { viewersList.innerHTML = ''; return; }
+        const viewers = result.viewers || result.data?.viewers || [];
+        if (!viewers.length) {
+            viewersList.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0;">No views yet</div>';
+            return;
+        }
+        // Update count
+        if (seenEl) seenEl.textContent = result.totalViews || viewers.length;
+        viewersList.innerHTML = viewers.slice(0, 20).map(v => {
+            const name = v.viewer?.displayName || v.viewer?.username || ('User ' + v.viewerId);
+            const initial = name.charAt(0).toUpperCase();
+            const time = v.viewedAt ? formatTimeAgo(v.viewedAt) : '';
+            const reaction = v.reaction ? ' · ' + v.reaction : '';
+            const replies = v.replyCount ? ' · ' + v.replyCount + ' repl' + (v.replyCount === 1 ? 'y' : 'ies') : '';
+            const avatarUrl = v.viewer?.avatar || v.viewer?.photoURL || '';
+            return '<div class="viewer-list-item" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-color,#2a3942);">' +
+                '<div style="width:32px;height:32px;border-radius:50%;background:var(--primary-color,#00a884);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;' + (avatarUrl ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;' : '') + '">' +
+                (avatarUrl ? '' : initial) + '</div>' +
+                '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:500;color:var(--text-primary,#e9edef);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</div>' +
+                '<div style="font-size:11px;color:var(--text-secondary,#8696a0);">' + time + reaction + replies + '</div></div></div>';
+        }).join('');
+    }).catch(() => { viewersList.innerHTML = ''; });
+}
+
+function _loadReactionsForFriend(status) {
+    // Reactions container is shown via CSS (friend-mode)
+    // Nothing extra needed here — reactions are loaded in setupEventListeners
 }
 
 function _bindOwnerButtons(status) {
+    // Always use direct onclick assignment (no _bound flag) so each new status slot gets fresh handler
     const editBtn   = document.getElementById('editStatusBtn');
     const deleteBtn = document.getElementById('deleteStatusBtn');
 
-    if (editBtn && !editBtn._bound) {
-        editBtn._bound = true;
-        editBtn.addEventListener('click', () => {
+    if (editBtn) {
+        editBtn.onclick = () => {
             closeViewer();
             if (typeof editMyStatus === 'function') editMyStatus(status);
-        });
-    }
-    if (deleteBtn && !deleteBtn._bound) {
-        deleteBtn._bound = true;
-        deleteBtn.addEventListener('click', async () => {
-            _clearSlideTimer();
-            const core = getCore();
-            if (core && core.deleteStatus) {
-                await core.deleteStatus(status.id).catch(() => {});
-            }
-            closeViewer();
-            showNotification('Status deleted', 'success');
-        });
-    }
-    // Re-bind in case of new status
-    if (editBtn)   { editBtn._bound = false; editBtn.onclick = () => { closeViewer(); if (typeof editMyStatus === 'function') editMyStatus(status); }; editBtn._bound = true; }
-    if (deleteBtn) {
-        deleteBtn._bound = false;
-        deleteBtn.onclick = async () => {
-            _clearSlideTimer();
-            const core = getCore();
-            if (core && core.deleteStatus) await core.deleteStatus(status.id).catch(() => {});
-            closeViewer();
-            showNotification('Status deleted', 'success');
         };
-        deleteBtn._bound = true;
+    }
+    if (deleteBtn) {
+        deleteBtn.onclick = async () => {
+            if (!confirm('Delete this status?')) return;
+            deleteBtn.disabled = true;
+            deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            _clearSlideTimer();
+            try {
+                const api = window.StatusAPI;
+                const core = getCore();
+                // Try API first (direct HTTP), fallback to core
+                let deleted = false;
+                if (api && api.deleteStatus) {
+                    const result = await api.deleteStatus(status.id).catch(() => null);
+                    deleted = result && result.success;
+                }
+                if (!deleted && core && core.deleteStatus) {
+                    await core.deleteStatus(status.id).catch(() => {});
+                    deleted = true;
+                }
+                closeViewer();
+                showNotification('Status deleted', 'success');
+                // Remove from local state
+                if (myStatuses) {
+                    myStatuses = myStatuses.filter(s => String(s.id) !== String(status.id));
+                }
+                if (typeof renderStatusListInstantlyUI === 'function') renderStatusListInstantlyUI();
+            } catch (e) {
+                showNotification('Failed to delete status', 'error');
+            } finally {
+                if (deleteBtn) { deleteBtn.disabled = false; deleteBtn.innerHTML = '<i class="fas fa-trash"></i>'; }
+            }
+        };
     }
 }
 
@@ -3267,12 +3396,18 @@ function loadViewerContent(statusData) {
         .toUpperCase()
         .substring(0, 2);
     const timeAgo = sanitized.createdAt ? formatTimeAgo(sanitized.createdAt) : 'Just now';
+    // If viewing own status, label as "My Status"
+    const currentUid = currentUser && (currentUser.id || currentUser.userId);
+    const statusOwnerId = sanitized.userId || sanitized.user_id || (sanitized.user && sanitized.user.id);
+    const isViewingOwnStatus = currentUid && statusOwnerId && String(currentUid) === String(statusOwnerId);
+    const shownName = isViewingOwnStatus ? 'My Status' : (user.displayName || 'Unknown User');
+    const avatarUrl = user.photoURL || user.avatar || '';
     viewerUserInfo.innerHTML = `
-        <div class="viewer-user-avatar" ${user.photoURL ? `style="background-image: url('${UISanitizer.sanitizeUrl(user.photoURL)}')"` : ''}>
-            ${user.photoURL ? '' : `<span>${initials}</span>`}
+        <div class="viewer-user-avatar" ${avatarUrl ? `style="background-image: url('${UISanitizer.sanitizeUrl(avatarUrl)}');background-size:cover;background-position:center;"` : ''}>
+            ${avatarUrl ? '' : `<span>${initials}</span>`}
         </div>
         <div class="viewer-user-details">
-            <div class="viewer-user-name">${UISanitizer.sanitizeHTML(user.displayName || 'Unknown User')}</div>
+            <div class="viewer-user-name">${UISanitizer.sanitizeHTML(shownName)}</div>
             <div class="viewer-status-time">${timeAgo}</div>
         </div>
     `;
@@ -4248,99 +4383,49 @@ function renderStatusesListUI(container, statusesList) {
 }
 
 // Create one list item that represents all statuses from one user
-// Enhanced: SVG segmented ring (WhatsApp-style), reaction/reply badges
 function createGroupedStatusElement(statuses) {
     if (!statuses || !statuses.length) return null;
     const first = statuses[0];
-    const user = first.statusUser || first.user || {};
-    const displayName = user.firstName
-        ? `${user.firstName} ${user.lastName || ''}`.trim()
-        : user.username || user.displayName || 'Unknown';
+    const user = first.user || { displayName: 'Unknown User' };
     const total = statuses.length;
-    const viewedCount = statuses.filter(s => viewedStatuses && (viewedStatuses.has(String(s.id)) || viewedStatuses.has(Number(s.id)))).length;
-    const allViewed = viewedCount >= total;
+    const viewedCount = statuses.filter(s => viewedStatuses?.has(s.id)).length;
+    const allViewed = viewedCount === total;
     const timeAgo = first.createdAt ? formatTimeAgo(first.createdAt) : 'Just now';
-    const avatarUrl = user.avatar || user.photoURL || user.profilePicture || null;
 
-    const initials = displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || '?';
+    const initials = (user.displayName || 'U')
+        .split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
 
     const item = document.createElement('div');
     item.className = 'status-group-item';
     item.dataset.userId = String(first.userId || user.id || '');
     item.dataset.statusIds = statuses.map(s => s.id).join(',');
 
-    // ── SVG segmented ring (exact segment per status, like WhatsApp) ──
-    const RING_R = 28;        // radius of ring circle
-    const RING_CX = 30;       // center x
-    const RING_CY = 30;       // center y
-    const STROKE = 2.5;
-    const GAP_DEG = total > 1 ? 4 : 0;   // gap between segments in degrees
-    const CIRCUMFERENCE = 2 * Math.PI * RING_R;
-    const segDeg = (360 - GAP_DEG * total) / total;
-    const segArc = (segDeg / 360) * CIRCUMFERENCE;
-    const gapArc = (GAP_DEG / 360) * CIRCUMFERENCE;
-    
-    let segments = '';
-    for (let i = 0; i < total; i++) {
-        const isViewed = viewedStatuses && (viewedStatuses.has(String(statuses[i].id)) || viewedStatuses.has(Number(statuses[i].id)));
-        const color = isViewed ? '#8696a0' : '#00a884';
-        const rotation = -90 + i * (segDeg + GAP_DEG);
-        segments += `<circle cx="${RING_CX}" cy="${RING_CY}" r="${RING_R}"
-            fill="none" stroke="${color}" stroke-width="${STROKE}"
-            stroke-dasharray="${segArc} ${CIRCUMFERENCE - segArc}"
-            stroke-dashoffset="${-(rotation / 360) * CIRCUMFERENCE + CIRCUMFERENCE * 0.25}"
-            transform="rotate(${rotation}, ${RING_CX}, ${RING_CY})"
-            class="seg" data-idx="${i}"
-        />`;
+    // Build segmented ring for multiple statuses
+    let ringHtml = '';
+    if (total === 1) {
+        ringHtml = `<div class="status-group-ring ${allViewed ? 'viewed' : ''}"></div>`;
+    } else {
+        // CSS conic-gradient ring divided into segments
+        const pct = Math.round((viewedCount / total) * 100);
+        ringHtml = `<div class="status-group-ring multi" style="--filled:${pct}%"></div>`;
     }
 
-    const ringSvg = `<svg class="ring-svg" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">${segments}</svg>`;
-
-    // ── Collect reactions/replies for badges ──
-    let reactEmoji = '';
-    let replyCount = 0;
-    let totalReactions = 0;
-    statuses.forEach(s => {
-        if (s.reactionCount) totalReactions += s.reactionCount;
-        if (s.replyCount) replyCount += s.replyCount;
-        if (s.latestReaction || s.topEmoji) reactEmoji = s.latestReaction || s.topEmoji;
-        // Check reactions object
-        if (s.reactions && typeof s.reactions === 'object') {
-            const emojis = Object.keys(s.reactions);
-            if (emojis.length) {
-                reactEmoji = emojis[0];
-                totalReactions += emojis.reduce((sum, k) => sum + (Array.isArray(s.reactions[k]) ? s.reactions[k].length : (s.reactions[k] || 0)), 0);
-            }
-        }
-    });
-
-    const badgesHtml = (totalReactions > 0 || replyCount > 0) ? `
-        <div class="status-group-badges">
-            ${totalReactions > 0 ? `<span class="status-badge reaction-badge">${reactEmoji || '😊'} ${totalReactions}</span>` : ''}
-            ${replyCount > 0 ? `<span class="status-badge reply-badge"><i class="fas fa-reply" style="font-size:10px;"></i> ${replyCount}</span>` : ''}
-        </div>
-    ` : '';
-
-    const metaText = timeAgo + (total > 1 ? ` · ${total} updates` : '');
-    const avatarInner = avatarUrl
-        ? `<div class="status-group-avatar-inner" style="background-image:url('${avatarUrl}');background-size:cover;background-position:center;"></div>`
-        : `<div class="status-group-avatar-inner"><span>${initials}</span></div>`;
-
+    const avatarStyle = user.photoURL ? `style="background-image:url('${user.photoURL}')"` : '';
     item.innerHTML = `
-        <div class="status-group-avatar${allViewed ? ' all-viewed' : ''}">
-            ${ringSvg}
-            ${avatarInner}
+        <div class="status-group-avatar">
+            ${ringHtml}
+            <div class="status-group-avatar-inner" ${avatarStyle}>
+                ${user.photoURL ? '' : `<span>${initials}</span>`}
+            </div>
+            ${total > 1 ? `<div class="status-group-count">${total}</div>` : ''}
         </div>
         <div class="status-group-info">
-            <div class="status-group-name">${displayName}</div>
-            <div class="status-group-meta">${metaText}</div>
-            ${badgesHtml}
+            <div class="status-group-name">${user.displayName || 'Unknown User'}</div>
+            <div class="status-group-meta">${timeAgo}${total > 1 ? ` · ${total} updates` : ''}</div>
         </div>
     `;
     return item;
 }
-
-
 
 // Bind click handlers on grouped items
 function bindGroupedStatusHandlers(container) {
@@ -5649,8 +5734,8 @@ async function handleSubmitReport() {
         showNotification('Please select a reason', 'error');
         return;
     }
-    if (details.length < 10) {
-        showNotification('Please provide more details (minimum 10 characters)', 'error');
+    if (details.length < 5) {
+        showNotification('Please provide more details (minimum 5 characters)', 'error');
         return;
     }
     try {
@@ -6236,8 +6321,8 @@ function refreshRecentViewersPanel() {
             const name = entry.viewer?.displayName || entry.viewer?.username || ('User ' + entry.viewerId);
             const avatarText = name ? name.charAt(0).toUpperCase() : 'U';
             const viewedAt = entry.viewedAt ? formatTimeAgo(entry.viewedAt) : 'Just now';
-            const reaction = entry.reaction ? ' Â· ' + entry.reaction : '';
-            const replies = entry.replyCount ? ' Â· ' + entry.replyCount + ' repl' + (entry.replyCount === 1 ? 'y' : 'ies') : '';
+            const reaction = entry.reaction ? ' · ' + entry.reaction : '';
+            const replies = entry.replyCount ? ' · ' + entry.replyCount + ' repl' + (entry.replyCount === 1 ? 'y' : 'ies') : '';
             item.innerHTML = '<div class="viewer-avatar" style="background:var(--primary-color);color:#fff;font-size:11px">' +
                 UISanitizer.sanitizeHTML(avatarText) +
                 '</div><div class="viewer-info"><div class="viewer-name">' +

@@ -5841,6 +5841,9 @@
     // CALL RETURN HANDLER - re-opens the same chat after call ends
 
     function setupCallReturnHandler() {
+        // Guard: only register this listener ONCE per page load
+        if (window.__callReturnHandlerBound) return;
+        window.__callReturnHandlerBound = true;
 
         window.addEventListener('message', (event) => {
 
@@ -5849,6 +5852,10 @@
             
 
             if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED') {
+                // Dedup: ignore if we already handled a call-end within the last 3 seconds
+                const now = Date.now();
+                if (window.__lastCallEndedHandled && (now - window.__lastCallEndedHandled) < 3000) return;
+                window.__lastCallEndedHandled = now;
 
                 console.log('[CallHandler] Call ended, returning to chat');
 
@@ -9715,10 +9722,7 @@ Type: ${message.type || 'text'}`;
                 const chats = core?.getConversations?.() || [];
 
                 UIRenderer.renderMultiSendChats(chats);
-                // Fix: loadMultiSendHistory lives on window.messagesUI, not on `this`
-                if (window.messagesUI && typeof window.messagesUI.loadMultiSendHistory === 'function') {
-                    window.messagesUI.loadMultiSendHistory();
-                }
+                this.loadMultiSendHistory();
 
                 UIFailsafe.safeAddClass(panel, 'active');
 
@@ -11621,24 +11625,31 @@ Type: ${message.type || 'text'}`;
 
                 } else {
 
-                    // Core not ready yet — single deduped polling loop (prevent stacking on rapid clicks)
-                    if (window.__openChatPending) clearTimeout(window.__openChatPending._timer);
+                    // Core not ready yet — poll until it is, then open
 
                     let attempts = 0;
+
                     const waitAndOpen = () => {
+
                         attempts++;
+
                         const c = getMessagesCore();
+
                         const s = c?.getState?.();
+
                         if (s?.state === 'ACTIVE') {
-                            window.__openChatPending = null;
+
                             c.openConversation(_chatId, _chatOpts).catch?.(() => {});
+
                         } else if (attempts < 20) {
-                            window.__openChatPending = { _timer: setTimeout(waitAndOpen, 250), chatId: _chatId };
-                        } else {
-                            window.__openChatPending = null;
+
+                            setTimeout(waitAndOpen, 250);
+
                         }
+
                     };
-                    window.__openChatPending = { _timer: setTimeout(waitAndOpen, 250), chatId: _chatId };
+
+                    setTimeout(waitAndOpen, 250);
 
                 }
 
@@ -11649,6 +11660,15 @@ Type: ${message.type || 'text'}`;
         
 
         loadChatByFriendId: (friendId, friendName) => {
+            // DEDUP: prevent opening same friend chat multiple times within 1.5s
+            const _dedupFriendKey = `loadchat_${friendId}`;
+            const _nowFriend = Date.now();
+            if (window.__loadChatDedup && window.__loadChatDedup[_dedupFriendKey]) {
+                if ((_nowFriend - window.__loadChatDedup[_dedupFriendKey]) < 1500) return;
+            }
+            if (!window.__loadChatDedup) window.__loadChatDedup = {};
+            window.__loadChatDedup[_dedupFriendKey] = _nowFriend;
+            setTimeout(() => { if (window.__loadChatDedup) delete window.__loadChatDedup[_dedupFriendKey]; }, 1500);
 
             const core = getMessagesCore();
 
@@ -12470,24 +12490,27 @@ Type: ${message.type || 'text'}`;
         if (!listEl) return;
 
         const items = Array.isArray(historyItems) ? historyItems : [];
+        UIFailsafe.safeSetStyle(listEl, 'display', 'block');
+
         if (items.length === 0) {
-            UIFailsafe.safeSetStyle(listEl, 'display', 'none');
+            UIFailsafe.safeSetHTML(listEl, '<div style="color:#64748b;font-size:12px;padding:8px 0;text-align:center;">No multi-send history yet</div>');
             return;
         }
 
-        const html = items.slice(0, 10).map((item) => {
-            const recipients = Array.isArray(item.recipients) ? item.recipients.length : (Array.isArray(item.recipientIds) ? item.recipientIds.length : 0);
+        const html = items.slice(0, 20).map((item) => {
+            const recipients = Array.isArray(item.recipients) ? item.recipients.length : (Array.isArray(item.recipientIds) ? item.recipientIds.length : (parseInt(item.deliveryCount, 10) || 0));
+            const preview = (item.content || '').substring(0, 60) + ((item.content || '').length > 60 ? '…' : '');
+            const ts = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
             return `
                 <button type="button" data-batch-id="${item.batchId || item.id}" class="multi-send-history-item"
                     style="width:100%;text-align:left;border:none;background:#fff;padding:10px 12px;border-radius:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(15,23,42,0.08);cursor:pointer;">
-                    <div style="font-weight:600;color:#0f172a;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.content || ''}</div>
-                    <div style="font-size:11px;color:#64748b;margin-top:4px;">${recipients} recipients · ${item.deliveryCount || 0} delivered · ${item.seenCount || 0} seen</div>
+                    <div style="font-weight:600;color:#0f172a;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preview}</div>
+                    <div style="font-size:11px;color:#64748b;margin-top:4px;">${recipients} recipients · ${parseInt(item.deliveryCount,10)||0} delivered · ${parseInt(item.seenCount,10)||0} seen${ts ? ' · ' + ts : ''}</div>
                 </button>
             `;
         }).join('');
 
         UIFailsafe.safeSetHTML(listEl, html);
-        UIFailsafe.safeSetStyle(listEl, 'display', 'block');
 
         listEl.querySelectorAll('[data-batch-id]').forEach((button) => {
             button.addEventListener('click', () => {
@@ -12618,8 +12641,9 @@ Type: ${message.type || 'text'}`;
                     if (!resp.ok || result.success === false) {
                         throw new Error(result.message || result.error || 'Failed to send');
                     }
-                    const sentCount = Array.isArray(result.data?.messages) ? result.data.messages.length : selectedChats.size;
-                    UIRenderer.showNotification('Sent to ' + sentCount + ' chats');
+                    // API returns { success, data: { batchId, results, successCount, totalTargeted } }
+                    const sentCount = result.data?.successCount || (Array.isArray(result.data?.results) ? result.data.results.filter(r=>r.success).length : selectedChats.size);
+                    UIRenderer.showNotification('✓ Sent to ' + sentCount + ' chat' + (sentCount !== 1 ? 's' : ''));
                     window.messagesUI?.loadMultiSendHistory?.();
                     if (input) input.value = '';
                     if (core?.multiSendSelectedChats) core.multiSendSelectedChats.clear();

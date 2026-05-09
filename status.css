@@ -3537,54 +3537,6 @@ html, body, .app-container {
     position: relative;
     z-index: 1;
 }
-/* SVG ring overlay */
-.status-group-avatar {
-    position: relative;
-}
-.status-group-avatar svg.ring-svg {
-    position: absolute;
-    top: -4px;
-    left: -4px;
-    width: calc(100% + 8px);
-    height: calc(100% + 8px);
-    z-index: 2;
-    pointer-events: none;
-}
-/* Badges */
-.status-group-badges {
-    display: flex;
-    gap: 6px;
-    margin-top: 2px;
-    flex-wrap: wrap;
-}
-.status-badge {
-    font-size: 11px;
-    color: var(--text-secondary, #8696a0);
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    line-height: 1;
-}
-.status-badge.reaction-badge { color: #00a884; }
-/* Hide old ring divs — SVG handles rings now */
-.status-group-ring { display: none !important; }
-/* More menu */
-.more-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 11px 16px;
-    background: none;
-    border: none;
-    color: var(--text-primary, #e9edef);
-    font-size: 14px;
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.15s;
-}
-.more-menu-item:hover { background: var(--surface-alt, #2a3942); }
-.more-menu-item i { width: 18px; color: var(--text-secondary, #8696a0); font-size: 14px; }
 .status-group-count {
     position: absolute;
     bottom: -2px;
@@ -3644,8 +3596,80 @@ html, body, .app-container {
 .progress-segment.active .fill { width: 0%; }
 
 /* ── VIEWER FOOTER: owner vs friend ─────────────────────────────────────── */
+/* ── Viewer footer owner/friend mode ─────────────────────────────── */
+/* OWNER sees: seen count + edit/delete. Hides reactions + reply */
 .viewer-footer.owner-mode .reactions-container,
 .viewer-footer.owner-mode .reply-input-container { display: none !important; }
+
+/* FRIEND sees: reactions + reply. Hides owner controls */
+.viewer-footer.friend-mode .owner-controls { display: none !important; }
+.viewer-footer:not(.owner-mode):not(.friend-mode) .owner-controls { display: none !important; }
+
+/* Owner controls layout */
+.owner-controls {
+    display: flex;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 0;
+    width: 100%;
+}
+.viewer-seen-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #fff;
+    font-weight: 500;
+    cursor: pointer;
+}
+.owner-action-btns {
+    display: flex;
+    gap: 10px;
+}
+.owner-action-btns button {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: #fff;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 15px;
+    transition: background 0.15s;
+}
+.owner-action-btns button:hover { background: rgba(255,255,255,0.25); }
+.owner-action-btns button.delete-btn { color: #ef4444; }
+
+/* Report modal overlay */
+#reportModal {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#reportModal:not(.active) { display: none !important; }
+#reportModal .category-option {
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border-color, #2a3942);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-secondary, #8696a0);
+    background: transparent;
+}
+#reportModal .category-option.selected {
+    border-color: #ef4444;
+    color: #ef4444;
+    background: rgba(239,68,68,0.1);
+}
 .viewer-footer.owner-mode .owner-controls { display: flex !important; }
 .viewer-footer.friend-mode .owner-controls { display: none !important; }
 

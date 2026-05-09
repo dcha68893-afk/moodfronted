@@ -998,49 +998,35 @@
         
         <!-- ========== EXISTING: GROUP CHAT PANEL ========== -->
         <div class="group-chat-panel" id="groupChatPanel">
-            <div class="chat-header">
+            <!-- INTERNAL HEADER HIDDEN: parent globalHeader now handles back/call/video/more -->
+            <!-- Keeping IDs as hidden stubs so JS references don't break -->
+            <div class="chat-header" id="chatHeaderInternal" style="display:none!important;height:0;overflow:hidden;padding:0;border:none;">
                 <div class="chat-header-info" id="chatHeaderInfo">
                     <button class="chat-header-btn" id="chatBackBtn" title="Back"><i class="fas fa-arrow-left"></i></button>
-                    <div class="chat-header-avatar" id="chatAvatar">
-                        <i class="fas fa-users"></i>
-                    </div>
+                    <div class="chat-header-avatar" id="chatAvatar"><i class="fas fa-users"></i></div>
                     <div class="chat-header-details">
                         <div class="chat-header-title" id="chatTitle">Group Chat</div>
                         <div class="chat-header-subtitle" id="chatSubtitle">
                             <span id="chatMemberCount">0 members</span>
-                            <span>•</span>
-                            <span id="chatActive">Active now</span>
-                            <!-- EXISTING: Group Purpose & Pulse -->
-                            <span id="chatPurposeTag" class="group-purpose-tag" style="display: none;"></span>
-                            <span id="chatPulse" class="group-pulse" style="display: none;"></span>
+                            <span id="chatPurposeTag" class="group-purpose-tag" style="display:none;"></span>
+                            <span id="chatPulse" class="group-pulse" style="display:none;"></span>
                         </div>
-                        <!-- EXISTING: Group Mood & Posting Rules -->
-                        <div id="chatMoodRules" style="display: none; margin-top: 4px;">
+                        <div id="chatMoodRules" style="display:none;">
                             <span id="chatMood" class="group-mood-indicator"></span>
                             <span id="chatPostingRules" class="posting-rules-banner"></span>
                         </div>
                     </div>
                 </div>
                 <div class="chat-header-actions">
-                    <button class="chat-header-btn" id="chatCallBtn" title="Voice call"><i class="fas fa-phone"></i></button>
-                    <button class="chat-header-btn" id="chatVideoCallBtn" title="Video call"><i class="fas fa-video"></i></button>
-                    <button class="chat-header-btn" id="chatDropdownBtn" title="More chat options"><i class="fas fa-caret-down"></i></button>
+                    <button class="chat-header-btn" id="chatCallBtn"><i class="fas fa-phone"></i></button>
+                    <button class="chat-header-btn" id="chatVideoCallBtn"><i class="fas fa-video"></i></button>
+                    <button class="chat-header-btn" id="chatDropdownBtn"><i class="fas fa-caret-down"></i></button>
                     <div style="position:relative">
-                        <button class="chat-header-btn" id="chatMoreBtn" title="More options"><i class="fas fa-ellipsis-v"></i></button>
-                        <div id="chatMoreMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;min-width:200px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:9999;padding:6px 0">
-                            <button class="gcm-item" data-action="members"><i class="fas fa-users"></i> Members</button>
-                            <button class="gcm-item" data-action="settings"><i class="fas fa-cog"></i> Settings</button>
-                            <button class="gcm-item" data-action="theme"><i class="fas fa-palette"></i> Theme</button>
-                            <button class="gcm-item" data-action="purpose"><i class="fas fa-bullseye"></i> Purpose</button>
-                            <button class="gcm-item" data-action="info"><i class="fas fa-info-circle"></i> Group Info</button>
-                            <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
-                            <button class="gcm-item gcm-danger" data-action="delete"><i class="fas fa-trash"></i> Delete Group</button>
-                            <button class="gcm-item gcm-danger" data-action="leave"><i class="fas fa-sign-out-alt"></i> Leave Group</button>
-                        </div>
+                        <button class="chat-header-btn" id="chatMoreBtn"><i class="fas fa-ellipsis-v"></i></button>
+                        <div id="chatMoreMenu" style="display:none;"></div>
                     </div>
-                    <button class="chat-header-btn" id="closeChatBtn" title="Close"><i class="fas fa-times"></i></button>
+                    <button class="chat-header-btn" id="closeChatBtn"><i class="fas fa-times"></i></button>
                 </div>
-                <!-- Sub-panel: members / settings / theme / purpose / info -->
                 <div id="gcSubPanel" style="display:none;position:absolute;top:0;right:0;bottom:0;width:320px;max-width:100%;background:var(--bg-color);border-left:1px solid var(--border-color);z-index:700;flex-direction:column;box-shadow:-4px 0 16px rgba(0,0,0,.12)">
                     <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border-color);flex-shrink:0">
                         <button id="gcSubBack" class="chat-header-btn"><i class="fas fa-arrow-left"></i></button>
@@ -2234,8 +2220,12 @@ function buildEmojiPicker(){
     if(document.getElementById('gcp-emoji'))return;
     var div=document.createElement('div');div.id='gcp-emoji';
     var cats=Object.keys(EMOJIS);
-    div.innerHTML='<div style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap">'+
+    div.innerHTML=
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'+
+        '<div style="display:flex;gap:2px;flex-wrap:wrap">'+
         cats.map(function(c){return'<button class="gcp-ecat'+(c===_eCat?' on':'')+'" data-ec="'+c+'">'+c+'</button>';}).join('')+
+        '</div>'+
+        '<button id="gcp-emoji-close" style="background:none;border:none;color:var(--text-secondary,#888);cursor:pointer;padding:4px 8px;font-size:16px;border-radius:4px;flex-shrink:0;" title="Close emojis">&#x2715;</button>'+
         '</div><div id="gcp-emoji-grid"></div>';
     var cp=document.getElementById('groupChatPanel');
     (cp||document.body).appendChild(div);
@@ -2247,6 +2237,8 @@ function buildEmojiPicker(){
             this.classList.add('on');renderECat(_eCat);
         });
     });
+    var closeEm=div.querySelector('#gcp-emoji-close');
+    if(closeEm)closeEm.addEventListener('click',function(e){e.stopPropagation();div.classList.remove('open');});
 }
 function renderECat(cat){
     var g=document.getElementById('gcp-emoji-grid');if(!g)return;
@@ -2278,28 +2270,21 @@ function openPanel(g){
     if(!g)return;
     window.__gcCurGroup=g;
 
-    /* Header fields */
+    /* Stub hidden header fields for JS compatibility */
     var title=document.getElementById('chatTitle');
     var sub=document.getElementById('chatMemberCount');
-    var av=document.getElementById('chatAvatar');
     if(title)title.textContent=g.name||'Group Chat';
     if(sub)sub.textContent=((g.stats&&g.stats.totalMembers)||g.memberCount||0)+' members';
-    if(av){
-        var ii=(g.name||'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);
-        av.innerHTML='<span style="color:#fff;font-weight:700;font-size:15px">'+esc(ii)+'</span>';
-        av.style.cssText='width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;';
-        av.onclick=function(){openSub('info');};
-    }
 
-    /* REMOVE any previously injected dynamic back buttons to prevent duplicates */
-    document.querySelectorAll('.gc-mb-dyn').forEach(function(el){el.remove();});
-
-    /* chatBackBtn (already in HTML) is the ONLY back btn — wire it once */
-    var staticBack=document.getElementById('chatBackBtn');
-    if(staticBack&&!staticBack._gcWired){
-        staticBack._gcWired=true;
-        staticBack.addEventListener('click',closePanel);
-    }
+    /* NOTIFY PARENT to show group header in globalHeader */
+    try{
+        window.parent.postMessage({
+            type:'GROUP_PANEL_OPEN',
+            payload:{id:g.id,name:g.name,memberCount:(g.stats&&g.stats.totalMembers)||g.memberCount||0,stats:g.stats,description:g.description,isPublic:g.isPublic,purpose:g.purpose,createdAt:g.createdAt},
+            source:'group-module',
+            timestamp:Date.now()
+        },'*');
+    }catch(ex){}
 
     /* Show panel */
     var panel=document.getElementById('groupChatPanel');
@@ -2335,10 +2320,12 @@ function closePanel(){
     if(panel){panel.style.display='none';panel.classList.remove('active');}
     if(sp){sp.style.display='none';sp.classList.remove('open');}
     if(ep)ep.classList.remove('open');
-    /* Remove any dynamic back btns */
-    document.querySelectorAll('.gc-mb-dyn').forEach(function(el){el.remove();});
     if(mob()&&sb){sb.style.display='';sb.classList.remove('hidden');}
     window.__gcCurGroup=null;
+    /* Notify parent to restore normal header */
+    try{ window.parent.postMessage({type:'GROUP_PANEL_CLOSE',source:'group-module',timestamp:Date.now()},'*'); }catch(ex){}
+    /* Stop any recording */
+    if(typeof stopRec==='function')try{stopRec();}catch(ex){}
 }
 
 /* ── Messages load ───────────────────────────────────────────── */
@@ -2460,28 +2447,88 @@ function updateSendBtn(){
 
 /* ── Voice recording ─────────────────────────────────────────── */
 var _mr=null,_ac=[];
+var _recStream=null,_recSeconds=0,_recTimer=null;
+
+function _showRecBar(){
+    /* Try to find parent's recording bar first */
+    var bar=document.getElementById('gcRecordingBar');
+    if(!bar){
+        /* Fallback: inject inside group panel */
+        bar=document.createElement('div');
+        bar.id='gcRecordingBar';
+        bar.style.cssText='display:flex;align-items:center;gap:14px;padding:10px 18px;background:var(--bg-color,#1e293b);border-top:1px solid var(--border-color,#374151);flex-shrink:0;';
+        bar.innerHTML='<div class="gcr-dot" style="width:10px;height:10px;border-radius:50%;background:#ef4444;animation:gcr-pulse 1s infinite;flex-shrink:0;"></div>'+
+            '<span id="gcRecordingTimer" style="font-size:15px;font-weight:600;flex:1;font-variant-numeric:tabular-nums;">0:00</span>'+
+            '<button id="gcRecordCancel" style="background:none;border:none;cursor:pointer;padding:6px 12px;border-radius:20px;font-size:13px;font-weight:600;color:#9ca3af;"><i class="fas fa-times"></i> Cancel</button>'+
+            '<button id="gcRecordSend" style="background:#0084ff;color:#fff;border:none;cursor:pointer;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;"><i class="fas fa-paper-plane"></i> Send</button>';
+        var panel=document.getElementById('groupChatPanel');
+        var inputArea=panel&&panel.querySelector('.chat-input-container');
+        if(inputArea)panel.insertBefore(bar,inputArea);
+        else if(panel)panel.appendChild(bar);
+    }
+    bar.classList.add('show');bar.style.display='flex';
+    _recSeconds=0;
+    var timerEl=document.getElementById('gcRecordingTimer');
+    if(timerEl)timerEl.textContent='0:00';
+    _recTimer=setInterval(function(){
+        _recSeconds++;
+        var m=Math.floor(_recSeconds/60),s=_recSeconds%60;
+        if(timerEl)timerEl.textContent=m+':'+(s<10?'0':'')+s;
+    },1000);
+
+    var cancelBtn=document.getElementById('gcRecordCancel');
+    var sendBtn=document.getElementById('gcRecordSend');
+    if(cancelBtn&&!cancelBtn._gcw){cancelBtn._gcw=true;cancelBtn.addEventListener('click',function(){cancelRec();});}
+    if(sendBtn&&!sendBtn._gcw){sendBtn._gcw=true;sendBtn.addEventListener('click',function(){stopRec();});}
+
+    /* Also hide chat input while recording */
+    var inp=document.getElementById('chatInput');
+    if(inp)inp.style.display='none';
+}
+
+function _hideRecBar(){
+    var bar=document.getElementById('gcRecordingBar');
+    if(bar){bar.classList.remove('show');bar.style.display='none';}
+    if(_recTimer){clearInterval(_recTimer);_recTimer=null;}
+    var inp=document.getElementById('chatInput');
+    if(inp)inp.style.display='';
+    updateSendBtn();
+}
+
 function startRec(){
     if(_mr&&_mr.state==='recording')return;
     navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+        _recStream=stream;
         _ac=[];_mr=new MediaRecorder(stream);
         _mr.ondataavailable=function(e){if(e.data.size>0)_ac.push(e.data);};
         _mr.onstop=function(){
-            var blob=new Blob(_ac,{type:'audio/webm'});
-            uploadFile(new File([blob],'voice-'+Date.now()+'.webm',{type:'audio/webm'}),'audio');
+            _hideRecBar();
+            if(!_mr._cancelled){
+                var blob=new Blob(_ac,{type:'audio/webm'});
+                uploadFile(new File([blob],'voice-'+Date.now()+'.webm',{type:'audio/webm'}),'audio');
+            }
+            _mr._cancelled=false;
             stream.getTracks().forEach(function(t){t.stop();});
+            _recStream=null;
         };
         _mr.start();
-        var btn=document.getElementById('chatMicBtn');
-        if(btn){btn.style.color='#e53935';btn.title='Stop recording';}
-        ntf('Recording… tap mic to stop','info');
+        _showRecBar();
     }).catch(function(){ntf('Mic access denied','error');});
 }
+
 function stopRec(){
     if(_mr&&_mr.state==='recording'){
+        _mr._cancelled=false;
         _mr.stop();
-        var btn=document.getElementById('chatMicBtn');
-        if(btn){btn.style.color='';btn.title='Voice message';}
     }
+}
+
+function cancelRec(){
+    if(_mr&&_mr.state==='recording'){
+        _mr._cancelled=true;
+        _mr.stop();
+    }
+    _hideRecBar();
 }
 
 /* ── Three-dots menu ─────────────────────────────────────────── */
@@ -2599,10 +2646,45 @@ function doLeave(){
         .catch(function(){ntf('Failed','error');});
 }
 function doDelete(){
-    var g=window.__gcCurGroup;if(!g||!confirm('Permanently delete "'+g.name+'"?\nThis cannot be undone.'))return;
+    var g=window.__gcCurGroup;
+    if(!g||!confirm('Permanently delete "'+g.name+'"?\nThis cannot be undone.'))return;
     api('/groups/'+g.id,{method:'DELETE'})
-        .then(function(){closePanel();ntf('Group deleted');var gc2=gc();if(gc2&&typeof gc2.requestGroupList==='function')gc2.requestGroupList().catch(function(){});})
-        .catch(function(){ntf('Failed','error');});
+        .then(function(d){
+            if(d&&d.success===false)throw new Error(d.message||'Delete failed');
+            /* Clear from all known localStorage keys */
+            var gidStr=String(g.id);
+            var storageKeys=['knecta_groups_cache','groups_cache','group_list','myGroups','joinedGroups','groupsData','kynecta_groups_v8','GC_groups','GC_myGroups','GC_joinedGroups'];
+            storageKeys.forEach(function(k){
+                try{
+                    var raw=localStorage.getItem(k);if(!raw)return;
+                    var data=JSON.parse(raw);
+                    if(Array.isArray(data)){localStorage.setItem(k,JSON.stringify(data.filter(function(x){return x&&String(x.id)!==gidStr;})));return;}
+                    ['groups','myGroups','joinedGroups','data','items'].forEach(function(f){
+                        if(data[f]&&Array.isArray(data[f]))data[f]=data[f].filter(function(x){return x&&String(x.id)!==gidStr;});
+                    });
+                    localStorage.setItem(k,JSON.stringify(data));
+                }catch(ex){}
+            });
+            /* Clear from GroupCore in-memory state */
+            var gc2=gc();
+            if(gc2){
+                ['groups','myGroups','joinedGroups'].forEach(function(f){
+                    if(gc2[f]&&Array.isArray(gc2[f]))gc2[f]=gc2[f].filter(function(x){return x&&String(x.id)!==gidStr;});
+                });
+                if(typeof gc2.saveGroups==='function')try{gc2.saveGroups();}catch(ex){}
+            }
+            /* Remove from visible lists */
+            document.querySelectorAll('[data-group-id="'+gidStr+'"]').forEach(function(el){el.remove();});
+            closePanel();
+            ntf('Group deleted');
+            /* Notify parent shell */
+            try{window.parent.postMessage({type:'GROUP_DELETED',payload:{groupId:gidStr},source:'group-module',timestamp:Date.now()},'*');}catch(ex){}
+            /* Re-render lists */
+            if(typeof renderAllGroupsSecure==='function')try{renderAllGroupsSecure();}catch(ex){}
+            if(typeof renderMyGroupsSecure==='function')try{renderMyGroupsSecure();}catch(ex){}
+            if(typeof renderJoinedGroupsSecure==='function')try{renderJoinedGroupsSecure();}catch(ex){}
+        })
+        .catch(function(err){ntf((err&&err.message)||'Delete failed','error');});
 }
 
 /* ── Call buttons ────────────────────────────────────────────── */
@@ -2674,6 +2756,33 @@ function hookRT(){
         window.KynectaRealtime.on('group_message',function(d){g.emit&&g.emit('group:message-received',{groupId:d.groupId||d.group_id,message:d.message||d});});
         window.KynectaRealtime.on('group:call-started',function(d){g.emit&&g.emit('group:call-started',d);});
     }
+
+    /* Listen for parent header actions forwarded via postMessage */
+    window.addEventListener('message',function(ev){
+        var d=ev.data;if(!d||!d.source)return;
+        if(d.source!=='parent-hdr'&&d.source!=='group-module')return;
+        if(d.type==='PARENT_GROUP_CLOSE'){closePanel();return;}
+        if(d.type==='PARENT_GROUP_ACTION'){
+            var a=d.payload&&d.payload.action;
+            if(a==='leave')doLeave();
+            else if(a==='delete')doDelete();
+            else if(a)openSub(a);
+            return;
+        }
+        if(d.type==='PARENT_GROUP_CALL'){
+            var t=(d.payload&&d.payload.type)||'voice';
+            var grp=window.__gcCurGroup;
+            if(!grp)return;
+            try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(grp.id,grp.name,t,'group',grp.id,'group-header');return;}}catch(e){}
+            try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:grp.id,userName:grp.name,callType:t,isGroup:true,groupId:grp.id,returnTo:'group'}},'*');}catch(e){}
+            return;
+        }
+        if(d.type==='PARENT_REFRESH_GROUPS'){
+            var gc2=gc();
+            if(gc2&&typeof gc2.requestGroupList==='function')gc2.requestGroupList().catch(function(){});
+            return;
+        }
+    });
 }
 
 /* ── Group list click delegation ─────────────────────────────── */

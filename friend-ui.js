@@ -2926,19 +2926,19 @@ function updateAllUsersCache() {
     // Priority 1: FriendCore in-memory cache (fastest)
     if (window.FriendCore && window.FriendCore._allUsersCache && Array.isArray(window.FriendCore._allUsersCache) && window.FriendCore._allUsersCache.length > 0) {
         _allUsersCache = window.FriendCore._allUsersCache;
-        console.log(`[All Users] Cache updated from FriendCore: ${_allUsersCache.length} users`);
+        // console.log(`[All Users] Cache updated from FriendCore: ${_allUsersCache.length} users`);
         return _allUsersCache;
     }
     // Priority 2: window global (set by fetchAllUsersFromBackend / syncEngine)
     if (window._allUsersCache && Array.isArray(window._allUsersCache) && window._allUsersCache.length > 0) {
         _allUsersCache = window._allUsersCache;
-        console.log(`[All Users] Cache updated from window: ${_allUsersCache.length} users`);
+        // console.log(`[All Users] Cache updated from window: ${_allUsersCache.length} users`);
         return _allUsersCache;
     }
     // Priority 3: imported module-level allUsers array
     if (typeof allUsers !== 'undefined' && Array.isArray(allUsers) && allUsers.length > 0) {
         _allUsersCache = allUsers;
-        console.log(`[All Users] Cache updated from imported allUsers: ${_allUsersCache.length} users`);
+        // console.log(`[All Users] Cache updated from imported allUsers: ${_allUsersCache.length} users`);
         return _allUsersCache;
     }
     // Priority 4: localStorage quick-access
@@ -3021,7 +3021,7 @@ function renderAllUsersFromCache() {
     const searchTerm = searchInput ? searchInput.value : '';
     const filteredUsers = getFilteredUsers(searchTerm);
     
-    console.log(`[All Users] Rendering ${filteredUsers.length} users from cache (search: "${searchTerm}")`);
+    // console.log(`[All Users] Rendering ${filteredUsers.length} users from cache (search: "${searchTerm}")`);
     
     if (allUsersStatusElement) {
         if (searchTerm) {
@@ -3070,19 +3070,19 @@ async function refreshAllUsersFromAPI() {
     // Rate limiting: don't refresh if already refreshed within last 5 seconds
     const now = Date.now();
     if (window._lastUsersRefresh && now - window._lastUsersRefresh < 5000) {
-        console.log('[All Users] Refresh throttled - last refresh was < 5s ago');
+        // console.log('[All Users] Refresh throttled - last refresh was < 5s ago');
         return;
     }
     window._lastUsersRefresh = now;
     
-    console.log('[All Users] Refreshing from API...');
+    // console.log('[All Users] Refreshing from API...');
     try {
         if (typeof fetchAllUsersFromBackend === 'function') {
             await fetchAllUsersFromBackend();
         }
         updateAllUsersCache();
         renderAllUsersFromCache();
-        console.log('[All Users] API refresh complete');
+        // console.log('[All Users] API refresh complete');
     } catch (err) {
         console.error('[All Users] API refresh failed:', err);
     }

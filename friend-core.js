@@ -63,7 +63,7 @@ const EXPECTED_PARENT_ORIGIN = window.location.origin;
 // =============================================
 
 const POLLING_CONFIG = {
-    INCOMING_REQUESTS_INTERVAL: 15000,  // 15 seconds — fast enough for real-time feel
+    INCOMING_REQUESTS_INTERVAL: 60000,  // 60s — socket handles realtime; polling is fallback only
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 5000,
     ENABLED: true
@@ -1106,8 +1106,7 @@ function isAuthenticated() {
 }
 
 async function authorizedRequest(endpoint, options = {}) {
-    console.log(`[authorizedRequest] Called with endpoint: ${endpoint}`);
-    console.log(`[authorizedRequest] Auth state: authReady=${authReadyReceived}, sessionReady=${__session.ready}, token=${!!__session.token}`);
+    Logger.debug('authorizedRequest', `→ ${endpoint}`);
     
     if (!authReadyReceived) {
         console.warn(`[authorizedRequest] Auth not ready - queuing request for ${endpoint}`);
@@ -3221,6 +3220,9 @@ const FriendCacheManager = {
         // FIX: Always use String key — integer 5 and string "5" are different Map keys,
         // causing the same friend to appear twice in getAllFriends().
         const key = String(friend.id);
+        // FIX: Never add the current user as their own friend
+        const _selfId = __session?.user?.id || currentUser?.id;
+        if (_selfId && key === String(_selfId)) return false;
         this._cache.friends.set(key, { ...friend, id: key });
         this._timestamps.set(`friend_${key}`, Date.now());
         this._emit('friend:updated', friend);
@@ -3229,24 +3231,23 @@ const FriendCacheManager = {
     
     setFriends(friendsArray) {
         if (!Array.isArray(friendsArray)) return false;
+        const _selfId = __session?.user?.id || currentUser?.id;
         friendsArray.forEach(f => {
-            if (f && f.id) {
-                // FIX: Reject records with pending/blocked/removed/presence-only statuses.
-                // The messages module stores all participants with presence statuses
-                // ('online'/'offline') in shared localStorage keys — those must not be
-                // treated as accepted friends.
-                const st = f.status;
-                if (st === 'pending_sent' || st === 'pending_received' ||
-                    st === 'pending' || st === 'blocked' || st === 'removed' ||
-                    st === 'none') return; // skip — not an accepted friend
-                // Allow: 'accepted', undefined/null (legacy), or presence statuses
-                // only when the record has friend-module-specific fields
-                if ((st === 'online' || st === 'offline' || st === 'away' || st === 'busy') &&
-                    !(f.addedAt || f.friendId || f.localId || f.serverId)) return;
-                const key = String(f.id);
-                this._cache.friends.set(key, { ...f, id: key });
-                this._timestamps.set(`friend_${key}`, Date.now());
-            }
+            if (!f || !f.id) return;
+            // FIX: Never add the current user as their own friend
+            if (_selfId && String(f.id) === String(_selfId)) return;
+            // FIX: Reject records with pending/blocked/removed/presence-only statuses.
+            const st = f.status;
+            if (st === 'pending_sent' || st === 'pending_received' ||
+                st === 'pending' || st === 'blocked' || st === 'removed' ||
+                st === 'none') return;
+            // Allow: 'accepted', undefined/null (legacy), or presence statuses
+            // only when the record has friend-module-specific fields
+            if ((st === 'online' || st === 'offline' || st === 'away' || st === 'busy') &&
+                !(f.addedAt || f.friendId || f.localId || f.serverId)) return;
+            const key = String(f.id);
+            this._cache.friends.set(key, { ...f, id: key });
+            this._timestamps.set(`friend_${key}`, Date.now());
         });
         this._emit('friends:updated', this.getAllFriends());
         return true;
@@ -7450,8 +7451,11 @@ async function loadFriendsFromBackend() {
                 friendsData = [response.data];
             }
             
-            // Format friends data consistently
-            const validFriends = friendsData.filter(f => f && f.id).map(friend => ({
+            // Format friends data consistently, excluding self
+            const _selfId = __session?.user?.id || currentUser?.id;
+            const validFriends = friendsData
+                .filter(f => f && f.id && (!_selfId || String(f.id) !== String(_selfId)))
+                .map(friend => ({
                 id: friend.id,
                 displayName: friend.displayName || friend.username || 'User',
                 username: friend.username || '',
@@ -7470,8 +7474,7 @@ async function loadFriendsFromBackend() {
                 SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, validFriends);
                 // Keep ALL key variants in sync so every module finds fresh data
                 try { localStorage.setItem('kynecta_friends_cache_v8', JSON.stringify(validFriends)); } catch(_) {}
-                console.log('[LOCAL SAVE] friends_list', validFriends.length, 'items');
-                console.log(`✅ loadFriendsFromBackend: Loaded ${validFriends.length} friends`);
+                Logger.debug('loadFriendsFromBackend', `Loaded ${validFriends.length} friends`);
             } else {
                 // SAFETY: Never wipe a populated cache with an empty server response.
                 // This prevents the "0 friends" flash caused by race conditions or
@@ -8048,7 +8051,6 @@ async function fetchAllUsersFromBackend() {
         FriendCacheManager.setUsers(filteredUsers);
         if (Array.isArray(filteredUsers) && filteredUsers.length > 0) {
             localStorage.setItem('discover_users', JSON.stringify(filteredUsers));
-            console.log('[LOCAL SAVE]', 'discover_users');
         }
 
         // ✅ FIX: Persist to IndexedDB 'users' store — primary offline source for discovery
@@ -9787,9 +9789,9 @@ async function initialize() {
                 startParallelDataLoading();
                 
                 setTimeout(() => {
-                    console.log('[Init] Loading all users for discovery...');
+                    Logger.debug('Init', 'Loading all users for discovery');
                     fetchAllUsersFromBackend().then(result => {
-                        console.log(`[Init] All users loaded: ${result.count} discoverable users`);
+                        Logger.debug('Init', `All users loaded: ${result.count}`);
                         if (result.users && result.users.length > 0) {
                             window.allUsersList = result.users;
                             if (window.FriendCore) {

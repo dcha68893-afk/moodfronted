@@ -683,23 +683,18 @@ function showIdleScreen() {
     }
 
     // ── Show idle screen ──
-    // ✅ FIX: Only show callContainer if we are NOT navigating away (i.e. the parent shell
-    // is still showing the calls iframe). After a call ends, SWITCH_MODULE hides this iframe,
-    // so we must NOT re-show callContainer — it causes a blank dark flash.
-    // We check: if CALL_ENDED was just fired (state already idle), keep callContainer hidden.
-    const _isPostCall = !UIState.callActive && UIState.callState === 'idle';
-    if (callContainer && !_isPostCall) {
+    // ✅ FIX v3: ALWAYS show callContainer so repeat calls work.
+    // The parent controls iframe visibility; we just reset internal screens.
+    if (callContainer) {
         callContainer.classList.add('active');
-        callContainer.style.display = 'flex';
-    } else if (callContainer) {
-        // Post-call: keep hidden, parent has navigated away
-        callContainer.classList.remove('active');
-        callContainer.style.setProperty('display', 'none', 'important');
+        callContainer.classList.add('idle-active');
+        callContainer.style.removeProperty('display');
     }
     if (idleScreen) {
         idleScreen.classList.add('active');
         idleScreen.style.setProperty('display', 'block', 'important');
     }
+
 
     // ── Reset state ──
     UIState.callActive      = false;
@@ -5733,12 +5728,13 @@ handleContactItemClick: function(e) {
 }
                     case 'CALL_INCOMING': {
                         const _incomingPayload = data.payload || {};
-                        // Store so late-arriving callCore listeners can still pick it up
                         window.__pendingIncomingCallData = _incomingPayload;
+                        // ✅ FIX: Always trigger master-fix handler first (always available)
+                        if (typeof window._startIncomingRingtone === 'function') window._startIncomingRingtone();
                         if (UIEventHandlers.handleIncomingCall) {
                             UIEventHandlers.handleIncomingCall(_incomingPayload);
                         } else {
-                            // callCore or UI not fully ready — retry up to 3x with 300ms gaps
+                            // Retry up to 10x with 200ms gaps; MasterFix already handles UI
                             let _retries = 0;
                             const _retryIncoming = setInterval(() => {
                                 _retries++;
@@ -5746,11 +5742,11 @@ handleContactItemClick: function(e) {
                                     clearInterval(_retryIncoming);
                                     UIEventHandlers.handleIncomingCall(_incomingPayload);
                                     window.__pendingIncomingCallData = null;
-                                } else if (_retries >= 3) {
+                                } else if (_retries >= 10) {
                                     clearInterval(_retryIncoming);
-                                    console.warn('[Calls UI] handleIncomingCall still not ready after retries');
+                                    console.log('[Calls UI] CALL_INCOMING: MasterFix already handled');
                                 }
-                            }, 300);
+                            }, 200);
                         }
                         break;
                     }
@@ -10543,63 +10539,36 @@ if (detectExistingCore()) {
 // During CALLING/IN-CALL: allow it — but we use the fullscreen #callOverlay instead,
 // so #callContainer doesn't actually need to be visible during calls either.
 // The key fix: do NOT suppress it with a MutationObserver that blocks the calling screen.
+// ✅ FIX v3: Simplified callContainer guard — only hides on page load, not during calls
 (function installCallContainerGuard() {
     'use strict';
 
-    function suppressCallContainer() {
+    // Only run once on page load to hide callContainer initially
+    // showIdleScreen() will re-show it. The MutationObserver is REMOVED
+    // because it was killing repeat calls by hiding callContainer too aggressively.
+    function _initHide() {
         var cc = document.getElementById('callContainer');
         if (!cc) return;
-        // Only hide if no call is currently active
-        if (!window.UIState || !window.UIState.callActive) {
+        // Only hide if no call in progress AND no calling/in-call screen is active
+        var callingActive = document.getElementById('callingScreen');
+        var inCallActive  = document.getElementById('inCallScreen');
+        var callInProgress = (callingActive && callingActive.classList.contains('active'))
+                          || (inCallActive  && inCallActive.classList.contains('active'))
+                          || (window.UIState && window.UIState.callActive)
+                          || window.__callActive;
+        if (!callInProgress) {
             cc.classList.remove('active');
             cc.style.setProperty('display', 'none', 'important');
         }
     }
 
     if (document.readyState !== 'loading') {
-        suppressCallContainer();
+        _initHide();
     } else {
-        document.addEventListener('DOMContentLoaded', suppressCallContainer);
+        document.addEventListener('DOMContentLoaded', _initHide);
     }
 
-    // Lightweight observer: only suppress in idle state, allow during active calls
-    var observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(m) {
-            if (m.type === 'attributes' && m.target.id === 'callContainer') {
-                // Allow visibility changes when a call is active
-                if (window.UIState && window.UIState.callActive) return;
-                if (window.__callActive) return;
-                // In idle: keep hidden
-                if (m.attributeName === 'class' && m.target.classList.contains('active')) {
-                    m.target.classList.remove('active');
-                    m.target.style.setProperty('display', 'none', 'important');
-                }
-                if (m.attributeName === 'style') {
-                    var d = m.target.style.display;
-                    if (d && d !== 'none') {
-                        m.target.style.setProperty('display', 'none', 'important');
-                    }
-                }
-            }
-        });
-    });
-
-    function startObserver() {
-        var cc = document.getElementById('callContainer');
-        if (cc) {
-            observer.observe(cc, { attributes: true, attributeFilter: ['class', 'style'] });
-        } else {
-            setTimeout(startObserver, 300);
-        }
-    }
-
-    if (document.readyState !== 'loading') {
-        startObserver();
-    } else {
-        document.addEventListener('DOMContentLoaded', startObserver);
-    }
-
-    console.log('[calls-ui] callContainer dark-screen guard installed.');
+    console.log('[calls-ui] callContainer dark-screen guard installed (v3 — no observer).');
 })();
 
 // ── CALLS_IFRAME_READY handshake ─────────────────────────────────────────────

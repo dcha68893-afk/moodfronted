@@ -1991,7 +1991,7 @@
             if (data.type === 'OPEN_CHAT_WITH_USER') {
                 console.log('[Message HTML] Opening chat with user:', data.payload);
                 
-                const { userId, userName, recipientId, recipientName } = data.payload || {};
+                const { userId, userName, recipientId, recipientName, timestamp: _reqTs } = data.payload || {};
                 const targetUserId = userId || recipientId;
                 const targetUserName = userName || recipientName || 'User';
                 
@@ -2000,8 +2000,24 @@
                     return;
                 }
 
+                // DEDUP: ignore duplicate OPEN_CHAT_WITH_USER for same user within 2 seconds
+                const _dedupKey = `open_chat_${targetUserId}`;
+                const _nowTs = Date.now();
+                if (window.__openChatDedup && window.__openChatDedup[_dedupKey]) {
+                    const _lastTs = window.__openChatDedup[_dedupKey];
+                    if ((_nowTs - _lastTs) < 2000) {
+                        // Already opened this chat recently — just ACK and return
+                        try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nowTs }, '*'); } catch(_) {}
+                        return;
+                    }
+                }
+                if (!window.__openChatDedup) window.__openChatDedup = {};
+                window.__openChatDedup[_dedupKey] = _nowTs;
+                // Clear dedup after 2s
+                setTimeout(() => { if (window.__openChatDedup) delete window.__openChatDedup[_dedupKey]; }, 2000);
+
                 // ACK parent so retry loop stops
-                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: Date.now() }, '*'); } catch(_) {}
+                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nowTs }, '*'); } catch(_) {}
                 // Clear stale sessionStorage so old pending_chat doesn't reopen on next navigation
                 sessionStorage.removeItem('open_chat_on_load');
                 sessionStorage.removeItem('pending_chat');
@@ -2014,7 +2030,6 @@
                 };
 
                 // FIX: getState() returns {state:'ACTIVE',...} not a bare string.
-                // Old check fired 15× causing panel flicker.
                 let _fired = false;
                 const tryOpen = (attempts) => {
                     if (_fired) return;
