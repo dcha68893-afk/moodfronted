@@ -5860,7 +5860,6 @@
                 console.log('[CallHandler] Call ended, returning to chat');
 
                 
-
                 const returnUserId = window.__messageChatReturnUserId;
 
                 const returnChatId = window.__messageChatReturnId;
@@ -9722,7 +9721,10 @@ Type: ${message.type || 'text'}`;
                 const chats = core?.getConversations?.() || [];
 
                 UIRenderer.renderMultiSendChats(chats);
-                this.loadMultiSendHistory();
+                // FIX: loadMultiSendHistory lives on window.messagesUI, not on `this`
+                if (window.messagesUI && typeof window.messagesUI.loadMultiSendHistory === 'function') {
+                    window.messagesUI.loadMultiSendHistory();
+                }
 
                 UIFailsafe.safeAddClass(panel, 'active');
 
@@ -12641,9 +12643,8 @@ Type: ${message.type || 'text'}`;
                     if (!resp.ok || result.success === false) {
                         throw new Error(result.message || result.error || 'Failed to send');
                     }
-                    // API returns { success, data: { batchId, results, successCount, totalTargeted } }
-                    const sentCount = result.data?.successCount || (Array.isArray(result.data?.results) ? result.data.results.filter(r=>r.success).length : selectedChats.size);
-                    UIRenderer.showNotification('✓ Sent to ' + sentCount + ' chat' + (sentCount !== 1 ? 's' : ''));
+                    const sentCount = Array.isArray(result.data?.messages) ? result.data.messages.length : selectedChats.size;
+                    UIRenderer.showNotification('Sent to ' + sentCount + ' chats');
                     window.messagesUI?.loadMultiSendHistory?.();
                     if (input) input.value = '';
                     if (core?.multiSendSelectedChats) core.multiSendSelectedChats.clear();

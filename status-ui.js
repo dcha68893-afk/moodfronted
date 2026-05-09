@@ -3217,6 +3217,15 @@ function _loadSlot(index, isOwner, group) {
     const status = group[index];
     currentViewerStatus = status;
 
+    // Expose current status ID to window (for viewers panel + hold-reveal)
+    window.__currentViewingStatusId = status.id;
+    window.__activeStatusId         = status.id;
+    if (typeof window.__setCurrentViewingStatusId === 'function') {
+        window.__setCurrentViewingStatusId(status.id);
+    }
+    // Dispatch event so inline JS can react
+    document.dispatchEvent(new CustomEvent('statusSlotLoaded', { detail: { statusId: status.id, isOwner } }));
+
     // Load content
     loadViewerContent(status);
 
@@ -3704,6 +3713,10 @@ function closeViewer() {
     const deleteBtn = document.getElementById('deleteStatusBtn');
     if (editBtn)   { editBtn._bound = false; editBtn.onclick = null; }
     if (deleteBtn) { deleteBtn._bound = false; deleteBtn.onclick = null; }
+    // Clear current status ID + dispatch close event
+    window.__currentViewingStatusId = null;
+    window.__activeStatusId = null;
+    try { document.dispatchEvent(new CustomEvent('statusViewerClosed')); } catch(_) {}
 }
 
 // =============================================
@@ -4380,6 +4393,10 @@ function renderStatusesListUI(container, statusesList) {
     container.innerHTML = '';
     container.appendChild(fragment);
     setTimeout(() => bindGroupedStatusHandlers(container), 50);
+
+    // Show "Recent updates" label when there are friend statuses
+    const recentLabel = document.getElementById('recentUpdatesLabel');
+    if (recentLabel) recentLabel.style.display = fragment.childElementCount > 0 ? '' : 'none';
 }
 
 // Create one list item that represents all statuses from one user

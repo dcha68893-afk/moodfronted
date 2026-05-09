@@ -745,7 +745,9 @@
 
         /* Hide with smooth slide animation on chat/call screens */
         body.chat-panel-active .mobile-nav-bar,
-        body.call-screen-active .mobile-nav-bar {
+        body.call-screen-active .mobile-nav-bar,
+        body.group-panel-active .mobile-nav-bar,
+        body.status-panel-active .mobile-nav-bar {
             transform: translateY(100%) !important;
             opacity: 0 !important;
             pointer-events: none !important;
@@ -757,7 +759,9 @@
                 display: flex !important;
             }
             body.chat-panel-active .mobile-nav-bar,
-            body.call-screen-active .mobile-nav-bar {
+            body.call-screen-active .mobile-nav-bar,
+            body.group-panel-active .mobile-nav-bar,
+            body.status-panel-active .mobile-nav-bar {
                 display: flex !important;
                 transform: translateY(100%) !important;
                 opacity: 0 !important;
@@ -1030,7 +1034,9 @@
         }
 
         body.chat-panel-active .mobile-back-btn,
-        body.call-screen-active .mobile-back-btn {
+        body.call-screen-active .mobile-back-btn,
+        body.group-panel-active .mobile-back-btn,
+        body.status-panel-active .mobile-back-btn {
             display: flex !important;
         }
 
@@ -1045,7 +1051,9 @@
                 /* Leave room for the 76px bottom nav + safe area */
                 bottom: 76px;
             }
-            body.chat-panel-active .iframe-container {
+            body.chat-panel-active .iframe-container,
+            body.group-panel-active .iframe-container,
+            body.status-panel-active .iframe-container {
                 bottom: 0;
             }
 
@@ -1071,7 +1079,9 @@
                 padding: 0 14px;
             }
             body.chat-panel-active #globalHeader,
-            body.call-screen-active #globalHeader {
+            body.call-screen-active #globalHeader,
+            body.group-panel-active #globalHeader,
+            body.status-panel-active #globalHeader {
                 opacity: 0 !important;
                 pointer-events: none !important;
                 visibility: hidden !important;
@@ -1137,6 +1147,53 @@
         .rounded-full { border-radius: 9999px; }
         .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
     </style>
+    <style id="group-hdr-css">
+        /* ── Group chat context in globalHeader ── */
+        #headerGroupCtx { display: none; align-items: center; flex: 1; gap: 8px; min-width: 0; overflow: hidden; }
+        #globalHeader.group-chat-active .header-context { display: none !important; }
+        #globalHeader.group-chat-active #headerActions    { display: none !important; }
+        #globalHeader.group-chat-active #profileTrigger   { display: none !important; }
+        #globalHeader.group-chat-active #headerGroupCtx   { display: flex !important; }
+        .hgm-btn {
+            background: none; border: none;
+            color: var(--text-primary, #e5e7eb);
+            cursor: pointer; padding: 7px; border-radius: 50%;
+            font-size: 16px; display: flex; align-items: center;
+            justify-content: center; transition: background .15s; flex-shrink: 0;
+        }
+        .hgm-btn:hover { background: rgba(255,255,255,.08); }
+        .hgm-item {
+            display: flex; align-items: center; gap: 10px;
+            width: 100%; padding: 10px 14px;
+            background: none; border: none; font-size: 13px;
+            color: var(--text-primary, #e5e7eb);
+            cursor: pointer; text-align: left; transition: background .15s;
+        }
+        .hgm-item:hover { background: rgba(255,255,255,.06); }
+        .hgm-item i { width: 14px; text-align: center; }
+        .hgm-danger { color: #ef4444 !important; }
+        /* ── Mic recording bar ── */
+        #gcRecordingBar {
+            display: none; position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: var(--surface-color, #1e293b);
+            border-top: 2px solid #ef4444;
+            padding: 12px 20px;
+            align-items: center; gap: 14px;
+            z-index: 9999; box-shadow: 0 -4px 16px rgba(0,0,0,.35);
+        }
+        #gcRecordingBar.show { display: flex !important; }
+        .gcr-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: #ef4444; flex-shrink: 0;
+            animation: gcrPulse 1s infinite;
+        }
+        @keyframes gcrPulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+        #gcRecordTimer { font-size:16px; font-weight:700; flex:1; color:var(--text-primary,#e5e7eb); font-variant-numeric:tabular-nums; }
+        .gcr-action { border: none; cursor: pointer; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+        #gcRecordCancel { background: rgba(255,255,255,.1); color: var(--text-secondary,#9ca3af); }
+        #gcRecordSend   { background: #0084ff; color: #fff; }
+    </style>
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
     <!-- ✅ GLOBAL DARK THEME SYSTEM -->
     <link rel="stylesheet" href="theme.colors.css">
@@ -1197,223 +1254,6 @@
             background: rgba(30,41,59,0.8) !important;
             border-color: rgba(139,92,246,0.4) !important;
         }
-
-        /* ============================================================
-           GROUP CONTEXT HEADER — replaces default icon+title when a
-           group chat panel is open. Sits inside #globalHeader as an
-           absolutely-positioned overlay so we touch zero existing layout.
-           ============================================================ */
-        #headerGroupCtx {
-            display: none;
-            position: absolute;
-            inset: 0;
-            align-items: center;
-            padding: 0 12px 0 8px;
-            gap: 10px;
-            background: inherit;
-            z-index: 2;
-            overflow: hidden;
-        }
-        body.group-panel-active #headerGroupCtx {
-            display: flex;
-        }
-        /* Also hide the default context + actions while group panel is active */
-        body.group-panel-active .header-context,
-        body.group-panel-active #headerActions,
-        body.group-panel-active #profileTrigger {
-            visibility: hidden;
-            pointer-events: none;
-        }
-
-        /* Back arrow */
-        #gcBackBtn {
-            width: 36px; height: 36px;
-            border-radius: 10px;
-            border: none;
-            background: rgba(255,255,255,0.08);
-            color: #e5e7eb;
-            font-size: 16px;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer;
-            flex-shrink: 0;
-            transition: background 0.15s;
-        }
-        #gcBackBtn:hover { background: rgba(255,255,255,0.16); }
-
-        /* Group avatar initials bubble */
-        #gcAvatar {
-            width: 36px; height: 36px;
-            border-radius: 11px;
-            background: linear-gradient(135deg, #7c3aed, #2563eb);
-            color: #fff;
-            font-size: 14px;
-            font-weight: 700;
-            display: flex; align-items: center; justify-content: center;
-            flex-shrink: 0;
-            overflow: hidden;
-            letter-spacing: 0.03em;
-        }
-        #gcAvatar img {
-            width: 100%; height: 100%; object-fit: cover;
-            border-radius: inherit;
-        }
-
-        /* Name + member count copy */
-        #gcInfo {
-            flex: 1 1 0;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-        }
-        #gcName {
-            font-size: 14px;
-            font-weight: 700;
-            color: #f1f5f9;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.15;
-        }
-        #gcMeta {
-            font-size: 11px;
-            color: #94a3b8;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        /* Right-side action buttons */
-        #gcActions {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-shrink: 0;
-        }
-        .gc-btn {
-            width: 34px; height: 34px;
-            border-radius: 10px;
-            border: none;
-            background: rgba(255,255,255,0.07);
-            color: #cbd5e1;
-            font-size: 15px;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-            position: relative;
-        }
-        .gc-btn:hover { background: rgba(255,255,255,0.14); color: #f1f5f9; }
-        .gc-btn:active { transform: scale(0.91); }
-
-        /* Three-dots dropdown */
-        #gcMoreMenu {
-            position: absolute;
-            top: calc(100% + 6px);
-            right: 0;
-            min-width: 180px;
-            background: #1e2535;
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 14px;
-            padding: 6px;
-            box-shadow: 0 12px 36px rgba(0,0,0,0.5);
-            z-index: 9999;
-            display: none;
-            animation: gcMenuIn 0.18s cubic-bezier(0.34,1.3,0.64,1) both;
-        }
-        #gcMoreMenu.open { display: block; }
-        @keyframes gcMenuIn {
-            from { opacity: 0; transform: translateY(-6px) scale(0.96); }
-            to   { opacity: 1; transform: translateY(0)  scale(1); }
-        }
-        .gc-menu-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 12px;
-            border-radius: 9px;
-            color: #e2e8f0;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.13s;
-            border: none;
-            background: none;
-            width: 100%;
-            text-align: left;
-        }
-        .gc-menu-item:hover { background: rgba(255,255,255,0.09); }
-        .gc-menu-item i { width: 16px; text-align: center; color: #94a3b8; }
-        .gc-menu-item.danger { color: #f87171; }
-        .gc-menu-item.danger i { color: #f87171; }
-        .gc-menu-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 4px 6px; }
-
-        /* ============================================================
-           MIC RECORDING BAR — shows at bottom when recording audio
-           ============================================================ */
-        #gcRecordingBar {
-            display: none;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 64px;
-            background: linear-gradient(180deg, rgba(15,23,42,0.97) 0%, rgba(10,13,22,0.99) 100%);
-            border-top: 1px solid rgba(255,255,255,0.07);
-            backdrop-filter: blur(16px);
-            z-index: 1100;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 16px;
-            gap: 12px;
-            box-shadow: 0 -8px 32px rgba(0,0,0,0.4);
-        }
-        #gcRecordingBar.active { display: flex; }
-        /* Red pulsing dot */
-        #gcRecDot {
-            width: 10px; height: 10px;
-            border-radius: 50%;
-            background: #ef4444;
-            flex-shrink: 0;
-            animation: recPulse 1.1s ease-in-out infinite;
-        }
-        @keyframes recPulse {
-            0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
-            50%       { opacity: 0.7; transform: scale(1.25); box-shadow: 0 0 0 6px rgba(239,68,68,0); }
-        }
-        /* Timer */
-        #gcRecTimer {
-            font-size: 15px;
-            font-weight: 700;
-            color: #f1f5f9;
-            font-variant-numeric: tabular-nums;
-            letter-spacing: 0.04em;
-            flex: 1 1 auto;
-        }
-        /* Cancel / Send buttons */
-        #gcRecCancel {
-            padding: 7px 16px;
-            border-radius: 20px;
-            border: 1px solid rgba(255,255,255,0.15);
-            background: rgba(255,255,255,0.07);
-            color: #94a3b8;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        #gcRecCancel:hover { background: rgba(255,255,255,0.14); color: #e2e8f0; }
-        #gcRecSend {
-            width: 40px; height: 40px;
-            border-radius: 50%;
-            border: none;
-            background: linear-gradient(135deg, #2563eb, #1d4ed8);
-            color: #fff;
-            font-size: 16px;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer;
-            box-shadow: 0 4px 14px rgba(37,99,235,0.5);
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-        #gcRecSend:hover { transform: scale(1.08); box-shadow: 0 6px 20px rgba(37,99,235,0.7); }
 
         .profile-trigger:hover {
             background: rgba(30,41,59,0.95) !important;
@@ -1499,6 +1339,8 @@
 
     <!-- Global Header with Profile & Cover -->
     <div id="globalHeader">
+
+        <!-- DEFAULT: icon + page title (hidden when group chat is open) -->
         <div class="header-context">
             <div id="headerModuleBadge" class="header-module-badge">
                 <i id="headerModuleIcon" class="fas fa-comments"></i>
@@ -1508,62 +1350,42 @@
                 <div id="headerModuleSubtitle" class="header-module-subtitle">Your recent chats load from local cache first.</div>
             </div>
         </div>
+
+        <!-- GROUP CHAT CONTEXT: replaces default when a group panel is open -->
+        <div id="headerGroupCtx">
+            <!-- Back -->
+            <button class="hgm-btn" id="hdrGroupBack" title="Back to groups">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <!-- Avatar initials -->
+            <div id="hdrGroupAvatar" style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:13px;color:#fff;cursor:pointer;user-select:none;">G</div>
+            <!-- Name + meta -->
+            <div style="flex:1;min-width:0;">
+                <div id="hdrGroupName" style="font-weight:600;font-size:14px;color:var(--text-primary,#e5e7eb);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Group</div>
+                <div id="hdrGroupMeta" style="font-size:11px;color:var(--text-secondary,#9ca3af);line-height:1.2;">0 members</div>
+            </div>
+            <!-- Actions -->
+            <button class="hgm-btn" id="hdrGroupCall"  title="Voice call"><i class="fas fa-phone"></i></button>
+            <button class="hgm-btn" id="hdrGroupVideo" title="Video call"><i class="fas fa-video"></i></button>
+            <div style="position:relative;">
+                <button class="hgm-btn" id="hdrGroupMore" title="More options"><i class="fas fa-ellipsis-v"></i></button>
+                <div id="hdrGroupMenu" style="display:none;position:absolute;top:40px;right:0;min-width:175px;background:var(--surface-color,#1e293b);border:1px solid var(--border-color,#374151);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;overflow:hidden;padding:4px 0;">
+                    <button class="hgm-item" data-hga="members"><i class="fas fa-users"></i> Members</button>
+                    <button class="hgm-item" data-hga="settings"><i class="fas fa-cog"></i> Settings</button>
+                    <button class="hgm-item" data-hga="theme"><i class="fas fa-palette"></i> Theme</button>
+                    <button class="hgm-item" data-hga="purpose"><i class="fas fa-tag"></i> Purpose</button>
+                    <button class="hgm-item" data-hga="info"><i class="fas fa-info-circle"></i> Group Info</button>
+                    <hr style="border:none;border-top:1px solid var(--border-color,#374151);margin:4px 0;">
+                    <button class="hgm-item" data-hga="leave" style="color:#f59e0b;"><i class="fas fa-sign-out-alt"></i> Leave Group</button>
+                    <button class="hgm-item hgm-danger" data-hga="delete"><i class="fas fa-trash"></i> Delete Group</button>
+                </div>
+            </div>
+        </div>
+
         <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
         <div id="profileTrigger" class="profile-trigger" title="Profile & Settings" aria-label="Profile">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
         </div>
-
-        <!-- GROUP CONTEXT OVERLAY — visible only when body.group-panel-active -->
-        <div id="headerGroupCtx" role="banner" aria-label="Group header">
-            <!-- Back arrow -->
-            <button id="gcBackBtn" aria-label="Back to groups">
-                <i class="fas fa-arrow-left"></i>
-            </button>
-            <!-- Group avatar (initials or image) -->
-            <div id="gcAvatar" aria-hidden="true">GR</div>
-            <!-- Name + member count -->
-            <div id="gcInfo">
-                <div id="gcName">Group</div>
-                <div id="gcMeta">0 members</div>
-            </div>
-            <!-- Action buttons -->
-            <div id="gcActions">
-                <button class="gc-btn" id="gcCallBtn" title="Voice call" aria-label="Voice call">
-                    <i class="fas fa-phone"></i>
-                </button>
-                <button class="gc-btn" id="gcVideoBtn" title="Video call" aria-label="Video call">
-                    <i class="fas fa-video"></i>
-                </button>
-                <!-- Three-dots -->
-                <div style="position:relative;">
-                    <button class="gc-btn" id="gcMoreBtn" title="More options" aria-label="More options" aria-haspopup="true" aria-expanded="false">
-                        <i class="fas fa-ellipsis-v"></i>
-                    </button>
-                    <div id="gcMoreMenu" role="menu">
-                        <button class="gc-menu-item" data-gc-action="members" role="menuitem">
-                            <i class="fas fa-users"></i> Members
-                        </button>
-                        <button class="gc-menu-item" data-gc-action="settings" role="menuitem">
-                            <i class="fas fa-cog"></i> Settings
-                        </button>
-                        <button class="gc-menu-item" data-gc-action="theme" role="menuitem">
-                            <i class="fas fa-palette"></i> Theme
-                        </button>
-                        <button class="gc-menu-item" data-gc-action="purpose" role="menuitem">
-                            <i class="fas fa-bullseye"></i> Purpose
-                        </button>
-                        <div class="gc-menu-divider"></div>
-                        <button class="gc-menu-item danger" data-gc-action="leave" role="menuitem">
-                            <i class="fas fa-sign-out-alt"></i> Leave group
-                        </button>
-                        <button class="gc-menu-item danger" data-gc-action="delete" role="menuitem">
-                            <i class="fas fa-trash"></i> Delete group
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- END GROUP CONTEXT OVERLAY -->
     </div>
 
     <!-- Hidden username element for JS compatibility -->
@@ -1697,16 +1519,6 @@
     <button id="mobileBackBtn" class="mobile-back-btn" style="display:none!important;" aria-hidden="true">
         <i class="fas fa-arrow-left"></i>
     </button>
-
-    <!-- MIC RECORDING BAR — shown when user records a voice message in a group -->
-    <div id="gcRecordingBar" role="status" aria-live="polite" aria-label="Recording audio">
-        <div id="gcRecDot" aria-hidden="true"></div>
-        <span id="gcRecTimer">0:00</span>
-        <button id="gcRecCancel" type="button">Cancel</button>
-        <button id="gcRecSend" type="button" title="Send recording" aria-label="Send recording">
-            <i class="fas fa-paper-plane"></i>
-        </button>
-    </div>
 
     <!-- IFrame Containers for each module -->
     <div id="messagesContent" class="iframe-container">
@@ -2702,6 +2514,28 @@
                 return true;
             }
 
+            if (document.body.classList.contains('group-panel-active')) {
+                document.body.classList.remove('group-panel-active');
+                // Notify group iframe to go back to list
+                const groupIframe = document.getElementById('groupIframe');
+                if (groupIframe && groupIframe.contentWindow) {
+                    groupIframe.contentWindow.postMessage({ type: 'GO_BACK_TO_LIST' }, '*');
+                }
+                logProcessStatus('back-navigation', true, 'returned-group-list');
+                return true;
+            }
+
+            if (document.body.classList.contains('status-panel-active')) {
+                document.body.classList.remove('status-panel-active');
+                // Notify status iframe to go back to list
+                const statusIframe = document.getElementById('statusIframe');
+                if (statusIframe && statusIframe.contentWindow) {
+                    statusIframe.contentWindow.postMessage({ type: 'GO_BACK_TO_LIST' }, '*');
+                }
+                logProcessStatus('back-navigation', true, 'returned-status-list');
+                return true;
+            }
+
             if (document.body.classList.contains('call-screen-active') || window.__activeCallInProgress) {
                 notifyCallsCloseScreen();
                 document.body.classList.remove('call-screen-active');
@@ -2777,6 +2611,10 @@
             if (page === 'calls' && window.__activeCallInProgress) {
                 document.body.classList.add('call-screen-active');
             }
+
+            // FIX: Clean up group/status panel classes when navigating away from those modules
+            if (page !== 'group')  document.body.classList.remove('group-panel-active');
+            if (page !== 'status') document.body.classList.remove('status-panel-active');
             
             // chat-panel-active is managed by message iframe events
             if (page !== 'messages') {
@@ -2921,7 +2759,45 @@
                         }
                     }
                 }
-                
+
+                // ── GROUP PANEL: hide nav when group chat/detail opens; show when back ──
+                if (data.type === 'GROUP_PANEL_OPENED' || data.type === 'GROUP_CHAT_OPENED' || data.type === 'GROUP_DETAIL_OPENED' || data.type === 'GROUP_PANEL_OPEN') {
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.add('group-panel-active');
+                        syncBrowserHistoryState(window.__currentPage, false);
+                    }
+                    // Update globalHeader to show group context
+                    var _gpData = data.payload || data.group || data.data || {};
+                    if (typeof showGroupHeader === 'undefined' && window.__groupHdrShow) window.__groupHdrShow(_gpData);
+                }
+                if (data.type === 'GROUP_PANEL_CLOSED' || data.type === 'GROUP_LIST_SHOWN' || data.type === 'GO_BACK_TO_LIST' || data.type === 'GROUP_PANEL_CLOSE') {
+                    if (window.innerWidth <= 768 && (event.source === document.getElementById('groupIframe')?.contentWindow || data.type === 'GROUP_PANEL_CLOSE' || data.type === 'GROUP_PANEL_CLOSED')) {
+                        document.body.classList.remove('group-panel-active');
+                    }
+                    // Restore globalHeader
+                    if (window.__groupHdrHide) window.__groupHdrHide();
+                }
+
+                // ── STATUS PANEL: hide nav when status view/create opens; show when back ──
+                if (data.type === 'STATUS_VIEW_OPENED' || data.type === 'STATUS_CREATE_OPENED' || data.type === 'STATUS_PANEL_OPENED') {
+                    if (window.innerWidth <= 768) {
+                        document.body.classList.add('status-panel-active');
+                        syncBrowserHistoryState(window.__currentPage, false);
+                    }
+                }
+                if (data.type === 'STATUS_PANEL_CLOSED' || data.type === 'STATUS_LIST_SHOWN') {
+                    if (window.innerWidth <= 768 && event.source === document.getElementById('statusIframe')?.contentWindow) {
+                        document.body.classList.remove('status-panel-active');
+                    }
+                }
+
+                // ── IN-CALL SCREEN: keep nav hidden while call is live ──
+                // call-screen-active is already set by CALL_SCREEN_ACTIVE above.
+                // CALL_ACCEPTED (in-call) — ensure nav stays hidden on both sides
+                if (data.type === 'CALL_ACCEPTED' || data.type === 'CALL_ANSWERED') {
+                    document.body.classList.add('call-screen-active');
+                }
+
                 // Handle call screen active state - CRITICAL FOR ICON HIDING
                 if (data.type === 'CALL_SCREEN_ACTIVE') {
                     if (data.payload && data.payload.active === true) {
@@ -3019,208 +2895,7 @@
                 }
             });
         }
-
-        // ======================================================================
-        // GROUP CONTEXT HEADER — JS wiring
-        // ======================================================================
-        (function initGroupContextHeader() {
-            // ── Helpers ──────────────────────────────────────────────────────
-            function getGroupIframe() {
-                return document.getElementById('groupIframe');
-            }
-
-            function sendToGroupIframe(type, payload) {
-                const iframe = getGroupIframe();
-                if (iframe && iframe.contentWindow) {
-                    iframe.contentWindow.postMessage({ type, payload: payload || {} }, '*');
-                }
-            }
-
-            // ── Populate header with group data ───────────────────────────────
-            function openGroupCtx(groupData) {
-                const d = groupData || {};
-                // Avatar: image URL or initials
-                const avatarEl = document.getElementById('gcAvatar');
-                if (avatarEl) {
-                    if (d.avatar) {
-                        avatarEl.innerHTML = `<img src="${d.avatar}" alt="${d.name || 'Group'}" onerror="this.parentNode.textContent='${_initials(d.name)}'">`;
-                    } else {
-                        avatarEl.textContent = _initials(d.name || d.groupName || 'GR');
-                    }
-                }
-                // Name
-                const nameEl = document.getElementById('gcName');
-                if (nameEl) nameEl.textContent = d.name || d.groupName || 'Group';
-                // Member count
-                const metaEl = document.getElementById('gcMeta');
-                if (metaEl) {
-                    const count = d.memberCount || d.membersCount || (Array.isArray(d.members) ? d.members.length : null);
-                    metaEl.textContent = count != null ? `${count} member${count === 1 ? '' : 's'}` : 'Group chat';
-                }
-                // Store current group id for action forwarding
-                document.getElementById('headerGroupCtx').dataset.groupId = d.id || d.groupId || '';
-                // Show panel — body class set by message listener
-                document.body.classList.add('group-panel-active');
-                // Push a history state so device-back works
-                try { history.pushState({ appNav: true, page: 'group', groupPanel: true, ts: Date.now() }, '', window.location.href); } catch (_) {}
-            }
-
-            function closeGroupCtx() {
-                document.body.classList.remove('group-panel-active');
-                document.getElementById('headerGroupCtx').dataset.groupId = '';
-                _closeMoreMenu();
-            }
-
-            function _initials(name) {
-                if (!name) return 'GR';
-                const parts = String(name).trim().split(/\s+/);
-                return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
-            }
-
-            function _closeMoreMenu() {
-                const menu = document.getElementById('gcMoreMenu');
-                const btn  = document.getElementById('gcMoreBtn');
-                if (menu) menu.classList.remove('open');
-                if (btn)  btn.setAttribute('aria-expanded', 'false');
-            }
-
-            // ── Back button ───────────────────────────────────────────────────
-            const gcBackBtn = document.getElementById('gcBackBtn');
-            if (gcBackBtn) {
-                gcBackBtn.addEventListener('click', function() {
-                    sendToGroupIframe('GO_BACK_TO_LIST');
-                    closeGroupCtx();
-                });
-            }
-
-            // ── Call button ───────────────────────────────────────────────────
-            const gcCallBtn = document.getElementById('gcCallBtn');
-            if (gcCallBtn) {
-                gcCallBtn.addEventListener('click', function() {
-                    const gid = document.getElementById('headerGroupCtx').dataset.groupId;
-                    sendToGroupIframe('PARENT_GROUP_ACTION', { action: 'voice_call', groupId: gid });
-                });
-            }
-
-            // ── Video button ──────────────────────────────────────────────────
-            const gcVideoBtn = document.getElementById('gcVideoBtn');
-            if (gcVideoBtn) {
-                gcVideoBtn.addEventListener('click', function() {
-                    const gid = document.getElementById('headerGroupCtx').dataset.groupId;
-                    sendToGroupIframe('PARENT_GROUP_ACTION', { action: 'video_call', groupId: gid });
-                });
-            }
-
-            // ── Three-dots toggle ─────────────────────────────────────────────
-            const gcMoreBtn  = document.getElementById('gcMoreBtn');
-            const gcMoreMenu = document.getElementById('gcMoreMenu');
-            if (gcMoreBtn && gcMoreMenu) {
-                gcMoreBtn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const isOpen = gcMoreMenu.classList.toggle('open');
-                    gcMoreBtn.setAttribute('aria-expanded', String(isOpen));
-                });
-                // Close on outside click
-                document.addEventListener('click', function(e) {
-                    if (!gcMoreMenu.contains(e.target) && e.target !== gcMoreBtn) {
-                        _closeMoreMenu();
-                    }
-                });
-                // Wire each menu item → forward PARENT_GROUP_ACTION to group iframe
-                gcMoreMenu.querySelectorAll('.gc-menu-item[data-gc-action]').forEach(function(item) {
-                    item.addEventListener('click', function() {
-                        const action = item.dataset.gcAction;
-                        const gid    = document.getElementById('headerGroupCtx').dataset.groupId;
-                        sendToGroupIframe('PARENT_GROUP_ACTION', { action, groupId: gid });
-                        _closeMoreMenu();
-                    });
-                });
-            }
-
-            // ── Listen for messages from group iframe ─────────────────────────
-            window.addEventListener('message', function(evt) {
-                if (!evt.data || typeof evt.data !== 'object') return;
-                const { type, payload } = evt.data;
-
-                // Group panel opened — populate + show header context
-                if (type === 'GROUP_PANEL_OPENED' || type === 'GROUP_CHAT_OPENED' || type === 'GROUP_DETAIL_OPENED') {
-                    if (window.innerWidth <= 768) {
-                        openGroupCtx(payload || {});
-                    }
-                }
-
-                // Group panel closed — restore normal header
-                if (type === 'GROUP_PANEL_CLOSED' || type === 'GROUP_LIST_SHOWN' || type === 'GO_BACK_TO_LIST') {
-                    // Only respond if the sender is the group iframe
-                    if (evt.source === (getGroupIframe() && getGroupIframe().contentWindow)) {
-                        closeGroupCtx();
-                    }
-                }
-
-                // Group data updated (rename, avatar, member change) — refresh header
-                if (type === 'GROUP_DATA_UPDATED' && document.body.classList.contains('group-panel-active')) {
-                    const d = payload || {};
-                    const nameEl = document.getElementById('gcName');
-                    const metaEl = document.getElementById('gcMeta');
-                    const avatarEl = document.getElementById('gcAvatar');
-                    if (nameEl && d.name) nameEl.textContent = d.name;
-                    if (metaEl && d.memberCount != null) metaEl.textContent = `${d.memberCount} member${d.memberCount === 1 ? '' : 's'}`;
-                    if (avatarEl && d.avatar) avatarEl.innerHTML = `<img src="${d.avatar}" alt="group">`;
-                }
-            });
-
-            // ── Recording bar wiring ──────────────────────────────────────────
-            const recBar    = document.getElementById('gcRecordingBar');
-            const recCancel = document.getElementById('gcRecCancel');
-            const recSend   = document.getElementById('gcRecSend');
-            const recTimer  = document.getElementById('gcRecTimer');
-            let _recInterval = null;
-            let _recSeconds  = 0;
-
-            function _startRecBar() {
-                _recSeconds = 0;
-                recTimer.textContent = '0:00';
-                recBar.classList.add('active');
-                _recInterval = setInterval(function() {
-                    _recSeconds++;
-                    const m = Math.floor(_recSeconds / 60);
-                    const s = _recSeconds % 60;
-                    recTimer.textContent = `${m}:${s.toString().padStart(2, '0')}`;
-                }, 1000);
-            }
-
-            function _stopRecBar() {
-                clearInterval(_recInterval);
-                _recInterval = null;
-                recBar.classList.remove('active');
-                _recSeconds = 0;
-            }
-
-            if (recCancel) recCancel.addEventListener('click', function() {
-                _stopRecBar();
-                sendToGroupIframe('RECORDING_CANCELLED', {});
-            });
-
-            if (recSend) recSend.addEventListener('click', function() {
-                _stopRecBar();
-                sendToGroupIframe('RECORDING_SEND', {});
-            });
-
-            // Group iframe can trigger recording bar via postMessage
-            window.addEventListener('message', function(evt) {
-                if (!evt.data || typeof evt.data !== 'object') return;
-                const { type } = evt.data;
-                if (type === 'RECORDING_STARTED') _startRecBar();
-                if (type === 'RECORDING_STOPPED' || type === 'RECORDING_CANCELLED' || type === 'RECORDING_SEND') _stopRecBar();
-            });
-
-            // Expose globally so group-ui.js can call directly if needed
-            window.gcHeaderOpenGroup  = openGroupCtx;
-            window.gcHeaderCloseGroup = closeGroupCtx;
-            window.gcHeaderStartRec   = _startRecBar;
-            window.gcHeaderStopRec    = _stopRecBar;
-        })();
-
+        
         document.addEventListener('DOMContentLoaded', function() {
             setupPanelDetection();
             dismissLoadingScreen(0);
@@ -3810,7 +3485,7 @@
                 const lastDispatch = window.__moduleSessionDispatchCache[moduleName];
                 if (lastDispatch &&
                     lastDispatch.fingerprint === sessionFingerprint &&
-                    now - lastDispatch.timestamp < 1500) {
+                    now - lastDispatch.timestamp < 300) {
                     return;
                 }
                 window.__moduleSessionDispatchCache[moduleName] = {
@@ -3986,8 +3661,9 @@
                 setTimeout(() => requestFriendsFromFriendIframe(), 1000);
             }
 
-            // FIX: Throttle — CALL_ENDED echoes cause infinite refresh loops.
-            // After one refresh, calls within 8 s are silently skipped.
+            // FIX: Throttle call history refresh — CALL_ENDED echoes create infinite loops
+            // where each iframe CALL_ENDED triggers another broadcast → another refresh.
+            // Allow at most one real API fetch per 8 seconds.
             let _lastCallHistoryRefresh = 0;
             let _callHistoryPending = false;
 
@@ -4009,7 +3685,7 @@
                     return cachedCalls;
                 }
                 try {
-                    // [Parent] Refreshing call history — suppressed (noisy)
+                    // suppressed: [Parent] Refreshing call history
                     const baseUrl = window.__getApiBase ? window.__getApiBase() : 'http://localhost:4000/api';
 
                     if (callsIframe && callsIframe.contentWindow && navigator.onLine) {
@@ -4055,7 +3731,7 @@
                     if (response.ok) {
                         const data = await response.json();
                         const calls = data?.data?.calls || data?.calls || [];
-                        // [Parent] Loaded call history — suppressed
+                        // suppressed: [Parent] Loaded call history
                         if (callsIframe && callsIframe.contentWindow) {
                             callsIframe.contentWindow.postMessage({
                                 type: 'CALL_HISTORY_UPDATE',
@@ -4153,6 +3829,24 @@
 
                 const data = event.data || {};
                 if (!data || typeof data !== 'object') return;
+
+                // FIX: Cross-module friend sync relay — when friend-core posts FRIENDS_SYNC,
+                // FRIENDS_DATA or FRIEND_RELATIONSHIP_CHANGED, rebroadcast to every OTHER
+                // iframe so chat, calls, status, groups all see updated friends instantly.
+                if (data.type === 'FRIENDS_SYNC' || data.type === 'FRIENDS_DATA' || data.type === 'FRIEND_RELATIONSHIP_CHANGED') {
+                    const iframes = document.querySelectorAll('iframe');
+                    iframes.forEach(function(frame) {
+                        if (frame.contentWindow === event.source) return; // don't echo back to sender
+                        try { frame.contentWindow.postMessage(data, '*'); } catch (_) {}
+                    });
+                    // Expose on window globals for same-frame consumers
+                    if (data.friends && Array.isArray(data.friends)) {
+                        window.friends = data.friends;
+                        window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: data.friends, source: data.type } }));
+                    }
+                    // Fall through — still handled below by FRIENDS_DATA/FRIENDS_SYNC blocks
+                }
+
                 if (data.type === 'SW_UPDATE_AVAILABLE' || data.type === 'SW_ACTIVATED') {
                     if (!window.__swReloadPending) {
                         window.__swReloadPending = true;
@@ -4617,6 +4311,10 @@
                         || window.__lastActivePage
                         || 'messages';
                     console.log('[Parent] Call ended → returnTo=' + returnTo);
+
+                    // CRITICAL: Clear session dispatch cache so the next navigateToPage
+                    // ALWAYS sends a fresh token — prevents hasToken:false rejection in modules
+                    window.__moduleSessionDispatchCache = {};
 
                     if (returnTo === 'calls') {
                         navigateToPage('calls');
@@ -6024,6 +5722,208 @@
         
     </script>
     <script>
+/* ===================================================================
+   GROUP HEADER CONTROLLER  v1.0  — injected into chat.html
+   ===================================================================
+   • Listens for GROUP_PANEL_OPEN  → activates group context in globalHeader
+   • Listens for GROUP_PANEL_CLOSE → restores default header
+   • Back / Call / Video / More buttons forwarded to group iframe
+   • GROUP_DELETED → clear all group storage caches
+   • CALL_ENDED duplicate refresh already debounced in main script
+   =================================================================== */
+(function () {
+'use strict';
+
+function groupIframe() { return document.getElementById('groupIframe'); }
+function postToGroup(type, payload) {
+    var f = groupIframe();
+    if (f && f.contentWindow)
+        f.contentWindow.postMessage({ type: type, payload: payload || {}, source: 'parent-hdr', timestamp: Date.now() }, '*');
+}
+
+/* ── Show group context in globalHeader ─────────────────────── */
+function showGroupHeader(g) {
+    if (!g) return;
+    var hdr   = document.getElementById('globalHeader');
+    var ctx   = document.getElementById('headerGroupCtx');
+    var name  = document.getElementById('hdrGroupName');
+    var meta  = document.getElementById('hdrGroupMeta');
+    var av    = document.getElementById('hdrGroupAvatar');
+    var acts  = document.getElementById('headerActions');
+    var prof  = document.getElementById('profileTrigger');
+
+    if (name) name.textContent = g.name || 'Group';
+    if (meta) meta.textContent = ((g.stats && g.stats.totalMembers) || g.memberCount || 0) + ' members';
+    if (av) {
+        var ii = (g.name || 'G').split(' ').map(function (w) { return w[0]; }).join('').toUpperCase().slice(0, 2);
+        av.textContent = ii;
+    }
+    if (hdr)  hdr.classList.add('group-chat-active');
+    if (acts) acts.classList.add('hidden');
+    if (prof) prof.style.visibility = 'hidden';
+    window.__groupHeaderShown = true;
+}
+
+/* ── Restore default header ─────────────────────────────────── */
+function hideGroupHeader() {
+    var hdr  = document.getElementById('globalHeader');
+    var menu = document.getElementById('hdrGroupMenu');
+    var acts = document.getElementById('headerActions');
+    var prof = document.getElementById('profileTrigger');
+
+    if (hdr)  hdr.classList.remove('group-chat-active');
+    if (menu) menu.style.display = 'none';
+    if (prof) prof.style.visibility = '';
+    window.__groupHeaderShown = false;
+
+    /* Restore header label for current page */
+    var page = window.__currentPage || 'messages';
+    if (typeof updateHeaderContext === 'function') try { updateHeaderContext(page); } catch (e) {}
+    if (typeof updateHeaderActions === 'function') try { updateHeaderActions(page); } catch (e) {}
+}
+
+/* ── Wire header buttons (called once after DOM ready) ──────── */
+function wireButtons() {
+    /* Back */
+    var back = document.getElementById('hdrGroupBack');
+    if (back && !back._ghw) { back._ghw = true;
+        back.addEventListener('click', function () {
+            postToGroup('PARENT_GROUP_CLOSE', {});
+            hideGroupHeader();
+        });
+    }
+    /* Voice call */
+    var call = document.getElementById('hdrGroupCall');
+    if (call && !call._ghw) { call._ghw = true;
+        call.addEventListener('click', function () { postToGroup('PARENT_GROUP_CALL', { type: 'voice' }); });
+    }
+    /* Video call */
+    var vid = document.getElementById('hdrGroupVideo');
+    if (vid && !vid._ghw) { vid._ghw = true;
+        vid.addEventListener('click', function () { postToGroup('PARENT_GROUP_CALL', { type: 'video' }); });
+    }
+    /* Three-dots */
+    var more = document.getElementById('hdrGroupMore');
+    var menu = document.getElementById('hdrGroupMenu');
+    if (more && menu && !more._ghw) { more._ghw = true;
+        more.addEventListener('click', function (e) {
+            e.stopPropagation();
+            menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+        });
+        document.addEventListener('click', function () { if (menu) menu.style.display = 'none'; });
+        menu.querySelectorAll('.hgm-item').forEach(function (it) {
+            it.addEventListener('click', function (e) {
+                e.stopPropagation();
+                menu.style.display = 'none';
+                var a = it.getAttribute('data-hga');
+                if (a === 'leave')   postToGroup('PARENT_GROUP_ACTION', { action: 'leave' });
+                else if (a === 'delete') postToGroup('PARENT_GROUP_ACTION', { action: 'delete' });
+                else postToGroup('PARENT_GROUP_ACTION', { action: a });
+            });
+        });
+    }
+    /* Avatar → group info sub-panel */
+    var av = document.getElementById('hdrGroupAvatar');
+    if (av && !av._ghw) { av._ghw = true;
+        av.addEventListener('click', function () { postToGroup('PARENT_GROUP_ACTION', { action: 'info' }); });
+    }
+}
+
+/* ── Listen for messages from group iframe ──────────────────── */
+window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.source === 'parent-hdr') return; // ignore echoes
+
+    /* Group panel opened */
+    if (d.type === 'GROUP_PANEL_OPEN' || d.type === 'GROUP_PANEL_OPENED' ||
+        d.type === 'GROUP_CHAT_OPENED' || d.type === 'GROUP_DETAIL_OPENED') {
+        var g = d.payload || d.group || d.data || {};
+        showGroupHeader(g);
+        if (window.innerWidth <= 768) document.body.classList.add('group-panel-active');
+        return;
+    }
+
+    /* Group panel closed */
+    if (d.type === 'GROUP_PANEL_CLOSE' || d.type === 'GROUP_PANEL_CLOSED' ||
+        d.type === 'GROUP_LIST_SHOWN'  || d.type === 'GO_BACK_TO_LIST') {
+        hideGroupHeader();
+        if (window.innerWidth <= 768) document.body.classList.remove('group-panel-active');
+        return;
+    }
+
+    /* Group updated (member count changed etc.) */
+    if (d.type === 'GROUP_PANEL_UPDATE') {
+        if (window.__groupHeaderShown) showGroupHeader(d.payload || {});
+        return;
+    }
+
+    /* Group deleted — clear storage + refresh list */
+    if (d.type === 'GROUP_DELETED') {
+        var gid = d.payload && (d.payload.groupId || d.payload.id);
+        if (gid) clearGroupFromAllStorage(String(gid));
+        hideGroupHeader();
+        if (window.innerWidth <= 768) document.body.classList.remove('group-panel-active');
+        setTimeout(function () { postToGroup('PARENT_REFRESH_GROUPS', {}); }, 250);
+        return;
+    }
+}, true);
+
+/* ── Purge a group from every localStorage / sessionStorage key ─ */
+function clearGroupFromAllStorage(gidStr) {
+    var KEYS = [
+        'knecta_groups_cache','groups_cache','group_list','myGroups','joinedGroups',
+        'groupsData','kynecta_groups_v8','GC_groups','GC_myGroups','GC_joinedGroups',
+        'knecta_group_queue'
+    ];
+    [localStorage, sessionStorage].forEach(function (store) {
+        KEYS.forEach(function (k) {
+            try {
+                var raw = store.getItem(k); if (!raw) return;
+                var data = JSON.parse(raw);
+                if (Array.isArray(data)) {
+                    store.setItem(k, JSON.stringify(data.filter(function (x) { return x && String(x.id) !== gidStr; })));
+                    return;
+                }
+                ['groups','myGroups','joinedGroups','data','items'].forEach(function (f) {
+                    if (data[f] && Array.isArray(data[f]))
+                        data[f] = data[f].filter(function (x) { return x && String(x.id) !== gidStr; });
+                });
+                store.setItem(k, JSON.stringify(data));
+            } catch (ex) {}
+        });
+    });
+    /* Also purge from GroupCore in-memory state inside group iframe */
+    var gf = groupIframe();
+    if (gf && gf.contentWindow) {
+        try {
+            var gc = gf.contentWindow.GroupCore;
+            if (gc) {
+                ['groups','myGroups','joinedGroups'].forEach(function (f) {
+                    if (gc[f] && Array.isArray(gc[f]))
+                        gc[f] = gc[f].filter(function (x) { return x && String(x.id) !== gidStr; });
+                });
+                if (typeof gc.saveGroups === 'function') gc.saveGroups();
+            }
+        } catch (ex) {}
+    }
+    console.log('[GroupHdr] Cleared group', gidStr, 'from all storage');
+}
+
+/* ── Init ───────────────────────────────────────────────────── */
+if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', wireButtons);
+else
+    setTimeout(wireButtons, 100);
+
+console.log('[GroupHdr] v1.0 loaded');
+// Expose for cross-script access
+window.__groupHdrShow = showGroupHeader;
+window.__groupHdrHide = hideGroupHeader;
+})();
+</script>
+
+    <script>
   // Keep backend alive — ping every 14 minutes (Render sleeps after 15)
   function keepBackendAwake() {
     fetch('https://moodchat-fy56.onrender.com/api/health', {
@@ -6038,5 +5938,14 @@
   keepBackendAwake();
   setInterval(keepBackendAwake, 14 * 60 * 1000);
 </script>
+
+    <!-- Mic Recording Bar (shared with group module) -->
+    <div id="gcRecordingBar">
+        <div class="gcr-dot"></div>
+        <span id="gcRecordTimer">0:00</span>
+        <button class="gcr-action" id="gcRecordCancel"><i class="fas fa-times"></i> Cancel</button>
+        <button class="gcr-action" id="gcRecordSend"><i class="fas fa-paper-plane"></i> Send</button>
+    </div>
+
 </body>
 </html>

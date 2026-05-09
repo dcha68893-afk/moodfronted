@@ -13102,21 +13102,43 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                         console.log('[CallsCore] Created <video id="remoteVideo">');
                     }
                     remoteVideo.srcObject = this._remoteVideoStream;
-                    remoteVideo.style.display = 'block';
+                    // ✅ FIX: Ensure remoteVideo is inside inCallScreen and properly styled
+                    const _inCallScreen = document.getElementById('inCallScreen');
+                    if (_inCallScreen && !_inCallScreen.contains(remoteVideo)) {
+                        _inCallScreen.style.position = 'relative';
+                        _inCallScreen.insertBefore(remoteVideo, _inCallScreen.firstChild);
+                    }
+                    remoteVideo.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;z-index:10;border-radius:inherit;display:block;';
                     // Hide avatar, show video
                     const avatarWrap = document.getElementById('incallAvatarWrap');
                     if (avatarWrap) avatarWrap.style.display = 'none';
+                    const _inCallBg = document.getElementById('inCallScreen');
+                    if (_inCallBg) _inCallBg.classList.add('video-active');
+                    remoteVideo.muted = false; // never mute remote video
                     remoteVideo.play().catch(function(videoPlayErr) {
-                        console.warn('[CallsCore] Remote video autoplay blocked, retrying on gesture', videoPlayErr.message);
                         const retryVideoPlay = function() {
                             remoteVideo.play().catch(function() {});
                             document.removeEventListener('click',      retryVideoPlay);
                             document.removeEventListener('touchstart', retryVideoPlay);
+                            document.removeEventListener('touchend',   retryVideoPlay);
                         };
                         document.addEventListener('click',      retryVideoPlay, { once: true });
                         document.addEventListener('touchstart', retryVideoPlay, { once: true });
+                        document.addEventListener('touchend',   retryVideoPlay, { once: true });
                     });
-                    console.log('[CallsCore] ✅ VIDEO TRACK routed → #remoteVideo');
+                    // ✅ FIX: Notify MasterFix that remote video arrived
+                    if (window.UIState) window.UIState.hasRemoteVideo = true;
+                    // Retry play after delays (autoplay policy)
+                    [300, 800, 2000].forEach(function(ms) {
+                        setTimeout(function() {
+                            if (remoteVideo && remoteVideo.srcObject && remoteVideo.paused) {
+                                remoteVideo.play().catch(function(){});
+                            }
+                        }, ms);
+                    });
+                    console.log('[CallsCore] ✅ VIDEO TRACK routed → #remoteVideo (fullscreen in inCallScreen)');
+                    // ✅ FIX: Notify calls.html master fix that remote video arrived
+                    try { window.dispatchEvent(new CustomEvent('kyn:remoteVideoArrived')); } catch(e) {}
                 }
 
                 if (stream) {
@@ -16523,23 +16545,27 @@ initiateCall: async function(callType, participants = []) {
 
 
 
-    // Double-check after cleanup
-
-
-
+    // ✅ FIX: Force-clear any remaining stale state instead of aborting
+    // Previous behavior: abort if callActive/activeCallId still set after cleanup
+    // New behavior: force-clear and continue (the user explicitly started a new call)
     if (callsState.callActive === true || callsState.activeCallId !== null) {
-
-
-
-        logError(MODULE, 'Call state still active after cleanup, aborting');
-
-
-
-        return { success: false, reason: 'call_state_stale' };
-
-
-
+        logWarn(MODULE, 'Force-clearing stale call state for new call');
+        callsState.callActive   = false;
+        callsState.callState    = 'idle';
+        callsState.activeCallId = null;
+        callsState.activeCall   = null;
+        callsState.serverCallId = null;
+        callsState.localCallId  = null;
+        callsState._isCaller    = false;
+        window.__callerCallId   = null;
+        // Close PC if still open
+        if (WebRTCManager && WebRTCManager._peerConnection) {
+            try { WebRTCManager._peerConnection.close(); } catch(e) {}
+            WebRTCManager._peerConnection = null;
+        }
     }
+
+
 
 
 
@@ -29809,23 +29835,33 @@ window.CallHandlers = {
     // ✅ FIX: Force callsState.callActive = true when offer arrives on receiver side
     // so the offer is never dropped due to inactive state guard
     const _validOfferStates = ['initiating','initiated','incoming','connecting','in-call',
-                               'starting','ringing','connected','in_call'];
+                               'starting','ringing','connected','in_call','in-progress',
+                               'accepted','answering','call_ready'];
+    // ✅ FIX: Queue offer if call not active yet — receiver may get offer before acceptCall completes
+    if (!callsState.callActive && !_validOfferStates.includes(callsState.callState)) {
+        if (!window.__pendingOfferPayload) {
+            window.__pendingOfferPayload = payload;
+            window.__pendingOfferRetries = 0;
+            var _offerRetryInterval = setInterval(function() {
+                window.__pendingOfferRetries = (window.__pendingOfferRetries || 0) + 1;
+                if (callsState.callActive || _validOfferStates.includes(callsState.callState)) {
+                    clearInterval(_offerRetryInterval);
+                    var _q = window.__pendingOfferPayload; window.__pendingOfferPayload = null;
+                    if (_q) handleSignalOffer(_q);
+                } else if (window.__pendingOfferRetries >= 15) {
+                    clearInterval(_offerRetryInterval);
+                    callsState.callActive = true;
+                    var _q2 = window.__pendingOfferPayload; window.__pendingOfferPayload = null;
+                    if (_q2) handleSignalOffer(_q2);
+                }
+            }, 200);
+        }
+        logWarn(MODULE, 'Signal offer queued — callState:', callsState.callState);
+        return;
+    }
     if (!callsState.callActive && _validOfferStates.includes(callsState.callState)) {
         callsState.callActive = true;
         console.log('[CallsCore] handleSignalOffer: forced callActive=true (state:', callsState.callState, ')');
-    }
-    if (!callsState.callActive && !_validOfferStates.includes(callsState.callState)) {
-
-
-
-        logWarn(MODULE, 'Signal offer received but no active call — state:', callsState.callState);
-
-
-
-        return;
-
-
-
     }
 
 

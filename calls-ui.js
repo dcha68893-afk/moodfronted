@@ -2418,14 +2418,16 @@ function cacheCallHistory(calls) {
         
         // Check if already in a call — but auto-reset if stale
         if (coreInstance.isInCall && coreInstance.isInCall()) {
-            // Check if this is a genuinely active call or just stale state
             const callState = coreInstance.getCallState ? coreInstance.getCallState() : null;
-            const callAge = callState?.callStartTime ? Date.now() - callState.callStartTime : Infinity;
-            if (callAge > 90000) {
-                // Stale — reset and continue
-                console.warn('[Calls UI] Stale isInCall detected, auto-resetting before pending call');
+            const callAge = callState && callState.callStartTime ? Date.now() - callState.callStartTime : Infinity;
+            // ✅ FIX: Treat ANY call older than 5s since last end as stale (not 90s)
+            const msSinceEnd = window.__lastCallEndedAt ? Date.now() - window.__lastCallEndedAt : Infinity;
+            const isStale = callAge > 90000 || msSinceEnd < 8000 || callAge === Infinity;
+            if (isStale) {
+                console.warn('[Calls UI] Stale isInCall detected, auto-resetting for new call');
                 if (coreInstance.forceResetCallState) coreInstance.forceResetCallState();
-                await new Promise(resolve => setTimeout(resolve, 200));
+                if (window.callsState) { window.callsState.callActive = false; window.callsState.activeCallId = null; }
+                await new Promise(resolve => setTimeout(resolve, 150));
             } else {
                 showNotification('You are already in a call. End current call to start a new one.', 'warning');
                 clearPendingCall();
@@ -5234,6 +5236,8 @@ handleContactItemClick: function(e) {
             // ✅ FIX: Stop all ringtones (master fix + legacy)
             if (typeof window._stopRingtones === 'function') window._stopRingtones();
             if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
+            // ✅ FIX: Track when call ended so repeat call stale check works
+            window.__lastCallEndedAt = Date.now();
             // ── Guard: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.

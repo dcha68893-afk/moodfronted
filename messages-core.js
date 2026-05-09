@@ -3044,7 +3044,7 @@ try {
         
         addMessage: function(message) {
             if (!message || !message.id) return;
-            // Always use string keys in the map to avoid number/string mismatch
+            // Always use string keys to avoid number/string mismatch in the Map
             const msgId = String(message.id);
             const msgLocalId = message.localId ? String(message.localId) : null;
 
@@ -3067,7 +3067,7 @@ try {
             if (msgLocalId) {
                 const existingByLocalId = this._messagesMap.get(msgLocalId);
                 if (existingByLocalId) {
-                    const idx = this._messages.findIndex(m => String(m.id) === msgLocalId || String(m.localId) === msgLocalId);
+                    const idx = this._messages.findIndex(m => String(m.id) === msgLocalId || String(m.localId || '') === msgLocalId);
                     const merged = { ...existingByLocalId, ...message, id: msgId };
                     if (idx !== -1) this._messages[idx] = merged;
                     this._messagesMap.delete(msgLocalId);
@@ -4304,7 +4304,7 @@ try {
             this._lastOpenRequest = { id: openKey, timestamp: now };
 
             // FIX: Clear in-memory messages ONLY when switching to a DIFFERENT chat.
-            // If the same chat is re-opened (e.g. returning from call), keep the messages.
+            // Re-opening the SAME chat (e.g. returning from a call) must NOT wipe messages.
             const _prevActive = ChatManager._activeConversation;
             const _switchingChat = _prevActive && String(_prevActive.id) !== String(actualId);
             if (_switchingChat) {
@@ -5726,6 +5726,9 @@ try {
     // REAL-TIME MESSAGE HANDLER
     // =============================================
     function setupRealtimeMessageListener() {
+        // MODULE-LEVEL guard — must survive across repeated calls (e.g. reconnect hooks)
+        if (window.__msgCoreRealtimeBound) return;
+        window.__msgCoreRealtimeBound = true;
         let hasRealtimeBinding = false;
 
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
@@ -5805,11 +5808,9 @@ try {
                     }).sort(function(a, b) {
                         return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                     });
-                    // Always include the incoming message even if not yet in ChatManager._messages
                     if (normalizedMessage) {
                         const _has = _msgs.some(function(m) {
-                            return (m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id))
-                                || (m.localId && normalizedMessage.localId && String(m.localId) === String(normalizedMessage.localId));
+                            return m.id && normalizedMessage.id && String(m.id) === String(normalizedMessage.id);
                         });
                         if (!_has) {
                             _msgs = _msgs.concat([normalizedMessage]).sort(function(a, b) {
@@ -5845,7 +5846,7 @@ try {
         // chat.html sends both 'message:new' AND 'new_message' to the iframe,
         // and multiple listeners (window.message, KynectaRealtime.on, document.message:new)
         // can all fire for the same payload — without dedup the message renders 4+ times.
-        // Use window-level Set so it persists even if setupRealtimeMessageListener were called again
+        // Use window-level Sets so they persist even if this function is called again
         if (!window.__realtimeProcessedIds) window.__realtimeProcessedIds = new Set();
         if (!window.__realtimeSentIds) window.__realtimeSentIds = new Set();
         const _realtimeProcessedIds = window.__realtimeProcessedIds;
@@ -5952,7 +5953,7 @@ try {
                 // ✅ FIX 9: Unwrap postMessage bridge wrapper { type, payload, source }
                 const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
                 const messageId = d.localId || d.messageId || d.serverId || d.id;
-                // DEDUP: message:sent fires once per listener — deduplicate by localId+serverId
+                // DEDUP: message:sent can fire once per listener — deduplicate
                 const _sentKey = String(d.localId || '') + ':' + String(d.serverId || d.messageId || d.id || '');
                 if (_sentKey !== ':' && _realtimeSentIds.has(_sentKey)) return;
                 if (_sentKey !== ':') {

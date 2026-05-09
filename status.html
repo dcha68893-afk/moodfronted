@@ -2084,6 +2084,192 @@
             };
         });
     </script>
+
+<style id="wa-status-overrides">
+/* ══════════════════════════════════════════════════════════
+   WhatsApp-style Status Sidebar — complete override
+   ══════════════════════════════════════════════════════════ */
+
+/* Camera / ellipsis icon buttons in header */
+.sw-icon-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-primary, #e9edef);
+    font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+.sw-icon-btn:hover { background: var(--surface-alt, #2a3942); }
+
+/* Three-dots dropdown */
+.sw-dropdown {
+    position: absolute;
+    top: 40px; right: 0;
+    min-width: 200px;
+    background: var(--surface, #1e2a32);
+    border: 1px solid var(--border-color, #2a3942);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    z-index: 9999;
+    overflow: hidden;
+}
+.sw-dropdown-item {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; padding: 12px 16px;
+    background: none; border: none;
+    color: var(--text-primary, #e9edef);
+    font-size: 14px; text-align: left;
+    cursor: pointer; transition: background 0.12s;
+}
+.sw-dropdown-item:hover { background: var(--surface-alt, #2a3942); }
+.sw-dropdown-item i { width: 16px; color: var(--text-secondary, #8696a0); font-size: 14px; }
+
+/* Section label ("Status", "Recent updates") */
+.sw-section-label {
+    padding: 6px 16px 2px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary, #8696a0);
+    letter-spacing: 0.4px;
+    text-transform: none;
+}
+
+/* My Status row */
+.sw-my-status-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.sw-my-status-row:hover { background: var(--surface-alt, #2a3942); }
+
+/* Avatar wrapper — holds the ring SVG + avatar */
+.sw-avatar-wrap {
+    position: relative;
+    width: 52px; height: 52px;
+    flex-shrink: 0;
+}
+.sw-avatar {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: var(--surface-alt, #2a3942);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    color: var(--text-secondary, #8696a0);
+    overflow: hidden;
+    background-size: cover;
+    background-position: center;
+}
+/* Plus badge for "add status" */
+.sw-add-badge {
+    position: absolute;
+    bottom: 0; right: 0;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #00a884;
+    color: #fff;
+    font-size: 10px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid var(--background-color, #0b141a);
+    z-index: 2;
+}
+
+/* Row info */
+.sw-row-info { flex: 1; min-width: 0; }
+.sw-row-name {
+    font-size: 15px; font-weight: 500;
+    color: var(--text-primary, #e9edef);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sw-row-sub {
+    font-size: 13px;
+    color: var(--text-secondary, #8696a0);
+    margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sw-pencil-btn { margin-left: auto; }
+
+/* Friend status group items — match WhatsApp style */
+.status-group-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.12s;
+    position: relative;
+}
+.status-group-item:hover { background: var(--surface-alt, #2a3942); }
+
+/* Hide old category tabs and clutter */
+.status-categories:not(#hiddenTabs),
+.filter-tags,
+.streak-counter,
+.mood-trends,
+.quick-actions {
+    display: none !important;
+}
+
+/* ── Hold-to-reveal: edit/delete shown on hold ── */
+#ownerActionBtns {
+    display: none;
+    gap: 10px;
+}
+#ownerActionBtns.revealed {
+    display: flex !important;
+}
+/* Hold hint */
+#holdHint.visible {
+    display: block !important;
+}
+
+/* Viewer seen count — clickable */
+.viewer-seen-count {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 20px;
+    background: rgba(255,255,255,0.1);
+    font-size: 14px;
+    color: #fff;
+    user-select: none;
+    transition: background 0.15s;
+}
+.viewer-seen-count:hover { background: rgba(255,255,255,0.2); }
+
+/* Viewers panel inside viewer footer */
+#viewersPanelInline {
+    border-radius: 12px 12px 0 0;
+}
+.viewer-list-person {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border-color, #2a3942);
+}
+.viewer-list-person:last-child { border-bottom: none; }
+.vp-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--surface-alt, #2a3942);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; color: #fff;
+    flex-shrink: 0; overflow: hidden;
+    background-size: cover; background-position: center;
+}
+.vp-name { font-size: 14px; font-weight: 500; color: var(--text-primary, #e9edef); }
+.vp-time { font-size: 11px; color: var(--text-secondary, #8696a0); margin-top: 1px; }
+.vp-reaction { font-size: 16px; margin-left: auto; }
+</style>
+
 </head>
 <body>
     <!-- Navigation Guard Indicator (hidden by default) -->
@@ -2761,123 +2947,84 @@
     <div class="app-container">
         <!-- Sidebar with status list -->
         <div class="sidebar active" id="sidebar">
-            <div class="sidebar-header">
-                <h2>Status</h2>
-                <div style="display: flex; gap: 10px;">
-                    <button class="create-status-btn" id="viewHighlightsBtn" title="View Highlights">
-                        <i class="fas fa-star"></i>
+            <!-- WhatsApp-style header: Updates title + camera + three-dots -->
+            <div class="sidebar-header" style="padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
+                <h2 style="font-size:20px;font-weight:700;margin:0;">Updates</h2>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <!-- Camera / create button -->
+                    <button class="sw-icon-btn" id="createStatusBtn" title="Create status">
+                        <i class="fas fa-camera"></i>
                     </button>
-                    <button class="create-status-btn" id="viewDraftsBtn" title="View Drafts">
-                        <i class="fas fa-file-alt"></i>
-                    </button>
-                    <button class="create-status-btn" id="createStatusBtn" title="Create new status">
-                        <i class="fas fa-plus"></i>
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Handshake Status Container (hidden - background only) -->
-            <div class="handshake-status-container" id="handshakeStatus" style="display: none;"></div>
-            
-            <!-- Connection Status (hidden by default) -->
-            <div class="connection-status online" id="connectionStatus" style="display: none;">
-                <span class="status-dot"></span>
-                <span class="status-text">Online</span>
-            </div>
-            
-            <div class="status-categories">
-                <button class="category-btn active" id="allTab">All Status</button>
-                <button class="category-btn" id="friendsTab">Friends</button>
-                <button class="category-btn" id="closeFriendsTab">Close Friends</button>
-                <button class="category-btn" id="pinnedTab">Pinned</button>
-                <button class="category-btn" id="mutedTab">Muted</button>
-                <button class="category-btn" id="microCirclesTab">Micro Circles</button>
-                <button class="category-btn" id="myStatusTab" style="display: none;">My Status</button>
-            </div>
-            
-            <!-- Filter Tags -->
-            <div class="filter-tags" id="filterTags">
-                <button class="clear-filters-btn" id="clearFiltersBtn" style="display: none;">
-                    <i class="fas fa-times"></i> Clear Filters
-                </button>
-            </div>
-            
-            <!-- My Status Preview -->
-            <div class="my-status-preview" id="myStatusPreview">
-                <div class="my-status-avatar">
-                    <div class="my-status-avatar-ring" id="myStatusRing">
-                        <div class="my-status-avatar-inner" id="myStatusAvatar">
-                            <i class="fas fa-user"></i>
+                    <!-- Three-dots more menu -->
+                    <div style="position:relative;">
+                        <button class="sw-icon-btn" id="statusMoreBtn" title="More options">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div id="statusMoreDropdown" class="sw-dropdown" style="display:none;">
+                            <button class="sw-dropdown-item" id="viewHighlightsBtn"><i class="fas fa-star"></i> Highlights</button>
+                            <button class="sw-dropdown-item" id="viewDraftsBtn"><i class="fas fa-file-alt"></i> Drafts</button>
+                            <button class="sw-dropdown-item" id="viewTimelineBtn"><i class="fas fa-history"></i> Memory Timeline</button>
+                            <button class="sw-dropdown-item" id="viewStatsBtn"><i class="fas fa-chart-line"></i> Analytics</button>
+                            <button class="sw-dropdown-item" id="viewScheduledBtn"><i class="fas fa-clock"></i> Scheduled</button>
+                            <button class="sw-dropdown-item" id="viewStreakBtn"><i class="fas fa-fire"></i> Posting Streak</button>
+                            <button class="sw-dropdown-item" id="viewMoodTrendsBtn"><i class="fas fa-smile"></i> Mood Trends</button>
+                            <button class="sw-dropdown-item" id="viewAchievementsBtn"><i class="fas fa-trophy"></i> Achievements</button>
+                            <button class="sw-dropdown-item" id="viewFeedbackBtn"><i class="fas fa-comment-dots"></i> Feedback</button>
                         </div>
                     </div>
                 </div>
-                <div class="my-status-info">
-                    <div class="my-status-name">My Status</div>
-                    <div class="my-status-text">
-                        <div class="my-status-indicator" id="myStatusIndicator"></div>
-                        <span id="myStatusText">No recent status</span>
+            </div>
+
+            <!-- Hidden background elements -->
+            <div class="handshake-status-container" id="handshakeStatus" style="display:none;"></div>
+            <div class="connection-status online" id="connectionStatus" style="display:none;">
+                <span class="status-dot"></span><span class="status-text">Online</span>
+            </div>
+
+            <!-- Hidden tab state (needed by JS) -->
+            <div style="display:none;">
+                <button id="allTab" class="category-btn active"></button>
+                <button id="friendsTab" class="category-btn"></button>
+                <button id="closeFriendsTab" class="category-btn"></button>
+                <button id="pinnedTab" class="category-btn"></button>
+                <button id="mutedTab" class="category-btn"></button>
+                <button id="microCirclesTab" class="category-btn"></button>
+                <button id="myStatusTab" class="category-btn"></button>
+            </div>
+            <div id="filterTags" style="display:none;">
+                <button id="clearFiltersBtn" style="display:none;"></button>
+            </div>
+
+            <!-- Hidden extras (accessible from ⋮ menu) -->
+            <div id="streakCounterHidden" style="display:none;"><span id="streakCount">0</span></div>
+            <div id="moodChartHidden" style="display:none;"><div id="moodChart"></div></div>
+
+            <!-- ── STATUS SECTION LABEL ── -->
+            <div class="sw-section-label">Status</div>
+
+            <!-- My Status row (always at top, pinned) -->
+            <div class="sw-my-status-row" id="myStatusPreview">
+                <div class="sw-avatar-wrap" id="myStatusRing">
+                    <div class="sw-avatar" id="myStatusAvatar">
+                        <i class="fas fa-user"></i>
                     </div>
+                    <!-- Plus badge when no status -->
+                    <div class="sw-add-badge" id="myStatusAddBadge"><i class="fas fa-plus"></i></div>
                 </div>
-                <button class="status-action-btn" id="viewMyStatusBtn" title="View my status">
-                    <i class="fas fa-eye"></i>
-                </button>
-                <button class="status-action-btn" id="editMyStatusBtn" title="Edit my status">
-                    <i class="fas fa-edit"></i>
-                </button>
-            </div>
-            
-            <!-- Streak Counter -->
-            <div class="streak-counter">
-                <div class="streak-info">
-                    <div class="streak-icon">
-                        <i class="fas fa-fire"></i>
-                    </div>
-                    <div class="streak-details">
-                        <h4>Posting Streak</h4>
-                        <p>Daily status updates</p>
-                    </div>
+                <div class="sw-row-info">
+                    <div class="sw-row-name">My status</div>
+                    <div class="sw-row-sub" id="myStatusText">Tap to add status update</div>
                 </div>
-                <div class="streak-count" id="streakCount">0</div>
-            </div>
-            
-            <!-- Mood Trends -->
-            <div class="mood-trends">
-                <h4>Mood Trends (Last 30 days)</h4>
-                <div class="mood-chart" id="moodChart">
-                    <!-- Mood chart bars will be loaded here -->
-                </div>
-            </div>
-            
-            <!-- Quick Actions -->
-            <div class="quick-actions">
-                <button class="quick-action-btn" id="viewTimelineBtn" title="Memory Timeline">
-                    <div class="quick-action-icon">
-                        <i class="fas fa-history"></i>
-                    </div>
-                    <div class="quick-action-text">Timeline</div>
+                <button class="sw-icon-btn sw-pencil-btn" id="editMyStatusBtn" title="Edit" style="opacity:0.5;">
+                    <i class="fas fa-pencil-alt"></i>
                 </button>
-                <button class="quick-action-btn" id="viewStatsBtn" title="View Stats">
-                    <div class="quick-action-icon">
-                        <i class="fas fa-chart-line"></i>
-                    </div>
-                    <div class="quick-action-text">Analytics</div>
-                </button>
-                <button class="quick-action-btn" id="viewScheduledBtn" title="View Scheduled">
-                    <div class="quick-action-icon">
-                        <i class="fas fa-clock"></i>
-                    </div>
-                    <div class="quick-action-text">Scheduled</div>
-                </button>
+                <!-- hidden but needed by JS -->
+                <button id="viewMyStatusBtn" style="display:none;"></button>
+                <div id="myStatusIndicator" style="display:none;"></div>
             </div>
-            
-            <!-- Intent & Mood Filters -->
-            <div class="status-categories" style="border-top: 1px solid var(--border-color);">
-                <button class="category-btn" data-filter="intent-feedback">Feedback</button>
-                <button class="category-btn" data-filter="intent-achievement">Achievement</button>
-                <button class="category-btn" data-filter="intent-advice">Advice</button>
-                <button class="category-btn" data-filter="mood-happy">Happy</button>
-                <button class="category-btn" data-filter="mood-motivated">Motivated</button>
-            </div>
+
+            <!-- Recent updates label -->
+            <div class="sw-section-label" id="recentUpdatesLabel" style="display:none;">Recent updates</div>
             
             <div class="status-list">
                 <div class="status-list-content">
@@ -2983,15 +3130,34 @@
             </div>
             
             <div class="viewer-footer" id="viewerFooter">
-                <!-- Owner controls (edit/delete + seen count) — shown only to status creator -->
+                <!-- Owner controls — shown only to status creator -->
                 <div class="owner-controls" id="ownerControls">
-                    <div class="viewer-seen-count" id="viewerSeenCount">
+                    <!-- Seen count: clickable to reveal viewer list -->
+                    <div class="viewer-seen-count" id="viewerSeenCount" title="Tap to see who viewed">
                         <i class="fas fa-eye"></i>
-                        <span id="seenCountNum">0</span> views
+                        <span id="seenCountNum">0</span>
+                        <span style="font-size:12px;opacity:0.8;margin-left:2px;">views</span>
+                        <i class="fas fa-chevron-up" style="font-size:10px;margin-left:6px;opacity:0.6;"></i>
                     </div>
-                    <div class="owner-action-btns">
+                    <!-- Edit/Delete: hidden until user holds the status (hold-to-reveal) -->
+                    <div class="owner-action-btns" id="ownerActionBtns" style="display:none;">
                         <button id="editStatusBtn" title="Edit Status"><i class="fas fa-edit"></i></button>
                         <button id="deleteStatusBtn" class="delete-btn" title="Delete Status"><i class="fas fa-trash"></i></button>
+                    </div>
+                    <!-- Hold hint (shows briefly) -->
+                    <div class="hold-hint" id="holdHint" style="display:none;font-size:11px;opacity:0.6;text-align:center;padding:4px 0;">
+                        Hold to edit or delete
+                    </div>
+                </div>
+
+                <!-- Viewers panel: hidden by default, shown when count is tapped -->
+                <div id="viewersPanelInline" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:var(--surface,#1e2a32);border-top:1px solid var(--border-color,#2a3942);max-height:220px;overflow-y:auto;z-index:10;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px 4px;">
+                        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#8696a0);text-transform:uppercase;letter-spacing:0.5px;">Viewed by</span>
+                        <button onclick="document.getElementById('viewersPanelInline').style.display='none';" style="background:none;border:none;color:var(--text-secondary,#8696a0);font-size:16px;cursor:pointer;padding:0 4px;">&times;</button>
+                    </div>
+                    <div id="viewersListInline" style="padding:0 8px 8px;">
+                        <div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">Loading...</div>
                     </div>
                 </div>
 
@@ -3054,5 +3220,195 @@
     <div class="recovery-progress" id="recoveryProgress" style="display: none;">
         <div class="progress-bar" style="width: 0%;"></div>
     </div>
+
+<script id="wa-status-logic">
+(function() {
+    document.addEventListener('DOMContentLoaded', init);
+    // Also run immediately if DOM is already ready
+    if (document.readyState !== 'loading') init();
+
+    function init() {
+        setupMoreMenu();
+        setupHoldReveal();
+        setupViewersPanel();
+    }
+
+    // ── Three-dots dropdown ──────────────────────────────────────────
+    function setupMoreMenu() {
+        var btn  = document.getElementById('statusMoreBtn');
+        var drop = document.getElementById('statusMoreDropdown');
+        if (!btn || !drop) return;
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
+        });
+        document.addEventListener('click', function() {
+            if (drop) drop.style.display = 'none';
+        });
+        // Wire menu items to existing handlers
+        var map = {
+            viewStreakBtn:       function() { alert('Posting streak feature coming soon'); },
+            viewMoodTrendsBtn:   function() { alert('Mood trends feature coming soon'); },
+            viewAchievementsBtn: function() { alert('Achievements feature coming soon'); },
+            viewFeedbackBtn:     function() { alert('Feedback feature coming soon'); }
+        };
+        Object.keys(map).forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('click', function() { drop.style.display = 'none'; map[id](); });
+        });
+        // These already have handlers wired by status-ui.js — just close dropdown
+        ['viewTimelineBtn','viewStatsBtn','viewScheduledBtn','viewHighlightsBtn','viewDraftsBtn'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('click', function() { drop.style.display = 'none'; }, true);
+        });
+    }
+
+    // ── Hold-to-reveal edit/delete on viewer panel ───────────────────
+    function setupHoldReveal() {
+        var panel    = document.getElementById('statusViewerPanel');
+        if (!panel) return;
+        var actionBtns = document.getElementById('ownerActionBtns');
+        var holdHint   = document.getElementById('holdHint');
+        var holdTimer  = null;
+        var hideTimer  = null;
+
+        function showControls() {
+            if (actionBtns) actionBtns.classList.add('revealed');
+            if (holdHint)   holdHint.classList.remove('visible');
+            clearTimeout(hideTimer);
+            // Auto-hide after 4 seconds of inactivity
+            hideTimer = setTimeout(hideControls, 4000);
+        }
+        function showHint() {
+            if (holdHint) holdHint.classList.add('visible');
+        }
+        function hideControls() {
+            if (actionBtns) actionBtns.classList.remove('revealed');
+            if (holdHint)   holdHint.classList.remove('visible');
+        }
+
+        // Mouse hold (500ms = reveal)
+        panel.addEventListener('mousedown', function(e) {
+            // Only reveal for owner (owner-mode class on footer)
+            var footer = document.getElementById('viewerFooter');
+            if (!footer || !footer.classList.contains('owner-mode')) return;
+            showHint();
+            holdTimer = setTimeout(showControls, 500);
+        });
+        panel.addEventListener('mouseup',    function() { clearTimeout(holdTimer); });
+        panel.addEventListener('mouseleave', function() { clearTimeout(holdTimer); });
+
+        // Touch hold
+        panel.addEventListener('touchstart', function(e) {
+            var footer = document.getElementById('viewerFooter');
+            if (!footer || !footer.classList.contains('owner-mode')) return;
+            showHint();
+            holdTimer = setTimeout(showControls, 500);
+        }, { passive: true });
+        panel.addEventListener('touchend',    function() { clearTimeout(holdTimer); });
+        panel.addEventListener('touchcancel', function() { clearTimeout(holdTimer); });
+
+        // Hide controls when viewer is closed / new status loaded
+        document.addEventListener('statusViewerClosed', hideControls);
+        document.addEventListener('statusSlotLoaded',   hideControls);
+    }
+
+    // ── Viewers panel (tap seen count to reveal) ─────────────────────
+    function setupViewersPanel() {
+        var seenCount = document.getElementById('viewerSeenCount');
+        var panel     = document.getElementById('viewersPanelInline');
+        var list      = document.getElementById('viewersListInline');
+        if (!seenCount || !panel) return;
+
+        seenCount.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var footer = document.getElementById('viewerFooter');
+            if (!footer || !footer.classList.contains('owner-mode')) return;
+
+            // Toggle panel
+            if (panel.style.display !== 'none') {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+            if (list) list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+
+            // Get current status id from active viewer
+            var currentStatusId = window.__currentViewingStatusId || window.__activeStatusId;
+            if (!currentStatusId) {
+                list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">No data</div>';
+                return;
+            }
+            // Fetch viewers
+            var api = window.StatusAPI;
+            if (api && api.getViewers) {
+                api.getViewers(currentStatusId).then(function(result) {
+                    var viewers = (result && (result.viewers || (result.data && result.data.viewers))) || [];
+                    if (!viewers.length) {
+                        list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">No views yet</div>';
+                        return;
+                    }
+                    list.innerHTML = viewers.slice(0, 50).map(function(v) {
+                        var name = (v.viewer && (v.viewer.displayName || v.viewer.username)) || ('User ' + v.viewerId);
+                        var initial = name.charAt(0).toUpperCase();
+                        var avatarUrl = v.viewer && (v.viewer.avatar || v.viewer.photoURL) || '';
+                        var t = v.viewedAt ? formatViewTime(v.viewedAt) : '';
+                        var reaction = v.reaction ? '<span class="vp-reaction">' + v.reaction + '</span>' : '';
+                        var avatarStyle = avatarUrl
+                            ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;'
+                            : 'background:var(--primary-color,#00a884);';
+                        return '<div class="viewer-list-person">' +
+                            '<div class="vp-avatar" style="' + avatarStyle + '">' + (avatarUrl ? '' : initial) + '</div>' +
+                            '<div style="flex:1;min-width:0;">' +
+                                '<div class="vp-name">' + escHtml(name) + '</div>' +
+                                '<div class="vp-time">' + t + '</div>' +
+                            '</div>' +
+                            reaction +
+                        '</div>';
+                    }).join('');
+                }).catch(function() {
+                    list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">Could not load viewers</div>';
+                });
+            } else {
+                list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-secondary,#8696a0);font-size:13px;">Not available</div>';
+            }
+        });
+
+        // Close panel when viewer closes
+        document.addEventListener('statusViewerClosed', function() {
+            if (panel) panel.style.display = 'none';
+        });
+    }
+
+    function formatViewTime(iso) {
+        try {
+            var d = new Date(iso);
+            var now = new Date();
+            var diff = Math.floor((now - d) / 1000);
+            if (diff < 60)  return 'Just now';
+            if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+            return d.toLocaleDateString([], {month:'short', day:'numeric'}) +
+                   ' at ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        } catch(e) { return ''; }
+    }
+
+    function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── Expose currentStatusId setter for status-ui.js ───────────────
+    window.__setCurrentViewingStatusId = function(id) {
+        window.__currentViewingStatusId = id;
+        // Also close viewers panel when status changes
+        var panel = document.getElementById('viewersPanelInline');
+        if (panel) panel.style.display = 'none';
+        // Also hide action buttons
+        var ab = document.getElementById('ownerActionBtns');
+        if (ab) ab.classList.remove('revealed');
+    };
+})();
+</script>
+
 </body>
 </html>
