@@ -3449,6 +3449,22 @@ const FriendCacheManager = {
         // Callers that actually have new data (loadFriendsFromBackend, FRIEND_REMOVED, etc.)
         // dispatch friendsUpdated explicitly after syncToGlobals returns.
         window.dispatchEvent(new CustomEvent('updateFriendCounts'));
+        // Broadcast to parent (chat/call/status/groups) with 80ms debounce to avoid flooding.
+        if (!FriendCacheManager._syncBroadcastTimer) {
+            FriendCacheManager._syncBroadcastTimer = setTimeout(() => {
+                FriendCacheManager._syncBroadcastTimer = null;
+                const _syncPayload = {
+                    type: 'FRIENDS_SYNC',
+                    friends: Array.from(FriendCacheManager._cache.friends.values()),
+                    requests: Array.from(FriendCacheManager._cache.requests.values()),
+                    sentRequests: Array.from(FriendCacheManager._cache.sentRequests.values()),
+                    source: 'friend-core',
+                    timestamp: Date.now()
+                };
+                try { window.parent.postMessage(_syncPayload, '*'); } catch (_) {}
+                window.dispatchEvent(new CustomEvent('FRIENDS_SYNC', { detail: _syncPayload }));
+            }, 80);
+        }
     },
     
     persist() {
@@ -4163,13 +4179,34 @@ const FriendRequestManager = {
                 window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true } }));
                 if (typeof showNotification === 'function') showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
                 const _sid = existingRequest?.senderId || existingRequest?.sender?.id || existingRequest?.requesterId || friendId;
-                safeSend({ type: 'FRIEND_ACCEPTED', payload: {
+                const _acceptPayload = {
                     requestId, friendId, friend: newFriend,
                     targetUserId: String(_sid), acceptedById: String(__session.user?.id || ''),
                     acceptedByName: __session.user?.displayName || __session.user?.username || '',
                     acceptedByAvatar: __session.user?.avatar || __session.user?.photoURL || '',
                     timestamp: Date.now()
-                }});
+                };
+                safeSend({ type: 'FRIEND_ACCEPTED', payload: _acceptPayload });
+                // Immediately push the full updated friends list to parent so ALL modules
+                // (chat, call, status, groups) update without waiting for next poll.
+                try {
+                    window.parent.postMessage({
+                        type: 'FRIENDS_DATA',
+                        friends: FriendCacheManager.getAllFriends(),
+                        source: 'friend-core',
+                        trigger: 'accept',
+                        timestamp: Date.now()
+                    }, '*');
+                    window.parent.postMessage({
+                        type: 'FRIEND_RELATIONSHIP_CHANGED',
+                        action: 'accepted',
+                        friendId: String(newFriend.id),
+                        targetUserId: String(_sid),
+                        acceptedById: String(__session.user?.id || ''),
+                        friend: newFriend,
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (_) {}
                 saveFriendLocal(newFriend, 'accepted', { isLocalOnly: false }).catch(() => {});
                 if (ls && localRecordId) ls.confirm(localRecordId, newFriend.serverId, { status: 'accepted', ...newFriend }).catch(() => {});
                 setTimeout(async () => {
@@ -4179,6 +4216,16 @@ const FriendRequestManager = {
                     FriendCacheManager.syncToGlobals(); FriendCacheManager.persist();
                     window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true, delayed: true } }));
                     window.dispatchEvent(new CustomEvent('updateFriendCounts'));
+                    // Second broadcast after backend reload confirms data
+                    try {
+                        window.parent.postMessage({
+                            type: 'FRIENDS_DATA',
+                            friends: FriendCacheManager.getAllFriends(),
+                            source: 'friend-core',
+                            trigger: 'accept-reload',
+                            timestamp: Date.now()
+                        }, '*');
+                    } catch (_) {}
                 }, 1000);
                 return { success: true, friend: newFriend };
             } else {
@@ -8735,7 +8782,12 @@ async function startCameraScanner() {
     
     try {
         cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: currentCamera },
+            video: {
+                facingMode: currentCamera,
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30, min: 15 }
+            },
             audio: false
         });
         
@@ -8762,29 +8814,29 @@ async function startCameraScanner() {
     }
 }
 
-// FIXED: QR scanner stops after result (Bug #6)
+// FIXED: QR scanner with optimized 100ms interval scan for instant detection
 function startRealQRCodeScanning(video, canvas) {
     if (!featureFlags.qrCode) return;
     
     const ctx = canvas.getContext('2d');
     scanningActive = true;
     let scanRequestSent = false;
-    let _qrScanActive = true;  // FIXED: Add stop flag for QR scanning
+    let _qrScanActive = true;
+    let _scanInterval = null;
     
     function scan() {
         if (!scanningActive || !document.getElementById('cameraScannerModal')?.classList.contains('active')) {
+            if (_scanInterval) { clearInterval(_scanInterval); _scanInterval = null; }
             return;
         }
         
-        if (!_qrScanActive) {  // FIXED: Exit if scan is complete
+        if (!_qrScanActive || scanRequestSent) {
+            if (_scanInterval) { clearInterval(_scanInterval); _scanInterval = null; }
             return;
         }
         
-        if (scanRequestSent) {
-            return;
-        }
-        
-        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        // Accept any ready state >= HAVE_CURRENT_DATA (2) for faster start
+        if (video.readyState >= 2) {
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
             
@@ -8794,21 +8846,26 @@ function startRealQRCodeScanning(video, canvas) {
                 if (typeof jsQR === 'function') {
                     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                     const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                        inversionAttempts: "dontInvert"
+                        inversionAttempts: "attemptBoth"
                     });
                     
                     if (code && !scanRequestSent) {
                         drawQRCodeRect(code.location, ctx);
                         scanRequestSent = true;
+                        _qrScanActive = false;
+                        if (_scanInterval) { clearInterval(_scanInterval); _scanInterval = null; }
                         processScannedQRCodeReal(code.data);
                         return;
                     }
                 }
             } catch (e) {}
         }
-        
-        requestAnimationFrame(scan);
     }
+    
+    // Use interval at 100ms (10fps scan) — faster than waiting for rAF + HAVE_ENOUGH_DATA
+    _scanInterval = setInterval(scan, 100);
+    // Also run immediately on first frame via rAF for the very first detection
+    requestAnimationFrame(scan);
     
     function drawQRCodeRect(location, ctx) {
         try {
@@ -8823,17 +8880,14 @@ function startRealQRCodeScanning(video, canvas) {
             ctx.stroke();
         } catch (e) {}
     }
-    
-    scan();
 }
 
 // FIXED: QR scanner stops after result (Bug #6)
 function processScannedQRCodeReal(qrData) {
     QRCodeManager.processScannedQR(qrData).then(result => {
-        // FIXED: Stop scanner first before processing result
-        _qrScanActive = false;   // ← STOP loop
-        scanningActive = false;   // ← Stop scanning flag
-        stopCameraScanner();      // ← Stop camera
+        // Stop scanner flags + camera
+        scanningActive = false;
+        stopCameraScanner();
         
         if (!result.success) {
             showNotification?.(result.error, 'error');
@@ -10252,6 +10306,7 @@ const NearbyManager = {
     _coords:      null,
     _onResult:    null,
     _onStatus:    null,
+    _pollTimer:   null,
 
     start(onResult, onStatus) {
         if (this._searching) return;
@@ -10261,24 +10316,48 @@ const NearbyManager = {
         this._onStatus('Requesting location...');
 
         if (!navigator.geolocation) {
-            this._onStatus('Geolocation not supported');
-            this._searching = false;
+            this._onStatus('Location not supported — showing online users');
+            this._fetchNearby(); // fallback: fetch online users
             return;
         }
 
-        this._watchId = navigator.geolocation.watchPosition(
+        // FIX: Fire getCurrentPosition FIRST for instant result, then watchPosition for updates
+        navigator.geolocation.getCurrentPosition(
             (position) => {
                 this._coords = { lat: position.coords.latitude, lng: position.coords.longitude };
                 this._onStatus('Searching nearby...');
-                this._fetchNearby();
+                this._updatePresence();  // push our location to backend
+                this._fetchNearby();     // fetch immediately — no waiting for watch
             },
             (err) => {
-                Logger.warn('NearbyManager', 'Geolocation error', err);
-                this._onStatus('Location permission denied — showing online users instead');
+                Logger.warn('NearbyManager', 'getCurrentPosition error', err);
+                this._onStatus('Location permission denied — showing online users');
                 this._fetchNearby();
             },
-            { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
         );
+
+        // Watch for ongoing updates
+        this._watchId = navigator.geolocation.watchPosition(
+            (position) => {
+                const prev = this._coords;
+                this._coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+                // Only re-fetch if moved more than ~50m (avoids constant re-fetching)
+                const moved = !prev || Math.abs(prev.lat - this._coords.lat) > 0.0005 || Math.abs(prev.lng - this._coords.lng) > 0.0005;
+                if (moved) {
+                    this._onStatus('Updating nearby...');
+                    this._updatePresence();
+                    this._fetchNearby();
+                }
+            },
+            (err) => {
+                Logger.warn('NearbyManager', 'watchPosition error', err);
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+        );
+
+        // Periodic refresh every 15s regardless of movement
+        this._pollTimer = setInterval(() => { if (this._searching) this._fetchNearby(); }, 15000);
     },
 
     stop() {
@@ -10287,9 +10366,21 @@ const NearbyManager = {
             navigator.geolocation.clearWatch(this._watchId);
             this._watchId = null;
         }
+        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
         this._coords  = null;
         this._onResult = null;
         this._onStatus = null;
+    },
+
+    // FIX: Push our location to backend so other users can discover us
+    async _updatePresence() {
+        if (!this._coords || !__session.token) return;
+        try {
+            await authorizedRequest('/api/users/presence', {
+                method: 'POST',
+                body: JSON.stringify({ lat: this._coords.lat, lng: this._coords.lng, status: 'online' })
+            });
+        } catch (_) {}
     },
 
     async _fetchNearby() {
@@ -10305,26 +10396,18 @@ const NearbyManager = {
                 users.forEach(user => {
                     user.photoURL = user.photoURL || user.avatar || '';
                 });
-                this._onResult(users, response.data?.mode || 'none');
-            } else {
-                // Fallback to allUsers if nearby endpoint fails or returns empty
-                const fallbackUsers = window._allUsersCache || [];
-                const onlineUsers = fallbackUsers.filter(u => u.online === true || u.status === 'online');
-                if (this._onResult) {
-                    this._onResult(onlineUsers, 'fallback');
+                if (users.length > 0 || response.data?.mode) {
+                    this._onResult(users, response.data?.mode || 'geo');
+                    return;
                 }
             }
+            // Fallback to online users from cache
+            const fallbackUsers = (window._allUsersCache || []).filter(u => u.online === true || u.status === 'online');
+            if (this._onResult) this._onResult(fallbackUsers, 'fallback');
         } catch (err) {
             Logger.error('NearbyManager', 'Failed to fetch nearby users', err);
-            // Fallback to allUsers on error
-            const fallbackUsers = window._allUsersCache || [];
-            const onlineUsers = fallbackUsers.filter(u => u.online === true || u.status === 'online');
-            if (this._onResult) {
-                this._onResult(onlineUsers, 'fallback');
-            }
-        }
-        if (this._searching) {
-            setTimeout(() => this._fetchNearby(), 30000);
+            const fallbackUsers = (window._allUsersCache || []).filter(u => u.online === true || u.status === 'online');
+            if (this._onResult) this._onResult(fallbackUsers, 'fallback');
         }
     }
 };

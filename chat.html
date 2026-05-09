@@ -4847,6 +4847,40 @@
                     }
                 }
 
+                // FIX: Also handle FRIENDS_SYNC — emitted by friend-core's syncToGlobals debounce.
+                // This covers the instant cross-module sync path on every friend state change.
+                if (data.type === 'FRIENDS_SYNC') {
+                    const incoming = data.friends || [];
+                    if (Array.isArray(incoming) && incoming.length > 0) {
+                        const seen = new Set();
+                        cachedFriendsList = incoming.filter(f => {
+                            if (!f || !f.id) return false;
+                            const k = String(f.id);
+                            if (seen.has(k)) return false;
+                            seen.add(k);
+                            return true;
+                        });
+                        broadcastFriendsToAllModules(cachedFriendsList);
+                    }
+                }
+
+                // FIX: Handle FRIEND_RELATIONSHIP_CHANGED for immediate cross-module status update
+                if (data.type === 'FRIEND_RELATIONSHIP_CHANGED') {
+                    const { action, friendId, friend } = data;
+                    if (action === 'accepted' && friendId && friend) {
+                        // Upsert this friend into the cached list
+                        const idx = cachedFriendsList.findIndex(f => String(f.id) === String(friendId));
+                        if (idx >= 0) cachedFriendsList[idx] = { ...cachedFriendsList[idx], ...friend };
+                        else cachedFriendsList.push(friend);
+                        broadcastFriendsToAllModules(cachedFriendsList);
+                    } else if (action === 'removed' && friendId) {
+                        cachedFriendsList = cachedFriendsList.filter(f => String(f.id) !== String(friendId));
+                        broadcastFriendsToAllModules(cachedFriendsList);
+                    }
+                    // Relay the event to all modules
+                    dispatchEventToModules({ type: 'FRIEND_RELATIONSHIP_CHANGED', payload: data, source: 'parent' });
+                }
+
                 if (data.type === 'FETCH_LISTINGS') {
                     const requestId = data.payload?.requestId;
                     if (!requestId) return;

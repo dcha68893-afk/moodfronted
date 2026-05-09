@@ -2190,7 +2190,15 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
         allGroupsList.innerHTML = '';
         
         const _gcR=window.GroupCore;
-        const _liveAll=(_gcR&&_gcR.groups&&_gcR.groups.length>0)?_gcR.groups:(groups||[]);
+        // ALL GROUPS = created + joined (merged, deduplicated by id)
+        const _gcGroups=(_gcR&&_gcR.groups)||groups||[];
+        const _gcMyG=(_gcR&&_gcR.myGroups)||myGroups||[];
+        const _gcJnG=(_gcR&&_gcR.joinedGroups)||joinedGroups||[];
+        const _allSeen=new Set();
+        const _liveAll=[..._gcGroups,..._gcMyG,..._gcJnG].filter(function(g){
+            if(!g||!g.id)return false;
+            var k=String(g.id);if(_allSeen.has(k))return false;_allSeen.add(k);return true;
+        });
         if(!_liveAll.length){allGroupsList.appendChild(createSecureEmptyStateElement('groups'));return;}
         const fragment=document.createDocumentFragment();
         const groupsToRender=_liveAll.slice(0,20);
@@ -2272,7 +2280,15 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         joinedList.innerHTML = '';
         
         const _gcJn=window.GroupCore;
-        const _liveJn=(_gcJn&&_gcJn.joinedGroups&&_gcJn.joinedGroups.length>0)?_gcJn.joinedGroups:(joinedGroups||[]);
+        // JOINED = groups user is member of but DID NOT create
+        const _jnRaw=(_gcJn&&_gcJn.joinedGroups&&_gcJn.joinedGroups.length>0)?_gcJn.joinedGroups:(joinedGroups||[]);
+        const _myUid=String((_gcJn&&_gcJn.currentUser&&(_gcJn.currentUser.id||_gcJn.currentUser.uid))||'');
+        // Also include groups from .groups array that user joined but didn't create
+        const _grpJoined=((_gcJn&&_gcJn.groups)||groups||[]).filter(function(g){
+            return g&&g.id&&_myUid&&String(g.createdBy)!==_myUid&&
+                   !_jnRaw.some(function(j){return String(j.id)===String(g.id);});
+        });
+        const _liveJn=[..._jnRaw,..._grpJoined];
         if(!_liveJn.length){joinedList.appendChild(createSecureEmptyStateElement('joined'));return;}
         const fragment=document.createDocumentFragment();
         _liveJn.forEach(group => {
@@ -4502,7 +4518,7 @@ export async function loadReceivedInvites() {
     if (!body) return;
     body.innerHTML = panelLoader();
     try {
-        const data = await panelFetch('/api/groups/invitations?status=pending');
+        const data = await panelFetch('/api/group-members/invitations?status=pending');
         const invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
         if (!invites.length) { body.innerHTML = panelEmpty('fas fa-envelope-open', 'No pending invitations.'); return; }
         body.innerHTML = '';
@@ -4660,8 +4676,9 @@ export async function loadSentInvites() {
     if (!body) return;
     body.innerHTML = panelLoader();
     try {
-        const gid = window.selectedGroup?.id;
-        const url = gid ? '/api/group-members/' + gid + '/invitations' : '/api/groups/invitations/sent';
+        const gid = window.selectedGroup?.id || (window.__gcCurGroup?.id);
+        // Correct per groupMembers.js: GET /api/group-members/:id/invitations/sent
+        const url = gid ? '/api/group-members/' + gid + '/invitations/sent' : '/api/group-members/invitations?status=sent';
         const data = await panelFetch(url);
         const invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
         if (!invites.length) { body.innerHTML = panelEmpty('fas fa-paper-plane', 'No sent invitations.'); return; }

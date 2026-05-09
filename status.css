@@ -3537,6 +3537,54 @@ html, body, .app-container {
     position: relative;
     z-index: 1;
 }
+/* SVG ring overlay */
+.status-group-avatar {
+    position: relative;
+}
+.status-group-avatar svg.ring-svg {
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    width: calc(100% + 8px);
+    height: calc(100% + 8px);
+    z-index: 2;
+    pointer-events: none;
+}
+/* Badges */
+.status-group-badges {
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+    flex-wrap: wrap;
+}
+.status-badge {
+    font-size: 11px;
+    color: var(--text-secondary, #8696a0);
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    line-height: 1;
+}
+.status-badge.reaction-badge { color: #00a884; }
+/* Hide old ring divs — SVG handles rings now */
+.status-group-ring { display: none !important; }
+/* More menu */
+.more-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 16px;
+    background: none;
+    border: none;
+    color: var(--text-primary, #e9edef);
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+.more-menu-item:hover { background: var(--surface-alt, #2a3942); }
+.more-menu-item i { width: 18px; color: var(--text-secondary, #8696a0); font-size: 14px; }
 .status-group-count {
     position: absolute;
     bottom: -2px;

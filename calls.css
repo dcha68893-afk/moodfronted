@@ -3475,6 +3475,10 @@ input:focus + .toggle-slider,
 .call-container.idle-active {
     display: flex !important;
 }
+/* ✅ FIX: Also show if .active class is set (legacy compatibility) */
+.call-container.active {
+    display: flex !important;
+}
 
 /* ── Idle screen: fills callContainer, visible by default ── */
 #idleScreen {

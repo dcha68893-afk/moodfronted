@@ -238,22 +238,42 @@ class StatusWebSocket {
     // ── STATUS REACTION (real-time, owner receives) ──────────────────────────
     _handleStatusReaction(data) {
         if (!data || !data.statusId) return;
-        console.log('[StatusWebSocket] status:reaction', data);
+        console.log('[StatusWebSocket] ⚡ status:reaction received', data);
 
-        // Update reaction button count in the active viewer if it's open
+        // 1. Update reaction button in active full-screen viewer
         if (typeof window.updateStatusReactionUI === 'function') {
             window.updateStatusReactionUI(data.statusId, data.emoji, data.count);
         }
 
-        // Show toast notification to status owner
+        // 2. Update sidebar list badge immediately (no refresh needed)
+        const sid = String(data.statusId);
+        const listItems = document.querySelectorAll('.status-group-item');
+        listItems.forEach(function(item) {
+            const ids = (item.dataset.statusIds || '').split(',');
+            if (ids.includes(sid)) {
+                let badges = item.querySelector('.status-group-badges');
+                if (!badges) {
+                    badges = document.createElement('div');
+                    badges.className = 'status-group-badges';
+                    const info = item.querySelector('.status-group-info');
+                    if (info) info.appendChild(badges);
+                }
+                let rb = badges.querySelector('.reaction-badge');
+                if (!rb) {
+                    rb = document.createElement('span');
+                    rb.className = 'status-badge reaction-badge';
+                    badges.appendChild(rb);
+                }
+                rb.textContent = data.emoji + ' ' + data.count;
+            }
+        });
+
+        // 3. Toast notification to status owner
         const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
         const currentId   = currentUser && (currentUser.id || currentUser.userId);
-        if (currentId) {
-            // The server only fires this event on the owner's room, so if we receive
-            // it, it means someone reacted to our status
-            if (typeof window.showNotification === 'function') {
-                window.showNotification(`${data.emoji} Someone reacted to your status`, 'info');
-            }
+        if (currentId && typeof window.showNotification === 'function') {
+            const reacter = data.reactorName || 'Someone';
+            window.showNotification(`${data.emoji} ${reacter} reacted to your status`, 'info');
         }
 
         this._emit('status:reaction', data);
@@ -262,9 +282,36 @@ class StatusWebSocket {
     // ── STATUS REPLY (real-time, delivered via chat system) ──────────────────
     _handleStatusReply(data) {
         if (!data) return;
-        console.log('[StatusWebSocket] status:reply', data);
+        console.log('[StatusWebSocket] ⚡ status:reply received', data);
 
-        // Forward to parent so the chat module can display the new message
+        // Update reply badge on sidebar list immediately
+        const sid = String(data.statusId || '');
+        if (sid) {
+            document.querySelectorAll('.status-group-item').forEach(function(item) {
+                const ids = (item.dataset.statusIds || '').split(',');
+                if (ids.includes(sid)) {
+                    let badges = item.querySelector('.status-group-badges');
+                    if (!badges) {
+                        badges = document.createElement('div');
+                        badges.className = 'status-group-badges';
+                        const info = item.querySelector('.status-group-info');
+                        if (info) info.appendChild(badges);
+                    }
+                    let rb = badges.querySelector('.reply-badge');
+                    if (!rb) {
+                        rb = document.createElement('span');
+                        rb.className = 'status-badge reply-badge';
+                        rb.innerHTML = '<i class="fas fa-reply" style="font-size:10px;"></i> 1';
+                        badges.appendChild(rb);
+                    } else {
+                        const n = (parseInt(rb.textContent.trim()) || 0) + 1;
+                        rb.innerHTML = '<i class="fas fa-reply" style="font-size:10px;"></i> ' + n;
+                    }
+                }
+            });
+        }
+
+        // Forward to parent chat module
         if (window.parent && window.parent !== window) {
             try {
                 window.parent.postMessage({
@@ -278,7 +325,8 @@ class StatusWebSocket {
         const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
         const currentId   = currentUser && (currentUser.id || currentUser.userId);
         if (currentId && typeof window.showNotification === 'function') {
-            window.showNotification('💬 Someone replied to your status', 'info');
+            const senderName = data.senderName || 'Someone';
+            window.showNotification(`💬 ${senderName} replied to your status`, 'info');
         }
 
         this._emit('status:reply', data);

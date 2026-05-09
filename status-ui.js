@@ -4248,49 +4248,99 @@ function renderStatusesListUI(container, statusesList) {
 }
 
 // Create one list item that represents all statuses from one user
+// Enhanced: SVG segmented ring (WhatsApp-style), reaction/reply badges
 function createGroupedStatusElement(statuses) {
     if (!statuses || !statuses.length) return null;
     const first = statuses[0];
-    const user = first.user || { displayName: 'Unknown User' };
+    const user = first.statusUser || first.user || {};
+    const displayName = user.firstName
+        ? `${user.firstName} ${user.lastName || ''}`.trim()
+        : user.username || user.displayName || 'Unknown';
     const total = statuses.length;
-    const viewedCount = statuses.filter(s => viewedStatuses?.has(s.id)).length;
-    const allViewed = viewedCount === total;
+    const viewedCount = statuses.filter(s => viewedStatuses && (viewedStatuses.has(String(s.id)) || viewedStatuses.has(Number(s.id)))).length;
+    const allViewed = viewedCount >= total;
     const timeAgo = first.createdAt ? formatTimeAgo(first.createdAt) : 'Just now';
+    const avatarUrl = user.avatar || user.photoURL || user.profilePicture || null;
 
-    const initials = (user.displayName || 'U')
-        .split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    const initials = displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || '?';
 
     const item = document.createElement('div');
     item.className = 'status-group-item';
     item.dataset.userId = String(first.userId || user.id || '');
     item.dataset.statusIds = statuses.map(s => s.id).join(',');
 
-    // Build segmented ring for multiple statuses
-    let ringHtml = '';
-    if (total === 1) {
-        ringHtml = `<div class="status-group-ring ${allViewed ? 'viewed' : ''}"></div>`;
-    } else {
-        // CSS conic-gradient ring divided into segments
-        const pct = Math.round((viewedCount / total) * 100);
-        ringHtml = `<div class="status-group-ring multi" style="--filled:${pct}%"></div>`;
+    // ── SVG segmented ring (exact segment per status, like WhatsApp) ──
+    const RING_R = 28;        // radius of ring circle
+    const RING_CX = 30;       // center x
+    const RING_CY = 30;       // center y
+    const STROKE = 2.5;
+    const GAP_DEG = total > 1 ? 4 : 0;   // gap between segments in degrees
+    const CIRCUMFERENCE = 2 * Math.PI * RING_R;
+    const segDeg = (360 - GAP_DEG * total) / total;
+    const segArc = (segDeg / 360) * CIRCUMFERENCE;
+    const gapArc = (GAP_DEG / 360) * CIRCUMFERENCE;
+    
+    let segments = '';
+    for (let i = 0; i < total; i++) {
+        const isViewed = viewedStatuses && (viewedStatuses.has(String(statuses[i].id)) || viewedStatuses.has(Number(statuses[i].id)));
+        const color = isViewed ? '#8696a0' : '#00a884';
+        const rotation = -90 + i * (segDeg + GAP_DEG);
+        segments += `<circle cx="${RING_CX}" cy="${RING_CY}" r="${RING_R}"
+            fill="none" stroke="${color}" stroke-width="${STROKE}"
+            stroke-dasharray="${segArc} ${CIRCUMFERENCE - segArc}"
+            stroke-dashoffset="${-(rotation / 360) * CIRCUMFERENCE + CIRCUMFERENCE * 0.25}"
+            transform="rotate(${rotation}, ${RING_CX}, ${RING_CY})"
+            class="seg" data-idx="${i}"
+        />`;
     }
 
-    const avatarStyle = user.photoURL ? `style="background-image:url('${user.photoURL}')"` : '';
+    const ringSvg = `<svg class="ring-svg" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">${segments}</svg>`;
+
+    // ── Collect reactions/replies for badges ──
+    let reactEmoji = '';
+    let replyCount = 0;
+    let totalReactions = 0;
+    statuses.forEach(s => {
+        if (s.reactionCount) totalReactions += s.reactionCount;
+        if (s.replyCount) replyCount += s.replyCount;
+        if (s.latestReaction || s.topEmoji) reactEmoji = s.latestReaction || s.topEmoji;
+        // Check reactions object
+        if (s.reactions && typeof s.reactions === 'object') {
+            const emojis = Object.keys(s.reactions);
+            if (emojis.length) {
+                reactEmoji = emojis[0];
+                totalReactions += emojis.reduce((sum, k) => sum + (Array.isArray(s.reactions[k]) ? s.reactions[k].length : (s.reactions[k] || 0)), 0);
+            }
+        }
+    });
+
+    const badgesHtml = (totalReactions > 0 || replyCount > 0) ? `
+        <div class="status-group-badges">
+            ${totalReactions > 0 ? `<span class="status-badge reaction-badge">${reactEmoji || '😊'} ${totalReactions}</span>` : ''}
+            ${replyCount > 0 ? `<span class="status-badge reply-badge"><i class="fas fa-reply" style="font-size:10px;"></i> ${replyCount}</span>` : ''}
+        </div>
+    ` : '';
+
+    const metaText = timeAgo + (total > 1 ? ` · ${total} updates` : '');
+    const avatarInner = avatarUrl
+        ? `<div class="status-group-avatar-inner" style="background-image:url('${avatarUrl}');background-size:cover;background-position:center;"></div>`
+        : `<div class="status-group-avatar-inner"><span>${initials}</span></div>`;
+
     item.innerHTML = `
-        <div class="status-group-avatar">
-            ${ringHtml}
-            <div class="status-group-avatar-inner" ${avatarStyle}>
-                ${user.photoURL ? '' : `<span>${initials}</span>`}
-            </div>
-            ${total > 1 ? `<div class="status-group-count">${total}</div>` : ''}
+        <div class="status-group-avatar${allViewed ? ' all-viewed' : ''}">
+            ${ringSvg}
+            ${avatarInner}
         </div>
         <div class="status-group-info">
-            <div class="status-group-name">${user.displayName || 'Unknown User'}</div>
-            <div class="status-group-meta">${timeAgo}${total > 1 ? ` · ${total} updates` : ''}</div>
+            <div class="status-group-name">${displayName}</div>
+            <div class="status-group-meta">${metaText}</div>
+            ${badgesHtml}
         </div>
     `;
     return item;
 }
+
+
 
 // Bind click handlers on grouped items
 function bindGroupedStatusHandlers(container) {

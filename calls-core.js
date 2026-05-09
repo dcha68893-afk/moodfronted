@@ -13085,6 +13085,19 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                         document.addEventListener('touchstart', retryPlay, { once: true });
                     });
                     console.log('[CallsCore] ✅ AUDIO TRACK routed → #remoteAudio (audio-only stream)');
+                    // ✅ FIX: Notify UI that remote stream arrived — triggers transitionToInCall if not already shown
+                    if (window.UIState) window.UIState.hasRemoteAudio = true;
+                    // Retry play after short delay (browser autoplay policies)
+                    setTimeout(function() {
+                        if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
+                            remoteAudio.play().catch(function(){});
+                        }
+                    }, 800);
+                    setTimeout(function() {
+                        if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
+                            remoteAudio.play().catch(function(){});
+                        }
+                    }, 2000);
                 }
 
                 if (track.kind === 'video') {
@@ -14399,42 +14412,18 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
     function resetCallState() {
-
-
-
     callsState.callActive = false;
-
-
-
     callsState.callState = 'idle';
-
-
-
     callsState.activeCallId = null;
-
-
-
     callsState.activeCall = null;
-
-
-
     callsState.callType = null;
-
-
-
     callsState.callParticipants = [];
-
-
-
     callsState.callStartTime = null;
-
-
-
     callsState.connectionState = 'new';
-
-
-
     callsState.signalingState = 'new';
+    // ✅ FIX: Clear caller flags on reset
+    callsState._isCaller = false;
+    window.__callerCallId = null;
 
 
 
@@ -16900,21 +16889,14 @@ initiateCall: async function(callType, participants = []) {
 
 
         // Set active call
-
-
-
         setActiveCall(callId, callType, participants);
 
-
-
-        
-
-
+        // ✅ FIX: Mark as caller so isCaller check in handleCallAccepted always works
+        callsState._isCaller = true;
+        window.__callerCallId = callId;
+        console.log('[CallsCore] Caller flag set for callId:', callId);
 
         // Set up WebRTC
-
-
-
         WebRTCManager.createPeerConnection();
 
 
@@ -28562,20 +28544,22 @@ _escapeHtml: function(text) {
 
 
 
-        const currentUserId = callsState.session && callsState.session.userId;
-        const isCaller = !!(callData &&
+        // ✅ FIX: Use multiple sources for currentUserId
+        const currentUserId = (callsState.session && callsState.session.userId)
+            || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId)
+            || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.user && window.__CHILD_SESSION__.user.id)
+            || null;
 
-
-
-            currentUserId != null &&
-
-
-
-            callData.callerId != null &&
-
-
-
+        // ✅ FIX: isCaller with robust fallbacks
+        const _isCallerByUserId = !!(currentUserId && callData && callData.callerId &&
             String(callData.callerId) === String(currentUserId));
+        const _isCallerByState  = !!(callsState._isCaller === true);
+        const _isCallerByInit   = !!(window.__callerCallId && callData &&
+            (callData.callId || callData.id) &&
+            String(window.__callerCallId) === String(callData.callId || callData.id));
+        const isCaller = _isCallerByUserId || _isCallerByState || _isCallerByInit;
+
+        console.log('[CallsCore] isCaller:', { isCaller, currentUserId, callerId: callData && callData.callerId });
 
 
 
@@ -28849,6 +28833,14 @@ _escapeHtml: function(text) {
             // SCREEN MANAGER: call ended — go idle then navigate back
             if (typeof window.showScreen === "function") { window.showScreen("idle"); }
             var __ov2 = document.getElementById("callOverlay"); if (__ov2) __ov2.setAttribute("data-state", "idle");
+            // ✅ FIX: Stop all media tracks immediately on call end
+            if (window.UIState && window.UIState.localStream) {
+                try { window.UIState.localStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
+                window.UIState.localStream = null;
+            }
+            // ✅ FIX: Clear caller flag on call end
+            if (window.callsState) window.callsState._isCaller = false;
+            window.__callerCallId = null;
 
 
 
@@ -29849,9 +29841,14 @@ window.CallHandlers = {
 
 
 
-    // FIX: allow all transitional states so receiver WebRTC offer is never dropped
+    // ✅ FIX: Force callsState.callActive = true when offer arrives on receiver side
+    // so the offer is never dropped due to inactive state guard
     const _validOfferStates = ['initiating','initiated','incoming','connecting','in-call',
                                'starting','ringing','connected','in_call'];
+    if (!callsState.callActive && _validOfferStates.includes(callsState.callState)) {
+        callsState.callActive = true;
+        console.log('[CallsCore] handleSignalOffer: forced callActive=true (state:', callsState.callState, ')');
+    }
     if (!callsState.callActive && !_validOfferStates.includes(callsState.callState)) {
 
 
@@ -30175,22 +30172,14 @@ window.CallHandlers = {
 
 
 
-    if (!callsState.callActive && callsState.callState !== 'initiating' &&
-
-
-
-        callsState.callState !== 'connecting' && callsState.callState !== 'in-call') {
-
-
-
-        logWarn(MODULE, 'ICE candidate received but no active call — ignoring');
-
-
-
+    // ✅ FIX: Accept ICE candidates in all transitional states including 'incoming' and 'ringing'
+    const _validIceStates = ['initiating','initiated','incoming','ringing','connecting','in-call','in_call','connected','starting'];
+    if (!callsState.callActive && !_validIceStates.includes(callsState.callState)) {
+        // Queue the candidate for later rather than dropping it
+        if (!callsState.iceCandidates) callsState.iceCandidates = [];
+        callsState.iceCandidates.push(payload.candidate);
+        logWarn(MODULE, 'ICE candidate queued (no active call yet) — state:', callsState.callState);
         return;
-
-
-
     }
 
 

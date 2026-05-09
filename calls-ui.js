@@ -4841,6 +4841,13 @@ handleContactItemClick: function(e) {
                 elements.incomingCallModal.dataset.timer = timer;
                 elements.incomingCallModal.classList.add('active'); elements.incomingCallModal.style.setProperty('display','flex','important');
                 UIState.activeModals.add('incomingCallModal');
+                // ✅ FIX: Start incoming ringtone when modal shows
+                if (typeof window._startIncomingRingtone === 'function') window._startIncomingRingtone();
+                else if (typeof window._playIncomingRing === 'function') window._playIncomingRing();
+                // ✅ FIX: ensure showScreen sees the incoming modal (it's position:fixed, not part of callContainer)
+                if (typeof window.showScreen === 'function') {
+                    // Don't call showScreen here — incoming modal has its own positioning
+                }
             }
         },
         
@@ -4953,6 +4960,11 @@ handleContactItemClick: function(e) {
                         userAvatar: participant.avatar || participant.photo || null
                     });
                 }
+                // ✅ FIX: Always call showScreen('calling') so caller sees outgoing screen
+                if (typeof window.showScreen === 'function') window.showScreen('calling');
+                // ✅ FIX: Start outgoing ringtone
+                if (typeof window._startOutgoingRingtone === 'function') window._startOutgoingRingtone();
+                else if (typeof window._playOutgoingRing === 'function') window._playOutgoingRing();
 
                 // Wire cancel button
                 if (elements.cancelCallBtn && !elements.cancelCallBtn._callingWired) {
@@ -5224,6 +5236,9 @@ handleContactItemClick: function(e) {
                 console.warn('[Calls UI] handleCallEnded ignored - stale end event during fresh call setup');
                 return;
             }
+            // ✅ FIX: Stop all ringtones (master fix + legacy)
+            if (typeof window._stopRingtones === 'function') window._stopRingtones();
+            if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
             // ── Guard: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.
@@ -5670,7 +5685,9 @@ handleContactItemClick: function(e) {
                     case 'CALL_ACCEPTED': {
     // Receiver answered — transition caller to in-call screen
     // ── Dedup: ignore if we already transitioned to in-call ──────────────
-    if (window.__callAcceptedHandled && (Date.now() - window.__callAcceptedHandled) < 5000) {
+    // ✅ FIX: Reduced from 5000ms to 500ms — both sides receive CALL_ACCEPTED,
+    // the previous 5s guard blocked the caller from transitioning.
+    if (window.__callAcceptedHandled && (Date.now() - window.__callAcceptedHandled) < 500) {
         console.log('[Calls UI] ⏭ CALL_ACCEPTED dedup — already handled');
         break;
     }

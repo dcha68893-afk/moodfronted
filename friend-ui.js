@@ -1207,6 +1207,44 @@ export const RenderPipeline = {
             }, Math.max(_delay, isRealtime ? 50 : 500)));
         });
 
+        // FIX: Also handle FRIENDS_SYNC postMessage from parent (cross-module sync).
+        // When another module (chat, status, call) or the parent rebroadcasts friend data,
+        // we merge it into local state and re-render — so this module never shows stale data.
+        window.addEventListener('message', (evt) => {
+            if (!evt.data || typeof evt.data !== 'object') return;
+            const { type, friends } = evt.data;
+            if ((type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA') && Array.isArray(friends)) {
+                if (window.FriendCacheManager?.setFriend) {
+                    friends.forEach(f => { if (f && f.id) window.FriendCacheManager.setFriend(f); });
+                    window.FriendCacheManager.syncToGlobals?.();
+                } else {
+                    window.friends = friends;
+                }
+                updateFriendCounts();
+                this.queueRender('friends', debounce(() => {
+                    if (UIState.activeSection === 'friendsSection') renderFriends();
+                    else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                    updateFriendCounts();
+                }, 200));
+            }
+            if (type === 'FRIEND_RELATIONSHIP_CHANGED' && evt.data.action === 'accepted') {
+                // Force refresh the friend action button for this user
+                const fid = evt.data.friendId;
+                if (fid) {
+                    document.querySelectorAll(`[data-user-id="${fid}"] .friend-action-btn, .friend-action-btn[data-user-id="${fid}"]`).forEach(btn => {
+                        btn.textContent = 'Friends';
+                        btn.dataset.status = 'accepted';
+                        btn.disabled = true;
+                    });
+                }
+                updateFriendCounts();
+                this.queueRender('friends', debounce(() => {
+                    if (UIState.activeSection === 'friendsSection') renderFriends();
+                    updateFriendCounts();
+                }, 150));
+            }
+        });
+
 
         // Catch any data load completion events and update counts
         window.addEventListener('requestsUpdated', () => updateFriendCounts());

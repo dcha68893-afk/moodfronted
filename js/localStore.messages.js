@@ -105,7 +105,24 @@
         async getMessagesByChat(chatId, options = {}) {
             await this.ready();
             const all = await window.AppCache.getAll('messages');
-            let filtered = all.filter((message) => String(message.chatId) === String(chatId) && message.deleted !== true);
+            // Get current userId for "deleted for me" filtering
+            let currentUserId = null;
+            try {
+                const sess = window.AuthSessionManager?.getSession?.() || null;
+                currentUserId = sess?.userId || sess?.user?.id || null;
+                if (!currentUserId && window.__PARENT_SESSION__) {
+                    currentUserId = window.__PARENT_SESSION__.userId || (window.__PARENT_SESSION__.user && window.__PARENT_SESSION__.user.id);
+                }
+            } catch (_) {}
+
+            let filtered = all.filter((message) => {
+                if (String(message.chatId) !== String(chatId)) return false;
+                if (message.deleted === true) return false;
+                // Filter out messages deleted for current user
+                if (currentUserId && Array.isArray(message.deletedFor) && message.deletedFor.includes(currentUserId)) return false;
+                if (currentUserId && Array.isArray(message.deletedFor) && message.deletedFor.includes(String(currentUserId))) return false;
+                return true;
+            });
             if (options.before) filtered = filtered.filter((message) => Number(message.createdAt || 0) < Number(options.before));
             filtered.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
             const limit = options.limit || 200;
@@ -172,8 +189,24 @@
             return normalized;
         }
 
-        async deleteMessage(id) {
-            return this.updateMessage(id, { deleted: true, status: 'deleted' });
+        async deleteMessage(id, options = {}) {
+            // options: { forEveryone: bool, userId: string }
+            if (options && options.forEveryone) {
+                // Hard delete for everyone
+                return this.updateMessage(id, { deleted: true, status: 'deleted' });
+            } else if (options && options.userId) {
+                // Soft delete for me only — record userId in deletedFor array
+                const existing = await this._findExistingMessage({ id });
+                if (!existing) return null;
+                const deletedFor = Array.isArray(existing.deletedFor) ? [...existing.deletedFor] : [];
+                if (!deletedFor.includes(options.userId) && !deletedFor.includes(String(options.userId))) {
+                    deletedFor.push(String(options.userId));
+                }
+                return this.updateMessage(id, { deletedFor, status: 'deleted_for_me' });
+            } else {
+                // Legacy: mark as fully deleted
+                return this.updateMessage(id, { deleted: true, status: 'deleted' });
+            }
         }
 
         async saveConversation(conv) {

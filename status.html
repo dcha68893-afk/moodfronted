@@ -1812,6 +1812,62 @@
                 color: #e9edef !important;
             }
         }
+    
+/* ── Three-dots more menu ───────────────────────────────────────────── */
+.more-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 11px 16px;
+    background: none;
+    border: none;
+    color: var(--text-primary, #e9edef);
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+.more-menu-item:hover { background: var(--surface-alt, #2a3942); }
+.more-menu-item i { width: 18px; color: var(--text-secondary, #8696a0); font-size: 15px; }
+
+/* ── WhatsApp-style segmented SVG ring ──────────────────────────────── */
+.status-group-avatar svg.ring-svg {
+    position: absolute;
+    inset: -4px;
+    width: calc(100% + 8px);
+    height: calc(100% + 8px);
+    z-index: 2;
+    pointer-events: none;
+}
+/* Reaction + Reply badges on list item */
+.status-group-badges {
+    display: flex;
+    gap: 5px;
+    margin-top: 3px;
+    flex-wrap: wrap;
+}
+.status-badge {
+    font-size: 11px;
+    color: var(--text-secondary, #8696a0);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    line-height: 1;
+}
+.status-badge.reaction-badge { color: #00a884; }
+.status-badge.reply-badge { color: #8696a0; }
+/* Remove the old conic ring for multi — we use SVG now */
+.status-group-ring.multi {
+    display: none !important;
+}
+.status-group-ring:not(.multi) {
+    display: none !important;
+}
+/* Viewed ring (grey) via SVG */
+.status-group-avatar.all-viewed svg.ring-svg circle.seg { stroke: #8696a0 !important; }
+
     </style>
     
     <!-- API.js must load BEFORE status.js -->
@@ -2762,17 +2818,25 @@
         <!-- Sidebar with status list -->
         <div class="sidebar active" id="sidebar">
             <div class="sidebar-header">
-                <h2>Status</h2>
-                <div style="display: flex; gap: 10px;">
-                    <button class="create-status-btn" id="viewHighlightsBtn" title="View Highlights">
-                        <i class="fas fa-star"></i>
+                <h2>Updates</h2>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="create-status-btn" id="createStatusBtn" title="Create new status" style="background:#00a884;color:#fff;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:16px;">
+                        <i class="fas fa-camera"></i>
                     </button>
-                    <button class="create-status-btn" id="viewDraftsBtn" title="View Drafts">
-                        <i class="fas fa-file-alt"></i>
-                    </button>
-                    <button class="create-status-btn" id="createStatusBtn" title="Create new status">
-                        <i class="fas fa-plus"></i>
-                    </button>
+                    <div class="status-more-menu-wrapper" style="position:relative;">
+                        <button class="create-status-btn" id="statusMoreBtn" title="More options" style="font-size:18px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div id="statusMoreDropdown" style="display:none;position:absolute;top:42px;right:0;background:var(--surface,#1e2a32);border:1px solid var(--border-color,#2a3942);border-radius:8px;min-width:195px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.35);overflow:hidden;">
+                            <button class="more-menu-item" id="viewHighlightsBtn"><i class="fas fa-star"></i> Highlights</button>
+                            <button class="more-menu-item" id="viewDraftsBtn"><i class="fas fa-file-alt"></i> Drafts</button>
+                            <button class="more-menu-item" id="viewTimelineBtn"><i class="fas fa-history"></i> Memory Timeline</button>
+                            <button class="more-menu-item" id="viewStatsBtn"><i class="fas fa-chart-line"></i> Analytics</button>
+                            <button class="more-menu-item" id="viewScheduledBtn"><i class="fas fa-clock"></i> Scheduled</button>
+                            <button class="more-menu-item" id="viewStreakBtn"><i class="fas fa-fire"></i> Posting Streak</button>
+                            <button class="more-menu-item" id="viewMoodTrendsBtn"><i class="fas fa-smile"></i> Mood Trends</button>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -2826,8 +2890,8 @@
                 </button>
             </div>
             
-            <!-- Streak Counter -->
-            <div class="streak-counter">
+            <!-- Streak Counter (moved to more menu) -->
+            <div class="streak-counter" style="display:none;">
                 <div class="streak-info">
                     <div class="streak-icon">
                         <i class="fas fa-fire"></i>
@@ -2840,16 +2904,16 @@
                 <div class="streak-count" id="streakCount">0</div>
             </div>
             
-            <!-- Mood Trends -->
-            <div class="mood-trends">
+            <!-- Mood Trends (moved to more menu) -->
+            <div class="mood-trends" style="display:none;">
                 <h4>Mood Trends (Last 30 days)</h4>
                 <div class="mood-chart" id="moodChart">
                     <!-- Mood chart bars will be loaded here -->
                 </div>
             </div>
             
-            <!-- Quick Actions -->
-            <div class="quick-actions">
+            <!-- Quick Actions (moved to more menu) -->
+            <div class="quick-actions" style="display:none;">
                 <button class="quick-action-btn" id="viewTimelineBtn" title="Memory Timeline">
                     <div class="quick-action-icon">
                         <i class="fas fa-history"></i>
@@ -2870,8 +2934,8 @@
                 </button>
             </div>
             
-            <!-- Intent & Mood Filters -->
-            <div class="status-categories" style="border-top: 1px solid var(--border-color);">
+            <!-- Intent & Mood Filters (hidden) -->
+            <div class="status-categories" style="border-top: 1px solid var(--border-color);display:none;">
                 <button class="category-btn" data-filter="intent-feedback">Feedback</button>
                 <button class="category-btn" data-filter="intent-achievement">Achievement</button>
                 <button class="category-btn" data-filter="intent-advice">Advice</button>
@@ -2883,6 +2947,7 @@
                 <div class="status-list-content">
                     <!-- All Status Section -->
                     <div class="statuses-section active" id="allStatusSection">
+                        <div class="status-section-label" style="padding:8px 16px 2px;font-size:12px;font-weight:600;color:var(--text-secondary,#8696a0);text-transform:uppercase;letter-spacing:0.5px;display:none;" id="recentUpdatesLabel">Recent updates</div>
                         <div class="statuses-list" id="allStatusList">
                             <div class="enhanced-loading">
                                 <i class="fas fa-spinner"></i>
@@ -3057,5 +3122,101 @@
     <div class="recovery-progress" id="recoveryProgress" style="display: none;">
         <div class="progress-bar" style="width: 0%;"></div>
     </div>
+
+<script>
+// ── Three-dots more menu toggle ───────────────────────────────────────────
+(function() {
+    document.addEventListener('DOMContentLoaded', function() {
+        var btn = document.getElementById('statusMoreBtn');
+        var drop = document.getElementById('statusMoreDropdown');
+        if (btn && drop) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
+            });
+            document.addEventListener('click', function() {
+                drop.style.display = 'none';
+            });
+        }
+        // Streak/Mood modal triggers
+        var streakBtn = document.getElementById('viewStreakBtn');
+        if (streakBtn) {
+            streakBtn.addEventListener('click', function() {
+                drop.style.display = 'none';
+                var el = document.querySelector('.streak-counter');
+                if (el) {
+                    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                    el.scrollIntoView({behavior:'smooth', block:'center'});
+                }
+            });
+        }
+        var moodBtn = document.getElementById('viewMoodTrendsBtn');
+        if (moodBtn) {
+            moodBtn.addEventListener('click', function() {
+                drop.style.display = 'none';
+                var el = document.querySelector('.mood-trends');
+                if (el) {
+                    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                    el.scrollIntoView({behavior:'smooth', block:'center'});
+                }
+            });
+        }
+    });
+})();
+
+// ── Expose realtime reaction/reply/view count updaters ───────────────────
+window.updateStatusReactionUI = function(statusId, emoji, count) {
+    // Update in viewer if open
+    var viewer = document.querySelector('.status-viewer-modal');
+    if (viewer) {
+        var reactionBtns = viewer.querySelectorAll('.reaction-btn[data-emoji="'+emoji+'"]');
+        reactionBtns.forEach(function(btn) {
+            var span = btn.querySelector('.reaction-count');
+            if (span) span.textContent = count;
+        });
+    }
+    // Update in list
+    var listItem = document.querySelector('.status-group-item[data-status-ids*="'+statusId+'"]');
+    if (listItem) {
+        var reactionBadge = listItem.querySelector('.reaction-badge');
+        if (reactionBadge) {
+            var existing = reactionBadge.textContent;
+            reactionBadge.innerHTML = '<i class="fas fa-smile"></i> ' + emoji;
+            reactionBadge.style.display = 'flex';
+        } else {
+            var badges = listItem.querySelector('.status-group-badges');
+            if (!badges) {
+                badges = document.createElement('div');
+                badges.className = 'status-group-badges';
+                var info = listItem.querySelector('.status-group-info');
+                if (info) info.appendChild(badges);
+            }
+            var badge = document.createElement('span');
+            badge.className = 'status-badge reaction-badge';
+            badge.innerHTML = emoji + ' <span>' + count + '</span>';
+            badges.appendChild(badge);
+        }
+    }
+};
+
+window.updateStatusViewerCount = function(statusId, viewerId) {
+    // Increment view count display in list
+    var listItem = document.querySelector('.status-group-item[data-status-ids*="'+statusId+'"]');
+    if (listItem) {
+        var meta = listItem.querySelector('.status-group-meta');
+        if (meta) {
+            // mark as has new views
+            var viewBadge = meta.querySelector('.view-badge');
+            if (!viewBadge) {
+                viewBadge = document.createElement('span');
+                viewBadge.className = 'view-badge';
+                viewBadge.style.cssText = 'color:#00a884;margin-left:4px;font-size:11px;';
+                meta.appendChild(viewBadge);
+            }
+        }
+    }
+};
+</script>
+
 </body>
 </html>

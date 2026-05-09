@@ -9715,7 +9715,10 @@ Type: ${message.type || 'text'}`;
                 const chats = core?.getConversations?.() || [];
 
                 UIRenderer.renderMultiSendChats(chats);
-                this.loadMultiSendHistory();
+                // Fix: loadMultiSendHistory lives on window.messagesUI, not on `this`
+                if (window.messagesUI && typeof window.messagesUI.loadMultiSendHistory === 'function') {
+                    window.messagesUI.loadMultiSendHistory();
+                }
 
                 UIFailsafe.safeAddClass(panel, 'active');
 
@@ -11618,31 +11621,24 @@ Type: ${message.type || 'text'}`;
 
                 } else {
 
-                    // Core not ready yet — poll until it is, then open
+                    // Core not ready yet — single deduped polling loop (prevent stacking on rapid clicks)
+                    if (window.__openChatPending) clearTimeout(window.__openChatPending._timer);
 
                     let attempts = 0;
-
                     const waitAndOpen = () => {
-
                         attempts++;
-
                         const c = getMessagesCore();
-
                         const s = c?.getState?.();
-
                         if (s?.state === 'ACTIVE') {
-
+                            window.__openChatPending = null;
                             c.openConversation(_chatId, _chatOpts).catch?.(() => {});
-
                         } else if (attempts < 20) {
-
-                            setTimeout(waitAndOpen, 250);
-
+                            window.__openChatPending = { _timer: setTimeout(waitAndOpen, 250), chatId: _chatId };
+                        } else {
+                            window.__openChatPending = null;
                         }
-
                     };
-
-                    setTimeout(waitAndOpen, 250);
+                    window.__openChatPending = { _timer: setTimeout(waitAndOpen, 250), chatId: _chatId };
 
                 }
 

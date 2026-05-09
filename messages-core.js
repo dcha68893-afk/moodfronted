@@ -4112,9 +4112,13 @@ try {
             }
 
             if (window.KynectaLocalStore) {
-                window.KynectaLocalStore.deleteMessage(messageId).catch(() => {});
+                const currentUserId = SessionManager?.getUserId?.() || null;
+                const deleteOpts = forEveryone
+                    ? { forEveryone: true }
+                    : { forEveryone: false, userId: currentUserId };
+                window.KynectaLocalStore.deleteMessage(messageId, deleteOpts).catch(() => {});
                 if (String(targetId) !== String(messageId)) {
-                    window.KynectaLocalStore.deleteMessage(targetId).catch(() => {});
+                    window.KynectaLocalStore.deleteMessage(targetId, deleteOpts).catch(() => {});
                 }
             }
 
@@ -5727,6 +5731,9 @@ try {
     // REAL-TIME MESSAGE HANDLER
     // =============================================
     function setupRealtimeMessageListener() {
+        // MODULE-LEVEL guard — must survive across repeated calls (e.g. reconnect hooks)
+        if (window.__msgCoreRealtimeBound) return;
+        window.__msgCoreRealtimeBound = true;
         let hasRealtimeBinding = false;
 
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
@@ -5994,18 +6001,33 @@ try {
                     : [d.messageId || d.id].filter(Boolean).map(String);
                 if (ids.length === 0) return;
 
-                const remaining = (ChatManager.getMessages() || []).filter((message) => {
-                    const currentId = String(message.serverId || message.id || message.localId || '');
-                    return !ids.includes(currentId);
-                });
-                const activeChatId = d.chatId || d.conversationId || ChatManager.getActiveChat()?.id || null;
-                if (activeChatId) {
-                    ChatManager.setMessages(remaining, activeChatId);
+                const currentUserId = SessionManager?.getUserId?.() ? String(SessionManager.getUserId()) : null;
+                const isForEveryone = !!d.deleteForEveryone;
+                // deleteForMe — only applies to the user who requested it
+                const isDeletedForMe = !isForEveryone && Array.isArray(d.deletedFor)
+                    && currentUserId && d.deletedFor.map(String).includes(currentUserId);
+
+                // Remove from UI only if: deleteForEveryone, OR this is the user it was deleted for
+                if (isForEveryone || isDeletedForMe) {
+                    const remaining = (ChatManager.getMessages() || []).filter((message) => {
+                        const currentId = String(message.serverId || message.id || message.localId || '');
+                        return !ids.includes(currentId);
+                    });
+                    const activeChatId = d.chatId || d.conversationId || ChatManager.getActiveChat()?.id || null;
+                    if (activeChatId) {
+                        ChatManager.setMessages(remaining, activeChatId);
+                    }
                 }
+
                 if (window.KynectaLocalStore) {
-                    ids.forEach((id) => window.KynectaLocalStore.deleteMessage(id).catch(() => {}));
+                    ids.forEach((id) => {
+                        const deleteOpts = isForEveryone
+                            ? { forEveryone: true }
+                            : { forEveryone: false, userId: currentUserId };
+                        window.KynectaLocalStore.deleteMessage(id, deleteOpts).catch(() => {});
+                    });
                 }
-                EventBus.emit('message:deleted', { messageIds: ids, chatId: activeChatId, forEveryone: !!d.deleteForEveryone });
+                EventBus.emit('message:deleted', { messageIds: ids, chatId: d.chatId, forEveryone: isForEveryone });
                 return;
             }
 

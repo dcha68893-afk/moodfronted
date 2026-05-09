@@ -1054,6 +1054,37 @@
     window.addEventListener('message', function (evt) {
         if (!evt.data || typeof evt.data !== 'object') return;
         const { type, payload } = evt.data;
+
+        // ── FIX: Cross-module friend sync ────────────────────────────────────
+        // When friend-core (inside its iframe) posts FRIENDS_SYNC or
+        // FRIEND_RELATIONSHIP_CHANGED, we rebroadcast it to every OTHER iframe
+        // so chat, call, status, groups etc. all see the updated friends list
+        // instantly without requiring a page refresh.
+        if (type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA' || type === 'FRIEND_RELATIONSHIP_CHANGED') {
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(function (frame) {
+                if (frame.contentWindow === evt.source) return; // don't echo back to sender
+                try { frame.contentWindow.postMessage(evt.data, '*'); } catch (_) {}
+            });
+            // Also expose on window globals for same-frame consumers
+            if (evt.data.friends && Array.isArray(evt.data.friends)) {
+                window.friends = evt.data.friends;
+                window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: evt.data.friends, source: type } }));
+                window.dispatchEvent(new CustomEvent('FRIENDS_SYNC', { detail: evt.data }));
+            }
+            return;
+        }
+
+        // ── FIX: friend:removed from any iframe → forward named event to all iframes ─
+        if (type === 'FRIEND_REMOVED' || type === 'FRIEND_REJECTED') {
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(function (frame) {
+                if (frame.contentWindow === evt.source) return;
+                try { frame.contentWindow.postMessage(evt.data, '*'); } catch (_) {}
+            });
+            return;
+        }
+
         const relevantTypes = ['SESSION_DATA', 'AUTH_READY', 'PARENT_READY'];
         if (relevantTypes.includes(type) && payload) {
             const t = payload.token ||
@@ -1220,6 +1251,20 @@
                 // friend-core.js listens for FRIEND_REQUEST_ACCEPTED (named action).
                 // Posting both forms ensures the sender's client updates its local
                 // store and friend list regardless of which unwrapper path fires.
+                // FIX: When friend-core posts FRIEND_ACCEPTED (sender accepted request),
+                // forward to ALL other iframes so chat/call/status modules update
+                // friendship status without waiting for a poll cycle.
+                if (eventType === 'FRIEND_ACCEPTED' || eventType === 'FRIEND_REQUEST_ACCEPTED') {
+                    var _faccId = 'rt_facc_top_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                    iframes.forEach(function (frame) {
+                        try {
+                            frame.contentWindow.postMessage({ type: 'FRIEND_REQUEST_ACCEPTED', payload: payload || {}, id: _faccId }, '*');
+                            frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:accepted', payload: payload || {}, id: _faccId + '_re' }, '*');
+                        } catch (_) {}
+                    });
+                    return;
+                }
+
                 if (eventType === 'friend:accepted') {
                     var _accId = 'rt_facc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {
