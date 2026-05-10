@@ -133,39 +133,37 @@ function logUIError(section, error) {
 // Helper function to get core modules safely
 // =============================================
 function getCore() {
-    // Check multiple possible locations for the core module
-    if (window.StatusCore && window.StatusCore.default) {
+    // Check multiple possible locations for the core module.
+    // NEVER return window — that causes infinite recursion because
+    // window.getStatuses === getStatuses, window.getCore === getCore, etc.
+    if (window.StatusCore && window.StatusCore.default &&
+        typeof window.StatusCore.default.getStatuses === 'function') {
         return window.StatusCore.default;
     }
-    if (window.StatusCore) {
+    if (window.StatusCore && window.StatusCore !== window &&
+        typeof window.StatusCore.getStatuses === 'function') {
         return window.StatusCore;
     }
-    if (window.__STATUS_CORE__) {
+    if (window.__STATUS_CORE__ && window.__STATUS_CORE__ !== window) {
         return window.__STATUS_CORE__;
     }
-    return window;
+    // Return null — callers must handle null gracefully
+    return null;
 }
 
 function getLifecycleState() {
     const core = getCore();
-    if (core && core.getLifecycleState) {
-        return core.getLifecycleState();
-    }
-    if (core && core.getState) {
-        return core.getState();
-    }
+    if (!core || core === window) return null;
+    if (core.getLifecycleState) return core.getLifecycleState();
+    if (core.getState)         return core.getState();
     return null;
 }
 
 function getLifecycleStateEnum() {
     const core = getCore();
-    return (core && core.LifecycleState) || {
-        BOOT: 'BOOT',
-        INITIALIZING: 'INITIALIZING',
-        READY: 'READY',
-        WAIT_PARENT: 'WAIT_PARENT',
-        ACTIVE: 'ACTIVE'
-    };
+    const defaults = { BOOT: 'BOOT', INITIALIZING: 'INITIALIZING', READY: 'READY', WAIT_PARENT: 'WAIT_PARENT', ACTIVE: 'ACTIVE' };
+    if (!core || core === window) return defaults;
+    return core.LifecycleState || defaults;
 }
 
 function ensureUIActive(actionName) {
@@ -181,7 +179,7 @@ function ensureUIActive(actionName) {
     const lifecycle = getLifecycleState();
     const LifecycleState = getLifecycleStateEnum();
     const core = getCore();
-    const sessionReady = core && core.isSessionReady ? core.isSessionReady() : false;
+    const sessionReady = core && core !== window && core.isSessionReady ? core.isSessionReady() : false;
     
     // Allow if ACTIVE OR session is ready (core may be active even if lifecycle says otherwise)
     if ((lifecycle && lifecycle.state === LifecycleState.ACTIVE) || sessionReady) {
@@ -202,59 +200,55 @@ function ensureUIActive(actionName) {
 
 function isSessionReady() {
     const core = getCore();
-    if (core && core.isSessionReady) {
-        return core.isSessionReady();
-    }
+    if (core && core !== window && core.isSessionReady) return core.isSessionReady();
+    // Fallback: check localStorage token
+    try { return !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') || localStorage.getItem('accessToken')); } catch(e) {}
     return false;
 }
 
 function isAuthenticated() {
     const core = getCore();
-    if (core && core.isAuthenticated) {
-        return core.isAuthenticated();
-    }
-    if (core && core.SessionManager && core.SessionManager.isAuthenticated) {
-        return core.SessionManager.isAuthenticated();
-    }
+    if (core && core !== window && core.isAuthenticated) return core.isAuthenticated();
+    if (core && core !== window && core.SessionManager && core.SessionManager.isAuthenticated) return core.SessionManager.isAuthenticated();
+    try { return !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') || localStorage.getItem('accessToken')); } catch(e) {}
     return false;
 }
 
 function getSessionToken() {
     const core = getCore();
-    if (core && core.getSessionToken) {
-        return core.getSessionToken();
-    }
-    if (core && core.SessionManager && core.SessionManager.getToken) {
-        return core.SessionManager.getToken();
-    }
+    if (core && core !== window && core.getSessionToken) return core.getSessionToken();
+    if (core && core !== window && core.SessionManager && core.SessionManager.getToken) return core.SessionManager.getToken();
+    try { return localStorage.getItem('kynecta_auth') || localStorage.getItem('token') || localStorage.getItem('accessToken') || null; } catch(e) {}
     return null;
 }
 
 function getSessionUser() {
     const core = getCore();
-    if (core && core.getSessionUser) {
-        return core.getSessionUser();
-    }
-    if (core && core.SessionManager && core.SessionManager.getUser) {
-        return core.SessionManager.getUser();
-    }
-    return null;
+    if (core && core !== window && core.getSessionUser) return core.getSessionUser();
+    if (core && core !== window && core.SessionManager && core.SessionManager.getUser) return core.SessionManager.getUser();
+    // Fallback: return cached user from window
+    return window.currentUser || (window.auth && window.auth.currentUser) || null;
 }
 
 // Get the actual data from core
 function getStatuses() {
     const core = getCore();
-    if (core && core.getStatuses) {
+    // Extra guard: never call core.getStatuses if core is window (recursion trap)
+    if (core && core !== window && typeof core.getStatuses === 'function') {
         return core.getStatuses();
     }
+    // Fallback: return cached statuses from module-level variable if available
+    if (typeof allStatuses !== 'undefined' && Array.isArray(allStatuses)) return allStatuses;
+    if (typeof liveStatuses !== 'undefined' && Array.isArray(liveStatuses)) return liveStatuses;
     return [];
 }
 
 function getMyStatuses() {
     const core = getCore();
-    if (core && core.getMyStatuses) {
+    if (core && core !== window && typeof core.getMyStatuses === 'function') {
         return core.getMyStatuses();
     }
+    if (typeof myStatuses !== 'undefined' && Array.isArray(myStatuses)) return myStatuses;
     return [];
 }
 

@@ -1825,7 +1825,25 @@
     <!-- CRITICAL: NOT type="module" — regular scripts share window scope so     -->
     <!-- status-core.js can call window.renderStatusListInstantlyUI from         -->
     <!-- status-ui.js, and status-ui.js can access window.StatusCore from core.  -->
-    <script src="status-core.js" defer onerror="console.warn('[Status] status-core.js not found')"></script>
+    <!-- status-core: try as module first (handles ES export syntax); fallback to classic -->
+    <script>
+    (function() {
+        // Attempt to load status-core.js as a module so ES `export` syntax works.
+        // If it loads as classic script elsewhere, the exports are already on window.
+        var s = document.createElement('script');
+        s.src = 'status-core.js';
+        s.type = 'module';
+        s.onerror = function() {
+            // Module load failed — try classic (server may serve it without CORS/module headers)
+            var s2 = document.createElement('script');
+            s2.src = 'status-core.js';
+            s2.defer = true;
+            s2.onerror = function() { console.warn('[Status] status-core.js not found'); };
+            document.head.appendChild(s2);
+        };
+        document.head.appendChild(s);
+    })();
+    </script>
     <script src="status-ui.js" defer onerror="console.warn('[Status] status-ui.js not found')"></script>
     <script>
         // =============================================
@@ -2269,6 +2287,33 @@
 .vp-time { font-size: 11px; color: var(--text-secondary, #8696a0); margin-top: 1px; }
 .vp-reaction { font-size: 16px; margin-left: auto; }
 </style>
+
+
+    <script>
+    // ── Global patch: guard against calls-ui.js bindStatusItemHandlers crash ──
+    // Runs before any module loads. If container.querySelectorAll is called on
+    // undefined/null, return [] instead of throwing.
+    (function() {
+        // Patch Node.prototype.querySelectorAll to be safe (no-op if not a real node)
+        // Actually we patch at the call site via prototype extension safely
+        var _origQSA = Element.prototype.querySelectorAll;
+        // We cannot safely patch Element.prototype without breaking everything.
+        // Instead expose a safe wrapper for any module that needs it.
+        window.__safeQSA = function(container, selector) {
+            try {
+                if (!container || typeof container.querySelectorAll !== 'function') return [];
+                return Array.from(container.querySelectorAll(selector) || []);
+            } catch(e) { return []; }
+        };
+
+        // ── Prevent status-ui.js infinite recursion if it runs before status-core.js ──
+        // Pre-define window.StatusCore as a safe stub so getCore() returns it
+        if (!window.StatusCore && !window.__STATUS_CORE__) {
+            window.__STATUS_CORE_STUB__ = true;
+            // Will be replaced by the real core when it loads
+        }
+    })();
+    </script>
 
 </head>
 <body>

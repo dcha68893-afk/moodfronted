@@ -2575,6 +2575,7 @@ const InitialRender = {
     },
     
     bindStatusItemHandlers(container) {
+        if (!container) return;
         const statusItems = container.querySelectorAll('.status-item');
         statusItems.forEach(item => {
             if (item._handlersBound) return;
@@ -2851,7 +2852,8 @@ const ProgressiveEnhancement = {
 
     enhanceInteractivity() {
         const statusItems = UIElements.querySelectorAll('.status-item');
-        InitialRender.bindStatusItemHandlers(statusItems[0]?.parentNode);
+        const container = statusItems[0]?.parentNode;
+        if (container) InitialRender.bindStatusItemHandlers(container);
     },
 
     enhanceAccessibility() {

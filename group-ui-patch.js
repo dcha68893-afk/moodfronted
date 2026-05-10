@@ -1864,10 +1864,15 @@
                     const found = document.getElementById('inviteBody');
                     if (found) { obs.observe(found, { childList: true }); dObs.disconnect(); }
                 });
-                dObs.observe(document.body, { childList: true, subtree: true });
+                const bodyTarget = document.body || document.documentElement;
+                if (bodyTarget) dObs.observe(bodyTarget, { childList: true, subtree: true });
             }
         }
-        startWatch();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startWatch);
+        } else {
+            startWatch();
+        }
         document.addEventListener('click', (e) => {
             if (e.target.closest('#groupInvitesBtn') || e.target.closest('[data-tab="invite"]') ||
                 e.target.closest('[data-inv-tab="friends"]')) setTimeout(injectUserSearch, 400);

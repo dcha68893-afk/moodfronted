@@ -12293,6 +12293,10 @@ Type: ${message.type || 'text'}`;
 
     }
 
+    // Expose UIRenderer globally so external IIFEs (e.g. installSettingsUIBridge)
+    // can reference it without a ReferenceError.
+    window.UIRenderer = UIRenderer;
+
 })();
 
 // =============================================
@@ -12306,6 +12310,13 @@ Type: ${message.type || 'text'}`;
 // =============================================
 
 (function installSettingsUIBridge() {
+
+    // UIRenderer lives in the outer IIFE; access it via window to avoid ReferenceError.
+    var UIRenderer = window.UIRenderer;
+    if (!UIRenderer) {
+        console.warn('[installSettingsUIBridge] UIRenderer not yet available — bridge skipped');
+        return;
+    }
 
     function applyUISettingChange(section, key, value) {
 
