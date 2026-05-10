@@ -1099,7 +1099,8 @@
 
             const userId = core?.getCurrentUserId?.();
 
-            if (userId && typeof userId === 'number' && userId !== 0) {
+            // FIX: userId may be a string "3" or number 3 — accept both
+            if (userId && userId !== 0 && userId !== '0' && userId !== '') {
 
                 this._cachedCoreSessionValid = true;
 
@@ -1107,7 +1108,15 @@
 
             }
 
-            
+            // Fallback: check localStorage/window directly
+            try {
+                const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+                const uid = localStorage.getItem('userId') || localStorage.getItem('user_id');
+                if (tok && uid && uid !== '0') { this._cachedCoreSessionValid = true; return true; }
+                if (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token && window.__CHILD_SESSION__.userId) {
+                    this._cachedCoreSessionValid = true; return true;
+                }
+            } catch(_) {}
 
             this._cachedCoreSessionValid = false;
 
@@ -1388,11 +1397,10 @@
             }
 
             
-
-            if (userId && (typeof userId !== 'number' || userId === 0)) {
-
-                isValid = false;
-
+            // FIX: do NOT set isValid=false just because userId is a string.
+            // String userIds like "3" are perfectly valid — parseInt them for check.
+            if (userId !== null && userId !== undefined && userId !== 0 && userId !== '0' && userId !== '') {
+                isValid = true; // any truthy non-zero userId means authenticated
             }
 
             
@@ -11660,9 +11668,7 @@ Type: ${message.type || 'text'}`;
         
 
         loadChatByFriendId: (friendId, friendName) => {
-            // Dedup: prevent same chat opening multiple times within 1.5s
-            const _dk = 'loadchat_' + friendId;
-            const _nt = Date.now();
+            const _dk = 'loadchat_' + friendId, _nt = Date.now();
             if (window.__loadChatDedup && window.__loadChatDedup[_dk] && (_nt - window.__loadChatDedup[_dk]) < 1500) return;
             if (!window.__loadChatDedup) window.__loadChatDedup = {};
             window.__loadChatDedup[_dk] = _nt;
@@ -12293,8 +12299,8 @@ Type: ${message.type || 'text'}`;
 
     }
 
-    // Expose UIRenderer globally so external IIFEs (e.g. installSettingsUIBridge)
-    // can reference it without a ReferenceError.
+    // FIX: expose UIRenderer to window so installSettingsUIBridge IIFE can use it
+    // (that IIFE is outside this closure, so UIRenderer would otherwise be undefined)
     window.UIRenderer = UIRenderer;
 
 })();
@@ -12310,13 +12316,6 @@ Type: ${message.type || 'text'}`;
 // =============================================
 
 (function installSettingsUIBridge() {
-
-    // UIRenderer lives in the outer IIFE; access it via window to avoid ReferenceError.
-    var UIRenderer = window.UIRenderer;
-    if (!UIRenderer) {
-        console.warn('[installSettingsUIBridge] UIRenderer not yet available — bridge skipped');
-        return;
-    }
 
     function applyUISettingChange(section, key, value) {
 
@@ -12494,7 +12493,7 @@ Type: ${message.type || 'text'}`;
 
     window.messagesUI = window.messagesUI || {};
 
-    UIRenderer.renderMultiSendHistory = function(historyItems) {
+    (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistory = function(historyItems) {
         const listEl = UIFailsafe.safeGetElement('multiSendHistoryList');
         if (!listEl) return;
         const items = Array.isArray(historyItems) ? historyItems : [];
@@ -12509,10 +12508,11 @@ Type: ${message.type || 'text'}`;
             const ts = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
             return '<button type="button" data-batch-id="' + (item.batchId || item.id) + '" class="multi-send-history-item" style="width:100%;text-align:left;border:none;background:#fff;padding:10px 12px;border-radius:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(15,23,42,0.08);cursor:pointer;">' +
                 '<div style="font-weight:600;color:#0f172a;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + preview + '</div>' +
-                '<div style="font-size:11px;color:#64748b;margin-top:4px;">' + cnt + ' recipients · ' + (parseInt(item.seenCount, 10) || 0) + ' seen' + (ts ? ' · ' + ts : '') + '</div>' +
+                '<div style="font-size:11px;color:#64748b;margin-top:4px;">' + cnt + ' recipients · ' + (parseInt(item.seenCount,10)||0) + ' seen' + (ts ? ' · ' + ts : '') + '</div>' +
                 '</button>';
         }).join('');
         UIFailsafe.safeSetHTML(listEl, html);
+
         listEl.querySelectorAll('[data-batch-id]').forEach((button) => {
             button.addEventListener('click', () => {
                 window.messagesUI?.openMultiSendHistory?.(button.dataset.batchId);
@@ -12520,7 +12520,7 @@ Type: ${message.type || 'text'}`;
         });
     };
 
-    UIRenderer.renderMultiSendHistoryDetail = function(detail) {
+    (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistoryDetail = function(detail) {
         const detailEl = UIFailsafe.safeGetElement('multiSendHistoryDetail');
         if (!detailEl) return;
         if (!detail) {
@@ -12557,7 +12557,7 @@ Type: ${message.type || 'text'}`;
                 headers: token ? { Authorization: 'Bearer ' + token } : {}
             });
             const result = await resp.json().catch(function() { return {}; });
-            UIRenderer.renderMultiSendHistory(Array.isArray(result.data) ? result.data : []);
+            (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistory(Array.isArray(result.data) ? result.data : []);
         } catch (error) {
             console.warn('[MultiSend] Failed to load history:', error);
             UIFailsafe.safeSetStyle(listEl, 'display', 'none');
@@ -12577,10 +12577,10 @@ Type: ${message.type || 'text'}`;
             if (!resp.ok || result.success === false) {
                 throw new Error(result.message || 'Failed to load history detail');
             }
-            UIRenderer.renderMultiSendHistoryDetail(result.data || null);
+            (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistoryDetail(result.data || null);
         } catch (error) {
             console.warn('[MultiSend] Failed to load history detail:', error);
-            UIRenderer.showNotification(error.message || 'Failed to open history', 'error');
+            (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).showNotification(error.message || 'Failed to open history', 'error');
         }
     };
 
@@ -12615,12 +12615,12 @@ Type: ${message.type || 'text'}`;
                 const core = getMessagesCore();
                 const replyVisibility = document.getElementById('multiSendReplyVisibility')?.value || 'public';
                 if (!msgContent) {
-                    UIRenderer.showNotification('Please type a message first', 'error');
+                    (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).showNotification('Please type a message first', 'error');
                     return;
                 }
                 const selectedChats = core && core.multiSendSelectedChats;
                 if (!(selectedChats instanceof Set) || selectedChats.size === 0) {
-                    UIRenderer.showNotification('Select at least one chat', 'error');
+                    (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).showNotification('Select at least one chat', 'error');
                     return;
                 }
 
@@ -12643,7 +12643,7 @@ Type: ${message.type || 'text'}`;
                         throw new Error(result.message || result.error || 'Failed to send');
                     }
                     const sentCount = result.data?.successCount || (Array.isArray(result.data?.results) ? result.data.results.filter(r=>r&&r.success).length : selectedChats.size);
-                    UIRenderer.showNotification('✓ Sent to ' + sentCount + ' chat' + (sentCount !== 1 ? 's' : ''));
+                    (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).showNotification('✓ Sent to ' + sentCount + ' chat' + (sentCount !== 1 ? 's' : ''));
                     window.messagesUI?.loadMultiSendHistory?.();
                     if (input) input.value = '';
                     if (core?.multiSendSelectedChats) core.multiSendSelectedChats.clear();
@@ -12652,7 +12652,7 @@ Type: ${message.type || 'text'}`;
                     UIStateManager.setState('multiSendVisible', false);
                 } catch (error) {
                     console.warn('[MultiSend] Error sending bulk message:', error);
-                    UIRenderer.showNotification(error.message || 'Failed to send', 'error');
+                    (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).showNotification(error.message || 'Failed to send', 'error');
                 }
             }, true);
         }

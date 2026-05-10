@@ -16,7 +16,7 @@
             sw.postMessage({ type: 'SKIP_WAITING' });
             // Reload once after a short delay to let the new SW take control
             navigator.serviceWorker.addEventListener('controllerchange', function() {
-                window.location.reload();
+                console.log('[SW-BOOT] SW controller changed — reload suppressed to protect call state');
             });
         }
     }).catch(function() {});
@@ -4431,6 +4431,9 @@ function _declineVideoUpgrade() {
             callInfo = callInfo || {};
             _callDispatchedAt = Date.now();
             _callEndedAt = 0;
+            // ✅ FIX: Set callActive flags immediately so _onIframeVisible doesn't reset to idle
+            window.__callActive = true;
+            if (window.UIState) window.UIState.callActive = true;
             // ✅ FIX: Always clear reset lock when showing calling screen
             _isResetting = false;
 
@@ -4874,6 +4877,9 @@ function _declineVideoUpgrade() {
 
             switch (t) {
                 case 'CALL_INITIATED':
+                    // ✅ FIX: Set flag before showing screen
+                    window.__callActive = true;
+                    if (window.UIState) window.UIState.callActive = true;
                     _showCallingNow({
                         userName:   pay.calleeName || pay.receiverName || pay.userName || window.__activePeerName || 'User',
                         callType:   pay.callType || pay.type || (window.UIState && window.UIState.callType) || 'voice',
@@ -4932,6 +4938,9 @@ function _declineVideoUpgrade() {
             window.callCore.addListener(function(event, data) {
                 switch (event) {
                     case 'call_initiated': case 'CALL_INITIATED':
+                        // ✅ FIX: Set flag before _showCallingNow so iframe-visible guard sees it
+                        window.__callActive = true;
+                        if (window.UIState) window.UIState.callActive = true;
                         _showCallingNow({
                             userName:   data && (data.calleeName || data.receiverName || data.userName) || window.__activePeerName || 'User',
                             callType:   data && data.callType || (window.UIState && window.UIState.callType) || 'voice',
@@ -5018,7 +5027,22 @@ function _declineVideoUpgrade() {
         // to calls page), we must ensure the screens are properly visible.
         // This handles the dark screen on 2nd+ call from either user.
         function _onIframeVisible() {
-            // Re-run showIdleScreen to restore callContainer visibility
+            // ✅ FIX: Only reset to idle if NO call is currently active
+            // If a call IS in progress, leave the current screen alone
+            var callInProgress = (window.callsState && (window.callsState.callActive || 
+                                  window.callsState.callState === 'initiating' ||
+                                  window.callsState.callState === 'in-call' ||
+                                  window.callsState.callState === 'connected'))
+                              || (window.UIState && window.UIState.callActive)
+                              || window.__callActive;
+
+            if (callInProgress) {
+                _log('Iframe visible — call in progress, leaving screens alone');
+                _patchTransitionToInCall();
+                return;
+            }
+
+            // Not in a call — restore idle screen so next call can show properly
             if (typeof window.showIdleScreen === 'function') {
                 window.showIdleScreen();
             } else if (typeof window.showScreen === 'function') {
@@ -5074,7 +5098,10 @@ function _declineVideoUpgrade() {
                 var _visObs = new IntersectionObserver(function(entries) {
                     entries.forEach(function(entry) {
                         if (entry.isIntersecting) {
-                            setTimeout(_onIframeVisible, 100);
+                            // ✅ FIX: Delay 600ms to let OPEN_CALL_WITH_USER arrive first
+                            // If a call starts during this window, _onIframeVisible will
+                            // detect callActive=true and skip the idle reset
+                            setTimeout(_onIframeVisible, 600);
                         }
                     });
                 }, { threshold: 0.1 });

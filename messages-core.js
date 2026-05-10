@@ -962,81 +962,39 @@ try {
     function upsertRealtimeConversation(chatId, normalizedMessage = null) {
         if (!chatId || !normalizedMessage || !ChatManager) return null;
 
-        const _chatIdStr = String(chatId);
-        const existing = ChatManager._conversationsMap.get(_chatIdStr) ||
-                         ChatManager._conversationsMap.get(chatId) ||
-                         ChatManager._conversationsMap.get(Number(chatId));
-        if (existing) {
-            // Update last message on existing conversation
-            existing.lastMessage    = normalizedMessage.content || existing.lastMessage || '';
-            existing.lastMessageAt  = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
-            const myId2 = SessionManager && SessionManager.getUserId ? String(SessionManager.getUserId() || '') : '';
-            const senderId2 = normalizedMessage.senderId != null ? String(normalizedMessage.senderId) : '';
-            if (senderId2 && senderId2 !== myId2) existing.unreadCount = (existing.unreadCount || 0) + 1;
-            ChatManager._saveToCache();
-            return existing;
-        }
+        const existing = ChatManager._conversationsMap.get(chatId) || ChatManager._conversationsMap.get(String(chatId));
+        if (existing) return existing;
 
         const myId = SessionManager && SessionManager.getUserId ? String(SessionManager.getUserId() || '') : '';
         const senderId = normalizedMessage.senderId != null ? String(normalizedMessage.senderId) : '';
         const receiverId = normalizedMessage.receiverId != null ? String(normalizedMessage.receiverId) : '';
-        // friendId = the OTHER person (not me)
-        let friendId = senderId && senderId !== myId ? senderId : (receiverId && receiverId !== myId ? receiverId : '');
-        // Fallback: check sender object
-        if (!friendId && normalizedMessage.sender && normalizedMessage.sender.id) {
-            const sid = String(normalizedMessage.sender.id);
-            if (sid !== myId) friendId = sid;
-        }
+        const friendId = senderId && senderId !== myId ? senderId : (receiverId && receiverId !== myId ? receiverId : '');
+        if (!friendId) return null;
 
         const friendRecord = FriendManager && FriendManager.getFriend
             ? (FriendManager.getFriend(friendId) || FriendManager.getFriend(Number(friendId)))
             : null;
-        const senderObj  = normalizedMessage.sender || {};
-        const friendName = (friendRecord && (friendRecord.displayName || friendRecord.username)) ||
-                           senderObj.displayName || senderObj.username ||
-                           (friendId ? 'User_' + friendId : 'Unknown');
-        const friendAvatar = (friendRecord && (friendRecord.avatar || friendRecord.photoURL)) ||
-                             senderObj.avatar || '';
-
+        const friendName = friendRecord?.displayName || friendRecord?.username || normalizedMessage.sender?.displayName ||
+            normalizedMessage.sender?.username || `User_${friendId}`;
+        const friendAvatar = friendRecord?.avatar || friendRecord?.photoURL || normalizedMessage.sender?.avatar || '';
         const conversation = {
-            id:            _chatIdStr,
-            chatId:        _chatIdStr,
-            type:          'direct',
-            friendId:      friendId || null,
-            participantIds:[myId, friendId].filter(Boolean),
+            id: String(chatId),
+            chatId: String(chatId),
+            type: 'direct',
+            friendId,
+            participantIds: [myId, friendId].filter(Boolean),
             friendName,
             friendAvatar,
-            lastMessage:   normalizedMessage.content || '',
+            lastMessage: normalizedMessage.content || '',
             lastMessageAt: normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now(),
-            unreadCount:   (senderId && senderId !== myId) ? 1 : 0,
-            online:        !!(friendRecord && (friendRecord.online || friendRecord.status === 'online')),
-            isPending:     false
+            unreadCount: senderId && senderId !== myId ? 1 : 0,
+            online: !!(friendRecord?.online || friendRecord?.status === 'online'),
+            isPending: false
         };
 
         ChatManager._conversations.unshift(conversation);
-        ChatManager._conversationsMap.set(_chatIdStr, conversation);
+        ChatManager._conversationsMap.set(conversation.id, conversation);
         ChatManager._saveToCache();
-
-        // Background fetch to enrich with full server data (name, avatar, participants)
-        const _tok = (SessionManager && SessionManager.getSession && SessionManager.getSession()?.token) ||
-                     localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('accessToken');
-        if (_tok) {
-            fetch('/api/chats/' + _chatIdStr, { headers: { Authorization: 'Bearer ' + _tok } })
-                .then(function(r) { return r.ok ? r.json() : null; })
-                .then(function(res) {
-                    if (!res || !res.data || !res.data.chat) return;
-                    const srv = res.data.chat;
-                    const conv2 = ChatManager._conversationsMap.get(_chatIdStr);
-                    if (!conv2) return;
-                    const other = (srv.participants || []).find(function(p) { return String(p.id) !== myId; }) || {};
-                    conv2.friendName   = other.displayName || other.username || conv2.friendName;
-                    conv2.friendAvatar = other.avatar || conv2.friendAvatar;
-                    conv2.friendId     = other.id ? String(other.id) : conv2.friendId;
-                    ChatManager._saveToCache();
-                })
-                .catch(function() {});
-        }
-
         return conversation;
     }
 
@@ -2318,7 +2276,7 @@ try {
         init: function() {
             try {
                 const cachedUser = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.USER_CACHE);
-                if (cachedUser && cachedUser.id && typeof cachedUser.id === 'number' && cachedUser.id !== 0) {
+                if (cachedUser && cachedUser.id && cachedUser.id !== 0 && cachedUser.id !== '0') {
                     this._user = cachedUser;
                     this._userId = cachedUser.id;
                 }
@@ -2330,7 +2288,9 @@ try {
             if (!user) return false;
             
             const userId = user.id || user.uid;
-            if (!userId || typeof userId !== 'number' || userId === 0) {
+            // FIX: accept string IDs like "3" — parseInt for validation
+            const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+            if (!userId || (typeof userId !== 'string' && typeof userId !== 'number') || userIdNum === 0 || isNaN(userIdNum)) {
                 console.warn('[SessionStore] Cannot set user with invalid ID:', userId);
                 return false;
             }
@@ -3086,7 +3046,6 @@ try {
         
         addMessage: function(message) {
             if (!message || !message.id) return;
-            // Always coerce to string — prevents number/string mismatch in Map lookups
             const msgId      = String(message.id);
             const msgLocalId = message.localId ? String(message.localId) : null;
 
@@ -3110,7 +3069,7 @@ try {
             if (msgLocalId) {
                 const existingByLocalId = this._messagesMap.get(msgLocalId);
                 if (existingByLocalId) {
-                    const idx = this._messages.findIndex(m => String(m.id) === msgLocalId || String(m.localId || '') === msgLocalId);
+                    const idx = this._messages.findIndex(m => String(m.id) === msgLocalId || String(m.localId||'') === msgLocalId);
                     const merged = { ...existingByLocalId, ...message, id: msgId };
                     if (idx !== -1) this._messages[idx] = merged;
                     this._messagesMap.delete(msgLocalId);
@@ -4346,8 +4305,7 @@ try {
             }
             this._lastOpenRequest = { id: openKey, timestamp: now };
 
-            // FIX: Only wipe messages when switching to a DIFFERENT chat.
-            // Re-opening the SAME chat (e.g. returning from a call) must NOT wipe messages.
+            // FIX: Only wipe when switching to a DIFFERENT chat.
             const _prevActive = ChatManager._activeConversation;
             const _switchingChat = _prevActive && String(_prevActive.id) !== String(actualId);
             if (_switchingChat) {
@@ -5769,8 +5727,10 @@ try {
     // REAL-TIME MESSAGE HANDLER
     // =============================================
     function setupRealtimeMessageListener() {
-        if (window.__msgCoreRealtimeBound) return;
-        window.__msgCoreRealtimeBound = true;
+        // MODULE-LEVEL guard — iframe reloads reset window, so we use a document-level flag
+        // that survives within the same page load but resets on true iframe recreation.
+        if (document.__msgCoreRealtimeBound) return;
+        document.__msgCoreRealtimeBound = true;
         let hasRealtimeBinding = false;
 
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
@@ -5861,7 +5821,6 @@ try {
                             });
                         }
                     }
-                    // Always render if we have the new message, even if _msgs was empty
                     const _renderMsgs = _msgs.length > 0 ? _msgs : (normalizedMessage ? [normalizedMessage] : []);
                     if (_renderMsgs.length > 0 && _now) {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
@@ -5994,9 +5953,9 @@ try {
             if (normalizedType === 'message_sent' || normalizedType === 'message:sent') {
                 const d = (data.payload && (data.payload.localId || data.payload.messageId)) ? data.payload : data;
                 const messageId = d.localId || d.messageId || d.serverId || d.id;
-                const _sentKey = String(d.localId || '') + ':' + String(d.serverId || d.messageId || d.id || '');
-                if (_sentKey !== ':' && _realtimeSentIds.has(_sentKey)) return;
-                if (_sentKey !== ':') { _realtimeSentIds.add(_sentKey); setTimeout(() => _realtimeSentIds.delete(_sentKey), 15000); }
+                const _sk = String(d.localId||'') + ':' + String(d.serverId||d.messageId||d.id||'');
+                if (_sk !== ':' && _realtimeSentIds.has(_sk)) return;
+                if (_sk !== ':') { _realtimeSentIds.add(_sk); setTimeout(()=>_realtimeSentIds.delete(_sk), 15000); }
                 console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'sent', {
@@ -6175,7 +6134,7 @@ try {
             console.log('[messages] ✅ Bound to KynectaRealtime singleton events');
         }
         _bindKynectaRealtime();
-        window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: false });
+        window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: true });
 
         // NOTE: window 'kyn:message:received' listener intentionally removed —
         // message.html previously dispatched both document:message:new AND

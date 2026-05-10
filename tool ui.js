@@ -152,6 +152,7 @@ import {
 // Make sure showCreateListingModal is defined and works - SIMPLIFIED: removed isActive check
 if (typeof showCreateListingModal !== 'function') {
     window.showCreateListingModal = function() {
+        console.log('[MANUAL] showCreateListingModal called');
         const modal = document.getElementById('createListingModal');
         if (modal) modal.classList.add('active');
     };
@@ -779,7 +780,7 @@ function processQueuedUIActions() {
                 item.action();
             }
         } catch (e) {
-            if (window.__TOOLS_DEBUG__) console.warn('[UI] Failed to replay queued action:', e.message);
+            console.warn('[UI] Failed to replay queued action:', e.message);
         }
     });
 }
@@ -799,7 +800,7 @@ function withErrorBoundary(uiSectionName, renderFn, fallbackHTML = '') {
         } catch (error) {
             if (!warningsShown.has(uiSectionName)) {
                 warningsShown.add(uiSectionName);
-            if (window.__TOOLS_DEBUG__) console.warn(`[UI Error][${uiSectionName}] ${error.message}`);
+                console.warn(`[UI Error][${uiSectionName}] ${error.message}`);
             }
             if (window.diagnosticsAgent) {
                 window.diagnosticsAgent.logError(error, { section: uiSectionName });
@@ -893,6 +894,8 @@ const UIPipeline = {
         if (!window._uiDataListenerAttached) {
             window._uiDataListenerAttached = true;
             window.addEventListener('marketplace:data-updated', function(e) {
+                const source = e.detail && e.detail.source;
+                console.log('[UI] marketplace:data-updated from', source, '— re-rendering list');
                 // Sync allListings from event
                 if (e.detail && e.detail.listings) {
                     allListings = e.detail.listings;
@@ -922,14 +925,14 @@ const UIPipeline = {
                             if (!alreadyPresent) {
                                 allListings = [msg.listing].concat(window.allListings || []);
                                 window.allListings = allListings;
+                                console.log('[TOOLS FLOW] Step 4: UI updated from cross-tab broadcast', { id: msg.listing.id });
                                 window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
                                     detail: { listings: allListings, source: 'broadcast' }
                                 }));
                             }
                         }
-                        if (msg.type === 'LISTING_DELETED' && (msg.id || msg.listingId)) {
-                            const _deletedId = msg.id || msg.listingId;
-                            allListings = (window.allListings || []).filter(function(l) { return l.id !== _deletedId; });
+                        if (msg.type === 'LISTING_DELETED' && msg.listingId) {
+                            allListings = (window.allListings || []).filter(function(l) { return l.id !== msg.listingId; });
                             window.allListings = allListings;
                             window.dispatchEvent(new CustomEvent('marketplace:data-updated', {
                                 detail: { listings: allListings, source: 'broadcast' }
@@ -1823,6 +1826,7 @@ const CoreBridge = {
     },
 
     handleCoreReady(e) {
+        console.log('[UI Bridge] Core ready');
         UIPipeline.progressiveEnhancement();
         UIPipeline.liveUpdate();
         UIPipeline.updateConnectionStatus();
@@ -1833,6 +1837,7 @@ const CoreBridge = {
     },
 
     handleCoreInit(e) {
+        console.log('[UI Bridge] Core initialized');
         UIPipeline.initialRender();
     },
 
@@ -1844,7 +1849,9 @@ const CoreBridge = {
         }, 150);
     },
     
+    // FIX F: Handle marketplace data updates
     handleMarketplaceDataUpdated(e) {
+        console.log('[UI Bridge] Marketplace data updated');
         if (e?.detail?.listings) {
             allListings = e.detail.listings;
             window.allListings = allListings;
@@ -1853,6 +1860,7 @@ const CoreBridge = {
     },
 
     handleSessionReady(e) {
+        console.log('[UI Bridge] Session ready');
         this.refreshUserUI();
         UIPipeline.initialRender();
         UIPipeline.updateConnectionStatus();
@@ -1862,25 +1870,30 @@ const CoreBridge = {
     
     handleLifecycleChange(e) {
         const { from, to } = e?.detail || {};
+        console.log(`[UI Bridge] Lifecycle: ${from} -> ${to}`);
         UIState.lifecycleState = to;
         UIPipeline.updateConnectionStatus();
         UIPipeline.updateStartupStageIndicator();
         UIPipeline.updateLifecycleStateIndicator();
         UIPipeline.updateHandshakeProgress();
         
+        // Update startup stage based on lifecycle
         if (to === 'BOOT') UIState.startupStage = STARTUP_STAGES?.IDLE || 'IDLE';
         else if (to === 'INITIALIZING') UIState.startupStage = STARTUP_STAGES?.HANDSHAKING || 'HANDSHAKING';
         else if (to === 'READY') UIState.startupStage = STARTUP_STAGES?.WAITING || 'WAITING';
         else if (to === 'WAIT_PARENT') UIState.startupStage = STARTUP_STAGES?.WAITING || 'WAITING';
         else if (to === 'ACTIVE') UIState.startupStage = STARTUP_STAGES?.ACTIVE || 'ACTIVE';
         
+        // If we become active, process any queued actions
         if (to === 'ACTIVE') {
             processQueuedUIActions();
+            // Also refresh UI to show all features
             UIPipeline.liveUpdate();
         }
     },
     
     handleToolsActive(e) {
+        console.log('[UI Bridge] Tools module active');
         UIState.lifecycleState = 'ACTIVE';
         UIState.startupStage = STARTUP_STAGES?.ACTIVE || 'ACTIVE';
         UIPipeline.updateConnectionStatus();
@@ -1891,6 +1904,7 @@ const CoreBridge = {
     },
     
     handlePageActivated(e) {
+        console.log('[UI Bridge] Page activated');
         if (e?.detail?.refresh) {
             UIPipeline.liveUpdate();
         }
@@ -1972,11 +1986,6 @@ const CoreBridge = {
 
 const renderers = {
     marketplaceList: withErrorBoundary('MarketplaceList', function() {
-        // Always pull latest data before rendering — ES module bindings are
-        // captured at import time; window globals are always live.
-        if (typeof UIPipeline !== 'undefined' && UIPipeline.syncFromCoreGlobals) {
-            UIPipeline.syncFromCoreGlobals();
-        }
         if (!DOM.marketplaceListContent) return;
         DOM.marketplaceListContent.innerHTML = '';
 
@@ -1998,7 +2007,7 @@ const renderers = {
             return;
         }
 
-        let filtered = [...allListings];
+        let filtered = Array.isArray(allListings) ? [...allListings] : [];
         if (currentMoodFilter) {
             filtered = filterListingsByMood(filtered, currentMoodFilter);
         }
@@ -2061,65 +2070,144 @@ const renderers = {
 
     addListingItem: withErrorBoundary('AddListingItem', function(listing) {
         if (!DOM.marketplaceListContent || !listing) return;
-        
-        // Check if already exists
         if (document.querySelector(`.listing-item[data-listing-id="${listing.id}"]`)) return;
-        
+
+        // ── Normalise product fields (works with both old listing schema and new product schema) ──
+        const ecom    = window.EcomMarketplace;
+        const price   = parseFloat(String(listing.price  || listing.price_display || 0).replace(/[^0-9.]/g, '')) || 0;
+        const origPrc = parseFloat(String(listing.original_price || listing.originalPrice || 0).replace(/[^0-9.]/g, '')) || 0;
+        const stock   = listing.stock_quantity ?? listing.stockQuantity ?? null;
+        const rating  = parseFloat(listing.rating) || 0;
+        const reviews = parseInt(listing.reviews_count || listing.reviewsCount) || 0;
+        const inStock = listing.available !== false && (stock === null || stock > 0);
+        const imgSrc  = (listing.images?.[0]) || listing.mediaUrl || listing.image || '';
+        const sellerName = listing.seller?.name || listing.user?.displayName || listing.sellerName || 'Seller';
+        const isWishlisted = ecom ? ecom.WishlistEngine.has(listing.id) : (savedItems?.some(s=>s.id===listing.id));
+        const inCart  = ecom ? ecom.CartEngine.has(listing.id) : false;
+        const discount= origPrc > price && origPrc > 0 ? Math.round((1 - price/origPrc)*100) : (parseFloat(listing.discount)||0);
+        const isFlash = listing.is_flash_sale || listing.isFlashSale;
+        const isFeatured = listing.featured || listing.isFeatured || listing.isSpotlight || listing.is_featured;
+        const isVerified = listing.verified || listing.isVerified || listing.seller?.verified;
+
+        // ── Stars HTML ──
+        const _stars = (r) => {
+            const full = Math.floor(r), half = r - full >= 0.5;
+            let s = '';
+            for (let i=0;i<full;i++) s += '<i class="fas fa-star" style="color:#f5a623"></i>';
+            if (half) s += '<i class="fas fa-star-half-alt" style="color:#f5a623"></i>';
+            const empty = 5 - full - (half?1:0);
+            for (let i=0;i<empty;i++) s += '<i class="far fa-star" style="color:#d1d5db"></i>';
+            return s;
+        };
+
+        // ── Price display ──
+        const fmt = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${n.toLocaleString()}`;
+        const priceHTML = price > 0
+            ? `<span class="listing-price" style="color:var(--primary-color,#f57224);font-size:16px;font-weight:700">${fmt(price)}</span>${origPrc > price ? `<span style="text-decoration:line-through;color:#9ca3af;font-size:12px;margin-left:6px">${fmt(origPrc)}</span>` : ''}`
+            : `<span class="listing-price" style="color:#22c55e;font-weight:700">Free</span>`;
+
         const item = document.createElement('div');
-        item.className = 'listing-item';
-        if (listing.featured || listing.boosted || listing.isFeatured || listing.isSpotlight) item.classList.add('featured');
+        item.className = 'listing-item ecom-product-card';
+        if (isFeatured) item.classList.add('featured');
         if (listing.premium || listing.isPremium) item.classList.add('premium-listing');
-        // FIX: Use both userId and sellerId for dataset
         item.dataset.listingId = listing.id;
-        item.dataset.userId = listing.userId || listing.sellerId;
-
-        const userName = listing.user?.displayName || 'Unknown User';
-        const userInitials = userName.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
-        const availabilityClass = `availability-${listing.availability || 'free'}`;
-        const availabilityText = listing.availability ? listing.availability.charAt(0).toUpperCase() + listing.availability.slice(1) : 'Available';
-
-        // Build badges
-        let badges = '';
-        if (listing.featured || listing.isFeatured || listing.isSpotlight) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
-        if (listing.boosted || listing.isBoosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
-        if (listing.verified || listing.isVerified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
-        if (listing.teamListing) badges += '<span class="team-badge"><i class="fas fa-users"></i> TEAM</span>';
-        if ((listing.premium || listing.isPremium) && !listing.featured && !listing.boosted) badges += '<span class="premium-badge"><i class="fas fa-crown"></i> PREMIUM</span>';
+        item.dataset.userId = listing.userId || listing.sellerId || listing.seller_id || '';
+        item.style.cssText = 'cursor:pointer;background:var(--card-bg,#fff);border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:box-shadow 0.2s,transform 0.15s;display:flex;flex-direction:column;position:relative;';
 
         item.innerHTML = `
-            <div class="listing-avatar" style="${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'background-color: #4caf50;' : ''}">
-                ${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? '<i class="fas fa-file-alt" style="font-size: 20px;"></i>' : 
-                  listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service' ? '<i class="fas fa-tools" style="font-size: 20px;"></i>' :
-                  listing.user?.photoURL ? '' : `<span style="color: white; font-size: 18px; font-weight: 500;">${escapeHtml(userInitials)}</span>`}
+            <!-- Image area -->
+            <div style="position:relative;width:100%;padding-top:56.25%;background:#f3f4f6;overflow:hidden;flex-shrink:0;">
+                ${imgSrc
+                    ? `<img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform 0.3s;" onerror="this.style.display='none'">`
+                    : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;color:#9ca3af">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
+                <!-- Badges overlay -->
+                <div style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:none;">
+                    ${discount > 0 ? `<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">-${discount}%</span>` : ''}
+                    ${isFlash ? `<span style="background:#f59e0b;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">⚡ FLASH</span>` : ''}
+                    ${isFeatured ? `<span style="background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">★ TOP</span>` : ''}
+                </div>
+                <!-- Wishlist button -->
+                <button class="ecom-wish-btn" data-pid="${listing.id}" style="position:absolute;top:8px;right:8px;background:rgba(255,255,255,0.9);border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;backdrop-filter:blur(4px);z-index:2;" title="Wishlist" onclick="event.stopPropagation()">
+                    ${isWishlisted ? '❤️' : '🤍'}
+                </button>
+                <!-- Out of stock overlay -->
+                ${!inStock && stock !== null ? `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center"><span style="color:#fff;font-size:13px;font-weight:700;background:#ef4444;padding:6px 14px;border-radius:20px">OUT OF STOCK</span></div>` : ''}
             </div>
-            <div class="listing-info">
-                <div class="listing-name">
-                    <span class="listing-title">${escapeHtml(listing.title || 'Untitled')}</span>
-                    ${listing.price ? `<span class="listing-price">${escapeHtml(listing.price)}</span>` : ''}
+            <!-- Info area -->
+            <div style="padding:10px 12px 12px;display:flex;flex-direction:column;flex:1;gap:4px;">
+                <div style="font-size:13px;color:#6b7280;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(listing.title||'Untitled')}</div>
+                <!-- Rating -->
+                ${rating > 0 ? `<div style="display:flex;align-items:center;gap:4px;font-size:11px;">${_stars(rating)}<span style="color:#6b7280">(${reviews.toLocaleString()})</span></div>` : ''}
+                <!-- Price -->
+                <div style="margin-top:2px;">${priceHTML}</div>
+                <!-- Seller + shipping info -->
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
+                    <div style="font-size:11px;color:#9ca3af;display:flex;align-items:center;gap:3px;">
+                        ${isVerified ? '<span title="Verified Seller" style="color:#3b82f6">✓</span>' : ''}
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px">${escapeHtml(sellerName)}</span>
+                    </div>
+                    ${listing.delivery_fee === 0 || listing.deliveryFee === 0 ? '<span style="font-size:10px;color:#22c55e;font-weight:600">Free delivery</span>' : listing.location ? `<span style="font-size:10px;color:#9ca3af">📍 ${escapeHtml(listing.location)}</span>` : ''}
                 </div>
-                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0;">
-                    ${badges}
-                </div>
-                <div class="listing-time">
-                    <span><i class="far fa-clock"></i> ${listing.createdAt ? formatTimeAgo(new Date(listing.createdAt)) : 'Just now'}</span>
-                    <span class="availability-badge ${availabilityClass}"><i class="fas fa-${listing.availability === 'urgent' ? 'exclamation-circle' : listing.availability === 'busy' ? 'clock' : 'check-circle'}"></i> ${availabilityText}</span>
-                    ${getTrustIndicator ? getTrustIndicator(listing.userId || listing.sellerId, listing.user?.trustLevel) : ''}
-                </div>
-                <div class="listing-preview">
-                    ${escapeHtml((listing.description || '').substring(0, 80))}${listing.description?.length > 80 ? '...' : ''}
-                </div>
+                <!-- Stock indicator -->
+                ${stock !== null && stock > 0 && stock <= 5 ? `<div style="font-size:11px;color:#f59e0b;font-weight:600">Only ${stock} left!</div>` : ''}
+                <!-- Add to Cart button -->
+                ${inStock ? `<button class="ecom-cart-btn" data-pid="${listing.id}" style="margin-top:8px;background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.2s;" onclick="event.stopPropagation()">
+                    ${inCart ? '<i class="fas fa-check"></i> In Cart' : '<i class="fas fa-shopping-cart"></i> Add to Cart'}
+                </button>` : `<button disabled style="margin-top:8px;background:#e5e7eb;color:#9ca3af;border:none;border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:not-allowed;width:100%;">Out of Stock</button>`}
             </div>
         `;
 
-        if (listing.user?.photoURL && (listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service')) {
-            const avatarDiv = item.querySelector('.listing-avatar');
-            avatarDiv.style.backgroundImage = `url('${escapeHtml(listing.user.photoURL)}')`;
-            avatarDiv.style.backgroundSize = 'cover';
-            avatarDiv.style.backgroundPosition = 'center';
-            avatarDiv.innerHTML = '';
+        // ── Event handlers ──
+        // Wishlist toggle
+        const wishBtn = item.querySelector('.ecom-wish-btn');
+        if (wishBtn) {
+            wishBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (ecom) {
+                    const added = ecom.WishlistEngine.toggle(listing.id);
+                    wishBtn.textContent = added ? '❤️' : '🤍';
+                } else {
+                    // Fallback: use existing toggleSave
+                    if (typeof toggleSaveListing === 'function') toggleSaveListing(listing.id);
+                }
+            });
         }
 
-        item.onclick = () => renderers.viewListingDetail(listing);
+        // Add to cart
+        const cartBtn = item.querySelector('.ecom-cart-btn');
+        if (cartBtn && inStock) {
+            cartBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (ecom) {
+                    // Build product object from listing
+                    const product = {
+                        id: listing.id, title: listing.title, price,
+                        original_price: origPrc, discount, seller_id: listing.seller_id || listing.sellerId || listing.userId,
+                        seller: { name: sellerName }, images: listing.images || (imgSrc ? [imgSrc] : []),
+                        stock_quantity: stock ?? 999, delivery_fee: parseFloat(listing.delivery_fee || listing.deliveryFee) || 0,
+                        available: inStock, category: listing.category || 'general',
+                    };
+                    const result = ecom.CartEngine.add(product);
+                    if (result.success) {
+                        cartBtn.innerHTML = '<i class="fas fa-check"></i> In Cart';
+                        cartBtn.style.background = '#22c55e';
+                        _updateCartBadge();
+                    } else {
+                        cartBtn.textContent = result.message || 'Failed';
+                        setTimeout(() => { cartBtn.innerHTML = '<i class="fas fa-shopping-cart"></i> Add to Cart'; cartBtn.style.background = ''; }, 2000);
+                    }
+                } else {
+                    if (typeof showNotification === 'function') showNotification('Product added to cart', 'success');
+                }
+            });
+        }
+
+        // Hover effects
+        item.addEventListener('mouseenter', () => { item.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)'; item.style.transform = 'translateY(-2px)'; });
+        item.addEventListener('mouseleave', () => { item.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; item.style.transform = ''; });
+
+        // Open detail panel on click
+        item.addEventListener('click', () => renderers.viewListingDetail(listing));
         DOM.marketplaceListContent.appendChild(item);
     }, null),
 
@@ -2164,180 +2252,332 @@ const renderers = {
 
     renderListingDetailContent: withErrorBoundary('ListingDetailContent', function(listing, container) {
         if (!container) return;
-        let html = '';
 
-        // Media section
-        if (listing.videoIntro) {
-            html += `<div class="file-preview" style="margin-bottom: 20px;">
-                <video controls class="listing-detail-media" poster="${listing.mediaUrl || ''}">
-                    <source src="${escapeHtml(listing.videoIntro)}" type="video/mp4">
-                    Your browser does not support the video tag.
-                </video>
-            </div>`;
-        } else if (listing.mediaUrl) {
-            html += `<div class="file-preview">
-                <img src="${escapeHtml(listing.mediaUrl)}" class="listing-detail-media" alt="${escapeHtml(listing.title)}" loading="lazy">
-            </div>`;
-        }
-        
-        // AR Preview for premium
-        if (listing.arPreview && isUserPremium()) {
-            html += `<div class="ar-preview-container" style="margin-bottom: 20px;">
-                <div class="ar-preview-placeholder">
-                    <i class="fas fa-vr-cardboard" style="font-size: 48px; margin-bottom: 10px; color: var(--primary-color);"></i>
-                    <p style="font-weight: 500;">AR Preview Available</p>
-                    <button class="action-btn secondary" style="margin-top: 10px;" id="viewArBtn">
-                        <i class="fas fa-eye"></i> View in AR
+        const ecom    = window.EcomMarketplace;
+        const price   = parseFloat(String(listing.price||0).replace(/[^0-9.]/g,'')) || 0;
+        const origPrc = parseFloat(String(listing.original_price||listing.originalPrice||0).replace(/[^0-9.]/g,'')) || 0;
+        const stock   = listing.stock_quantity ?? listing.stockQuantity ?? null;
+        const rating  = parseFloat(listing.rating) || 0;
+        const reviews = parseInt(listing.reviews_count || listing.reviewsCount) || 0;
+        const inStock = listing.available !== false && (stock === null || stock > 0);
+        const images  = (listing.images?.length ? listing.images : listing.mediaUrl ? [listing.mediaUrl] : []);
+        const sellerName = listing.seller?.name || listing.user?.displayName || listing.sellerName || 'Seller';
+        const sellerId   = listing.seller?.id || listing.seller_id || listing.userId || listing.sellerId;
+        const sellerRating = parseFloat(listing.seller?.rating) || 0;
+        const discount = origPrc > price && origPrc > 0 ? Math.round((1-price/origPrc)*100) : (parseFloat(listing.discount)||0);
+        const fmt      = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${parseFloat(n).toLocaleString()}`;
+        const inWish   = ecom ? ecom.WishlistEngine.has(listing.id) : false;
+        const inCart   = ecom ? ecom.CartEngine.has(listing.id) : false;
+        const _stars   = (r,sm=false)=>{const full=Math.floor(r),half=r-full>=0.5,sz=sm?'11px':'14px';let s='';for(let i=0;i<full;i++)s+=`<i class="fas fa-star" style="color:#f5a623;font-size:${sz}"></i>`;if(half)s+=`<i class="fas fa-star-half-alt" style="color:#f5a623;font-size:${sz}"></i>`;const e=5-full-(half?1:0);for(let i=0;i<e;i++)s+=`<i class="far fa-star" style="color:#d1d5db;font-size:${sz}"></i>`;return s;};
+
+        container.innerHTML = `
+        <div class="ecom-detail-wrap" style="font-family:system-ui,sans-serif;padding-bottom:24px;">
+
+            <!-- Image Gallery -->
+            <div style="position:relative;background:#f3f4f6;border-radius:12px;overflow:hidden;margin-bottom:16px;">
+                ${images.length > 0
+                    ? `<div id="ecom-gallery" style="position:relative;width:100%;padding-top:66%;overflow:hidden;">
+                        <img id="ecom-main-img" src="${escapeHtml(images[0])}" alt="${escapeHtml(listing.title||'')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;" loading="lazy">
+                        ${discount > 0 ? `<span style="position:absolute;top:12px;left:12px;background:#ef4444;color:#fff;font-size:12px;font-weight:700;padding:4px 10px;border-radius:6px;">-${discount}%</span>` : ''}
+                        ${images.length > 1 ? `
+                        <button id="ecom-prev" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.9);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.15);">‹</button>
+                        <button id="ecom-next" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.9);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.15);">›</button>
+                        ` : ''}
+                      </div>
+                      ${images.length > 1 ? `<div id="ecom-thumbs" style="display:flex;gap:8px;padding:8px 12px;overflow-x:auto;">
+                        ${images.map((img,i)=>`<img src="${escapeHtml(img)}" data-idx="${i}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid ${i===0?'var(--primary-color,#f57224)':'transparent'};flex-shrink:0;" loading="lazy">`).join('')}
+                      </div>` : ''}`
+                    : `<div style="width:100%;height:200px;display:flex;align-items:center;justify-content:center;font-size:64px;">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
+                ${!inStock && stock !== null ? `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;"><span style="color:#fff;font-size:16px;font-weight:700;background:#ef4444;padding:10px 24px;border-radius:24px;">OUT OF STOCK</span></div>` : ''}
+            </div>
+
+            <!-- Title & Price -->
+            <h2 style="font-size:17px;font-weight:600;line-height:1.4;margin:0 0 8px;color:var(--text-primary,#111)">${escapeHtml(listing.title||'Untitled')}</h2>
+
+            <!-- Badges -->
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+                ${listing.featured||listing.isFeatured?'<span style="background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">★ FEATURED</span>':''}
+                ${listing.verified||listing.isVerified?'<span style="background:#3b82f6;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">✓ VERIFIED</span>':''}
+                ${listing.is_flash_sale||listing.isFlashSale?'<span style="background:#f59e0b;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">⚡ FLASH SALE</span>':''}
+                ${listing.isPremium||listing.premium?'<span style="background:#d97706;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">👑 PREMIUM</span>':''}
+                ${listing.condition?`<span style="background:#f3f4f6;color:#374151;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;">${escapeHtml(listing.condition.toUpperCase())}</span>`:''}
+            </div>
+
+            <!-- Rating -->
+            ${rating > 0 || reviews > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                <span style="font-size:16px;font-weight:700;color:#111">${rating.toFixed(1)}</span>
+                <div>${_stars(rating)}</div>
+                <span style="color:#6b7280;font-size:13px;">${reviews.toLocaleString()} review${reviews!==1?'s':''}</span>
+            </div>` : ''}
+
+            <!-- Price block -->
+            <div style="background:linear-gradient(135deg,#fff9f0,#fff);border:1px solid #fed7aa;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
+                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+                    <span style="font-size:26px;font-weight:800;color:var(--primary-color,#f57224)">${price > 0 ? fmt(price) : '<span style="color:#22c55e">Free</span>'}</span>
+                    ${origPrc > price ? `<span style="text-decoration:line-through;color:#9ca3af;font-size:15px;">${fmt(origPrc)}</span>` : ''}
+                    ${discount > 0 ? `<span style="background:#ef4444;color:#fff;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;">-${discount}%</span>` : ''}
+                </div>
+                ${discount > 0 && origPrc > price ? `<div style="font-size:12px;color:#22c55e;margin-top:4px;font-weight:600;">You save ${fmt(origPrc-price)}</div>` : ''}
+                ${listing.delivery_fee === 0 || listing.deliveryFee === 0 ? '<div style="font-size:12px;color:#22c55e;margin-top:4px;font-weight:600;">🚚 Free delivery</div>' : listing.delivery_fee ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">Delivery: ${fmt(parseFloat(listing.delivery_fee||0))}</div>` : ''}
+            </div>
+
+            <!-- Stock indicator -->
+            ${stock !== null ? `<div style="margin-bottom:12px;font-size:13px;">
+                ${stock > 5 ? `<span style="color:#22c55e;font-weight:600;">✓ In Stock</span>` : stock > 0 ? `<span style="color:#f59e0b;font-weight:600;">⚠ Only ${stock} left</span>` : `<span style="color:#ef4444;font-weight:600;">✗ Out of Stock</span>`}
+                ${listing.sold_count > 0 ? `<span style="color:#6b7280;margin-left:12px;">${parseInt(listing.sold_count||0).toLocaleString()} sold</span>` : ''}
+            </div>` : ''}
+
+            <!-- Quantity selector + action buttons -->
+            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+                ${inStock ? `
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+                    <span style="font-size:13px;color:#374151;font-weight:500;">Qty:</span>
+                    <div style="display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+                        <button id="ecom-qty-dec" style="padding:8px 14px;border:none;background:#f9fafb;cursor:pointer;font-size:16px;font-weight:600;">−</button>
+                        <span id="ecom-qty-val" style="padding:8px 16px;font-size:15px;font-weight:600;min-width:40px;text-align:center;">1</span>
+                        <button id="ecom-qty-inc" style="padding:8px 14px;border:none;background:#f9fafb;cursor:pointer;font-size:16px;font-weight:600;">+</button>
+                    </div>
+                </div>
+                <button id="ecom-add-cart-btn" style="background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;transition:background 0.2s;">
+                    <i class="fas fa-shopping-cart"></i> ${inCart ? 'Update Cart' : 'Add to Cart'}
+                </button>
+                <button id="ecom-buy-now-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
+                    <i class="fas fa-bolt"></i> Buy Now
+                </button>` : `<button disabled style="background:#e5e7eb;color:#9ca3af;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;width:100%;">Out of Stock</button>`}
+                <button id="ecom-wish-detail-btn" style="background:${inWish?'#fee2e2':'#f9fafb'};color:${inWish?'#ef4444':'#374151'};border:1px solid ${inWish?'#fca5a5':'#e5e7eb'};border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
+                    ${inWish ? '<i class="fas fa-heart"></i> Remove from Wishlist' : '<i class="far fa-heart"></i> Add to Wishlist'}
+                </button>
+            </div>
+
+            <!-- Description -->
+            <div style="margin-bottom:16px;">
+                <h3 style="font-size:15px;font-weight:700;margin-bottom:8px;color:#111;">Product Description</h3>
+                <div style="font-size:14px;color:#374151;line-height:1.6;white-space:pre-line;">${escapeHtml(listing.description||'No description provided.')}</div>
+            </div>
+
+            <!-- Delivery info -->
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px;margin-bottom:16px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:10px;color:#166534;">🚚 Delivery & Location</h3>
+                ${listing.location ? `<div style="font-size:13px;color:#374151;margin-bottom:6px;">📍 Ships from: <strong>${escapeHtml(listing.location)}</strong></div>` : ''}
+                <div style="font-size:13px;color:#374151;margin-bottom:6px;">📦 Estimated delivery: <strong>1-3 business days</strong></div>
+                ${listing.delivery_fee === 0 || listing.deliveryFee === 0
+                    ? '<div style="font-size:13px;font-weight:600;color:#22c55e;">✓ Free delivery on this item</div>'
+                    : listing.delivery_fee ? `<div style="font-size:13px;color:#374151;">Delivery fee: <strong>${fmt(parseFloat(listing.delivery_fee))}</strong></div>` : ''}
+                <button id="ecom-delivery-calc" style="margin-top:10px;background:transparent;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:600;">Calculate delivery to my location</button>
+            </div>
+
+            <!-- Seller info -->
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:16px;">
+                <h3 style="font-size:14px;font-weight:700;margin-bottom:10px;color:#111;">🏪 About the Seller</h3>
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+                    <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--primary-color,#f57224),#ff9a00);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;flex-shrink:0;">
+                        ${escapeHtml((sellerName[0]||'S').toUpperCase())}
+                    </div>
+                    <div>
+                        <div style="font-weight:600;font-size:14px;color:#111;">${escapeHtml(sellerName)} ${listing.seller?.verified||listing.isVerified?'<span style="color:#3b82f6;font-size:13px;">✓</span>':''}</div>
+                        ${sellerRating > 0 ? `<div style="display:flex;align-items:center;gap:4px;margin-top:2px;">${_stars(sellerRating,true)}<span style="font-size:11px;color:#6b7280;">${sellerRating.toFixed(1)}</span></div>` : ''}
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button id="ecom-chat-seller-btn" style="flex:1;background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                        <i class="fas fa-comment"></i> Chat Seller
+                    </button>
+                    <button id="ecom-seller-profile-btn" style="flex:1;background:#f9fafb;color:#374151;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                        <i class="fas fa-store"></i> View Shop
                     </button>
                 </div>
-            </div>`;
-        }
+            </div>
 
-        // Title and badges
-        let badges = '';
-        if (listing.featured || listing.isFeatured || listing.isSpotlight) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
-        if (listing.boosted || listing.isBoosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
-        if (listing.verified || listing.isVerified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
-        if (listing.teamListing) badges += '<span class="team-badge"><i class="fas fa-users"></i> TEAM</span>';
-
-        html += `
-            <h1 class="listing-detail-title">
-                ${escapeHtml(listing.title || 'Untitled')}
-                <div style="display: inline-flex; gap: 8px; margin-left: 10px;">${badges}</div>
-            </h1>
-            <div class="listing-detail-price">
-                ${listing.price ? escapeHtml(listing.price) : 'Free'}
-                ${listing.acceptsTips ? '<span class="tips-badge" style="margin-left: 10px;"><i class="fas fa-gift"></i> Accepts Tips</span>' : ''}
-            </div>
-            <div class="listing-detail-description">
-                ${escapeHtml(listing.description || 'No description provided.').replace(/\n/g, '<br>')}
-            </div>
-            
-            <div class="listing-detail-meta">
-                <span class="meta-badge"><i class="fas fa-${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'file-alt' : 'tools'}"></i> ${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'Digital Item' : 'Service'}</span>
-                <span class="meta-badge availability-${listing.availability || 'free'}"><i class="fas fa-${listing.availability === 'urgent' ? 'exclamation-circle' : listing.availability === 'busy' ? 'clock' : 'check-circle'}"></i> ${listing.availability ? listing.availability.charAt(0).toUpperCase() + listing.availability.slice(1) : 'Available'}</span>
-                ${listing.visibility ? `<span class="meta-badge ${listing.visibility === 'premium' || listing.visibility === 'micro' ? 'premium-feature' : ''}"><i class="fas fa-${listing.visibility === 'friends' ? 'user-friends' : listing.visibility === 'groups' ? 'users' : listing.visibility === 'selected' ? 'user-check' : listing.visibility === 'premium' ? 'crown' : listing.visibility === 'micro' ? 'bullseye' : 'globe'}"></i> ${listing.visibility === 'friends' ? 'Friends Only' : listing.visibility === 'groups' ? 'Group Members' : listing.visibility === 'selected' ? 'Selected People' : listing.visibility === 'premium' ? 'Premium Only' : listing.visibility === 'micro' ? 'Micro-Audience' : 'Public'}</span>` : ''}
-                ${listing.moodContext ? `<span class="meta-badge ${listing.moodContext === 'creative' || listing.moodContext === 'business' ? 'premium-feature' : ''}"><i class="fas fa-${listing.moodContext === 'help' ? 'hands-helping' : listing.moodContext === 'learn' ? 'graduation-cap' : listing.moodContext === 'urgent' ? 'bolt' : listing.moodContext === 'creative' ? 'palette' : listing.moodContext === 'business' ? 'briefcase' : 'search'}"></i> ${listing.moodContext === 'help' ? 'Help Needed' : listing.moodContext === 'learn' ? 'Learning' : listing.moodContext === 'urgent' ? 'Urgent' : listing.moodContext === 'creative' ? 'Creative' : listing.moodContext === 'business' ? 'Business' : 'Browsing'}</span>` : ''}
-                ${listing.template ? `<span class="meta-badge ${listing.template === 'business' || listing.template === 'coaching' || listing.template === 'vip' ? 'premium-feature' : ''}"><i class="fas fa-${listing.template === 'business' ? 'briefcase' : listing.template === 'coaching' ? 'chalkboard-teacher' : listing.template === 'creative' ? 'palette' : listing.template === 'vip' ? 'crown' : listing.template === 'digital' ? 'download' : 'file-alt'}"></i> ${listing.template === 'business' ? 'Business' : listing.template === 'coaching' ? 'Coaching' : listing.template === 'creative' ? 'Creative' : listing.template === 'vip' ? 'VIP' : listing.template === 'digital' ? 'Digital' : 'Basic'}</span>` : ''}
-                <span class="meta-badge trust-${listing.user?.trustLevel || 'new'}"><i class="fas fa-${listing.user?.trustLevel === 'verified' ? 'shield-alt' : listing.user?.trustLevel === 'pro' ? 'crown' : listing.user?.trustLevel === 'responsive' ? 'comments' : 'star'}"></i> ${listing.user?.trustLevel ? listing.user.trustLevel.charAt(0).toUpperCase() + listing.user.trustLevel.slice(1) : 'New'}</span>
-            </div>
-            
-            ${listing.teamMembers && listing.teamMembers.length > 0 ? `<div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;">
-                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;"><i class="fas fa-users" style="font-size: 20px;"></i><div style="font-weight: 600;">Team Listing</div></div>
-                <div style="font-size: 14px;">Managed by ${listing.teamMembers.length} team member${listing.teamMembers.length > 1 ? 's' : ''}</div>
-                <div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
-                    ${listing.teamMembers.map(m => `<span style="background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 20px; font-size: 12px;">${escapeHtml(m.name || 'Team Member')}</span>`).join('')}
+            <!-- Reviews section -->
+            <div style="margin-bottom:16px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <h3 style="font-size:15px;font-weight:700;color:#111;">⭐ Reviews (${reviews.toLocaleString()})</h3>
+                    <button id="ecom-write-review-btn" style="background:transparent;color:var(--primary-color,#f57224);border:1px solid var(--primary-color,#f57224);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600;">Write Review</button>
                 </div>
-            </div>` : ''}
-            
-            ${listing.expiresAt ? `<div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 12px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <i class="fas fa-clock" style="color: var(--warning-color); font-size: 20px;"></i>
-                    <div>
-                        <div style="font-weight: 500;">Expires ${formatTimeRemaining ? formatTimeRemaining(new Date(listing.expiresAt)) : listing.expiresAt}</div>
-                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 4px;">Listed ${formatTimeAgo(new Date(listing.createdAt || Date.now()))}</div>
-                    </div>
-                </div>
-                ${listing.autoRenew ? `<div style="margin-top: 10px; padding: 10px; background-color: rgba(52, 199, 89, 0.1); border-radius: 8px; border: 1px solid rgba(52, 199, 89, 0.2);">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <i class="fas fa-sync-alt" style="color: var(--success-color);"></i>
-                        <span style="font-size: 14px;">Auto-renew enabled</span>
-                    </div>
+                ${rating > 0 ? `<div style="display:flex;align-items:center;gap:16px;background:#f9fafb;border-radius:10px;padding:12px;margin-bottom:10px;">
+                    <div style="text-align:center;"><div style="font-size:36px;font-weight:800;color:#111">${rating.toFixed(1)}</div><div>${_stars(rating)}</div><div style="font-size:11px;color:#9ca3af;margin-top:2px;">${reviews.toLocaleString()} reviews</div></div>
                 </div>` : ''}
-            </div>` : ''}
-            
-            ${listing.reactions?.length ? `<div style="margin-top: 20px;">
-                <div style="font-weight: 600; margin-bottom: 10px;">Reactions</div>
-                <div class="reaction-picker" style="justify-content: flex-start;">
-                    ${listing.reactions.map(r => `<div class="reaction-option ${r.premium ? 'premium' : ''}" style="cursor: default;">${r.emoji}<span style="font-size: 12px; margin-left: 5px; font-weight: 600;">${r.count}</span></div>`).join('')}
+                <div id="ecom-reviews-list" style="display:flex;flex-direction:column;gap:10px;">
+                    <div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">Loading reviews…</div>
                 </div>
-            </div>` : ''}
-        `;
+                ${reviews > 5 ? `<button id="ecom-load-more-reviews" style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;margin-top:8px;font-weight:600;color:#374151;">Load more reviews</button>` : ''}
+            </div>
 
-        container.innerHTML = html;
+            <!-- Related products placeholder -->
+            <div>
+                <h3 style="font-size:15px;font-weight:700;margin-bottom:10px;color:#111;">🛍 Related Products</h3>
+                <div id="ecom-related-products" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;">
+                    <div style="color:#9ca3af;font-size:13px;padding:8px;">Loading…</div>
+                </div>
+            </div>
 
-        // Add AR button handler
-        const arBtn = document.getElementById('viewArBtn');
-        if (arBtn) {
-            arBtn.onclick = () => {
-                showNotification('AR preview feature coming soon!', 'info');
-            };
+            <!-- Share -->
+            <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="ecom-share-btn" style="flex:1;background:#f9fafb;color:#374151;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;">
+                    <i class="fas fa-share-alt"></i> Share
+                </button>
+                <button id="ecom-report-btn" style="background:#f9fafb;color:#9ca3af;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;">
+                    <i class="fas fa-flag"></i>
+                </button>
+            </div>
+        </div>`;
+
+        // ── Wire up all buttons ──
+        const _$ = (id) => container.querySelector('#' + id);
+        let _qty = 1;
+        const _maxQty = stock ?? 999;
+
+        // Quantity controls
+        _$('ecom-qty-dec')?.addEventListener('click', () => { if(_qty>1){_qty--;_$('ecom-qty-val').textContent=_qty;} });
+        _$('ecom-qty-inc')?.addEventListener('click', () => { if(_qty<_maxQty){_qty++;_$('ecom-qty-val').textContent=_qty;} });
+
+        // Add to Cart
+        const _addBtn = _$('ecom-add-cart-btn');
+        if (_addBtn && inStock) {
+            _addBtn.addEventListener('click', () => {
+                if (ecom) {
+                    const p = { id:listing.id, title:listing.title, price, original_price:origPrc, discount,
+                        seller_id:sellerId, seller:{name:sellerName}, images, stock_quantity:_maxQty,
+                        delivery_fee:parseFloat(listing.delivery_fee||listing.deliveryFee||0), available:true, category:listing.category||'general' };
+                    const res = ecom.CartEngine.add(p, _qty);
+                    if (res.success) {
+                        _addBtn.innerHTML = '<i class="fas fa-check"></i> Added to Cart';
+                        _addBtn.style.background = '#22c55e';
+                        _updateCartBadge();
+                        setTimeout(()=>{ _addBtn.innerHTML='<i class="fas fa-shopping-cart"></i> Add to Cart'; _addBtn.style.background=''; }, 2000);
+                    } else {
+                        ecom.NotificationEngine.show(res.message || 'Failed', 'error', '❌');
+                    }
+                }
+            });
         }
 
-        // Add download button for digital items
-        if (listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital') {
-            if (listing.fileUrl) {
-                const downloadBtn = document.createElement('button');
-                downloadBtn.className = 'action-btn primary';
-                downloadBtn.style.marginTop = '20px';
-                downloadBtn.style.width = '100%';
-                downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download File';
-                downloadBtn.onclick = () => {
-                    if (downloadDigitalFile) {
-                        downloadDigitalFile(listing.id, listing.fileUrl, listing.fileName || 'download');
-                    }
-                };
-                container.appendChild(downloadBtn);
-                
-                // Add file info if available
-                if (listing.fileName || listing.fileSize) {
-                    const fileInfo = document.createElement('div');
-                    fileInfo.className = 'file-info';
-                    fileInfo.style.marginBottom = '10px';
-                    fileInfo.style.padding = '10px';
-                    fileInfo.style.background = 'var(--secondary-color)';
-                    fileInfo.style.borderRadius = '8px';
-                    fileInfo.innerHTML = `
-                        <span><i class="fas fa-file"></i> ${escapeHtml(listing.fileName || 'File')}</span>
-                        <span style="float: right;">${listing.fileSize ? formatFileSize(listing.fileSize) : ''}</span>
-                    `;
-                    container.insertBefore(fileInfo, downloadBtn);
-                }
+        // Buy Now
+        _$('ecom-buy-now-btn')?.addEventListener('click', () => {
+            if (ecom) {
+                const p = { id:listing.id, title:listing.title, price, seller_id:sellerId,
+                    seller:{name:sellerName}, images, stock_quantity:_maxQty, delivery_fee:parseFloat(listing.delivery_fee||0),
+                    available:true, category:listing.category||'general' };
+                ecom.CartEngine.add(p, _qty);
+                _updateCartBadge();
+                openCheckoutPanel();
+            }
+        });
+
+        // Wishlist
+        const _wishBtn = _$('ecom-wish-detail-btn');
+        _wishBtn?.addEventListener('click', () => {
+            if (ecom) {
+                const added = ecom.WishlistEngine.toggle(listing.id);
+                _wishBtn.innerHTML = added ? '<i class="fas fa-heart"></i> Remove from Wishlist' : '<i class="far fa-heart"></i> Add to Wishlist';
+                _wishBtn.style.background = added ? '#fee2e2' : '#f9fafb';
+                _wishBtn.style.color = added ? '#ef4444' : '#374151';
+                _wishBtn.style.borderColor = added ? '#fca5a5' : '#e5e7eb';
+            }
+        });
+
+        // Chat seller
+        _$('ecom-chat-seller-btn')?.addEventListener('click', () => {
+            if (ecom) { ecom.ChatBridge.openWithSeller({ ...listing, seller_id:sellerId, seller:{id:sellerId,name:sellerName} }); }
+            else if (typeof openChat === 'function') { openChat(sellerId, sellerName); }
+        });
+
+        // Seller profile
+        _$('ecom-seller-profile-btn')?.addEventListener('click', () => { if(sellerId) openSellerPanel(sellerId); });
+
+        // Delivery calculator
+        _$('ecom-delivery-calc')?.addEventListener('click', () => {
+            const area = prompt('Enter your area/city for delivery estimate:');
+            if (area && ecom) {
+                const fee = ecom.DeliveryEngine.calculateFee(listing.location||'', area);
+                alert(`Estimated delivery from ${listing.location||'seller location'} to ${area}:\nKES ${fee}`);
+            }
+        });
+
+        // Write review
+        _$('ecom-write-review-btn')?.addEventListener('click', () => openWriteReviewPanel(listing.id));
+
+        // Share
+        _$('ecom-share-btn')?.addEventListener('click', () => {
+            const url = `${window.location.origin}/?product=${listing.id}`;
+            if (navigator.share) { navigator.share({ title: listing.title, url }); }
+            else { navigator.clipboard?.writeText(url).then(()=>{ if(typeof showNotification==='function') showNotification('Link copied!','success'); }); }
+        });
+
+        // Gallery navigation
+        if (images.length > 1) {
+            let curIdx = 0;
+            const mainImg = _$('ecom-main-img');
+            const thumbs  = container.querySelectorAll('#ecom-thumbs img');
+            const _setImg = (idx) => {
+                curIdx = (idx + images.length) % images.length;
+                if (mainImg) mainImg.src = escapeHtml(images[curIdx]);
+                thumbs.forEach((t,i)=>{ t.style.borderColor = i===curIdx ? 'var(--primary-color,#f57224)' : 'transparent'; });
+            };
+            _$('ecom-prev')?.addEventListener('click', (e)=>{ e.stopPropagation(); _setImg(curIdx-1); });
+            _$('ecom-next')?.addEventListener('click', (e)=>{ e.stopPropagation(); _setImg(curIdx+1); });
+            thumbs.forEach((t,i)=>{ t.addEventListener('click', (e)=>{ e.stopPropagation(); _setImg(i); }); });
+        }
+
+        // Load reviews asynchronously
+        if (ecom && reviews > 0) {
+            ecom.ReviewEngine.getReviews(listing.id, { limit: 5 }).then(revList => {
+                const rl = _$('ecom-reviews-list');
+                if (!rl) return;
+                if (!revList.length) { rl.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">No reviews yet. Be the first!</div>'; return; }
+                rl.innerHTML = revList.map(r => `
+                    <div style="background:#f9fafb;border-radius:10px;padding:12px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;">${(r.user?.name||r.username||'U')[0].toUpperCase()}</div>
+                                <div>
+                                    <div style="font-size:13px;font-weight:600;">${escapeHtml(r.user?.name||r.username||'User')}</div>
+                                    <div style="font-size:11px;color:#9ca3af;">${r.created_at ? formatTimeAgo(new Date(r.created_at)) : ''}</div>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:1px;">${'<i class="fas fa-star" style="color:#f5a623;font-size:12px;"></i>'.repeat(r.rating||0)}</div>
+                        </div>
+                        ${r.text ? `<div style="font-size:13px;color:#374151;line-height:1.5;">${escapeHtml(r.text)}</div>` : ''}
+                        ${r.images?.length ? `<div style="display:flex;gap:6px;margin-top:8px;">${r.images.map(img=>`<img src="${escapeHtml(img)}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;">`).join('')}</div>` : ''}
+                        ${r.seller_response ? `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:8px 10px;margin-top:8px;border-radius:0 6px 6px 0;font-size:12px;color:#166534;"><strong>Seller response:</strong> ${escapeHtml(r.seller_response)}</div>` : ''}
+                    </div>`).join('');
+            }).catch(() => {
+                const rl = _$('ecom-reviews-list');
+                if (rl) rl.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">No reviews yet. Be the first!</div>';
+            });
+        } else {
+            const rl = _$('ecom-reviews-list');
+            if (rl) rl.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">No reviews yet. Be the first!</div>';
+        }
+
+        // Load related products asynchronously
+        const relEl = _$('ecom-related-products');
+        if (relEl && ecom) {
+            const related = ecom.ProductEngine.search('', { category: listing.category||'general' })
+                .filter(p => p.id !== listing.id).slice(0, 6);
+            if (related.length) {
+                relEl.innerHTML = related.map(p => `
+                    <div data-pid="${p.id}" style="flex-shrink:0;width:120px;cursor:pointer;background:#f9fafb;border-radius:10px;overflow:hidden;border:1px solid #f3f4f6;">
+                        <div style="width:100%;height:90px;background:#e5e7eb;overflow:hidden;">
+                            ${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">🛒</div>`}
+                        </div>
+                        <div style="padding:6px 8px;">
+                            <div style="font-size:11px;font-weight:500;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.title)}</div>
+                            <div style="font-size:12px;font-weight:700;color:var(--primary-color,#f57224);margin-top:2px;">${p.price>0?`KES ${p.price.toLocaleString()}`:'Free'}</div>
+                        </div>
+                    </div>`).join('');
+                relEl.querySelectorAll('[data-pid]').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const p = ecom.ProductEngine.getStore().products.get(el.dataset.pid);
+                        if (p) renderers.viewListingDetail(p);
+                    });
+                });
+            } else {
+                relEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;">No related products found</div>';
             }
         }
-        
-        // Add purchase button for paid listings
-        var priceVal = listing.price;
-        var hasPaidPrice = priceVal && priceVal !== '0' && priceVal !== 0 && 
-                           String(priceVal).toLowerCase() !== 'free' && 
-                           String(priceVal).toLowerCase() !== 'negotiable';
-        if (hasPaidPrice) {
-            const buyBtn = document.createElement('button');
-            buyBtn.className = 'action-btn primary';
-            buyBtn.style.marginTop = '20px';
-            buyBtn.style.width = '100%';
-            buyBtn.style.background = 'linear-gradient(135deg,#4CAF50,#2E7D32)';
-            // Format price display
-            var num = parseFloat(String(priceVal).replace(/[^0-9.]/g,''));
-            var priceDisplay = (!isNaN(num) && num > 0) ? 'KES ' + num.toLocaleString('en-KE') : String(priceVal);
-            buyBtn.innerHTML = '<i class="fas fa-shopping-cart"></i> Buy Now — ' + priceDisplay;
-            buyBtn.onclick = function() {
-                if (window.openPurchaseModal) {
-                    window.openPurchaseModal(listing);
-                } else {
-                    alert('Purchase: ' + listing.title + '\nPrice: ' + priceDisplay + '\nContact the seller to complete.');
-                }
-            };
-            container.appendChild(buyBtn);
-        }
 
-        // Add contact button for services
-        if (listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service') {
-            const contactBtn = document.createElement('button');
-            contactBtn.className = 'action-btn secondary';
-            contactBtn.style.marginTop = '10px';
-            contactBtn.style.width = '100%';
-            contactBtn.innerHTML = '<i class="fas fa-comment"></i> Message Seller';
-            contactBtn.onclick = () => {
-                if (openChat) {
-                    openChat(listing.userId || listing.sellerId, listing.user?.displayName || 'Seller');
-                } else if (window.openChat) {
-                    window.openChat(listing.userId || listing.sellerId, listing.user?.displayName || 'Seller');
-                }
-            };
-            container.appendChild(contactBtn);
-        }
-    }, '<div class="error-placeholder">Failed to load listing details</div>'),
+    }, '<div class="error-placeholder">Failed to load product details</div>'),
 
     // FIX E: Spotlight renderer - show section when items exist
     spotlight: withErrorBoundary('Spotlight', function() {
@@ -2848,10 +3088,16 @@ const renderers = {
 // =============================================
 // SIMPLIFIED: Removed isActive() checks from showCreateListingModal
 function showCreateListingModal() {
+    console.log('[Tool-ui] showCreateListingModal called - DIRECT');
+    // Direct DOM access - don't rely on DOM cache
     const modal = document.getElementById('createListingModal');
     if (modal) {
         modal.classList.add('active');
-        modal.style.display = 'flex';
+        console.log('[Tool-ui] Modal opened successfully');
+    } else {
+        console.error('[Tool-ui] Modal element NOT FOUND!');
+        // Fallback - create alert
+        alert('Create Listing feature - modal not found');
     }
 }
 
@@ -2958,6 +3204,11 @@ function handleBulkUpload(e) {
 window._publishListingFromModal = function() { return publishListingFromModal(); };
 async function publishListingFromModal() {
     const activeTab = UIState.createListingActiveTab || 'service';
+    console.log('[PUBLISH] Starting publish, activeTab:', activeTab);
+    
+    // Check we have a function to call
+    console.log('[PUBLISH] createServiceListing available:', typeof createServiceListing);
+    console.log('[PUBLISH] DOM.serviceTitle:', DOM.serviceTitle?.value);
 
     // ── Immediate visual feedback — disable button while working ──────────────
     const publishBtn = document.getElementById('publishListingBtn');
@@ -3002,7 +3253,6 @@ async function publishListingFromModal() {
                 allowedUsers:   UIState.selectedUsers,
             };
 
-            // createServiceListing handles optimistic-UI + backend + broadcast
             const listing = typeof createServiceListing === 'function'
                 ? await createServiceListing(title, description, opts)
                 : await marketplaceCore?.createListing({
@@ -3010,13 +3260,16 @@ async function publishListingFromModal() {
                   });
 
             if (listing) {
-                // UI already updated by optimistic write — just close modal and sync
+                console.log('[PUBLISH] ✅ Listing created:', listing.id);
+                showNotification('Listing published! 🎉', 'success');
                 hideCreateListingModal();
                 resetCreateListingForm();
                 UIPipeline.syncFromCoreGlobals();
                 UIPipeline.liveUpdate();
+            } else {
+                console.warn('[PUBLISH] createServiceListing returned null/undefined');
+                showNotification('Could not publish listing. Check console for details.', 'error');
             }
-            // If listing is null, error notification was already shown by core
             return;
         }
 
@@ -3073,8 +3326,8 @@ async function publishListingFromModal() {
         showNotification('Tab "' + activeTab + '" is not yet supported', 'info');
 
     } catch (err) {
-        if (window.__TOOLS_DEBUG__) console.error('[publishListingFromModal] Error:', err.message);
-        showNotification('Failed to publish listing. Please try again.', 'error');
+        console.error('[PUBLISH] ERROR:', err.message, err);
+        showNotification('Failed to publish: ' + (err.message || 'Unknown error'), 'error');
     } finally {
         // Always restore publish button
         if (publishBtn) {
@@ -3140,64 +3393,38 @@ function publishPremiumListingFromModal() {
 
 window._saveCurrentAsDraft = function() { saveCurrentAsDraft(); };
 function saveCurrentAsDraft() {
+    console.log('[saveCurrentAsDraft] Called');
+    
+    // Get current form data
     const activeTab = UIState.createListingActiveTab || 'service';
-    const title = activeTab === 'service'
-        ? (DOM.serviceTitle?.value || 'Untitled')
-        : (DOM.digitalTitle?.value || 'Untitled');
-
+    const title = activeTab === 'service' ? 
+        (DOM.serviceTitle?.value || 'Untitled') : 
+        (DOM.digitalTitle?.value || 'Untitled');
+    
+    // Store in localStorage so it persists
     const draft = {
         id: 'draft_' + Date.now(),
         title: title,
         tab: activeTab,
-        serviceTitle:       DOM.serviceTitle?.value       || '',
-        serviceDescription: DOM.serviceDescription?.value || '',
-        servicePrice:       DOM.servicePrice?.value       || '',
-        digitalTitle:       DOM.digitalTitle?.value       || '',
-        digitalDescription: DOM.digitalDescription?.value || '',
-        digitalPrice:       DOM.digitalPrice?.value       || '',
         savedAt: new Date().toISOString()
     };
-
+    
     try {
-        // PRIMARY: route through StorageProxy (sandbox-compliant)
-        if (typeof safeApiCall !== 'undefined' && window.StorageProxy) {
-            const raw = window.StorageProxy.get ? null : null; // get is async — read via safeStorage below
+        let drafts = JSON.parse(localStorage.getItem('marketplace_drafts') || '[]');
+        drafts.unshift(draft);
+        drafts = drafts.slice(0, 10); // Keep last 10 drafts
+        localStorage.setItem('marketplace_drafts', JSON.stringify(drafts));
+        // Also save to LocalStoreTools IDB for offline resilience
+        const LST = window.LocalStoreTools;
+        if (LST && LST.saveDraftLocal) {
+            LST.saveDraftLocal(draft).catch(()=>{});
         }
-        // Use window.safeStorage if exposed, else fall back to sessionStorage then localStorage
-        const _store = window.__toolsSafeStorage || window.safeStorage;
-        if (_store && typeof _store.get === 'function') {
-            _store.get('marketplace_drafts').then(function(existing) {
-                let drafts = Array.isArray(existing) ? existing : [];
-                drafts.unshift(draft);
-                drafts = drafts.slice(0, 10);
-                _store.set('marketplace_drafts', drafts);
-                // Persist to LocalStoreTools IDB as well
-                const LST = window.LocalStoreTools;
-                if (LST && typeof LST.saveDraftLocal === 'function') {
-                    LST.saveDraftLocal(draft).catch(function() {});
-                }
-            }).catch(function() {
-                // Fallback to sessionStorage on proxy failure (never direct localStorage in sandbox)
-                try {
-                    let drafts = JSON.parse(sessionStorage.getItem('marketplace_drafts') || '[]');
-                    drafts.unshift(draft);
-                    sessionStorage.setItem('marketplace_drafts', JSON.stringify(drafts.slice(0, 10)));
-                } catch(_) {}
-            });
-        } else {
-            // Last resort: sessionStorage (scoped to tab, no cross-origin leak)
-            let drafts = JSON.parse(sessionStorage.getItem('marketplace_drafts') || '[]');
-            drafts.unshift(draft);
-            sessionStorage.setItem('marketplace_drafts', JSON.stringify(drafts.slice(0, 10)));
-        }
-
-        showNotification('Draft "' + title + '" saved!', 'success');
-        // Fire event so any listening panels can refresh
-        window.dispatchEvent(new CustomEvent('marketplace:draft-saved', { detail: draft }));
+        showNotification(`Draft "${title}" saved!`, 'success');
     } catch(e) {
-        showNotification('Draft saved (in memory)', 'info');
+        console.error('Failed to save draft:', e);
+        showNotification('Draft saved (in memory)', 'success');
     }
-
+    
     hideCreateListingModal();
 }
 
@@ -3319,9 +3546,8 @@ function hideReactionPicker() {
 function showSavedItemsModal() {
     if (DOM.savedItemsModal) {
         DOM.savedItemsModal.classList.add('active');
-        // FIX: Sync savedItems from window globals before rendering
-        if (window.savedItems) savedItems = window.savedItems;
-        renderSavedItems();
+        _loadSavedItems();
+        setTimeout(renderSavedItems, 100); // Allow async IDB load
     }
 }
 
@@ -3357,6 +3583,7 @@ function renderSavedItems() {
 function showMyNotesModal() {
     if (DOM.myNotesModal) {
         DOM.myNotesModal.classList.add('active');
+        _loadNotes(); // Reload from storage each time
         renderMyNotes();
     }
 }
@@ -3370,19 +3597,43 @@ function hideMyNotesModal() {
 function renderMyNotes() {
     if (!DOM.myNotesList) return;
     if (!privateNotes || privateNotes.length === 0) {
-        DOM.myNotesList.innerHTML = '<div style="text-align: center; padding: 40px;">No private notes</div>';
+        DOM.myNotesList.innerHTML = `
+            <div style="text-align:center;padding:40px;color:var(--text-secondary);">
+                <i class="fas fa-sticky-note" style="font-size:36px;margin-bottom:12px;display:block;opacity:0.4;"></i>
+                <p>No private notes yet</p>
+                <p style="font-size:13px;margin-top:6px;">Tap "Add Note" to create one</p>
+            </div>`;
         return;
     }
     DOM.myNotesList.innerHTML = '';
-    privateNotes.forEach(note => {
+    privateNotes.slice().reverse().forEach((note, idx) => {
+        const realIdx = privateNotes.length - 1 - idx;
         const noteEl = document.createElement('div');
         noteEl.className = 'note-item';
+        noteEl.style.cssText = 'border:1px solid var(--border-color,#e0e0e0);border-radius:10px;padding:14px;margin-bottom:10px;';
         noteEl.innerHTML = `
-            <div style="font-weight: 500;">${escapeHtml(note.title || 'Note')}</div>
-            <div style="font-size: 14px; margin-top: 8px;">${escapeHtml(note.content || '').substring(0, 100)}</div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 8px;">${formatTimeAgo(new Date(note.createdAt))}</div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div style="font-weight:600;font-size:14px;">${escapeHtml(note.title || 'Note')}</div>
+                <button class="delete-note-btn" data-idx="${realIdx}" style="background:none;border:none;color:#f44336;cursor:pointer;padding:2px 6px;font-size:16px;" title="Delete">✕</button>
+            </div>
+            <div style="font-size:14px;line-height:1.5;">${escapeHtml(note.content || '')}</div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-top:8px;">
+                <i class="far fa-clock"></i> ${formatTimeAgo(new Date(note.createdAt))}
+                ${note.listingId ? `<span style="margin-left:8px;"><i class="fas fa-link"></i> Linked to listing</span>` : ''}
+            </div>
         `;
         DOM.myNotesList.appendChild(noteEl);
+    });
+    // Wire delete buttons
+    DOM.myNotesList.querySelectorAll('.delete-note-btn').forEach(btn => {
+        btn.onclick = function(e) {
+            e.stopPropagation();
+            const i = parseInt(this.dataset.idx);
+            privateNotes.splice(i, 1);
+            _saveNotes();
+            renderMyNotes();
+            showNotification('Note deleted', 'info');
+        };
     });
 }
 
@@ -3465,43 +3716,104 @@ function renderTrustStats() {
 }
 
 function saveToSavedItems() {
-    if (UIState.currentListingData) {
-        const exists = savedItems.some(item => item.id === UIState.currentListingData.id);
-        if (!exists) {
-            savedItems.push(UIState.currentListingData);
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-            showNotification('Item saved', 'success');
-            if (DOM.saveListingBtn) {
-                DOM.saveListingBtn.innerHTML = '<i class="fas fa-bookmark"></i>';
-                DOM.saveListingBtn.style.color = 'var(--primary-color)';
-            }
-        } else {
-            const index = savedItems.findIndex(item => item.id === UIState.currentListingData.id);
-            if (index !== -1) {
-                savedItems.splice(index, 1);
-                saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
-                showNotification('Item removed from saved', 'info');
-                if (DOM.saveListingBtn) {
-                    DOM.saveListingBtn.innerHTML = '<i class="fas fa-bookmark"></i>';
-                    DOM.saveListingBtn.style.color = '';
-                }
-            }
-        }
+    if (!UIState.currentListingData) return;
+    const listing = UIState.currentListingData;
+    const exists = savedItems.some(item => item.id === listing.id);
+    if (!exists) {
+        savedItems.push(listing);
+        _persistSavedItems();
+        showNotification('Item saved', 'success');
+        if (DOM.saveListingBtn) DOM.saveListingBtn.style.color = 'var(--primary-color)';
+    } else {
+        savedItems = savedItems.filter(item => item.id !== listing.id);
+        _persistSavedItems();
+        showNotification('Removed from saved', 'info');
+        if (DOM.saveListingBtn) DOM.saveListingBtn.style.color = '';
     }
+}
+
+function _persistSavedItems() {
+    try { localStorage.setItem('mp_saved_items', JSON.stringify(savedItems)); } catch(e) {}
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.saveSavedItem) {
+            savedItems.forEach(item => LST.saveSavedItem(item).catch(() => {}));
+        }
+    } catch(e) {}
+    window.savedItems = savedItems;
+}
+
+function _loadSavedItems() {
+    try {
+        const raw = localStorage.getItem('mp_saved_items');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) { savedItems = parsed; window.savedItems = savedItems; return; }
+        }
+    } catch(e) {}
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.getAllSaved) {
+            LST.getAllSaved().then(items => {
+                if (Array.isArray(items) && items.length > 0) {
+                    savedItems = items; window.savedItems = savedItems;
+                }
+            }).catch(() => {});
+        }
+    } catch(e) {}
 }
 
 function showAddNoteDialog() {
     const note = prompt('Add a private note about this listing:');
     if (note) {
-        privateNotes.push({
-            id: UIState.currentListingId,
-            title: UIState.currentListingData?.title,
+        const entry = {
+            id: 'note_' + Date.now(),
+            listingId: UIState.currentListingId,
+            title: UIState.currentListingData?.title || 'Listing',
             content: note,
             createdAt: new Date().toISOString()
-        });
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
+        };
+        privateNotes.push(entry);
+        _saveNotes();
         showNotification('Note added', 'success');
     }
+}
+
+function _saveNotes() {
+    // Save to localStorage
+    try { localStorage.setItem('mp_private_notes', JSON.stringify(privateNotes)); } catch(e) {}
+    // Save to LocalStoreTools IDB
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.saveNote) {
+            privateNotes.forEach(n => LST.saveNote(n).catch(() => {}));
+        }
+    } catch(e) {}
+}
+
+function _loadNotes() {
+    // Load from localStorage first (fastest)
+    try {
+        const raw = localStorage.getItem('mp_private_notes');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                privateNotes = parsed;
+                return;
+            }
+        }
+    } catch(e) {}
+    // Load from LocalStoreTools IDB
+    try {
+        const LST = window.LocalStoreTools;
+        if (LST && LST.getAllNotes) {
+            LST.getAllNotes().then(notes => {
+                if (Array.isArray(notes) && notes.length > 0) {
+                    privateNotes = notes;
+                }
+            }).catch(() => {});
+        }
+    } catch(e) {}
 }
 
 function showDetailMenu() {
@@ -3509,7 +3821,9 @@ function showDetailMenu() {
 }
 
 function reserveListing() {
-    showNotification('Reservation feature coming soon', 'info');
+    const listing = UIState.currentListingData;
+    if (!listing) { showNotification('No listing selected', 'info'); return; }
+    openPlaceOrderPanel(listing);
 }
 
 function shareListing() {
@@ -3531,8 +3845,16 @@ function showTipOptions() {
 }
 
 function contactSeller() {
-    if (UIState.currentListingData && openChat) {
-        openChat(UIState.currentListingData.userId || UIState.currentListingData.sellerId, UIState.currentListingData.user?.displayName);
+    const listing = UIState.currentListingData;
+    if (!listing) { showNotification('No listing selected', 'info'); return; }
+    const sellerId   = listing.userId || listing.sellerId;
+    const sellerName = listing.user?.displayName || listing.user?.username || 'Seller';
+    const chatFn = typeof openChat === 'function' ? openChat : window.openChat;
+    if (typeof chatFn === 'function') {
+        chatFn(sellerId, sellerName);
+    } else {
+        const url = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName);
+        window.location.href = url;
     }
 }
 
@@ -3548,7 +3870,7 @@ function clearMoodFilter() {
 
 // SIMPLIFIED: Removed isActive() checks from setActiveTab
 function setActiveTab(tab) {
-    if (window.__TOOLS_DEBUG__) console.log('[Tool-ui] setActiveTab called with:', tab);
+    console.log('[Tool-ui] setActiveTab called with:', tab);
     UIState.activeTab = tab;
     
     // Update tab UI
@@ -3619,68 +3941,36 @@ function exportAnalytics() {
 
 function clearAllSavedItems() {
     if (confirm('Clear all saved items?')) {
-        savedItems.length = 0;
-        saveToLocalStorage(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
+        savedItems = [];
+        window.savedItems = [];
+        try { localStorage.removeItem('mp_saved_items'); } catch(e) {}
+        try {
+            const LST = window.LocalStoreTools;
+            if (LST && LST.getAllSaved) {
+                LST.getAllSaved().then(items => {
+                    (items || []).forEach(item => LST.deleteSavedItem && LST.deleteSavedItem(item.id));
+                }).catch(() => {});
+            }
+        } catch(e) {}
         renderSavedItems();
         showNotification('All saved items cleared', 'success');
     }
 }
 
 function addNewNote() {
-    // prompt() is blocked in sandboxed iframes — use a safe fallback inline input
-    let noteText = null;
-    try {
-        noteText = window.prompt ? window.prompt('Add a new note:') : null;
-    } catch(_) { noteText = null; }
-
-    if (noteText === null || noteText === undefined) {
-        // prompt was blocked — dispatch an event so the UI can show an inline form
-        window.dispatchEvent(new CustomEvent('marketplace:show-note-input', {
-            detail: { callback: '_addNoteFromInlineForm' }
-        }));
-        return;
+    const note = prompt('Add a new note:');
+    if (note) {
+        const entry = {
+            id: 'note_' + Date.now(),
+            title: 'General Note',
+            content: note,
+            createdAt: new Date().toISOString()
+        };
+        privateNotes.push(entry);
+        _saveNotes();
+        renderMyNotes();
+        showNotification('Note added', 'success');
     }
-
-    _persistNote(noteText);
-}
-
-// Called by both prompt path and inline-form path
-window._addNoteFromInlineForm = function(text) {
-    if (text && text.trim()) _persistNote(text.trim());
-};
-
-function _persistNote(noteText) {
-    if (!noteText || !noteText.trim()) return;
-
-    const note = {
-        id: Date.now().toString(),
-        title: 'Note',
-        content: noteText.trim(),
-        createdAt: new Date().toISOString()
-    };
-
-    privateNotes.unshift(note);
-
-    // PRIMARY: route through StorageProxy (sandbox-compliant)
-    const _store = window.__toolsSafeStorage || window.safeStorage;
-    if (_store && typeof _store.set === 'function') {
-        _store.set('knecta_private_notes', privateNotes);
-    } else {
-        // Fallback: use saveToLocalStorage which is the core-provided helper
-        if (typeof saveToLocalStorage === 'function') {
-            saveToLocalStorage(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
-        }
-    }
-
-    // Also persist to LocalStoreTools IDB
-    const LST = window.LocalStoreTools;
-    if (LST && typeof LST.saveToolLocal === 'function') {
-        LST.saveToolLocal({ type: 'note', ...note }, 'NOTES').catch(function() {});
-    }
-
-    renderMyNotes();
-    showNotification('Note added', 'success');
-    window.dispatchEvent(new CustomEvent('marketplace:note-added', { detail: note }));
 }
 
 function completePayment() {
@@ -3852,9 +4142,9 @@ const pageCore = {
                 }
             };
             
-            if (window.__TOOLS_DEBUG__) console.log('[pageCore] UI initialized v7.1');
+            console.log('[pageCore] UI initialized v7.1');
         } catch (err) {
-            if (window.__TOOLS_DEBUG__) console.warn('[pageCore.init] Failed:', err.message);
+            console.warn('[pageCore.init] Failed:', err.message);
         }
     }
 };
@@ -3867,7 +4157,7 @@ const logOnce = (function() {
     return function(key, message) {
         if (!shown.has(key)) {
             shown.add(key);
-            if (window.__TOOLS_DEBUG__) console.log(message);
+            console.log(message);
         }
     };
 })();
@@ -3879,6 +4169,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     cacheDOMElements();
     UIPipeline.skeleton();
     ResponsiveEngine.init();
+
+    // Load persisted data immediately
+    _loadNotes();
+    _loadSavedItems();
+
+    // Hide "Loading marketplace" banner after max 4s regardless of core state
+    setTimeout(() => {
+        const el = document.getElementById('marketplaceStatusMessage');
+        if (el) el.style.display = 'none';
+    }, 4000);
+
     await pageCore.init();
     
     // Start health monitoring
@@ -3896,7 +4197,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // FORCE UI BINDING AFTER DOM FULLY LOADS
 // =============================================
 function forceBindAllUIEvents() {
-    if (window.__TOOLS_DEBUG__) console.log('[Tool-ui] Force binding all UI events...');
+    console.log('[Tool-ui] Force binding all UI events...');
     
     cacheDOMElements();
     
@@ -3920,7 +4221,7 @@ function forceBindAllUIEvents() {
                 el.onclick = (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (window.__TOOLS_DEBUG__) console.log('[Tool-ui] Tab clicked:', tab.name);
+                    console.log('[Tool-ui] Tab clicked:', tab.name);
                     setActiveTab(tab.name);
                 };
             }
@@ -3989,7 +4290,7 @@ function forceBindAllUIEvents() {
             }
         });
         
-        if (window.__TOOLS_DEBUG__) console.log('[Tool-ui] Force binding complete - bound', document.querySelectorAll('[data-bound="true"]').length, 'elements');
+        console.log('[Tool-ui] Force binding complete - bound', document.querySelectorAll('[data-bound="true"]').length, 'elements');
     }, 200);
 }
 
@@ -4006,13 +4307,20 @@ if (document.readyState === 'loading') {
 
 // Also run when module becomes active
 window.addEventListener('tools:active', () => {
-    if (window.__TOOLS_DEBUG__) console.log('[Tool-ui] tools:active received, re-binding UI events');
-    setTimeout(forceBindAllUIEvents, 200);
+    if (!window._toolsActiveHandled) {
+        window._toolsActiveHandled = true;
+        console.log('[Tool-ui] tools:active received, re-binding UI events');
+        setTimeout(forceBindAllUIEvents, 200);
+        setTimeout(() => { window._toolsActiveHandled = false; }, 5000);
+    }
 });
 
 window.addEventListener('marketplaceCoreReady', () => {
-    if (window.__TOOLS_DEBUG__) console.log('[Tool-ui] marketplaceCoreReady received, re-binding UI events');
-    setTimeout(forceBindAllUIEvents, 200);
+    if (!window._coreReadyHandled) {
+        window._coreReadyHandled = true;
+        console.log('[Tool-ui] marketplaceCoreReady received, re-binding UI events');
+        setTimeout(forceBindAllUIEvents, 200);
+    }
 });
 
 // =============================================
@@ -4020,7 +4328,7 @@ window.addEventListener('marketplaceCoreReady', () => {
 // =============================================
 
 function directAttachHandlers() {
-    if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Attaching click handlers');
+    console.log('[DIRECT] Attaching click handlers');
     
     // Create Listing button
     const createBtn = document.getElementById('createListingBtn');
@@ -4028,14 +4336,14 @@ function directAttachHandlers() {
         createBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Create Listing clicked');
+            console.log('[DIRECT] Create Listing clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             return false;
         };
-        if (window.__TOOLS_DEBUG__) console.log('[DIRECT] createListingBtn OK');
+        console.log('[DIRECT] createListingBtn OK');
     } else {
-        if (window.__TOOLS_DEBUG__) console.log('[DIRECT] createListingBtn NOT FOUND');
+        console.log('[DIRECT] createListingBtn NOT FOUND');
     }
     
     // Sell Service button
@@ -4044,7 +4352,7 @@ function directAttachHandlers() {
         serviceBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Sell Service clicked');
+            console.log('[DIRECT] Sell Service clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             // Try to switch to service tab
@@ -4052,7 +4360,7 @@ function directAttachHandlers() {
             if (serviceTab) serviceTab.click();
             return false;
         };
-        if (window.__TOOLS_DEBUG__) console.log('[DIRECT] sellServiceBtn OK');
+        console.log('[DIRECT] sellServiceBtn OK');
     }
     
     // Sell Digital button
@@ -4061,14 +4369,14 @@ function directAttachHandlers() {
         digitalBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Sell Digital clicked');
+            console.log('[DIRECT] Sell Digital clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             const digitalTab = document.querySelector('.create-listing-tab[data-tab="digital"]');
             if (digitalTab) digitalTab.click();
             return false;
         };
-        if (window.__TOOLS_DEBUG__) console.log('[DIRECT] sellDigitalBtn OK');
+        console.log('[DIRECT] sellDigitalBtn OK');
     }
     
     // Quick Create button
@@ -4077,12 +4385,12 @@ function directAttachHandlers() {
         quickBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Quick Create clicked');
+            console.log('[DIRECT] Quick Create clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             return false;
         };
-        if (window.__TOOLS_DEBUG__) console.log('[DIRECT] createListingQuickBtn OK');
+        console.log('[DIRECT] createListingQuickBtn OK');
     }
     
     // Close modal button
@@ -4094,7 +4402,7 @@ function directAttachHandlers() {
             if (modal) modal.classList.remove('active');
             return false;
         };
-        if (window.__TOOLS_DEBUG__) console.log('[DIRECT] closeCreateListingModal OK');
+        console.log('[DIRECT] closeCreateListingModal OK');
     }
     
     // Category tabs
@@ -4105,7 +4413,7 @@ function directAttachHandlers() {
             tab.onclick = function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Tab clicked:', tabId);
+                console.log('[DIRECT] Tab clicked:', tabId);
                 // Remove active from all tabs
                 tabs.forEach(id => {
                     const t = document.getElementById(id);
@@ -4116,7 +4424,7 @@ function directAttachHandlers() {
                 setActiveTab(tabName);
                 return false;
             };
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Tab attached:', tabId);
+            console.log('[DIRECT] Tab attached:', tabId);
         }
     });
     
@@ -4125,7 +4433,7 @@ function directAttachHandlers() {
     if (viewAnalytics) {
         viewAnalytics.onclick = function(e) {
             e.preventDefault();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Analytics clicked');
+            console.log('[DIRECT] Analytics clicked');
             const modal = document.getElementById('analyticsModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4136,7 +4444,7 @@ function directAttachHandlers() {
     if (viewSaved) {
         viewSaved.onclick = function(e) {
             e.preventDefault();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Saved clicked');
+            console.log('[DIRECT] Saved clicked');
             const modal = document.getElementById('savedItemsModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4147,7 +4455,7 @@ function directAttachHandlers() {
     if (viewNotes) {
         viewNotes.onclick = function(e) {
             e.preventDefault();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Notes clicked');
+            console.log('[DIRECT] Notes clicked');
             const modal = document.getElementById('myNotesModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4158,7 +4466,7 @@ function directAttachHandlers() {
     if (viewTrust) {
         viewTrust.onclick = function(e) {
             e.preventDefault();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Trust stats clicked');
+            console.log('[DIRECT] Trust stats clicked');
             const modal = document.getElementById('trustStatsModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4169,22 +4477,19 @@ function directAttachHandlers() {
     if (premiumOpts) {
         premiumOpts.onclick = function(e) {
             e.preventDefault();
-            if (window.__TOOLS_DEBUG__) console.log('[DIRECT] Premium options clicked');
+            console.log('[DIRECT] Premium options clicked');
             const modal = document.getElementById('premiumOptionsModal');
             if (modal) modal.classList.add('active');
             return false;
         };
     }
     
-    if (window.__TOOLS_DEBUG__) console.log('[DIRECT] All handlers attached');
+    console.log('[DIRECT] All handlers attached');
 }
 
-// Run immediately and repeatedly
+// Run once and after DOM ready only
 directAttachHandlers();
-setTimeout(directAttachHandlers, 500);
-setTimeout(directAttachHandlers, 1000);
-setTimeout(directAttachHandlers, 2000);
-setTimeout(directAttachHandlers, 5000);
+setTimeout(directAttachHandlers, 800);
 
 // Also run when DOM is ready
 if (document.readyState === 'loading') {
@@ -4193,7 +4498,7 @@ if (document.readyState === 'loading') {
 
 // Also run when tools becomes active
 window.addEventListener('tools:active', function() {
-    if (window.__TOOLS_DEBUG__) console.log('[DIRECT] tools:active event');
+    console.log('[DIRECT] tools:active event');
     setTimeout(directAttachHandlers, 100);
 });
 
@@ -4208,7 +4513,7 @@ window.addEventListener('tools:active', function() {
     if (window._emergencyHandlersAttached) return;
     window._emergencyHandlersAttached = true;
     
-    if (window.__TOOLS_DEBUG__) console.log('[FIX] Starting emergency click handler initialization');
+    console.log('[FIX] Starting emergency click handler initialization');
     
     function openCreateModal() {
         var modal = document.getElementById('createListingModal');
@@ -4321,7 +4626,7 @@ window.addEventListener('tools:active', function() {
             };
         }
         
-        if (window.__TOOLS_DEBUG__) console.log('[FIX] Handlers attached once');
+        console.log('[FIX] Handlers attached once');
     }
     
     // Run immediately and after DOM ready
@@ -4398,19 +4703,12 @@ window.addEventListener('tools:active', function() {
             tab: activeTab,
             savedAt: new Date().toISOString()
         };
-        // StorageProxy-first (sandbox-compliant), sessionStorage fallback — never direct localStorage
-        var _store = window.__toolsSafeStorage || window.safeStorage;
-        if (_store && typeof _store.get === 'function') {
-            _store.get('marketplace_drafts').then(function(existing) {
-                var drafts = Array.isArray(existing) ? existing : [];
-                drafts.unshift(draft);
-                _store.set('marketplace_drafts', drafts.slice(0, 10));
-            }).catch(function() {
-                try { sessionStorage.setItem('marketplace_drafts_emergency', JSON.stringify(draft)); } catch(_) {}
-            });
-        } else {
-            try { sessionStorage.setItem('marketplace_drafts_emergency', JSON.stringify(draft)); } catch(_) {}
-        }
+        try {
+            var drafts = JSON.parse(localStorage.getItem('marketplace_drafts') || '[]');
+            drafts.unshift(draft);
+            drafts = drafts.slice(0, 10);
+            localStorage.setItem('marketplace_drafts', JSON.stringify(drafts));
+        } catch(e) {}
         var LST = window.LocalStoreTools;
         if (LST && LST.saveDraftLocal) LST.saveDraftLocal(draft).catch(function(){});
         if (window.showNotification) window.showNotification('Draft "' + title + '" saved!', 'success');
@@ -4468,11 +4766,754 @@ window.addEventListener('tools:active', function() {
         if (cached) { var parsed = JSON.parse(cached); var settings = (parsed && parsed.data) ? parsed.data : parsed; if (parsed.timestamp && (Date.now() - parsed.timestamp) < 86400000) applyAll(settings); }
     } catch(e) {}
 })();
-// ----------------------------------------------------------------------
-// PRESERVED EXPORTS (Full Compatibility)
-// ----------------------------------------------------------------------
-// BUG FIX: viewListingDetail must be a module-scope binding for the export to resolve.
-const viewListingDetail = function(...args) { return renderers.viewListingDetail(...args); };
+// [exports moved to end of file]
+// ══════════════════════════════════════════════════════════════════════════════
+// MARKETPLACE PANELS — Orders, Reviews, Seller Profile
+// Injected into Tools.html at runtime, powered by existing auth + API layer
+// ══════════════════════════════════════════════════════════════════════════════
+
+(function initMarketplacePanels() {
+
+    // ── Inject panel HTML once ────────────────────────────────────────────────
+    function injectPanels() {
+        if (document.getElementById('mp-orders-panel')) return;
+        // Hide any stuck "Loading marketplace" banner immediately
+        const stuck = document.getElementById('marketplaceStatusMessage');
+        if (stuck) stuck.style.display = 'none';
+        // Also hide it after a short delay in case it renders after us
+        setTimeout(() => {
+            const s2 = document.getElementById('marketplaceStatusMessage');
+            if (s2) s2.style.display = 'none';
+        }, 1000);
+        document.body.insertAdjacentHTML('beforeend', `
+<style>
+.mp-panel{position:fixed;inset:0;z-index:9000;display:none;align-items:flex-end;background:rgba(0,0,0,.5);}
+.mp-panel.active{display:flex;}
+.mp-sheet{background:var(--bg-primary,#fff);width:100%;max-width:640px;margin:0 auto;border-radius:20px 20px 0 0;max-height:90vh;overflow-y:auto;padding:20px;box-sizing:border-box;}
+.mp-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.mp-hdr h3{margin:0;font-size:18px;font-weight:700;}
+.mp-x{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#888);line-height:1;}
+.mp-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:10px;border:none;cursor:pointer;font-size:14px;font-weight:600;transition:.15s;}
+.mp-btn:disabled{opacity:.5;cursor:not-allowed;}
+.mp-primary{background:var(--primary-color,#6C63FF);color:#fff;}
+.mp-primary:hover:not(:disabled){opacity:.88;}
+.mp-danger{background:#ef4444;color:#fff;}
+.mp-outline{background:transparent;border:1.5px solid var(--border-color,#e0e0e0);color:var(--text-primary,#222);}
+.mp-card{border:1px solid var(--border-color,#e0e0e0);border-radius:12px;padding:14px;margin-bottom:12px;}
+.mp-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;}
+.mp-badge.pending{background:#fef9c3;color:#854d0e;}
+.mp-badge.paid{background:#dcfce7;color:#166534;}
+.mp-badge.shipped{background:#dbeafe;color:#1e40af;}
+.mp-badge.delivered{background:#d1fae5;color:#065f46;}
+.mp-badge.cancelled{background:#fee2e2;color:#991b1b;}
+.mp-badge.refunded{background:#f3f4f6;color:#374151;}
+.mp-stars{color:#f59e0b;font-size:16px;letter-spacing:2px;}
+.mp-stars-input span{font-size:30px;cursor:pointer;color:#d1d5db;transition:.1s;}
+.mp-stars-input span.on{color:#f59e0b;}
+.mp-field{margin-bottom:14px;}
+.mp-field label{display:block;font-size:13px;font-weight:600;margin-bottom:5px;color:var(--text-secondary,#666);}
+.mp-field input,.mp-field textarea,.mp-field select{width:100%;padding:10px 12px;border:1.5px solid var(--border-color,#e0e0e0);border-radius:10px;font-size:14px;background:var(--bg-primary,#fff);color:var(--text-primary,#222);box-sizing:border-box;}
+.mp-field textarea{resize:vertical;min-height:72px;}
+.mp-tabs{display:flex;border-bottom:2px solid var(--border-color,#e0e0e0);margin-bottom:16px;overflow-x:auto;}
+.mp-tab{padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-secondary,#888);}
+.mp-tab.active{border-bottom-color:var(--primary-color,#6C63FF);color:var(--primary-color,#6C63FF);}
+.mp-spinner{text-align:center;padding:32px;color:var(--text-secondary,#888);}
+.mp-empty{text-align:center;padding:40px 20px;color:var(--text-secondary,#888);}
+.mp-stat-row{display:flex;gap:10px;margin-bottom:16px;}
+.mp-stat{flex:1;background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;text-align:center;}
+.mp-stat strong{display:block;font-size:22px;font-weight:800;}
+.mp-stat span{font-size:12px;color:var(--text-secondary,#888);}
+.mp-seller-avatar{width:68px;height:68px;border-radius:50%;background:var(--primary-color,#6C63FF);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;margin:0 auto 10px;overflow:hidden;}
+.mp-seller-avatar img{width:100%;height:100%;object-fit:cover;}
+.mp-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.mp-product-tile{border:1px solid var(--border-color,#e0e0e0);border-radius:10px;overflow:hidden;}
+.mp-product-tile-img{width:100%;height:88px;object-fit:cover;background:var(--bg-secondary,#f5f5f5);display:flex;align-items:center;justify-content:center;font-size:26px;}
+.mp-product-tile-body{padding:8px;}
+.mp-product-tile-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mp-product-tile-price{font-size:12px;color:var(--primary-color,#6C63FF);font-weight:700;}
+/* ── Responsive overrides ───────────────────────────────────────────────── */
+@media(max-width:480px){
+  .mp-sheet{border-radius:16px 16px 0 0;padding:16px 14px;max-height:95vh;}
+  .mp-btn{padding:9px 12px;font-size:13px;}
+  .mp-tabs{gap:0;}
+  .mp-tab{padding:8px 10px;font-size:12px;}
+  .mp-stat-row{gap:6px;}
+  .mp-stat strong{font-size:18px;}
+  .mp-grid-2{grid-template-columns:1fr 1fr;gap:8px;}
+  .mp-product-tile-img{height:72px;}
+  .mp-hdr h3{font-size:16px;}
+  .mp-field input,.mp-field textarea,.mp-field select{font-size:16px;} /* prevent iOS zoom */
+}
+@media(min-width:768px){
+  .mp-panel{align-items:center;}
+  .mp-sheet{border-radius:16px;max-height:80vh;margin-bottom:0;}
+}
+/* Marketplace status banner override — hide after load */
+#marketplaceStatusMessage[style*="Loading"]{animation:mpFadeOut 5s forwards;}
+@keyframes mpFadeOut{0%{opacity:1}80%{opacity:1}100%{opacity:0;pointer-events:none;}}
+</style>
+
+<!-- ORDERS PANEL -->
+<div id="mp-orders-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>🛒 My Orders</h3><button class="mp-x" onclick="closeOrdersPanel()">✕</button></div>
+    <div class="mp-tabs">
+      <div class="mp-tab active" onclick="loadOrdersTab(this,'')">All</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'pending')">Pending</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'paid')">Paid</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'shipped')">Shipped</div>
+      <div class="mp-tab" onclick="loadOrdersTab(this,'delivered')">Delivered</div>
+    </div>
+    <div id="mp-orders-body"></div>
+  </div>
+</div>
+
+<!-- PLACE ORDER PANEL -->
+<div id="mp-place-order-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>🛍 Place Order</h3><button class="mp-x" onclick="closePlaceOrderPanel()">✕</button></div>
+    <div id="mp-place-order-body"></div>
+  </div>
+</div>
+
+<!-- REVIEWS PANEL -->
+<div id="mp-reviews-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>⭐ Reviews</h3><button class="mp-x" onclick="closeReviewsPanel()">✕</button></div>
+    <div id="mp-reviews-body"></div>
+    <div id="mp-write-review-body"></div>
+  </div>
+</div>
+
+<!-- SELLER PANEL -->
+<div id="mp-seller-panel" class="mp-panel">
+  <div class="mp-sheet">
+    <div class="mp-hdr"><h3>🏪 Seller Profile</h3><button class="mp-x" onclick="closeSellerPanel()">✕</button></div>
+    <div id="mp-seller-body"></div>
+  </div>
+</div>
+`);
+
+        // Close on backdrop click
+        ['mp-orders-panel','mp-place-order-panel','mp-reviews-panel','mp-seller-panel'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', e => { if (e.target === el) el.classList.remove('active'); });
+        });
+    }
+
+    // ── API helper ────────────────────────────────────────────────────────────
+    async function mpFetch(method, path, body) {
+        let token = null;
+        if (typeof getAuthSession === 'function') {
+            const s = getAuthSession(); if (s?.token) token = s.token;
+        }
+        if (!token && window.sessionClient?.getToken) token = window.sessionClient.getToken();
+        if (!token) { showNotification('Please log in first', 'error'); throw new Error('Not authenticated'); }
+
+        const url = path.startsWith('/api/marketplace/')
+            ? path.replace('/api/marketplace/', '/api/tools/marketplace/')
+            : path;
+
+        const res = await fetch(url, {
+            method,
+            credentials: 'include',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Request failed (' + res.status + ')');
+        return json;
+    }
+
+    function esc(s) {
+        if (s == null) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function fmtDate(iso) {
+        if (!iso) return '—';
+        try { return new Date(iso).toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' }); } catch { return iso; }
+    }
+    function stars(n) { return '★'.repeat(Math.max(0,Math.round(n))) + '☆'.repeat(Math.max(0,5-Math.round(n))); }
+    function myId() {
+        if (window.sessionClient?.getUser) return window.sessionClient.getUser()?.id;
+        return window.currentUser?.id;
+    }
+
+    // ── ORDERS ────────────────────────────────────────────────────────────────
+    window.openOrdersPanel = async function() {
+        injectPanels();
+        document.getElementById('mp-orders-panel').classList.add('active');
+        loadOrdersTab(document.querySelector('#mp-orders-panel .mp-tab'), '');
+    };
+    window.closeOrdersPanel = function() {
+        document.getElementById('mp-orders-panel').classList.remove('active');
+    };
+    window.loadOrdersTab = async function(tabEl, status) {
+        if (tabEl) {
+            document.querySelectorAll('#mp-orders-panel .mp-tab').forEach(t => t.classList.remove('active'));
+            tabEl.classList.add('active');
+        }
+        const body = document.getElementById('mp-orders-body');
+        body.innerHTML = '<div class="mp-spinner"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+        try {
+            const qs  = status ? '?status=' + status : '';
+            const res = await mpFetch('GET', '/api/tools/marketplace/orders/mine' + qs);
+            const orders = res.data?.orders || [];
+            if (!orders.length) {
+                body.innerHTML = '<div class="mp-empty"><i class="fas fa-box-open" style="font-size:36px;margin-bottom:10px;display:block;"></i>No orders yet</div>';
+                return;
+            }
+            body.innerHTML = orders.map(o => `
+                <div class="mp-card">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <strong style="font-size:15px;">${esc(o.product?.title || 'Product')}</strong>
+                        <span class="mp-badge ${o.status}">${o.status}</span>
+                    </div>
+                    <div style="font-size:13px;color:var(--text-secondary,#666);">
+                        Qty: ${o.quantity} &nbsp;|&nbsp; Total: ${esc(o.currency)} ${Number(o.totalPrice).toLocaleString()}
+                    </div>
+                    <div style="font-size:12px;color:var(--text-secondary,#888);margin-top:3px;">Ordered ${fmtDate(o.createdAt)}</div>
+                    ${o.trackingNumber ? `<div style="font-size:12px;margin-top:3px;">Tracking: <strong>${esc(o.trackingNumber)}</strong></div>` : ''}
+                    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+                        ${['pending','paid'].includes(o.status) ? `<button class="mp-btn mp-danger" onclick="cancelOrder('${o.id}')">Cancel</button>` : ''}
+                        ${o.status === 'delivered' ? `<button class="mp-btn mp-outline" onclick="openReviewsPanel('${o.productId}','${o.id}')">Write Review</button>` : ''}
+                        <button class="mp-btn mp-outline" onclick="openSellerPanel('${o.sellerId}')">Seller Profile</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            body.innerHTML = '<div class="mp-empty">Failed to load orders: ' + esc(e.message) + '</div>';
+        }
+    };
+    window.cancelOrder = async function(orderId) {
+        if (!confirm('Cancel this order?')) return;
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/orders/' + orderId + '/cancel', { reason: 'Cancelled by buyer' });
+            showNotification('Order cancelled', 'success');
+            loadOrdersTab(null, '');
+        } catch (e) { showNotification('Failed: ' + e.message, 'error'); }
+    };
+
+    // ── PLACE ORDER ───────────────────────────────────────────────────────────
+    window.openPlaceOrderPanel = function(listing) {
+        injectPanels();
+        const panel = document.getElementById('mp-place-order-panel');
+        const body  = document.getElementById('mp-place-order-body');
+        const price = parseFloat(String(listing.price).replace(/[^0-9.]/g,'')) || 0;
+        const cur   = listing.currency || 'KES';
+
+        body.innerHTML = `
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:18px;">
+                ${listing.images?.[0]
+                    ? `<img src="${esc(listing.images[0])}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;">`
+                    : `<div style="width:64px;height:64px;border-radius:10px;background:var(--primary-color,#6C63FF);display:flex;align-items:center;justify-content:center;font-size:24px;">🛍</div>`}
+                <div>
+                    <div style="font-weight:700;font-size:15px;">${esc(listing.title)}</div>
+                    <div style="color:var(--primary-color,#6C63FF);font-weight:600;margin-top:3px;">${cur} ${price.toLocaleString()} per item</div>
+                </div>
+            </div>
+            <div class="mp-field"><label>Quantity</label>
+                <input type="number" id="mp-qty" value="1" min="1" ${listing.stock ? 'max="'+listing.stock+'"' : ''} oninput="updateOrderTotal(${price},'${cur}')">
+            </div>
+            <div class="mp-field"><label>Delivery Address</label>
+                <textarea id="mp-addr" placeholder="Enter delivery address or 'Pickup in person'"></textarea>
+            </div>
+            <div class="mp-field"><label>Payment Method</label>
+                <select id="mp-payment">
+                    <option value="mpesa">M-Pesa</option>
+                    <option value="cash">Cash on Delivery</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="mp-field"><label>Notes to Seller (optional)</label>
+                <textarea id="mp-notes" placeholder="Any special requests…" style="min-height:56px;"></textarea>
+            </div>
+            <div style="background:var(--bg-secondary,#f5f5f5);border-radius:10px;padding:12px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;">Total</span>
+                <span id="mp-total" style="font-weight:800;font-size:16px;color:var(--primary-color,#6C63FF);">${cur} ${price.toLocaleString()}</span>
+            </div>
+            <button id="mp-submit-order-btn" class="mp-btn mp-primary" style="width:100%;" onclick="submitOrder('${listing.id}','${cur}',${price})">
+                <i class="fas fa-shopping-cart"></i> Place Order
+            </button>
+        `;
+        panel.classList.add('active');
+    };
+    window.closePlaceOrderPanel = function() {
+        document.getElementById('mp-place-order-panel').classList.remove('active');
+    };
+    window.updateOrderTotal = function(price, cur) {
+        const qty   = parseInt(document.getElementById('mp-qty')?.value) || 1;
+        const total = document.getElementById('mp-total');
+        if (total) total.textContent = cur + ' ' + (qty * price).toLocaleString();
+    };
+    window.submitOrder = async function(productId, currency, unitPrice) {
+        const qty     = parseInt(document.getElementById('mp-qty')?.value) || 1;
+        const address = document.getElementById('mp-addr')?.value || '';
+        const payment = document.getElementById('mp-payment')?.value || 'mpesa';
+        const notes   = document.getElementById('mp-notes')?.value || '';
+        const btn     = document.getElementById('mp-submit-order-btn');
+
+        if (!address.trim()) { showNotification('Please enter a delivery address', 'error'); return; }
+
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Placing order…'; }
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/orders', {
+                productId, quantity: qty,
+                deliveryAddress: { raw: address },
+                paymentMethod: payment, notes,
+            });
+            showNotification('Order placed! Check My Orders for updates 🎉', 'success');
+            closePlaceOrderPanel();
+        } catch (e) {
+            showNotification('Failed to place order: ' + e.message, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-shopping-cart"></i> Place Order'; }
+        }
+    };
+
+    // ── REVIEWS ───────────────────────────────────────────────────────────────
+    let _reviewProductId = null, _reviewOrderId = null, _reviewRating = 0;
+
+    window.openReviewsPanel = async function(productId, orderId) {
+        injectPanels();
+        _reviewProductId = productId;
+        _reviewOrderId   = orderId || null;
+        _reviewRating    = 0;
+        document.getElementById('mp-reviews-panel').classList.add('active');
+        await loadReviews();
+    };
+    window.closeReviewsPanel = function() {
+        document.getElementById('mp-reviews-panel').classList.remove('active');
+    };
+    async function loadReviews() {
+        const body  = document.getElementById('mp-reviews-body');
+        const write = document.getElementById('mp-write-review-body');
+        body.innerHTML  = '<div class="mp-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+        write.innerHTML = '';
+        try {
+            const res  = await mpFetch('GET', '/api/tools/marketplace/listings/' + _reviewProductId + '/reviews');
+            const { reviews = [], avgRating = 0, total = 0 } = res.data || {};
+            const alreadyReviewed = reviews.some(r => r.userId === myId());
+
+            if (!reviews.length) {
+                body.innerHTML = '<div class="mp-empty"><i class="fas fa-star" style="font-size:32px;margin-bottom:10px;display:block;color:#d1d5db;"></i>No reviews yet</div>';
+            } else {
+                body.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border-color,#e0e0e0);">
+                        <span style="font-size:42px;font-weight:800;line-height:1;">${parseFloat(avgRating).toFixed(1)}</span>
+                        <div><div class="mp-stars" style="font-size:20px;">${stars(avgRating)}</div>
+                        <div style="font-size:13px;color:var(--text-secondary,#888);">${total} review${total!==1?'s':''}</div></div>
+                    </div>
+                ` + reviews.map(r => `
+                    <div class="mp-card">
+                        <div class="mp-stars">${stars(r.rating)}</div>
+                        <div style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+                            <strong style="font-size:14px;">${esc(r.reviewer?.displayName || r.reviewer?.username || 'User')}</strong>
+                            ${r.isVerifiedPurchase ? '<span class="mp-badge paid" style="font-size:10px;">✓ Verified</span>' : ''}
+                            <span style="font-size:12px;color:var(--text-secondary,#888);margin-left:auto;">${fmtDate(r.createdAt)}</span>
+                        </div>
+                        ${r.comment ? `<p style="margin:0 0 8px;font-size:14px;">${esc(r.comment)}</p>` : ''}
+                        ${r.sellerReply ? `
+                            <div style="background:var(--bg-secondary,#f5f5f5);border-radius:8px;padding:10px;margin-top:8px;">
+                                <div style="font-size:12px;font-weight:700;margin-bottom:4px;">Seller replied:</div>
+                                <p style="margin:0;font-size:13px;">${esc(r.sellerReply)}</p>
+                            </div>` : ''}
+                        <button class="mp-btn mp-outline" style="margin-top:8px;padding:4px 10px;font-size:12px;"
+                            onclick="markReviewHelpful('${r.id}',this)">👍 Helpful (${r.helpfulCount||0})</button>
+                    </div>
+                `).join('');
+            }
+
+            // Show write-review form only when coming from a delivered order
+            if (_reviewOrderId && !alreadyReviewed) {
+                _reviewRating = 0;
+                write.innerHTML = `
+                    <hr style="border:none;border-top:1px solid var(--border-color,#e0e0e0);margin:16px 0;">
+                    <h4 style="margin:0 0 14px;font-size:16px;">Write a Review</h4>
+                    <div class="mp-field"><label>Your Rating</label>
+                        <div class="mp-stars-input" id="mp-star-row">
+                            ${[1,2,3,4,5].map(n=>`<span data-n="${n}" onclick="setReviewRating(${n})">☆</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="mp-field"><label>Comment (optional)</label>
+                        <textarea id="mp-review-comment" placeholder="Share your experience…"></textarea>
+                    </div>
+                    <button id="mp-submit-review-btn" class="mp-btn mp-primary" onclick="submitReview()">
+                        <i class="fas fa-paper-plane"></i> Submit Review
+                    </button>
+                `;
+            }
+        } catch (e) {
+            body.innerHTML = '<div class="mp-empty">Failed to load reviews: ' + esc(e.message) + '</div>';
+        }
+    }
+    window.setReviewRating = function(n) {
+        _reviewRating = n;
+        document.querySelectorAll('#mp-star-row span').forEach(s => {
+            const v = parseInt(s.dataset.n);
+            s.textContent = v <= n ? '★' : '☆';
+            s.classList.toggle('on', v <= n);
+        });
+    };
+    window.submitReview = async function() {
+        if (!_reviewRating) { showNotification('Please select a star rating', 'error'); return; }
+        const comment = document.getElementById('mp-review-comment')?.value || '';
+        const btn     = document.getElementById('mp-submit-review-btn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting…'; }
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/listings/' + _reviewProductId + '/reviews', {
+                rating: _reviewRating, comment, orderId: _reviewOrderId,
+            });
+            showNotification('Review submitted! 🌟', 'success');
+            _reviewOrderId = null; // hide write form on reload
+            await loadReviews();
+        } catch (e) {
+            showNotification('Failed: ' + e.message, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Submit Review'; }
+        }
+    };
+    window.markReviewHelpful = async function(reviewId, btn) {
+        try {
+            await mpFetch('POST', '/api/tools/marketplace/reviews/' + reviewId + '/helpful');
+            showNotification('Marked as helpful', 'success');
+            if (btn) {
+                const m = btn.textContent.match(/\((\d+)\)/);
+                const n = m ? parseInt(m[1]) + 1 : 1;
+                btn.textContent = '👍 Helpful (' + n + ')';
+            }
+        } catch (e) { showNotification(e.message, 'error'); }
+    };
+
+    // ── SELLER PROFILE ────────────────────────────────────────────────────────
+    window.openSellerPanel = async function(sellerId) {
+        if (!sellerId) return;
+        injectPanels();
+        document.getElementById('mp-seller-panel').classList.add('active');
+        const body = document.getElementById('mp-seller-body');
+        body.innerHTML = '<div class="mp-spinner"><i class="fas fa-spinner fa-spin"></i> Loading profile…</div>';
+        try {
+            const res = await mpFetch('GET', '/api/tools/marketplace/seller/' + sellerId);
+            const { seller = {}, listings = [], stats = {} } = res.data || {};
+            body.innerHTML = `
+                <div style="text-align:center;padding:10px 0 20px;">
+                    <div class="mp-seller-avatar">
+                        ${seller.avatar ? `<img src="${esc(seller.avatar)}" alt="Seller">` : (seller.name||'S').charAt(0).toUpperCase()}
+                    </div>
+                    <div style="font-weight:800;font-size:18px;">${esc(seller.name||'Seller')}</div>
+                    <div style="font-size:13px;color:var(--text-secondary,#888);margin-top:4px;">Member since ${fmtDate(seller.joinedAt)}</div>
+                </div>
+                <div class="mp-stat-row">
+                    <div class="mp-stat"><strong>${stats.listingCount||0}</strong><span>Listings</span></div>
+                    <div class="mp-stat"><strong>${stats.avgRating ? parseFloat(stats.avgRating).toFixed(1) : '—'}</strong><span>Rating</span></div>
+                    <div class="mp-stat"><strong>${stats.reviewCount||0}</strong><span>Reviews</span></div>
+                </div>
+                <button class="mp-btn mp-primary" style="width:100%;margin-bottom:16px;"
+                    onclick="messageSeller('${esc(seller.id||sellerId)}','${esc(seller.name||'Seller')}')">
+                    <i class="fas fa-comment"></i> Message Seller
+                </button>
+                ${listings.length ? `
+                <div style="font-weight:700;font-size:15px;margin-bottom:10px;">Active Listings (${stats.listingCount||0})</div>
+                <div class="mp-grid-2">
+                    ${listings.slice(0,6).map(l => `
+                        <div class="mp-product-tile">
+                            ${l.images?.[0]
+                                ? `<img src="${esc(l.images[0])}" class="mp-product-tile-img" alt="${esc(l.title)}">`
+                                : `<div class="mp-product-tile-img">🛍</div>`}
+                            <div class="mp-product-tile-body">
+                                <div class="mp-product-tile-title">${esc(l.title)}</div>
+                                <div class="mp-product-tile-price">${esc(l.currency||'KES')} ${Number(l.price||0).toLocaleString()}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>` : '<div class="mp-empty" style="padding:20px;">No active listings</div>'}
+            `;
+        } catch (e) {
+            body.innerHTML = '<div class="mp-empty">Failed to load seller profile: ' + esc(e.message) + '</div>';
+        }
+    };
+    window.closeSellerPanel = function() {
+        document.getElementById('mp-seller-panel').classList.remove('active');
+    };
+    window.messageSeller = function(sellerId, sellerName) {
+        closeSellerPanel();
+        const chatFn = typeof openChat === 'function' ? openChat : window.openChat;
+        if (typeof chatFn === 'function') {
+            chatFn(sellerId, sellerName);
+        } else {
+            window.location.href = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName||'');
+        }
+    };
+
+    // ── WebSocket event listeners ──────────────────────────────────────────────
+    function wireWS() {
+        const ws = window.WebSocketService || window.wsService;
+        const handle = (event, cb) => {
+            if (ws?.on) ws.on(event, cb);
+            window.addEventListener('ws:' + event, e => cb(e.detail));
+        };
+        handle('ORDER_PLACED',         d => showNotification('✅ Order placed for "' + (d.order?.product?.title||'item') + '"', 'success'));
+        handle('ORDER_RECEIVED',       () => showNotification('🛍 New order received!', 'success'));
+        handle('ORDER_STATUS_UPDATED', d => showNotification('📦 Order is now: ' + d.status, 'info'));
+        handle('NEW_REVIEW',           () => showNotification('⭐ You have a new review!', 'info'));
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => { injectPanels(); wireWS(); });
+    } else {
+        injectPanels();
+        wireWS();
+    }
+
+})();
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ECOMMERCE HELPER FUNCTIONS — Cart badge, checkout panel, review writer
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Update the cart count badge in the header */
+function _updateCartBadge() {
+    const ecom = window.EcomMarketplace;
+    const count = ecom ? ecom.CartEngine.size() : 0;
+    let badge = document.getElementById('ecom-cart-count-badge');
+    if (!badge) {
+        // Try to find any cart button and attach badge
+        const cartBtns = document.querySelectorAll('[data-cart-trigger],[id*="cart"],[class*="cart-btn"]');
+        cartBtns.forEach(btn => {
+            let b = btn.querySelector('.ecom-cart-badge');
+            if (!b) {
+                b = document.createElement('span');
+                b.className = 'ecom-cart-badge';
+                b.id = 'ecom-cart-count-badge';
+                b.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;line-height:1;';
+                btn.style.position = 'relative';
+                btn.appendChild(b);
+                badge = b;
+            }
+        });
+    }
+    if (badge) badge.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
+    if (badge) badge.style.display = count > 0 ? 'flex' : 'none';
+
+    // Also dispatch event for any badge listeners
+    window.dispatchEvent(new CustomEvent('ecom:cart-badge-update', { detail: { count } }));
+}
+
+/** Open the full checkout/cart sidebar */
+function openCheckoutPanel() {
+    const ecom = window.EcomMarketplace;
+    // Remove existing panel if any
+    let panel = document.getElementById('ecom-checkout-panel');
+    if (panel) panel.remove();
+
+    const cart = ecom ? ecom.CartEngine.getCart() : { items: [], total: 0, subtotal: 0, delivery: 0, count: 0 };
+    const fmt  = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${parseFloat(n||0).toLocaleString()}`;
+
+    panel = document.createElement('div');
+    panel.id = 'ecom-checkout-panel';
+    panel.style.cssText = 'position:fixed;top:0;right:0;width:min(400px,100vw);height:100vh;background:#fff;z-index:99998;box-shadow:-8px 0 32px rgba(0,0,0,0.2);display:flex;flex-direction:column;transition:transform 0.3s ease;overflow:hidden;';
+
+    panel.innerHTML = `
+    <!-- Header -->
+    <div style="background:var(--primary-color,#f57224);color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <i class="fas fa-shopping-cart" style="font-size:20px;"></i>
+            <h2 style="margin:0;font-size:18px;font-weight:700;">Your Cart (${cart.count})</h2>
+        </div>
+        <button onclick="document.getElementById('ecom-checkout-panel').remove()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;">×</button>
+    </div>
+
+    <!-- Cart Items -->
+    <div id="ecom-checkout-items" style="flex:1;overflow-y:auto;padding:16px;">
+        ${cart.items.length === 0 ? `
+        <div style="text-align:center;padding:48px 20px;color:#9ca3af;">
+            <div style="font-size:64px;margin-bottom:16px;">🛒</div>
+            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Your cart is empty</div>
+            <div style="font-size:14px;">Add products to get started</div>
+        </div>` : cart.items.map(item => `
+        <div data-cart-item="${item.product.id}" style="display:flex;gap:12px;padding:14px 0;border-bottom:1px solid #f3f4f6;align-items:flex-start;">
+            <div style="width:72px;height:72px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#f3f4f6;">
+                ${item.product.images?.[0] ? `<img src="${escapeHtml(item.product.images[0])}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">🛒</div>`}
+            </div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;color:#111;line-height:1.3;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(item.product.title)}</div>
+                <div style="font-size:14px;font-weight:700;color:var(--primary-color,#f57224);margin-bottom:8px;">${fmt(item.product.price)}</div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button onclick="_ecomQtyChange('${item.product.id}',-1)" style="background:#f3f4f6;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">−</button>
+                    <span style="font-size:14px;font-weight:600;min-width:24px;text-align:center;">${item.quantity}</span>
+                    <button onclick="_ecomQtyChange('${item.product.id}',1)" style="background:#f3f4f6;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">+</button>
+                    <button onclick="_ecomRemoveItem('${item.product.id}')" style="background:transparent;border:none;color:#ef4444;cursor:pointer;font-size:13px;margin-left:auto;">Remove</button>
+                </div>
+                ${item.product.delivery_fee > 0 ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px;">+ ${fmt(item.product.delivery_fee)} delivery</div>` : '<div style="font-size:11px;color:#22c55e;margin-top:4px;">Free delivery</div>'}
+            </div>
+            <div style="font-size:14px;font-weight:700;color:#111;flex-shrink:0;">${fmt(item.product.price * item.quantity)}</div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Summary & Checkout -->
+    ${cart.items.length > 0 ? `
+    <div style="flex-shrink:0;padding:16px;border-top:1px solid #f3f4f6;background:#fff;">
+        <div style="background:#f9fafb;border-radius:12px;padding:14px;margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#6b7280;">
+                <span>Subtotal (${cart.count} items)</span><span>${fmt(cart.subtotal)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#6b7280;">
+                <span>Delivery</span><span>${cart.delivery > 0 ? fmt(cart.delivery) : '<span style="color:#22c55e">Free</span>'}</span>
+            </div>
+            ${cart.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#22c55e;"><span>Savings</span><span>-${fmt(cart.discount)}</span></div>` : ''}
+            <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:#111;border-top:1px solid #e5e7eb;padding-top:10px;margin-top:6px;">
+                <span>Total</span><span style="color:var(--primary-color,#f57224)">${fmt(cart.total)}</span>
+            </div>
+        </div>
+        <button id="ecom-proceed-checkout-btn" onclick="_ecomProceedToCheckout()" style="width:100%;background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:12px;padding:16px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;">
+            <i class="fas fa-lock"></i> Proceed to Checkout
+        </button>
+        <button onclick="document.getElementById('ecom-checkout-panel').remove()" style="width:100%;background:#f3f4f6;color:#374151;border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;">
+            Continue Shopping
+        </button>
+    </div>` : ''}
+    `;
+
+    document.body.appendChild(panel);
+    requestAnimationFrame(() => { panel.style.transform = 'translateX(0)'; });
+}
+window.openCheckoutPanel = openCheckoutPanel;
+
+// Cart quantity helpers (called from onclick in injected HTML)
+window._ecomQtyChange = function(productId, delta) {
+    const ecom = window.EcomMarketplace;
+    if (!ecom) return;
+    const item = ecom.CartEngine.getItem(productId);
+    if (!item) return;
+    ecom.CartEngine.updateQuantity(productId, item.quantity + delta);
+    _updateCartBadge();
+    openCheckoutPanel(); // Re-render
+};
+window._ecomRemoveItem = function(productId) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) ecom.CartEngine.remove(productId);
+    _updateCartBadge();
+    openCheckoutPanel(); // Re-render
+};
+window._ecomProceedToCheckout = function() {
+    const panel = document.getElementById('ecom-checkout-panel');
+    const body = panel?.querySelector('#ecom-checkout-items');
+    if (body) {
+        const ecom = window.EcomMarketplace;
+        const fmt = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${parseFloat(n||0).toLocaleString()}`;
+        const cart = ecom ? ecom.CartEngine.getCart() : null;
+        if (!cart || !cart.items.length) return;
+
+        body.innerHTML = `
+        <h3 style="font-size:16px;font-weight:700;margin:0 0 16px;">Delivery Details</h3>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">FULL NAME</label>
+                <input id="eco-ch-name" type="text" placeholder="Your full name" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;"></div>
+            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">PHONE NUMBER</label>
+                <input id="eco-ch-phone" type="tel" placeholder="07XXXXXXXX" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;"></div>
+            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DELIVERY ADDRESS</label>
+                <textarea id="eco-ch-addr" placeholder="Street, Area, City" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;min-height:72px;box-sizing:border-box;resize:vertical;"></textarea></div>
+            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">PAYMENT METHOD</label>
+                <select id="eco-ch-pay" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
+                    <option value="mpesa">📱 M-Pesa (STK Push)</option>
+                    <option value="card">💳 Card Payment</option>
+                    <option value="cash">💵 Cash on Delivery</option>
+                    <option value="wallet">👛 Wallet</option>
+                </select></div>
+            <div id="eco-ch-mpesa-hint" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:13px;color:#166534;">
+                📲 You'll receive an M-Pesa prompt on your phone. Enter your PIN to complete payment.
+            </div>
+            <div style="background:#f9fafb;border-radius:10px;padding:12px;">
+                <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;color:#111;">
+                    <span>Order Total</span><span style="color:var(--primary-color,#f57224)">${fmt(cart.total)}</span>
+                </div>
+            </div>
+        </div>`;
+
+        const footer = panel.querySelector('[id="ecom-proceed-checkout-btn"]')?.closest('div');
+        if (footer) {
+            footer.querySelector('#ecom-proceed-checkout-btn').textContent = '';
+            footer.querySelector('#ecom-proceed-checkout-btn').innerHTML = '<i class="fas fa-lock"></i> Place Order & Pay';
+            footer.querySelector('#ecom-proceed-checkout-btn').onclick = _ecomPlaceOrder;
+        }
+
+        // Toggle mpesa hint
+        document.getElementById('eco-ch-pay')?.addEventListener('change', function() {
+            const hint = document.getElementById('eco-ch-mpesa-hint');
+            if (hint) hint.style.display = this.value === 'mpesa' ? 'block' : 'none';
+        });
+    }
+};
+window._ecomPlaceOrder = async function() {
+    const ecom = window.EcomMarketplace;
+    if (!ecom) return;
+    const name   = document.getElementById('eco-ch-name')?.value?.trim();
+    const phone  = document.getElementById('eco-ch-phone')?.value?.trim();
+    const addr   = document.getElementById('eco-ch-addr')?.value?.trim();
+    const payMth = document.getElementById('eco-ch-pay')?.value || 'mpesa';
+    const btn    = document.getElementById('ecom-proceed-checkout-btn');
+
+    if (!name || !addr) { ecom.NotificationEngine.show('Please fill in all required fields', 'error', '❌'); return; }
+    if (payMth === 'mpesa' && !phone) { ecom.NotificationEngine.show('Phone number required for M-Pesa', 'error', '❌'); return; }
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Placing Order…'; }
+
+    try {
+        const result = await ecom.OrderEngine.checkout({
+            address: { name, phone, raw: addr },
+            payment_method: payMth, phone, notes: '',
+        });
+
+        if (result.success) {
+            document.getElementById('ecom-checkout-panel')?.remove();
+            _updateCartBadge();
+
+            // Initiate payment if M-Pesa
+            if (payMth === 'mpesa' && result.order?.id) {
+                setTimeout(async () => {
+                    const pRes = await ecom.PaymentEngine.initiateMpesa({ phone, amount: result.order.total, orderId: result.order.id });
+                    if (pRes.success) {
+                        ecom.NotificationEngine.show(pRes.message, 'success', '📱');
+                    }
+                }, 500);
+            }
+
+            ecom.NotificationEngine.show('Order placed successfully! 🎉', 'success', '✅');
+        }
+    } catch (e) {
+        ecom.NotificationEngine.show('Order failed: ' + e.message, 'error', '❌');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Place Order & Pay'; }
+    }
+};
+
+/** Open write-review panel for a product */
+function openWriteReviewPanel(productId) {
+    // If openReviewsPanel already exists (from the MP IIFE), use it
+    if (typeof window.openReviewsPanel === 'function') {
+        window.openReviewsPanel(productId, null);
+        return;
+    }
+    // Minimal fallback
+    const rating = prompt('Rate this product (1-5 stars):');
+    const ratingNum = parseInt(rating);
+    if (!ratingNum || ratingNum < 1 || ratingNum > 5) { alert('Invalid rating'); return; }
+    const comment = prompt('Leave a comment (optional):') || '';
+    const ecom = window.EcomMarketplace;
+    if (ecom) {
+        ecom.ReviewEngine.submitReview({ productId, rating: ratingNum, text: comment })
+            .then(r => { if (r.success) alert('Review submitted! Thank you.'); else alert('Failed: ' + r.message); });
+    }
+}
+window.openWriteReviewPanel = openWriteReviewPanel;
+
+// Listen to ecom cart events and update badge
+window.addEventListener('ecom:cart-updated', () => _updateCartBadge());
+window.addEventListener('ecom:ready', () => { _updateCartBadge(); console.log('[UI] Ecom marketplace ready'); });
+
+// ── Module exports ──────────────────────────────────────────────────────────
+// viewListingDetail lives on renderers — re-export as a named alias
+const viewListingDetail = (...args) => renderers.viewListingDetail(...args);
+
 export {
     renderers,
     UIState,

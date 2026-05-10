@@ -56,8 +56,13 @@
 
     function _normalizeEndpoint(endpoint) {
         if (!endpoint || typeof endpoint !== 'string') return endpoint;
+        // Map both /api/marketplace/ and /api/tools/marketplace/ to the same base
         if (endpoint.startsWith('/api/marketplace/')) {
             return endpoint.replace('/api/marketplace/', '/api/tools/marketplace/');
+        }
+        // Also map new /api/marketplace/products to listings for backward compat
+        if (endpoint.includes('/api/tools/marketplace/products')) {
+            return endpoint; // already normalized
         }
         return endpoint;
     }

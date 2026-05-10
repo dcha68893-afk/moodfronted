@@ -2795,10 +2795,15 @@
 
 /* Chat / Messages header → BLUE (navigation) */
 .sidebar-header,
-.chat-header,
 .new-chat-header,
 .new-call-header {
   background: var(--header-chat) !important;
+}
+
+/* Group chat-header is now in the parent shell — keep local one transparent */
+.chat-header {
+  background: var(--bg-color, #0f172a) !important;
+  border-bottom: 1px solid var(--border-color, #374151) !important;
 }
 
 /* Calls sidebar header → GREEN (communication) */
@@ -3516,4 +3521,16 @@ body.dark .msg-time { color: rgba(255,255,255,.4); }
 /* Chat header button hover */
 .chat-header-btn:hover {
     background: var(--secondary-color, #f0f0f0) !important;
+}
+
+/* ── Group chat header is now rendered in the parent shell (chat.html) ──
+   Hide the local chat-header entirely in the group iframe.              */
+#localGroupChatHeader,
+.group-chat-panel > .chat-header {
+    display: none !important;
+}
+
+/* Adjust group-chat-panel to start from top since header is gone */
+.group-chat-panel.active {
+    padding-top: 0 !important;
 }

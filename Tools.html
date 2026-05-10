@@ -2142,6 +2142,7 @@
     <script type="module" src="tool ui.patch.js"></script>
     <script type="module" src="Tool-core.js"></script>
     <script type="module" src="Tool-ui.js"></script>
+    <script type="module" src="marketplace-ecommerce.js"></script>
 
 
 
@@ -2254,6 +2255,14 @@
 
 <!-- UI Controller (depends on Tool-core exports) -->
 <script type="module" src="Tool-ui.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     ECOMMERCE MARKETPLACE ENGINE
+     Full realtime marketplace: cart, orders, payments (M-Pesa/card),
+     reviews, wishlist, seller dashboard, inventory, delivery, search.
+     Must load AFTER Tool-core.js and Tool-ui.js.
+     ═══════════════════════════════════════════════════════════════════ -->
+<script type="module" src="marketplace-ecommerce.js"></script>
 
     <!-- Purchase / Checkout Modal -->
     <div class="create-listing-modal" id="purchaseModal" style="z-index:10002;">

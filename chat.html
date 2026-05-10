@@ -1080,11 +1080,17 @@
             }
             body.chat-panel-active #globalHeader,
             body.call-screen-active #globalHeader,
-            body.group-panel-active #globalHeader,
             body.status-panel-active #globalHeader {
                 opacity: 0 !important;
                 pointer-events: none !important;
                 visibility: hidden !important;
+            }
+            /* group-panel-active: keep globalHeader VISIBLE — it now shows
+               the group name/avatar/back/call/more icons when in a group */
+            body.group-panel-active #globalHeader {
+                opacity: 1 !important;
+                visibility: visible !important;
+                pointer-events: auto !important;
             }
             .header-module-subtitle {
                 display: none;
@@ -1154,14 +1160,22 @@
         #globalHeader.group-chat-active #headerActions    { display: none !important; }
         #globalHeader.group-chat-active #profileTrigger   { display: none !important; }
         #globalHeader.group-chat-active #headerGroupCtx   { display: flex !important; }
+
+        /* ── Group header buttons — clean dark style, NO colored bar ── */
         .hgm-btn {
             background: none; border: none;
-            color: var(--text-primary, #e5e7eb);
+            color: #e5e7eb;
             cursor: pointer; padding: 7px; border-radius: 50%;
             font-size: 16px; display: flex; align-items: center;
             justify-content: center; transition: background .15s; flex-shrink: 0;
         }
-        .hgm-btn:hover { background: rgba(255,255,255,.08); }
+        .hgm-btn:hover { background: rgba(255,255,255,.10); }
+        /* Override any color the header gradient might add */
+        #globalHeader.group-chat-active {
+            background:
+                linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.97)),
+                linear-gradient(90deg, rgba(17,24,39,0.2), rgba(14,165,233,0.06)) !important;
+        }
         .hgm-item {
             display: flex; align-items: center; gap: 10px;
             width: 100%; padding: 10px 14px;
@@ -2762,19 +2776,18 @@
 
                 // ── GROUP PANEL: hide nav when group chat/detail opens; show when back ──
                 if (data.type === 'GROUP_PANEL_OPENED' || data.type === 'GROUP_CHAT_OPENED' || data.type === 'GROUP_DETAIL_OPENED' || data.type === 'GROUP_PANEL_OPEN') {
-                    if (window.innerWidth <= 768) {
-                        document.body.classList.add('group-panel-active');
-                        syncBrowserHistoryState(window.__currentPage, false);
-                    }
-                    // Update globalHeader to show group context
+                    // Add group-panel-active on all widths (hides nav on mobile, controls header on desktop)
+                    document.body.classList.add('group-panel-active');
+                    syncBrowserHistoryState(window.__currentPage, false);
+                    // Store current group for PARENT_GROUP_CALL dispatch
                     var _gpData = data.payload || data.group || data.data || {};
-                    if (typeof showGroupHeader === 'undefined' && window.__groupHdrShow) window.__groupHdrShow(_gpData);
+                    window.__gcCurrentGroup = _gpData;
+                    // Update globalHeader to show group context (all screen sizes)
+                    if (window.__groupHdrShow) window.__groupHdrShow(_gpData);
                 }
                 if (data.type === 'GROUP_PANEL_CLOSED' || data.type === 'GROUP_LIST_SHOWN' || data.type === 'GO_BACK_TO_LIST' || data.type === 'GROUP_PANEL_CLOSE') {
-                    if (window.innerWidth <= 768 && (event.source === document.getElementById('groupIframe')?.contentWindow || data.type === 'GROUP_PANEL_CLOSE' || data.type === 'GROUP_PANEL_CLOSED')) {
-                        document.body.classList.remove('group-panel-active');
-                    }
-                    // Restore globalHeader
+                    document.body.classList.remove('group-panel-active');
+                    // Restore globalHeader (all screen sizes)
                     if (window.__groupHdrHide) window.__groupHdrHide();
                 }
 
@@ -2812,7 +2825,7 @@
                         // signal is a stale echo from the iframe resetting after a prior
                         // CALL_FORCE_ENDED — do NOT remove call-screen-active.
                         var _sinceDispatchCSA = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                        if (_sinceDispatchCSA < 15000) {
+                        if (_sinceDispatchCSA < 4000) {
                             console.warn('[Parent] CALL_SCREEN_ACTIVE(false) ignored — call dispatched only ' + Math.round(_sinceDispatchCSA/1000) + 's ago (stale idle reset)');
                         } else {
                             window.__activeCallInProgress = false;
@@ -2827,7 +2840,7 @@
                 if (data.type === 'CALL_ENDED' || data.type === 'CALL_FORCE_ENDED' || data.type === 'CALL_REJECTED') {
                     // ── Guard: ignore stale echoes within 15s of call dispatch ──
                     var _sinceDispatchCE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchCE < 15000 && data.source !== 'end-btn' && data.source !== 'parent-echo') {
+                    if (_sinceDispatchCE < 4000 && data.source !== 'end-btn' && data.source !== 'parent-echo') {
                         console.warn('[Parent] Early CALL_ENDED/FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchCE/1000)+'s ago');
                         return;
                     }
@@ -3876,7 +3889,7 @@
                     // ── Guard: ignore stale CALL_ENDED echoes within 15s of call dispatch,
                     // UNLESS this came from the end-btn (user deliberately ended the call).
                     var _sinceDispatchWS = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchWS < 15000 && data.source !== 'end-btn') {
+                    if (_sinceDispatchWS < 4000 && data.source !== 'end-btn') {
                         console.warn('[Parent] CALL_ENDED (non-ws) ignored — call dispatched only', Math.round(_sinceDispatchWS/1000)+'s ago (stale echo)');
                         return;
                     }
@@ -3908,6 +3921,39 @@
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
                     await refreshCallHistoryForUser(cachedUserId);
+                    // ── Navigate back to origin page after CALL_ENDED (non-ws) ──
+                    // The calls iframe fires CALL_ENDED_RETURN for its own navigation,
+                    // but relay it here too so state is always cleaned regardless of
+                    // which path triggered the end.
+                    (function _navigateAfterEnd() {
+                        const _ceNow2 = Date.now();
+                        if (window.__callEndedNavAt && (_ceNow2 - window.__callEndedNavAt) < 3000) return; // debounce
+                        window.__callEndedNavAt = _ceNow2;
+                        setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
+                        let _ctx = window.__callReturnContext;
+                        if (!_ctx) { try { const _s = sessionStorage.getItem('call_return_ctx'); if (_s) _ctx = JSON.parse(_s); } catch(e) {} }
+                        const _returnTo = (_ctx && _ctx.returnTo) || window.__lastActivePage || 'messages';
+                        window.__callReturnContext = null;
+                        window.__moduleSessionDispatchCache = {};
+                        try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
+                        if (_returnTo === 'group') {
+                            navigateToPage('group');
+                            const _gf = document.getElementById('groupIframe');
+                            if (_gf && _gf.contentWindow) setTimeout(() => _gf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _ctx && _ctx.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                        } else if (_returnTo === 'friends') {
+                            navigateToPage('friends');
+                            const _ff = document.getElementById('friendsIframe');
+                            if (_ff && _ff.contentWindow) setTimeout(() => _ff.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                        } else if (_returnTo === 'messages') {
+                            navigateToPage('messages');
+                            if (_ctx && _ctx.chatUserId) {
+                                const _mf = document.getElementById('messagesIframe');
+                                if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx.chatUserId, userName: _ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active'); }, 300);
+                            }
+                        } else if (_returnTo && _returnTo !== 'calls') {
+                            navigateToPage(_returnTo);
+                        }
+                    })();
                     return;
                 }
                 
@@ -3928,6 +3974,36 @@
                         }
                     });
                     await refreshCallHistoryForUser(cachedUserId);
+                    // ── ws-bridge CALL_ENDED: also navigate back ──────────────────
+                    (function _wsNavigateAfterEnd() {
+                        const _ceNow3 = Date.now();
+                        if (window.__callEndedNavAt && (_ceNow3 - window.__callEndedNavAt) < 3000) return;
+                        window.__callEndedNavAt = _ceNow3;
+                        setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
+                        let _ctx3 = window.__callReturnContext;
+                        if (!_ctx3) { try { const _s3 = sessionStorage.getItem('call_return_ctx'); if (_s3) _ctx3 = JSON.parse(_s3); } catch(e) {} }
+                        const _rt3 = (_ctx3 && _ctx3.returnTo) || window.__lastActivePage || 'messages';
+                        window.__callReturnContext = null;
+                        window.__moduleSessionDispatchCache = {};
+                        try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
+                        if (_rt3 === 'group') {
+                            navigateToPage('group');
+                            const _gf3 = document.getElementById('groupIframe');
+                            if (_gf3 && _gf3.contentWindow) setTimeout(() => _gf3.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _ctx3 && _ctx3.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                        } else if (_rt3 === 'friends') {
+                            navigateToPage('friends');
+                            const _ff3 = document.getElementById('friendsIframe');
+                            if (_ff3 && _ff3.contentWindow) setTimeout(() => _ff3.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                        } else if (_rt3 === 'messages') {
+                            navigateToPage('messages');
+                            if (_ctx3 && _ctx3.chatUserId) {
+                                const _mf3 = document.getElementById('messagesIframe');
+                                if (_mf3 && _mf3.contentWindow) setTimeout(() => { _mf3.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx3.chatUserId, userName: _ctx3.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active'); }, 300);
+                            }
+                        } else if (_rt3 && _rt3 !== 'calls') {
+                            navigateToPage(_rt3);
+                        }
+                    })();
                     return;
                 }
                 
@@ -3985,7 +4061,7 @@
                     // If we dispatched a call less than 15s ago, this is a ghost signal
                     // from a previous session — ignore it so the new call isn't killed.
                     var _sinceDispatchFE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchFE < 15000) {
+                    if (_sinceDispatchFE < 4000) {
                         console.warn('[Parent] CALL_FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchFE/1000)+'s ago (stale echo)');
                         return;
                     }
@@ -3996,7 +4072,7 @@
                 if (data.type === 'call:force_end' || data.type === 'call_force_ended') {
                     // ── Same stale-echo guard for alias event names ──
                     var _sinceDispatchFE2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatchFE2 < 15000) {
+                    if (_sinceDispatchFE2 < 4000) {
                         console.warn('[Parent] call_force_ended alias ignored — call dispatched only', Math.round(_sinceDispatchFE2/1000)+'s ago (stale echo)');
                         return;
                     }
@@ -4076,7 +4152,7 @@
                     } else {
                         // Guard: suppress stale idle-reset within 15s of call dispatch
                         var _sinceDispatchCSA2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                        if (_sinceDispatchCSA2 < 15000) {
+                        if (_sinceDispatchCSA2 < 4000) {
                             console.warn('[Parent] CALL_SCREEN_ACTIVE(false) #2 ignored — call dispatched only ' + Math.round(_sinceDispatchCSA2/1000) + 's ago');
                         } else {
                             window.__activeCallInProgress = false;
@@ -4194,7 +4270,7 @@
                     return lock.userId === String(userId) && (Date.now() - lock.ts) < 2000;
                 }
 
-                function __dispatchCallToIframe(userId, userName, callType, returnTo, chatUserId, source) {
+                function __dispatchCallToIframe(userId, userName, callType, returnTo, chatUserId, source, extraCtx) {
                     if (__isCallDuplicate(userId)) {
                         console.log('[Parent] ⏭ Duplicate call dispatch suppressed');
                         return;
@@ -4210,7 +4286,7 @@
                     }
                     // 'calls' is valid — user started from calls module, return there after
 
-                    const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now() };
+                    const ctx = { returnTo, chatUserId: chatUserId || userId, userName, source, ts: Date.now(), ...(extraCtx || {}) };
                     window.__callReturnContext = ctx;
                     try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
 
@@ -4245,13 +4321,17 @@
 
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
                     const p = data.payload || {};
-                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', p.returnTo || 'messages', p.chatUserId || p.userId, 'messages-module');
+                    const _swReturnTo = p.returnTo || window.__currentPage || 'messages';
+                    const _swExtra = p.groupId ? { groupId: p.groupId, groupName: p.groupName || p.userName } : {};
+                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _swReturnTo, p.chatUserId || p.userId, 'messages-module', _swExtra);
                     return;
                 }
 
                 if (data.type === 'INITIATE_CALL') {
                     const p = data.payload || {};
-                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', 'messages', p.userId, 'messages-module');
+                    const _iciReturnTo = p.returnTo || (p.isGroup ? 'group' : 'messages');
+                    const _iciExtra = p.isGroup ? { groupId: p.groupId || p.userId, groupName: p.userName } : {};
+                    __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _iciReturnTo, p.userId, 'messages-module', _iciExtra);
                 }
 
                 // Receiver-side missed call recording — fired by calls-core when 3-min timeout expires
@@ -4275,10 +4355,10 @@
                 if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
                     // ── GUARD: ignore if a call was just dispatched in the last 10s ──────
                     // CALL_ENDED_RETURN fires from stale WS echoes during call SETUP, not
-                    // just after call ends. If the call started less than 10 seconds ago,
-                    // this is a spurious signal — drop it completely.
+                    // just after call ends. Only drop signals within the first 3 seconds
+                    // (true instantaneous echoes). 10s was too long — it blocked short calls.
                     const _sinceDispatch = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
-                    if (_sinceDispatch < 10000) {
+                    if (_sinceDispatch < 3000) {
                         console.warn('[Parent] CALL_ENDED_RETURN ignored — call dispatched only', Math.round(_sinceDispatch/1000)+'s ago (stale echo)');
                         return;
                     }
@@ -4339,6 +4419,24 @@
                         if (friendsIframe && friendsIframe.contentWindow) {
                             setTimeout(() => {
                                 friendsIframe.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
+                            }, 300);
+                        }
+                    } else if (returnTo === 'group') {
+                        // Return to group panel — navigate to group module then re-open the specific group
+                        navigateToPage('group');
+                        const groupIframe = document.getElementById('groupIframe');
+                        if (groupIframe && groupIframe.contentWindow) {
+                            setTimeout(() => {
+                                groupIframe.contentWindow.postMessage({
+                                    type: 'RETURN_FROM_CALL',
+                                    payload: {
+                                        returnFromCall: true,
+                                        groupId: ctx.groupId || null,
+                                        groupName: ctx.groupName || null,
+                                        timestamp: Date.now()
+                                    },
+                                    source: 'parent-frame'
+                                }, '*');
                             }, 300);
                         }
                     } else {
@@ -4894,9 +4992,31 @@
 
                 if (data.type === 'DIRECT_CALL_REQUEST') {
                     const p = data.payload || {};
-                    const returnTo = (window.__currentPage && window.__currentPage !== 'calls') ? window.__currentPage : (window.__lastActivePage || 'friends');
+                    // Always return to friends after a direct call from friends module
                     sendFriendsToCallsIframe();
-                    __dispatchCallToIframe(p.userId, p.userName || p.name || 'User', p.callType || 'voice', returnTo, p.userId, 'friends-module');
+                    __dispatchCallToIframe(p.userId, p.userName || p.name || 'User', p.callType || 'voice', 'friends', p.userId, 'friends-module');
+                }
+
+                // ── GROUP CALL — triggered by parent header call/video buttons ──────────
+                // postToGroup sends PARENT_GROUP_CALL to group iframe, which re-posts
+                // INITIATE_CALL to parent. But we also handle it directly here so the
+                // group header buttons in chat.html can dispatch calls without a round-trip.
+                if (data.type === 'PARENT_GROUP_CALL') {
+                    const p = data.payload || {};
+                    const grp = window.__gcCurrentGroup || {};
+                    const groupId   = p.groupId   || grp.id   || null;
+                    const groupName = p.groupName  || grp.name || 'Group';
+                    const callType  = p.type || p.callType || 'voice';
+                    if (groupId) {
+                        sendFriendsToCallsIframe();
+                        __dispatchCallToIframe(
+                            groupId, groupName, callType,
+                            'group',          // returnTo
+                            groupId,          // chatUserId
+                            'group-hdr',      // source
+                            { groupId, groupName, isGroup: true }
+                        );
+                    }
                 }
 
                 // ── STATUS_REPLY_RECEIVED / OPEN_CHAT ─────────────────────────────────────
@@ -5793,12 +5913,14 @@ function groupIframe() { return document.getElementById('groupIframe'); }
 function postToGroup(type, payload) {
     var f = groupIframe();
     if (f && f.contentWindow)
-        f.contentWindow.postMessage({ type: type, payload: payload || {}, source: 'parent-hdr', timestamp: Date.now() }, '*');
+        f.contentWindow.postMessage({ type: type, payload: payload || {}, source: 'parent-shell', timestamp: Date.now() }, '*');
 }
 
 /* ── Show group context in globalHeader ─────────────────────── */
 function showGroupHeader(g) {
     if (!g) return;
+    // Store for PARENT_GROUP_CALL dispatch
+    window.__gcCurrentGroup = g;
     var hdr   = document.getElementById('globalHeader');
     var ctx   = document.getElementById('headerGroupCtx');
     var name  = document.getElementById('hdrGroupName');
@@ -5895,7 +6017,7 @@ window.addEventListener('message', function (e) {
         d.type === 'GROUP_CHAT_OPENED' || d.type === 'GROUP_DETAIL_OPENED') {
         var g = d.payload || d.group || d.data || {};
         showGroupHeader(g);
-        if (window.innerWidth <= 768) document.body.classList.add('group-panel-active');
+        document.body.classList.add('group-panel-active'); // all widths
         return;
     }
 
@@ -5903,7 +6025,7 @@ window.addEventListener('message', function (e) {
     if (d.type === 'GROUP_PANEL_CLOSE' || d.type === 'GROUP_PANEL_CLOSED' ||
         d.type === 'GROUP_LIST_SHOWN'  || d.type === 'GO_BACK_TO_LIST') {
         hideGroupHeader();
-        if (window.innerWidth <= 768) document.body.classList.remove('group-panel-active');
+        document.body.classList.remove('group-panel-active'); // all widths
         return;
     }
 

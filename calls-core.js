@@ -37201,13 +37201,16 @@ clearActiveCall: function() {
 
 
     window.addEventListener('beforeunload', () => {
-
-
-
-        if (window.callCore) window.callCore.cleanup();
-
-
-
+        // ✅ FIX: Only cleanup on unload if NO active call — prevents SW reload from destroying calls
+        if (window.callCore && window.callCore.cleanup) {
+            var _cs = window.callsState;
+            var _callInProgress = _cs && (_cs.callActive || _cs.callState === 'in-call' || _cs.callState === 'connected' || _cs.callState === 'initiating');
+            if (!_callInProgress) {
+                window.callCore.cleanup();
+            } else {
+                console.log('[calls-core] beforeunload: skipping cleanup — call in progress');
+            }
+        }
     });
 
 

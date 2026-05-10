@@ -445,18 +445,66 @@ function populateFriendsInCreateModal() {
 }
 
 // Subscribe to status state changes
+// ── Direct friend-status fetcher ────────────────────────────────────────────
+// Called on init and when socket signals new_status from a friend.
+// Uses StatusAPI directly so it works even when core.loadStatuses() only
+// loads the current user's own statuses.
+let _friendFetchPending = false;
+let _friendFetchLast    = 0;
+async function _fetchFriendStatusesDirect() {
+    const now = Date.now();
+    if (_friendFetchPending) return;
+    if (now - _friendFetchLast < 5000) return; // throttle: max once per 5s
+    _friendFetchPending = true;
+    _friendFetchLast = now;
+    try {
+        const api = window.StatusAPI;
+        if (!api || !api.getFriendsStatuses) return;
+        const result = await api.getFriendsStatuses({ limit: 100 });
+        if (result && result.success && Array.isArray(result.statuses) && result.statuses.length > 0) {
+            friendsStatuses = result.statuses;
+            renderStatusListInstantlyUI();
+            // Show Recent updates label
+            const lbl = document.getElementById('recentUpdatesLabel');
+            if (lbl) lbl.style.display = '';
+        }
+    } catch (e) {
+        console.warn('[status-ui] _fetchFriendStatusesDirect error:', e);
+    } finally {
+        _friendFetchPending = false;
+    }
+}
+
 function subscribeToStatusChanges() {
     const core = getCore();
-    if (core && core.subscribe) {
+    if (core && core !== window && core.subscribe) {
         core.subscribe((newState) => {
+            let needsRender = false;
             if (newState.statuses) {
                 statuses = newState.statuses;
-                renderStatusListInstantlyUI();
+                needsRender = true;
+            }
+            // Core may return friend statuses under different keys
+            if (newState.friendsStatuses) {
+                friendsStatuses = newState.friendsStatuses;
+                needsRender = true;
+            }
+            if (newState.allStatuses) {
+                // Some cores put everything in allStatuses — split own vs friends
+                const uid = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
+                if (uid) {
+                    myStatuses = newState.allStatuses.filter(s => String(s.userId || s.user_id || '') === uid);
+                    friendsStatuses = newState.allStatuses.filter(s => String(s.userId || s.user_id || '') !== uid);
+                } else {
+                    friendsStatuses = newState.allStatuses;
+                }
+                needsRender = true;
             }
             if (newState.myStatuses) {
                 myStatuses = newState.myStatuses;
                 updateMyStatusPreviewUI();
             }
+            if (needsRender) renderStatusListInstantlyUI();
         });
     }
     
@@ -475,6 +523,14 @@ function subscribeToStatusChanges() {
     });
 
     // statusExpired fires when a status hits its countdown — remove it from UI instantly
+    // ── Raw socket: new_status from a friend → refresh friend statuses ──
+    document.addEventListener('new_status', (e) => {
+        if (typeof _fetchFriendStatusesDirect === 'function') _fetchFriendStatusesDirect();
+    });
+    document.addEventListener('status_created', (e) => {
+        if (typeof _fetchFriendStatusesDirect === 'function') _fetchFriendStatusesDirect();
+    });
+
     document.addEventListener('statusExpired', (e) => {
         const expiredId = e.detail && (e.detail.statusId || e.detail.id);
         if (!expiredId) return;
@@ -895,12 +951,16 @@ const UIFailsafe = {
     // CRITICAL: Re-bind all handlers after enabling UI
     setTimeout(() => {
         this._rebindAllHandlers();
-        // Also trigger initial render
+        // Trigger initial render
         if (typeof renderStatusListInstantlyUI === 'function') {
             renderStatusListInstantlyUI();
         }
         if (typeof updateMyStatusPreviewUI === 'function') {
             updateMyStatusPreviewUI();
+        }
+        // Fetch friend statuses directly from API on activate
+        if (typeof _fetchFriendStatusesDirect === 'function') {
+            _fetchFriendStatusesDirect();
         }
     }, 100);
     
@@ -932,8 +992,12 @@ const UIFailsafe = {
             this._rebindAllHandlers();
             if (isSessionReady()) {
                 const core = getCore();
-                if (core && core.loadStatuses) {
+                if (core && core !== window && core.loadStatuses) {
                     core.loadStatuses().catch(() => {});
+                }
+                // Also directly fetch friend statuses
+                if (typeof _fetchFriendStatusesDirect === 'function') {
+                    _fetchFriendStatusesDirect();
                 }
             }
         }
@@ -1735,10 +1799,26 @@ const UIBridge = {
             //    can display it without waiting for the core's async fetch ──
             if (incomingStatus && incomingStatus.id) {
                 const sid = String(incomingStatus.id);
-                // Module-level statuses array
+                const _myUid = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
+                const _ownerId = String(incomingStatus.userId || incomingStatus.user_id || (incomingStatus.user && incomingStatus.user.id) || '');
+                const _isMine = _myUid && _ownerId === _myUid;
+
+                // Module-level statuses array (all statuses, backward compat)
                 if (typeof statuses !== 'undefined' && Array.isArray(statuses)) {
                     if (!statuses.find(s => String(s.id) === sid)) {
                         statuses.unshift({ ...incomingStatus, id: sid });
+                    }
+                }
+                // ── KEY FIX: also inject into friendsStatuses if from a friend ──
+                if (!_isMine && typeof friendsStatuses !== 'undefined' && Array.isArray(friendsStatuses)) {
+                    if (!friendsStatuses.find(s => String(s.id) === sid)) {
+                        friendsStatuses.unshift({ ...incomingStatus, id: sid });
+                    }
+                }
+                // Own status → myStatuses
+                if (_isMine && typeof myStatuses !== 'undefined' && Array.isArray(myStatuses)) {
+                    if (!myStatuses.find(s => String(s.id) === sid)) {
+                        myStatuses.unshift({ ...incomingStatus, id: sid });
                     }
                 }
                 // Core statusState
@@ -1746,6 +1826,11 @@ const UIBridge = {
                     if (!statusState.statuses.find(s => String(s.id) === sid)) {
                         statusState.statuses.unshift({ ...incomingStatus, id: sid });
                     }
+                }
+                // Show Recent updates label
+                if (!_isMine) {
+                    const lbl = document.getElementById('recentUpdatesLabel');
+                    if (lbl) lbl.style.display = '';
                 }
             }
 
@@ -4299,7 +4384,17 @@ function renderSectionContent(sectionId) {
     switch(sectionId) {
         case 'allStatusSection':
             container = UIElements.allStatusList;
-            data = filterStatusesByPrivacy(statuses);
+            // Merge friend statuses with own statuses, excluding own from friends list
+            {
+                const _currentUid = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
+                const _friendOnly = Array.isArray(friendsStatuses)
+                    ? friendsStatuses.filter(s => {
+                        const _ownerId = String(s.userId || s.user_id || (s.user && s.user.id) || '');
+                        return !_currentUid || _ownerId !== _currentUid;
+                    })
+                    : [];
+                data = filterStatusesByPrivacy(_friendOnly);
+            }
             break;
         case 'friendsStatusSection':
             container = UIElements.friendsStatusList;
@@ -6642,14 +6737,44 @@ function renderStatusListInstantlyUI() {
     if (!container) return;
 
     const core = getCore();
-    let liveStatuses = (core && core.getStatuses && core.getStatuses())
-        || (typeof statusState !== 'undefined' && statusState.statuses)
-        || statuses
-        || [];
+
+    // ── Collect own statuses ──────────────────────────────────────────────
+    let ownStatuses = [];
+    if (core && core !== window && core.getStatuses && typeof core.getStatuses === 'function') {
+        ownStatuses = core.getStatuses() || [];
+    } else if (typeof statusState !== 'undefined' && Array.isArray(statusState.statuses)) {
+        ownStatuses = statusState.statuses;
+    } else {
+        ownStatuses = Array.isArray(statuses) ? statuses : [];
+    }
+
+    // ── Collect friend statuses ───────────────────────────────────────────
+    let friendData = [];
+    if (core && core !== window && core.getFriendsStatuses && typeof core.getFriendsStatuses === 'function') {
+        friendData = core.getFriendsStatuses() || [];
+    } else if (Array.isArray(friendsStatuses)) {
+        friendData = friendsStatuses;
+    }
+
+    // ── Merge: combine own + friend statuses, deduplicating by id ────────
+    const seen = new Set();
+    const currentUserId = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
+    // Friends panel: exclude own statuses (shown in My Status row instead)
+    const friendsOnly = friendData.filter(s => {
+        const sid = String(s.id);
+        if (seen.has(sid)) return false;
+        seen.add(sid);
+        // exclude own statuses from the friends list
+        const statusOwner = String(s.userId || s.user_id || (s.user && s.user.id) || '');
+        return !currentUserId || statusOwner !== currentUserId;
+    });
+    ownStatuses.forEach(s => seen.add(String(s.id)));
+
+    let liveStatuses = friendsOnly;
 
     // Normalise IDs to strings
     liveStatuses = liveStatuses.map(s => ({ ...s, id: String(s.id) }));
-    if (statuses && statuses.length > 0) {
+    if (Array.isArray(statuses) && statuses.length > 0) {
         statuses = statuses.map(s => ({ ...s, id: String(s.id) }));
     }
 
@@ -6657,11 +6782,11 @@ function renderStatusListInstantlyUI() {
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-comment-dots"></i>
-                <p>No statuses yet</p>
-                <p class="subtext">Be the first to post a status!</p>
+                <p>No recent updates</p>
+                <p class="subtext">Status updates from your contacts will appear here</p>
                 ${isAuthenticated() ? `
                     <button class="action-btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
-                        <i class="fas fa-plus"></i> Create Status
+                        <i class="fas fa-plus"></i> Add Status
                     </button>
                 ` : ''}
             </div>
@@ -6669,7 +6794,6 @@ function renderStatusListInstantlyUI() {
         return;
     }
 
-    // ── Use the grouped renderer so new friend statuses appear correctly ──
     renderStatusesListUI(container, liveStatuses);
 }
 
@@ -6977,6 +7101,9 @@ document.addEventListener('statusLifecycleChange', (e) => {
                     // Refresh data when becoming active
                     if (core && core.loadStatuses) {
                         core.loadStatuses().catch(() => {});
+                if (typeof _fetchFriendStatusesDirect === 'function') {
+                    _fetchFriendStatusesDirect();
+                }
                     }
                 }
             }
