@@ -4420,8 +4420,8 @@ function _declineVideoUpgrade() {
             // Show idle screen
             if (typeof window.showScreen === 'function') window.showScreen('idle');
 
-            // Release reset lock after short delay
-            setTimeout(function() { _isResetting = false; }, 300);
+            // ✅ FIX: Release reset lock immediately — 300ms delay was blocking second calls
+            _isResetting = false;
 
             _log('Full reset complete');
         }
@@ -4431,6 +4431,8 @@ function _declineVideoUpgrade() {
             callInfo = callInfo || {};
             _callDispatchedAt = Date.now();
             _callEndedAt = 0;
+            // ✅ FIX: Always clear reset lock when showing calling screen
+            _isResetting = false;
 
             _log('Showing calling screen →', callInfo.userName, callInfo.callType);
 
@@ -4827,12 +4829,17 @@ function _declineVideoUpgrade() {
             var callId = data.callId || data.id || null;
 
             // ✅ STALE-EVENT PROTECTION:
-            // Ignore CALL_ENDED that arrives within 4s of dispatching a NEW call
-            // (these are echoes from the previous call's cleanup on the WebSocket)
+            // Ignore CALL_ENDED that arrives within 5s of dispatching a NEW call
+            // AND the ended callId doesn't match the current active callId
             var msSinceDispatch = Date.now() - _callDispatchedAt;
-            if (_callDispatchedAt > 0 && msSinceDispatch < 4000 &&
-                (window.UIState && window.UIState.callState === 'calling' || window.UIState && window.UIState.callState === 'connected')) {
-                _log('Stale CALL_ENDED ignored (only', msSinceDispatch, 'ms since dispatch)');
+            var currentActiveId = (window.callsState && window.callsState.activeCallId)
+                               || (window.UIState && window.UIState.activeCallId)
+                               || null;
+            var isStaleEcho = _callDispatchedAt > 0 && msSinceDispatch < 5000
+                && (callId === null || callId === _lastCallEndedId
+                    || (currentActiveId && callId && callId !== currentActiveId));
+            if (isStaleEcho) {
+                _log('Stale CALL_ENDED ignored (', msSinceDispatch, 'ms since dispatch, callId:', callId, ')');
                 return;
             }
 

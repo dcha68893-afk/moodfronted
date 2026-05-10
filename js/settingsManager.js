@@ -222,7 +222,23 @@
                 }
             }
 
-            // Priority 2: Legacy moodchat_settings_<userId> key
+            // Priority 2: knecta_settings_cache raw (written by settings-core.js in AppSettings schema)
+            try {
+                const raw = localStorage.getItem('knecta_settings_cache');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    // shape: { data: { appearance:{}, notifications:{}, ... }, timestamp, version }
+                    const data = parsed.data || parsed;
+                    if (data && typeof data === 'object' && (data.appearance || data.notifications || data.privacy)) {
+                        this.currentSettings = this.mergeDeep(this.cloneDeep(this.defaultSettings), data);
+                        console.log('[SettingsManager] Loaded from knecta_settings_cache (AppSettings schema)');
+                        this._saveToLegacyKey();
+                        return;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            // Priority 3: Legacy moodchat_settings_<userId> key
             const legacyKey = _legacyKey(this.userId);
             try {
                 const saved = localStorage.getItem(legacyKey);

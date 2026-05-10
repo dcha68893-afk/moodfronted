@@ -1,3355 +1,2912 @@
 // =============================================
-// STATUS SYSTEM - PASSIVE IFRAME MODULE
-// DETERMINISTIC MICRO-FRONTEND VERSION v10.0
-// PARENT-AUTHORITY ARCHITECTURE - STRICT LIFECYCLE
-// PROTOCOL-COMPLIANT - ALL EXISTING FEATURES PRESERVED
-// LIFECYCLE SYSTEM: DETERMINISTIC STATE MACHINE (HANDSHAKE V3)
-// SANDBOX-SAFE STORAGE PROXY INTEGRATED
-// REAL END-TO-END STATUS SYSTEM - NO FALLBACKS
+// SETTINGS MODULE - REAL BACKEND-DRIVEN CONTROL SYSTEM
+// VERSION: 9.2.2 - FIXED EXPORTS & AUTH GUARDS
 // =============================================
 
-(function() {
-    'use strict';
-
 // =============================================
-// SESSION VALIDATION UTILITY - CRITICAL PATCH
+// SESSION VALIDATION UTILITY - CRITICAL GUARD
 // =============================================
 function __isValidSession(session) {
-    if (!session || typeof session !== 'object') return false;
+  if (!session) return false;
 
-    // Must have a token that is a non-empty string
-    if (!session.token || typeof session.token !== 'string' || session.token.length === 0) {
-        // In guest mode or cached mode, allow missing token temporarily
-        if (session.guestMode === true || session.isGuest === true) {
-            return true;
-        }
-        return false;
-    }
+  if (!session.token || typeof session.token !== 'string') return false;
 
-    // Check userId - accept various formats
-    let userId = session.userId;
-    if (!userId && session.user) {
-        userId = session.user.id || session.user.userId;
-    }
-    
-    // If no userId at all, might be valid if we have token
-    if (!userId && session.token) {
-        return true; // Token-only session is valid
-    }
-    
-    // If userId exists but is placeholder, reject
-    if (userId === 'user' || userId === 'default' || userId === 0 || userId === '0') {
-        return false;
-    }
+  const userId = session.userId;
+  if (userId === undefined || userId === null) return false;
+  if (userId === 'user' || userId === 'default' || userId === '' || userId === 'null' || userId === 'undefined') return false;
+  // Accept both number and numeric string (e.g. "42" or 42)
+  if (typeof userId === 'number' && (isNaN(userId) || userId === 0)) return false;
+  if (typeof userId === 'string' && (isNaN(Number(userId)) || Number(userId) === 0)) return false;
+  if (typeof userId !== 'number' && typeof userId !== 'string') return false;
 
-    return true;
+  return true;
 }
 
-// Store last valid session ID for deduplication
-let _lastValidSessionId = null;
-let _lastValidSessionHash = null;
-let _backgroundInitStarted = false;
-let _backgroundInitWithSessionStarted = false;
-
-function __getSessionHash(session) {
-    if (!session) return null;
-    const tokenPart = session.token ? session.token.substring(0, 16) : 'null';
-    const userIdPart = session.userId || session.user?.id || session.user?.userId || 'null';
-    return `${tokenPart}:${userIdPart}`;
-}
-
-function __isDuplicateSession(session) {
-    if (!session) return true;
-    
-    // Check by explicit sessionId if available
-    if (session.sessionId && _lastValidSessionId === session.sessionId) {
-        return true;
-    }
-    
-    // Otherwise use hash
-    const hash = __getSessionHash(session);
-    if (hash && _lastValidSessionHash === hash) {
-        return true;
-    }
-    
-    return false;
-}
-
-function __storeValidSessionId(session) {
-    if (session.sessionId) {
-        _lastValidSessionId = session.sessionId;
-    }
-    _lastValidSessionHash = __getSessionHash(session);
-}
 
 // =============================================
-// CLEAN CONSOLE LOGGING - SINGLE INSTANCE, NO SPAM
+// INITIALIZATION GUARD - PREVENT MULTIPLE INITIALIZATIONS
+// =============================================
+(function() {
+    if (window.__SETTINGS_CORE_INITIALIZED__) {
+        return;
+    }
+    window.__SETTINGS_CORE_INITIALIZED__ = true;
+    window.__SETTINGS_INITIALIZING__ = true;
+})();
+
+// =============================================
+// MODULE IDENTITY & VERSION
+// =============================================
+const MODULE_NAME = 'settings';
+const MODULE_VERSION = '9.2.2';
+const FRAME_ID = 'settings';
+let moduleId = `settings-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+// =============================================
+// GLOBAL DEBUG FLAG - MINIMAL NOISE
 // =============================================
 const DEBUG = false;
-const MODULE_NAME = "status"; // EXACT MATCH - DO NOT CHANGE
-const MODULE_VERSION = "10.0.0";
-
-// Track which messages have been logged - prevents duplicates
-const _loggedMessages = new Set();
-const _loggedStatuses = new Set();
-
-function logStatus(type, message, data = null) {
-    // Create a unique key for this message
-    const key = `${type}:${message}`;
-    
-    // If we've already logged this exact status, don't log again
-    if (_loggedStatuses.has(key)) {
-        return;
-    }
-    
-    // Mark as logged
-    _loggedStatuses.add(key);
-    
-    const now = Date.now();
-    const emoji = {
-        'INIT': '🚀',
-        'SENDING': '📤',
-        'WAITING': '⏳',
-        'SUCCESS': '✅',
-        'FAILED': '❌',
-        'READY': '🔵',
-        'WARNING': '⚠️',
-        'DISCONNECTED': '🔴',
-        'VIEW': '👁️',
-        'REACTION': '👍',
-        'POST': '📝',
-        'EXPIRE': '⌛',
-        'LIFECYCLE': '⚡'
-    }[type] || '📋';
-    
-    console.log(`%c[${MODULE_NAME}] ${emoji} ${type}: ${message}`, 
-        type === 'FAILED' || type === 'DISCONNECTED' ? 'color: #ff3b30; font-weight: bold;' :
-        type === 'SUCCESS' || type === 'READY' ? 'color: #34c759; font-weight: bold;' :
-        type === 'WARNING' ? 'color: #ff9500; font-weight: bold;' :
-        type === 'SENDING' || type === 'WAITING' ? 'color: #0084ff; font-weight: bold;' :
-        type === 'VIEW' ? 'color: #5856d6; font-weight: bold;' :
-        type === 'REACTION' ? 'color: #ff2d55; font-weight: bold;' :
-        type === 'POST' ? 'color: #64d2ff; font-weight: bold;' :
-        type === 'LIFECYCLE' ? 'color: #aa00ff; font-weight: bold;' :
-        'color: #5856d6; font-weight: bold;'
-    );
-    
-    if (data && Object.keys(data).length > 0) {
-        console.log('  📦', data);
-    }
-}
-
-// Debug functions - each logs only once
-const _debugLogs = new Set();
-function debugLog(...args) {
-    if (!DEBUG) return;
-    
-    const key = args.join('|');
-    if (_debugLogs.has(key)) return;
-    _debugLogs.add(key);
-    
-    console.log(`[${MODULE_NAME}]`, ...args);
-}
-
-const _debugErrors = new Set();
-function debugError(...args) {
-    if (!DEBUG) return;
-    
-    const key = args.join('|');
-    if (_debugErrors.has(key)) return;
-    _debugErrors.add(key);
-    
-    console.error(`[${MODULE_NAME} ERROR]`, ...args);
-}
-
-const _debugWarns = new Set();
-function debugWarn(...args) {
-    if (!DEBUG) return;
-    
-    const key = args.join('|');
-    if (_debugWarns.has(key)) return;
-    _debugWarns.add(key);
-    
-    console.warn(`[${MODULE_NAME} WARN]`, ...args);
-}
+window.__SETTINGS_DEBUG__ = DEBUG;
+let DEBUG_ENABLED = DEBUG;
+let CONSOLE_NOISE_SUPPRESSED = true;
 
 // =============================================
-// LIFECYCLE STATE MACHINE (STRICT DETERMINISTIC)
+// AUTH STATE - CRITICAL FIX
 // =============================================
-const LIFECYCLE_STATES = {
-    BOOT: 'BOOT',
-    INITIALIZING: 'INITIALIZING',
-    READY: 'READY',
-    WAIT_PARENT: 'WAIT_PARENT',
-    ACTIVE: 'ACTIVE'
-};
-
-let currentState = LIFECYCLE_STATES.BOOT;
-let childReadySent = false;
-let parentReadyReceived = false;
-let parentReadyData = null;
-let stateHistory = [];
-const maxHistorySize = 50;
-const stateListeners = new Set();
-const processedMessageIds = new Set();
-const sentMessageIds = new Set();
-
-// Parent ready promise
-let parentReadyResolver;
-let parentReadyPromise = new Promise((resolve) => {
-    parentReadyResolver = resolve;
-});
+let isAuthenticated = false;
+let authCheckComplete = false;
 
 // =============================================
-// LIFECYCLE TRANSITION VALIDATION
-// =============================================
-const validTransitions = {
-    [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
-    [LIFECYCLE_STATES.INITIALIZING]: [LIFECYCLE_STATES.READY],
-    [LIFECYCLE_STATES.READY]: [LIFECYCLE_STATES.WAIT_PARENT],
-    [LIFECYCLE_STATES.WAIT_PARENT]: [LIFECYCLE_STATES.ACTIVE],
-    [LIFECYCLE_STATES.ACTIVE]: []
-};
-
-function setState(nextState, reason = '') {
-    if (currentState === nextState) return true;
-
-    const allowed = validTransitions[currentState] || [];
-    if (!allowed.includes(nextState)) {
-        debugWarn(`Invalid transition: ${currentState} → ${nextState}`);
-        return false;
-    }
-
-    const fromState = currentState;
-    currentState = nextState;
-    
-    stateHistory.push({
-        from: fromState,
-        to: nextState,
-        timestamp: Date.now(),
-        reason
-    });
-    
-    if (stateHistory.length > maxHistorySize) {
-        stateHistory.shift();
-    }
-
-    console.log(`[${MODULE_NAME}] State: ${fromState} → ${nextState}${reason ? ` (${reason})` : ''}`);
-
-    notifyStateListeners(nextState, fromState, reason);
-    
-    return true;
-}
-
-function notifyStateListeners(toState, fromState, reason) {
-    stateListeners.forEach(listener => {
-        try {
-            listener(toState, fromState, reason);
-        } catch (e) {}
-    });
-    
-    window.dispatchEvent(new CustomEvent('statusLifecycleChange', {
-        detail: { state: toState, previous: fromState, reason }
-    }));
-}
-
-// =============================================
-// LIFECYCLE GUARDS - CRITICAL
-// =============================================
-function ensureActive(actionName) {
-    // Check BOTH state machines
-    const isLegacyActive = (currentState === LIFECYCLE_STATES.ACTIVE);
-    const isNewActive = (typeof _currentState !== 'undefined' && _currentState === LifecycleState.ACTIVE);
-    
-    if (!isLegacyActive && !isNewActive) {
-        console.warn(`[${MODULE_NAME}] ❌ Blocked action '${actionName}' - not ACTIVE (legacy: ${currentState}, new: ${typeof _currentState !== 'undefined' ? _currentState : 'undefined'})`);
-        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
-        return false;
-    }
-    return true;
-}
-
-function canSendUserMessages() {
-    return currentState === LIFECYCLE_STATES.ACTIVE;
-}
-
-function isDuplicateMessage(messageId) {
-    if (!messageId) return false;
-    if (processedMessageIds.has(messageId)) return true;
-    processedMessageIds.add(messageId);
-    
-    if (processedMessageIds.size > 1000) {
-        processedMessageIds.clear();
-    }
-    return false;
-}
-
-function isDuplicateSentMessage(messageId) {
-    if (!messageId) return false;
-    if (sentMessageIds.has(messageId)) return true;
-    sentMessageIds.add(messageId);
-    
-    if (sentMessageIds.size > 1000) {
-        sentMessageIds.clear();
-    }
-    return false;
-}
-
-function getLifecycleState() {
-    return {
-        state: currentState,
-        childReadySent,
-        parentReadyReceived,
-        history: stateHistory.slice(-10)
-    };
-}
-
-function resetLifecycle() {
-    currentState = LIFECYCLE_STATES.BOOT;
-    childReadySent = false;
-    parentReadyReceived = false;
-    parentReadyData = null;
-    stateHistory = [];
-    processedMessageIds.clear();
-    sentMessageIds.clear();
-    
-    parentReadyPromise = new Promise((resolve) => {
-        parentReadyResolver = resolve;
-    });
-}
-
-// =============================================
-// ID GENERATION UTILITIES
-// =============================================
-function generateMessageId() {
-    return 'msg_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
-}
-
-function generateRequestId() {
-    return 'req_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
-}
-
-function genId() {
-    return "msg_" + Math.random().toString(36).slice(2) + Date.now();
-}
-
-function genReqId() {
-    return "req_" + Math.random().toString(36).slice(2) + Date.now();
-}
-
-// =============================================
-// API REQUEST HANDLER (NO DIRECT FETCH - PARENT ROUTED)
-// =============================================
-const pendingRequests = new Map(); // requestId -> { resolve, reject, timeout, timestamp, type }
-const TIMING = {
-    // FIX: 60 s was too long — requests silently hung for a full minute before
-    // the cleanup interval even ran. 20 s gives slow connections enough time
-    // while still surfacing failures quickly. The cleanup now runs every 10 s
-    // so timed-out requests are rejected promptly instead of stacking up.
-    REQUEST_TIMEOUT: 20000,   // 20 s (was 60 s)
-    CLEANUP_INTERVAL: 10000   // 10 s (was 60 s)
-};
-
-function cleanupPendingRequests() {
-    const now = Date.now();
-    for (const [requestId, pending] of pendingRequests.entries()) {
-        if (now - pending.timestamp > TIMING.REQUEST_TIMEOUT) {
-            console.warn(`[${MODULE_NAME}] Request timeout: ${requestId} (${pending.type})`);
-            if (pending.reject) {
-                pending.reject(new Error(`Request timeout: ${pending.type}`));
-            }
-            pendingRequests.delete(requestId);
-        }
-    }
-}
-
-setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
-
-// In status-core.js, find the makeApiRequest function and update it:
-
-function makeApiRequest(endpoint, method, data = null, params = null) {
-    return new Promise((resolve, reject) => {
-        // FIX Bug B: When module is not yet ACTIVE (e.g. user posts before SESSION_DATA
-        // handshake completes), fall back to a direct fetch instead of hard-rejecting.
-        // This lets status creation work immediately without waiting for the iframe lifecycle.
-        if (!ensureActive(`API_REQUEST: ${endpoint}`)) {
-            // Attempt direct fetch fallback using token from any available source
-            const fallbackToken =
-                _sessionToken ||
-                (function() { try { return localStorage.getItem('moodchat_token') || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('accessToken') || null; } catch(_) { return null; } })();
-
-            if (!fallbackToken) {
-                reject(new Error(`Module not ACTIVE and no fallback token available (current: ${currentState})`));
-                return;
-            }
-
-            // Build URL — strip leading /api so we don't double-prefix
-            let directEndpoint = endpoint;
-            if (directEndpoint.startsWith('/api/')) directEndpoint = directEndpoint.substring(4);
-            if (!directEndpoint.startsWith('/')) directEndpoint = '/' + directEndpoint;
-
-            const getBase = () => {
-                if (typeof window.__getApiBase === 'function') return window.__getApiBase().replace(/\/api\/?$/, '');
-                const h = window.location.hostname;
-                if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:3000';
-                return window.location.origin;
-            };
-
-            const directUrl = getBase() + '/api' + directEndpoint;
-            const fetchOpts = {
-                method: method.toUpperCase(),
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + fallbackToken },
-                credentials: 'include'
-            };
-            if (data && method.toUpperCase() !== 'GET') fetchOpts.body = JSON.stringify(data);
-
-            logStatus('WARN', `makeApiRequest: module not ACTIVE — using direct fetch fallback for ${method} ${directEndpoint}`);
-
-            fetch(directUrl, fetchOpts)
-                .then(res => res.json().catch(() => ({ success: false, message: 'Non-JSON response' })).then(json => ({ res, json })))
-                .then(({ res, json }) => {
-                    if (!res.ok) {
-                        const err = new Error(json.message || json.error || `HTTP ${res.status}`);
-                        err.statusCode = res.status;
-                        reject(err);
-                    } else {
-                        // Strip outer wrapper same as handleApiResponse does
-                        let result = json;
-                        if (result && result.data !== undefined && result.success === true) result = result.data;
-                        if (result && result.status === 'success' && result.data !== undefined) result = result.data;
-                        resolve(result);
-                    }
-                })
-                .catch(err => reject(err));
-            return;
-        }
-        
-        // Get token directly from session
-        const token = getSessionToken();
-        const userId = getSessionUserId();
-        
-        // Normalize endpoint like other modules do
-        let normalizedEndpoint = endpoint;
-        if (normalizedEndpoint.startsWith('/api/')) {
-            normalizedEndpoint = normalizedEndpoint.substring(4);
-        }
-        if (!normalizedEndpoint.startsWith('/')) {
-            normalizedEndpoint = '/' + normalizedEndpoint;
-        }
-        
-        const requestId = generateRequestId();
-        const timestamp = Date.now();
-        
-        // FIXED: Enhanced timeout with retry logic
-        const requestTimeout = setTimeout(() => {
-            if (pendingRequests.has(requestId)) {
-                pendingRequests.delete(requestId);
-                reject(new Error(`API request timeout: ${endpoint}`));
-            }
-        }, TIMING.REQUEST_TIMEOUT);
-        
-        pendingRequests.set(requestId, {
-            resolve,
-            reject,
-            timestamp,
-            type: endpoint,
-            timeout: requestTimeout
-        });
-        
-        // Include token in the payload so parent doesn't need to fetch it
-        const message = {
-            id: generateMessageId(),
-            type: 'API_REQUEST',
-            source: MODULE_NAME,
-            target: 'parent',
-            requestId: requestId,
-            payload: {
-                endpoint: normalizedEndpoint,
-                method: method.toUpperCase(),
-                body: data || null,
-                params: params || null,
-                token: token,  // ← ADD THIS - send token directly
-                userId: userId // ← ADD THIS - send userId
-            },
-            timestamp: timestamp
-        };
-        
-        try {
-            if (!window.parent || window.parent === window) {
-                throw new Error('No parent window');
-            }
-            window.parent.postMessage(message, '*');
-            logStatus('SENDING', `API_REQUEST: ${method} ${normalizedEndpoint} (token: ${!!token})`);
-        } catch (error) {
-            console.error(`[${MODULE_NAME}] Failed to send API_REQUEST:`, error);
-            if (pendingRequests.has(requestId)) {
-                const pending = pendingRequests.get(requestId);
-                if (pending.timeout) clearTimeout(pending.timeout);
-                pendingRequests.delete(requestId);
-            }
-            reject(error);
-        }
-    });
-}
-
-// Handle API_RESPONSE from parent
-function handleApiResponse(data) {
-    const requestId = data.requestId || data.payload?.requestId;  // also check nested
-    const response = data.payload || data;
-    
-    if (!pendingRequests.has(requestId)) {
-        console.warn(`[${MODULE_NAME}] No pending request for: ${requestId}`);
-        // Still dispatch for UI listeners
-        document.dispatchEvent(new CustomEvent('apiResponse', { detail: data }));
-        return;
-    }
-    const pending = pendingRequests.get(requestId);
-    
-    if (pending.timeout) {
-        clearTimeout(pending.timeout);
-    }
-    
-    pendingRequests.delete(requestId);
-    
-    // Check if response indicates failure
-    const isFailed = response && (
-        response.success === false ||
-        (response.statusCode && response.statusCode >= 400)
-    );
-    
-    if (isFailed) {
-        const errMsg = response.error || response.message || 'API request failed';
-        const err = new Error(errMsg);
-        // Attach the HTTP status code so isAuthorizationFailure() can match numerically
-        err.statusCode = response.statusCode || 0;
-        console.error(`[${MODULE_NAME}] API request failed (${err.statusCode}): ${errMsg}`);
-        pending.reject(err);
-    } else {
-        // Extract data from response
-        let result = response;
-        
-        // Handle different response formats
-        if (result && result.data !== undefined && result.success === true) {
-            result = result.data;
-        }
-        if (result && result.status === 'success' && result.data !== undefined) {
-            result = result.data;
-        }
-        
-        pending.resolve(result);
-    }
-    document.dispatchEvent(new CustomEvent('apiResponse', { detail: data }));
-}
-
-// =============================================
-// STORAGE PROXY - SANDBOX-SAFE, NO DIRECT STORAGE ACCESS
-// =============================================
-const StorageProxy = {
-    _pendingRequests: new Map(),
-    _requestCounter: 0,
-    
-    get(key) {
-        return new Promise((resolve, reject) => {
-            const requestId = `storage_get_${++this._requestCounter}_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
-            
-            const timeout = setTimeout(() => {
-                if (this._pendingRequests.has(requestId)) {
-                    this._pendingRequests.delete(requestId);
-                    reject(new Error(`Storage get timeout for key: ${key}`));
-                }
-            }, 5000);
-            
-            this._pendingRequests.set(requestId, { resolve, reject, timeout });
-            
-            parent.postMessage({
-                type: 'STORAGE_GET',
-                key,
-                requestId,
-                module: MODULE_NAME,
-                timestamp: Date.now()
-            }, '*');
-        });
-    },
-    
-    set(key, value) {
-        parent.postMessage({
-            type: 'STORAGE_SET',
-            key,
-            value: typeof value === 'string' ? value : JSON.stringify(value),
-            module: MODULE_NAME,
-            timestamp: Date.now()
-        }, '*');
-    },
-    
-    remove(key) {
-        parent.postMessage({
-            type: 'STORAGE_REMOVE',
-            key,
-            module: MODULE_NAME,
-            timestamp: Date.now()
-        }, '*');
-    },
-    
-    clear() {
-        parent.postMessage({
-            type: 'STORAGE_CLEAR',
-            module: MODULE_NAME,
-            timestamp: Date.now()
-        }, '*');
-    },
-    
-    async getJSON(key, defaultValue = null) {
-        try {
-            const value = await this.get(key);
-            if (value === null || value === undefined) return defaultValue;
-            try {
-                return JSON.parse(value);
-            } catch {
-                return value;
-            }
-        } catch {
-            return defaultValue;
-        }
-    },
-    
-    setJSON(key, value) {
-        this.set(key, JSON.stringify(value));
-    },
-    
-    handleResponse(event) {
-        if (event.data?.type === 'STORAGE_RESULT') {
-            const { requestId, value, error } = event.data;
-            const pending = this._pendingRequests.get(requestId);
-            if (pending) {
-                clearTimeout(pending.timeout);
-                this._pendingRequests.delete(requestId);
-                if (error) {
-                    pending.reject(new Error(error));
-                } else {
-                    pending.resolve(value);
-                }
-            }
-        }
-    }
-};
-
-// =============================================
-// MESSAGE GUARD - DEDUPLICATION
-// =============================================
-const MessageGuard = {
-    _seen: new Set(),
-    _maxSize: 1000,
-    
-    isDuplicate(id) {
-        if (!id) return false;
-        if (this._seen.has(id)) return true;
-        this._seen.add(id);
-        
-        if (this._seen.size > this._maxSize) {
-            const first = this._seen.values().next().value;
-            this._seen.delete(first);
-        }
-        
-        return false;
-    },
-    
-    clear() {
-        this._seen.clear();
-    }
-};
-
-// =============================================
-// DETERMINISTIC LIFECYCLE STATE MACHINE (HANDSHAKE V3)
+// STRICT LIFECYCLE STATE MACHINE - DETERMINISTIC HANDSHAKE
 // =============================================
 const LifecycleState = {
     BOOT: 'BOOT',
     INITIALIZING: 'INITIALIZING',
+    WAITING_AUTH: 'WAITING_AUTH',
     READY: 'READY',
     WAIT_PARENT: 'WAIT_PARENT',
     ACTIVE: 'ACTIVE'
 };
 
-let _currentState = LifecycleState.BOOT;
-let _previousState = null;
-let _childReadySent = false;
-let _parentReadyReceived = false;
-let _transitionLock = false;
-let _parentReady = false;
+let currentState = LifecycleState.BOOT;
+let stateHistory = [];
+let isReady = false;
+let initializationLock = false;
 
-const _validTransitions = {
-    [LifecycleState.BOOT]: [LifecycleState.INITIALIZING],
-    [LifecycleState.INITIALIZING]: [LifecycleState.READY],
-    [LifecycleState.READY]: [LifecycleState.WAIT_PARENT],
-    [LifecycleState.WAIT_PARENT]: [LifecycleState.ACTIVE],
-    [LifecycleState.ACTIVE]: []
+// Handshake tracking - STRICT ONCE RULE
+let childReadySent = false;
+let parentReadyReceived = false;
+let moduleRegistered = false;
+let registrationCompleted = false;
+
+// Message deduplication
+const processedMessages = new Set();
+const sentMessageIds = new Set();
+const MAX_PROCESSED_MESSAGES = 100;
+
+// Pre-active message queue
+let messageQueue = [];
+let queueFlushed = false;
+
+// =============================================
+// SESSION DEDUPLICATION TRACKING
+// =============================================
+let _lastSessionId = null;
+let _currentValidSession = null;
+
+// =============================================
+// REQUEST QUEUE FOR AUTH-BLOCKED CALLS
+// =============================================
+let requestQueue = [];
+let queueProcessing = false;
+
+// =============================================
+// CENTRALIZED AUTHORIZED REQUEST - NO DIRECT FETCH
+// =============================================
+const pendingRequests = new Map();
+
+function authorizedRequest(endpoint, options = {}) {
+    return new Promise((resolve, reject) => {
+        // Block requests if not authenticated
+        if (!isAuthenticated) {
+            if (DEBUG) console.warn(`[${MODULE_NAME}] ⏳ Auth not ready, queuing request: ${endpoint}`);
+            requestQueue.push(() => authorizedRequest(endpoint, options).then(resolve).catch(reject));
+            return;
+        }
+
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+        const method = options.method || 'GET';
+        
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📡 API Request: ${method} ${endpoint}`);
+        }
+        
+        const timeoutId = setTimeout(() => {
+            if (pendingRequests.has(requestId)) {
+                pendingRequests.delete(requestId);
+                reject(new Error(`Request timeout: ${endpoint}`));
+            }
+        }, 30000);
+        
+        const handler = (event) => {
+            if (event.data?.type === 'API_RESPONSE' && 
+                event.data?.requestId === requestId) {
+                
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                pendingRequests.delete(requestId);
+                
+                // FIX: chat.html sends { type:'API_RESPONSE', requestId, payload:{success,data,statusCode} }
+                // so we must read event.data.payload first, not event.data.response
+                const response = event.data.payload || event.data.response || event.data;
+                
+                // Handle auth failures
+                if (response.statusCode === 401 || response.status === 401 || response.message === 'Authentication required') {
+                    console.error(`[${MODULE_NAME}] ❌ Unauthorized: ${endpoint}`);
+                    
+                    window.parent.postMessage({
+                        type: 'AUTH_ERROR',
+                        module: MODULE_NAME,
+                        timestamp: Date.now()
+                    }, '*');
+                    
+                    reject(new Error('Authentication required'));
+                    return;
+                }
+                
+                if (DEBUG) {
+                    console.log(`[${MODULE_NAME}] ✅ Response: ${method} ${endpoint}`);
+                }
+                resolve(response);
+            }
+            
+            if (event.data?.type === 'API_ERROR' && 
+                event.data?.requestId === requestId) {
+                
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handler);
+                pendingRequests.delete(requestId);
+                
+                console.error(`[${MODULE_NAME}] ❌ API Error: ${endpoint}`, event.data.error);
+                reject(new Error(event.data.error || 'API request failed'));
+            }
+        };
+        
+        pendingRequests.set(requestId, { resolve, reject, timeoutId });
+        window.addEventListener('message', handler);
+        
+        // Send request to parent - use payload wrapper so chat.html reads it correctly
+        window.parent.postMessage({
+            type: 'API_REQUEST',
+            requestId: requestId,
+            source: MODULE_NAME,
+            module: MODULE_NAME,
+            endpoint: normalizeEndpoint(endpoint),
+            method: method,
+            body: options.body,
+            data: options.body,
+            headers: options.headers || {},
+            payload: {
+                requestId: requestId,
+                endpoint: normalizeEndpoint(endpoint),
+                method: method,
+                body: options.body,
+                data: options.body,
+                source: MODULE_NAME
+            },
+            timestamp: Date.now()
+        }, '*');
+    });
+}
+
+// Process queued requests after auth is ready
+async function processRequestQueue() {
+    if (queueProcessing) return;
+    if (!isAuthenticated) return;
+    
+    queueProcessing = true;
+    
+    while (requestQueue.length > 0) {
+        const queuedRequest = requestQueue.shift();
+        try {
+            await queuedRequest();
+        } catch (error) {
+            console.error(`[${MODULE_NAME}] ❌ Queued request failed:`, error);
+        }
+    }
+    
+    queueProcessing = false;
+}
+
+// =============================================
+// OFFLINE QUEUE MANAGER - PERSISTS PENDING UPDATES
+// =============================================
+const OfflineQueue = {
+    _queue: [],
+    _storageKey: 'knecta_offline_queue',
+    _online: navigator.onLine !== false,
+    _syncInProgress: false,
+    _watchers: [],
+    
+    init() {
+        this._loadQueue();
+        this._setupOnlineListeners();
+        console.log(`[${MODULE_NAME}] 📦 OfflineQueue initialized, online: ${this._online}, pending: ${this._queue.length}`);
+    },
+    
+    _loadQueue() {
+        try {
+            const saved = localStorage.getItem(this._storageKey);
+            if (saved) {
+                this._queue = JSON.parse(saved);
+                // Clean up old entries (> 7 days)
+                const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+                this._queue = this._queue.filter(item => item.timestamp > weekAgo);
+                this._saveQueue();
+            }
+        } catch (e) {}
+    },
+    
+    _saveQueue() {
+        try {
+            localStorage.setItem(this._storageKey, JSON.stringify(this._queue));
+        } catch (e) {}
+    },
+    
+    _setupOnlineListeners() {
+        window.addEventListener('online', () => {
+            console.log(`[${MODULE_NAME}] 🌐 Browser came online`);
+            this._online = true;
+            this._triggerWatchers();
+            if (this.hasPending()) {
+                console.log(`[${MODULE_NAME}] 📤 Syncing ${this._queue.length} pending updates`);
+                this.syncAll();
+            }
+        });
+        
+        window.addEventListener('offline', () => {
+            console.log(`[${MODULE_NAME}] 📴 Browser went offline`);
+            this._online = false;
+        });
+    },
+    
+    isOnline() {
+        return this._online && navigator.onLine !== false;
+    },
+    
+    enqueue(section, key, value) {
+        const item = {
+            id: `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            section,
+            key,
+            value,
+            timestamp: Date.now(),
+            retries: 0
+        };
+        this._queue.push(item);
+        this._saveQueue();
+        
+        // Update UI badge
+        this._updateBadge();
+        
+        console.log(`[${MODULE_NAME}] 📦 Queued: ${section}.${key} (total: ${this._queue.length})`);
+    },
+    
+    async syncAll(sendFunction = null) {
+        if (this._syncInProgress) return false;
+        if (!this.isOnline()) return false;
+        if (this._queue.length === 0) return true;
+        
+        this._syncInProgress = true;
+        console.log(`[${MODULE_NAME}] 🔄 Syncing ${this._queue.length} queued updates`);
+        
+        const failed = [];
+        
+        for (const item of this._queue) {
+            try {
+                let success = false;
+                
+                if (sendFunction) {
+                    const result = await sendFunction(item.section, item.key, item.value);
+                    success = result && result.success;
+                } else if (typeof SettingsState?._sendUpdateToBackend === 'function') {
+                    const result = await SettingsState._sendUpdateToBackend(item.section, item.key, item.value);
+                    success = result && result.success;
+                }
+                
+                if (success) {
+                    console.log(`[${MODULE_NAME}] ✅ Synced: ${item.section}.${item.key}`);
+                } else {
+                    item.retries++;
+                    if (item.retries < 5) {
+                        failed.push(item);
+                    } else {
+                        console.warn(`[${MODULE_NAME}] ⚠️ Dropping item after ${item.retries} retries: ${item.section}.${item.key}`);
+                    }
+                }
+            } catch (error) {
+                item.retries++;
+                if (item.retries < 5) {
+                    failed.push(item);
+                }
+                console.error(`[${MODULE_NAME}] ❌ Sync failed for ${item.section}.${item.key}:`, error.message);
+            }
+        }
+        
+        this._queue = failed;
+        this._saveQueue();
+        this._updateBadge();
+        this._syncInProgress = false;
+        
+        console.log(`[${MODULE_NAME}] 📦 Sync complete, ${this._queue.length} remaining`);
+        return this._queue.length === 0;
+    },
+    
+    hasPending() {
+        return this._queue.length > 0;
+    },
+    
+    getPendingCount() {
+        return this._queue.length;
+    },
+    
+    clear() {
+        this._queue = [];
+        this._saveQueue();
+        this._updateBadge();
+    },
+    
+    _updateBadge() {
+        const count = this._queue.length;
+        
+        // Dispatch event for UI to show badge
+        const event = new CustomEvent('offlineQueueUpdated', {
+            detail: { pendingCount: count, hasPending: count > 0 }
+        });
+        window.dispatchEvent(event);
+        
+        // Try to update any existing badge element
+        try {
+            let badge = document.getElementById('offlineQueueBadge');
+            if (count > 0) {
+                if (!badge) {
+                    badge = document.createElement('div');
+                    badge.id = 'offlineQueueBadge';
+                    badge.style.cssText = `
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        background: var(--warning-color, #ff9800);
+                        color: white;
+                        border-radius: 20px;
+                        padding: 8px 16px;
+                        font-size: 12px;
+                        z-index: 10000;
+                        cursor: pointer;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    `;
+                    badge.innerHTML = `
+                        <span>📦</span>
+                        <span>${count} pending sync</span>
+                        <button style="background: white; border: none; border-radius: 4px; padding: 2px 8px; cursor: pointer;">Sync now</button>
+                    `;
+                    badge.querySelector('button').onclick = () => this.syncAll();
+                    document.body.appendChild(badge);
+                } else {
+                    badge.querySelector('span:last-child').textContent = `${count} pending sync`;
+                    badge.style.display = 'flex';
+                }
+            } else if (badge) {
+                badge.style.display = 'none';
+            }
+        } catch (e) {}
+    },
+    
+    watchOnline(callback) {
+        this._watchers.push(callback);
+    },
+    
+    _triggerWatchers() {
+        this._watchers.forEach(cb => {
+            try { cb(); } catch (e) {}
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            online: this.isOnline(),
+            pendingCount: this._queue.length,
+            queue: this._queue.slice(0, 10)
+        };
+    }
 };
 
-const _sentMessages = new Set();
-
-function transitionTo(nextState, reason = '') {
-    if (_transitionLock) {
-        debugWarn(`[Lifecycle] Transition locked - cannot transition ${_currentState} → ${nextState}`, reason);
-        return false;
-    }
-    
-    if (_currentState === nextState) {
-        return true;
-    }
-    
-    const allowed = _validTransitions[_currentState] || [];
-    if (!allowed.includes(nextState)) {
-        debugWarn(`[Lifecycle] Invalid transition: ${_currentState} → ${nextState}`, reason);
-        logStatus('LIFECYCLE', `Invalid transition blocked: ${_currentState} → ${nextState}`);
-        return false;
-    }
-    
-    _transitionLock = true;
-    
-    _previousState = _currentState;
-    _currentState = nextState;
-    
-    const transitionKey = `lifecycle_${_previousState}_to_${nextState}`;
-    if (!_loggedMessages.has(transitionKey)) {
-        _loggedMessages.add(transitionKey);
-        logStatus('LIFECYCLE', `${_previousState} → ${nextState}${reason ? ` (${reason})` : ''}`);
-    }
-    
-    _transitionLock = false;
-    
-    if (nextState === LifecycleState.ACTIVE) {
-        onModuleActive();
-    }
-    
-    return true;
-}
-
-function isInState(state) {
-    return _currentState === state;
-}
-
-function canTransitionTo(state) {
-    const allowed = _validTransitions[_currentState] || [];
-    return allowed.includes(state);
-}
-
-function assertActive(actionName) {
-    if (_currentState !== LifecycleState.ACTIVE) {
-        debugWarn(`[Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${_currentState})`);
-        logStatus('LIFECYCLE', `Blocked: ${actionName} - not ACTIVE`);
-        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
-        return false;
-    }
-    return true;
-}
+// Initialize OfflineQueue
+OfflineQueue.init();
 
 // =============================================
-// WIRE EXTERNAL STATUS MODULES
-// FIX: StatusAPI / StatusCache / StatusWebSocket were never initialized from
-// within status-core so they stayed === false / undefined in diagnostics and
-// real-time socket events were never registered.
-// Called from onModuleActive() so wiring happens the instant the lifecycle
-// transitions to ACTIVE — before any background data loads.
+// REAL SETTINGS STATE MANAGEMENT - NO MOCK DATA
 // =============================================
-let _statusModulesWired = false;
-
-function wireStatusWebSocket() {
-    // FIX: Don't guard with _statusModulesWired at the top level —
-    // the socket may not have been available on the first call (race with
-    // app_realtime_socket.js). We always attempt to re-wire StatusWebSocket.
-
-    // 1. Wire StatusWebSocket — registers all socket.on listeners
-    if (window.StatusWebSocket && typeof window.StatusWebSocket.init === 'function') {
-        if (!window.StatusWebSocket.isConnected) {
-            const wired = window.StatusWebSocket.init();
-            logStatus('SUCCESS', `StatusWebSocket wired: ${wired}`);
-        } else {
-            logStatus('SUCCESS', 'StatusWebSocket already connected');
+const SettingsState = {
+    loaded: false,
+    loading: false,
+    data: {},
+    lastSynced: null,
+    syncInProgress: false,
+    pendingUpdates: new Map(),
+    listeners: new Set(),
+    
+    get() {
+        return this.data;
+    },
+    
+    getSection(section) {
+        return this.data[section] || null;
+    },
+    
+    getSetting(section, key, defaultValue = null) {
+        return this.data[section]?.[key] ?? defaultValue;
+    },
+    
+    async update(section, key, value) {
+        // STEP 1: Update AppSettings FIRST (single source of truth)
+        // This triggers all module subscriptions instantly
+        if (window.AppSettings) {
+            window.AppSettings.set(section + '.' + key, value);
         }
-    } else {
-        // Script may not be loaded yet — retry after a short delay
-        if (!_statusModulesWired) {
-            setTimeout(() => {
-                if (window.StatusWebSocket && typeof window.StatusWebSocket.init === 'function') {
-                    window.StatusWebSocket.init();
-                    logStatus('SUCCESS', 'StatusWebSocket wired (delayed)');
-                } else {
-                    logStatus('WARNING', 'StatusWebSocket not available — real-time events may be missing');
-                }
-            }, 800);
-        }
-    }
 
-    // Only run one-time setup once
-    if (_statusModulesWired) return;
-    _statusModulesWired = true;
+        // STEP 2: Update local state for backwards compatibility
+        if (!this.data[section]) this.data[section] = {};
+        this.data[section][key] = value;
+        this._saveToCache();
 
-    // 2. Ensure StatusCache IndexedDB is open
-    if (window.StatusCache && typeof window.StatusCache.init === 'function') {
-        window.StatusCache.init()
-            .then(() => logStatus('SUCCESS', 'StatusCache ready'))
-            .catch(err => logStatus('WARNING', `StatusCache init failed: ${err.message}`));
-    } else {
-        logStatus('WARNING', 'StatusCache not found — offline caching disabled');
-    }
+        // STEP 3: Emit unified event for any remaining legacy listeners
+        window.dispatchEvent(new CustomEvent('appSettingsChanged', {
+            detail: { 
+                settings: window.AppSettings?.getAll() || this.data,
+                path: section + '.' + key,
+                value: value,
+                timestamp: Date.now()
+            }
+        }));
 
-    // 3. Confirm StatusAPI is present
-    if (window.StatusAPI) {
-        logStatus('SUCCESS', 'StatusAPI ready');
-    } else {
-        logStatus('WARNING', 'StatusAPI not found — status-api.js may not be loaded');
-    }
-
-    // 4. Re-wire when KynectaRealtimeManager authenticates (fires after ACTIVE on cold start)
-    window.addEventListener('kyn:realtimeReady', function() {
-        if (window.StatusWebSocket && !window.StatusWebSocket.isConnected) {
-            window.StatusWebSocket.socket = null; // force re-init
-            window.StatusWebSocket.init();
-            logStatus('SUCCESS', 'StatusWebSocket re-wired after kyn:realtimeReady');
-        }
-    });
-
-    // ── FIX 5: DOM event listeners ────────────────────────────────────────────
-    // app_realtime_socket.js dispatches both window and document CustomEvents
-    // (e.g. document.dispatchEvent(new CustomEvent('new_status', {detail: payload})))
-    // for every socket event it receives. Register listeners here so that
-    // handleRealtimeStatusEvent fires even when the socket bridge postMessage
-    // path doesn't find the iframe, OR when status.html is in standalone mode.
-    const _domStatusEvents = [
-        'new_status', 'status:created', 'status_created',
-        'status:updated', 'status_updated',
-        'status:deleted', 'status_deleted'
-    ];
-    const _domStatusHandler = function(evt) {
-        const payload = evt.detail || {};
-        handleRealtimeStatusEvent(evt.type, payload);
-    };
-    _domStatusEvents.forEach(evtName => {
-        // window catches kyn: prefixed events; document catches raw name events
-        document.addEventListener(evtName, _domStatusHandler);
-        window.addEventListener(`kyn:${evtName}`, _domStatusHandler);
-    });
-    logStatus('INFO', 'DOM status event listeners registered');
-}
-
-function onModuleActive() {
-    logStatus('LIFECYCLE', 'Module ACTIVE - safe zone entered');
-
-    // FIX: Wire StatusWebSocket / StatusAPI / StatusCache immediately on ACTIVE
-    // so real-time events are registered before any background data loads.
-    wireStatusWebSocket();
-    
-    // Only request session if we have a valid one already or need to get one
-    if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
-        logStatus('SUCCESS', 'Active with valid session');
-    } else {
-        requestSession();
-    }
-    
-    if (typeof startBackgroundInitialization === 'function') {
-        setTimeout(() => {
-            startBackgroundInitialization();
-        }, 100);
-    }
-    
-    // Dispatch moduleActive event for UI to pick up
-    document.dispatchEvent(new CustomEvent('moduleActive', {
-        detail: { module: MODULE_NAME, timestamp: Date.now(), state: 'ACTIVE' }
-    }));
-    
-    // Also dispatch a more specific event
-    window.dispatchEvent(new CustomEvent('statusModuleActive', {
-        detail: { timestamp: Date.now() }
-    }));
-}
-
-
-function sendChildReady() {
-    if (_childReadySent) {
-        debugWarn('[Lifecycle] CHILD_READY already sent — skipping');
-        return false;
-    }
-
-    // Allow from INITIALIZING or READY state
-    if (_currentState !== LifecycleState.READY && _currentState !== LifecycleState.INITIALIZING) {
-        debugWarn(`[Lifecycle] Cannot send CHILD_READY — invalid state: ${_currentState}`);
-        logStatus('LIFECYCLE', `CHILD_READY blocked - current state: ${_currentState}`);
-        return false;
-    }
-
-    // If in INITIALIZING, transition to READY first
-    if (_currentState === LifecycleState.INITIALIZING) {
-        transitionTo(LifecycleState.READY, 'preparing_to_send_child_ready');
-    }
-
-    _childReadySent = true;
-
-    const messageId = `child_ready_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
-    
-    if (_sentMessages.has(messageId)) {
-        debugWarn('[Lifecycle] Duplicate CHILD_READY prevented');
-        return false;
-    }
-    _sentMessages.add(messageId);
-
-    parent.postMessage({
-        type: "CHILD_READY",
-        source: MODULE_NAME,  // ADD THIS - parent checks source field
-        module: MODULE_NAME,
-        moduleVersion: '10.0',
-        messageId: messageId,
-        capabilities: [
-            'view_statuses',
-            'post_statuses',
-            'react_to_statuses',
-            'track_views',
-            'expiration_management'
-        ],
-        timestamp: Date.now()
-    }, "*");
-
-    transitionTo(LifecycleState.WAIT_PARENT, 'child_ready_sent');
-    
-    logStatus('LIFECYCLE', 'CHILD_READY sent - waiting for parent (NO RETRIES)');
-    return true;
-}
-
-function handleParentReady(messageData) {
-    if (_parentReadyReceived) {
-        debugWarn('[Lifecycle] PARENT_READY already received — ignoring duplicate');
-        logStatus('LIFECYCLE', 'Duplicate PARENT_READY ignored');
-        return;
-    }
-
-    if (_currentState !== LifecycleState.WAIT_PARENT) {
-        debugWarn(`[Lifecycle] Unexpected PARENT_READY in state: ${_currentState} — ignoring`);
-        logStatus('LIFECYCLE', `PARENT_READY received in unexpected state: ${_currentState} - ignoring`);
-        return;
-    }
-
-    _parentReadyReceived = true;
-    _parentReady = true;
-    parentReady = true; // FIX: also set the legacy parentReady flag so flushQueue works
-
-    logStatus('LIFECYCLE', 'PARENT_READY received');
-
-    const sessionData = messageData.session || messageData.payload?.session || null;
-    
-    if (sessionData) {
-        // Validate session before handling
-        if (__isValidSession(sessionData)) {
-            if (!__isDuplicateSession(sessionData)) {
-                handleSession(sessionData);
-                __storeValidSessionId(sessionData);
+        // STEP 4: Persist to backend when possible (non-blocking)
+        if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
+            if (!OfflineQueue.isOnline()) {
+                OfflineQueue.enqueue(section, key, value);
+                this._notify('update-queued', { section, key, value, reason: 'offline-pre-auth' });
             } else {
-                // Rate limit duplicate session warnings to reduce noise
-                if (!window._lastDuplicateSessionWarning || Date.now() - window._lastDuplicateSessionWarning > 10000) {
-                    logStatus('WARNING', 'Duplicate session data ignored');
-                    window._lastDuplicateSessionWarning = Date.now();
+                requestQueue.push(async () => {
+                    try { await this._sendUpdateToBackend(section, key, value); } catch (e) {}
+                });
+            }
+            return { success: true, offline: !OfflineQueue.isOnline() };
+        }
+
+        return this._performUpdate(section, key, value);
+    },
+    
+    async _performUpdate(section, key, value) {
+        // NOTE: Local apply + cache save + global broadcast already done in update().
+        // This function only handles the backend sync path (called when auth is ACTIVE).
+        const oldValue = this.getSetting(section, key);
+    
+        // If offline, queue for later sync and return success
+        if (!OfflineQueue.isOnline()) {
+            OfflineQueue.enqueue(section, key, value);
+            this._notify('update-queued', { section, key, value, reason: 'offline' });
+            return { success: true, offline: true };
+        }
+    
+        // If online, try backend
+        try {
+            const response = await this._sendUpdateToBackend(section, key, value);
+            if (response && response.success) {
+                this.lastSynced = Date.now();
+                this._notify('update-success', { section, key, value, oldValue });
+                return { success: true };
+            } else {
+                OfflineQueue.enqueue(section, key, value);
+                this._notify('update-queued', { section, key, value, reason: 'server-error' });
+                return { success: true, queued: true };
+            }
+        } catch (error) {
+            OfflineQueue.enqueue(section, key, value);
+            this._notify('update-queued', { section, key, value, reason: error.message });
+            return { success: true, queued: true };
+        }
+    },
+    
+    async _sendUpdateToBackend(section, key, value) {
+        // Route each settings section to the correct backend endpoint.
+        // settings.js has: GET /, PUT /, PUT /profile, PUT /notifications, PUT /privacy, PUT /theme, PUT /language
+        try {
+            let endpoint, method, body;
+
+            switch (section) {
+                case 'appearance':
+                    if (key === 'theme') {
+                        endpoint = '/api/settings/theme';
+                        method   = 'PUT';
+                        body     = { theme: value };
+                    } else if (key === 'language') {
+                        endpoint = '/api/settings/language';
+                        method   = 'PUT';
+                        body     = { language: value };
+                    } else {
+                        // accentColor, fontSize, etc. — use profile endpoint
+                        endpoint = '/api/settings/profile';
+                        method   = 'PUT';
+                        body     = { [key]: value, section };
+                    }
+                    break;
+
+                case 'notifications':
+                    endpoint = '/api/settings/notifications';
+                    method   = 'PUT';
+                    body     = { [key]: value };
+                    break;
+
+                case 'privacy':
+                    endpoint = '/api/settings/privacy';
+                    method   = 'PUT';
+                    body     = { [key]: value };
+                    break;
+
+                case 'account':
+                case 'profile':
+                    endpoint = '/api/settings/profile';
+                    method   = 'PUT';
+                    body     = { [key]: value, section };
+                    break;
+
+                default:
+                    // chat, calls, groups, friends, advanced, status
+                    // Use the bulk PUT / endpoint so all sections are persisted
+                    endpoint = '/api/settings';
+                    method   = 'PUT';
+                    body     = { [section]: { [key]: value } };
+                    break;
+            }
+
+            const response = await authorizedRequest(endpoint, { method, body });
+            return { success: response?.success !== false };
+        } catch (error) {
+            throw new Error(error.message || 'Update failed');
+        }
+    },
+    
+    _applySettingGlobally(section, key, value) {
+        // 1. Push into AppSettings (single source of truth)
+        if (window.AppSettings) {
+            window.AppSettings.set(section + '.' + key, value);
+        }
+
+        // 2. Notify parent frame
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'SETTINGS_GLOBAL_UPDATE',
+                module: MODULE_NAME,
+                section: section,
+                key: key,
+                value: value,
+                timestamp: Date.now()
+            }, '*');
+        }
+
+        // 3. Broadcast to sibling iframes
+        try {
+            const frames = document.querySelectorAll('iframe');
+            frames.forEach(f => {
+                try {
+                    f.contentWindow.postMessage({
+                        type: 'SETTINGS_GLOBAL_UPDATE',
+                        source: MODULE_NAME,
+                        section, key, value,
+                        timestamp: Date.now()
+                    }, '*');
+                } catch (_) {}
+            });
+        } catch (_) {}
+
+        this._applyLocalEffects(section, key, value);
+    },
+    
+    _applyLocalEffects(section, key, value) {
+        switch (section) {
+            case 'appearance':
+                if (key === 'theme') {
+                    this._applyTheme(value);
+                }
+                if (key === 'language') {
+                    this._applyLanguage(value);
+                }
+                break;
+            case 'privacy':
+                this._updatePrivacyUI(key, value);
+                break;
+            case 'notifications':
+                this._updateNotificationUI(key, value);
+                break;
+        }
+    },
+    
+    _applyTheme(theme) {
+        try {
+            const root = document.documentElement;
+            if (theme === 'auto') {
+                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+            } else {
+                root.setAttribute('data-theme', theme);
+            }
+            
+            const event = new CustomEvent('themeApplied', {
+                detail: { theme, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {}
+    },
+    
+    _applyLanguage(language) {
+        try {
+            const event = new CustomEvent('languageChanged', {
+                detail: { language, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        } catch (error) {}
+    },
+    
+    _updatePrivacyUI(key, value) {
+        const event = new CustomEvent('privacyUpdated', {
+            detail: { key, value, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    },
+    
+    _updateNotificationUI(key, value) {
+        const event = new CustomEvent('notificationsUpdated', {
+            detail: { key, value, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    },
+    
+    // FIX #8: Allow loading from cache even when module is not ACTIVE
+    async load() {
+        // Allow load from cache even if not authenticated
+        const cached = this._loadFromCache();
+        if (cached && Object.keys(cached).length > 0) {
+            this.data = cached;
+            this.loaded = true;
+            this._notify('loaded', this.data);
+            // Sync cached settings into AppSettings immediately (offline-safe)
+            if (window.AppSettings) window.AppSettings.merge(this.data);
+            
+            // If not authenticated, don't try to fetch from backend
+            if (!isAuthenticated) {
+                return this.data;
+            }
+        }
+        
+        // Only try backend fetch if authenticated
+        if (!isAuthenticated) {
+            if (DEBUG) console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings from backend: auth not ready`);
+            return this.data;
+        }
+        
+        // Don't block on state check for reading
+        if (this.loading) {
+            return new Promise((resolve) => {
+                const checkLoaded = () => {
+                    if (this.loaded) {
+                        resolve(this.data);
+                    } else {
+                        setTimeout(checkLoaded, 100);
+                    }
+                };
+                checkLoaded();
+            });
+        }
+        
+        this.loading = true;
+        
+        try {
+            const response = await this._fetchFromBackend();
+            
+            if (response && response.success && response.data) {
+                this.data = response.data;
+                this.loaded = true;
+                this.lastSynced = Date.now();
+                this._saveToCache();
+                this._notify('loaded', this.data);
+                // Sync backend settings into AppSettings
+                if (window.AppSettings) window.AppSettings.merge(this.data);
+                return this.data;
+            } else if (cached) {
+                return cached;
+            } else {
+                this.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+                this.loaded = true;
+                this._saveToCache();
+                this._notify('loaded', this.data);
+                return this.data;
+            }
+        } catch (error) {
+            const cached = this._loadFromCache();
+            if (cached && Object.keys(cached).length > 0) {
+                this.data = cached;
+                this.loaded = true;
+                this._notify('loaded', this.data);
+                return this.data;
+            }
+            
+            this.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            this.loaded = true;
+            this._notify('loaded', this.data);
+            return this.data;
+        } finally {
+            this.loading = false;
+        }
+    },
+    
+    async _fetchFromBackend() {
+        try {
+            const response = await authorizedRequest('/api/settings', { method: 'GET' });
+            // New shape: { success:true, data:{ settings:{...AppSettings sections...} } }
+            // Legacy shape: { success:true, data:{...} }
+            const raw = response?.data?.settings || response?.data || response || {};
+            return { success: true, data: raw };
+        } catch (error) {
+            throw new Error('Fetch failed: ' + error.message);
+        }
+    },
+    
+    _saveToCache() {
+        try {
+            const cacheData = {
+                data: this.data,
+                timestamp: Date.now(),
+                version: MODULE_VERSION
+            };
+            localStorage.setItem('knecta_settings_cache', JSON.stringify(cacheData));
+        } catch (error) {}
+    },
+    
+    _loadFromCache() {
+        try {
+            const cached = localStorage.getItem('knecta_settings_cache');
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                if (parsed.timestamp && (Date.now() - parsed.timestamp) < 24 * 60 * 60 * 1000) {
+                    return parsed.data;
                 }
             }
-        } else {
-            logStatus('FAILED', 'Invalid session data in PARENT_READY - rejected');
-        }
-    }
-
-    // Only transition to ACTIVE if we have a valid session
-    // CRITICAL FIX: Do NOT activate without valid session
-    if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
-        transitionTo(LifecycleState.ACTIVE, 'parent_ready_received_with_valid_session');
-        flushQueue();
-        
-        if (parentReadyResolver) {
-            parentReadyResolver({ type: 'PARENT_READY', timestamp: Date.now() });
-        }
-        
-        if (typeof onParentReadyCallback === 'function') {
-            onParentReadyCallback();
-        }
-    } else {
-        // Stay in WAIT_PARENT and request session
-        logStatus('WAITING', 'PARENT_READY received but no valid session - waiting for session');
-        requestSession();
-    }
-}
-
-
-function onParentReadyCallback() {
-    debugLog('Parent ready callback triggered');
-    logStatus('LIFECYCLE', 'Parent ready callback executed');
+        } catch (error) {}
+        return null;
+    },
     
-    if (typeof startBackgroundInitialization === 'function' && isInState(LifecycleState.ACTIVE)) {
-        setTimeout(() => {
-            startBackgroundInitialization();
-        }, 100);
+    subscribe(callback) {
+        this.listeners.add(callback);
+        return () => this.listeners.delete(callback);
+    },
+    
+    _notify(event, data) {
+        this.listeners.forEach(callback => {
+            try {
+                callback(event, data);
+            } catch (error) {}
+        });
+    },
+    
+    async reset() {
+        if (!isAuthenticated) {
+            throw new Error('Authentication not ready');
+        }
+        
+        if (currentState !== LifecycleState.ACTIVE) {
+            throw new Error('Cannot reset settings: module not active');
+        }
+        
+        const defaultData = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        
+        try {
+            const response = await authorizedRequest('/api/settings/reset', {
+                method: 'POST',
+                body: {}
+            });
+            
+            if (response && response.success) {
+                this.data = defaultData;
+                this.lastSynced = Date.now();
+                this._saveToCache();
+                this._notify('reset', this.data);
+                return { success: true };
+            }
+            throw new Error('Reset failed');
+        } catch (error) {
+            throw error;
+        }
     }
-}
+};
 
-// =============================================
-// SESSION STORAGE - MEMORY ONLY, NO LOCALSTORAGE FOR TOKENS
-// =============================================
-let _sessionToken = null;
-let _sessionUser = null;
-let _sessionExpiresAt = null;
-let _sessionReady = false;
-
-let _sessionRequested = false;
-let _sessionRequestRetries = 0;
-const MAX_SESSION_REQUEST_RETRIES = 3;
-
-function setSession(token, user, expiresAt = null) {
-    // CRITICAL: Validate session before storing
-    const sessionToValidate = {
-        token: token,
-        userId: user?.id || user?.userId,
-        user: user
+function setState(newState, reason = '') {
+    if (currentState === newState) return false;
+    
+    // Allow all transitions in standalone mode
+    const validTransitions = {
+        [LifecycleState.BOOT]: [LifecycleState.INITIALIZING, LifecycleState.ACTIVE],
+        [LifecycleState.INITIALIZING]: [LifecycleState.WAITING_AUTH, LifecycleState.READY, LifecycleState.ACTIVE, LifecycleState.ERROR],
+        [LifecycleState.WAITING_AUTH]: [LifecycleState.READY, LifecycleState.WAIT_PARENT, LifecycleState.ACTIVE, LifecycleState.ERROR],
+        [LifecycleState.READY]: [LifecycleState.WAIT_PARENT, LifecycleState.ACTIVE],
+        [LifecycleState.WAIT_PARENT]: [LifecycleState.ACTIVE],
+        [LifecycleState.ACTIVE]: [LifecycleState.ACTIVE]
     };
     
-    if (!__isValidSession(sessionToValidate)) {
-        logStatus('FAILED', 'Attempted to set invalid session - rejected');
-        return false;
-    }
-    
-    // Check if this is a duplicate session
-    if (__isDuplicateSession(sessionToValidate)) {
-        logStatus('WARNING', 'Duplicate session set prevented');
-        return false;
-    }
-    
-    // Prevent session downgrade - if we already have a valid session, don't overwrite with invalid
-    if (_sessionReady && _sessionToken) {
-        const currentValid = __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId });
-        if (currentValid && !__isValidSession(sessionToValidate)) {
-            logStatus('WARNING', 'Prevented session downgrade - keeping existing valid session');
-            return false;
+    if (!validTransitions[currentState]?.includes(newState)) {
+        if (DEBUG) {
+            console.warn(`[${MODULE_NAME}] Transition ${currentState} → ${newState}: proceeding anyway`);
         }
+        // Don't block — just log and continue
     }
     
-    _sessionToken = token;
-    _sessionUser = user;
-    _sessionExpiresAt = expiresAt ? new Date(expiresAt) : null;
-    _sessionReady = true;
-
-    __storeValidSessionId(sessionToValidate);
-
-    // Clear any previous auth block so background loaders can retry
-    if (typeof resetStatusAuthBlock === 'function') resetStatusAuthBlock();
-
-    logStatus('SUCCESS', 'Session stored in memory');
+    const oldState = currentState;
+    currentState = newState;
     
-    // Load statuses after session is established — debounced to prevent multiple
-    // rapid setSession() calls (AUTH_READY + PARENT_READY + SESSION_DATA) from
-    // firing 3–5 parallel loadStatuses() fetches.
-    if (_currentState === LifecycleState.ACTIVE) {
-        if (setSession._loadDebounce) clearTimeout(setSession._loadDebounce);
-        setSession._loadDebounce = setTimeout(() => {
-            setSession._loadDebounce = null;
-            loadStatuses();
-        }, 150);
-    }
+    console.log(`[${MODULE_NAME}] 📍 State: ${oldState} → ${newState}${reason ? ` (${reason})` : ''}`);
+    
+    recordStateTransition(oldState, newState, reason);
+    
+    window.__SETTINGS_STATE__ = currentState;
+    window.__SETTINGS_SESSION_ACTIVE__ = (newState === LifecycleState.ACTIVE);
+    window.__SETTINGS_READY__ = (newState === LifecycleState.ACTIVE);
+    isReady = (newState === LifecycleState.ACTIVE);
+    
+    try {
+        const event = new CustomEvent('lifecycleStateChange', {
+            detail: { oldState, newState, reason, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (e) {}
     
     return true;
 }
 
-function getSessionToken() {
-    if (!_sessionReady) {
-        debugWarn('Session not ready - token unavailable');
-        return null;
-    }
-    
-    if (_sessionExpiresAt && new Date() >= _sessionExpiresAt) {
-        debugWarn('Session token expired');
-        clearSession();
-        return null;
-    }
-    
-    return _sessionToken;
-}
-
-function getSessionUser() {
-    return _sessionReady ? _sessionUser : null;
-}
-
-function getSessionUserId() {
-    if (!_sessionReady) return null;
-    const userId = _sessionUser?.id || _sessionUser?.userId;
-    // Validate that userId is a valid number, not "user" or other placeholder
-    if (userId === 'user' || userId === 'default' || userId === 0 || userId === '0') {
-        return null;
-    }
-    return userId;
-}
-
-function isSessionReady() {
-    if (!_sessionReady || !_sessionToken) return false;
-    
-    // Validate stored session
-    const sessionToValidate = {
-        token: _sessionToken,
-        userId: _sessionUser?.id || _sessionUser?.userId,
-        user: _sessionUser
-    };
-    
-    return __isValidSession(sessionToValidate);
-}
-
-function clearSession() {
-    _sessionToken = null;
-    _sessionUser = null;
-    _sessionExpiresAt = null;
-    _sessionReady = false;
-    _sessionRequested = false;
-    _sessionRequestRetries = 0;
-    
-    logStatus('INFO', 'Session cleared from memory');
-}
-
-// =============================================
-// AUTHORIZED FETCH - ALWAYS INCLUDES BEARER TOKEN
-// =============================================
-async function authorizedFetch(url, options = {}) {
-    if (!isSessionReady()) {
-        const error = new Error('Session not ready - cannot make authorized request');
-        error.code = 'SESSION_NOT_READY';
-        debugWarn(`Blocked API call to ${url}: session not ready`);
-        
-        if (!_sessionRequested && isInState(LifecycleState.ACTIVE)) {
-            requestSession();
-        }
-        
-        throw error;
-    }
-    
-    const token = getSessionToken();
-    if (!token) {
-        const error = new Error('No valid session token');
-        error.code = 'NO_TOKEN';
-        debugWarn(`Blocked API call to ${url}: no token`);
-        throw error;
-    }
-    
-    // CRITICAL: Use parent proxy instead of direct fetch
-    // This ensures requests go through chat.html which has the correct backend URL
-    try {
-        // Route through parent proxy via API_REQUEST
-        const endpoint = url.replace(/^https?:\/\/[^\/]+/, '');
-        const response = await makeApiRequest(endpoint, options.method || 'GET', options.body, null);
-        // makeApiRequest returns the parsed JSON response directly
-        return {
-            ok: true,
-            status: 200,
-            json: async () => response,
-            text: async () => JSON.stringify(response),
-            headers: new Headers({ 'content-type': 'application/json' })
-        };
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Parent proxy request failed:`, error);
-        throw error;
-    }
-}
-
-async function authorizedFetchJSON(url, options = {}) {
-    const response = await authorizedFetch(url, options);
-    return response.json();
-}
-
-// =============================================
-// ACTION GATE - Prevent actions before ACTIVE state
-// =============================================
-function canSendAction() {
-    return isInState(LifecycleState.ACTIVE);
-}
-
-function safeSendAction(action, payload = {}) {
-    if (!canSendAction()) {
-        debugWarn(`Blocked action "${action}" - not in ACTIVE state (current: ${_currentState})`);
-        logStatus('LIFECYCLE', `Blocked action: ${action} - not ACTIVE`);
-        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('blockedActions');
-        return false;
-    }
-    
-    return sendMessage('ACTION', {
-        action,
-        module: MODULE_NAME,
-        payload,
+function recordStateTransition(from, to, reason = '') {
+    stateHistory.push({
+        from,
+        to,
+        reason,
         timestamp: Date.now()
     });
+    if (stateHistory.length > 50) stateHistory.shift();
 }
+window.__SETTINGS_STATE_OBJ__ = SettingsState;
 
 // =============================================
-// MESSAGE QUEUE SYSTEM - CRITICAL FOR PROTOCOL COMPLIANCE
+// STRICT CHILD_READY - SENT EXACTLY ONCE
 // =============================================
-let parentReady = false;
-const messageQueue = [];
-
-function sendMessage(type, payload = {}, options = {}) {
-    if (type !== 'CHILD_READY' && !isInState(LifecycleState.ACTIVE) && !parentReady) {
-        debugLog(`Queueing ${type} - not active yet`);
-        messageQueue.push({ type, payload, options, timestamp: Date.now() });
-        return null;
+function sendChildReady() {
+    if (childReadySent) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] ⚠️ CHILD_READY already sent, ignoring duplicate`);
+        }
+        return false;
     }
     
+    if (currentState !== LifecycleState.READY) {
+        if (DEBUG) {
+            console.warn(`[${MODULE_NAME}] ❌ Cannot send CHILD_READY: state is ${currentState} (must be READY)`);
+        }
+        return false;
+    }
+    
+    childReadySent = true;
+    
+    const message = {
+        type: 'CHILD_READY',
+        module: MODULE_NAME,
+        version: MODULE_VERSION,
+        frameId: FRAME_ID,
+        messageId: generateMessageId(),
+        timestamp: Date.now(),
+        environment: window.__iframeEnvironment || 'unknown',
+        waitingForAuth: !isAuthenticated
+    };
+    
     try {
-        const messageId = options.id || genId();
-        
-        if (_sentMessages.has(messageId)) {
-            debugWarn(`Duplicate message prevented: ${type} (${messageId})`);
-            return null;
-        }
-        _sentMessages.add(messageId);
-        
-        const message = {
-            type: type,
-            id: messageId,
-            requestId: options.requestId || genReqId(),
-            source: MODULE_NAME,
-            target: "parent",
-            payload: payload,
-            timestamp: Date.now()
-        };
-
-        if (!message.type || !message.id || !message.requestId || !message.source || !message.target || message.timestamp === undefined) {
-            debugError('Invalid message schema - missing required fields', message);
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(message, '*');
+            console.log(`[${MODULE_NAME}] 📤 CHILD_READY sent (ONCE)`);
+            setState(LifecycleState.WAIT_PARENT, 'child_ready_sent');
+            return true;
+        } else {
+            if (DEBUG) {
+                console.warn(`[${MODULE_NAME}] ⚠️ No parent window found for CHILD_READY`);
+            }
             return false;
         }
-
-        if (!window.parent || window.parent === window) {
-            debugLog('No parent window available');
-            return false;
-        }
-
-        window.parent.postMessage(message, '*');
-        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('messagesSent');
-        
-        const logKey = `sent_${message.type}`;
-        if (!_loggedMessages.has(logKey)) {
-            _loggedMessages.add(logKey);
-            logStatus('SENDING', `${message.type} sent`);
-        }
-        
-        return message.id;
     } catch (error) {
-        debugError('Failed to send message:', error);
+        if (DEBUG) {
+            console.error(`[${MODULE_NAME}] ❌ Error sending CHILD_READY:`, error);
+        }
         return false;
     }
 }
 
-function safeSend(type, payload = {}, options = {}) {
-    if (type === 'CHILD_READY') {
-        debugWarn('Use sendChildReady() instead of safeSend for CHILD_READY');
-        return sendChildReady();
+// =============================================
+// STRICT PARENT_READY HANDLER - ACTIVATION GATE WITH SESSION VALIDATION
+// =============================================
+function handleParentReady(message) {
+    // Accept both WAIT_PARENT (normal flow) and ACTIVE (standalone/forced mode)
+    // so the real parent session is applied even when standalone mode pre-activated us
+    const acceptableStates = [LifecycleState.WAIT_PARENT, LifecycleState.ACTIVE];
+    if (!acceptableStates.includes(currentState)) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📥 PARENT_READY ignored (state: ${currentState})`);
+        }
+        return false;
     }
-
-    if (!parentReady) {
-        debugLog(`Queueing ${type} - parent not ready`);
-        messageQueue.push({ type, payload, options, timestamp: Date.now() });
-        return true;
+    
+    if (parentReadyReceived) {
+        // If already received but we got a new one with a different session, still apply it
+        const newSessionData = message.session || message.payload?.session || message;
+        if (newSessionData && __isValidSession(newSessionData)) {
+            const newSessionId = newSessionData.sessionId || `${newSessionData.token}_${newSessionData.userId}`;
+            if (_lastSessionId !== newSessionId) {
+                _lastSessionId = newSessionId;
+                _currentValidSession = newSessionData;
+                applySession(newSessionData);
+                isAuthenticated = true;
+                authCheckComplete = true;
+                processRequestQueue();
+                loadSettingsAfterActivation();
+            }
+        }
+        return false;
     }
+    
+    parentReadyReceived = true;
+    
+    const sessionData = message.session || message.payload?.session || message;
+    
+    console.log(`[${MODULE_NAME}] 📥 PARENT_READY received${sessionData ? ' with session' : ''}`);
+    
+    // CRITICAL: Validate session before activating
+    if (sessionData) {
+        if (!__isValidSession(sessionData)) {
+            console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY with invalid session - cannot activate, staying in ${currentState}`);
+            parentReadyReceived = false; // allow retry
+            return false;
+        }
+        
+        // Deduplicate session if already processed
+        const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+        if (_lastSessionId === sessionId && _currentValidSession) {
+            console.log(`[${MODULE_NAME}] 📥 PARENT_READY with duplicate session ignored`);
+            return false;
+        }
+        _lastSessionId = sessionId;
+        _currentValidSession = sessionData;
+        
+        applySession(sessionData);
+    } else {
+        console.warn(`[${MODULE_NAME}] ⚠️ PARENT_READY without session data`);
+        parentReadyReceived = false; // allow retry
+        return false;
+    }
+    
+    window.parentReady = true;
+    window.parentReadyReceived = true;
+    window.parentCommunicationReady = true;
+    
+    // Ensure we're ACTIVE
+    if (currentState !== LifecycleState.ACTIVE) {
+        setState(LifecycleState.ACTIVE, 'parent_ready_received_valid_session');
+    }
+    
+    flushQueue();
+    
+    // Mark authenticated and load settings
+    isAuthenticated = true;
+    authCheckComplete = true;
+    processRequestQueue();
+    loadSettingsAfterActivation();
+    
+    onModuleActive();
+    
+    try {
+        const event = new CustomEvent('parentReady', {
+            detail: { session: sessionData, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (e) {}
+    
+    return true;
+}
 
-    return sendMessage(type, payload, options);
+async function loadSettingsAfterActivation() {
+    if (!isAuthenticated) {
+        console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings: auth not ready`);
+        return;
+    }
+    
+    try {
+        await SettingsState.load();
+        applySettingsToUI(SettingsState.get());
+        
+        // =============================================
+        // Start watching for reconnection to sync offline queue
+        // =============================================
+        OfflineQueue.watchOnline(() => {
+            if (OfflineQueue.hasPending() && OfflineQueue.isOnline()) {
+                console.log(`[${MODULE_NAME}] 🔄 Online detected, syncing ${OfflineQueue.getPendingCount()} pending updates`);
+                OfflineQueue.syncAll((section, key, value) => {
+                    return SettingsState._sendUpdateToBackend(section, key, value);
+                });
+            }
+        });
+        
+        // Sync any queue that accumulated while offline
+        if (OfflineQueue.hasPending() && OfflineQueue.isOnline()) {
+            console.log(`[${MODULE_NAME}] 🔄 Syncing pending queue (${OfflineQueue.getPendingCount()} items)`);
+            OfflineQueue.syncAll((section, key, value) => {
+                return SettingsState._sendUpdateToBackend(section, key, value);
+            });
+        }
+        
+        const event = new CustomEvent('settingsLoaded', {
+            detail: { settings: SettingsState.get(), timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {
+        if (DEBUG) {
+            console.error('[settings-core] Error loading settings:', error);
+        }
+        showRetryUI();
+    }
+}
+
+function applySettingsToUI(settings) {
+    try {
+        if (settings.appearance?.theme) {
+            applyTheme(settings.appearance.theme);
+        }
+        
+        if (settings.appearance?.language) {
+            const event = new CustomEvent('languageChanged', {
+                detail: { language: settings.appearance.language, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        if (settings.privacy) {
+            const event = new CustomEvent('privacySettingsApplied', {
+                detail: { privacy: settings.privacy, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        if (settings.notifications) {
+            const event = new CustomEvent('notificationSettingsApplied', {
+                detail: { notifications: settings.notifications, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        updateUIWithSettings(settings);
+        
+    } catch (error) {}
+}
+
+function updateUIWithSettings(settings) {
+    try {
+        if (settings.profile) {
+            const displayNameInput = document.getElementById('displayName');
+            if (displayNameInput && settings.profile.displayName) {
+                displayNameInput.value = settings.profile.displayName;
+            }
+            
+            const usernameInput = document.getElementById('username');
+            if (usernameInput && settings.profile.username) {
+                usernameInput.value = settings.profile.username;
+            }
+            
+            const bioTextarea = document.getElementById('bio');
+            if (bioTextarea && settings.profile.bio) {
+                bioTextarea.value = settings.profile.bio;
+            }
+            
+            const emailInput = document.getElementById('email');
+            if (emailInput && settings.profile.email) {
+                emailInput.value = settings.profile.email;
+            }
+            
+            const moodSelect = document.getElementById('currentMood');
+            if (moodSelect && settings.profile.currentMood) {
+                moodSelect.value = settings.profile.currentMood;
+            }
+        }
+        
+        if (settings.privacy) {
+            const whoCanAddMe = document.getElementById('whoCanAddMe');
+            if (whoCanAddMe && settings.privacy.whoCanAddMe) {
+                whoCanAddMe.value = settings.privacy.whoCanAddMe;
+            }
+            
+            const canMessageMe = document.getElementById('canMessageMe');
+            if (canMessageMe && settings.privacy.canMessageMe) {
+                canMessageMe.value = settings.privacy.canMessageMe;
+            }
+            
+            const readReceipts = document.getElementById('readReceipts');
+            if (readReceipts) {
+                readReceipts.checked = settings.privacy.readReceipts !== false;
+            }
+            
+            const typingIndicators = document.getElementById('typingIndicators');
+            if (typingIndicators) {
+                typingIndicators.checked = settings.privacy.typingIndicators !== false;
+            }
+        }
+        
+        if (settings.notifications) {
+            const messageNotifications = document.getElementById('messageNotifications');
+            if (messageNotifications) {
+                messageNotifications.checked = settings.notifications.messageNotifications !== false;
+            }
+            
+            const groupNotifications = document.getElementById('groupNotifications');
+            if (groupNotifications) {
+                groupNotifications.checked = settings.notifications.groupNotifications !== false;
+            }
+            
+            const callNotifications = document.getElementById('callNotifications');
+            if (callNotifications) {
+                callNotifications.checked = settings.notifications.callNotifications !== false;
+            }
+        }
+        
+        if (settings.appearance) {
+            const themeSelect = document.getElementById('theme');
+            if (themeSelect && settings.appearance.theme) {
+                themeSelect.value = settings.appearance.theme;
+            }
+            
+            const fontSizeSlider = document.getElementById('fontSize');
+            if (fontSizeSlider && settings.appearance.fontSize) {
+                fontSizeSlider.value = settings.appearance.fontSize;
+                document.documentElement.style.fontSize = `${settings.appearance.fontSize}px`;
+            }
+            
+            const languageSelect = document.getElementById('language');
+            if (languageSelect && settings.appearance.language) {
+                languageSelect.value = settings.appearance.language;
+            }
+        }
+        
+        if (settings.storage) {
+            const totalStorageUsed = document.getElementById('totalStorageUsed');
+            if (totalStorageUsed) {
+                totalStorageUsed.textContent = formatStorageSize(settings.storage.totalStorageUsed || 0);
+            }
+            
+            const chatCacheSize = document.getElementById('chatCacheSize');
+            if (chatCacheSize) {
+                chatCacheSize.textContent = formatStorageSize(settings.storage.chatCacheSize || 0);
+            }
+            
+            const mediaCacheSize = document.getElementById('mediaCacheSize');
+            if (mediaCacheSize) {
+                mediaCacheSize.textContent = formatStorageSize(settings.storage.mediaCacheSize || 0);
+            }
+        }
+        
+    } catch (error) {}
+}
+
+function showRetryUI() {
+    try {
+        const container = document.getElementById('settingsContent');
+        if (container) {
+            const retryDiv = document.createElement('div');
+            retryDiv.className = 'settings-retry';
+            retryDiv.style.cssText = `
+                background: var(--warning-color);
+                color: white;
+                padding: 12px 20px;
+                margin: 20px;
+                border-radius: 8px;
+                text-align: center;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            `;
+            retryDiv.innerHTML = `
+                <span>⚠️ Failed to load settings. Using cached settings.</span>
+                <button onclick="window.__retryLoadSettings()" style="
+                    background: white;
+                    color: var(--warning-color);
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                ">Retry</button>
+            `;
+            container.prepend(retryDiv);
+        }
+        
+        window.__retryLoadSettings = async () => {
+            if (!isAuthenticated) {
+                console.warn('[settings-core] Cannot retry: auth not ready');
+                return;
+            }
+            try {
+                await SettingsState.load();
+                applySettingsToUI(SettingsState.get());
+                const retryDiv = document.querySelector('.settings-retry');
+                if (retryDiv) retryDiv.remove();
+            } catch (error) {}
+        };
+    } catch (error) {}
+}
+
+// =============================================
+// APPLY SESSION WITH VALIDATION AND DEDUPLICATION
+// =============================================
+function applySession(sessionData) {
+    if (!sessionData) {
+        console.warn(`[${MODULE_NAME}] ⚠️ applySession called with null/undefined session`);
+        return;
+    }
+    
+    // CRITICAL: Validate session before applying
+    if (!__isValidSession(sessionData)) {
+        console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid session data`, {
+            hasToken: !!sessionData.token,
+            userId: sessionData.userId,
+            tokenType: typeof sessionData.token
+        });
+        return;
+    }
+    
+    // Deduplicate session
+    const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+    if (_lastSessionId === sessionId && _currentValidSession) {
+        if (DEBUG) {
+            console.log(`[${MODULE_NAME}] 📥 Duplicate session ignored (sessionId: ${sessionId})`);
+        }
+        return;
+    }
+    _lastSessionId = sessionId;
+    _currentValidSession = sessionData;
+    
+    const token = sessionData.token || sessionData.accessToken;
+    const user = sessionData.user || sessionData;
+    const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3600000);
+    
+    if (token) {
+        window.session = window.session || {};
+        window.session.token = token;
+    }
+    
+    if (user) {
+        window.session = window.session || {};
+        window.session.user = typeof user === 'object' ? { ...user } : user;
+        window.currentUser = window.session.user;
+    }
+    
+    if (expiry) {
+        window.session = window.session || {};
+        window.session.expiresAt = expiry;
+    }
+    
+    window.parentSessionReceived = true;
+    window.sessionValidated = true;
+    window.__SETTINGS_SESSION_ACTIVE__ = true;
+    
+    console.log(`[${MODULE_NAME}] ✅ Valid session applied:`, user ? `userId: ${user.id || user.userId || 'unknown'}` : 'no user');
 }
 
 function flushQueue() {
-    if (!parentReady) {
-        debugWarn('Cannot flush queue - parent not ready');
-        return;
-    }
-
-    const queueLength = messageQueue.length;
-    if (queueLength === 0) return;
-
-    debugLog(`Flushing ${queueLength} queued messages`);
+    if (queueFlushed) return;
+    queueFlushed = true;
     
     while (messageQueue.length) {
-        const { type, payload, options } = messageQueue.shift();
-        sendMessage(type, payload, options);
+        const msg = messageQueue.shift();
+        sendMessage(msg);
     }
     
-    const flushKey = 'queue_flushed';
-    if (!_loggedMessages.has(flushKey)) {
-        _loggedMessages.add(flushKey);
-        logStatus('SUCCESS', `Flushed ${queueLength} queued messages`);
+    if (DEBUG && messageQueue.length === 0) {
+        console.log(`[${MODULE_NAME}] 📬 Queue flushed`);
     }
 }
 
-// =============================================
-// STANDARDIZED MESSAGE SCHEMA VALIDATOR - STRICT
-// =============================================
-const MessageValidator = {
-    requiredFields: ['type', 'id', 'requestId', 'source', 'target', 'timestamp'],
+function onModuleActive() {
+    if (DEBUG) {
+        console.log(`[${MODULE_NAME}] 🎯 Module activated, starting post-activation tasks`);
+    }
     
-    // For INBOUND messages from parent, only type is truly required.
-    // For OUTBOUND messages (source === MODULE_NAME), full schema is enforced elsewhere.
-    validate(message) {
-        try {
-            if (!message || typeof message !== 'object') {
-                return { valid: false, reason: 'Not an object' };
-            }
-
-            // Every message must have a type
-            if (!message.type || typeof message.type !== 'string') {
-                return { valid: false, reason: 'Missing or invalid type' };
-            }
-
-            // For messages FROM parent, relax schema — parent controls its own format
-            if (message.source === 'parent') {
-                return { valid: true };
-            }
-
-            // For outbound messages (MODULE_NAME as source), enforce full schema
-            const outboundRequired = ['id', 'requestId', 'source', 'target', 'timestamp'];
-            for (const field of outboundRequired) {
-                if (!message[field] && message[field] !== 0) {
-                    return { valid: false, reason: `Missing required field: ${field}` };
-                }
-            }
-
-            if (typeof message.source !== 'string') {
-                return { valid: false, reason: 'source must be string' };
-            }
-
-            if (message.source !== 'parent' && message.target !== 'parent') {
-                return { valid: false, reason: `Invalid target: ${message.target} - must be 'parent'` };
-            }
-
-            if (typeof message.id !== 'string') {
-                return { valid: false, reason: 'id must be string' };
-            }
-
-            if (typeof message.requestId !== 'string') {
-                return { valid: false, reason: 'requestId must be string' };
-            }
-
-            if (typeof message.timestamp !== 'number') {
-                return { valid: false, reason: 'timestamp must be number' };
-            }
-
-            const now = Date.now();
-            if (Math.abs(now - message.timestamp) > 300000) {
-                debugWarn(`Timestamp out of range for ${message.type}: ${message.timestamp}`);
-            }
-
-            return { valid: true };
-        } catch (error) {
-            return { valid: false, reason: error.message };
+    if (typeof requestSettingsLoad === 'function') {
+        requestSettingsLoad();
+    }
+    
+    // Only start background tasks if auth is ready
+    if (isAuthenticated) {
+        if (typeof startBackgroundTasks === 'function') {
+            startBackgroundTasks();
         }
-    },
-    
-    createMessage(type, payload = {}, options = {}) {
-        return {
-            type,
-            id: options.id || genId(),
-            requestId: options.requestId || genReqId(),
-            source: MODULE_NAME,
-            target: 'parent',
-            timestamp: Date.now(),
-            payload,
-            ...options
-        };
-    }
-};
-
-// =============================================
-// IN-MEMORY STATE (PRIMARY SOURCE OF TRUTH)
-// =============================================
-let statusState = {
-    statuses: [],
-    myStatuses: [],
-    loading: false,
-    error: null,
-    lastSync: null
-};
-
-const statusCache = new Set(); // For duplicate detection
-const statusObservers = new Set();
-
-function notifyStatusObservers() {
-    statusObservers.forEach(observer => {
-        try {
-            observer(statusState);
-        } catch (e) {}
-    });
-
-    // ── FIX: Dispatch on BOTH targets so every listener fires ────────────────
-    // UIBridge in status-ui.js listens on document for 'statusUpdate'.
-    // Other listeners (e.g. LiveUpdateEngine) use window 'statusStateChanged'.
-    // Previously only window was notified — document listeners were silently skipped,
-    // so the receiver-side UI never re-rendered after handleRealtimeStatusEvent ran.
-    const detail = { state: statusState, statuses: statusState.statuses || statuses };
-
-    document.dispatchEvent(new CustomEvent('statusUpdate', { detail }));
-    document.dispatchEvent(new CustomEvent('statusStateChanged', { detail }));
-    window.dispatchEvent(new CustomEvent('statusStateChanged', { detail }));
-}
-
-function updateStatusState(updates) {
-    Object.assign(statusState, updates);
-    notifyStatusObservers();
-}
-
-function addStatus(status) {
-    if (!status || !status.id) return false;
-
-    if (statusCache.has(status.id)) {
-        debugLog(`Duplicate status ignored: ${status.id}`);
-        return false;
-    }
-
-    statusCache.add(status.id);
-    statusState.statuses.unshift(status);
-
-    const currentUserId = getSessionUserId();
-    if (currentUserId && String(status.userId) === String(currentUserId)) {
-        statusState.myStatuses.unshift(status);
-        myStatuses = statusState.myStatuses;
     } else {
-        // Friend's status — add to friendsStatuses silo too
-        if (!friendsStatuses.some(s => String(s.id) === String(status.id))) {
-            friendsStatuses.unshift(status);
-            friendsStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        }
-    }
-
-    statusState.statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    statusState.myStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    // Keep module-level alias in sync so status-ui.js renderAllStatuses() sees the update
-    statuses = statusState.statuses;
-
-    // Persist to IDB immediately so the status survives a page refresh
-    const expiryForIDB = status.expiresAt || new Date(Date.now() + 86400000).toISOString();
-    StatusDB.put({ ...status, expiresAt: expiryForIDB }).catch(() => {});
-    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-
-    // Schedule precision countdown so the status disappears at the exact right moment
-    if (typeof schedulePrecisionExpiry === 'function') schedulePrecisionExpiry(status);
-
-    notifyStatusObservers();
-
-    logStatus('SUCCESS', `Status added: ${status.id}`);
-    return true;
-}
-
-function removeStatus(statusId) {
-    const idStr = String(statusId);
-    statusState.statuses   = (statusState.statuses   || []).filter(s => String(s.id) !== idStr);
-    statusState.myStatuses = (statusState.myStatuses || []).filter(s => String(s.id) !== idStr);
-    statusCache.delete(statusId);
-
-    // Keep module-level aliases in sync
-    statuses        = statusState.statuses;
-    myStatuses      = statusState.myStatuses;
-    friendsStatuses = (friendsStatuses || []).filter(s => String(s.id) !== idStr);
-
-    // Remove from IDB so it can't be rehydrated on next load
-    StatusDB.delete(statusId).catch(() => {});
-
-    notifyStatusObservers();
-    logStatus('INFO', `Status removed: ${statusId}`);
-    return true;
-}
-
-function updateStatus(statusId, updates) {
-    const status = statusState.statuses.find(s => s.id === statusId);
-    if (status) {
-        Object.assign(status, updates);
-        notifyStatusObservers();
-        return true;
+        console.log(`[${MODULE_NAME}] ⏳ Waiting for authentication before starting background tasks`);
     }
     
-    const myStatus = statusState.myStatuses.find(s => s.id === statusId);
-    if (myStatus) {
-        Object.assign(myStatus, updates);
-        notifyStatusObservers();
-        return true;
+    if (typeof initializeUI === 'function') {
+        initializeUI();
     }
     
-    return false;
-}
-
-function markStatusViewedLocally(statusId) {
-    const status = statusState.statuses.find(s => s.id === statusId);
-    if (status && !status.viewed) {
-        status.viewed = true;
-        status.viewedAt = new Date().toISOString();
-        status.viewCount = (status.viewCount || 0) + 1;
-        notifyStatusObservers();
-        return true;
+    if (typeof updateUserUI === 'function') {
+        updateUserUI();
     }
-    return false;
-}
-
-// =============================================
-// STATUS API ACTIONS (REAL END-TO-END)
-// =============================================
-
-async function loadStatuses() {
-    if (!ensureActive('loadStatuses')) {
-        updateStatusState({ loading: false, error: 'Module not active' });
-        return;
-    }
-
-    // Prevent concurrent calls — if a fetch is already in-flight, skip
-    if (loadStatuses._inFlight) return;
-    loadStatuses._inFlight = true;
-    
-    updateStatusState({ loading: true, error: null });
     
     try {
-        // console.log(`[${MODULE_NAME}] 📤 Loading statuses from backend`);
-        const response = await makeApiRequest('/api/status', 'GET');
+        const event = new CustomEvent('moduleActive', {
+            detail: { module: MODULE_NAME, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (e) {}
+}
 
-        // Backend wraps data: { success, data: { statuses: [...] } }
-        // After handleApiResponse resolves, we receive response.data (the inner data object).
-        // Support both shapes for resilience.
-        const statusList = (response && (response.statuses || (response.data && response.data.statuses))) || null;
+function requestSettingsLoad() {
+    if (currentState !== LifecycleState.ACTIVE) return;
+    
+    try {
+        if (typeof MessageTransport !== 'undefined' && MessageTransport.send) {
+            MessageTransport.send('SETTINGS_LOAD_REQUEST', {});
+        } else if (typeof sendMessage === 'function') {
+            sendMessage({
+                type: 'SETTINGS_LOAD_REQUEST',
+                source: MODULE_NAME,
+                target: 'parent',
+                payload: {}
+            });
+        }
+    } catch (error) {
+        if (DEBUG) console.error('[settings-core] Error requesting settings:', error);
+    }
+}
 
-        // console.log(`[${MODULE_NAME}] 📥 Received ${statusList?.length || 0} statuses from backend`);
+// =============================================
+// MESSAGE MANAGEMENT - NO DUPLICATES
+// =============================================
+function generateMessageId() {
+    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+function generateRequestId() {
+    return `req_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+function isMessageDuplicate(messageId) {
+    if (!messageId) return false;
+    
+    if (processedMessages.has(messageId)) {
+        return true;
+    }
+    
+    processedMessages.add(messageId);
+    
+    if (processedMessages.size > MAX_PROCESSED_MESSAGES) {
+        const firstItem = processedMessages.values().next().value;
+        processedMessages.delete(firstItem);
+    }
+    
+    return false;
+}
+
+function isSentDuplicate(messageId) {
+    if (!messageId) return false;
+    if (sentMessageIds.has(messageId)) return true;
+    sentMessageIds.add(messageId);
+    
+    if (sentMessageIds.size > MAX_PROCESSED_MESSAGES) {
+        const firstItem = sentMessageIds.values().next().value;
+        sentMessageIds.delete(firstItem);
+    }
+    
+    return false;
+}
+
+// =============================================
+// SAFE SEND TO PARENT - QUEUE BEFORE ACTIVE
+// =============================================
+function sendMessage(message) {
+    // No longer gate on ACTIVE state - always attempt to send
+    
+    try {
+        let canonicalMessage = message;
         
-        if (statusList && Array.isArray(statusList)) {
-            statusCache.clear();
-            statusState.statuses = [];
-            statusState.myStatuses = [];
+        if (!message.type || !message.source || !message.messageId) {
+            canonicalMessage = createCanonicalMessage(
+                message.type || 'UNKNOWN',
+                message.payload || message,
+                'parent'
+            );
+        }
+        
+        if (canonicalMessage.messageId && isSentDuplicate(canonicalMessage.messageId)) {
+            if (DEBUG) {
+                console.log(`[${MODULE_NAME}] ⚠️ Duplicate message blocked: ${canonicalMessage.messageId}`);
+            }
+            return false;
+        }
+        
+        if (!canonicalMessage.type || !canonicalMessage.source || !canonicalMessage.messageId || !canonicalMessage.timestamp) {
+            return false;
+        }
+        
+        canonicalMessage.target = 'parent';
+        
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(canonicalMessage, '*');
+            return true;
+        }
+        return false;
+    } catch (error) {
+        return false;
+    }
+}
+
+function safeSend(msg) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        messageQueue.push(msg);
+        return true;
+    }
+    
+    return sendMessage(msg);
+}
+
+function createCanonicalMessage(type, payload = {}, target = 'parent') {
+    return {
+        type: type,
+        source: MODULE_NAME,
+        target: target,
+        messageId: generateMessageId(),
+        requestId: generateRequestId(),
+        timestamp: Date.now(),
+        payload: payload
+    };
+}
+
+// =============================================
+// API REQUEST HELPER - ENDPOINT NORMALIZATION
+// =============================================
+function normalizeEndpoint(endpoint) {
+    if (!endpoint || typeof endpoint !== 'string') return '/';
+    
+    let normalized = endpoint.trim();
+    
+    // Remove /api prefix if present
+    if (normalized.startsWith('/api/')) {
+        normalized = normalized.substring(4);
+    } else if (normalized.startsWith('api/')) {
+        normalized = '/' + normalized.substring(4);
+    }
+    
+    // Ensure starts with /
+    if (!normalized.startsWith('/')) {
+        normalized = '/' + normalized;
+    }
+    
+    // Remove double slashes
+    normalized = normalized.replace(/\/+/g, '/');
+
+    const exactAliases = {
+        '/settings': '/settings',
+        '/settings/privacy': '/profile/privacy',
+        '/users/blocked': '/users/blocked'
+    };
+
+    if (Object.prototype.hasOwnProperty.call(exactAliases, normalized)) {
+        return exactAliases[normalized];
+    }
+
+    return normalized;
+}
+
+// =============================================
+// SIMPLIFIED MESSAGE LISTENER WITH AUTH HANDLING AND SESSION VALIDATION
+// =============================================
+function setupMessageListener() {
+    window.addEventListener('message', (event) => {
+        const data = event.data;
+        
+        if (!data || typeof data !== 'object') return;
+        if (!data.type) return;
+        
+        if (data.messageId && isMessageDuplicate(data.messageId)) {
+            if (DEBUG) {
+                console.log(`[${MODULE_NAME}] 📥 Duplicate message ignored: ${data.type} (${data.messageId})`);
+            }
+            return;
+        }
+        
+        // =============================================
+        // AUTH_READY HANDLER - CRITICAL FIX
+        // =============================================
+        if (data.type === 'AUTH_READY') {
+            console.log(`[${MODULE_NAME}] ✅ AUTH_READY received`);
+            isAuthenticated = true;
+            authCheckComplete = true;
             
-            const currentUserId = getSessionUserId();
+            // Process queued requests
+            processRequestQueue();
             
-            statusList.forEach(status => {
-                if (status && status.id) {
-                    statusCache.add(status.id);
-                    statusState.statuses.push(status);
-                    
-                    if (currentUserId && status.userId === currentUserId) {
-                        statusState.myStatuses.push(status);
+            // Load settings if we're ACTIVE (regardless of parentReadyReceived — standalone mode reaches ACTIVE without it)
+            if (currentState === LifecycleState.ACTIVE) {
+                loadSettingsAfterActivation();
+                startBackgroundTasks();
+            }
+            
+            // If we're still waiting for auth, transition to READY
+            if (currentState === LifecycleState.WAITING_AUTH) {
+                setState(LifecycleState.READY, 'auth_ready');
+                sendChildReady();
+            }
+            
+            return;
+        }
+        
+        // =============================================
+        // AUTH_ERROR HANDLER
+        // =============================================
+        if (data.type === 'AUTH_ERROR') {
+            console.error(`[${MODULE_NAME}] ❌ AUTH_ERROR received`);
+            isAuthenticated = false;
+            authCheckComplete = true;
+            setState(LifecycleState.ERROR, 'auth_error');
+            return;
+        }
+        
+        // =============================================
+        // SESSION_DATA HANDLER WITH VALIDATION
+        // =============================================
+        if (data.type === 'SESSION_DATA') {
+            const sessionData = data.session || data.payload?.session || data.payload || data;
+            
+            if (!__isValidSession(sessionData)) {
+                if (DEBUG) console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_DATA`, {
+                    hasToken: !!sessionData.token,
+                    userId: sessionData.userId,
+                    tokenType: typeof sessionData.token
+                });
+                return;
+            }
+            
+            const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+            if (_lastSessionId === sessionId && _currentValidSession && isAuthenticated) {
+                if (DEBUG) console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_DATA ignored`);
+                return;
+            }
+            _lastSessionId = sessionId;
+            _currentValidSession = sessionData;
+            
+            applySession(sessionData);
+            
+            // Mark authenticated so API calls can proceed
+            if (!isAuthenticated) {
+                isAuthenticated = true;
+                authCheckComplete = true;
+                processRequestQueue();
+                if (currentState === LifecycleState.ACTIVE) {
+                    loadSettingsAfterActivation();
+                }
+            }
+            
+            console.log(`[${MODULE_NAME}] ✅ Valid SESSION_DATA applied`);
+            return;
+        }
+        
+        // =============================================
+        // SESSION_UPDATE HANDLER WITH VALIDATION AND PROTECTION
+        // =============================================
+        if (data.type === 'SESSION_UPDATE') {
+            const sessionData = data.session || data.payload?.session || data;
+            
+            // Prevent session downgrade
+            if (_currentValidSession && __isValidSession(_currentValidSession)) {
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ Prevented session downgrade - ignoring invalid SESSION_UPDATE`);
+                    return;
+                }
+            }
+            
+            if (!__isValidSession(sessionData)) {
+                console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_UPDATE`);
+                return;
+            }
+            
+            const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+            if (_lastSessionId === sessionId && _currentValidSession) {
+                if (DEBUG) {
+                    console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_UPDATE ignored`);
+                }
+                return;
+            }
+            _lastSessionId = sessionId;
+            
+            // Merge safely without overwriting entire state
+            if (_currentValidSession) {
+                _currentValidSession = { ..._currentValidSession, ...sessionData };
+            } else {
+                _currentValidSession = sessionData;
+            }
+            
+            applySession(_currentValidSession);
+            console.log(`[${MODULE_NAME}] ✅ Valid SESSION_UPDATE merged`);
+            
+            return;
+        }
+        
+        if (data.type === 'PARENT_READY') {
+            handleParentReady(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_DATA') {
+            handleSettingsDataResponse(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_UPDATE_CONFIRMED') {
+            handleSettingsUpdateConfirmedMessage(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_UPDATE_ERROR') {
+            handleSettingsUpdateErrorMessage(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_FETCH_ERROR') {
+            handleSettingsFetchErrorMessage(data);
+            return;
+        }
+        
+        if (data.type === 'SETTINGS_GLOBAL_UPDATE') {
+            handleSettingsGlobalUpdateMessage(data);
+            return;
+        }
+        
+        if (data.type === 'API_REQUEST') {
+            handleApiRequest(data);
+            return;
+        }
+        
+        if (currentState !== LifecycleState.ACTIVE) {
+            if (DEBUG && data.type !== 'PING') {
+                console.log(`[${MODULE_NAME}] 📥 Ignoring ${data.type} (state: ${currentState})`);
+            }
+            return;
+        }
+        
+        routeMessage(data);
+    });
+}
+
+function handleApiRequest(message) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        console.warn(`[${MODULE_NAME}] API request ignored - module not active`);
+        return;
+    }
+    
+    if (!isAuthenticated) {
+        console.warn(`[${MODULE_NAME}] API request ignored - not authenticated`);
+        return;
+    }
+    
+    // Ensure request has required fields
+    const request = message.payload || message;
+    const requestId = request.requestId || generateRequestId();
+    const endpoint = normalizeEndpoint(request.endpoint);
+    const method = request.method || 'GET';
+    
+    const apiMessage = {
+        type: 'API_REQUEST',
+        requestId: requestId,
+        endpoint: endpoint,
+        method: method,
+        data: request.data,
+        headers: request.headers || {},
+        timestamp: Date.now()
+    };
+    
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage(apiMessage, '*');
+    }
+}
+
+function handleSettingsDataResponse(data) {
+    if (data.payload && data.payload.settings) {
+        SettingsState.data = data.payload.settings;
+        SettingsState.loaded = true;
+        SettingsState.lastSynced = Date.now();
+        SettingsState._saveToCache();
+        applySettingsToUI(SettingsState.data);
+        
+        const event = new CustomEvent('settingsDataReceived', {
+            detail: { settings: SettingsState.data, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    }
+}
+
+function handleSettingsUpdateConfirmedMessage(data) {
+    const event = new CustomEvent('settingsUpdateConfirmed', {
+        detail: { data: data.payload, timestamp: Date.now() }
+    });
+    window.dispatchEvent(event);
+}
+
+function handleSettingsUpdateErrorMessage(data) {
+    const event = new CustomEvent('settingsUpdateError', {
+        detail: { error: data.error, timestamp: Date.now() }
+    });
+    window.dispatchEvent(event);
+}
+
+function handleSettingsFetchErrorMessage(data) {
+    if (DEBUG) {
+        console.error('[settings-core] Settings fetch error:', data.error);
+    }
+    
+    const event = new CustomEvent('settingsFetchError', {
+        detail: { error: data.error, timestamp: Date.now() }
+    });
+    window.dispatchEvent(event);
+}
+
+function handleSettingsGlobalUpdateMessage(data) {
+    if (data.section && data.key !== undefined) {
+        if (!SettingsState.data[data.section]) {
+            SettingsState.data[data.section] = {};
+        }
+        SettingsState.data[data.section][data.key] = data.value;
+        SettingsState.lastSynced = Date.now();
+        SettingsState._saveToCache();
+        applySettingsToUI(SettingsState.data);
+        
+        const event = new CustomEvent('settingsGlobalUpdated', {
+            detail: { section: data.section, key: data.key, value: data.value, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    }
+}
+
+function routeMessage(message) {
+    const type = message.type;
+    
+    switch (type) {
+        case 'SESSION_DATA':
+            if (typeof handleSessionData === 'function') handleSessionData(message);
+            break;
+        case 'MODULE_REGISTERED':
+            if (typeof handleModuleRegisteredMessage === 'function') handleModuleRegisteredMessage(message);
+            break;
+        case 'SESSION_SYNC':
+            if (typeof handleSessionSyncMessage === 'function') handleSessionSyncMessage(message);
+            break;
+        case 'SESSION_UPDATE':
+            if (typeof handleSessionUpdateMessage === 'function') handleSessionUpdateMessage(message);
+            break;
+        case 'SESSION_INVALIDATED':
+            if (typeof handleSessionInvalidatedMessage === 'function') handleSessionInvalidatedMessage(message);
+            break;
+        case 'SETTINGS_LOAD_RESPONSE':
+            if (typeof handleSettingsLoadResponseMessage === 'function') handleSettingsLoadResponseMessage(message);
+            break;
+        case 'SETTINGS_UPDATED':
+            if (typeof handleSettingsUpdatedMessage === 'function') handleSettingsUpdatedMessage(message);
+            break;
+        case 'PROFILE_UPDATED':
+            if (typeof handleProfileUpdatedMessage === 'function') handleProfileUpdatedMessage(message);
+            break;
+        case 'PRIVACY_UPDATED':
+            if (typeof handlePrivacyUpdatedMessage === 'function') handlePrivacyUpdatedMessage(message);
+            break;
+        case 'NOTIFICATIONS_UPDATED':
+            if (typeof handleNotificationsUpdatedMessage === 'function') handleNotificationsUpdatedMessage(message);
+            break;
+        case 'LANGUAGE_CHANGED':
+            if (typeof handleLanguageChangedMessage === 'function') handleLanguageChangedMessage(message);
+            break;
+        case 'THEME_CHANGED':
+            if (typeof handleThemeChangedMessage === 'function') handleThemeChangedMessage(message);
+            break;
+        case 'ACCOUNT_LOGGED_OUT':
+            if (typeof handleAccountLoggedOutMessage === 'function') handleAccountLoggedOutMessage(message);
+            break;
+        case 'BLOCKED_USERS_UPDATED':
+            if (typeof handleBlockedUsersUpdatedMessage === 'function') handleBlockedUsersUpdatedMessage(message);
+            break;
+        case 'ACTIVE_SESSIONS_UPDATED':
+            if (typeof handleActiveSessionsUpdatedMessage === 'function') handleActiveSessionsUpdatedMessage(message);
+            break;
+        case 'USER_CONTACTS_UPDATED':
+            if (typeof handleUserContactsUpdatedMessage === 'function') handleUserContactsUpdatedMessage(message);
+            break;
+        case 'USER_GROUPS_UPDATED':
+            if (typeof handleUserGroupsUpdatedMessage === 'function') handleUserGroupsUpdatedMessage(message);
+            break;
+        case 'STORAGE_USAGE_UPDATED':
+            if (typeof handleStorageUsageUpdatedMessage === 'function') handleStorageUsageUpdatedMessage(message);
+            break;
+        case 'ERROR':
+            if (typeof handleErrorMessageMessage === 'function') handleErrorMessageMessage(message);
+            break;
+        case 'PING':
+            if (typeof handlePingMessage === 'function') handlePingMessage(message);
+            break;
+        case 'PONG':
+            if (typeof handlePongMessage === 'function') handlePongMessage(message);
+            break;
+    }
+}
+
+function handlePingMessage(message) {
+    if (currentState === LifecycleState.ACTIVE) {
+        try {
+            const pongMessage = {
+                type: 'PONG',
+                source: MODULE_NAME,
+                target: 'parent',
+                messageId: generateMessageId(),
+                inResponseTo: message.messageId,
+                timestamp: Date.now()
+            };
+            
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage(pongMessage, '*');
+            }
+        } catch (e) {}
+    }
+}
+
+function handlePongMessage(message) {
+    window.lastPongTime = Date.now();
+    if (typeof ReliabilityEngine !== 'undefined' && ReliabilityEngine.emit) {
+        ReliabilityEngine.emit('pong', { timestamp: Date.now() });
+    }
+}
+
+// =============================================
+// PLACEHOLDER HANDLERS TO PREVENT UNDEFINED ERRORS
+// =============================================
+function handleSessionData(message) {}
+function handleModuleRegisteredMessage(message) {}
+function handleSessionSyncMessage(message) {}
+function handleSessionUpdateMessage(message) {}
+function handleSessionInvalidatedMessage(message) {}
+function handleSettingsLoadResponseMessage(message) {
+    // Settings data returned from parent's cache/backend — merge into SettingsState
+    const settings = message?.settings || message?.data?.settings || message?.data || null;
+    if (settings && typeof settings === 'object' && Object.keys(settings).length > 0) {
+        SettingsState.data = Object.assign({}, SettingsState.data, settings);
+        SettingsState.loaded = true;
+        SettingsState._saveToCache();
+        if (window.AppSettings) window.AppSettings.merge(SettingsState.data);
+        applySettingsToUI(SettingsState.data);
+    }
+}
+
+function handleSettingsUpdatedMessage(message) {
+    // Incoming settings update — could be from another device via socket relay,
+    // from a sibling iframe, or from the parent frame broadcasting a change.
+    const settings = message?.settings || message?.data?.settings || message?.data || null;
+    if (!settings || typeof settings !== 'object') return;
+
+    // Deep-merge into SettingsState so we never lose existing keys
+    Object.keys(settings).forEach(section => {
+        if (settings[section] && typeof settings[section] === 'object') {
+            SettingsState.data[section] = Object.assign({}, SettingsState.data[section] || {}, settings[section]);
+        } else if (settings[section] !== undefined) {
+            SettingsState.data[section] = settings[section];
+        }
+    });
+    SettingsState.lastSynced = Date.now();
+    SettingsState._saveToCache();
+
+    // Propagate into AppSettings (single source of truth)
+    if (window.AppSettings) window.AppSettings.merge(SettingsState.data);
+
+    // Apply effects to this page's DOM immediately
+    applySettingsToUI(SettingsState.data);
+
+    window.dispatchEvent(new CustomEvent('settingsUpdated', {
+        detail: { settings: SettingsState.data, partial: settings, timestamp: Date.now() }
+    }));
+}
+function handleProfileUpdatedMessage(message) {}
+function handlePrivacyUpdatedMessage(message) {}
+function handleNotificationsUpdatedMessage(message) {}
+function handleLanguageChangedMessage(message) {}
+function handleThemeChangedMessage(message) {}
+function handleAccountLoggedOutMessage(message) {}
+function handleBlockedUsersUpdatedMessage(message) {}
+function handleActiveSessionsUpdatedMessage(message) {}
+function handleUserContactsUpdatedMessage(message) {}
+function handleUserGroupsUpdatedMessage(message) {}
+function handleStorageUsageUpdatedMessage(message) {}
+function handleErrorMessageMessage(message) {}
+
+// =============================================
+// REGISTRATION FLAGS
+// =============================================
+let sessionSyncCompleted = false;
+let registrationSent = false;
+
+window.parentReady = false;
+
+window.session = {
+    token: null,
+    user: null,
+    expiresAt: 0,
+    version: 0
+};
+
+// =============================================
+// EXPORTED STATE VARIABLES
+// =============================================
+let currentUser = null;
+let userSettings = null;
+let currentSection = 'profile';
+let unsavedChanges = false;
+let blockedUsers = [];
+let activeSessions = [];
+let userContacts = [];
+let userGroups = [];
+
+let authReady = false;
+let apiInitialized = false;
+let backgroundTasksStarted = false;
+let tokenReady = false;
+let tokenAvailable = false;
+let tokenInitialized = false;
+let parentCommunicationReady = false;
+let parentSessionReceived = false;
+let parentOrigin = null;
+let parentSessionData = null;
+let sessionValidated = false;
+let connectionQuality = 'unknown';
+let lastPongTime = 0;
+
+window.__SETTINGS_STATE__ = currentState;
+window.__SETTINGS_SESSION_ACTIVE__ = false;
+window.__SETTINGS_READY__ = isReady;
+
+// =============================================
+// CONSTANTS
+// =============================================
+const MAX_API_RETRIES = 0;
+const AUTH_CHECK_INTERVAL = 30000;
+const TOKEN_CHECK_INTERVAL = 1000;
+const HANDSHAKE_RETRY_INTERVAL = 2000;
+const SESSION_SYNC_TIMEOUT = 5000;
+const HEARTBEAT_INTERVAL = 10000;
+const PING_INTERVAL = 15000;
+const PING_TIMEOUT = 5000;
+const MAX_PING_FAILURES = 3;
+const RECOVERY_BACKOFF_BASE = 1000;
+const RECOVERY_MAX_BACKOFF = 30000;
+const VISIBILITY_THROTTLE_DELAY = 5000;
+const TOKEN_BINDING_NONCE_LENGTH = 16;
+
+const activeTimers = new Set();
+const activeIntervals = new Set();
+
+function safeSetTimeout(fn, delay) {
+    const timer = setTimeout(() => {
+        activeTimers.delete(timer);
+        fn();
+    }, delay);
+    activeTimers.add(timer);
+    return timer;
+}
+
+function safeSetInterval(fn, interval) {
+    const timer = setInterval(fn, interval);
+    activeIntervals.add(timer);
+    return timer;
+}
+
+function clearAllTimers() {
+    activeTimers.forEach(timer => clearTimeout(timer));
+    activeTimers.clear();
+    activeIntervals.forEach(interval => clearInterval(interval));
+    activeIntervals.clear();
+}
+
+// =============================================
+// SECURE ORIGIN VALIDATION
+// =============================================
+const TrustedOrigins = {
+    _trusted: new Set(),
+    
+    init() {
+        this.addTrustedOrigin(window.location.origin);
+        this.addTrustedOrigin('http://localhost');
+        this.addTrustedOrigin('http://127.0.0.1');
+        this.addTrustedOrigin('null');
+        
+        try {
+            if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                this.addTrustedOrigin(window.location.ancestorOrigins[0]);
+            }
+        } catch (e) {}
+        
+        this.addTrustedOrigin('https://moodchat-fy56.onrender.com');
+        this.addTrustedOrigin('https://moodfronted.onrender.com');
+    },
+    
+    addTrustedOrigin(origin) {
+        if (origin) this._trusted.add(origin);
+    },
+    
+    isValid(origin) {
+        if (!origin) return false;
+        if (origin === 'null') return true;
+        if (this._trusted.has(origin)) return true;
+        
+        if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('onrender.com')) {
+            this._trusted.add(origin);
+            return true;
+        }
+        
+        return false;
+    },
+    
+    setParentOrigin(origin) {
+        if (origin && this.isValid(origin)) {
+            parentOrigin = origin;
+            this.addTrustedOrigin(origin);
+        }
+    }
+};
+
+TrustedOrigins.init();
+
+// =============================================
+// VALIDATE CANONICAL MESSAGE SCHEMA
+// =============================================
+function validateCanonicalMessage(msg) {
+    if (!msg || typeof msg !== 'object') return false;
+    
+    const required = ['type', 'source', 'target', 'messageId', 'timestamp', 'payload'];
+    
+    for (const field of required) {
+        if (!msg.hasOwnProperty(field)) {
+            return false;
+        }
+    }
+    
+    if (typeof msg.type !== 'string') return false;
+    if (typeof msg.source !== 'string') return false;
+    if (typeof msg.target !== 'string') return false;
+    if (typeof msg.messageId !== 'string') return false;
+    if (typeof msg.timestamp !== 'number') return false;
+    
+    if (msg.target !== 'parent') {
+        return false;
+    }
+    
+    return true;
+}
+
+function throttledLog(level, message, data = null) {
+    if (!DEBUG && level !== 'error' && level !== 'success' && level !== 'init' && level !== 'receive') {
+        return;
+    }
+    
+    switch(level) {
+        case 'error': 
+            console.error(`[${MODULE_NAME}] ❌ ${message}`, data || '');
+            break;
+        case 'warn': 
+            console.warn(`[${MODULE_NAME}] ⚠️ ${message}`, data || '');
+            break;
+        case 'success': 
+            console.log(`[${MODULE_NAME}] ✅ ${message}`, data || '');
+            break;
+        case 'init': 
+            console.log(`[${MODULE_NAME}] 🚀 ${message}`, data || '');
+            break;
+        case 'receive':
+            console.log(`[${MODULE_NAME}] 📥 ${message}`, data || '');
+            break;
+        case 'send':
+            if (DEBUG) console.log(`[${MODULE_NAME}] 📤 ${message}`, data || '');
+            break;
+        default:
+            if (DEBUG) console.debug(`[${MODULE_NAME}] 🔍 ${message}`, data || '');
+    }
+}
+
+function debugLog(...args) { throttledLog('debug', args[0], args.slice(1)); }
+function errorLog(...args) { throttledLog('error', args[0], args.slice(1)); }
+function successLog(...args) { throttledLog('success', args[0], args.slice(1)); }
+function sendLog(...args) { throttledLog('send', args[0], args.slice(1)); }
+function receiveLog(...args) { throttledLog('receive', args[0], args.slice(1)); }
+function initLog(...args) { throttledLog('init', args[0], args.slice(1)); }
+
+// =============================================
+// MESSAGE TRANSPORT
+// =============================================
+const MessageTransport = {
+    _parentWindow: null,
+    _parentOrigin: '*',
+    _messageHandlers: new Map(),
+    _enabled: true,
+    _frameId: FRAME_ID,
+    _silent: true,
+    _listenerAttached: false,
+    
+    init() {
+        initLog('MessageTransport initializing');
+        this._detectParent();
+        this._setupListener();
+        successLog('MessageTransport initialized');
+    },
+    
+    _detectParent() {
+        try {
+            if (window.parent && window.parent !== window) {
+                this._parentWindow = window.parent;
+                
+                try {
+                    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                        this._parentOrigin = window.location.ancestorOrigins[0];
+                    } else {
+                        this._parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
                     }
+                } catch (e) {
+                    this._parentOrigin = '*';
+                }
+                
+                TrustedOrigins.setParentOrigin(this._parentOrigin);
+                parentOrigin = this._parentOrigin;
+            }
+        } catch (error) {}
+    },
+    
+    _setupListener() {
+        if (this._listenerAttached) return;
+        
+        window.addEventListener('message', (event) => {
+            setTimeout(() => this._handleIncoming(event), 0);
+        });
+        
+        this._listenerAttached = true;
+    },
+    
+    _handleIncoming(event) {
+        try {
+            if (parentOrigin && event.origin !== parentOrigin && currentState !== LifecycleState.WAIT_PARENT) {
+                return;
+            }
+            
+            const message = event.data;
+            
+            if (message.type !== 'PARENT_READY' && !validateCanonicalMessage(message) && 
+                message.type !== 'SETTINGS_DATA' && message.type !== 'SETTINGS_UPDATE_CONFIRMED' &&
+                message.type !== 'SETTINGS_UPDATE_ERROR' && message.type !== 'SETTINGS_FETCH_ERROR' &&
+                message.type !== 'SETTINGS_GLOBAL_UPDATE' && message.type !== 'AUTH_READY' && message.type !== 'AUTH_ERROR') {
+                return;
+            }
+            
+            if (message.messageId && isMessageDuplicate(message.messageId)) {
+                return;
+            }
+            
+            receiveLog(message.type);
+            
+            if (message.type === 'AUTH_READY') {
+                isAuthenticated = true;
+                authCheckComplete = true;
+                processRequestQueue();
+                
+                if (parentReadyReceived && currentState === LifecycleState.ACTIVE && __isValidSession(_currentValidSession)) {
+                    loadSettingsAfterActivation();
+                    startBackgroundTasks();
+                }
+                
+                if (currentState === LifecycleState.WAITING_AUTH) {
+                    setState(LifecycleState.READY, 'auth_ready');
+                    sendChildReady();
+                }
+                return;
+            }
+            
+            if (message.type === 'AUTH_ERROR') {
+                console.error(`[${MODULE_NAME}] ❌ AUTH_ERROR received`);
+                isAuthenticated = false;
+                authCheckComplete = true;
+                setState(LifecycleState.ERROR, 'auth_error');
+                return;
+            }
+            
+            if (message.type === 'SESSION_DATA') {
+                const sessionData = message.session || message.payload?.session || message;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_DATA in MessageTransport`);
+                    return;
+                }
+                const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+                if (_lastSessionId === sessionId && _currentValidSession) {
+                    return;
+                }
+                _lastSessionId = sessionId;
+                _currentValidSession = sessionData;
+                applySession(sessionData);
+                return;
+            }
+            
+            if (message.type === 'SESSION_UPDATE') {
+                const sessionData = message.session || message.payload?.session || message;
+                if (_currentValidSession && __isValidSession(_currentValidSession)) {
+                    if (!__isValidSession(sessionData)) {
+                        console.warn(`[${MODULE_NAME}] ⚠️ Prevented session downgrade in MessageTransport`);
+                        return;
+                    }
+                }
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ Ignored invalid SESSION_UPDATE in MessageTransport`);
+                    return;
+                }
+                const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
+                if (_lastSessionId === sessionId && _currentValidSession) {
+                    return;
+                }
+                _lastSessionId = sessionId;
+                if (_currentValidSession) {
+                    _currentValidSession = { ..._currentValidSession, ...sessionData };
+                } else {
+                    _currentValidSession = sessionData;
+                }
+                applySession(_currentValidSession);
+                return;
+            }
+            
+            if (message.type === 'PARENT_READY') {
+                handleParentReady(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_DATA') {
+                handleSettingsDataResponse(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_UPDATE_CONFIRMED') {
+                handleSettingsUpdateConfirmedMessage(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_UPDATE_ERROR') {
+                handleSettingsUpdateErrorMessage(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_FETCH_ERROR') {
+                handleSettingsFetchErrorMessage(message);
+                return;
+            }
+            
+            if (message.type === 'SETTINGS_GLOBAL_UPDATE') {
+                handleSettingsGlobalUpdateMessage(message);
+                return;
+            }
+            
+            if (!window.parentReady) {
+                return;
+            }
+            
+            const handlers = this._messageHandlers.get(message.type) || [];
+            handlers.forEach(handler => {
+                try {
+                    handler(message);
+                } catch (error) {
+                    errorLog(`Error in handler for ${message.type}:`, error);
                 }
             });
             
-            statusState.statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            statusState.myStatuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            
-            statusState.lastSync = new Date().toISOString();
-            statusState.loading = false;
-            
-            logStatus('SUCCESS', `Loaded ${statusState.statuses.length} statuses`);
-            notifyStatusObservers();
-
-            // Also load friends' statuses
-            loadFriendsStatusesInBackground().catch(() => {});
-        } else {
-            throw new Error('Invalid response format');
-        }
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to load statuses:`, error);
-        logStatus('FAILED', `Load statuses: ${error.message}`);
-
-        // On network failure, serve whatever is in cache so UI isn't empty
+        } catch (error) {}
+    },
+    
+    send(type, payload = {}) {
         try {
-            const cachedStatuses = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
-            if (cachedStatuses && Array.isArray(cachedStatuses) && cachedStatuses.length > 0) {
-                statuses = cachedStatuses;
-                statusState.statuses = cachedStatuses;
-                statusState.loading = false;
-                logStatus('INFO', `Serving ${cachedStatuses.length} cached statuses after fetch failure`);
-                notifyStatusObservers();
-            } else {
-                updateStatusState({ loading: false, error: error.message || 'Failed to load statuses' });
-            }
-        } catch (_) {
-            updateStatusState({ loading: false, error: error.message || 'Failed to load statuses' });
-        }
-    } finally {
-        loadStatuses._inFlight = false;
-    }
-}
-
-async function postStatus(statusData) {
-    // FIX Bug B: Do NOT hard-block on ensureActive here.
-    // makeApiRequest now handles the "not ACTIVE" case by falling back to a
-    // direct fetch using whatever token is available.  We only block if there
-    // is genuinely no session data anywhere.
-    const hasAnyToken = _sessionToken ||
-        (function() { try { return localStorage.getItem('moodchat_token') || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('accessToken') || null; } catch(_) { return null; } })();
-
-    if (!ensureActive('postStatus') && !hasAnyToken) {
-        return { success: false, error: 'Module not active and no session token available' };
-    }
-    if (!isSessionReady() && !hasAnyToken) {
-        return { success: false, error: 'Not authenticated' };
-    }
-    if (!statusData || (!(statusData.content || '').trim() && !(statusData.text || '').trim() && !statusData.media && !statusData.mediaUrl)) {
-        return { success: false, error: 'Status content required' };
-    }
-
-    updateStatusState({ loading: true, error: null });
-
-    const rawContent = statusData.content || statusData.text || '';
-
-    // Build payload — only include fields that have actual values so that
-    // express-validator's .optional() validators skip them correctly.
-    // Sending null for optional fields (e.g. mediaUrl, moodType) triggers
-    // isURL/isIn validation failures → 400 Bad Request.
-    const payload = { content: rawContent };
-
-    const type = statusData.type || 'text';
-    payload.type = type;
-
-    if (statusData.mood || statusData.moodType) {
-        payload.moodType = statusData.mood || statusData.moodType;
-    }
-    if (statusData.media || statusData.mediaUrl) {
-        payload.mediaUrl = statusData.media || statusData.mediaUrl;
-    }
-    if (statusData.mediaType) payload.mediaType = statusData.mediaType;
-    if (statusData.background) payload.background = statusData.background;
-
-    // privacy: send the string form the backend expects
-    payload.privacy = statusData.privacy || (statusData.isPublic === false ? 'friends' : 'public');
-    payload.isPublic = (payload.privacy === 'public' || payload.privacy === 'everyone');
-
-    if (statusData.location) payload.location = statusData.location;
-    if (statusData.latitude != null) payload.latitude = statusData.latitude;
-    if (statusData.longitude != null) payload.longitude = statusData.longitude;
-
-    // If offline — queue immediately + show optimistically in UI
-    if (!isOnlineGlobal || !navigator.onLine) {
-        try {
-            const tempId = 'offline_' + Date.now();
-            const optimistic = {
-                ...payload,
-                id: tempId,
-                createdAt: new Date().toISOString(),
-                expiresAt: new Date(Date.now() + 86400000).toISOString(),
-                offline: true,
-                pending: true,
-                user: currentUser || null
-            };
-            // Show in UI immediately
-            statuses.unshift(optimistic);
-            myStatuses.unshift(optimistic);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-            StatusDB.put(optimistic).catch(() => {});
-            // Queue for background sync
-            const queue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
-            queue.push({ ...payload, _tempId: tempId, _queuedAt: new Date().toISOString() });
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
-            if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-            updateStatusState({ loading: false });
-            logStatus('INFO', 'Status posted successfully');
-            return { success: true, queued: true, status: optimistic, message: 'Posted successfully' };
-        } catch (qErr) {
-            updateStatusState({ loading: false, error: 'Failed to queue status offline' });
-            return { success: false, error: 'Offline and queue failed' };
-        }
-    }
-
-    try {
-        // console.log(`[${MODULE_NAME}] 📤 Posting new status`);
-        const response = await makeApiRequest('/api/status', 'POST', payload);
-        // console.log(`[${MODULE_NAME}] 📥 Status posted successfully:`, response);
-
-        // FIX Bug E: handleApiResponse strips the outer { success, data } wrapper so
-        // `response` here is the `data` inner object: { status: {...} }.
-        // We also guard the legacy shape where the full object comes through.
-        const newStatus =
-            response?.status ||           // normal: data.status after one strip
-            response?.data?.status ||     // double-wrapped (some older code paths)
-            (response?.id ? response : null); // backend returned the status itself
-        if (newStatus) {
-            addStatus(newStatus);
-            // Persist to IndexedDB immediately
-            StatusDB.put(newStatus).catch(() => {});
-            // Invalidate TTL so next background refresh picks up the new post
-            SafeStorage.memoryStore.delete(LOCAL_STORAGE_KEYS.LAST_SYNC);
-            updateStatusState({ loading: false });
-            logStatus('POST', 'Status posted successfully');
-            return { success: true, status: newStatus };
-        } else {
-            throw new Error('Invalid response from server');
-        }
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to post status:`, error);
-        updateStatusState({ loading: false, error: error.message });
-        logStatus('FAILED', `Post status: ${error.message}`);
-        // Queue on network failures so the post isn't lost
-        if (!navigator.onLine || error.message.includes('timeout') || error.message.includes('network') || error.message.includes('fetch')) {
-            try {
-                const queue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
-                queue.push({ ...payload, _queuedAt: new Date().toISOString() });
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, queue);
-                logStatus('INFO', 'Status posted — syncing...');
-                return { success: false, queued: true, error: error.message, message: 'Posted successfully' };
-            } catch (_) {}
-        }
-        return { success: false, error: error.message };
-    }
-}
-
-async function markStatusViewed(statusId) {
-    if (!ensureActive('markStatusViewed')) {
-        return { success: false, error: 'Module not active' };
-    }
-
-    if (!statusId) {
-        return { success: false, error: 'Status ID required' };
-    }
-
-    // Always mark locally first — viewer must open regardless of network state
-    markStatusViewedLocally(statusId);
-
-    try {
-        // POST /api/status/:statusId/view — fire-and-forget; don't block the viewer
-        const response = await makeApiRequest(`/api/status/${statusId}/view`, 'POST', {});
-        if (response && response.success !== false) {
-            logStatus('VIEW', `Status viewed: ${statusId}`);
-        }
-        return { success: true };
-    } catch (error) {
-        // Timeout/offline is expected in dev — silence the error, local mark already done
-        if (error.message && error.message.includes('timeout')) {
-            // silently swallow — viewer is already open and local state is marked
-        } else {
-            console.warn(`[${MODULE_NAME}] markStatusViewed network error (non-blocking):`, error.message);
-        }
-        return { success: false, error: error.message };
-    }
-}
-
-async function deleteStatus(statusId) {
-    if (!ensureActive('deleteStatus')) {
-        return { success: false, error: 'Module not active' };
-    }
-    
-    if (!statusId) {
-        return { success: false, error: 'Status ID required' };
-    }
-    
-    try {
-        // console.log(`[${MODULE_NAME}] 📤 Deleting status: ${statusId}`);
-        
-        // Correct RESTful endpoint: DELETE /api/status/:statusId
-        const response = await makeApiRequest(`/api/status/${statusId}`, 'DELETE', null);
-        
-        // console.log(`[${MODULE_NAME}] 📥 Status deleted:`, response);
-        
-        if (response && response.success !== false) {
-            removeStatus(statusId);
-            // Remove from IndexedDB immediately
-            StatusDB.remove(statusId).catch(() => {});
-            logStatus('SUCCESS', `Status deleted: ${statusId}`);
-            return { success: true };
-        } else {
-            throw new Error('Failed to delete status');
-        }
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to delete status:`, error);
-        logStatus('FAILED', `Delete status: ${error.message}`);
-        return { success: false, error: error.message };
-    }
-}
-
-// =============================================
-// REAL-TIME STATUS EVENTS  (socket → IndexedDB → UI)
-// =============================================
-function handleRealtimeStatusEvent(eventName, data) {
-    try {
-        // ── Proof log — this MUST appear in the console when User B receives a status
-        console.log(`[status] 📥 STATUS RECEIVED: ${eventName}`, data);
-        logStatus('SUCCESS', `Realtime event: ${eventName}`);
-
-        switch (eventName) {
-            case 'new_status':
-            case 'status:created':
-            case 'status_created': {
-                const status = data?.status || data;
-                if (!status || !status.id) {
-                    console.warn('[status] ⚠️ handleRealtimeStatusEvent: no status.id in payload', data);
-                    break;
-                }
-                // Ensure expiry
-                if (!status.expiresAt) {
-                    status.expiresAt = new Date(Date.now() + 86400000).toISOString();
-                }
-                // FIX: normalise id to string to match how dataset.statusId works in UI
-                status.id = String(status.id);
-
-                // Skip if already in list (check both module-level statuses and statusState)
-                const alreadyInStatuses = statuses.find(s => String(s.id) === status.id);
-                const alreadyInState = statusState.statuses && statusState.statuses.find(s => String(s.id) === status.id);
-
-                if (!alreadyInStatuses && !alreadyInState) {
-                    // Update BOTH the module-level array and the statusState object
-                    statuses.unshift(status);
-                    if (statusState.statuses) {
-                        statusState.statuses.unshift(status);
-                    }
-                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-                    StatusDB.put(status).catch(() => {});
-                    if (window.StatusCache && typeof window.StatusCache.cacheStatus === 'function') {
-                        window.StatusCache.cacheStatus(status).catch(() => {});
-                    }
-                    // Notify UI layer
-                    if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                    const _renderFn = (typeof renderStatusListInstantlyUI === 'function' && renderStatusListInstantlyUI)
-                        || (typeof window !== 'undefined' && window.renderStatusListInstantlyUI);
-                    if (_renderFn) {
-                        _renderFn();
-                    } else {
-                        // status-ui.js may not have run yet — retry once after a tick
-                        setTimeout(() => {
-                            const fn = typeof window !== 'undefined' && window.renderStatusListInstantlyUI;
-                            if (fn) fn();
-                        }, 100);
-                    }
-                    if (window.parent && window.parent !== window) {
-                        try {
-                            window.parent.postMessage({
-                                type: 'STATUS_EVENT',
-                                event: 'status:created',
-                                payload: { status, statusId: status.id, userId: status.userId },
-                                source: MODULE_NAME,
-                                timestamp: Date.now()
-                            }, '*');
-                        } catch (_) {}
-                    }
-                    console.log(`[status] ✅ STATUS ADDED TO UI id=${status.id} userId=${status.userId}`);
-                    logStatus('SUCCESS', `Realtime: new status ${status.id} added`);
-                } else {
-                    console.log(`[status] ℹ️ Status ${status.id} already in list — skipping duplicate`);
-                }
-                break;
-            }
-
-            case 'status_deleted':
-            case 'status:deleted': {
-                const statusId = data?.statusId || data?.id || data;
-                if (!statusId) break;
-                removeStatus(statusId);
-                StatusDB.remove(statusId).catch(() => {});
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                const _delRenderFn = (typeof renderStatusListInstantlyUI === 'function' && renderStatusListInstantlyUI)
-                    || (typeof window !== 'undefined' && window.renderStatusListInstantlyUI);
-                if (_delRenderFn) _delRenderFn();
-                else setTimeout(() => { const fn = window && window.renderStatusListInstantlyUI; if (fn) fn(); }, 100);
-                logStatus('SUCCESS', `Realtime: status ${statusId} deleted`);
-                break;
-            }
-
-            case 'status_updated':
-            case 'status:updated': {
-                const statusId = data?.statusId || data?.id;
-                const updates  = data?.updates  || data;
-                if (!statusId) break;
-                updateStatus(statusId, updates);
-                // Refresh from IDB if we have the item
-                StatusDB.getAll().then(all => {
-                    const existing = all.find(s => String(s.id) === String(statusId));
-                    if (existing) {
-                        Object.assign(existing, updates);
-                        StatusDB.put(existing).catch(() => {});
-                    }
-                }).catch(() => {});
-                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                break;
-            }
-
-            case 'status:liked':
-            case 'status_liked': {
-                const statusId = data?.statusId || data?.id;
-                if (!statusId) break;
-                updateStatus(statusId, { likeCount: (statuses.find(s => s.id === statusId)?.likeCount || 0) + 1 });
-                break;
-            }
-
-            case 'status:viewed':
-            case 'status:viewer_update': {
-                const statusId = data?.statusId || data?.id;
-                if (!statusId) break;
-                const viewCount = data?.viewerCount ?? data?.viewCount;
-                if (viewCount !== undefined) {
-                    updateStatus(statusId, { viewCount });
-                }
-                document.dispatchEvent(new CustomEvent('viewerUpdate', {
-                    detail: {
-                        statusId,
-                        viewerId: data?.viewerId || null,
-                        viewerCount: viewCount ?? 0,
-                        viewedAt: data?.viewedAt || data?.timestamp || Date.now()
-                    }
-                }));
-                break;
-            }
-
-            case 'status:reaction': {
-                const statusId = data?.statusId || data?.id;
-                if (!statusId) break;
-                const target = statuses.find(s => String(s.id) === String(statusId))
-                    || myStatuses.find(s => String(s.id) === String(statusId));
-                if (target) {
-                    const summary = target.reactionSummary && typeof target.reactionSummary === 'object'
-                        ? { ...target.reactionSummary }
-                        : {};
-                    if (data?.removed) {
-                        Object.keys(summary).forEach((key) => {
-                            if (!summary[key]) delete summary[key];
-                        });
-                    } else if (data?.emoji) {
-                        summary[data.emoji] = data.count || 0;
-                    }
-                    target.reactionSummary = summary;
-                }
-                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                document.dispatchEvent(new CustomEvent('reactionUpdate', {
-                    detail: {
-                        statusId,
-                        emoji: data?.emoji || null,
-                        count: data?.count ?? 0,
-                        reactorId: data?.reactorId || null,
-                        removed: !!data?.removed
-                    }
-                }));
-                break;
-            }
-
-            case 'status:reply': {
-                if (data) {
-                    pendingReplies.push(data);
-                    if (pendingReplies.length > 50) pendingReplies.shift();
-                }
-                document.dispatchEvent(new CustomEvent('statusReply', {
-                    detail: data || {}
-                }));
-                break;
-            }
-
-            case 'status:expired': {
-                const statusId = data?.statusId || data?.id;
-                if (!statusId) break;
-                removeStatus(statusId);
-                StatusDB.remove(statusId).catch(() => {});
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-                document.dispatchEvent(new CustomEvent('statusExpired', {
-                    detail: { statusId, userId: data?.userId || null }
-                }));
-                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-                break;
-            }
-
-            default:
-                break;
-        }
-    } catch (err) {
-        logStatus('FAILED', `handleRealtimeStatusEvent (${eventName}): ${err.message}`);
-    }
-}
-
-async function addReaction(statusId, reaction) {
-    if (!ensureActive('addReaction')) {
-        return { success: false, error: 'Module not active' };
-    }
-    
-    if (!statusId || !reaction) {
-        return { success: false, error: 'Status ID and reaction required' };
-    }
-    
-    try {
-        // console.log(`[${MODULE_NAME}] 📤 Adding reaction ${reaction} to status: ${statusId}`);
-        
-        const response = await makeApiRequest(`/api/status/${statusId}/like`, 'POST', {});
-        
-        // console.log(`[${MODULE_NAME}] 📥 Reaction added:`, response);
-        
-        if (response && response.success !== false) {
-            const status = statusState.statuses.find(s => s.id === statusId);
-            if (status) {
-                if (!status.reactions) status.reactions = {};
-                if (!status.reactions[reaction]) status.reactions[reaction] = [];
-                const currentUserId = getSessionUserId();
-                if (currentUserId && !status.reactions[reaction].includes(currentUserId)) {
-                    status.reactions[reaction].push(currentUserId);
-                }
-                notifyStatusObservers();
-            }
-            logStatus('REACTION', `Added ${reaction} to ${statusId}`);
-            return { success: true };
-        } else {
-            throw new Error('Failed to add reaction');
-        }
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to add reaction:`, error);
-        logStatus('FAILED', `Add reaction: ${error.message}`);
-        return { success: false, error: error.message };
-    }
-}
-
-async function removeReaction(statusId, reaction) {
-    if (!ensureActive('removeReaction')) {
-        return { success: false, error: 'Module not active' };
-    }
-    
-    if (!statusId || !reaction) {
-        return { success: false, error: 'Status ID and reaction required' };
-    }
-    
-    try {
-        // console.log(`[${MODULE_NAME}] 📤 Removing reaction ${reaction} from status: ${statusId}`);
-        
-        const response = await makeApiRequest(`/api/status/${statusId}/like`, 'DELETE', null);
-        
-        // console.log(`[${MODULE_NAME}] 📥 Reaction removed:`, response);
-        
-        if (response && response.success !== false) {
-            const status = statusState.statuses.find(s => s.id === statusId);
-            if (status && status.reactions && status.reactions[reaction]) {
-                const currentUserId = getSessionUserId();
-                const index = status.reactions[reaction].indexOf(currentUserId);
-                if (index !== -1) {
-                    status.reactions[reaction].splice(index, 1);
-                    if (status.reactions[reaction].length === 0) {
-                        delete status.reactions[reaction];
-                    }
-                }
-                notifyStatusObservers();
-            }
-            logStatus('REACTION', `Removed ${reaction} from ${statusId}`);
-            return { success: true };
-        } else {
-            throw new Error('Failed to remove reaction');
-        }
-    } catch (error) {
-        console.error(`[${MODULE_NAME}] Failed to remove reaction:`, error);
-        logStatus('FAILED', `Remove reaction: ${error.message}`);
-        return { success: false, error: error.message };
-    }
-}
-
-// =============================================
-// REQUEST SESSION - ONLY AFTER ACTIVE
-// =============================================
-function requestSession() {
-    if (_sessionRequested && _sessionRequestRetries >= MAX_SESSION_REQUEST_RETRIES) {
-        debugWarn('Max session request retries reached');
-        return;
-    }
-    
-    if (!isInState(LifecycleState.ACTIVE) && currentState !== LIFECYCLE_STATES.WAIT_PARENT) {
-        debugLog('Cannot request session - not ACTIVE or WAIT_PARENT (current: ' + _currentState + ')');
-        return;
-    }
-    
-    if (!parentReady) {
-        debugLog('Cannot request session - parent not ready, queueing REQUEST_SESSION');
-        safeSend('REQUEST_SESSION', {});
-        return;
-    }
-    
-    _sessionRequested = true;
-    _sessionRequestRetries++;
-    if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('sessionRequests');
-    
-    safeSend('REQUEST_SESSION', {});
-    const sessionKey = 'session_requested';
-    if (!_loggedMessages.has(sessionKey)) {
-        _loggedMessages.add(sessionKey);
-        logStatus('SENDING', 'Session requested');
-    }
-}
-
-function handleSession(sessionData) {
-    if (!sessionData) return;
-    
-    // CRITICAL: Validate session before accepting
-    if (!__isValidSession(sessionData)) {
-        logStatus('FAILED', 'Invalid session data received - rejected', { userId: sessionData.userId, hasToken: !!sessionData.token });
-        return;
-    }
-    
-    // Check for duplicate session
-    if (__isDuplicateSession(sessionData)) {
-        logStatus('WARNING', 'Duplicate session data ignored');
-        return;
-    }
-    
-    // Prevent session downgrade - if we already have a valid session, don't overwrite with invalid
-    if (_sessionReady && _sessionToken) {
-        const currentValid = __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId });
-        if (currentValid && !__isValidSession(sessionData)) {
-            logStatus('WARNING', 'Prevented session downgrade - keeping existing valid session');
-            return;
-        }
-    }
-    
-    // Extract user ID from various possible formats
-    let userId = null;
-    if (sessionData.userId) {
-        userId = sessionData.userId;
-    } else if (sessionData.user?.id) {
-        userId = sessionData.user.id;
-    } else if (sessionData.user?.userId) {
-        userId = sessionData.user.userId;
-    }
-    
-    // Final validation - ensure userId is valid
-    if (!userId || userId === 'user' || userId === 'default' || userId === 0 || userId === '0') {
-        logStatus('FAILED', 'Invalid userId in session data - rejected', { userId });
-        return;
-    }
-    
-    if (sessionData.token) {
-        const user = sessionData.user || { id: userId, displayName: sessionData.user?.displayName || 'User' };
-        setSession(sessionData.token, user, sessionData.expiresAt || null);
-        
-        _sessionRequestRetries = 0;
-        if (typeof DiagnosticsAgent !== 'undefined') DiagnosticsAgent.increment('sessionSuccess');
-        
-        StorageProxy.remove('USER_TOKEN');
-        StorageProxy.remove('USER_DATA');
-        
-        __storeValidSessionId(sessionData);
-        
-        // If we were waiting for session to activate, now we can activate
-        if (_currentState === LifecycleState.WAIT_PARENT && (_parentReadyReceived || _parentReady) && !isInState(LifecycleState.ACTIVE)) {
-            transitionTo(LifecycleState.ACTIVE, 'valid_session_received');
-            flushQueue();
-            
-            if (parentReadyResolver) {
-                parentReadyResolver({ type: 'PARENT_READY', timestamp: Date.now() });
-            }
-        }
-    }
-    
-    if (typeof updateSessionMirror === 'function') {
-        updateSessionMirror(sessionData, 'parent');
-    }
-    
-    if (typeof ParentCommunication !== 'undefined' && ParentCommunication.handleSessionSync) {
-        ParentCommunication.handleSessionSync(sessionData);
-    }
-    
-    if (typeof SessionClient !== 'undefined' && SessionClient.updateSession) {
-        SessionClient.updateSession(sessionData, 'parent');
-    }
-    
-    if (sessionData.user) {
-        if (typeof currentUser !== 'undefined') currentUser = sessionData.user;
-        if (typeof userData !== 'undefined') userData = sessionData.user;
-    }
-    
-    if (sessionData.token) {
-        if (typeof state !== 'undefined') state.token = sessionData.token;
-    }
-    
-    if (typeof isTokenReady !== 'undefined') {
-        isTokenReady = true;
-        if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-            triggerTokenReadyCallbacks();
-        }
-    }
-    if (typeof processPendingApiRequests !== 'undefined') processPendingApiRequests();
-    
-    const sessionKey = 'session_received';
-    if (!_loggedMessages.has(sessionKey)) {
-        _loggedMessages.add(sessionKey);
-        logStatus('SUCCESS', 'Session data received');
-    }
-}
-
-// =============================================
-// SEND HEARTBEAT ACK
-// =============================================
-function sendHeartbeatAck(inResponseTo) {
-    safeSend('HEARTBEAT_ACK', {
-        inResponseTo,
-        timestamp: Date.now()
-    });
-}
-
-// =============================================
-// PARENT COMMUNICATION LAYER - ADAPTED FOR PROTOCOL COMPLIANCE
-// =============================================
-const ParentCommunication = {
-    childReadySent: false,
-    moduleRegistered: false,
-    parentReadyReceived: false,
-    sessionSynced: false,
-    
-    initialize() {
-        debugLog('ParentCommunication initialized');
-        return this;
-    },
-    
-    sendChildReady() {
-        return sendChildReady();
-    },
-    
-    sendRegistration() {
-        if (this.moduleRegistered) {
-            debugLog('Already registered, skipping');
-            return false;
-        }
-        
-        if (!isInState(LifecycleState.WAIT_PARENT) && !isInState(LifecycleState.ACTIVE)) {
-            debugWarn(`Cannot register in state ${_currentState} - must be WAIT_PARENT or ACTIVE`);
-            return false;
-        }
-        
-        const success = safeSend('REGISTER_MODULE', {
-            moduleName: MODULE_NAME,
-            moduleVersion: '10.0',
-            capabilities: IframeEnvironment.getCapabilities(),
-            features: [
-                'status_text',
-                'status_media',
-                'status_poll',
-                'reactions',
-                'view_tracking',
-                'expiration'
-            ]
-        });
-        
-        if (success) {
-            this.moduleRegistered = true;
-            logStatus('SENDING', 'REGISTER_MODULE sent');
-        }
-        
-        return success;
-    },
-    
-    sendHeartbeatAck(inResponseTo) {
-        return safeSend('HEARTBEAT_ACK', {
-            inResponseTo,
-            timestamp: Date.now()
-        });
-    },
-    
-    handleSessionSync(sessionData) {
-        if (!sessionData) return false;
-        
-        // Validate before handling
-        if (!__isValidSession(sessionData)) {
-            logStatus('FAILED', 'Invalid session in handleSessionSync - rejected');
-            return false;
-        }
-        
-        this.updateSessionState(sessionData);
-        
-        logStatus('SUCCESS', 'Session synchronized');
-        
-        return true;
-    },
-    
-    updateSessionState(sessionData) {
-        try {
-            if (sessionData.user) {
-                if (typeof currentUser !== 'undefined') currentUser = sessionData.user;
-                if (typeof userData !== 'undefined') userData = sessionData.user;
+            if (!this._enabled) {
+                return false;
             }
             
-            if (sessionData.token) {
-                if (typeof state !== 'undefined') state.token = sessionData.token;
-            }
+            const message = createCanonicalMessage(type, payload, 'parent');
             
-            if (sessionData.permissions) {
-                if (typeof state !== 'undefined') state.permissionsGranted = sessionData.permissions;
-            }
+            sendLog(`${type} - MessageId: ${message.messageId}`);
             
-            if (sessionData.sessionId) {
-                if (typeof state !== 'undefined') state.sessionId = sessionData.sessionId;
-            }
-            
-            if (typeof updateSessionMirror === 'function') {
-                updateSessionMirror(sessionData, 'session_sync');
-            }
-            if (typeof SessionClient !== 'undefined' && SessionClient.updateSession) {
-                SessionClient.updateSession(sessionData, 'session_sync');
-            }
-            
-            if (typeof isTokenReady !== 'undefined') {
-                isTokenReady = true;
-                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-                    triggerTokenReadyCallbacks();
+            if (!this._parentWindow || this._parentWindow === window) {
+                this._detectParent();
+                if (!this._parentWindow || this._parentWindow === window) {
+                    return false;
                 }
             }
-            if (typeof processPendingApiRequests !== 'undefined') processPendingApiRequests();
+            
+            safeSend(message);
+            
+            return true;
             
         } catch (error) {
-            debugError('Failed to update session state:', error);
+            return false;
         }
     },
     
-    handleParentMessage(message) {
-        if (!message || !message.type) {
-            return;
+    on(type, handler) {
+        if (!this._messageHandlers.has(type)) {
+            this._messageHandlers.set(type, []);
         }
-        
-        switch (message.type) {
-            case 'PARENT_READY':
-                this.parentReadyReceived = true;
-                break;
-                case 'AUTH_READY':
-    logStatus('RECEIVE', 'AUTH_READY received in ParentCommunication');
+        this._messageHandlers.get(type).push(handler);
+        return () => this.off(type, handler);
+    },
     
-    const authPayload = message.payload || message.data || {};
-    const authSession = authPayload.session || authPayload;
-    
-    if (authSession && __isValidSession(authSession)) {
-        if (!__isDuplicateSession(authSession)) {
-            this.handleSessionSync(authSession);
-            __storeValidSessionId(authSession);
-        }
-    }
-    
-    if (!this.parentReadyReceived && isInState(LifecycleState.WAIT_PARENT)) {
-        this.parentReadyReceived = true;
-        parentReady = true;
-        _parentReady = true;
-        
-        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
-            transitionTo(LifecycleState.ACTIVE, 'auth_ready_with_valid_session');
-            flushQueue();
-            
-            if (parentReadyResolver) {
-                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
-            }
-        }
-    }
-    break;
-                
-            case 'MODULE_REGISTERED':
-                if (message.payload?.moduleName === MODULE_NAME) {
-                    this.moduleRegistered = true;
-                    logStatus('SUCCESS', 'Module registered');
-                }
-                break;
-                
-            case 'SESSION_DATA':
-                // Validate session before handling
-                if (message.payload && __isValidSession(message.payload)) {
-                    this.handleSessionSync(message.payload);
-                } else {
-                    logStatus('WARNING', 'Invalid SESSION_DATA received');
-                }
-                break;
-                
-            case 'HEARTBEAT':
-                this.sendHeartbeatAck(message.id);
-                break;
-                
-            case 'SESSION_ACTIVE':
-                if (message.payload && __isValidSession(message.payload)) {
-                    this.handleSessionSync(message.payload);
-                }
-                break;
-                
-            default:
-                break;
+    off(type, handler) {
+        const handlers = this._messageHandlers.get(type);
+        if (handlers) {
+            const index = handlers.indexOf(handler);
+            if (index !== -1) handlers.splice(index, 1);
         }
     },
     
-    sendAction(action, payload = {}) {
-        return safeSendAction(action, payload);
+    disable() {
+        this._enabled = false;
     },
     
-    reset() {
-        this.childReadySent = false;
-        this.parentReadyReceived = false;
-        this.moduleRegistered = false;
-        this.sessionSynced = false;
+    enable() {
+        this._enabled = true;
+    },
+    
+    getDiagnostics() {
+        return {
+            enabled: this._enabled
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
-}.initialize();
+};
+
+MessageTransport.init();
 
 // =============================================
-// MESSAGE TYPES - ENHANCED
+// LIFECYCLE CONTROLLER - STRICT STATE MACHINE
 // =============================================
-const MESSAGE_TYPES = {
-    CHILD_READY: 'CHILD_READY',
-    PARENT_READY: 'PARENT_READY',
-    REGISTER_MODULE: 'REGISTER_MODULE',
-    MODULE_REGISTERED: 'MODULE_REGISTERED',
-    SESSION_DATA: 'SESSION_DATA',
-    HEARTBEAT: 'HEARTBEAT',
-    HEARTBEAT_ACK: 'HEARTBEAT_ACK',
-    ACK: 'ACK',
-    ACTION: 'ACTION',
-    SESSION_ACTIVE: 'SESSION_ACTIVE',
-    REQUEST_SESSION: 'REQUEST_SESSION',
+const LifecycleController = {
+    _sessionRequestRetries: 0,
+    _maxSessionRetries: 3,
     
-    STORAGE_GET: 'STORAGE_GET',
-    STORAGE_SET: 'STORAGE_SET',
-    STORAGE_REMOVE: 'STORAGE_REMOVE',
-    STORAGE_CLEAR: 'STORAGE_CLEAR',
-    STORAGE_RESULT: 'STORAGE_RESULT',
+    init() {
+        initLog('LifecycleController initializing');
+        this._setupMessageHandlers();
+        
+        setState(LifecycleState.BOOT, 'starting');
+        this._initializeComponents();
+        
+        successLog('LifecycleController initialized');
+    },
     
-    READY: 'STATUS_READY',
-    SESSION: 'STATUS_SESSION',
-    DATA: 'STATUS_DATA',
-    ERROR: 'STATUS_ERROR',
-    STATUS: 'STATUS_UPDATE',
-    REQUEST_SESSION_LEGACY: 'STATUS_REQUEST_SESSION',
-    UI_READY: 'STATUS_UI_READY',
-    NEEDS_AUTH: 'STATUS_NEEDS_AUTH',
-    API_REQUEST: 'API_REQUEST',
-    API_RESPONSE: 'API_RESPONSE',
-    API_ERROR: 'API_ERROR',
-    AUTH_VALIDATED: 'AUTH_VALIDATED',
-    SESSION_UPDATE: 'SESSION_UPDATE',
-    LOGOUT: 'LOGOUT',
-    IFRAME_READY: 'IFRAME_READY',
-    STATUS_SHUTDOWN: 'STATUS_SHUTDOWN',
-    USER_ACTIVE: 'USER_ACTIVE',
-    USER_INACTIVE: 'USER_INACTIVE',
-    HANDSHAKE_REQUEST: 'HANDSHAKE_REQUEST',
-    HANDSHAKE_RESPONSE: 'HANDSHAKE_RESPONSE',
-    HANDSHAKE_ACK: 'HANDSHAKE_ACK',
-    SESSION_ACK: 'SESSION_ACK',
-    PING: 'PING',
-    PONG: 'PONG',
-    PAGE_ACTIVATED: 'PAGE_ACTIVATED',
-    NAVIGATE: 'NAVIGATE',
-    CAPABILITY_REQUEST: 'CAPABILITY_REQUEST',
-    CAPABILITY_RESPONSE: 'CAPABILITY_RESPONSE',
-    TOKEN_REFRESH: 'TOKEN_REFRESH',
-    TOKEN_REFRESH_RESPONSE: 'TOKEN_REFRESH_RESPONSE',
-    ORIGIN_VALIDATION: 'ORIGIN_VALIDATION',
-    ORIGIN_VALIDATION_RESPONSE: 'ORIGIN_VALIDATION_RESPONSE',
-    CONFIG_REQUEST: 'CONFIG_REQUEST',
-    CONFIG_RESPONSE: 'CONFIG_RESPONSE',
-    DIAGNOSTICS: 'DIAGNOSTICS',
-    RECOVERY_REQUEST: 'RECOVERY_REQUEST',
-    RECOVERY_RESPONSE: 'RECOVERY_RESPONSE',
-    STATUS_VIEW: 'STATUS_VIEW',
-    STATUS_REACT: 'STATUS_REACT',
-    STATUS_REPLY: 'STATUS_REPLY',
-    STATUS_PIN: 'STATUS_PIN',
-    STATUS_UNPIN: 'STATUS_UNPIN',
-    STATUS_MUTE: 'STATUS_MUTE',
-    STATUS_UNMUTE: 'STATUS_UNMUTE',
-    STATUS_REPORT: 'STATUS_REPORT',
-    STATUS_DRAFT_SAVE: 'STATUS_DRAFT_SAVE',
-    STATUS_DRAFT_LOAD: 'STATUS_DRAFT_LOAD',
-    STATUS_DRAFT_DELETE: 'STATUS_DRAFT_DELETE',
-    STATUS_SCHEDULE: 'STATUS_SCHEDULE',
-    STATUS_SCHEDULE_CANCEL: 'STATUS_SCHEDULE_CANCEL',
-    HIGHLIGHT_CREATE: 'HIGHLIGHT_CREATE',
-    HIGHLIGHT_UPDATE: 'HIGHLIGHT_UPDATE',
-    HIGHLIGHT_DELETE: 'HIGHLIGHT_DELETE',
-    HIGHLIGHT_ADD_STATUS: 'HIGHLIGHT_ADD_STATUS',
-    HIGHLIGHT_REMOVE_STATUS: 'HIGHLIGHT_REMOVE_STATUS',
-    IFRAME_REGISTERED: 'IFRAME_REGISTERED',
+    _initializeComponents() {
+        loadFromLocalStorage();
+        
+        if (currentState === LifecycleState.BOOT) {
+            setState(LifecycleState.INITIALIZING, 'component_init');
+            setState(LifecycleState.WAITING_AUTH, 'auth_bypass');
+            setState(LifecycleState.READY, 'auth_bypass');
+            setState(LifecycleState.WAIT_PARENT, 'auth_bypass');
+            setState(LifecycleState.ACTIVE, 'standalone_mode');
+            console.log(`[${MODULE_NAME}] ✅ Standalone mode - state forced to ACTIVE`);
+        }
+    },
     
-    STATUS_CREATE: 'STATUS_CREATE',
-    STATUS_POSTED: 'STATUS_POSTED',
-    STATUS_VIEWED: 'STATUS_VIEWED',
-    STATUS_REACTED: 'STATUS_REACTED',
-    STATUS_REACTION_REMOVED: 'STATUS_REACTION_REMOVED',
-    STATUS_EXPIRED: 'STATUS_EXPIRED',
-    STATUS_SYNC_REQUEST: 'STATUS_SYNC_REQUEST',
-    STATUS_SYNC_RESPONSE: 'STATUS_SYNC_RESPONSE',
-    STATUSES_UPDATE: 'STATUSES_UPDATE',
-    VIEWER_TRACKED: 'VIEWER_TRACKED',
-    REACTION_ADDED: 'REACTION_ADDED',
-    REACTION_REMOVED: 'REACTION_REMOVED',
-    REACTION_CHANGED: 'REACTION_CHANGED',
-    REACTIONS_UPDATE: 'REACTIONS_UPDATE',
-    VIEWERS_UPDATE: 'VIEWERS_UPDATE',
-    EXPIRED_STATUS_CLEANUP: 'EXPIRED_STATUS_CLEANUP'
+    _sendChildReady() {
+        if (childReadySent) return;
+        if (currentState !== LifecycleState.READY) return;
+        
+        sendChildReady();
+        initLog('CHILD_READY sent, waiting for PARENT_READY');
+    },
+    
+    _setupMessageHandlers() {
+        MessageTransport.on('PARENT_READY', (message) => {});
+        MessageTransport.on('MODULE_REGISTERED', (message) => {});
+        MessageTransport.on('SESSION_SYNC', (message) => {});
+        MessageTransport.on('SESSION_UPDATE', (message) => {});
+        MessageTransport.on('SESSION_INVALIDATED', (message) => {});
+        MessageTransport.on('SETTINGS_LOAD_RESPONSE', (message) => {});
+        MessageTransport.on('SETTINGS_UPDATED', (message) => {});
+        MessageTransport.on('PROFILE_UPDATED', (message) => {});
+        MessageTransport.on('PRIVACY_UPDATED', (message) => {});
+        MessageTransport.on('NOTIFICATIONS_UPDATED', (message) => {});
+        MessageTransport.on('LANGUAGE_CHANGED', (message) => {});
+        MessageTransport.on('THEME_CHANGED', (message) => {});
+        MessageTransport.on('ACCOUNT_LOGGED_OUT', (message) => {});
+        MessageTransport.on('BLOCKED_USERS_UPDATED', (message) => {});
+        MessageTransport.on('ACTIVE_SESSIONS_UPDATED', (message) => {});
+        MessageTransport.on('USER_CONTACTS_UPDATED', (message) => {});
+        MessageTransport.on('USER_GROUPS_UPDATED', (message) => {});
+        MessageTransport.on('STORAGE_USAGE_UPDATED', (message) => {});
+        MessageTransport.on('ERROR', (message) => {});
+        MessageTransport.on('SETTINGS_DATA', (message) => {});
+        MessageTransport.on('SETTINGS_UPDATE_CONFIRMED', (message) => {});
+        MessageTransport.on('SETTINGS_GLOBAL_UPDATE', (message) => {});
+        MessageTransport.on('AUTH_READY', (message) => {});
+        MessageTransport.on('AUTH_ERROR', (message) => {});
+    }
 };
 
 // =============================================
-// ENVIRONMENT AUTO-DETECTION SYSTEM
+// API CORE GATEWAY - USES authorizedRequest
 // =============================================
+const ApiCore = {
+    _ready: false,
+    _readyPromise: null,
+    _readyResolvers: [],
+    
+    init() {
+        initLog('API Gateway initializing');
+        this._readyPromise = new Promise((resolve) => {
+            this._readyResolvers.push(resolve);
+        });
+        return this;
+    },
+    
+    isReady() {
+        return this._ready && currentState === LifecycleState.ACTIVE && isAuthenticated;
+    },
+    
+    whenReady() {
+        return this._readyPromise || Promise.resolve();
+    },
+    
+    async request(endpoint, options = {}) {
+        if (currentState !== LifecycleState.ACTIVE) {
+            return {
+                success: false,
+                status: 'error',
+                message: 'Cannot perform action: not ACTIVE state',
+                data: null
+            };
+        }
+        
+        if (!isAuthenticated) {
+            return {
+                success: false,
+                status: 'error',
+                message: 'Authentication not ready',
+                data: null
+            };
+        }
+        
+        try {
+            const response = await authorizedRequest(endpoint, options);
+            return response;
+        } catch (error) {
+            return {
+                success: false,
+                status: 'error',
+                message: error.message || 'Request failed',
+                data: null
+            };
+        }
+    },
+    
+    getDiagnostics() {
+        return {
+            ready: this._ready,
+            authenticated: isAuthenticated
+        };
+    }
+}.init();
+
+// =============================================
+// SECURE API WRAPPER - USES authorizedRequest
+// =============================================
+async function secureApiCall(endpoint, options = {}) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Cannot perform action: not ACTIVE state',
+            data: null
+        };
+    }
+    
+    if (!isAuthenticated) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Authentication not ready',
+            data: null
+        };
+    }
+    
+    try {
+        const response = await authorizedRequest(endpoint, options);
+        return { success: true, data: response };
+    } catch (error) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Request failed',
+            data: null
+        };
+    }
+}
+
+// =============================================
+// AUTHORIZED FETCH - NO LONGER USED DIRECTLY
+// =============================================
+function authorizedFetch(url, options = {}) {
+    if (!isAuthenticated) {
+        throw new Error("Authentication not ready");
+    }
+    
+    // This should not be called directly - use authorizedRequest instead
+    if (DEBUG) console.warn(`[${MODULE_NAME}] ⚠️ authorizedFetch called - this should be replaced with authorizedRequest`);
+    return authorizedRequest(url, options);
+}
+
+// =============================================
+// SAFE DATA ACCESS UTILITIES
+// =============================================
+function safeGet(data, path, defaultValue = null) {
+    if (!data || typeof data !== 'object') return defaultValue;
+    
+    const parts = path.split('.');
+    let current = data;
+    
+    for (const part of parts) {
+        if (current === null || current === undefined || typeof current !== 'object') {
+            return defaultValue;
+        }
+        current = current[part];
+    }
+    
+    return current !== undefined ? current : defaultValue;
+}
+
+function safeArray(array, defaultValue = []) {
+    return Array.isArray(array) ? array : defaultValue;
+}
+
+function safeObject(obj, defaultValue = {}) {
+    return obj && typeof obj === 'object' ? obj : defaultValue;
+}
+
+// =============================================
+// IFRAME ENVIRONMENT DETECTOR
+// =============================================
+const ENV_TYPES = {
+    LOCAL_DEV: 'local_dev',
+    RENDER_HOSTED: 'render_hosted',
+    VPN_NETWORK: 'vpn_network',
+    PRODUCTION: 'production',
+    UNKNOWN: 'unknown'
+};
+
 const IframeEnvironment = {
-    type: 'UNKNOWN',
-    isLocalDev: false,
-    isRenderHosted: false,
-    isVPNNetwork: false,
-    isProduction: false,
-    isSandboxed: false,
-    isSecure: false,
-    latency: 0,
-    bandwidth: 0,
-    connectionType: 'unknown',
-    effectiveType: 'unknown',
-    rtt: 0,
-    downlink: 0,
-    saveData: false,
+    _environment: ENV_TYPES.UNKNOWN,
+    _features: {
+        hasSecureContext: false,
+        hasCrypto: false,
+        hasLocalStorage: false,
+        hasServiceWorker: false,
+        connectionType: 'unknown',
+        effectiveBandwidth: 0,
+        rtt: 0,
+        isSandboxed: false,
+        isIframe: false,
+        parentOrigin: null,
+        backendReachable: true
+    },
+    _detected: false,
+    _backendUrl: 'https://moodchat-fy56.onrender.com',
+    _frontendUrl: 'https://moodfronted.onrender.com',
+    _detectionComplete: false,
     
     detect() {
+        if (this._detected) return this.getInfo();
+        
         try {
-            const start = performance.now();
-            
             const hostname = window.location.hostname;
             const protocol = window.location.protocol;
-            const isSecureContext = window.isSecureContext || protocol === 'https:';
+            const isSecure = protocol === 'https:';
             
-            this.isLocalDev = (
-                hostname === 'localhost' ||
-                hostname === '127.0.0.1' ||
-                hostname.startsWith('192.168.') ||
-                hostname.startsWith('10.') ||
-                hostname.includes('.local') ||
-                hostname.includes('.test') ||
-                protocol === 'file:' ||
-                hostname.includes('::1')
-            );
-            
-            this.isRenderHosted = (
-                hostname.includes('.onrender.com') ||
-                hostname.includes('.render.com') ||
-                hostname.includes('render.com')
-            );
-            
-            if (navigator.connection) {
-                const conn = navigator.connection;
-                this.latency = conn.rtt || 0;
-                this.bandwidth = conn.downlink || 0;
-                this.connectionType = conn.type || 'unknown';
-                this.effectiveType = conn.effectiveType || 'unknown';
-                this.rtt = conn.rtt || 0;
-                this.downlink = conn.downlink || 0;
-                this.saveData = conn.saveData || false;
-                
-                this.isVPNNetwork = (
-                    this.latency > 300 ||
-                    this.effectiveType === 'slow-2g' ||
-                    this.effectiveType === '2g' ||
-                    (this.latency > 150 && this.latency < 300 && this.saveData)
-                );
-            } else {
-                const end = performance.now();
-                this.latency = end - start;
-                this.isVPNNetwork = this.latency > 300;
-            }
-            
-            this.isProduction = (
-                !this.isLocalDev &&
-                !this.isRenderHosted &&
-                isSecureContext &&
-                !hostname.includes('.local') &&
-                !hostname.includes('.test') &&
-                hostname.includes('.')
-            );
+            this._features.isIframe = window.self !== window.top;
             
             try {
-                this.isSandboxed = (
-                    !window.parent ||
-                    window.parent === window ||
-                    (() => {
-                        try {
-                            return !window.parent.location;
-                        } catch {
-                            return true;
-                        }
-                    })()
-                );
-            } catch {
-                this.isSandboxed = true;
+                localStorage.setItem('_test', 'test');
+                localStorage.removeItem('_test');
+                this._features.hasLocalStorage = true;
+            } catch (e) {
+                this._features.hasLocalStorage = false;
+                this._features.isSandboxed = true;
             }
             
-            this.isSecure = isSecureContext;
+            this._features.hasCrypto = !!(window.crypto && window.crypto.subtle);
+            this._features.hasSecureContext = window.isSecureContext || false;
             
-            if (this.isLocalDev) this.type = 'LOCAL_DEV';
-            else if (this.isRenderHosted) this.type = 'RENDER_HOSTED';
-            else if (this.isVPNNetwork) this.type = 'VPN_NETWORK';
-            else if (this.isProduction) this.type = 'PRODUCTION';
-            else this.type = 'UNKNOWN';
+            if (navigator.connection) {
+                this._features.connectionType = navigator.connection.effectiveType || 'unknown';
+                this._features.effectiveBandwidth = navigator.connection.downlink || 0;
+                this._features.rtt = navigator.connection.rtt || 0;
+            }
             
-            logStatus('INIT', `Environment: ${this.type}`);
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || 
+                hostname.startsWith('192.168.') || protocol === 'file:') {
+                this._environment = ENV_TYPES.LOCAL_DEV;
+            } else if (hostname.includes('onrender.com')) {
+                this._environment = ENV_TYPES.RENDER_HOSTED;
+            } else if (this._features.rtt > 300 || 
+                      (this._features.connectionType === '4g' && this._features.rtt > 200) ||
+                      navigator.connection?.saveData) {
+                this._environment = ENV_TYPES.VPN_NETWORK;
+            } else if (isSecure && hostname.includes('.')) {
+                this._environment = ENV_TYPES.PRODUCTION;
+            } else {
+                this._environment = ENV_TYPES.UNKNOWN;
+            }
             
-            return this.type;
-        } catch (e) {
-            debugError('Environment detection failed:', e);
-            this.type = 'UNKNOWN';
-            return this.type;
+            this._features.backendReachable = true;
+            this._detected = true;
+            this._detectionComplete = true;
+            
+        } catch (error) {
+            this._environment = ENV_TYPES.UNKNOWN;
+            this._detectionComplete = true;
+            errorLog('Environment detection failed:', error);
         }
-    },
-    
-    getConfig() {
-        const baseConfig = {
-            handshakeTimeout: 5000,
-            heartbeatInterval: 30000,
-            maxRetries: 3,
-            maxRecoveryAttempts: 3,
-            originChecks: 'standard',
-            crypto: 'enabled',
-            compatibilityMode: false,
-            batchMessages: false,
-            keepalive: false,
-            offlineBufferSize: 100,
-            retryBackoff: 'exponential',
-            jitter: true
-        };
         
-        switch(this.type) {
-            case 'LOCAL_DEV':
-                return {
-                    ...baseConfig,
-                    handshakeTimeout: 5000,
-                    heartbeatInterval: 30000,
-                    maxRetries: 3,
-                    maxRecoveryAttempts: 3,
-                    originChecks: 'relaxed',
-                    crypto: 'disabled',
-                    compatibilityMode: true,
-                    batchMessages: false,
-                    keepalive: false
-                };
-            case 'RENDER_HOSTED':
-                return {
-                    ...baseConfig,
-                    handshakeTimeout: 8000,
-                    heartbeatInterval: 25000,
-                    maxRetries: 5,
-                    maxRecoveryAttempts: 4,
-                    originChecks: 'strict',
-                    crypto: 'enabled',
-                    compatibilityMode: false,
-                    batchMessages: true,
-                    keepalive: true
-                };
-            case 'VPN_NETWORK':
-                return {
-                    ...baseConfig,
-                    handshakeTimeout: 15000,
-                    heartbeatInterval: 45000,
-                    maxRetries: 7,
-                    maxRecoveryAttempts: 5,
-                    originChecks: 'standard',
-                    crypto: 'enabled',
-                    compatibilityMode: false,
-                    batchMessages: true,
-                    keepalive: true,
-                    offlineBufferSize: 200,
-                    retryBackoff: 'fibonacci'
-                };
-            case 'PRODUCTION':
-                return {
-                    ...baseConfig,
-                    handshakeTimeout: 5000,
-                    heartbeatInterval: 20000,
-                    maxRetries: 3,
-                    maxRecoveryAttempts: 2,
-                    originChecks: 'strict',
-                    crypto: 'enabled',
-                    compatibilityMode: false,
-                    batchMessages: false,
-                    keepalive: false
-                };
-            default:
-                return baseConfig;
-        }
+        return this.getInfo();
     },
     
-    getCapabilities() {
+    getInfo() {
         return {
-            localStorage: !!window.localStorage,
-            sessionStorage: !!window.sessionStorage,
-            serviceWorker: 'serviceWorker' in navigator,
-            indexedDB: !!window.indexedDB,
-            webWorker: !!window.Worker,
-            webSocket: !!window.WebSocket,
-            webRTC: !!window.RTCPeerConnection,
-            crypto: !!window.crypto && !!window.crypto.subtle,
-            mediaDevices: !!navigator.mediaDevices,
-            geolocation: !!navigator.geolocation,
-            notifications: 'Notification' in window,
-            bluetooth: !!navigator.bluetooth,
-            usb: !!navigator.usb,
-            hid: !!navigator.hid,
-            serial: !!navigator.serial,
-            webShare: !!navigator.share,
-            webAssembly: !!window.WebAssembly,
-            bigInt: typeof BigInt !== 'undefined',
-            webGL: (() => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
-                } catch {
-                    return false;
-                }
-            })(),
-            webGL2: (() => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    return !!canvas.getContext('webgl2');
-                } catch {
-                    return false;
-                }
-            })(),
-            webAudio: !!window.AudioContext || !!window.webkitAudioContext,
-            webMIDI: !!navigator.requestMIDIAccess,
-            webUSB: !!navigator.usb,
-            webBluetooth: !!navigator.bluetooth,
-            webNFC: !!navigator.nfc,
-            webXR: !!navigator.xr,
-            webVTT: !!window.VTTCue,
-            webAnimation: !!document.createElement('div').animate,
-            webSpeech: !!window.SpeechRecognition || !!window.webkitSpeechRecognition,
-            webPayment: !!window.PaymentRequest,
-            webCredentials: !!navigator.credentials,
-            webLocks: !!navigator.locks,
-            webStorage: !!window.localStorage,
-            webDatabase: !!window.openDatabase,
-            webSQL: !!window.openDatabase,
-            webIndexedDB: !!window.indexedDB,
-            webFileSystem: !!window.requestFileSystem || !!window.webkitRequestFileSystem,
-            webFileReader: !!window.FileReader,
-            webFileWriter: !!window.FileWriter,
-            webFile: !!window.File,
-            webBlob: !!window.Blob,
-            webFormData: !!window.FormData,
-            webURL: !!window.URL,
-            webURLSearchParams: !!window.URLSearchParams,
-            webHeaders: !!window.Headers,
-            webRequest: !!window.Request,
-            webResponse: !!window.Response,
-            webFetch: !!window.fetch,
-            webAbortController: !!window.AbortController,
-            webAbortSignal: !!window.AbortSignal,
-            webIntersectionObserver: !!window.IntersectionObserver,
-            webMutationObserver: !!window.MutationObserver,
-            webResizeObserver: !!window.ResizeObserver,
-            webPerformanceObserver: !!window.PerformanceObserver,
-            webReportingObserver: !!window.ReportingObserver,
-            webGamepad: !!navigator.getGamepads,
-            webBattery: !!navigator.getBattery,
-            webVibrate: !!navigator.vibrate,
-            webWakeLock: !!navigator.wakeLock,
-            webSMS: !!navigator.sms,
-            webContacts: !!navigator.contacts,
-            webClipboard: !!navigator.clipboard,
-            webPermissions: !!navigator.permissions,
-            webPresentation: !!navigator.presentation,
-            webNetworkInformation: !!navigator.connection,
-            webDeviceMemory: !!navigator.deviceMemory,
-            webHardwareConcurrency: !!navigator.hardwareConcurrency,
-            webMaxTouchPoints: !!navigator.maxTouchPoints,
-            webCookieEnabled: navigator.cookieEnabled,
-            webDoNotTrack: navigator.doNotTrack,
-            webLanguages: !!navigator.languages,
-            webPlatform: !!navigator.platform,
-            webProduct: !!navigator.product,
-            webVendor: !!navigator.vendor
+            environment: this._environment,
+            features: { ...this._features }
         };
     },
     
-    logEnvironment() {
-        // Already logged in detect()
+    getEnvironment() {
+        return this._environment;
+    },
+    
+    getBackendUrl() {
+        return this._backendUrl;
+    },
+    
+    getFrontendUrl() {
+        return this._frontendUrl;
+    },
+    
+    isVPN() {
+        return this._environment === ENV_TYPES.VPN_NETWORK;
+    },
+    
+    isLocal() {
+        return this._environment === ENV_TYPES.LOCAL_DEV;
+    },
+    
+    isProduction() {
+        return this._environment === ENV_TYPES.PRODUCTION;
+    },
+    
+    isRender() {
+        return this._environment === ENV_TYPES.RENDER_HOSTED;
+    },
+    
+    getAdjustedTimeout(baseTimeout) {
+        if (this.isVPN()) return baseTimeout * 2;
+        if (this.isLocal()) return baseTimeout * 1.5;
+        return baseTimeout;
+    },
+    
+    getAdjustedRetries(baseRetries) {
+        return baseRetries;
+    },
+    
+    isDetectionComplete() {
+        return this._detectionComplete;
     }
 };
 
 IframeEnvironment.detect();
+window.__iframeEnvironment = IframeEnvironment.getEnvironment();
 
 // =============================================
-// COMPATIBILITY BRIDGE - ENSURES BACKWARD COMPATIBILITY
-// =============================================
-const CompatibilityBridge = {
-    version: '10.0',
-    legacyMode: false,
-    adapters: new Map(),
-    transforms: new Map(),
-    fallbacks: new Map(),
-    
-    initialize() {
-        this.legacyMode = IframeEnvironment.type === 'LOCAL_DEV' || IframeEnvironment.isSandboxed;
-        this.registerAdapters();
-        this.registerTransforms();
-        this.registerFallbacks();
-        debugLog('CompatibilityBridge initialized, legacyMode:', this.legacyMode);
-        return this;
-    },
-    
-    registerAdapters() {
-        this.adapters.set('message', {
-            toLegacy: (msg) => {
-                if (!msg) return msg;
-                return {
-                    ...msg,
-                    type: msg.type || msg.event,
-                    data: msg.payload || msg.data,
-                    id: msg.id || msg.messageId,
-                    timestamp: msg.timestamp || Date.now()
-                };
-            },
-            fromLegacy: (msg) => {
-                if (!msg) return msg;
-                return {
-                    type: msg.type || msg.event,
-                    id: msg.id || msg.messageId || genId(),
-                    requestId: genReqId(),
-                    source: MODULE_NAME,
-                    target: 'parent',
-                    timestamp: Date.now(),
-                    payload: msg.data || msg.payload || {}
-                };
-            }
-        });
-        
-        this.adapters.set('session', {
-            toLegacy: (session) => {
-                if (!session) return session;
-                return {
-                    ...session,
-                    user: session.user || session.userData,
-                    token: session.token || session.accessToken,
-                    refreshToken: session.refreshToken || session.refresh_token
-                };
-            },
-            fromLegacy: (session) => {
-                if (!session) return session;
-                return {
-                    ...session,
-                    user: session.user || session.userData,
-                    token: session.token || session.accessToken,
-                    refreshToken: session.refreshToken || session.refresh_token
-                };
-            }
-        });
-        
-        this.adapters.set('storage', {
-            toLegacy: (key, value) => {
-                return { key, value };
-            },
-            fromLegacy: (key, value) => {
-                return { key, value };
-            }
-        });
-    },
-    
-    registerTransforms() {
-        this.transforms.set('handshake', (data) => {
-            if (this.legacyMode) {
-                return {
-                    ...data,
-                    protocol: '1.0',
-                    handshake: data.handshake || data.handshakeId
-                };
-            }
-            return data;
-        });
-        
-        this.transforms.set('status', (data) => {
-            if (this.legacyMode) {
-                return {
-                    ...data,
-                    statusId: data.statusId || data.id,
-                    userId: data.userId || data.user?.id
-                };
-            }
-            return data;
-        });
-        
-        this.transforms.set('reaction', (data) => {
-            if (this.legacyMode) {
-                return {
-                    ...data,
-                    reactionType: data.reactionType || data.reaction,
-                    statusId: data.statusId || data.id
-                };
-            }
-            return data;
-        });
-    },
-    
-    registerFallbacks() {
-        this.fallbacks.set('postMessage', (target, message, origin) => {
-            try {
-                if (typeof target.postMessage === 'function') {
-                    return target.postMessage(message, origin || '*');
-                }
-                return false;
-            } catch (e) {
-                return false;
-            }
-        });
-        
-        this.fallbacks.set('storage', {
-            get: async (key) => {
-                try {
-                    return await StorageProxy.get(key);
-                } catch {
-                    return null;
-                }
-            },
-            set: (key, value) => {
-                try {
-                    StorageProxy.set(key, value);
-                    return true;
-                } catch {
-                    return false;
-                }
-            },
-            remove: (key) => {
-                try {
-                    StorageProxy.remove(key);
-                    return true;
-                } catch {
-                    return false;
-                }
-            }
-        });
-        
-        this.fallbacks.set('fetch', async (url, options) => {
-            try {
-                return await fetch(url, options);
-            } catch (e) {
-                throw new Error('Fetch failed in compatibility mode');
-            }
-        });
-    },
-    
-    adapt(type, data, direction = 'to') {
-        const adapter = this.adapters.get(type);
-        if (!adapter) return data;
-        
-        try {
-            return direction === 'to' ? adapter.toLegacy(data) : adapter.fromLegacy(data);
-        } catch (e) {
-            return data;
-        }
-    },
-    
-    transform(type, data) {
-        const transform = this.transforms.get(type);
-        if (!transform) return data;
-        
-        try {
-            return transform(data);
-        } catch (e) {
-            return data;
-        }
-    },
-    
-    fallback(type, ...args) {
-        const fallback = this.fallbacks.get(type);
-        if (!fallback) return null;
-        
-        try {
-            return typeof fallback === 'function' ? fallback(...args) : fallback;
-        } catch (e) {
-            return null;
-        }
-    },
-    
-    isLegacy() {
-        return this.legacyMode;
-    }
-}.initialize();
-
-// =============================================
-// STANDALONE MODE DETECTION
-// =============================================
-const isStandaloneMode = !window.parent || window.parent === window || !document.referrer;
-
-if (isStandaloneMode && !_loggedMessages.has('standalone')) {
-    _loggedMessages.add('standalone');
-    debugLog('Running in standalone mode (no parent iframe)');
-}
-
-// =============================================
-// IFRAME AUTHORITY - CENTRALIZED CONTROL
-// =============================================
-const IframeAuthority = {
-    id: `iframe_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`,
-    instanceId: `instance_${Date.now()}_${Math.random().toString(36).substr(2, 15)}`,
-    parentOrigin: null,
-    parentDetected: false,
-    parentCapabilities: new Set(),
-    securityLevel: 'standard',
-    compatibilityMode: IframeEnvironment.type === 'LOCAL_DEV' || IframeEnvironment.isSandboxed,
-    backendDomain: 'https://moodchat-fy56.onrender.com',
-    frontendDomain: 'https://moodfronted.onrender.com',
-    trustedDomains: new Set([
-        'https://moodchat-fy56.onrender.com',
-        'https://moodfronted.onrender.com',
-        'http://localhost:3000',
-        'http://localhost:5500',
-        'http://localhost:5000',
-        'http://localhost:8080',
-        'https://localhost:3000',
-        'https://localhost:5500',
-        'https://localhost:5000',
-        'https://localhost:8080',
-        'http://127.0.0.1:3000',
-        'http://localhost:4000',
-        'http://127.0.0.1:5000',
-        'http://127.0.0.1:8080',
-        'https://127.0.0.1:3000',
-        'https://127.0.0.1:5500',
-        'https://127.0.0.1:5000',
-        'https://127.0.0.1:8080'
-    ]),
-    
-    initialize() {
-        this.detectParent();
-        this.validateSecurityContext();
-        this.addTrustedDomain(this.backendDomain);
-        this.addTrustedDomain(this.frontendDomain);
-        debugLog('IframeAuthority initialized');
-        return this;
-    },
-    
-    detectParent() {
-        try {
-            this.parentDetected = !!(window.parent && window.parent !== window);
-            if (this.parentDetected && document.referrer) {
-                try {
-                    this.parentOrigin = new URL(document.referrer).origin;
-                    this.addTrustedDomain(this.parentOrigin);
-                    debugLog('Parent detected from referrer:', this.parentOrigin);
-                } catch {}
-            }
-        } catch (e) {
-            this.parentDetected = false;
-        }
-    },
-    
-    validateSecurityContext() {
-        if (this.compatibilityMode || IframeEnvironment.isSandboxed) {
-            this.securityLevel = 'compatibility';
-        } else if (IframeEnvironment.type === 'PRODUCTION') {
-            this.securityLevel = 'strict';
-        } else {
-            this.securityLevel = 'standard';
-        }
-    },
-    
-    addTrustedDomain(domain) {
-        if (domain) {
-            this.trustedDomains.add(domain);
-        }
-    },
-    
-    isTrustedOrigin(origin) {
-        if (!origin) return false;
-        if (this.securityLevel === 'compatibility') return true;
-        
-        if (this.trustedDomains.has(origin)) return true;
-        
-        if (origin.includes('.onrender.com') || origin.includes('.render.com')) return true;
-        
-        if (origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
-        
-        if (this.parentOrigin && origin === this.parentOrigin) return true;
-        
-        return false;
-    },
-    
-    getCapabilities() {
-        return Array.from(this.parentCapabilities);
-    },
-    
-    getBackendURL(path = '') {
-        return `${this.backendDomain}${path}`;
-    },
-    
-    getFrontendURL(path = '') {
-        return `${this.frontendDomain}${path}`;
-    }
-}.initialize();
-
-// =============================================
-// DIAGNOSTICS AGENT - TELEMETRY & DEBUGGING
-// =============================================
-const DiagnosticsAgent = {
-    enabled: true,
-    reports: [],
-    maxReports: 100,
-    metrics: {
-        startTime: Date.now(),
-        messagesSent: 0,
-        messagesReceived: 0,
-        errors: 0,
-        warnings: 0,
-        handshakeAttempts: 0,
-        handshakeSuccess: 0,
-        handshakeFailures: 0,
-        recoveryAttempts: 0,
-        recoverySuccess: 0,
-        recoveryFailures: 0,
-        tokenRefreshes: 0,
-        apiCalls: 0,
-        apiErrors: 0,
-        storageReads: 0,
-        storageWrites: 0,
-        storageErrors: 0,
-        offlineOperations: 0,
-        statusViews: 0,
-        statusReactions: 0,
-        statusPosts: 0,
-        statusExpired: 0,
-        sessionRequests: 0,
-        sessionSuccess: 0,
-        sessionFailures: 0,
-        lifecycleTransitions: 0,
-        invalidTransitions: 0,
-        blockedActions: 0
-    },
-    events: [],
-    maxEvents: 1000,
-    
-    enable() {
-        this.enabled = true;
-        debugLog('Diagnostics enabled');
-    },
-    
-    disable() {
-        this.enabled = false;
-    },
-    
-    log(level, module, message, data = null) {
-        if (!this.enabled && level !== 'error') return;
-        
-        const entry = {
-            timestamp: Date.now(),
-            level,
-            module,
-            message,
-            data: this.sanitize(data),
-            id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
-        };
-        
-        this.events.push(entry);
-        
-        if (this.events.length > this.maxEvents) {
-            this.events.shift();
-        }
-        
-        if (level === 'error') {
-            this.metrics.errors++;
-        } else if (level === 'warn') {
-            this.metrics.warnings++;
-        }
-    },
-    
-    sanitize(data) {
-        if (!data || typeof data !== 'object') return data;
-        
-        try {
-            return JSON.parse(JSON.stringify(data, (key, value) => {
-                if (key === 'token' || key === 'accessToken' || key === 'refreshToken') {
-                    return '[REDACTED]';
-                }
-                if (typeof value === 'string' && value.length > 1000) {
-                    return value.substring(0, 1000) + '... [truncated]';
-                }
-                return value;
-            }));
-        } catch {
-            return data;
-        }
-    },
-    
-    error(module, message, data) {
-        this.log('error', module, message, data);
-    },
-    
-    warn(module, message, data) {
-        this.log('warn', module, message, data);
-    },
-    
-    info(module, message, data) {
-        this.log('info', module, message, data);
-    },
-    
-    debug(module, message, data) {
-        this.log('debug', module, message, data);
-    },
-    
-    increment(metric) {
-        if (this.metrics[metric] !== undefined) {
-            this.metrics[metric]++;
-        }
-    },
-    
-    getReport() {
-        return {
-            timestamp: Date.now(),
-            uptime: Date.now() - this.metrics.startTime,
-            metrics: { ...this.metrics },
-            recentEvents: this.events.slice(-20),
-            environment: {
-                type: IframeEnvironment.type,
-                isLocalDev: IframeEnvironment.isLocalDev,
-                isRenderHosted: IframeEnvironment.isRenderHosted,
-                isVPNNetwork: IframeEnvironment.isVPNNetwork,
-                isProduction: IframeEnvironment.isProduction,
-                isSandboxed: IframeEnvironment.isSandboxed,
-                latency: IframeEnvironment.latency,
-                connectionType: IframeEnvironment.connectionType
-            },
-            authority: {
-                id: IframeAuthority.id,
-                instanceId: IframeAuthority.instanceId,
-                parentDetected: IframeAuthority.parentDetected,
-                parentOrigin: IframeAuthority.parentOrigin,
-                securityLevel: IframeAuthority.securityLevel,
-                compatibilityMode: IframeAuthority.compatibilityMode
-            },
-            lifecycle: getLifecycleState()
-        };
-    },
-    
-    clear() {
-        this.events = [];
-        this.metrics = {
-            startTime: Date.now(),
-            messagesSent: 0,
-            messagesReceived: 0,
-            errors: 0,
-            warnings: 0,
-            handshakeAttempts: 0,
-            handshakeSuccess: 0,
-            handshakeFailures: 0,
-            recoveryAttempts: 0,
-            recoverySuccess: 0,
-            recoveryFailures: 0,
-            tokenRefreshes: 0,
-            apiCalls: 0,
-            apiErrors: 0,
-            storageReads: 0,
-            storageWrites: 0,
-            storageErrors: 0,
-            offlineOperations: 0,
-            statusViews: 0,
-            statusReactions: 0,
-            statusPosts: 0,
-            statusExpired: 0,
-            sessionRequests: 0,
-            sessionSuccess: 0,
-            sessionFailures: 0,
-            lifecycleTransitions: 0,
-            invalidTransitions: 0,
-            blockedActions: 0
-        };
-    }
-};
-
-// =============================================
-// LOGGING SYSTEM - STRUCTURED, NO DUPLICATES
-// =============================================
-const LOG_LEVEL = {
-    DEBUG: 0,
-    INFO: 1,
-    WARN: 2,
-    ERROR: 3
-};
-
-let currentLogLevel = LOG_LEVEL.DEBUG;
-const errorCache = new Set();
-const warningCache = new Set();
-
-function log(level, module, message, data = null) {
-    try {
-        if (level < currentLogLevel) return;
-        
-        if (level === LOG_LEVEL.ERROR) {
-            const key = `${module}:${message}`;
-            if (!errorCache.has(key)) {
-                errorCache.add(key);
-                DiagnosticsAgent.error(module, message, data);
-                setTimeout(() => errorCache.delete(key), 60000);
-            }
-        } else if (level === LOG_LEVEL.WARN) {
-            const key = `${module}:${message}`;
-            if (!warningCache.has(key)) {
-                warningCache.add(key);
-                DiagnosticsAgent.warn(module, message, data);
-                setTimeout(() => warningCache.delete(key), 30000);
-            }
-        }
-    } catch (e) {}
-}
-
-// =============================================
-// SAFE STORAGE LAYER - USES STORAGE PROXY
+// SAFE STORAGE LAYER
 // =============================================
 const SafeStorage = {
-    memoryStore: new Map(),
-    storageAvailable: false,
-    storageType: 'proxy',
-    quota: 5 * 1024 * 1024,
-    used: 0,
+    _memoryCache: new Map(),
+    _storageAvailable: null,
+    _encryptionKey: null,
+    _prefix: 'knecta_',
+    _quotaExceeded: false,
+    _quotaWarningIssued: false,
+    _fallbackMode: false,
+    _initialized: false,
+    _initPromise: null,
     
-    initialize() {
-        this.checkAvailability();
-        this.calculateUsage();
-        debugLog('SafeStorage initialized, available:', this.storageAvailable, 'type:', this.storageType);
-        return this;
+    init() {
+        if (this._initialized) return this;
+        if (this._initPromise) return this._initPromise;
+        
+        this._initPromise = new Promise((resolve) => {
+            initLog('SafeStorage initializing');
+            this._checkAvailability();
+            this._generateKey();
+            
+            try {
+                const cached = sessionStorage.getItem(`${this._prefix}memory_fallback`);
+                if (cached) {
+                    const data = JSON.parse(cached);
+                    Object.entries(data).forEach(([key, value]) => {
+                        this._memoryCache.set(key, value);
+                    });
+                }
+            } catch (e) {}
+            
+            this._initialized = true;
+            successLog('SafeStorage initialized - Type:', this.getStorageType());
+            resolve(this);
+        });
+        
+        return this._initPromise;
     },
     
-    checkAvailability() {
+    _checkAvailability() {
+        if (this._storageAvailable !== null) return this._storageAvailable;
+        
         try {
-            this.storageAvailable = true;
-            this.storageType = 'proxy';
+            const testKey = `${this._prefix}_test`;
+            localStorage.setItem(testKey, 'test');
+            localStorage.removeItem(testKey);
+            this._storageAvailable = true;
+            this._fallbackMode = false;
         } catch (e) {
-            this.storageAvailable = false;
-            this.storageType = 'memory';
-        }
-    },
-    
-    calculateUsage() {
-        if (!this.storageAvailable || this.storageType === 'memory') return 0;
-        return 0;
-    },
-    
-    hasQuota(size) {
-        return this.used + size <= this.quota;
-    },
-    
-    async get(key, fallback = null) {
-        DiagnosticsAgent.increment('storageReads');
-        
-        if (this.storageAvailable && this.storageType === 'proxy') {
+            this._storageAvailable = false;
+            this._fallbackMode = true;
+            
             try {
-                const value = await StorageProxy.get(key);
-                if (value !== null && value !== undefined) return value;
-            } catch (e) {
-                DiagnosticsAgent.increment('storageErrors');
-                debugWarn(`Storage get failed for ${key}:`, e.message);
+                const testKey = `${this._prefix}_test`;
+                sessionStorage.setItem(testKey, 'test');
+                sessionStorage.removeItem(testKey);
+                this._storageAvailable = 'session';
+            } catch (e2) {
+                this._storageAvailable = false;
+            }
+            
+            if (!this._quotaWarningIssued) {
+                this._quotaWarningIssued = true;
             }
         }
         
-        return this.memoryStore.has(key) ? this.memoryStore.get(key) : fallback;
+        return this._storageAvailable;
     },
     
-    set(key, value) {
-        DiagnosticsAgent.increment('storageWrites');
+    _generateKey() {
+        this._encryptionKey = `key_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+    },
+    
+    get(key, fallback = null, useEncryption = false) {
+        const prefixedKey = `${this._prefix}${key}`;
         
-        let success = false;
-        const size = (key.length + (value ? value.length : 0)) * 2;
+        if (this._memoryCache.has(prefixedKey)) {
+            return this._memoryCache.get(prefixedKey);
+        }
         
-        if (this.storageAvailable && this.storageType === 'proxy') {
+        if (this._storageAvailable) {
             try {
-                StorageProxy.set(key, String(value));
-                this.used += size;
-                success = true;
+                let value = null;
+                
+                if (this._storageAvailable === true) {
+                    value = localStorage.getItem(prefixedKey);
+                } else if (this._storageAvailable === 'session') {
+                    value = sessionStorage.getItem(prefixedKey);
+                }
+                
+                if (value) {
+                    if (useEncryption) {
+                        try {
+                            value = this._decrypt(value);
+                        } catch (e) {}
+                    }
+                    
+                    this._memoryCache.set(prefixedKey, value);
+                    return value;
+                }
+            } catch (e) {}
+        }
+        
+        return fallback;
+    },
+    
+    _decrypt(value) {
+        return value;
+    },
+    
+    set(key, value, useEncryption = false) {
+        const prefixedKey = `${this._prefix}${key}`;
+        
+        this._memoryCache.set(prefixedKey, value);
+        
+        if (this._storageAvailable) {
+            try {
+                let storageValue = value;
+                if (useEncryption) {
+                    storageValue = this._encrypt(String(value));
+                }
+                
+                if (this._storageAvailable === true) {
+                    localStorage.setItem(prefixedKey, String(storageValue));
+                } else if (this._storageAvailable === 'session') {
+                    sessionStorage.setItem(prefixedKey, String(storageValue));
+                }
+                
+                this._quotaExceeded = false;
+                return true;
+                
             } catch (e) {
-                DiagnosticsAgent.increment('storageErrors');
-                debugWarn(`Storage set failed for ${key}:`, e.message);
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    this._quotaExceeded = true;
+                    if (!this._quotaWarningIssued) {
+                        this._quotaWarningIssued = true;
+                    }
+                }
+                return false;
             }
         }
         
-        this.memoryStore.set(key, String(value));
-        return success;
+        try {
+            const cacheObj = {};
+            this._memoryCache.forEach((val, k) => {
+                cacheObj[k] = val;
+            });
+            sessionStorage.setItem(`${this._prefix}memory_fallback`, JSON.stringify(cacheObj));
+        } catch (e) {}
+        
+        return true;
+    },
+    
+    _encrypt(value) {
+        return value;
     },
     
     remove(key) {
-        if (this.storageAvailable && this.storageType === 'proxy') {
+        const prefixedKey = `${this._prefix}${key}`;
+        this._memoryCache.delete(prefixedKey);
+        
+        if (this._storageAvailable) {
             try {
-                StorageProxy.remove(key);
-                this.used -= (key.length + (this.memoryStore.get(key)?.length || 0)) * 2;
-            } catch (e) {
-                // Silent error
-            }
+                if (this._storageAvailable === true) {
+                    localStorage.removeItem(prefixedKey);
+                } else if (this._storageAvailable === 'session') {
+                    sessionStorage.removeItem(prefixedKey);
+                }
+            } catch (e) {}
         }
-        this.memoryStore.delete(key);
     },
     
-    async getJSON(key, fallback = null) {
-        const value = await this.get(key);
+    getJSON(key, fallback = null, useEncryption = false) {
+        const value = this.get(key, null, useEncryption);
         if (!value) return fallback;
         
         try {
@@ -3359,7584 +2916,4804 @@ const SafeStorage = {
         }
     },
     
-    setJSON(key, value) {
+    setJSON(key, value, useEncryption = false) {
         try {
-            return this.set(key, JSON.stringify(value));
+            return this.set(key, JSON.stringify(value), useEncryption);
         } catch (e) {
             return false;
         }
     },
     
-    clear() {
-        this.memoryStore.clear();
+    clear(prefix = null) {
+        const actualPrefix = prefix ? `${this._prefix}${prefix}` : this._prefix;
         
-        if (this.storageAvailable && this.storageType === 'proxy') {
+        if (prefix) {
+            for (const key of this._memoryCache.keys()) {
+                if (key.startsWith(actualPrefix)) {
+                    this._memoryCache.delete(key);
+                }
+            }
+        } else {
+            this._memoryCache.clear();
+        }
+        
+        if (this._storageAvailable) {
             try {
-                StorageProxy.clear();
-                this.used = 0;
+                const storage = this._storageAvailable === true ? localStorage : sessionStorage;
+                for (let i = storage.length - 1; i >= 0; i--) {
+                    const key = storage.key(i);
+                    if (key && key.startsWith(actualPrefix)) {
+                        storage.removeItem(key);
+                    }
+                }
             } catch (e) {}
         }
     },
     
-    async keys() {
+    getAllKeys() {
         const keys = new Set();
         
-        this.memoryStore.forEach((_, key) => keys.add(key));
+        for (const key of this._memoryCache.keys()) {
+            keys.add(key.substring(this._prefix.length));
+        }
+        
+        if (this._storageAvailable) {
+            try {
+                const storage = this._storageAvailable === true ? localStorage : sessionStorage;
+                for (let i = 0; i < storage.length; i++) {
+                    const key = storage.key(i);
+                    if (key && key.startsWith(this._prefix)) {
+                        keys.add(key.substring(this._prefix.length));
+                    }
+                }
+            } catch (e) {}
+        }
+        
         return Array.from(keys);
     },
     
-    size() {
-        return this.memoryStore.size;
+    isQuotaExceeded() {
+        return this._quotaExceeded;
+    },
+    
+    isFallbackMode() {
+        return this._fallbackMode;
+    },
+    
+    getStorageType() {
+        if (this._storageAvailable === true) return 'localStorage';
+        if (this._storageAvailable === 'session') return 'sessionStorage';
+        return 'memory';
     }
-}.initialize();
+};
+
+SafeStorage.init();
 
 // =============================================
-// ORIGIN TRUST ADAPTER - DYNAMIC TRUST EVALUATION
+// COMPATIBILITY BRIDGE
 // =============================================
-const OriginTrustAdapter = {
-    trustedOrigins: new Set(),
-    blockedOrigins: new Set(),
-    dynamicTrustCache: new Map(),
-    trustLevel: 'standard',
-    parentOrigin: null,
-    backendDomain: 'https://moodchat-fy56.onrender.com',
-    frontendDomain: 'https://moodfronted.onrender.com',
+const CompatibilityBridge = {
+    _enabled: false,
+    _reason: null,
+    _legacyAPIs: new Map(),
+    _messageTranslator: null,
+    _parentProtocolVersion: null,
+    _detected: false,
     
-    initialize() {
-        this.loadBuiltinTrustedOrigins();
-        this.setTrustLevelFromEnvironment();
-        this.addTrustedOrigin(this.backendDomain);
-        this.addTrustedOrigin(this.frontendDomain);
-        debugLog('OriginTrustAdapter initialized, trustLevel:', this.trustLevel);
-        return this;
+    detect() {
+        if (this._detected) return this._enabled;
+        
+        if (IframeEnvironment._features.isSandboxed) {
+            this.enable('sandboxed');
+            return true;
+        }
+        
+        if (!SafeStorage.getStorageType().includes('local')) {
+            this.enable('storage_restricted');
+            return true;
+        }
+        
+        if (!window.crypto || !window.crypto.subtle) {
+            this.enable('crypto_restricted');
+            return true;
+        }
+        
+        const isOldBrowser = !window.Promise || !window.fetch || !window.postMessage;
+        if (isOldBrowser) {
+            this.enable('old_browser');
+            return true;
+        }
+        
+        this._detected = true;
+        return this._enabled;
     },
     
-    loadBuiltinTrustedOrigins() {
-        const builtin = [
-            window.location.origin,
-            'http://localhost',
-            'http://127.0.0.1',
-            'https://localhost',
-            'https://127.0.0.1',
-            'http://localhost:3000',
-            'http://localhost:5500',
-            'http://localhost:5000',
-            'http://localhost:8080',
-            'https://localhost:3000',
-            'https://localhost:5500',
-            'https://localhost:5000',
-            'https://localhost:8080',
-            'http://127.0.0.1:3000',
-            'http://localhost:4000',
-            'http://127.0.0.1:5000',
-            'http://127.0.0.1:8080',
-            'https://127.0.0.1:3000',
-            'https://127.0.0.1:5500',
-            'https://127.0.0.1:5000',
-            'https://127.0.0.1:8080',
-            'https://moodchat-fy56.onrender.com',
-            'https://moodfronted.onrender.com'
-        ];
+    enable(reason) {
+        if (this._enabled) return;
         
-        builtin.forEach(origin => this.trustedOrigins.add(origin));
-        
-        this.trustedOrigins.add('https://*.onrender.com');
-        this.trustedOrigins.add('https://*.render.com');
+        this._enabled = true;
+        this._reason = reason;
     },
     
-    setTrustLevelFromEnvironment() {
-        if (IframeEnvironment.type === 'LOCAL_DEV' || IframeAuthority.compatibilityMode) {
-            this.trustLevel = 'relaxed';
-        } else if (IframeEnvironment.type === 'PRODUCTION') {
-            this.trustLevel = 'strict';
-        } else {
-            this.trustLevel = 'standard';
+    isEnabled() {
+        return this._enabled;
+    },
+    
+    getReason() {
+        return this._reason;
+    },
+    
+    translateOutgoing(message) {
+        if (!this._enabled) return message;
+        return this._messageTranslator?.toLegacy(message) || message;
+    },
+    
+    translateIncoming(message) {
+        if (!this._enabled) return message;
+        if (message && message._legacy) {
+            return this._messageTranslator?.toCanonical(message) || message;
+        }
+        return message;
+    },
+    
+    getLegacyAPI(name) {
+        return this._legacyAPIs.get(name);
+    }
+};
+
+// =============================================
+// ORIGIN ADAPTER
+// =============================================
+const OriginAdapter = {
+    _trustedOrigins: new Set(),
+    _originPatterns: [],
+    _dynamicTrust: new Map(),
+    _lastValidation: 0,
+    _validationCache: new Map(),
+    _parentOrigin: null,
+    _parentVerified: false,
+    _backendOrigin: 'https://moodchat-fy56.onrender.com',
+    _frontendOrigin: 'https://moodfronted.onrender.com',
+    
+    init() {
+        initLog('OriginAdapter initializing');
+        
+        TrustedOrigins._trusted.forEach(origin => {
+            this._trustedOrigins.add(origin);
+        });
+        
+        this.addTrustedOrigin(window.location.origin);
+        this.addTrustedOrigin(this._backendOrigin);
+        this.addTrustedOrigin(this._frontendOrigin);
+        
+        ['localhost', '127.0.0.1', '::1'].forEach(host => {
+            [5500, 3000, 8080, 5000, 5173].forEach(port => {
+                this.addTrustedOrigin(`http://${host}:${port}`);
+                this.addTrustedOrigin(`https://${host}:${port}`);
+            });
+            this.addTrustedOrigin(`http://${host}`);
+            this.addTrustedOrigin(`https://${host}`);
+        });
+        
+        this.addOriginPattern(/^https?:\/\/.*\.onrender\.com$/);
+        this.addOriginPattern(/^https?:\/\/.*\.render\.com$/);
+        this.addOriginPattern(/^https?:\/\/(192\.168\..*|10\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*)$/);
+        this.addOriginPattern(/^https?:\/\/.*\.knecta\.(app|chat)$/);
+        this.addOriginPattern(/^https?:\/\/knecta\..*$/);
+        
+        successLog('OriginAdapter initialized');
+    },
+    
+    addTrustedOrigin(origin) {
+        if (origin && !this._trustedOrigins.has(origin)) {
+            this._trustedOrigins.add(origin);
         }
     },
     
-    isTrusted(origin) {
-        if (!origin) return false;
-        
-        if (this.dynamicTrustCache.has(origin)) {
-            return this.dynamicTrustCache.get(origin);
+    addOriginPattern(pattern) {
+        if (pattern && !this._originPatterns.includes(pattern)) {
+            this._originPatterns.push(pattern);
         }
-        
-        if (this.blockedOrigins.has(origin)) {
-            this.dynamicTrustCache.set(origin, false);
+    },
+    
+    isTrusted(origin, options = {}) {
+        if (currentState === LifecycleState.WAIT_PARENT) {
+            return true;
+        }
+        return TrustedOrigins.isValid(origin);
+    },
+    
+    setParentOrigin(origin) {
+        this._parentOrigin = origin;
+        this._parentVerified = true;
+        this.addTrustedOrigin(origin);
+        TrustedOrigins.setParentOrigin(origin);
+    },
+    
+    getParentOrigin() {
+        return this._parentOrigin;
+    },
+    
+    isParentVerified() {
+        return this._parentVerified;
+    },
+    
+    reset() {
+        this._parentOrigin = null;
+        this._parentVerified = false;
+        this._validationCache.clear();
+    },
+    
+    getBackendOrigin() {
+        return this._backendOrigin;
+    },
+    
+    getFrontendOrigin() {
+        return this._frontendOrigin;
+    },
+    
+    getDiagnostics() {
+        return {
+            trustedOriginsCount: this._trustedOrigins.size,
+            patternsCount: this._originPatterns.length,
+            parentVerified: this._parentVerified,
+            parentOrigin: this._parentOrigin,
+            cacheSize: this._validationCache.size
+        };
+    }
+};
+
+OriginAdapter.init();
+
+// =============================================
+// STARTUP GOVERNOR
+// =============================================
+const StartupGovernor = {
+    _state: 'INIT',
+    _lock: false,
+    _attempts: 0,
+    _maxAttempts: 1,
+    _backoffMs: 1000,
+    _initialized: false,
+    _startTime: Date.now(),
+    _stateHistory: [],
+    _transitionListeners: new Set(),
+    _silent: true,
+    
+    states: {
+        INIT: 'INIT',
+        WAIT_PARENT: 'WAIT_PARENT',
+        ACTIVE: 'ACTIVE',
+        READY: 'READY'
+    },
+    
+    getState() { 
+        return this._state; 
+    },
+    
+    transition(newState, reason = '') {
+        if (this._lock && newState !== this._state && newState !== 'FAILED') {
             return false;
         }
         
-        if (this.trustedOrigins.has(origin)) {
-            this.dynamicTrustCache.set(origin, true);
-            return true;
+        const oldState = this._state;
+        this._state = newState;
+        
+        if (!this._silent) {
+            debugLog(`Governor: ${oldState} → ${newState} (${reason})`);
         }
         
-        for (const trusted of this.trustedOrigins) {
-            if (trusted.includes('*')) {
-                const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
-                const regex = new RegExp(`^${pattern}$`);
-                if (regex.test(origin)) {
-                    this.dynamicTrustCache.set(origin, true);
-                    return true;
+        this._stateHistory.push({
+            from: oldState,
+            to: newState,
+            reason,
+            timestamp: Date.now()
+        });
+        
+        if (this._stateHistory.length > 20) {
+            this._stateHistory.shift();
+        }
+        
+        this._transitionListeners.forEach(listener => {
+            try {
+                listener(oldState, newState, reason);
+            } catch (e) {}
+        });
+        
+        return true;
+    },
+    
+    onTransition(listener) {
+        this._transitionListeners.add(listener);
+        return () => this._transitionListeners.delete(listener);
+    },
+    
+    canProceed() {
+        return this._state !== 'FAILED';
+    },
+    
+    isStable() {
+        return this._state === 'ACTIVE' || this._state === 'READY';
+    },
+    
+    getDiagnostics() {
+        return {
+            state: this._state,
+            attempts: this._attempts,
+            uptime: Date.now() - this._startTime,
+            history: this._stateHistory.slice(-5),
+            locked: this._lock
+        };
+    },
+    
+    reset() {
+        this._state = 'INIT';
+        this._lock = false;
+        this._attempts = 0;
+        this._stateHistory = [];
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+// =============================================
+// IFRAME TRANSPORT
+// =============================================
+const IframeTransport = {
+    _messageHandlers: new Map(),
+    _frameId: FRAME_ID,
+    _enabled: true,
+    _parentWindow: null,
+    _parentOrigin: '*',
+    
+    init() {
+        initLog('IframeTransport initializing');
+        this._detectParent();
+        successLog('IframeTransport initialized');
+    },
+    
+    _detectParent() {
+        try {
+            if (window.parent && window.parent !== window) {
+                this._parentWindow = window.parent;
+                
+                try {
+                    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                        this._parentOrigin = window.location.ancestorOrigins[0];
+                    } else {
+                        this._parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
+                    }
+                } catch (e) {
+                    this._parentOrigin = '*';
                 }
+                
+                OriginAdapter.setParentOrigin(this._parentOrigin);
+                parentOrigin = this._parentOrigin;
             }
+        } catch (error) {}
+    },
+    
+    send(type, payload = {}) {
+        return MessageTransport.send(type, payload);
+    },
+    
+    on(type, handler) {
+        return MessageTransport.on(type, handler);
+    },
+    
+    off(type, handler) {
+        MessageTransport.off(type, handler);
+    },
+    
+    enable() {
+        MessageTransport.enable();
+        this._enabled = true;
+    },
+    
+    disable() {
+        MessageTransport.disable();
+        this._enabled = false;
+    },
+    
+    getDiagnostics() {
+        return {
+            ...MessageTransport.getDiagnostics()
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+        MessageTransport.setSilent(silent);
+    }
+};
+
+IframeTransport.init();
+
+// =============================================
+// SESSION STORAGE - MEMORY ONLY WITH VALIDATION
+// =============================================
+function updateSession(user, token, expiry, version) {
+    // Validate incoming session data
+    const sessionData = {
+        userId: user?.id || user?.userId,
+        token: token,
+        user: user
+    };
+    
+    if (!__isValidSession(sessionData)) {
+        console.warn(`[${MODULE_NAME}] ⚠️ updateSession called with invalid data - rejected`);
+        return false;
+    }
+    
+    // Prevent session downgrade
+    if (window.session.user && __isValidSession({ userId: window.session.user.id, token: window.session.token })) {
+        const newUserId = user?.id || user?.userId;
+        if (newUserId === 'user' || newUserId === 'default') {
+            console.warn(`[${MODULE_NAME}] ⚠️ Prevented session downgrade in updateSession`);
+            return false;
+        }
+    }
+    
+    if (token) {
+        window.session.token = token;
+    }
+    
+    if (user) {
+        window.session.user = typeof user === 'object' ? { ...user } : user;
+        currentUser = window.session.user;
+        coreData.user = window.session.user;
+    }
+    
+    if (expiry) {
+        window.session.expiresAt = expiry;
+    }
+    
+    if (version !== undefined) {
+        window.session.version = version;
+    }
+    
+    window.__SETTINGS_SESSION_ACTIVE__ = !!window.session.user && isAuthenticated;
+    return true;
+}
+
+function clearSession() {
+    window.session = {
+        token: null,
+        user: null,
+        expiresAt: 0,
+        version: 0
+    };
+    currentUser = null;
+    coreData.user = null;
+    window.__SETTINGS_SESSION_ACTIVE__ = false;
+}
+
+function isSessionValid() {
+    const sessionData = {
+        userId: window.session.user?.id || window.session.user?.userId,
+        token: window.session.token
+    };
+    return isAuthenticated && __isValidSession(sessionData) && window.session.expiresAt > Date.now();
+}
+
+// =============================================
+// SETTINGS STORE
+// =============================================
+const SettingsStore = {
+    account: {},
+    privacy: {},
+    notifications: {},
+    appearance: {},
+    _listeners: new Set(),
+    
+    load(settingsData) {
+        if (settingsData.account) this.account = { ...settingsData.account };
+        if (settingsData.privacy) this.privacy = { ...settingsData.privacy };
+        if (settingsData.notifications) this.notifications = { ...settingsData.notifications };
+        if (settingsData.appearance) this.appearance = { ...settingsData.appearance };
+        
+        this._notify('loaded', this.getAll());
+        return true;
+    },
+    
+    update(section, key, value) {
+        if (!this[section]) return false;
+        
+        const oldValue = this[section][key];
+        this[section][key] = value;
+        
+        this._notify('updated', {
+            section,
+            key,
+            value,
+            oldValue,
+            all: this.getAll()
+        });
+        
+        return true;
+    },
+    
+    getAll() {
+        return {
+            account: { ...this.account },
+            privacy: { ...this.privacy },
+            notifications: { ...this.notifications },
+            appearance: { ...this.appearance }
+        };
+    },
+    
+    getSection(section) {
+        return this[section] ? { ...this[section] } : null;
+    },
+    
+    subscribe(callback) {
+        this._listeners.add(callback);
+        return () => this._listeners.delete(callback);
+    },
+    
+    _notify(event, data) {
+        this._listeners.forEach(callback => {
+            try {
+                callback(event, data);
+            } catch (e) {}
+        });
+    }
+};
+
+// =============================================
+// HEARTBEAT CLIENT
+// =============================================
+const HeartbeatClient = {
+    _interval: null,
+    _missedCount: 0,
+    _maxMissed: 3,
+    _running: false,
+    _lastAck: 0,
+    _listeners: new Set(),
+    
+    start() {
+        this._running = true;
+    },
+    
+    stop() {
+        this._running = false;
+        this._missedCount = 0;
+        this.emit('stopped', {});
+    },
+    
+    handleAck() {
+        this._missedCount = 0;
+        this._lastAck = Date.now();
+    },
+    
+    isHealthy() {
+        return this._missedCount < this._maxMissed;
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
+            }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            running: this._running,
+            missedCount: this._missedCount,
+            maxMissed: this._maxMissed,
+            lastAck: this._lastAck,
+            healthy: this.isHealthy()
+        };
+    },
+    
+    setSilent(silent) {
+    }
+};
+
+const HeartbeatManager = HeartbeatClient;
+
+// =============================================
+// SESSION CLIENT WITH VALIDATION
+// =============================================
+const SessionClient = {
+    _session: null,
+    _sessionToken: null,
+    _sessionExpiry: null,
+    _sessionVersion: 0,
+    _lastSync: 0,
+    _syncInterval: null,
+    _refreshTimer: null,
+    _listeners: new Set(),
+    _pendingAck: false,
+    _sessionLock: false,
+    _refreshAttempts: 0,
+    _maxRefreshAttempts: 0,
+    _offlineMode: false,
+    _syncInProgress: false,
+    _silent: true,
+    
+    init() {
+        initLog('SessionClient initializing');
+        successLog('SessionClient initialized');
+        return this;
+    },
+    
+    async sync() {
+        if (currentState !== LifecycleState.ACTIVE) {
+            return false;
         }
         
-        for (const trusted of this.trustedOrigins) {
-            if (!trusted.includes('*') && origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
-                this.dynamicTrustCache.set(origin, true);
+        if (!isAuthenticated) {
+            return false;
+        }
+        
+        if (this._syncInProgress) return false;
+        
+        this._syncInProgress = true;
+        
+        try {
+            const response = await MessageTransport.send('SESSION_SYNC', {});
+            
+            if (response && response.payload && response.payload.session) {
+                const sessionData = response.payload.session;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ SessionClient.sync received invalid session`);
+                    this._syncInProgress = false;
+                    return false;
+                }
+                this.updateSession(
+                    sessionData.user,
+                    sessionData.token,
+                    sessionData.expiry
+                );
+                this._syncInProgress = false;
                 return true;
             }
+            
+            this._syncInProgress = false;
+            return false;
+        } catch (error) {
+            this._syncInProgress = false;
+            return false;
+        }
+    },
+    
+    updateSession(user, token, expiry) {
+        const sessionData = {
+            userId: user?.id || user?.userId,
+            token: token,
+            user: user
+        };
+        
+        if (!__isValidSession(sessionData)) {
+            console.warn(`[${MODULE_NAME}] ⚠️ SessionClient.updateSession received invalid session`);
+            return false;
         }
         
-        if (this.trustLevel === 'relaxed') {
-            try {
-                const originHostname = new URL(origin).hostname;
-                const currentHostname = window.location.hostname;
-                
-                if (originHostname === currentHostname ||
-                    originHostname.endsWith('.' + currentHostname) ||
-                    currentHostname.endsWith('.' + originHostname)) {
-                    this.dynamicTrustCache.set(origin, true);
-                    return true;
+        // Prevent session downgrade
+        if (this._session && __isValidSession({ userId: this._session?.id, token: this._sessionToken })) {
+            const newUserId = user?.id || user?.userId;
+            if (newUserId === 'user' || newUserId === 'default') {
+                console.warn(`[${MODULE_NAME}] ⚠️ SessionClient prevented session downgrade`);
+                return false;
+            }
+        }
+        
+        if (user) {
+            window.session.user = typeof user === 'object' ? { ...user } : user;
+            currentUser = window.session.user;
+            coreData.user = window.session.user;
+            this._session = window.session.user;
+        }
+        
+        if (token) {
+            window.session.token = token;
+            this._sessionToken = token;
+        }
+        
+        if (expiry) {
+            window.session.expiresAt = expiry;
+            this._sessionExpiry = expiry;
+        }
+        
+        window.session.version++;
+        this._sessionVersion = window.session.version;
+        this._lastSync = Date.now();
+        
+        this.emit('updated', {
+            user: window.session.user,
+            token: !!window.session.token,
+            expiry: window.session.expiresAt,
+            version: window.session.version
+        });
+        
+        return true;
+    },
+    
+    async refresh() {
+        if (!this.isValid()) return false;
+        
+        try {
+            const response = await MessageTransport.send('SESSION_REFRESH', {});
+            
+            if (response && response.payload && response.payload.session) {
+                const sessionData = response.payload.session;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ SessionClient.refresh received invalid session`);
+                    return false;
                 }
-            } catch {}
+                this.updateSession(
+                    sessionData.user,
+                    sessionData.token,
+                    sessionData.expiry
+                );
+                return true;
+            }
+            
+            return false;
+        } catch (error) {
+            return false;
         }
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
+            }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getSession() {
+        return window.session.user ? { ...window.session.user } : null;
+    },
+    
+    getToken() {
+        return window.session.token;
+    },
+    
+    isValid() {
+        return isSessionValid();
+    },
+    
+    isExpired() {
+        return !isSessionValid();
+    },
+    
+    isOffline() {
+        return false;
+    },
+    
+    clear() {
+        window.session = {
+            token: null,
+            user: null,
+            expiresAt: 0,
+            version: 0
+        };
+        currentUser = null;
+        coreData.user = null;
+        this._session = null;
+        this._sessionToken = null;
+        this._sessionExpiry = null;
+        this._sessionVersion = 0;
+        this.emit('cleared', {});
+    },
+    
+    getDiagnostics() {
+        return {
+            hasSession: !!window.session.user,
+            hasToken: !!window.session.token,
+            expiry: window.session.expiresAt,
+            version: window.session.version,
+            lastSync: this._lastSync,
+            refreshAttempts: this._refreshAttempts,
+            isValid: isSessionValid(),
+            isExpired: !isSessionValid(),
+            offlineMode: false
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+SessionClient.init();
+
+// =============================================
+// RELIABILITY ENGINE
+// =============================================
+const ReliabilityEngine = {
+    _quality: 'unknown',
+    _enabled: true,
+    _silent: true,
+    _listeners: new Set(),
+    
+    init() {
+        initLog('ReliabilityEngine initializing');
+        successLog('ReliabilityEngine initialized');
+    },
+    
+    getQuality() {
+        return this._quality;
+    },
+    
+    enable() {
+        this._enabled = true;
+    },
+    
+    disable() {
+        this._enabled = false;
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            quality: this._quality,
+            enabled: this._enabled
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+ReliabilityEngine.init();
+
+// =============================================
+// RELIABILITY LAYER
+// =============================================
+const ReliabilityLayer = {
+    _pendingMessages: new Map(),
+    _maxRetries: 3,
+    _baseTimeout: 5000,
+    _backoffFactor: 1.5,
+    _enabled: true,
+    _silent: true,
+    _listeners: new Set(),
+    _messageCounter: 0,
+    
+    init() {
+        initLog('ReliabilityLayer initializing');
+        successLog('ReliabilityLayer initialized');
+        return this;
+    },
+    
+    send(message, options = {}) {
+        return MessageTransport.send(
+            message.action || message.type,
+            message.data || message.payload || {},
+            options
+        );
+    },
+    
+    acknowledge(id) {
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
+            }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getPendingCount() {
+        return this._pendingMessages.size;
+    },
+    
+    clearPending() {
+        this._pendingMessages.forEach(entry => {
+            clearTimeout(entry.timer);
+            activeTimers.delete(entry.timer);
+        });
+        this._pendingMessages.clear();
+    },
+    
+    getDiagnostics() {
+        return {
+            pendingCount: this._pendingMessages.size,
+            maxRetries: this._maxRetries,
+            baseTimeout: this._baseTimeout,
+            enabled: this._enabled
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+ReliabilityLayer.init();
+
+// =============================================
+// MESSAGE DISPATCHER
+// =============================================
+const MessageDispatcher = {
+    _handlers: new Map(),
+    _systemActions: new Set([
+        'PARENT_READY',
+        'SESSION_DATA',
+        'MODULE_REGISTERED',
+        'ACK',
+        'HEARTBEAT_ACK',
+        'SETTINGS_DATA',
+        'SETTINGS_UPDATE_CONFIRMED',
+        'SETTINGS_GLOBAL_UPDATE',
+        'AUTH_READY',
+        'AUTH_ERROR'
+    ]),
+    _silent: true,
+    
+    init() {
+        initLog('MessageDispatcher initializing');
+        this._setupSystemHandlers();
+        successLog('MessageDispatcher initialized');
+        return this;
+    },
+    
+    _setupSystemHandlers() {
+        this.register('PARENT_READY', (message) => {
+            window.parentReady = true;
+            parentReadyReceived = true;
+            parentCommunicationReady = true;
+            console.log('[settings-core] 📥 PARENT_READY received');
+        });
         
-        if (this.parentOrigin && origin === this.parentOrigin) {
-            this.dynamicTrustCache.set(origin, true);
+        this.register('SESSION_DATA', (message) => {
+            const sessionData = message.session || message.payload?.session || message;
+            if (!__isValidSession(sessionData)) {
+                console.warn(`[${MODULE_NAME}] ⚠️ MessageDispatcher ignored invalid SESSION_DATA`);
+                return;
+            }
+            handleSessionData(message);
+        });
+        
+        this.register('MODULE_REGISTERED', (message) => {
+            moduleRegistered = true;
+        });
+        
+        this.register('ACK', (message) => {
+            if (message.payload && message.payload.inResponseTo) {
+                ReliabilityLayer.acknowledge(message.payload.inResponseTo);
+            }
+        });
+        
+        this.register('HEARTBEAT_ACK', (message) => {
+            HeartbeatClient.handleAck();
+        });
+        
+        this.register('SETTINGS_DATA', (message) => {
+            handleSettingsDataResponse(message);
+        });
+        
+        this.register('SETTINGS_UPDATE_CONFIRMED', (message) => {
+            handleSettingsUpdateConfirmedMessage(message);
+        });
+        
+        this.register('SETTINGS_GLOBAL_UPDATE', (message) => {
+            handleSettingsGlobalUpdateMessage(message);
+        });
+        
+        this.register('AUTH_READY', (message) => {
+            isAuthenticated = true;
+            authCheckComplete = true;
+            processRequestQueue();
+            console.log('[settings-core] ✅ AUTH_READY received');
+        });
+        
+        this.register('AUTH_ERROR', (message) => {
+            isAuthenticated = false;
+            console.error('[settings-core] ❌ AUTH_ERROR received');
+        });
+    },
+    
+    register(action, handler) {
+        if (!this._handlers.has(action)) {
+            this._handlers.set(action, []);
+        }
+        this._handlers.get(action).push(handler);
+        return this;
+    },
+    
+    unregister(action, handler) {
+        const handlers = this._handlers.get(action);
+        if (handlers) {
+            const index = handlers.indexOf(handler);
+            if (index !== -1) handlers.splice(index, 1);
+        }
+        return this;
+    },
+    
+    dispatch(message) {
+        if (!message || !message.action) return false;
+        
+        const handlers = this._handlers.get(message.action) || [];
+        handlers.forEach(handler => {
+            try {
+                handler(message);
+            } catch (e) {
+                errorLog(`Error in handler for ${message.action}:`, e);
+            }
+        });
+        
+        return handlers.length > 0;
+    },
+    
+    getDiagnostics() {
+        return {
+            systemActions: Array.from(this._systemActions),
+            registeredActions: Array.from(this._handlers.keys())
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+MessageDispatcher.init();
+
+// =============================================
+// SECURITY VALIDATOR
+// =============================================
+const SecurityValidator = {
+    _trustedOrigins: new Set(),
+    _strictMode: true,
+    _validationRules: new Map(),
+    _silent: true,
+    
+    init() {
+        initLog('SecurityValidator initializing');
+        this._setupDefaultRules();
+        successLog('SecurityValidator initialized');
+        return this;
+    },
+    
+    _setupDefaultRules() {
+        this.addTrustedOrigin(window.location.origin);
+        
+        this.addRule('message_structure', (message) => {
+            if (!message || typeof message !== 'object') return false;
+            if (!message.id && !message.action && !message.type) return false;
+            if (!message.source) return false;
+            if (!message.timestamp) return false;
             return true;
-        }
+        });
         
-        const trusted = this.trustLevel === 'relaxed' || 
-                       (this.trustLevel === 'standard' && origin.startsWith('https://'));
+        this.addRule('action_valid', (message) => {
+            if (!message.type && !message.action) return false;
+            const action = message.type || message.action;
+            if (typeof action !== 'string') return false;
+            if (action.length > 50) return false;
+            return true;
+        });
         
-        this.dynamicTrustCache.set(origin, trusted);
-        return trusted;
+        this.addRule('source_valid', (message) => {
+            if (!message.source) return false;
+            if (message.source !== 'parent' && message.source !== MODULE_NAME) return false;
+            return true;
+        });
+        
+        this.addRule('target_valid', (message) => {
+            if (message.target && message.target !== FRAME_ID && message.target !== 'all' && message.target !== 'parent') return false;
+            return true;
+        });
     },
     
     addTrustedOrigin(origin) {
         if (origin) {
-            this.trustedOrigins.add(origin);
-            this.dynamicTrustCache.delete(origin);
+            this._trustedOrigins.add(origin);
         }
-    },
-    
-    blockOrigin(origin) {
-        if (origin) {
-            this.blockedOrigins.add(origin);
-            this.dynamicTrustCache.delete(origin);
-        }
-    },
-    
-    setParentOrigin(origin) {
-        if (origin) {
-            this.parentOrigin = origin;
-            this.addTrustedOrigin(origin);
-        }
-    },
-    
-    validateMessageOrigin(origin) {
-        if (!origin) return false;
-        if (this.trustLevel === 'relaxed' && !origin.includes('chrome-extension')) return true;
-        return this.isTrusted(origin);
-    },
-    
-    getTrustLevel() {
-        return this.trustLevel;
-    },
-    
-    reset() {
-        this.dynamicTrustCache.clear();
-        this.blockedOrigins.clear();
-    }
-}.initialize();
-
-// =============================================
-// MESSAGE BUS - CENTRALIZED COMMUNICATION
-// =============================================
-const MessageBus = {
-    channels: new Map(),
-    messageQueue: [],
-    processing: false,
-    maxQueueSize: 100,
-    messageCounter: 0,
-    pendingAcks: new Map(),
-    messageHandlers: new Map(),
-    history: new Map(),
-    maxHistory: 100,
-    
-    createChannel(channelName) {
-        if (!this.channels.has(channelName)) {
-            this.channels.set(channelName, {
-                subscribers: new Set(),
-                messageHistory: []
-            });
-        }
-        return this.channels.get(channelName);
-    },
-    
-    subscribe(channelName, handler) {
-        const channel = this.createChannel(channelName);
-        channel.subscribers.add(handler);
-        
-        return () => {
-            channel.subscribers.delete(handler);
-        };
-    },
-    
-    publish(channelName, message) {
-        const channel = this.channels.get(channelName);
-        if (!channel) return;
-        
-        const messageId = ++this.messageCounter;
-        const enrichedMessage = {
-            ...message,
-            messageId,
-            timestamp: Date.now(),
-            channel: channelName,
-            source: 'message-bus',
-            busId: `bus_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`
-        };
-        
-        channel.messageHistory.push(enrichedMessage);
-        if (channel.messageHistory.length > 50) {
-            channel.messageHistory.shift();
-        }
-        
-        if (!this.history.has(channelName)) {
-            this.history.set(channelName, []);
-        }
-        const history = this.history.get(channelName);
-        history.push(enrichedMessage);
-        if (history.length > this.maxHistory) {
-            history.shift();
-        }
-        
-        channel.subscribers.forEach(handler => {
-            try {
-                handler(enrichedMessage);
-            } catch (e) {}
-        });
-    },
-    
-    request(channelName, message, timeout = 5000) {
-        return new Promise((resolve, reject) => {
-            const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const responseChannel = `${channelName}_response_${requestId}`;
-            
-            const timeoutId = setTimeout(() => {
-                this.unsubscribe(responseChannel, responseHandler);
-                reject(new Error(`Request timeout on channel ${channelName}`));
-            }, timeout);
-            
-            const responseHandler = (response) => {
-                clearTimeout(timeoutId);
-                this.unsubscribe(responseChannel, responseHandler);
-                resolve(response);
-            };
-            
-            this.subscribe(responseChannel, responseHandler);
-            this.publish(channelName, {
-                ...message,
-                requestId,
-                responseChannel
-            });
-        });
-    },
-    
-    addMessageHandler(type, handler) {
-        if (!this.messageHandlers.has(type)) {
-            this.messageHandlers.set(type, new Set());
-        }
-        this.messageHandlers.get(type).add(handler);
-    },
-    
-    removeMessageHandler(type, handler) {
-        const handlers = this.messageHandlers.get(type);
-        if (handlers) {
-            handlers.delete(handler);
-        }
-    },
-    
-    processMessage(message) {
-        const handlers = this.messageHandlers.get(message.type);
-        if (handlers) {
-            handlers.forEach(handler => {
-                try {
-                    handler(message);
-                } catch (e) {}
-            });
-        }
-    },
-    
-    getHistory(channelName) {
-        return this.history.get(channelName) || [];
-    },
-    
-    clearHistory() {
-        this.history.clear();
-        this.channels.forEach(channel => {
-            channel.messageHistory = [];
-        });
-    }
-};
-
-// =============================================
-// PARENT READY PROMISE - EVENT-DRIVEN WAITING
-// =============================================
-let _parentReadyResolver = null;
-let _parentReadyRejecter = null;
-const _parentReadyPromise = new Promise((resolve, reject) => {
-    _parentReadyResolver = resolve;
-    _parentReadyRejecter = reject;
-});
-
-// =============================================
-// PARENT MESSAGE HANDLER - PROTOCOL-COMPLIANT
-// =============================================
-function handleParentMessage(event) {
-    // FIX: removed wrapping setTimeout — it deferred every API_RESPONSE by one
-    // macrotask, causing visible UI lag and making API calls feel slow.
-    // postMessage handlers are already invoked asynchronously by the browser.
-    try {
-        const msg = event.data;
-
-            if (!msg || typeof msg !== 'object') return;
-
-            if (msg.type === 'STORAGE_RESULT') {
-                StorageProxy.handleResponse(event);
-                return;
-            }
-
-            if (msg.id && isDuplicateMessage(msg.id)) {
-                const dupKey = `duplicate_${msg.type}_${msg.id}`;
-                if (!_loggedMessages.has(dupKey)) {
-                    _loggedMessages.add(dupKey);
-                    debugLog(`Duplicate message ignored: ${msg.type} (${msg.id})`);
-                }
-                return;
-            }
-
-            if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
-                debugWarn(`Message from untrusted origin ignored: ${event.origin}`);
-                return;
-            }
-
-            const _validResult = MessageValidator.validate(msg);
-            const _msgValid = typeof _validResult === 'object' && _validResult !== null ? _validResult.valid : _validResult;
-            if (!_msgValid) {
-                debugWarn(`Invalid message schema: ${msg.type}`);
-                return;
-            }
-
-            DiagnosticsAgent.increment('messagesReceived');
-
-            // Handle PARENT_READY
-            if (msg.type === 'PARENT_READY') {
-                // console.log('[status] 📥 PARENT_READY received via direct handler');
-                handleParentReady(msg);
-                return;
-            }
-
-            // Handle AUTH_READY directly
-if (msg.type === 'AUTH_READY') {
-    // console.log('[status] 📥 AUTH_READY received via direct handler');
-    
-    const payload = msg.payload || {};
-    const sessionData = payload.session || payload;
-    
-    if (sessionData && __isValidSession(sessionData)) {
-        if (!__isDuplicateSession(sessionData)) {
-            handleSession(sessionData);
-            __storeValidSessionId(sessionData);
-            logStatus('SUCCESS', 'Session applied from AUTH_READY');
-        } else {
-            logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
-        }
-    }
-    
-    // Mark parent as ready
-    parentReady = true;
-    _parentReady = true;
-    
-    // Check BOTH state machines (legacy currentState and new _currentState)
-    const isInWaitParent = (currentState === LIFECYCLE_STATES.WAIT_PARENT) || 
-                           (typeof _currentState !== 'undefined' && _currentState === LifecycleState.WAIT_PARENT);
-    
-    // If we're in WAIT_PARENT, transition to ACTIVE
-    if (isInWaitParent) {
-        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
-            // Transition BOTH state machines
-            transitionTo(LIFECYCLE_STATES.ACTIVE, 'auth_ready_with_valid_session');
-            if (typeof transitionTo === 'function' && LifecycleState && LifecycleState.ACTIVE) {
-                try {
-                    if (typeof _currentState !== 'undefined' && _currentState !== LifecycleState.ACTIVE) {
-                        // Call the second state machine's transition if it exists
-                        if (typeof window.transitionTo === 'function') window.transitionTo(LifecycleState.ACTIVE, 'auth_ready');
-                    }
-                } catch(e) {}
-            }
-            flushQueue();
-            
-            if (parentReadyResolver) {
-                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
-            }
-        }
-    }
-    return;
-}
-
-            // Handle SESSION_DATA
-            if (msg.type === 'SESSION_DATA') {
-                if (msg.payload && __isValidSession(msg.payload)) {
-                    if (!__isDuplicateSession(msg.payload)) {
-                        handleSession(msg.payload);
-                        __storeValidSessionId(msg.payload);
-                    } else {
-                        logStatus('WARNING', 'Duplicate SESSION_DATA ignored');
-                    }
-                } else {
-                    logStatus('FAILED', 'Invalid SESSION_DATA received - rejected');
-                }
-                return;
-            }
-
-            // Handle MODULE_REGISTERED
-            if (msg.type === 'MODULE_REGISTERED') {
-                if (msg.payload?.moduleName === MODULE_NAME) {
-                    const moduleKey = 'module_registered';
-                    if (!_loggedMessages.has(moduleKey)) {
-                        _loggedMessages.add(moduleKey);
-                        logStatus('SUCCESS', 'Module registered');
-                    }
-                }
-                return;
-            }
-
-            // Handle HEARTBEAT
-            if (msg.type === 'HEARTBEAT') {
-                sendHeartbeatAck(msg.id);
-                return;
-            }
-            
-            // Handle API_RESPONSE
-            if (msg.type === 'API_RESPONSE') {
-                handleApiResponse(msg);
-                return;
-            }
-            
-            // Handle STATUS_UPDATE
-            if (msg.type === 'STATUS_UPDATE') {
-                const status = msg.payload || msg;
-                if (status && status.id) {
-                    if (status.deleted) {
-                        removeStatus(status.id);
-                    } else {
-                        addStatus(status);
-                    }
-                }
-                return;
-            }
-
-            // ── REAL-TIME: WebSocket events forwarded from parent socket bridge ──
-            // Handles both snake_case (socket.io) and colon-namespaced (backend emit) forms
-            if (
-                msg.type === 'REALTIME_EVENT' ||
-                msg.type === 'SOCKET_EVENT'   ||
-                msg.type === 'WS_EVENT'
-            ) {
-                const evtName = msg.event || msg.payload?.event || msg.payload?.type || '';
-                const evtData = msg.payload?.data || msg.data || msg.payload || {};
-                handleRealtimeStatusEvent(evtName, evtData);
-                return;
-            }
-
-            // Direct event types (parent broadcasts the event type directly)
-            if (
-                msg.type === 'new_status'      ||
-                msg.type === 'status:created'  ||
-                msg.type === 'status_created'
-            ) {
-                handleRealtimeStatusEvent('new_status', msg.payload || msg.data || msg);
-                return;
-            }
-
-            if (
-                msg.type === 'status_deleted'  ||
-                msg.type === 'status:deleted'
-            ) {
-                handleRealtimeStatusEvent('status_deleted', msg.payload || msg.data || msg);
-                return;
-            }
-
-            if (
-                msg.type === 'status:updated'  ||
-                msg.type === 'status_updated'
-            ) {
-                handleRealtimeStatusEvent('status_updated', msg.payload || msg.data || msg);
-                return;
-            }
-
-            if (
-                msg.type === 'status:viewed'        ||
-                msg.type === 'status:viewer_update' ||
-                msg.type === 'status:reaction'      ||
-                msg.type === 'status:reply'         ||
-                msg.type === 'status:expired'
-            ) {
-                handleRealtimeStatusEvent(msg.type, msg.payload || msg.data || msg);
-                return;
-            }
-
-            if (
-                msg.type === 'FRIENDS_LIST_UPDATE' ||
-                msg.type === 'FRIENDS_LIST_RESPONSE' ||
-                msg.type === 'friend:accepted' ||
-                msg.type === 'friend:removed' ||
-                msg.type === 'FRIEND_REQUEST_ACCEPTED' ||
-                msg.type === 'FRIEND_REMOVED'
-            ) {
-                const payload = msg.payload || msg.data || {};
-                if (Array.isArray(payload.friends)) {
-                    try {
-                        localStorage.setItem('friends', JSON.stringify(payload.friends));
-                    } catch (_error) {}
-                }
-                if (typeof loadStatuses === 'function') {
-                    loadStatuses().catch(() => {});
-                }
-                if (typeof loadFriendsStatusesInBackground === 'function') {
-                    loadFriendsStatusesInBackground().catch(() => {});
-                }
-                return;
-            }
-
-            // ── SETTINGS: Apply per-key or full-settings changes immediately ──
-            if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
-                const payload = msg.payload || msg.data || {};
-                if (msg.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
-                    const { section, key, value } = payload;
-                    if (typeof applySettingToStatusModule === 'function') {
-                        applySettingToStatusModule(section, key, value);
-                    }
-                    window.dispatchEvent(new CustomEvent('settingChanged', { detail: { section, key, value, timestamp: Date.now() } }));
-                    if (typeof EventBus !== 'undefined' && EventBus.emit) EventBus.emit('settingChanged', { section, key, value });
-                }
-                if (msg.type === 'SETTINGS_UPDATED' && payload.settings) {
-                    const s = payload.settings;
-                    if (typeof applySettingToStatusModule === 'function') {
-                        Object.entries(s).forEach(([sec, secVal]) => {
-                            if (secVal && typeof secVal === 'object')
-                                Object.entries(secVal).forEach(([k, v]) => applySettingToStatusModule(sec, k, v));
-                        });
-                    }
-                    if (typeof SafeStorage !== 'undefined') SafeStorage.setJSON('user_settings', s);
-                    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { settings: s, timestamp: Date.now() } }));
-                    if (typeof EventBus !== 'undefined' && EventBus.emit) EventBus.emit('settingsUpdated', { settings: s });
-                }
-                return;
-            }
-
-            // Pass to ParentCommunication if needed
-            if (typeof ParentCommunication !== 'undefined') {
-                ParentCommunication.handleParentMessage(msg);
-            }
-
-            // Handle any registered message handlers
-            const handlers = messageHandlers.get(msg.type) || [];
-            for (const handler of handlers) {
-                try {
-                    handler(msg, event.origin);
-                } catch (e) {
-                    debugError(`Handler error for ${msg.type}:`, e);
-                }
-            }
-
-        } catch (error) {
-            debugError('Error handling parent message:', error);
-        }
-}
-
-// =============================================
-// MESSAGE HANDLER REGISTRATION - DEFINED ONCE
-// =============================================
-const messageHandlers = new Map();
-
-function addMessageHandler(type, handler) {
-    if (!messageHandlers.has(type)) {
-        messageHandlers.set(type, []);
-    }
-    messageHandlers.get(type).push(handler);
-}
-
-// Register all message handlers
-addMessageHandler('ACK', (message) => {});
-
-addMessageHandler('STATUS', (message) => {
-    document.dispatchEvent(new CustomEvent('statusUpdate', {
-        detail: message.payload
-    }));
-});
-
-addMessageHandler('ERROR', (message) => {
-    const errorKey = `parent_error_${message.payload?.error || 'unknown'}`;
-    if (!_loggedMessages.has(errorKey)) {
-        _loggedMessages.add(errorKey);
-        logStatus('FAILED', `Error from parent: ${message.payload?.error || 'Unknown error'}`);
-    }
-});
-
-addMessageHandler('DATA', (message) => {
-    document.dispatchEvent(new CustomEvent('coreData', {
-        detail: message.payload
-    }));
-});
-
-addMessageHandler('HANDSHAKE_RESPONSE', (message) => {
-    if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleResponse(message);
-});
-
-addMessageHandler('SESSION', (message) => {
-    if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleSessionInit(message);
-});
-
-addMessageHandler('SESSION_DATA', (message) => {
-    if (message.payload && __isValidSession(message.payload)) {
-        if (typeof HandshakeClient !== 'undefined') HandshakeClient.handleSessionInit(message);
-    }
-});
-
-addMessageHandler('SESSION_UPDATE', (message) => {
-    const payload = message.payload || message.data || {};
-    if (__isValidSession(payload)) {
-        if (typeof updateSessionMirror !== 'undefined') updateSessionMirror(payload, 'session_update');
-    }
-});
-
-addMessageHandler('SESSION_ACTIVE', (message) => {
-    const payload = message.payload || message.data || {};
-    if (__isValidSession(payload)) {
-        if (typeof updateSessionMirror !== 'undefined') updateSessionMirror(payload, 'session_active');
-    }
-});
-
-addMessageHandler('AUTH_VALIDATED', (message) => {
-    const payload = message.payload || message.data || {};
-    if (payload.success) {
-        if (typeof isTokenReady !== 'undefined') {
-            isTokenReady = true;
-            if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-                triggerTokenReadyCallbacks();
-            }
-        }
-        const authKey = 'auth_validated';
-        if (!_loggedMessages.has(authKey)) {
-            _loggedMessages.add(authKey);
-            logStatus('SUCCESS', 'Auth validated');
-        }
-    }
-});
-
-addMessageHandler('PARENT_READY', (message) => {
-    // console.log('[status] 📥 PARENT_READY via registered handler');
-    handleParentReady(message);
-});
-
-addMessageHandler('AUTH_READY', (message) => {
-    // console.log('[status] 📥 AUTH_READY via registered handler');
-    
-    const payload = message.payload || message.data || {};
-    const sessionData = payload.session || payload;
-    
-    if (sessionData && __isValidSession(sessionData)) {
-        if (!__isDuplicateSession(sessionData)) {
-            handleSession(sessionData);
-            __storeValidSessionId(sessionData);
-            logStatus('SUCCESS', 'Session applied from AUTH_READY (registered handler)');
-        } else {
-            logStatus('WARNING', 'Duplicate session data in AUTH_READY ignored');
-        }
-    }
-    
-    // Mark parent as ready
-    parentReady = true;
-    _parentReady = true;
-    
-    // If we're in READY state (haven't sent CHILD_READY yet), send it now
-    if (isInState(LifecycleState.READY)) {
-        logStatus('LIFECYCLE', 'AUTH_READY received in READY - sending CHILD_READY');
-        sendChildReady();
-    } else if (isInState(LifecycleState.WAIT_PARENT)) {
-        logStatus('LIFECYCLE', 'AUTH_READY received in WAIT_PARENT - activating');
-        
-        // If we have a valid session, transition to ACTIVE
-        if (isSessionReady() && __isValidSession({ token: _sessionToken, userId: _sessionUser?.id || _sessionUser?.userId })) {
-            transitionTo(LifecycleState.ACTIVE, 'auth_ready_with_valid_session');
-            flushQueue();
-            
-            if (parentReadyResolver) {
-                parentReadyResolver({ type: 'AUTH_READY', timestamp: Date.now() });
-            }
-        }
-    }
-});
-
-addMessageHandler('MODULE_REGISTERED', (message) => {
-    if (message.payload?.moduleName === MODULE_NAME) {
-        if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
-    }
-});
-
-addMessageHandler('HEARTBEAT', (message) => {
-    if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendHeartbeatAck(message.id);
-});
-
-addMessageHandler('LOGOUT', (message) => {
-    if (typeof handleLogout !== 'undefined') handleLogout(message.payload);
-});
-
-addMessageHandler('API_RESPONSE', (message) => {
-    if (typeof handleApiResponse !== 'undefined') handleApiResponse(message); // pass full message
-});
-
-addMessageHandler('API_ERROR', (message) => {
-    if (typeof handleApiError !== 'undefined') handleApiError(message.payload);
-});
-
-addMessageHandler('PONG', (message) => {
-    if (typeof state !== 'undefined') {
-        if (typeof state.lastHeartbeatReceived !== 'undefined') state.lastHeartbeatReceived = Date.now();
-        if (typeof state.heartbeatFailures !== 'undefined') state.heartbeatFailures = 0;
-    }
-});
-
-addMessageHandler('PAGE_ACTIVATED', (message) => {
-    if (typeof state !== 'undefined') {
-        if (typeof state.pageActivated !== 'undefined') state.pageActivated = true;
-    }
-    
-    const pageKey = 'page_activated_handler';
-    if (!_loggedMessages.has(pageKey)) {
-        _loggedMessages.add(pageKey);
-        logStatus('INFO', 'Page activated');
-    }
-    
-    if (typeof loadFreshDataInBackground !== 'undefined' && isInState(LifecycleState.ACTIVE)) {
-        setTimeout(() => {
-            if (typeof loadFreshDataInBackground !== 'undefined') loadFreshDataInBackground();
-        }, 100);
-    }
-    
-    document.dispatchEvent(new CustomEvent('pageActivated', {
-        detail: { timestamp: Date.now() }
-    }));
-});
-
-addMessageHandler('NAVIGATE', (message) => {
-    if (message.payload && message.payload.path) {
-        document.dispatchEvent(new CustomEvent('navigate', {
-            detail: message.payload
-        }));
-    }
-});
-
-addMessageHandler('CAPABILITY_RESPONSE', (message) => {
-    if (message.payload && Array.isArray(message.payload.capabilities)) {
-        message.payload.capabilities.forEach(cap => {
-            if (typeof state !== 'undefined') {
-                if (typeof state.parentCapabilities !== 'undefined') state.parentCapabilities.add(cap);
-            }
-            if (typeof IframeAuthority !== 'undefined') IframeAuthority.parentCapabilities.add(cap);
-        });
-    }
-});
-
-addMessageHandler('TOKEN_REFRESH_RESPONSE', (message) => {
-    if (message.payload && message.payload.token) {
-        if (typeof state !== 'undefined') {
-            if (typeof state.token !== 'undefined') state.token = message.payload.token;
-        }
-        if (typeof setSession !== 'undefined') setSession(message.payload.token, state?.user, state?.sessionExpiry);
-        
-        if (message.payload.refreshToken && typeof state !== 'undefined') {
-            if (typeof state.sessionMirror !== 'undefined') state.sessionMirror.refreshToken = message.payload.refreshToken;
-        }
-    }
-});
-
-addMessageHandler('ORIGIN_VALIDATION_RESPONSE', (message) => {
-    if (message.payload && message.payload.valid && typeof state !== 'undefined') {
-        if (typeof state.securityContext !== 'undefined') state.securityContext.originValidated = true;
-    }
-});
-
-addMessageHandler('CONFIG_RESPONSE', (message) => {
-    if (message.payload && message.payload.config) {
-        if (typeof applyParentConfig !== 'undefined') applyParentConfig(message.payload.config);
-    }
-});
-
-addMessageHandler('RECOVERY_RESPONSE', (message) => {
-    if (message.payload && message.payload.success && typeof state !== 'undefined') {
-        if (typeof state.metrics !== 'undefined') state.metrics.successfulRecoveries++;
-    }
-});
-
-addMessageHandler('IFRAME_REGISTERED', (message) => {
-    if (message.payload && message.payload.module === 'status') {
-        // Acknowledgment received
-        logStatus('SUCCESS', 'IFRAME_REGISTERED received');
-    }
-});
-
-// =============================================
-// RECOVERY MANAGER - PASSIVE, WAITS FOR PARENT
-// =============================================
-const RecoveryManager = {
-    recoveryAttempts: 0,
-    maxRecoveryAttempts: 2,
-    recoveryInProgress: false,
-    lastRecoveryTime: null,
-    recoveryStrategies: new Map(),
-    recoveryHistory: [],
-    
-    initialize() {
-        this.registerStrategies();
-        debugLog('RecoveryManager initialized');
         return this;
     },
     
-    registerStrategies() {
-        this.recoveryStrategies.set('handshake', this.recoverHandshake.bind(this));
-        this.recoveryStrategies.set('session', this.recoverSession.bind(this));
-        this.recoveryStrategies.set('connection', this.recoverConnection.bind(this));
-        this.recoveryStrategies.set('token', this.recoverToken.bind(this));
-        this.recoveryStrategies.set('storage', this.recoverStorage.bind(this));
-        this.recoveryStrategies.set('ui', this.recoverUI.bind(this));
-    },
-    
-    async recover(problem, context = {}) {
-        if (this.recoveryInProgress) {
-            return { success: false, reason: 'Recovery already in progress' };
-        }
-        
-        if (this.recoveryAttempts >= this.maxRecoveryAttempts) {
-            debugWarn('Max recovery attempts reached, entering passive waiting');
-            return { success: false, reason: 'Max attempts exceeded' };
-        }
-        
-        this.recoveryAttempts++;
-        this.recoveryInProgress = true;
-        this.lastRecoveryTime = Date.now();
-        
-        const strategy = this.recoveryStrategies.get(problem);
-        if (!strategy) {
-            this.recoveryInProgress = false;
-            return { success: false, reason: 'No recovery strategy' };
-        }
-        
-        try {
-            const result = await strategy(context);
-            
-            this.recoveryHistory.push({
-                problem,
-                attempt: this.recoveryAttempts,
-                success: result.success,
-                timestamp: Date.now()
-            });
-            
-            this.recoveryInProgress = false;
-            return result;
-        } catch (error) {
-            this.recoveryInProgress = false;
-            return { success: false, error: error.message };
-        }
-    },
-    
-    async recoverHandshake(context) {
-        if (!parentReady && !_parentReadyReceived) {
-            return { success: true, waiting: true };
-        }
-        return { success: false };
-    },
-    
-    async recoverSession(context) {
-        if (isSessionReady()) {
-            return { success: true, valid: true };
-        }
-        return { success: false };
-    },
-    
-    async recoverConnection(context) {
-        return { success: true, waiting: true };
-    },
-    
-    async recoverToken(context) {
-        return { success: false };
-    },
-    
-    async recoverStorage(context) {
-        try {
-            SafeStorage.initialize();
-            return { success: true };
-        } catch (error) {}
-        return { success: false };
-    },
-    
-    async recoverUI(context) {
-        if (typeof window !== 'undefined') {
-            document.dispatchEvent(new CustomEvent('uiRecovery', {
-                detail: { timestamp: Date.now() }
-            }));
-        }
-        return { success: true };
-    },
-    
-    canRecover() {
-        return this.recoveryAttempts < this.maxRecoveryAttempts && !this.recoveryInProgress;
-    },
-    
-    reset() {
-        this.recoveryAttempts = 0;
-        this.recoveryInProgress = false;
-        this.recoveryHistory = [];
-    },
-    
-    getHistory() {
-        return [...this.recoveryHistory];
-    }
-}.initialize();
-
-// =============================================
-// MESSAGE FIREWALL & PARSER
-// =============================================
-const MessageFirewall = {
-    validators: new Map(),
-    replayCache: new Set(),
-    maxCacheSize: 1000,
-    sequenceTracker: new Map(),
-    
-    init() {
-        this.registerValidators();
-        debugLog('MessageFirewall initialized');
+    addRule(name, validator) {
+        this._validationRules.set(name, validator);
         return this;
     },
     
-    registerValidators() {
-        this.validators.set('SESSION_DATA', (msg) => {
-            return msg.payload && 
-                   (msg.payload.token || msg.payload.user) &&
-                   (!msg.payload.token || typeof msg.payload.token === 'string') &&
-                   (!msg.payload.user || msg.payload.user.id || msg.payload.user.userId);
-        });
-        
-        this.validators.set('PARENT_READY', (msg) => {
-            // FIX: parent sends payload without timestamp; accept any payload or just a type match
-            return !!msg.type;
-        });
-        
-        this.validators.set('MODULE_REGISTERED', (msg) => {
-            return msg.payload && msg.payload.moduleName;
-        });
-        
-        this.validators.set('HEARTBEAT', (msg) => {
-            return msg.payload && msg.payload.timestamp;
-        });
-        
-        this.validators.set('HEARTBEAT_ACK', (msg) => {
-            return msg.payload?.inResponseTo || msg.inResponseTo;
-        });
-        
-        this.validators.set('SESSION_ACTIVE', (msg) => {
-            return msg.payload && 
-                   (msg.payload.sessionId || msg.payload.token || msg.payload.user);
-        });
-        
-        this.validators.set('STATUS_POSTED', (msg) => {
-            return msg.payload && msg.payload.status && msg.payload.status.id;
-        });
-        
-        this.validators.set('STATUS_VIEWED', (msg) => {
-            return msg.payload && msg.payload.statusId && msg.payload.userId;
-        });
-        
-        this.validators.set('STATUS_REACTED', (msg) => {
-            return msg.payload && msg.payload.statusId && msg.payload.userId && msg.payload.emoji;
-        });
-        
-        this.validators.set('STATUS_EXPIRED', (msg) => {
-            return msg.payload && msg.payload.statusId;
-        });
-        
-        this.validators.set('VIEWER_TRACKED', (msg) => {
-            return msg.payload && msg.payload.statusId && msg.payload.viewerCount !== undefined;
-        });
-        
-        this.validators.set('REACTION_ADDED', (msg) => {
-            return msg.payload && msg.payload.statusId && msg.payload.userId && msg.payload.emoji;
-        });
-        
-        this.validators.set('REACTION_REMOVED', (msg) => {
-            return msg.payload && msg.payload.statusId && msg.payload.userId && msg.payload.emoji;
-        });
-        
-        this.validators.set('REACTION_CHANGED', (msg) => {
-            return msg.payload && msg.payload.statusId && msg.payload.userId && 
-                   msg.payload.oldEmoji && msg.payload.newEmoji;
-        });
-        
-        this.validators.set('API_RESPONSE', (msg) => {
-            return msg.requestId && (msg.payload !== undefined);
-        });
+    removeRule(name) {
+        this._validationRules.delete(name);
+        return this;
     },
     
-    validate(message, origin) {
-        try {
-            if (!message || typeof message !== 'object') {
-                return false;
-            }
-            
-            if (!OriginTrustAdapter.validateMessageOrigin(origin)) {
-                const originKey = `invalid_origin_${origin}`;
-                if (!_loggedMessages.has(originKey)) {
-                    _loggedMessages.add(originKey);
-                    debugWarn(`Invalid origin: ${origin}`);
-                }
-                return false;
-            }
-            
-            if (!message.type) {
-                return false;
-            }
-            
-            if (message.id && isDuplicateMessage(message.id)) {
-                const replayKey = `replay_${message.id}`;
-                if (!_loggedMessages.has(replayKey)) {
-                    _loggedMessages.add(replayKey);
-                    debugWarn(`Replay detected: ${message.id}`);
-                }
-                return false;
-            }
-            
-            const validator = this.validators.get(message.type);
-            if (validator && !validator(message) && !IframeAuthority.compatibilityMode) {
-                const schemaKey = `schema_${message.type}`;
-                if (!_loggedMessages.has(schemaKey)) {
-                    _loggedMessages.add(schemaKey);
-                    debugWarn(`Schema validation failed for ${message.type}`);
-                }
-                return false;
-            }
-            
-            return true;
-        } catch (e) {
-            debugError('Message validation error:', e);
+    validateMessage(message, origin) {
+        if (!OriginAdapter.isTrusted(origin)) {
+            if (!this._silent) debugLog(`Message rejected: untrusted origin ${origin}`);
             return false;
         }
+        
+        for (const [name, validator] of this._validationRules) {
+            try {
+                if (!validator(message)) {
+                    if (!this._silent) debugLog(`Message rejected: rule ${name} failed`);
+                    return false;
+                }
+            } catch (e) {
+                if (!this._silent) debugLog(`Message validation error in rule ${name}:`, e);
+                return false;
+            }
+        }
+        
+        return true;
     },
     
-    sanitize(message) {
-        try {
-            const sanitized = { ...message };
-            
-            if (sanitized.payload) {
-                sanitized.payload = JSON.parse(JSON.stringify(sanitized.payload, (key, value) => {
-                    if (typeof value === 'string') {
-                        return value
-                            .replace(/</g, '&lt;')
-                            .replace(/>/g, '&gt;')
-                            .replace(/&/g, '&amp;')
-                            .replace(/"/g, '&quot;')
-                            .replace(/'/g, '&#039;');
-                    }
-                    return value;
-                }));
+    validateAction(action) {
+        if (!action || typeof action !== 'string') return false;
+        if (action.length > 100) return false;
+        
+        const dangerousPatterns = ['<', '>', 'script', 'javascript:', 'data:'];
+        for (const pattern of dangerousPatterns) {
+            if (action.toLowerCase().includes(pattern)) return false;
+        }
+        
+        return true;
+    },
+    
+    sanitizeData(data) {
+        if (!data) return data;
+        
+        if (typeof data === 'string') {
+            return data
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+        
+        if (Array.isArray(data)) {
+            return data.map(item => this.sanitizeData(item));
+        }
+        
+        if (typeof data === 'object' && data !== null) {
+            const sanitized = {};
+            for (const [key, value] of Object.entries(data)) {
+                sanitized[key] = this.sanitizeData(value);
             }
-            
-            if (sanitized.payload && sanitized.payload.token) {
-                sanitized.payload.token = '[REDACTED]';
-            }
-            if (sanitized.token) {
-                sanitized.token = '[REDACTED]';
-            }
-            
             return sanitized;
-        } catch (e) {
-            return message;
-        }
-    }
-}.init();
-
-// =============================================
-// MESSAGE ID GENERATOR
-// =============================================
-function generateSequenceId() {
-    return `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function generateHandshakeId() {
-    return `handshake_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
-}
-
-function generateFrameId() {
-    return `frame_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
-}
-
-function generateInstanceId() {
-    return `instance_${Date.now()}_${Math.random().toString(36).substr(2, 15)}`;
-}
-
-// =============================================
-// ORIGIN VALIDATION & SECURITY
-// =============================================
-const TRUSTED_ORIGINS = new Set([
-    window.location.origin,
-    'http://localhost:4000',
-    'http://localhost:5500',
-    'http://127.0.0.1:3000',
-    'http://localhost:3000',
-    'http://127.0.0.1:5000',
-    'http://localhost:5000',
-    'http://127.0.0.1:8080',
-    'http://localhost:8080',
-    'https://127.0.0.1:5500',
-    'https://localhost:5500',
-    'https://127.0.0.1:3000',
-    'https://localhost:3000',
-    'https://127.0.0.1:5000',
-    'https://localhost:5000',
-    'https://127.0.0.1:8080',
-    'https://localhost:8080',
-    'https://*.onrender.com',
-    'https://moodchat-fy56.onrender.com',
-    'https://moodfronted.onrender.com'
-]);
-
-function isValidOrigin(origin) {
-    try {
-        if (!origin) return false;
-        if (origin === window.location.origin) return true;
-        if (TRUSTED_ORIGINS.has(origin)) return true;
-        
-        for (const trusted of TRUSTED_ORIGINS) {
-            if (trusted.includes('*')) {
-                const pattern = trusted.replace(/\*/g, '[^.]+').replace(/\./g, '\\.');
-                const regex = new RegExp(`^${pattern}$`);
-                if (regex.test(origin)) return true;
-            } else if (origin.endsWith(trusted.replace(/^https?:\/\//, ''))) {
-                return true;
-            }
         }
         
-        if (origin.includes('.onrender.com') || origin.includes('.render.com')) {
-            return true;
-        }
-        
-        return false;
-    } catch (e) {
-        return false;
-    }
-}
-
-function validateMessage(message, origin) {
-    return MessageFirewall.validate(message, origin);
-}
-
-// =============================================
-// LEGACY MESSAGE ADAPTER
-// =============================================
-function adaptLegacyMessage(message) {
-    try {
-        if (message.id && message.requestId) return message;
-        
-        const adapted = {
-            type: message.type,
-            id: message.id || message.messageId || genId(),
-            requestId: message.requestId || genReqId(),
-            source: message.source || MODULE_NAME,
-            target: 'parent',
-            timestamp: message.timestamp || Date.now(),
-            payload: message.payload || message.data || {},
-            legacy: true
-        };
-        
-        if (message.inResponseTo) adapted.inResponseTo = message.inResponseTo;
-        if (message.token) adapted.token = message.token;
-        if (message.signature) adapted.signature = message.signature;
-        
-        return adapted;
-    } catch (e) {
-        DiagnosticsAgent.error('Adapter', `Failed to adapt legacy message: ${e.message}`, e);
-        return message;
-    }
-}
-
-// =============================================
-// CANONICAL MESSAGE FORMATTER
-// =============================================
-function formatCanonicalMessage(type, payload = {}, options = {}) {
-    return {
-        type: type,
-        id: options.id || genId(),
-        requestId: options.requestId || genReqId(),
-        source: options.source || MODULE_NAME,
-        target: options.target || 'parent',
-        timestamp: Date.now(),
-        payload: payload,
-        ...options
-    };
-}
-
-// =============================================
-// COMMUNICATION ENGINE - PARENT-ONLY ROUTING
-// =============================================
-const receiveFromParent = function(event) {
-    handleParentMessage(event);
-};
-
-const sendToParent = function(type, payload = {}, options = {}) {
-    if (type === 'CHILD_READY') {
-        return sendChildReady();
-    }
-    
-    if (type === 'REGISTER_MODULE') {
-        if (typeof ParentCommunication !== 'undefined') return ParentCommunication.sendRegistration();
-    }
-    
-    if (type === 'ACTION' || type.startsWith('STATUS_')) {
-        const action = type.startsWith('STATUS_') ? type : payload.action;
-        return safeSendAction(action, payload.payload || payload);
-    }
-    
-    return safeSend(type, payload, {
-        expectAck: options.requiresAck || false
-    });
-};
-
-// =============================================
-// DETERMINISTIC INITIALIZATION SEQUENCE (HANDSHAKE V3)
-// =============================================
-let initializationStarted = false;
-
-function initializeModule() {
-    if (initializationStarted) {
-        debugLog('Initialization already started');
-        return;
-    }
-    
-    initializationStarted = true;
-    
-    transitionTo(LifecycleState.INITIALIZING, 'module_initialize');
-    
-    logStatus('INIT', 'Module initializing');
-    
-    transitionTo(LifecycleState.READY, 'setup_complete');
-    logStatus('READY', 'Module ready');
-    
-    sendChildReady();
-    
-    logStatus('WAITING', 'Waiting for PARENT_READY (no retries)');
-}
-
-// =============================================
-// PASSIVE REGISTRATION - ONCE ONLY
-// =============================================
-let statusRegistered = false;
-let lastStatusRegister = 0;
-
-function registerStatusModule() {
-    if (statusRegistered) return;
-    
-    const now = Date.now();
-    if (now - lastStatusRegister < 3000) return;
-    
-    lastStatusRegister = now;
-    
-    if (!_childReadySent && isInState(LifecycleState.READY)) {
-        sendChildReady();
-        statusRegistered = true;
-    }
-}
-
-window.addEventListener('load', registerStatusModule);
-
-// =============================================
-// GLOBAL STATE - MODULE SCOPED
-// =============================================
-const state = {
-    initialized: false,
-    parentDetected: false,
-    handshakeComplete: false,
-    sessionActive: false,
-    permissionsGranted: ['guest', 'view_statuses'],
-    dependenciesLoaded: false,
-    readyState: 'preflight',
-    shutdownInProgress: false,
-    
-    handshakeState: 'idle',
-    handshakeStartTime: null,
-    handshakeEndTime: null,
-    handshakeRetryCount: 0,
-    handshakeMaxRetries: IframeEnvironment.getConfig().maxRetries,
-    handshakeTimeoutMs: IframeEnvironment.getConfig().handshakeTimeout,
-    parentReadyReceived: false,
-    childReadySent: false,
-    handshakeAckReceived: false,
-    sessionSyncReceived: false,
-    pageActivated: false,
-    
-    frameId: IframeAuthority.id,
-    instanceId: IframeAuthority.instanceId,
-    sessionId: null,
-    
-    capabilities: new Map(),
-    parentCapabilities: new Set(),
-    
-    securityContext: {
-        originValidated: false,
-        parentOrigin: null,
-        signatureRequired: !IframeEnvironment.isSandboxed && IframeEnvironment.type !== 'LOCAL_DEV',
-        encryptionRequired: false,
-        hmacKey: null,
-        timestampTolerance: IframeEnvironment.isVPNNetwork ? 60000 : 30000,
-        replayProtection: !IframeEnvironment.isSandboxed,
-        messageSequence: new Map()
+        return data;
     },
     
-    sessionMirror: {
-        token: null,
-        user: null,
-        expiry: null,
-        permissions: [],
-        timestamp: 0,
-        messageId: null,
-        validated: false,
-        source: null,
-        refreshToken: null,
-        lastRefresh: null,
-        refreshInProgress: false,
-        capabilities: []
-    },
-    
-    sessionData: null,
-    token: null,
-    user: null,
-    isGuestMode: true,
-    sessionExpiry: null,
-    
-    messageId: 0,
-    pendingAcks: new Map(),
-    pendingRequests: new Map(),
-    messageCache: new Set(),
-    messageSequence: new Map(),
-    originValidated: false,
-    
-    retryQueue: [],
-    retryTimers: new Map(),
-    maxRetryAttempts: 3,
-    baseRetryDelay: 1000,
-    maxRetryDelay: 30000,
-    
-    offlineBuffer: [],
-    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
-    offlineModeEnabled: false,
-    
-    heartbeatFailures: 0,
-    maxHeartbeatFailures: 3,
-    lastHeartbeatSent: null,
-    lastHeartbeatReceived: null,
-    
-    listeners: new Set(),
-    intervals: new Set(),
-    timeouts: new Set(),
-    
-    features: new Map(),
-    disabledFeatures: new Set(),
-    
-    metrics: {
-        messagesSent: 0,
-        messagesReceived: 0,
-        handshakeAttempts: 0,
-        errorsLogged: 0,
-        startTime: Date.now(),
-        lastHandshake: 0,
-        handshakeFailures: 0,
-        retryCount: 0,
-        offlineOperations: 0,
-        tokenRefreshes: 0,
-        originValidations: 0,
-        capabilityNegotiations: 0,
-        recoveryAttempts: 0,
-        successfulRecoveries: 0,
-        statusViews: 0,
-        statusReactions: 0,
-        statusPosts: 0,
-        statusExpired: 0,
-        sessionRequests: 0,
-        sessionSuccess: 0,
-        sessionFailures: 0,
-        lifecycleTransitions: 0,
-        invalidTransitions: 0,
-        blockedActions: 0
-    },
-    
-    handshakeId: null,
-    handshakePromise: null,
-    handshakeResolve: null,
-    handshakeReject: null,
-    handshakeTimer: null,
-    handshakeRetries: 0,
-    maxHandshakeRetries: IframeEnvironment.getConfig().maxRetries,
-    
-    protocolVersion: '10.0',
-    parentProtocolVersion: null,
-    
-    diagnosticsEnabled: true,
-    diagnosticData: []
-};
-
-// =============================================
-// IFRAME TRANSPORT - CENTRALIZED COMMUNICATION LAYER
-// =============================================
-const IframeTransport = {
-    version: '10.0',
-    messageQueue: [],
-    isProcessing: false,
-    maxRetries: 3,
-    baseRetryDelay: 1000,
-    maxRetryDelay: 30000,
-    messageCounter: 0,
-    pendingAcks: new Map(),
-    heartbeatInterval: null,
-    lastHeartbeatSent: null,
-    lastHeartbeatReceived: null,
-    heartbeatMissed: 0,
-    maxMissedHeartbeats: 3,
-    connectionStatus: 'disconnected',
-    offlineBuffer: [],
-    batchMessages: IframeEnvironment.getConfig().batchMessages,
-    keepalive: IframeEnvironment.getConfig().keepalive,
-    _messageLogs: new Set(),
-    
-    initialize() {
-        debugLog('IframeTransport initialized');
-        return this;
-    },
-    
-    send(type, payload = {}, options = {}) {
-        if (type === 'CHILD_READY') {
-            sendChildReady();
-            return Promise.resolve({ success: true });
-        }
-        
-        if (type === 'REGISTER_MODULE') {
-            if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendRegistration();
-            return Promise.resolve({ success: true });
-        }
-        
-        if (type === 'ACTION' || type.startsWith('STATUS_')) {
-            const action = type.startsWith('STATUS_') ? type : payload.action;
-            const result = safeSendAction(action, payload.payload || payload);
-            return result ? Promise.resolve({ success: true, messageId: result }) : Promise.reject(new Error('Failed to send action'));
-        }
-        
-        const sent = safeSend(type, payload, {
-            expectAck: options.requiresAck || false
-        });
-        
-        if (sent) {
-            return Promise.resolve({ success: true, messageId: sent });
-        } else {
-            return Promise.reject(new Error('Failed to send message'));
-        }
-    },
-    
-    sanitizePayload(payload) {
-        if (!payload || typeof payload !== 'object') return payload;
-        
-        try {
-            return JSON.parse(JSON.stringify(payload, (key, value) => {
-                if (typeof value === 'string' && value.length > 10000) {
-                    return value.substring(0, 10000) + '... [truncated]';
-                }
-                if (key === 'token' && typeof value === 'string') {
-                    return '[REDACTED]';
-                }
-                return value;
-            }));
-        } catch {
-            return payload;
-        }
-    },
-    
-    queueOffline(type, payload, options, resolve, reject) {
-        const offlineItem = {
-            id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`,
-            type,
-            payload,
-            options,
-            resolve,
-            reject,
-            timestamp: Date.now()
-        };
-        
-        this.offlineBuffer.push(offlineItem);
-        
-        DiagnosticsAgent.increment('offlineOperations');
-        
-        const offlineKey = `offline_${type}`;
-        if (!this._messageLogs.has(offlineKey)) {
-            this._messageLogs.add(offlineKey);
-            logStatus('WARNING', `Offline - queued ${type}`);
-        }
-    },
-    
-    calculateRetryDelay(attempt) {
-        const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
-        const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), this.maxRetryDelay);
-        const jitter = Math.random() * 200;
-        return delay + jitter;
-    },
-    
-    cleanupPendingAcks() {
-        const now = Date.now();
-        for (const [id, handler] of this.pendingAcks.entries()) {
-            if (now - handler.timestamp > 30000) {
-                clearTimeout(handler.timer);
-                this.pendingAcks.delete(id);
-            }
-        }
-    },
-    
-    startHeartbeat() {
-        debugLog('Heartbeat disabled - waiting for parent heartbeats');
-    },
-    
-    stopHeartbeat() {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
-            this.heartbeatInterval = null;
-        }
-    },
-    
-    async processOfflineQueue() {
-        if (this.offlineBuffer.length === 0 || !IframeAuthority.parentDetected) return;
-        
-        const processKey = 'offline_process';
-        if (!this._messageLogs.has(processKey)) {
-            this._messageLogs.add(processKey);
-            logStatus('INFO', `Processing ${this.offlineBuffer.length} offline messages`);
-        }
-        
-        const queue = [...this.offlineBuffer];
-        this.offlineBuffer = [];
-        
-        for (const item of queue) {
-            try {
-                const result = await this.send(item.type, item.payload, item.options);
-                item.resolve(result);
-            } catch (error) {
-                item.reject(error);
-            }
-            
-            await new Promise(r => setTimeout(r, 10));
-        }
-        
-        const completeKey = 'offline_complete';
-        if (!this._messageLogs.has(completeKey)) {
-            this._messageLogs.add(completeKey);
-            logStatus('SUCCESS', 'Offline queue processed');
-        }
-    },
-    
-    getStatus() {
+    getDiagnostics() {
         return {
-            connectionStatus: this.connectionStatus,
-            pendingAcks: this.pendingAcks.size,
-            retryQueue: this.retryQueue.size,
-            offlineBuffer: this.offlineBuffer.length,
-            heartbeatMissed: this.heartbeatMissed,
-            lastHeartbeatSent: this.lastHeartbeatSent,
-            lastHeartbeatReceived: this.lastHeartbeatReceived
-        };
-    }
-}.initialize();
-
-// =============================================
-// NAVIGATION GUARD - PROTECTS PAGE TRANSITIONS
-// =============================================
-const NavigationGuard = {
-    active: false,
-    pendingOperations: 0,
-    guardElement: null,
-    beforeUnloadHandler: null,
-    navigationListeners: new Set(),
-    historyState: [],
-    maxHistory: 50,
-    
-    initialize() {
-        this.createGuardElement();
-        this.setupBeforeUnload();
-        this.setupHistoryTracking();
-        this.setupNavigationListeners();
-        debugLog('NavigationGuard initialized');
-        return this;
-    },
-    
-    createGuardElement() {
-        if (document.getElementById('navigationGuard')) return;
-        
-        const guard = document.createElement('div');
-        guard.id = 'navigationGuard';
-        guard.className = 'navigation-guard';
-        guard.innerHTML = `
-            <i class="fas fa-sync-alt fa-spin"></i>
-            <span>Operation in progress. Please wait...</span>
-        `;
-        
-        document.body.appendChild(guard);
-        this.guardElement = guard;
-    },
-    
-    setupBeforeUnload() {
-        this.beforeUnloadHandler = (e) => {
-            if (this.pendingOperations > 0) {
-                e.preventDefault();
-                e.returnValue = 'There are pending operations. Are you sure you want to leave?';
-                return e.returnValue;
-            }
-        };
-        
-        window.addEventListener('beforeunload', this.beforeUnloadHandler);
-    },
-    
-    setupHistoryTracking() {
-        const pushState = history.pushState;
-        const replaceState = history.replaceState;
-        
-        history.pushState = (...args) => {
-            const result = pushState.apply(history, args);
-            this.trackHistoryChange('push', args[2]);
-            return result;
-        };
-        
-        history.replaceState = (...args) => {
-            const result = replaceState.apply(history, args);
-            this.trackHistoryChange('replace', args[2]);
-            return result;
-        };
-        
-        window.addEventListener('popstate', () => {
-            this.trackHistoryChange('pop', window.location.pathname);
-        });
-    },
-    
-    trackHistoryChange(type, url) {
-        this.historyState.push({
-            type,
-            url,
-            timestamp: Date.now()
-        });
-        
-        if (this.historyState.length > this.maxHistory) {
-            this.historyState.shift();
-        }
-    },
-    
-    setupNavigationListeners() {
-        document.addEventListener('click', (e) => {
-            const link = e.target.closest('a');
-            if (link && link.href && link.target !== '_blank') {
-                this.handleNavigation(link.href);
-            }
-        });
-        
-        window.addEventListener('pagehide', () => {
-            this.handlePageHide();
-        });
-    },
-    
-    handleNavigation(url) {
-        if (this.pendingOperations > 0) {
-            if (!confirm('There are pending operations. Navigate away?')) {
-                return false;
-            }
-        }
-        return true;
-    },
-    
-    handlePageHide() {
-        if (this.pendingOperations > 0 && typeof sendToParent !== 'undefined') {
-            sendToParent('PAGE_HIDE', {
-                pendingOperations: this.pendingOperations,
-                timestamp: Date.now()
-            }, { requiresAck: false, silent: true });
-        }
-    },
-    
-    startOperation(operation) {
-        this.pendingOperations++;
-        this.active = true;
-        this.updateGuard();
-    },
-    
-    endOperation(operation) {
-        this.pendingOperations = Math.max(0, this.pendingOperations - 1);
-        this.active = this.pendingOperations > 0;
-        this.updateGuard();
-    },
-    
-    updateGuard() {
-        if (!this.guardElement) return;
-        
-        if (this.pendingOperations > 0) {
-            this.guardElement.classList.add('active');
-        } else {
-            this.guardElement.classList.remove('active');
-        }
-    },
-    
-    wrapOperation(fn, operationName) {
-        return async (...args) => {
-            this.startOperation(operationName);
-            try {
-                return await fn(...args);
-            } finally {
-                this.endOperation(operationName);
-            }
+            trustedOriginsCount: this._trustedOrigins.size,
+            strictMode: this._strictMode,
+            rulesCount: this._validationRules.size
         };
     },
     
-    addNavigationListener(listener) {
-        this.navigationListeners.add(listener);
-        return () => this.navigationListeners.delete(listener);
-    },
-    
-    getState() {
-        return {
-            active: this.active,
-            pendingOperations: this.pendingOperations,
-            historySize: this.historyState.length
-        };
-    },
-    
-    reset() {
-        this.pendingOperations = 0;
-        this.active = false;
-        this.updateGuard();
-        this.historyState = [];
-    }
-}.initialize();
-
-// =============================================
-// ERROR BOUNDARY SYSTEM
-// =============================================
-function createErrorBoundary(fn, featureName, fallback = null) {
-    return async function(...args) {
-        if (typeof state !== 'undefined' && state.disabledFeatures?.has(featureName)) {
-            return typeof fallback === 'function' ? fallback(...args) : fallback;
-        }
-
-        try {
-            return await fn(...args);
-        } catch (error) {
-            const errorKey = `error_${featureName}`;
-            if (!_loggedMessages.has(errorKey)) {
-                _loggedMessages.add(errorKey);
-                logStatus('FAILED', `${featureName}: ${error.message}`);
-            }
-            
-            if (typeof state !== 'undefined' && state.disabledFeatures) {
-                state.disabledFeatures.add(featureName);
-            }
-            
-            const key = featureName.split(':')[0];
-            if (typeof CIRCUIT_BREAKER !== 'undefined') {
-                if (typeof CIRCUIT_BREAKER.failures !== 'undefined') {
-                    CIRCUIT_BREAKER.failures[key] = (CIRCUIT_BREAKER.failures[key] || 0) + 1;
-                }
-                if (typeof CIRCUIT_BREAKER.lastFailure !== 'undefined') {
-                    CIRCUIT_BREAKER.lastFailure[key] = Date.now();
-                }
-            }
-            
-            return typeof fallback === 'function' ? fallback(...args) : fallback;
-        }
-    };
-}
-
-// =============================================
-// CIRCUIT BREAKER
-// =============================================
-const CIRCUIT_BREAKER = {
-    failures: {},
-    threshold: 5,
-    timeout: 30000,
-    lastFailure: {},
-    
-    isOpen(service) {
-        const failures = this.failures[service] || 0;
-        const lastFailure = this.lastFailure[service] || 0;
-        const timeSinceFailure = Date.now() - lastFailure;
-        
-        if (failures >= this.threshold && timeSinceFailure < this.timeout) {
-            return true;
-        }
-        
-        if (timeSinceFailure >= this.timeout) {
-            this.failures[service] = 0;
-            return false;
-        }
-        
-        return false;
-    },
-    
-    recordFailure(service) {
-        this.failures[service] = (this.failures[service] || 0) + 1;
-        this.lastFailure[service] = Date.now();
-        
-        const key = `circuit_${service}`;
-        if (!_loggedMessages.has(key)) {
-            _loggedMessages.add(key);
-            logStatus('WARNING', `Circuit failure for ${service}: ${this.failures[service]}`);
-        }
-    },
-    
-    recordSuccess(service) {
-        this.failures[service] = 0;
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-function isCircuitOpen(service) {
-    return CIRCUIT_BREAKER.isOpen(service);
-}
-
-// =============================================
-// ENHANCED HANDSHAKE CLIENT
-// =============================================
-const HandshakeClient = {
-    status: 'idle',
-    handshakeId: null,
-    startTime: null,
-    endTime: null,
-    resolve: null,
-    reject: null,
-    timer: null,
-    retries: 0,
-    maxRetries: IframeEnvironment.getConfig().maxRetries,
-    childReadySent: false,
-    parentReadyReceived: false,
-    handshakeAckReceived: false,
-    sessionSyncReceived: false,
-    handshakePromise: null,
-    handshakeInProgress: false,
-    handshakeLock: false,
-    _handshakeLogged: false,
-    
-    initialize() {
-        this.reset();
-        debugLog('HandshakeClient initialized');
-        return this;
-    },
-    
-    reset() {
-        this.status = 'idle';
-        this.handshakeId = null;
-        this.startTime = null;
-        this.endTime = null;
-        this.resolve = null;
-        this.reject = null;
-        this.retries = 0;
-        this.childReadySent = false;
-        this.parentReadyReceived = false;
-        this.handshakeAckReceived = false;
-        this.sessionSyncReceived = false;
-        this.handshakeInProgress = false;
-        this._handshakeLogged = false;
-        
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-        }
-    },
-    
-    async execute(options = {}) {
-        if (!_childReadySent && isInState(LifecycleState.READY)) {
-            sendChildReady();
-        }
-        
-        return { success: true, delegated: true };
-    },
-    
-    handleResponse(message) {
-        if (message.type === 'PARENT_READY') {
-            if (typeof ParentCommunication !== 'undefined') ParentCommunication.parentReadyReceived = true;
-        }
-        
-        if (message.type === 'MODULE_REGISTERED') {
-            if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
-        }
-        
-        if (message.type === 'SESSION_DATA' || message.type === 'SESSION_ACTIVE') {
-            // Validate before handling
-            if (message.payload && __isValidSession(message.payload)) {
-                if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(message.payload);
-            }
-        }
-    },
-    
-    handleSessionInit(message) {
-        // Validate before handling
-        if ((message.payload || message.data) && __isValidSession(message.payload || message.data)) {
-            if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(message.payload || message.data);
-        }
-    }
-}.initialize();
-
-// =============================================
-// IFRAME HANDSHAKE AUTHORITY - DETERMINISTIC HANDSHAKE
-// =============================================
-const IframeHandshakeAuthority = {
-    status: 'idle',
-    handshakeId: null,
-    startTime: null,
-    endTime: null,
-    resolve: null,
-    reject: null,
-    timer: null,
-    retries: 0,
-    maxRetries: IframeEnvironment.getConfig().maxRetries,
-    childReadySent: false,
-    parentReadyReceived: false,
-    handshakeAckReceived: false,
-    sessionSyncReceived: false,
-    handshakePromise: null,
-    handshakeInProgress: false,
-    handshakeLock: false,
-    _handshakeLogged: false,
-    
-    initialize() {
-        this.reset();
-        debugLog('IframeHandshakeAuthority initialized');
-        return this;
-    },
-    
-    reset() {
-        this.status = 'idle';
-        this.handshakeId = null;
-        this.startTime = null;
-        this.endTime = null;
-        this.resolve = null;
-        this.reject = null;
-        this.retries = 0;
-        this.childReadySent = false;
-        this.parentReadyReceived = false;
-        this.handshakeAckReceived = false;
-        this.sessionSyncReceived = false;
-        this.handshakeInProgress = false;
-        this._handshakeLogged = false;
-        
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-        }
-    },
-    
-    async execute(options = {}) {
-        if (this.handshakeInProgress) {
-            return this.handshakePromise;
-        }
-        
-        this.handshakeInProgress = true;
-        this.status = 'connecting';
-        this.startTime = Date.now();
-        this.handshakeId = generateHandshakeId();
-        
-        this.handshakePromise = new Promise((resolve, reject) => {
-            this.resolve = resolve;
-            this.reject = reject;
-            
-            if (!_childReadySent && isInState(LifecycleState.READY)) {
-                sendChildReady();
-                this.childReadySent = true;
-            }
-        });
-        
-        return this.handshakePromise;
-    },
-    
-    handleResponse(message) {
-        if (message.type === 'PARENT_READY') {
-            this.parentReadyReceived = true;
-            this.status = 'parent_ready';
-            
-        } else if (message.type === 'MODULE_REGISTERED') {
-            this.handshakeAckReceived = true;
-            this.status = 'registered';
-            
-        } else if (message.type === 'SESSION_DATA' || message.type === 'SESSION_ACTIVE') {
-            if (message.payload && __isValidSession(message.payload)) {
-                this.sessionSyncReceived = true;
-                this.status = 'connected';
-                this.endTime = Date.now();
-                this.handshakeInProgress = false;
-                
-                if (this.timer) {
-                    clearTimeout(this.timer);
-                    this.timer = null;
-                }
-                
-                if (this.resolve) {
-                    this.resolve({ success: true, handshakeId: this.handshakeId });
-                }
-            }
-        }
-    },
-    
-    handleSessionInit(message) {
-        if ((message.payload || message.data) && __isValidSession(message.payload || message.data)) {
-            if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(message.payload || message.data);
-        }
-    }
-}.initialize();
-
-// =============================================
-// STARTUP GOVERNOR - CONTROLLED INITIALIZATION
-// =============================================
-const StartupGovernor = {
-    state: 'PENDING',
-    stages: {
-        PREFLIGHT: 'PREFLIGHT',
-        DEPENDENCY_CHECK: 'DEPENDENCY_CHECK',
-        PARENT_DETECT: 'PARENT_DETECT',
-        HANDSHAKE: 'HANDSHAKE',
-        REGISTRATION: 'REGISTRATION',
-        SESSION_SYNC: 'SESSION_SYNC',
-        ACTIVE: 'ACTIVE',
-        DEGRADED: 'DEGRADED',
-        RECOVERING: 'RECOVERING'
-    },
-    currentStage: 'PREFLIGHT',
-    startTime: Date.now(),
-    stageTimes: {},
-    errors: [],
-    
-    initialize() {
-        debugLog('StartupGovernor initialized');
-        return this;
-    },
-    
-    transitionTo(stage) {
-        this.stageTimes[stage] = Date.now() - this.startTime;
-        this.currentStage = stage;
-        this.state = stage;
-        
-        document.dispatchEvent(new CustomEvent('governorStateChange', {
-            detail: { newState: stage, previousState: this.currentStage }
-        }));
-        
-        debugLog(`StartupGovernor: ${stage}`);
-    },
-    
-    recordError(error) {
-        this.errors.push({
-            stage: this.currentStage,
-            error: error.message,
-            timestamp: Date.now()
-        });
-    },
-    
-    canProceed() {
-        return this.state !== 'DEGRADED';
-    },
-    
-    getMetrics() {
-        return {
-            currentStage: this.currentStage,
-            stageTimes: this.stageTimes,
-            errors: this.errors,
-            totalTime: Date.now() - this.startTime
-        };
-    }
-}.initialize();
-
-// =============================================
-// SESSION CLIENT - RESILIENT SESSION MANAGEMENT
-// =============================================
-const SessionClient = {
-    session: null,
-    sessionValid: false,
-    sessionExpiry: null,
-    refreshInProgress: false,
-    refreshTimer: null,
-    sessionListeners: new Set(),
-    offlineMode: false,
-    
-    initialize() {
-        this.setupRefreshTimer();
-        debugLog('SessionClient initialized');
-        return this;
-    },
-    
-    loadCachedSession() {
-        return false;
-    },
-    
-    setupRefreshTimer() {
-        if (this.refreshTimer) {
-            clearInterval(this.refreshTimer);
-        }
-        
-        this.refreshTimer = setInterval(() => {
-            this.checkSession();
-        }, 300000);
-    },
-    
-    async checkSession() {
-        if (!this.sessionValid) return;
-        
-        if (this.sessionExpiry) {
-            const timeToExpiry = this.sessionExpiry - new Date();
-            if (timeToExpiry < 300000 && timeToExpiry > 0) {
-                const expiryKey = 'session_expiring';
-                if (!_loggedMessages.has(expiryKey)) {
-                    _loggedMessages.add(expiryKey);
-                    logStatus('WARNING', 'Session expiring soon, refreshing...');
-                }
-                await this.refreshSession();
-            }
-        }
-    },
-    
-    async refreshSession() {
-        if (this.refreshInProgress) return this.session;
-        
-        this.refreshInProgress = true;
-        
-        try {
-            const response = await safeSendAction('TOKEN_REFRESH', {
-                refreshToken: this.session?.refreshToken
-            });
-            
-            if (response && response.payload && response.payload.token) {
-                // Validate new token before updating
-                const newSessionData = {
-                    token: response.payload.token,
-                    userId: this.session?.user?.id || this.session?.userId,
-                    user: this.session?.user
-                };
-                
-                if (__isValidSession(newSessionData)) {
-                    this.session.token = response.payload.token;
-                    if (response.payload.refreshToken) {
-                        this.session.refreshToken = response.payload.refreshToken;
-                    }
-                    if (response.payload.expiry) {
-                        this.session.expiry = response.payload.expiry;
-                        this.sessionExpiry = new Date(response.payload.expiry);
-                    }
-                    
-                    this.notifyListeners('refreshed', this.session);
-                    
-                    const refreshKey = 'session_refreshed';
-                    if (!_loggedMessages.has(refreshKey)) {
-                        _loggedMessages.add(refreshKey);
-                        logStatus('SUCCESS', 'Session refreshed');
-                    }
-                    
-                    return this.session;
-                }
-            }
-        } catch (error) {
-            if (this.session) {
-                const failKey = 'session_refresh_failed';
-                if (!_loggedMessages.has(failKey)) {
-                    _loggedMessages.add(failKey);
-                    logStatus('FAILED', 'Session refresh failed');
-                }
-                
-                this.offlineMode = true;
-            }
-        } finally {
-            this.refreshInProgress = false;
-        }
-        
-        return this.session;
-    },
-    
-    updateSession(sessionData, source = 'parent') {
-        if (!sessionData) return false;
-        
-        // Validate session before updating
-        if (!__isValidSession(sessionData)) {
-            logStatus('FAILED', `Invalid session in updateSession from ${source} - rejected`);
-            return false;
-        }
-        
-        // Check for duplicate
-        if (__isDuplicateSession(sessionData)) {
-            logStatus('WARNING', 'Duplicate session update ignored');
-            return false;
-        }
-        
-        // Prevent session downgrade
-        if (this.session && this.sessionValid) {
-            const currentValid = __isValidSession({ token: this.session.token, userId: this.session.user?.id || this.session.userId });
-            if (currentValid && !__isValidSession(sessionData)) {
-                logStatus('WARNING', 'Prevented session downgrade in SessionClient');
-                return false;
-            }
-        }
-        
-        const oldSession = this.session ? { ...this.session } : null;
-        
-        if (sessionData.token) {
-            if (!this.session) this.session = {};
-            this.session.token = sessionData.token;
-            if (typeof state !== 'undefined') {
-                state.token = sessionData.token;
-            }
-            setSession(sessionData.token, sessionData.user || oldSession?.user, sessionData.expiry);
-        }
-        
-        if (sessionData.user) {
-            if (!this.session) this.session = {};
-            this.session.user = {
-                id: sessionData.user.id || sessionData.user.userId,
-                displayName: sessionData.user.displayName || sessionData.user.name,
-                photoURL: sessionData.user.photoURL || sessionData.user.avatar,
-                email: sessionData.user.email,
-                isGuest: sessionData.user.isGuest || false
-            };
-            if (typeof state !== 'undefined') {
-                state.user = this.session.user;
-            }
-        }
-        
-        if (sessionData.refreshToken) {
-            if (!this.session) this.session = {};
-            this.session.refreshToken = sessionData.refreshToken;
-        }
-        
-        if (sessionData.expiry) {
-            this.session.expiry = sessionData.expiry;
-            this.sessionExpiry = new Date(sessionData.expiry);
-        }
-        
-        if (sessionData.permissions) {
-            if (!this.session) this.session = {};
-            this.session.permissions = [...sessionData.permissions];
-            if (typeof state !== 'undefined') {
-                state.permissionsGranted = [...sessionData.permissions];
-            }
-        }
-        
-        if (sessionData.sessionId && typeof state !== 'undefined') {
-            state.sessionId = sessionData.sessionId;
-        }
-        
-        this.sessionValid = true;
-        __storeValidSessionId(sessionData);
-        
-        this.notifyListeners('updated', this.session, oldSession);
-        
-        const updateKey = `session_updated_${source}`;
-        if (!_loggedMessages.has(updateKey)) {
-            _loggedMessages.add(updateKey);
-            logStatus('SUCCESS', `Session updated from ${source}`);
-        }
-        
-        this.offlineMode = false;
-        
-        return true;
-    },
-    
-    clearSession() {
-        this.session = null;
-        this.sessionValid = false;
-        this.sessionExpiry = null;
-        this.offlineMode = true;
-        
-        clearSession();
-        
-        this.notifyListeners('cleared', null);
-        
-        const clearKey = 'session_cleared';
-        if (!_loggedMessages.has(clearKey)) {
-            _loggedMessages.add(clearKey);
-            logStatus('WARNING', 'Session cleared');
-        }
-    },
-    
-    cacheSession() {
-    },
-    
-    getSession() {
-        return this.session ? { ...this.session } : null;
-    },
-    
-    isAuthenticated() {
-        return this.sessionValid && !!this.session?.token && !!this.session?.user && 
-               __isValidSession({ token: this.session.token, userId: this.session.user?.id || this.session.userId });
-    },
-    
-    isGuest() {
-        return !this.isAuthenticated() || this.session?.user?.isGuest === true;
-    },
-    
-    isOfflineMode() {
-        return this.offlineMode;
-    },
-    
-    addListener(listener) {
-        this.sessionListeners.add(listener);
-        return () => this.sessionListeners.delete(listener);
-    },
-    
-    notifyListeners(event, session, oldSession = null) {
-        this.sessionListeners.forEach(listener => {
-            try {
-                listener({ event, session, oldSession });
-            } catch (e) {}
-        });
-    }
-}.initialize();
-
-// =============================================
-// SESSION MIRROR LAYER - ENHANCED
-// =============================================
-function updateSessionMirror(sessionData, source = 'parent') {
-    try {
-        if (!sessionData) return false;
-        
-        // Validate session before updating
-        if (!__isValidSession(sessionData)) {
-            logStatus('FAILED', `Invalid session in updateSessionMirror from ${source} - rejected`);
-            return false;
-        }
-        
-        // Check for duplicate
-        if (__isDuplicateSession(sessionData)) {
-            logStatus('WARNING', 'Duplicate session mirror update ignored');
-            return false;
-        }
-        
-        // Prevent session downgrade
-        if (state.sessionMirror.validated && state.sessionMirror.token && state.sessionMirror.user) {
-            const currentValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
-            if (currentValid && !__isValidSession(sessionData)) {
-                logStatus('WARNING', 'Prevented session downgrade in updateSessionMirror');
-                return false;
-            }
-        }
-        
-        const previousState = { ...state.sessionMirror };
-        
-        if (sessionData.token && typeof sessionData.token === 'string') {
-            if (sessionData.token === 'present' && sessionData.actualToken) {
-                state.sessionMirror.token = sessionData.actualToken;
-                state.token = sessionData.actualToken;
-                setSession(sessionData.actualToken, state.sessionMirror.user, state.sessionMirror.expiry);
-            } else {
-                state.sessionMirror.token = sessionData.token;
-                state.token = sessionData.token;
-                setSession(sessionData.token, state.sessionMirror.user, state.sessionMirror.expiry);
-            }
-        }
-        
-        if (sessionData.refreshToken) {
-            state.sessionMirror.refreshToken = sessionData.refreshToken;
-        }
-        
-        if (sessionData.user) {
-            state.sessionMirror.user = {
-                id: sessionData.user.id || sessionData.user.userId,
-                displayName: sessionData.user.displayName || sessionData.user.name,
-                photoURL: sessionData.user.photoURL || sessionData.user.avatar,
-                email: sessionData.user.email,
-                isGuest: sessionData.user.isGuest || false
-            };
-            state.user = state.sessionMirror.user;
-        }
-        
-        if (sessionData.permissions && Array.isArray(sessionData.permissions)) {
-            state.sessionMirror.permissions = [...sessionData.permissions];
-            state.permissionsGranted = [...sessionData.permissions];
-        }
-        
-        if (sessionData.capabilities && Array.isArray(sessionData.capabilities)) {
-            state.sessionMirror.capabilities = [...sessionData.capabilities];
-        }
-        
-        if (sessionData.expiry) {
-            state.sessionMirror.expiry = new Date(sessionData.expiry);
-            state.sessionExpiry = state.sessionMirror.expiry;
-        }
-        
-        if (sessionData.sessionId) {
-            state.sessionId = sessionData.sessionId;
-        }
-        
-        state.sessionMirror.timestamp = Date.now();
-        state.sessionMirror.source = source;
-        state.sessionMirror.messageId = sessionData.messageId || sessionData.id;
-        
-        if (state.sessionMirror.token && state.sessionMirror.user) {
-            state.sessionMirror.validated = true;
-            state.sessionActive = true;
-            state.isGuestMode = false;
-            __storeValidSessionId(sessionData);
-            
-            SessionClient.updateSession(sessionData, source);
-            
-            const updateKey = `mirror_updated_${source}`;
-            if (!_loggedMessages.has(updateKey)) {
-                _loggedMessages.add(updateKey);
-                logStatus('SUCCESS', `Session mirror updated from ${source}`);
-            }
-            
-            if (typeof isTokenReady !== 'undefined') {
-                isTokenReady = true;
-                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-                    triggerTokenReadyCallbacks();
-                }
-            }
-            
-            if (typeof processPendingApiRequests !== 'undefined') {
-                processPendingApiRequests();
-            }
-            
-            return true;
-        }
-        
-        return false;
-    } catch (error) {
-        const errorKey = `mirror_update_${error.message}`;
-        if (!_loggedMessages.has(errorKey)) {
-            _loggedMessages.add(errorKey);
-            logStatus('FAILED', `updateSessionMirror: ${error.message}`);
-        }
-        return false;
-    }
-}
-
-function getSessionMirror() {
-    return {
-        ...state.sessionMirror,
-        user: state.sessionMirror.user ? { ...state.sessionMirror.user } : null,
-        capabilities: state.sessionMirror.capabilities ? [...state.sessionMirror.capabilities] : []
-    };
-}
-
-function isSessionMirrorValid() {
-    if (!state.sessionMirror.validated) return false;
-    if (!state.sessionMirror.token || !state.sessionMirror.user) return false;
-    if (state.sessionMirror.expiry && new Date() >= state.sessionMirror.expiry) return false;
-    return __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
-}
-
-// =============================================
-// PARENT CONFIGURATION REQUEST
-// =============================================
-async function requestParentConfig() {
-    if (!isInState(LifecycleState.ACTIVE)) {
-        debugLog('Cannot request config - not active');
-        return;
-    }
-    
-    safeSendAction('REQUEST_CONFIG', {});
-}
-
-function applyParentConfig(config) {
-    try {
-        if (config.heartbeatInterval) {
-            IframeEnvironment.getConfig().heartbeatInterval = config.heartbeatInterval;
-        }
-        
-        if (config.sessionTimeout) {
-            state.sessionExpiry = new Date(Date.now() + config.sessionTimeout);
-        }
-        
-        if (config.maxRetries) {
-            state.maxRetryAttempts = config.maxRetries;
-        }
-        
-        if (config.security) {
-            if (config.security.signatureRequired !== undefined) {
-                state.securityContext.signatureRequired = config.security.signatureRequired && !IframeAuthority.compatibilityMode;
-            }
-            if (config.security.timestampTolerance) {
-                state.securityContext.timestampTolerance = config.security.timestampTolerance;
-            }
-        }
-        
-        const applyKey = 'config_applied';
-        if (!_loggedMessages.has(applyKey)) {
-            _loggedMessages.add(applyKey);
-            logStatus('SUCCESS', 'Parent config applied');
-        }
-        
-        document.dispatchEvent(new CustomEvent('configApplied', {
-            detail: config
-        }));
-        
-    } catch (error) {}
-}
-
-// =============================================
-// TOKEN REFRESH HANDLER
-// =============================================
-async function refreshToken() {
-    if (state.sessionMirror.refreshInProgress) return state.token;
-    
-    state.sessionMirror.refreshInProgress = true;
-    
-    try {
-        const response = await safeSendAction('TOKEN_REFRESH', {
-            refreshToken: state.sessionMirror.refreshToken
-        });
-        
-        if (response && response.payload && response.payload.token) {
-            // Validate new token before updating
-            const newTokenData = {
-                token: response.payload.token,
-                userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId,
-                user: state.sessionMirror.user
-            };
-            
-            if (__isValidSession(newTokenData)) {
-                state.token = response.payload.token;
-                state.sessionMirror.token = response.payload.token;
-                state.sessionMirror.lastRefresh = Date.now();
-                
-                setSession(response.payload.token, state.sessionMirror.user, state.sessionMirror.expiry);
-                
-                if (response.payload.refreshToken) {
-                    state.sessionMirror.refreshToken = response.payload.refreshToken;
-                }
-                
-                const refreshKey = 'token_refreshed';
-                if (!_loggedMessages.has(refreshKey)) {
-                    _loggedMessages.add(refreshKey);
-                    logStatus('SUCCESS', 'Token refreshed');
-                }
-                
-                return state.token;
-            }
-        }
-    } catch (error) {
-        const failKey = 'token_refresh_failed';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', 'Token refresh failed');
-        }
-    } finally {
-        state.sessionMirror.refreshInProgress = false;
-    }
-    
-    return state.token;
-}
-
-// =============================================
-// PARENT AVAILABILITY DETECTION
-// =============================================
-const ParentDetector = {
-    status: 'unknown',
-    checkCount: 0,
-    maxChecks: 3,
-    checkInterval: null,
-    
-    detect() {
-        return new Promise((resolve) => {
-            this.status = 'checking';
-            this.checkCount = 0;
-            
-            const check = () => {
-                this.checkCount++;
-                
-                const isAvailable = this.checkAvailability();
-                
-                if (isAvailable) {
-                    this.status = 'available';
-                    state.parentDetected = true;
-                    IframeAuthority.parentDetected = true;
-                    
-                    if (this.checkInterval) {
-                        clearInterval(this.checkInterval);
-                        this.checkInterval = null;
-                    }
-                    
-                    const detectKey = 'parent_detected';
-                    if (!_loggedMessages.has(detectKey)) {
-                        _loggedMessages.add(detectKey);
-                        logStatus('SUCCESS', 'Parent detected');
-                    }
-                    
-                    resolve(true);
-                    return;
-                }
-                
-                if (this.checkCount >= this.maxChecks) {
-                    this.status = 'unavailable';
-                    state.parentDetected = false;
-                    IframeAuthority.parentDetected = false;
-                    
-                    if (this.checkInterval) {
-                        clearInterval(this.checkInterval);
-                        this.checkInterval = null;
-                    }
-                    
-                    const noParentKey = 'parent_not_detected';
-                    if (!_loggedMessages.has(noParentKey)) {
-                        _loggedMessages.add(noParentKey);
-                        logStatus('WARNING', 'Parent not detected');
-                    }
-                    
-                    resolve(false);
-                    return;
-                }
-            };
-            
-            check();
-            
-            this.checkInterval = setInterval(check, 100);
-        });
-    },
-    
-    checkAvailability() {
-        try {
-            if (window.self === window.top) {
-                return false;
-            }
-            
-            if (!window.parent || window.parent === window) {
-                return false;
-            }
-            
-            if (typeof window.parent.postMessage !== 'function') {
-                return false;
-            }
-            
-            return true;
-        } catch (e) {
-            if (e.name === 'SecurityError') {
-                return true;
-            }
-            return false;
-        }
-    },
-    
-    isAvailable() {
-        return this.status === 'available';
-    },
-    
-    reset() {
-        if (this.checkInterval) {
-            clearInterval(this.checkInterval);
-            this.checkInterval = null;
-        }
-        this.status = 'unknown';
-        this.checkCount = 0;
-    }
-};
-
-// =============================================
-// INITIALIZATION PIPELINE - PREFLIGHT → READY (NO TIMEOUTS)
-// =============================================
-async function preflightStage() {
-    try {
-        if (typeof window === 'undefined') throw new Error('Window not available');
-        if (typeof document === 'undefined') throw new Error('Document not available');
-        
-        IframeEnvironment.detect();
-        
-        const preflightKey = 'preflight_complete';
-        if (!_loggedMessages.has(preflightKey)) {
-            _loggedMessages.add(preflightKey);
-            logStatus('SUCCESS', 'Preflight complete');
-        }
-        
-        return { success: true };
-    } catch (error) {
-        const failKey = 'preflight_failed';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Preflight failed: ${error.message}`);
-        }
-        return { success: false, fallback: true };
-    }
-}
-
-async function dependencyCheckStage() {
-    try {
-        const requiredApis = ['postMessage', 'addEventListener'];
-        const missing = requiredApis.filter(api => typeof window[api] === 'undefined');
-        
-        if (missing.length > 0) {
-            state.dependenciesLoaded = false;
-            const missingKey = 'missing_deps_' + missing.join('_');
-            if (!_loggedMessages.has(missingKey)) {
-                _loggedMessages.add(missingKey);
-                logStatus('WARNING', `Missing dependencies: ${missing.join(', ')}`);
-            }
-            return { success: false, fallback: true, missing };
-        }
-        
-        state.dependenciesLoaded = true;
-        
-        const depsKey = 'deps_ok';
-        if (!_loggedMessages.has(depsKey)) {
-            _loggedMessages.add(depsKey);
-            logStatus('SUCCESS', 'Dependencies OK');
-        }
-        
-        return { success: true };
-    } catch (error) {
-        const failKey = 'deps_failed';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Dependency check failed: ${error.message}`);
-        }
-        state.dependenciesLoaded = false;
-        return { success: false, fallback: true };
-    }
-}
-
-async function parentDetectStage(timeout = 2000) {
-    const detected = await ParentDetector.detect();
-    
-    if (detected) {
-        return { success: true };
-    } else {
-        return { success: false, fallback: true };
-    }
-}
-
-async function handshakeStage(options = {}) {
-    if (!state.parentDetected) {
-        state.handshakeComplete = false;
-        const noParentKey = 'handshake_no_parent';
-        if (!_loggedMessages.has(noParentKey)) {
-            _loggedMessages.add(noParentKey);
-            logStatus('WARNING', 'No parent detected, skipping handshake');
-        }
-        return { success: false, fallback: true };
-    }
-    
-    if (isInState(LifecycleState.READY)) {
-        sendChildReady();
-    }
-    
-    return { success: true, delegated: true };
-}
-
-async function sessionSyncStage(timeout = 5000) {
-    if (!state.handshakeComplete || !state.parentDetected) {
-        if (state.sessionMirror.validated && isSessionReady()) {
-            activateSessionFromMirror();
-            const cacheKey = 'using_cached_session';
-            if (!_loggedMessages.has(cacheKey)) {
-                _loggedMessages.add(cacheKey);
-                logStatus('SUCCESS', 'Using cached session');
-            }
-            return { success: true, guestMode: false, cached: true };
-        }
-        
-        enableGuestMode();
-        const noSessionKey = 'no_session_guest';
-        if (!_loggedMessages.has(noSessionKey)) {
-            _loggedMessages.add(noSessionKey);
-            logStatus('WARNING', 'No session, using guest mode');
-        }
-        return { success: false, guestMode: true };
-    }
-    
-    return { success: true, waiting: true };
-}
-
-function activateSessionFromMirror() {
-    if (!state.sessionMirror.validated) return false;
-    
-    // Validate mirror session before activating
-    const mirrorValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
-    if (!mirrorValid) {
-        logStatus('FAILED', 'Invalid session mirror - cannot activate');
-        return false;
-    }
-    
-    if (state.sessionMirror.token) {
-        setSession(state.sessionMirror.token, state.sessionMirror.user, state.sessionMirror.expiry);
-    }
-    
-    state.sessionActive = true;
-    state.isGuestMode = false;
-    state.token = state.sessionMirror.token;
-    state.user = state.sessionMirror.user;
-    state.permissionsGranted = state.sessionMirror.permissions.length > 0 ? 
-        state.sessionMirror.permissions : ['view_statuses', 'create_status'];
-    state.sessionData = {
-        user: state.user,
-        token: state.token,
-        permissions: state.permissionsGranted,
-        expiry: state.sessionMirror.expiry,
-        capabilities: state.sessionMirror.capabilities
-    };
-    
-    __storeValidSessionId({ token: state.sessionMirror.token, userId: state.user?.id || state.user?.userId });
-    
-    const activateKey = 'session_activated';
-    if (!_loggedMessages.has(activateKey)) {
-        _loggedMessages.add(activateKey);
-        logStatus('SUCCESS', 'Session activated from mirror');
-    }
-    
-    return true;
-}
-
-async function serviceInitStage() {
-    try {
-        const serviceKey = 'service_init_complete';
-        if (!_loggedMessages.has(serviceKey)) {
-            _loggedMessages.add(serviceKey);
-            logStatus('SUCCESS', 'Service init complete');
-        }
-        
-        return { success: true };
-    } catch (error) {
-        const failKey = 'service_init_failed';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Service init failed: ${error.message}`);
-        }
-        return { success: false, fallback: true };
-    }
-}
-
-function readyStage() {
-    state.initialized = true;
-    state.readyState = 'ready';
-    
-    window.addEventListener('message', receiveFromParent);
-    state.listeners.add({ type: 'message', handler: receiveFromParent });
-    
-    const readyKey = 'status_core_ready';
-    if (!_loggedMessages.has(readyKey)) {
-        _loggedMessages.add(readyKey);
-        logStatus('READY', 'Status core ready');
-    }
-    
-    return { success: true, state: state.readyState, guestMode: state.isGuestMode };
-}
-
-const initializeCore = createErrorBoundary(async function(options = {}) {
-    if (state.initialized) {
-        const alreadyKey = 'core_already_initialized';
-        if (!_loggedMessages.has(alreadyKey)) {
-            _loggedMessages.add(alreadyKey);
-            logStatus('INFO', 'Core already initialized');
-        }
-        return { success: true, state: state.readyState };
-    }
-    
-    const startKey = 'core_init_start';
-    if (!_loggedMessages.has(startKey)) {
-        _loggedMessages.add(startKey);
-        logStatus('INIT', 'Starting core initialization');
-    }
-    
-    try {
-        state.readyState = 'preflight';
-        await preflightStage();
-        
-        state.readyState = 'dependencyCheck';
-        await dependencyCheckStage();
-        
-        state.readyState = 'parentDetect';
-        await parentDetectStage(options.parentTimeout || 2000);
-        
-        state.readyState = 'handshake';
-        await handshakeStage({ maxRetries: 3 });
-        
-        state.readyState = 'sessionSync';
-        await sessionSyncStage(options.sessionTimeout || 5000);
-        
-        state.readyState = 'serviceInit';
-        await serviceInitStage();
-        
-        state.readyState = 'ready';
-        const result = readyStage();
-        
-        return result;
-        
-    } catch (error) {
-        const failKey = 'core_init_failed';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Core initialization: ${error.message}`);
-        }
-        
-        if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
-            activateSessionFromMirror();
-        } else {
-            enableGuestMode();
-        }
-        
-        state.initialized = true;
-        state.readyState = 'ready';
-        
-        return { success: false, state: 'ready', guestMode: state.isGuestMode };
-    }
-}, 'initializeCore', { success: false, guestMode: true });
-
-const startHandshake = createErrorBoundary(async function(options = { retries: 3 }) {
-    return handshakeStage({ maxRetries: options.retries });
-}, 'startHandshake', { success: false });
-
-const requestSessionWrapper = createErrorBoundary(async function(options = { timeout: 5000 }) {
-    if (!parentReady) {
-        safeSend('REQUEST_SESSION', {});
-        return { success: true, queued: true };
-    }
-    return sessionSyncStage(options.timeout);
-}, 'requestSession', { guestMode: true });
-
-function enableGuestMode() {
-    if (state.isGuestMode) return;
-    
-    state.isGuestMode = true;
-    state.sessionActive = false;
-    state.permissionsGranted = ['guest', 'view_statuses'];
-    state.sessionData = {
-        user: { id: 'guest', displayName: 'Guest', isGuest: true },
-        permissions: ['guest', 'view_statuses'],
-        guestMode: true
-    };
-    state.user = state.sessionData.user;
-    state.token = null;
-    
-    clearSession();
-    
-    state.sessionMirror = {
-        ...state.sessionMirror,
-        validated: false,
-        guestMode: true
-    };
-    
-    const guestKey = 'guest_mode_enabled';
-    if (!_loggedMessages.has(guestKey)) {
-        _loggedMessages.add(guestKey);
-        logStatus('INFO', 'Guest mode enabled');
-    }
-    
-    document.dispatchEvent(new CustomEvent('guestModeEnabled', {
-        detail: { timestamp: Date.now() }
-    }));
-}
-
-function loadCachedSession() {
-    return null;
-}
-
-// =============================================
-// SHUTDOWN & RESOURCE MANAGEMENT
-// =============================================
-const shutdownCore = createErrorBoundary(async function() {
-    if (state.shutdownInProgress) return;
-    
-    state.shutdownInProgress = true;
-    
-    const shutdownKey = 'shutdown_start';
-    if (!_loggedMessages.has(shutdownKey)) {
-        _loggedMessages.add(shutdownKey);
-        logStatus('INFO', 'Shutting down core');
-    }
-    
-    try {
-        state.intervals.forEach(clearInterval);
-        state.intervals.clear();
-        
-        state.timeouts.forEach(clearTimeout);
-        state.timeouts.clear();
-        
-        state.retryTimers.forEach((timer) => clearTimeout(timer));
-        state.retryTimers.clear();
-        
-        state.listeners.forEach(({ type, handler }) => {
-            try {
-                window.removeEventListener(type, handler);
-            } catch (e) {}
-        });
-        state.listeners.clear();
-        
-        state.pendingAcks.forEach((handler) => {
-            clearTimeout(handler.timer);
-        });
-        state.pendingAcks.clear();
-        
-        state.pendingRequests.clear();
-        state.messageCache.clear();
-        state.retryQueue = [];
-        
-        messageHandlers.clear();
-        
-        _sentMessages.clear();
-        processedMessageIds.clear();
-        
-        clearSession();
-        
-        if (state.parentDetected) {
-            safeSendAction('STATUS_SHUTDOWN', {
-                metrics: state.metrics
-            });
-        }
-        
-        const completeKey = 'shutdown_complete';
-        if (!_loggedMessages.has(completeKey)) {
-            _loggedMessages.add(completeKey);
-            logStatus('SUCCESS', 'Core shutdown complete');
-        }
-        
-    } catch (error) {
-        const failKey = 'shutdown_error';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Shutdown error: ${error.message}`);
-        }
-    } finally {
-        state.shutdownInProgress = false;
-    }
-}, 'shutdownCore', null);
-
-// =============================================
-// FEATURE ISOLATION SYSTEM
-// =============================================
-function registerFeature(name, implementation) {
-    try {
-        if (state.features.has(name)) {
-            return false;
-        }
-        
-        const wrappedImplementation = createErrorBoundary(implementation, `Feature:${name}`, null);
-        state.features.set(name, wrappedImplementation);
-        return true;
-    } catch (e) {
-        const regKey = `feature_reg_fail_${name}`;
-        if (!_loggedMessages.has(regKey)) {
-            _loggedMessages.add(regKey);
-            logStatus('FAILED', `Feature registration failed: ${name} - ${e.message}`);
-        }
-        return false;
-    }
-}
-
-function executeFeature(name, ...args) {
-    try {
-        if (isCircuitOpen(`feature:${name}`)) {
-            return null;
-        }
-        
-        if (state.disabledFeatures.has(name)) {
-            return null;
-        }
-        
-        const feature = state.features.get(name);
-        if (!feature) {
-            return null;
-        }
-        
-        return feature(...args);
-    } catch (error) {
-        const execKey = `feature_exec_fail_${name}`;
-        if (!_loggedMessages.has(execKey)) {
-            _loggedMessages.add(execKey);
-            logStatus('FAILED', `Feature execution failed: ${name} - ${error.message}`);
-        }
-        state.disabledFeatures.add(name);
-        return null;
-    }
-}
-
-// =============================================
-// SESSION & TOKEN MANAGEMENT
-// =============================================
-function getSession() {
-    if (state.sessionMirror.validated) {
-        const isValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
-        if (isValid) {
-            return {
-                active: true,
-                user: state.sessionMirror.user,
-                token: state.sessionMirror.token,
-                expiry: state.sessionMirror.expiry,
-                guestMode: false,
-                permissions: [...state.sessionMirror.permissions],
-                validated: true,
-                source: state.sessionMirror.source,
-                capabilities: state.sessionMirror.capabilities ? [...state.sessionMirror.capabilities] : []
-            };
-        }
-    }
-    
-    return {
-        active: state.sessionActive,
-        user: state.user,
-        token: state.token,
-        expiry: state.sessionExpiry,
-        guestMode: state.isGuestMode,
-        permissions: [...state.permissionsGranted],
-        validated: state.sessionMirror.validated,
-        capabilities: []
-    };
-}
-
-function isSessionValid() {
-    if (state.isGuestMode) return true;
-    if (state.sessionMirror.validated) {
-        if (!state.sessionMirror.expiry) return true;
-        const isValid = __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id || state.sessionMirror.user?.userId });
-        if (!isValid) return false;
-        return new Date() < state.sessionMirror.expiry;
-    }
-    if (!state.sessionActive || !state.sessionExpiry) return false;
-    return new Date() < state.sessionExpiry;
-}
-
-// =============================================
-// HEALTH METRICS
-// =============================================
-function getHealthMetrics() {
-    return {
-        ...state.metrics,
-        uptime: Date.now() - state.metrics.startTime,
-        readyState: state.readyState,
-        initialized: state.initialized,
-        parentDetected: state.parentDetected,
-        handshakeComplete: state.handshakeComplete,
-        handshakeState: state.handshakeState,
-        sessionActive: state.sessionActive,
-        sessionMirrorValid: state.sessionMirror.validated && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id }),
-        guestMode: state.isGuestMode,
-        protocolVersion: state.protocolVersion,
-        parentProtocolVersion: state.parentProtocolVersion,
-        frameId: state.frameId,
-        instanceId: state.instanceId,
-        sessionId: state.sessionId,
-        circuitBreakers: { ...CIRCUIT_BREAKER.failures },
-        disabledFeatures: Array.from(state.disabledFeatures),
-        pendingAcks: state.pendingAcks.size,
-        pendingRequests: state.pendingRequests.size,
-        retryQueue: state.retryQueue.length,
-        offlineBuffer: state.offlineBuffer.length,
-        features: state.features.size,
-        messageCacheSize: state.messageCache.size,
-        lastHeartbeat: state.lastHeartbeatSent,
-        lastHeartbeatReceived: state.lastHeartbeatReceived,
-        heartbeatFailures: state.heartbeatFailures,
-        isOnline: state.isOnline,
-        offlineModeEnabled: state.offlineModeEnabled,
-        parentCapabilities: Array.from(state.parentCapabilities),
-        originValidated: state.securityContext.originValidated,
-        diagnosticsEnabled: state.diagnosticsEnabled,
-        
-        environment: IframeEnvironment.type,
-        environmentDetails: {
-            isLocalDev: IframeEnvironment.isLocalDev,
-            isRenderHosted: IframeEnvironment.isRenderHosted,
-            isVPNNetwork: IframeEnvironment.isVPNNetwork,
-            isProduction: IframeEnvironment.isProduction,
-            isSandboxed: IframeEnvironment.isSandboxed,
-            latency: IframeEnvironment.latency,
-            connectionType: IframeEnvironment.connectionType
-        },
-        
-        lifecycle: getLifecycleState(),
-        
-        transport: IframeTransport.getStatus(),
-        
-        sessionClient: {
-            sessionValid: SessionClient.sessionValid,
-            sessionExpiry: SessionClient.sessionExpiry,
-            offlineMode: SessionClient.offlineMode
-        },
-        
-        navigation: NavigationGuard.getState(),
-        
-        parentReady: parentReady,
-        
-        sessionReady: isSessionReady()
-    };
-}
-
-// =============================================
-// PARENT COORDINATION - ENHANCED FOR UI REQUIREMENTS
-// =============================================
-const parentCoordinator = {
-    isInitialized: false,
-    handshakeComplete: false,
-    sessionData: null,
-    messageChannel: null,
-    handshakeRetries: 0,
-    maxHandshakeRetries: 3,
-    handshakeInterval: null,
-    parentOrigin: null,
-    handshakeInProgress: false,
-    sessionValid: false,
-    handshakeTimeout: null,
-    sessionRequestSent: false,
-    trustedOrigins: TRUSTED_ORIGINS,
-    lastMessageOrigin: null,
-    sequenceId: null,
-    
-    frameId: state.frameId,
-    instanceId: state.instanceId,
-    handshakeState: 'idle',
-    childReadySent: false,
-    parentReadyReceived: false,
-    capabilities: new Set()
-};
-
-function initializeParentCoordination() {
-    if (parentCoordinator.isInitialized) return;
-    
-    try {
-        if (!window.parent || window.parent === window) {
-            handleParentUnavailable();
-            return;
-        }
-        
-        parentCoordinator.trustedOrigins.add(window.location.origin);
-        parentCoordinator.parentOrigin = window.location.origin;
-        
-        window.removeEventListener('message', handleEnhancedParentMessage);
-        window.addEventListener('message', handleEnhancedParentMessage);
-        parentCoordinator.messageChannel = window;
-        parentCoordinator.isInitialized = true;
-        
-        const initKey = 'parent_coord_init';
-        if (!_loggedMessages.has(initKey)) {
-            _loggedMessages.add(initKey);
-            logStatus('INFO', 'Parent coordination initialized');
-        }
-        
-        if (isInState(LifecycleState.READY)) {
-            sendChildReady();
-        }
-        
-    } catch (error) {
-        const failKey = 'parent_coord_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Parent coordination: ${error.message}`);
-        }
-        handleParentUnavailable();
-    }
-}
-
-function handleEnhancedParentMessage(event) {
-    try {
-        parentCoordinator.lastMessageOrigin = event.origin;
-        
-        if (event.data?.type === 'STORAGE_RESULT') {
-            StorageProxy.handleResponse(event);
-            return;
-        }
-        
-        if (event.data?.id && isDuplicateMessage(event.data.id)) {
-            return;
-        }
-        
-        if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) {
-            debugWarn(`Message from untrusted origin ignored: ${event.origin}`);
-            return;
-        }
-        
-        const message = event.data;
-        
-        const _vr2 = MessageValidator.validate(message);
-        const _mv2 = typeof _vr2 === 'object' && _vr2 !== null ? _vr2.valid : _vr2;
-        if (!_mv2) {
-            return;
-        }
-        
-        // Skip HTML-encoding for trusted internal message types — sanitize corrupts API payloads/tokens
-        const _skipSanitize = ['API_RESPONSE', 'AUTH_READY', 'SESSION_DATA', 'PARENT_READY', 'SESSION', 'SESSION_ACTIVE', 'SESSION_UPDATE'].includes(message.type);
-        const sanitizedMessage = _skipSanitize ? message : MessageFirewall.sanitize(message);
-        
-        const messageKey = `${sanitizedMessage.type}:${sanitizedMessage.id || 'no-id'}:${sanitizedMessage.timestamp || Date.now()}`;
-        if (state.messageCache.has(messageKey)) return;
-        state.messageCache.add(messageKey);
-        
-        if (state.messageCache.size > 100) {
-            const firstKey = state.messageCache.values().next().value;
-            state.messageCache.delete(firstKey);
-        }
-        
-        if (sanitizedMessage.type === 'PARENT_READY') {
-            handleParentReady(sanitizedMessage);
-            return;
-        }
-        
-        // =============================================
-        // SETTING CHANGED HANDLER - PLACED CORRECTLY HERE
-        // =============================================
-        if (sanitizedMessage.type === 'SETTING_CHANGED' || sanitizedMessage.type === 'SETTINGS_UPDATED') {
-            const payload = sanitizedMessage.payload || sanitizedMessage.data || {};
-
-            if (sanitizedMessage.type === 'SETTING_CHANGED' && payload.section && payload.key !== undefined) {
-                const { section, key, value } = payload;
-                if (typeof applySettingToStatusModule === 'function') {
-                    applySettingToStatusModule(section, key, value);
-                }
-                window.dispatchEvent(new CustomEvent('settingChanged', { 
-                    detail: { section, key, value, timestamp: Date.now() } 
-                }));
-                if (typeof EventBus !== 'undefined') {
-                    EventBus.emit('settingChanged', { section, key, value });
-                }
-            }
-
-            if (sanitizedMessage.type === 'SETTINGS_UPDATED' && payload.settings) {
-                const s = payload.settings;
-                if (typeof applySettingToStatusModule === 'function') {
-                    Object.entries(s).forEach(([sec, secVal]) => {
-                        if (secVal && typeof secVal === 'object') {
-                            Object.entries(secVal).forEach(([k, v]) => applySettingToStatusModule(sec, k, v));
-                        }
-                    });
-                }
-                if (typeof SafeStorage !== 'undefined') {
-                    SafeStorage.setJSON('user_settings', s);
-                }
-                window.dispatchEvent(new CustomEvent('settingsUpdated', { 
-                    detail: { settings: s, timestamp: Date.now() } 
-                }));
-                if (typeof EventBus !== 'undefined') {
-                    EventBus.emit('settingsUpdated', { settings: s });
-                }
-            }
-            return;
-        }
-        
-        switch (sanitizedMessage.type) {
-            case 'SESSION_DATA':
-            case 'SESSION':
-            case 'SESSION_ACTIVE':
-            case 'SESSION_UPDATE':
-                if (sanitizedMessage.payload && __isValidSession(sanitizedMessage.payload)) {
-                    handleSecureSessionData(sanitizedMessage);
-                } else {
-                    logStatus('WARNING', 'Invalid session data in enhanced message - rejected');
-                }
-                break;
-            case 'SESSION_SYNC':
-                if (sanitizedMessage.payload && __isValidSession(sanitizedMessage.payload)) {
-                    handleSecureSessionData(sanitizedMessage);
-                }
-                break;
-            case 'LOGOUT':
-                if (typeof handleLogout !== 'undefined') handleLogout(sanitizedMessage.data || sanitizedMessage.payload);
-                break;
-            case 'API_RESPONSE':
-                if (typeof handleApiResponse !== 'undefined') handleApiResponse(sanitizedMessage);
-                break;
-            case 'API_ERROR':
-                if (typeof handleApiError !== 'undefined') handleApiError(sanitizedMessage.data || sanitizedMessage.payload);
-                break;
-            case 'AUTH_VALIDATED':
-                if (typeof handleAuthValidated !== 'undefined') handleAuthValidated(sanitizedMessage.data || sanitizedMessage.payload);
-                break;
-            case 'HANDSHAKE_RESPONSE':
-                HandshakeClient.handleResponse(sanitizedMessage);
-                break;
-            case 'MODULE_REGISTERED':
-                if (typeof ParentCommunication !== 'undefined') ParentCommunication.moduleRegistered = true;
-                break;
-            case 'HEARTBEAT':
-                if (typeof ParentCommunication !== 'undefined') ParentCommunication.sendHeartbeatAck(sanitizedMessage.id);
-                break;
-            case 'PONG':
-                state.lastHeartbeatReceived = Date.now();
-                state.heartbeatFailures = 0;
-                break;
-            case 'PAGE_ACTIVATED':
-                parentCoordinator.handshakeState = 'active';
-                if (typeof loadFreshDataInBackground !== 'undefined' && isInState(LifecycleState.ACTIVE)) {
-                    setTimeout(() => {
-                        if (typeof loadFreshDataInBackground !== 'undefined') loadFreshDataInBackground();
-                    }, 100);
-                }
-                break;
-            case 'STATUS_POSTED':
-            case 'STATUS_VIEWED':
-            case 'STATUS_REACTED':
-            case 'REACTION_REMOVED':
-            case 'REACTION_CHANGED':
-            case 'STATUS_EXPIRED':
-            case 'STATUSES_UPDATE':
-                document.dispatchEvent(new CustomEvent('parentStatusUpdate', {
-                    detail: { type: sanitizedMessage.type, payload: sanitizedMessage.payload }
-                }));
-                break;
-            default:
-                break;
-        }
-        
-    } catch (error) {
-        const handlerKey = `enhanced_parent_msg_${error.message}`;
-        if (!_loggedMessages.has(handlerKey)) {
-            _loggedMessages.add(handlerKey);
-            logStatus('FAILED', `handleEnhancedParentMessage: ${error.message}`);
-        }
-    }
-}
-
-function startSecureHandshake() {
-    try {
-        clearSecureHandshake();
-        
-        if (isInState(LifecycleState.READY)) {
-            sendChildReady();
-        }
-        
-    } catch (error) {
-        const failKey = 'secure_handshake_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `Secure handshake: ${error.message}`);
-        }
-    }
-}
-
-function sendChildReadyMessage() {
-    if (isInState(LifecycleState.READY)) {
-        sendChildReady();
-    }
-}
-
-function requestSessionFromParent() {
-    safeSend('REQUEST_SESSION', {});
-}
-
-function handleSecureSessionData(message) {
-    try {
-        if (message.source !== 'parent' && message.source !== 'PARENT') return;
-        
-        const sessionData = message.data || message.payload;
-        
-        if (!sessionData) {
-            return;
-        }
-        
-        // Validate session data
-        if (!__isValidSession(sessionData)) {
-            logStatus('FAILED', 'Invalid secure session data - rejected');
-            return;
-        }
-        
-        // Check for duplicate
-        if (__isDuplicateSession(sessionData)) {
-            logStatus('WARNING', 'Duplicate secure session data ignored');
-            return;
-        }
-        
-        const updated = updateSessionMirror(sessionData, 'secure_handshake');
-        
-        if (updated) {
-            parentCoordinator.sessionValid = true;
-            parentCoordinator.handshakeComplete = true;
-            parentCoordinator.handshakeState = 'active';
-            parentCoordinator.handshakeInProgress = false;
-            clearTimeout(parentCoordinator.handshakeTimeout);
-            parentCoordinator.sessionData = sessionData;
-            __storeValidSessionId(sessionData);
-            
-            if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(sessionData);
-            
-            const dataKey = 'secure_session_data';
-            if (!_loggedMessages.has(dataKey)) {
-                _loggedMessages.add(dataKey);
-                logStatus('SUCCESS', 'Secure session data received');
-            }
-            
-            if (typeof bindUIAfterSession !== 'undefined') bindUIAfterSession();
-            
-            sendSecureResponseToParent('AUTH_VALIDATED', {
-                success: true,
-                module: MODULE_NAME,
-                frameId: state.frameId
-            });
-            
-            if (typeof startBackgroundInitializationWithSession !== 'undefined') startBackgroundInitializationWithSession();
-        } else {
-            parentCoordinator.handshakeInProgress = false;
-            clearTimeout(parentCoordinator.handshakeTimeout);
-        }
-        
-    } catch (error) {
-        const failKey = 'secure_session_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `handleSecureSessionData: ${error.message}`);
-        }
-        parentCoordinator.handshakeInProgress = false;
-        clearTimeout(parentCoordinator.handshakeTimeout);
-    }
-}
-
-function bindUIAfterSession() {
-    try {
-        if (typeof window.initializeStatusUI === 'function') {
-            window.initializeStatusUI();
-        }
-        if (typeof updateUIBasedOnAuth !== 'undefined') updateUIBasedOnAuth();
-    } catch (error) {
-        const bindKey = 'ui_bind_fail';
-        if (!_loggedMessages.has(bindKey)) {
-            _loggedMessages.add(bindKey);
-            logStatus('FAILED', `bindUIAfterSession: ${error.message}`);
-        }
-    }
-}
-
-function updateUIBasedOnAuth() {
-    try {
-        document.dispatchEvent(new CustomEvent('sessionReady', {
-            detail: { user: typeof currentUser !== 'undefined' ? currentUser : null }
-        }));
-    } catch (error) {
-        const uiKey = 'ui_auth_fail';
-        if (!_loggedMessages.has(uiKey)) {
-            _loggedMessages.add(uiKey);
-            logStatus('FAILED', `updateUIBasedOnAuth: ${error.message}`);
-        }
-    }
-}
-
-function sendSecureResponseToParent(type, data = {}) {
-    try {
-        if (!window.parent || window.parent === window) return;
-        
-        safeSend(type, {
-            ...data,
-            source: MODULE_NAME,
-            timestamp: Date.now(),
-            frameId: state.frameId
-        });
-        
-    } catch (error) {
-        const sendKey = 'secure_response_fail';
-        if (!_loggedMessages.has(sendKey)) {
-            _loggedMessages.add(sendKey);
-            logStatus('FAILED', `sendSecureResponseToParent: ${error.message}`);
-        }
-    }
-}
-
-function handleSessionFailed() {
-    parentCoordinator.handshakeInProgress = false;
-    parentCoordinator.handshakeComplete = false;
-    parentCoordinator.handshakeState = 'failed';
-    
-    logStatus('WAITING', 'Session failed - waiting for parent');
-    
-    if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
-        activateSessionFromMirror();
-    } else {
-        if (typeof loadCachedDataInstantly !== 'undefined') loadCachedDataInstantly();
-        enableGuestMode();
-    }
-    
-    if (typeof initializeUIWithCachedData !== 'undefined') initializeUIWithCachedData();
-}
-
-function clearSecureHandshake() {
-    try {
-        if (parentCoordinator.handshakeTimeout) {
-            clearTimeout(parentCoordinator.handshakeTimeout);
-            parentCoordinator.handshakeTimeout = null;
-        }
-        parentCoordinator.handshakeInProgress = false;
-        parentCoordinator.sessionValid = false;
-        parentCoordinator.sessionRequestSent = false;
-        parentCoordinator.handshakeRetries = 0;
-    } catch (error) {
-        const clearKey = 'clear_handshake_fail';
-        if (!_loggedMessages.has(clearKey)) {
-            _loggedMessages.add(clearKey);
-            logStatus('FAILED', `clearSecureHandshake: ${error.message}`);
-        }
-    }
-}
-
-function handleSessionData(sessionData) {
-    try {
-        if (!validateSessionData(sessionData)) {
-            sendToParent('ERROR', {
-                error: 'INVALID_SESSION_SCHEMA',
-                message: 'Session data validation failed'
-            });
-            return;
-        }
-        
-        // Validate session data before updating
-        if (!__isValidSession(sessionData)) {
-            logStatus('FAILED', 'Invalid session data in handleSessionData - rejected');
-            sendToParent('ERROR', {
-                error: 'INVALID_SESSION_DATA',
-                message: 'Session data validation failed'
-            });
-            return;
-        }
-        
-        updateSessionMirror(sessionData, 'session_data');
-        
-        parentCoordinator.sessionData = sessionData;
-        parentCoordinator.handshakeComplete = true;
-        parentCoordinator.handshakeState = 'active';
-        
-        if (typeof ParentCommunication !== 'undefined') ParentCommunication.handleSessionSync(sessionData);
-        
-        if (parentCoordinator.handshakeInterval) {
-            clearInterval(parentCoordinator.handshakeInterval);
-            parentCoordinator.handshakeInterval = null;
-        }
-        
-        const dataKey = 'session_data_received';
-        if (!_loggedMessages.has(dataKey)) {
-            _loggedMessages.add(dataKey);
-            logStatus('SUCCESS', 'Session data received');
-        }
-        
-        sendToParent('AUTH_VALIDATED', {
-            module: MODULE_NAME,
-            success: true,
-            frameId: state.frameId
-        });
-        
-        if (typeof startBackgroundInitializationWithSession !== 'undefined') startBackgroundInitializationWithSession();
-        
-    } catch (error) {
-        const failKey = 'session_data_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `handleSessionData: ${error.message}`);
-        }
-        sendToParent('ERROR', {
-            error: 'SESSION_PROCESSING_ERROR',
-            message: error.message
-        });
-    }
-}
-
-function validateSessionData(sessionData) {
-    try {
-        if (!sessionData || typeof sessionData !== 'object') return false;
-        
-        if (sessionData.token && typeof sessionData.token !== 'string') return false;
-        if (sessionData.user && (!sessionData.user.id || !sessionData.user.displayName)) return false;
-        
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-function handleSessionUpdate(updateData) {
-    try {
-        if (!updateData) return;
-        
-        // Validate update data
-        if (!__isValidSession(updateData)) {
-            logStatus('WARNING', 'Invalid session update data - rejected');
-            return;
-        }
-        
-        updateSessionMirror(updateData, 'session_update');
-        
-    } catch (error) {
-        const updateKey = 'session_update_fail';
-        if (!_loggedMessages.has(updateKey)) {
-            _loggedMessages.add(updateKey);
-            logStatus('FAILED', `handleSessionUpdate: ${error.message}`);
-        }
-    }
-}
-
-function handleLogout(logoutData) {
-    try {
-        parentCoordinator.sessionData = null;
-        parentCoordinator.handshakeComplete = false;
-        parentCoordinator.sessionValid = false;
-        parentCoordinator.handshakeState = 'idle';
-        
-        transitionTo(LifecycleState.BOOT, 'logout');
-        
-        state.sessionMirror = {
-            token: null,
-            user: null,
-            expiry: null,
-            permissions: [],
-            timestamp: 0,
-            messageId: null,
-            validated: false,
-            source: null,
-            refreshToken: null,
-            lastRefresh: null,
-            refreshInProgress: false,
-            capabilities: []
-        };
-        
-        if (typeof currentUser !== 'undefined') currentUser = null;
-        if (typeof userData !== 'undefined') userData = null;
-        
-        clearSession();
-        
-        if (typeof isTokenReady !== 'undefined') isTokenReady = false;
-        state.sessionActive = false;
-        state.user = null;
-        state.token = null;
-        enableGuestMode();
-        
-        const logoutKey = 'logout_handled';
-        if (!_loggedMessages.has(logoutKey)) {
-            _loggedMessages.add(logoutKey);
-            logStatus('INFO', 'Logout handled');
-        }
-        
-        safeSendAction('CHILD_LOADED', {
-            module: MODULE_NAME,
-            loggedOut: true
-        });
-        
-    } catch (error) {
-        const failKey = 'logout_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `handleLogout: ${error.message}`);
-        }
-    }
-}
-
-function handleParentUnavailable() {
-    if (typeof loadCachedDataInstantly !== 'undefined') loadCachedDataInstantly();
-    
-    if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
-        activateSessionFromMirror();
-    } else {
-        enableGuestMode();
-    }
-    
-    state.offlineModeEnabled = true;
-    
-    const unavailKey = 'parent_unavailable';
-    if (!_loggedMessages.has(unavailKey)) {
-        _loggedMessages.add(unavailKey);
-        logStatus('WARNING', 'Parent unavailable');
-    }
-    
-    logStatus('WAITING', 'Parent unavailable - waiting for parent');
-}
-
-function startBackgroundInitializationWithSession() {
-    if (typeof isBackgroundInitialized !== 'undefined' && isBackgroundInitialized) return;
-    if (_backgroundInitWithSessionStarted) return; // ← ADD THIS LINE
-    _backgroundInitWithSessionStarted = true; // ← ADD THIS LINE
-    
-    try {
-        setTimeout(async () => {
-            try {
-                if (typeof loadFreshDataInBackground !== 'undefined' && isInState(LifecycleState.ACTIVE)) {
-                    await loadFreshDataInBackground();
-                }
-                
-                if (typeof isBackgroundInitialized !== 'undefined') {
-                    isBackgroundInitialized = true;
-                }
-                
-                if (parentCoordinator.handshakeComplete) {
-                    safeSendAction('UI_READY', {
-                        module: MODULE_NAME
-                    });
-                }
-                
-                const bgKey = 'background_init_complete';
-                if (!_loggedMessages.has(bgKey)) {
-                    _loggedMessages.add(bgKey);
-                    logStatus('SUCCESS', 'Background initialization complete');
-                }
-            } catch (error) {
-                const bgFailKey = 'background_init_fail';
-                if (!_loggedMessages.has(bgFailKey)) {
-                    _loggedMessages.add(bgFailKey);
-                    logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
-                }
-            }
-        }, 1000);
-    } catch (error) {
-        const bgSetupKey = 'background_init_setup_fail';
-        if (!_loggedMessages.has(bgSetupKey)) {
-            _loggedMessages.add(bgSetupKey);
-            logStatus('FAILED', `startBackgroundInitialization: ${error.message}`);
-        }
-    }
-}
-
-async function makeParentApiRequest(endpoint, options = {}) {
-    return new Promise((resolve, reject) => {
-        try {
-            const requestId = genReqId();
-            
-            const responseHandler = (event) => {
-                try {
-                    if (!OriginTrustAdapter.validateMessageOrigin(event.origin)) return;
-                    
-                    const message = event.data;
-                    if (!message || !message.type || !message.payload || message.payload.requestId !== requestId) return;
-                    
-                    if (message.type === 'API_RESPONSE') {
-                        window.removeEventListener('message', responseHandler);
-                        resolve(message.payload.response || message.payload.data);
-                    } else if (message.type === 'API_ERROR') {
-                        window.removeEventListener('message', responseHandler);
-                        reject(new Error(message.payload.error || 'API Error'));
-                    }
-                } catch (error) {
-                    window.removeEventListener('message', responseHandler);
-                    reject(error);
-                }
-            };
-            
-            window.addEventListener('message', responseHandler);
-            
-            safeSend('API_REQUEST', {
-                requestId,
-                endpoint,
-                options: {
-                    method: options.method || 'GET',
-                    headers: options.headers || {},
-                    body: options.body,
-                    credentials: 'include'
-                },
-                timestamp: Date.now(),
-                frameId: state.frameId
-            });
-            
-            const reqKey = `api_req_${endpoint}`;
-            if (!_loggedMessages.has(reqKey)) {
-                _loggedMessages.add(reqKey);
-                logStatus('SENDING', `API request: ${endpoint}`);
-            }
-            
-            const timeoutMs = IframeEnvironment.isVPNNetwork ? 60000 : 30000;
-            
-            const timer = setTimeout(() => {
-                window.removeEventListener('message', responseHandler);
-                reject(new Error('Request timeout'));
-            }, timeoutMs);
-            
-            state.timeouts.add(timer);
-            
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-// NOTE: Real handleApiResponse is defined earlier (line ~430) - this is a supplemental notifier
-function notifyApiResponse(responseData) {
-    document.dispatchEvent(new CustomEvent('apiResponse', {
-        detail: responseData
-    }));
-}
-
-function handleApiError(errorData) {
-    const errorKey = `api_error_${errorData.error || 'unknown'}`;
-    if (!_loggedMessages.has(errorKey)) {
-        _loggedMessages.add(errorKey);
-        logStatus('FAILED', `API Error: ${errorData.error || 'Unknown error'}`);
-    }
-}
-
-function handleAuthValidated(data) {
-    try {
-        if (data.success) {
-            if (typeof isTokenReady !== 'undefined') {
-                isTokenReady = true;
-                if (typeof triggerTokenReadyCallbacks !== 'undefined') {
-                    triggerTokenReadyCallbacks();
-                }
-            }
-            const authKey = 'auth_validated_handler';
-            if (!_loggedMessages.has(authKey)) {
-                _loggedMessages.add(authKey);
-                logStatus('SUCCESS', 'Auth validated');
-            }
-        }
-    } catch (error) {
-        const failKey = 'auth_validated_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `handleAuthValidated: ${error.message}`);
-        }
-    }
-}
-
-// =============================================
-// CENTRALIZED TOKEN ACCESS SYSTEM
-// =============================================
-let isTokenReady = false;
-let tokenReadyCallbacks = [];
-let pendingApiRequests = [];
-let apiCheckInterval = null;
-let apiReadyReceived = false;
-let authValidated = false;
-let authChecked = false;
-
-const UNIFIED_TOKEN_KEY = 'USER_TOKEN';
-
-function waitForTokenReady() {
-    return new Promise((resolve) => {
-        try {
-            // Check all possible token-ready signals immediately
-            if (isTokenReady || isSessionReady() || getSessionToken()) {
-                resolve(true);
-                return;
-            }
-            
-            if (state.sessionMirror.validated && state.sessionMirror.token && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
-                isTokenReady = true;
-                resolve(true);
-                triggerTokenReadyCallbacks();
-                return;
-            }
-            
-            if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData && __isValidSession(parentCoordinator.sessionData)) {
-                isTokenReady = true;
-                resolve(true);
-                triggerTokenReadyCallbacks();
-                return;
-            }
-            
-            let resolved = false;
-            // 30-second hard timeout — resolves true optimistically if any token source appears
-            const hardTimeout = setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    if (getSessionToken()) { resolve(true); } else { resolve(false); }
-                }
-            }, 30000);
-            
-            const checkToken = () => {
-                try {
-                    if (resolved) return;
-                    const tok = getSessionToken();
-                    const ready = (isTokenReady || isSessionReady() || tok) &&
-                                  (tok ? __isValidSession({ token: tok, userId: getSessionUserId() }) : isSessionReady());
-                    if (ready) {
-                        resolved = true;
-                        clearTimeout(hardTimeout);
-                        isTokenReady = true;
-                        resolve(true);
-                        triggerTokenReadyCallbacks();
-                        return;
-                    }
-                    setTimeout(checkToken, 100);
-                } catch (error) {
-                    if (!resolved) { resolved = true; clearTimeout(hardTimeout); resolve(false); }
-                }
-            };
-            
-            checkToken();
-        } catch (error) {
-            resolve(false);
-        }
-    });
-}
-
-// NOTE: duplicate waitForTokenReady removed — the version above is the canonical one
-
-function onTokenReady(callback) {
-    try {
-        if (isTokenReady || (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() }))) {
-            callback();
-        } else {
-            tokenReadyCallbacks.push(callback);
-        }
-    } catch (error) {
-        const readyKey = 'token_ready_callback_fail';
-        if (!_loggedMessages.has(readyKey)) {
-            _loggedMessages.add(readyKey);
-            logStatus('FAILED', `onTokenReady: ${error.message}`);
-        }
-    }
-}
-
-function triggerTokenReadyCallbacks() {
-    try {
-        while (tokenReadyCallbacks.length > 0) {
-            const callback = tokenReadyCallbacks.shift();
-            try {
-                callback();
-            } catch (error) {
-                const cbKey = 'token_callback_fail';
-                if (!_loggedMessages.has(cbKey)) {
-                    _loggedMessages.add(cbKey);
-                    logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
-                }
-            }
-        }
-    } catch (error) {
-        const triggerKey = 'token_trigger_fail';
-        if (!_loggedMessages.has(triggerKey)) {
-            _loggedMessages.add(triggerKey);
-            logStatus('FAILED', `triggerTokenReadyCallbacks: ${error.message}`);
-        }
-    }
-}
-
-function getUnifiedToken() {
-    return getSessionToken();
-}
-
-function migrateLegacyTokens() {
-    return null;
-}
-
-function isAuthenticated() {
-    try {
-        if (state.sessionMirror.validated && state.sessionMirror.token && state.sessionMirror.user) {
-            return __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id });
-        }
-        if (parentCoordinator.handshakeComplete && parentCoordinator.sessionData) {
-            return __isValidSession(parentCoordinator.sessionData);
-        }
-        if (state.sessionActive && !state.isGuestMode) {
-            return __isValidSession({ token: state.token, userId: state.user?.id });
-        }
-        return isSessionReady();
-    } catch (error) {
-        return false;
-    }
-}
-
-async function queueApiRequest(requestFunction) {
-    if (isTokenReady || (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() }))) return requestFunction();
-    
-    return new Promise((resolve, reject) => {
-        try {
-            pendingApiRequests.push({ requestFunction, resolve, reject });
-            if (!apiCheckInterval) startTokenReadinessCheck();
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-function processPendingApiRequests() {
-    try {
-        while (pendingApiRequests.length > 0) {
-            const { requestFunction, resolve, reject } = pendingApiRequests.shift();
-            try {
-                requestFunction().then(resolve).catch(reject);
-            } catch (error) {
-                reject(error);
-            }
-        }
-    } catch (error) {
-        const processKey = 'process_api_fail';
-        if (!_loggedMessages.has(processKey)) {
-            _loggedMessages.add(processKey);
-            logStatus('FAILED', `processPendingApiRequests: ${error.message}`);
-        }
-    }
-}
-
-function startTokenReadinessCheck() {
-    try {
-        if (apiCheckInterval) clearInterval(apiCheckInterval);
-        
-        let checkCount = 0;
-        const maxChecks = 30;
-        
-        apiCheckInterval = setInterval(() => {
-            try {
-                checkCount++;
-                
-                if (isTokenReady || (isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() })) || 
-                    parentCoordinator.handshakeComplete || 
-                    state.token || (state.sessionMirror.validated && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id }))) {
-                    clearInterval(apiCheckInterval);
-                    apiCheckInterval = null;
-                    isTokenReady = true;
-                    processPendingApiRequests();
-                    triggerTokenReadyCallbacks();
-                } else if (checkCount >= maxChecks) {
-                    clearInterval(apiCheckInterval);
-                    apiCheckInterval = null;
-                }
-            } catch (error) {}
-        }, 100);
-    } catch (error) {
-        const startKey = 'token_check_start_fail';
-        if (!_loggedMessages.has(startKey)) {
-            _loggedMessages.add(startKey);
-            logStatus('FAILED', `startTokenReadinessCheck: ${error.message}`);
-        }
-    }
-}
-
-// =============================================
-// SECURE API CALL WITH FALLBACK - Using parent proxy
-// REPLACE the entire secureApiCall function with this:
-
-// =============================================
-// REPLACE the entire secureApiCall function (around line 4240) with:
-// =============================================
-
-const secureApiCall = createErrorBoundary(async function(endpoint, options = {}) {
-    const method = options.method || 'GET';
-    const body   = options.body;
-    const params = options.params;
-
-    // ── Helper: direct fetch (no postMessage bridge needed) ──────────────────
-    const directFetch = async () => {
-        const token =
-            _sessionToken ||
-            (function() {
-                try { return localStorage.getItem('moodchat_token') || localStorage.getItem('authToken') ||
-                             localStorage.getItem('token') || localStorage.getItem('accessToken') || null; }
-                catch(_) { return null; }
-            })();
-
-        if (!token) throw new Error('No auth token for direct fetch');
-
-        let ep = endpoint;
-        if (ep.startsWith('/api/')) ep = ep.substring(4);
-        if (!ep.startsWith('/')) ep = '/' + ep;
-
-        const getBase = () => {
-            if (typeof window.__getApiBase === 'function') return window.__getApiBase().replace(/\/api\/?$/, '');
-            const h = window.location.hostname;
-            if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:3000';
-            return 'https://moodchat-fy56.onrender.com';
-        };
-
-        const url = getBase() + '/api' + ep + (params ? '?' + new URLSearchParams(params) : '');
-        const fetchOpts = {
-            method: method.toUpperCase(),
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            credentials: 'include',
-        };
-        if (body && method.toUpperCase() !== 'GET') fetchOpts.body = typeof body === 'string' ? body : JSON.stringify(body);
-
-        const res  = await fetch(url, fetchOpts);
-        const json = await res.json().catch(() => ({ success: false }));
-        if (!res.ok) {
-            const err = new Error(json.message || json.error || `HTTP ${res.status}`);
-            err.statusCode = res.status;
-            throw err;
-        }
-        // Unwrap standard { success, data } envelope
-        if (json && json.data !== undefined && json.success === true) return json.data;
-        return json;
-    };
-
-    // If module is not yet active, go straight to direct fetch
-    if (!ensureActive('secureApiCall')) {
-        logStatus('INFO', `secureApiCall (not ACTIVE): direct fetch for ${method} ${endpoint}`);
-        return directFetch();
-    }
-
-    if (!isSessionReady()) {
-        logStatus('INFO', `secureApiCall (no session): direct fetch for ${method} ${endpoint}`);
-        return directFetch();
-    }
-
-    // Try postMessage bridge first with a 7-second timeout; fall back to direct fetch
-    try {
-        const result = await Promise.race([
-            makeApiRequest(endpoint, method, body, params),
-            new Promise((_, rej) => setTimeout(() => rej(new Error(`API request timeout: ${endpoint}`)), 7000))
-        ]);
-        return result;
-    } catch (err) {
-        if (err.message && (err.message.includes('timeout') || err.message.includes('not active') || err.message.includes('not ready'))) {
-            logStatus('WARNING', `secureApiCall: bridge failed (${err.message}), switching to direct fetch for ${endpoint}`);
-            return directFetch();
-        }
-        throw err;
-    }
-}, 'secureApiCall', null);
-// GLOBAL STATE VARIABLES
-// =============================================
-let currentUser = null;
-let userData = null;
-
-let statuses = [];
-let myStatuses = [];
-let friendsStatuses = [];
-let closeFriendsStatuses = [];
-let pinnedStatuses = [];
-let mutedStatuses = [];
-let microCirclesStatuses = [];
-let highlights = [];
-let drafts = [];
-let scheduledStatuses = [];
-
-let viewedStatuses = new Set();
-let mutedUsers = new Set();
-let currentViewerStatus = null;
-let currentSlideIndex = 0;
-let autoAdvanceInterval = null;
-let isAutoAdvancePaused = false;
-let progressInterval = null;
-let currentCategoryFilter = 'all';
-let currentIntentFilter = null;
-let currentMoodFilter = null;
-let isMobile = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
-let isOfflineMode = false;
-let pendingReplies = [];
-let pendingReactions = [];
-let moodChartData = [];
-let streakCount = 0;
-let lastPostDate = null;
-let activeFilters = new Set();
-let selectedDraft = null;
-let isBackgroundInitialized = false;
-let statusAuthBlocked = false;
-
-// Reset auth block when a new valid session arrives so retries work after login
-function resetStatusAuthBlock() {
-    if (statusAuthBlocked) {
-        statusAuthBlocked = false;
-        logStatus('SUCCESS', 'Auth block cleared — new session available');
-    }
-}
-
-function isAuthorizationFailure(error) {
-    const message = String(error?.message || error || '');
-    // Also catch numeric status codes attached to error objects
-    const code = error?.statusCode || error?.status || 0;
-    return /401|unauthorized|forbidden/i.test(message) || code === 401 || code === 403;
-}
-
-const statusTypes = {
-    'text': { name: 'Text Status', icon: 'fas fa-font', color: 'var(--primary-color)' },
-    'media': { name: 'Media Status', icon: 'fas fa-image', color: 'var(--success-color)' },
-    'poll': { name: 'Poll Status', icon: 'fas fa-poll', color: 'var(--warning-color)' }
-};
-
-const statusIntents = {
-    'feedback': { name: 'Looking for feedback', icon: 'fas fa-comments', color: 'var(--intent-feedback)' },
-    'achievement': { name: 'Sharing achievement', icon: 'fas fa-trophy', color: 'var(--intent-achievement)' },
-    'advice': { name: 'Need advice', icon: 'fas fa-hands-helping', color: 'var(--intent-advice)' },
-    'chat': { name: 'Available to chat', icon: 'fas fa-comment-dots', color: 'var(--intent-chat)' },
-    'venting': { name: 'Just venting', icon: 'fas fa-wind', color: 'var(--intent-venting)' },
-    'reflection': { name: 'Personal reflection', icon: 'fas fa-brain', color: 'var(--intent-reflection)' },
-    'question': { name: 'Asking a question', icon: 'fas fa-question-circle', color: 'var(--intent-question)' },
-    'celebration': { name: 'Celebration', icon: 'fas fa-glass-cheers', color: 'var(--intent-celebration)' }
-};
-
-const statusMoods = {
-    'happy': { name: 'Happy', emoji: '😊', color: 'var(--mood-happy)' },
-    'stressed': { name: 'Stressed', emoji: '😫', color: 'var(--mood-stressed)' },
-    'motivated': { name: 'Motivated', emoji: '💪', color: 'var(--mood-motivated)' },
-    'lonely': { name: 'Lonely', emoji: '😔', color: 'var(--mood-lonely)' },
-    'excited': { name: 'Excited', emoji: '🤩', color: 'var(--mood-excited)' },
-    'calm': { name: 'Calm', emoji: '😌', color: 'var(--mood-calm)' },
-    'sad': { name: 'Sad', emoji: '😢', color: 'var(--mood-sad)' },
-    'angry': { name: 'Angry', emoji: '😠', color: 'var(--mood-angry)' }
-};
-
-const statusCategories = {
-    'life': { name: 'Life', icon: 'fas fa-heart', color: 'var(--category-life)' },
-    'business': { name: 'Business', icon: 'fas fa-briefcase', color: 'var(--category-business)' },
-    'study': { name: 'Study', icon: 'fas fa-graduation-cap', color: 'var(--category-study)' },
-    'motivation': { name: 'Motivation', icon: 'fas fa-fire', color: 'var(--category-motivation)' },
-    'event': { name: 'Event', icon: 'fas fa-calendar-alt', color: 'var(--category-event)' }
-};
-
-const actionButtons = {
-    'message': { name: 'Message me', icon: 'fas fa-comments', color: 'var(--primary-color)' },
-    'join': { name: 'Join discussion', icon: 'fas fa-users', color: 'var(--success-color)' },
-    'vote': { name: 'Vote now', icon: 'fas fa-vote-yea', color: 'var(--warning-color)' },
-    'book': { name: 'Book a call', icon: 'fas fa-phone', color: 'var(--info-color)' },
-    'learn': { name: 'Learn more', icon: 'fas fa-book', color: 'var(--primary-color)' },
-    'support': { name: 'Show support', icon: 'fas fa-hands-helping', color: 'var(--success-color)' },
-    'collaborate': { name: 'Collaborate', icon: 'fas fa-handshake', color: 'var(--warning-color)' },
-    'resource': { name: 'View resource', icon: 'fas fa-external-link-alt', color: 'var(--info-color)' }
-};
-
-const privacySettings = {
-    'everyone': { name: 'Everyone', description: 'Visible to all Knecta users', icon: 'fas fa-globe' },
-    'friends': { name: 'Friends Only', description: 'Visible to your friends only', icon: 'fas fa-user-friends' },
-    'close-friends': { name: 'Close Friends', description: 'Visible to close friends only', icon: 'fas fa-heart' },
-    'except': { name: 'All Except...', description: 'Hide from specific people', icon: 'fas fa-user-minus' },
-    'specific': { name: 'Specific People...', description: 'Share with select individuals', icon: 'fas fa-user-check' },
-    'micro-circle': { name: 'Micro Circle', description: 'Share with a specific group', icon: 'fas fa-users' }
-};
-
-const durationOptions = {
-    '3600': '1 hour',
-    '21600': '6 hours',
-    '43200': '12 hours',
-    '86400': '24 hours',
-    '0': 'Permanent'
-};
-
-const reportReasons = {
-    'spam': 'Spam',
-    'inappropriate': 'Inappropriate Content',
-    'harassment': 'Harassment',
-    'false-info': 'False Information',
-    'violence': 'Violence',
-    'hate-speech': 'Hate Speech',
-    'self-harm': 'Self-Harm',
-    'copyright': 'Copyright Violation'
-};
-
-const reactions = {
-    'like': '👍',
-    'love': '❤️',
-    'helpful': '💡',
-    'inspiring': '✨',
-    'funny': '😂',
-    'not-useful': '👎'
-};
-
-const emojis = ['😊', '😂', '🥰', '😍', '🤩', '😎', '🤔', '😴', '🥳', '😢', '😠', '😱', '👍', '👎', '❤️', '🔥', '💯', '✨', '🎉', '🙏', '🤝', '💪', '👏', '🙌', '🤗', '😇', '🥺', '🤯', '😳', '🤪', '😜', '🤓', '😎', '🥶', '😈', '👻', '💀', '👀', '🦄', '🐶', '🐱', '🦁', '🐯', '🦊', '🐻', '🐼', '🐨', '🐵', '🦉', '🐣', '🦋', '🐝', '🐙', '🦑', '🐋', '🦈', '🐊', '🦒', '🐘', '🦏', '🦘', '🐫', '🦙', '🦌', '🐎', '🐖', '🐑', '🐕', '🐈', '🐇', '🦔', '🐿️', '🐉', '🐲', '🌵', '🎄', '🌲', '🌳', '🌴', '🌱', '🌿', '☘️', '🍀', '🎍', '🎋', '🍃', '🍂', '🍁', '🍄', '🐚', '🌾', '💐', '🌷', '🌹', '🥀', '🌺', '🌸', '🌼', '🌻', '🌞', '🌝', '🌛', '🌜', '🌚', '🌕', '🌖', '🌗', '🌘', '🌑', '🌒', '🌓', '🌔', '🌙', '🌎', '🌍', '🌏', '🪐', '💫', '⭐', '🌟', '✨', '⚡', '☄️', '💥', '🔥', '🌈', '☀️', '🌤️', '⛅', '🌥️', '☁️', '🌦️', '🌧️', '⛈️', '🌩️', '🌨️', '❄️', '☃️', '⛄', '🌬️', '💨', '💧', '💦', '☔', '☂️', '🌊', '🌫️'];
-
-const backgroundOptions = [
-    { id: '1', type: 'solid', color: 'var(--status-bg-1)' },
-    { id: '2', type: 'solid', color: 'var(--status-bg-2)' },
-    { id: '3', type: 'solid', color: 'var(--status-bg-3)' },
-    { id: '4', type: 'solid', color: 'var(--status-bg-4)' },
-    { id: '5', type: 'solid', color: 'var(--status-bg-5)' },
-    { id: '6', type: 'solid', color: 'var(--status-bg-6)' },
-    { id: '7', type: 'solid', color: 'var(--status-bg-7)' },
-    { id: '8', type: 'solid', color: 'var(--status-bg-8)' },
-    { id: 'gradient-1', type: 'gradient', gradient: 'linear-gradient(45deg, #667eea, #764ba2)' },
-    { id: 'gradient-2', type: 'gradient', gradient: 'linear-gradient(45deg, #f6d365, #fda085)' },
-    { id: 'gradient-3', type: 'gradient', gradient: 'linear-gradient(45deg, #a8edea, #fed6e3)' },
-    { id: 'gradient-4', type: 'gradient', gradient: 'linear-gradient(45deg, #ff6b6b, #ffa726)' }
-];
-
-const statusTemplates = {
-    'motivation': {
-        name: 'Motivation',
-        text: 'Today is a new opportunity to be better than yesterday. Keep pushing forward! 💪',
-        background: 'gradient-2',
-        mood: 'motivated',
-        intent: 'reflection'
-    },
-    'question': {
-        name: 'Question',
-        text: 'What\'s the best piece of advice you\'ve ever received? 🤔',
-        background: '3',
-        mood: 'curious',
-        intent: 'question'
-    },
-    'achievement': {
-        name: 'Achievement',
-        text: 'Just reached a personal milestone! Celebrating small wins along the way. 🎉',
-        background: 'gradient-1',
-        mood: 'happy',
-        intent: 'achievement'
-    },
-    'reflection': {
-        name: 'Reflection',
-        text: 'Taking a moment to reflect on what truly matters in life. Peace comes from within. ✨',
-        background: '6',
-        mood: 'calm',
-        intent: 'reflection'
-    }
-};
-
-const LOCAL_STORAGE_KEYS = {
-    USER: 'knecta_current_user',
-    USER_TOKEN: 'knecta_user_token',
-    STATUSES: 'knecta_statuses_cache',
-    MY_STATUSES: 'knecta_my_statuses_cache',
-    VIEWED_STATUSES: 'knecta_viewed_statuses',
-    MUTED_USERS: 'knecta_muted_users',
-    HIGHLIGHTS: 'knecta_status_highlights',
-    DRAFTS: 'knecta_status_drafts',
-    SCHEDULED: 'knecta_scheduled_statuses',
-    PENDING_REPLIES: 'knecta_pending_replies',
-    PENDING_REACTIONS: 'knecta_pending_reactions',
-    MOOD_DATA: 'knecta_mood_data',
-    STREAK: 'knecta_posting_streak',
-    LAST_POST_DATE: 'knecta_last_post_date',
-    OFFLINE_QUEUE: 'knecta_offline_status_queue',
-    LAST_SYNC: 'knecta_status_last_sync'
-};
-
-// =============================================
-// INDEXED-DB STATUS CACHE  (cache-first, offline-capable)
-// Store: "status"  — key = status id
-// =============================================
-const StatusDB = (() => {
-    const DB_NAME = 'knecta_status_db';
-    const DB_VERSION = 2;
-    const STORE = 'status';
-    let _db = null;
-
-    function open() {
-        if (_db) return Promise.resolve(_db);
-        return new Promise((resolve, reject) => {
-            if (!window.indexedDB) { reject(new Error('IndexedDB not supported')); return; }
-            const req = window.indexedDB.open(DB_NAME, DB_VERSION);
-            req.onupgradeneeded = (e) => {
-                const db = e.target.result;
-                if (!db.objectStoreNames.contains(STORE)) {
-                    const store = db.createObjectStore(STORE, { keyPath: 'id' });
-                    store.createIndex('userId', 'userId', { unique: false });
-                    store.createIndex('expiresAt', 'expiresAt', { unique: false });
-                    store.createIndex('createdAt', 'createdAt', { unique: false });
-                }
-            };
-            req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
-            req.onerror = (e) => reject(e.target.error);
-        });
-    }
-
-    function tx(mode) {
-        return open().then(db => db.transaction(STORE, mode).objectStore(STORE));
-    }
-
-    function promReq(req) {
-        return new Promise((res, rej) => {
-            req.onsuccess = () => res(req.result);
-            req.onerror  = () => rej(req.error);
-        });
-    }
-
-    async function putMany(items) {
-        if (!Array.isArray(items) || !items.length) return;
-        const store = await tx('readwrite');
-        for (const item of items) {
-            if (item && item.id) {
-                // Ensure expiresAt is set (24 h default)
-                if (!item.expiresAt) item.expiresAt = new Date(Date.now() + 86400000).toISOString();
-                store.put(item);
-            }
-        }
-    }
-
-    async function getAll() {
-        const store = await tx('readonly');
-        const all = await promReq(store.getAll());
-        // Filter out expired on read
-        const now = Date.now();
-        return (all || []).filter(s => !s.expiresAt || new Date(s.expiresAt).getTime() > now);
-    }
-
-    async function getAllMine(userId) {
-        if (!userId) return [];
-        const all = await getAll();
-        return all.filter(s => String(s.userId) === String(userId));
-    }
-
-    async function remove(id) {
-        const store = await tx('readwrite');
-        store.delete(id);
-    }
-
-    async function purgeExpired() {
-        const store = await tx('readwrite');
-        const all = await promReq(store.getAll());
-        const now = Date.now();
-        (all || []).forEach(s => {
-            if (s.expiresAt && new Date(s.expiresAt).getTime() <= now) store.delete(s.id);
-        });
-    }
-
-    async function put(item) {
-        if (!item || !item.id) return;
-        if (!item.expiresAt) item.expiresAt = new Date(Date.now() + 86400000).toISOString();
-        const store = await tx('readwrite');
-        store.put(item);
-    }
-
-    return { open, putMany, getAll, getAllMine, remove, put, purgeExpired };
-})();
-
-// Initialise DB early and purge stale entries
-StatusDB.open().then(() => StatusDB.purgeExpired()).catch(() => {});
-
-// Periodic expiry cleanup (every 5 min)
-setInterval(() => StatusDB.purgeExpired().catch(() => {}), 5 * 60 * 1000);
-
-// =============================================
-// INSTANT UI RENDERING WITH CACHED DATA (CACHE ONLY, NOT PRIMARY)
-// =============================================
-function initializeUIWithCachedData() {
-    try {
-        loadCachedDataInstantly();
-        
-        if (typeof window.initializeStatusUI === 'function') {
-            window.initializeStatusUI();
-        }
-        
-        if (parentReady) {
-            startBackgroundInitializationWithSession();
-        }
-        
-        const uiKey = 'ui_cached_init';
-        if (!_loggedMessages.has(uiKey)) {
-            _loggedMessages.add(uiKey);
-            logStatus('INFO', 'UI initialized with cached data');
-        }
-        
-    } catch (error) {
-        const failKey = 'ui_cached_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `initializeUIWithCachedData: ${error.message}`);
-        }
-    }
-}
-
-function loadUserFromCache() {
-    try {
-        // Try memoryStore first (synchronous, always available)
-        const raw = SafeStorage.memoryStore.get(LOCAL_STORAGE_KEYS.USER);
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed && parsed.id) return parsed;
-        }
-    } catch(e) {}
-    return null;
-}
-
-async function loadCachedDataInstantly() {
-    try {
-        // ── CACHE-FIRST: load from IndexedDB (persistent, offline-capable) ──
-        try {
-            const idbAll = await StatusDB.getAll();
-            if (idbAll && idbAll.length > 0) {
-                statuses = idbAll.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                const uid = getSessionUserId();
-                if (uid) myStatuses = idbAll.filter(s => String(s.userId) === String(uid));
-                logStatus('SUCCESS', `IndexedDB cache: ${statuses.length} statuses loaded instantly`);
-                // Notify UI immediately so the list renders before any API call
-                if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-            }
-        } catch (_idbErr) {
-            // IndexedDB unavailable — fall through to SafeStorage below
-        }
-
-        // ── FALLBACK: SafeStorage (memory / localStorage) ──
-        const statusesData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.STATUSES);
-        if (statusesData && (!statuses || statuses.length === 0)) {
-            try { statuses = statusesData || []; } catch { statuses = []; }
-            
-            const statusKey = 'statuses_cached';
-            if (!_loggedMessages.has(statusKey)) {
-                _loggedMessages.add(statusKey);
-                logStatus('INFO', `Loaded ${statuses.length} statuses from SafeStorage cache`);
-            }
-        }
-        
-        const myStatusesData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
-        if (myStatusesData && (!myStatuses || myStatuses.length === 0)) {
-            try { myStatuses = myStatusesData || []; } catch { myStatuses = []; }
-        }
-        
-        const viewedStatusesData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES);
-        if (viewedStatusesData) {
-            try { viewedStatuses = new Set(viewedStatusesData || []); } catch { viewedStatuses = new Set(); }
-        }
-        
-        const mutedUsersData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MUTED_USERS);
-        if (mutedUsersData) {
-            try { mutedUsers = new Set(mutedUsersData || []); } catch { mutedUsers = new Set(); }
-        }
-        
-        const highlightsData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
-        if (highlightsData) {
-            try { highlights = highlightsData || []; } catch { highlights = []; }
-        }
-        
-        const draftsData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.DRAFTS);
-        if (draftsData) {
-            try { drafts = draftsData || []; } catch { drafts = []; }
-        }
-        
-        const scheduledData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.SCHEDULED);
-        if (scheduledData) {
-            try { scheduledStatuses = scheduledData || []; } catch { scheduledStatuses = []; }
-        }
-        
-        const pendingRepliesData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REPLIES);
-        if (pendingRepliesData) {
-            try { pendingReplies = pendingRepliesData || []; } catch { pendingReplies = []; }
-        }
-        
-        const pendingReactionsData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS);
-        if (pendingReactionsData) {
-            try { pendingReactions = pendingReactionsData || []; } catch { pendingReactions = []; }
-        }
-        
-        const moodData = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MOOD_DATA);
-        if (moodData) {
-            try { moodChartData = moodData || []; } catch { moodChartData = []; }
-        }
-        
-        const streakData = await SafeStorage.get(LOCAL_STORAGE_KEYS.STREAK);
-        if (streakData) {
-            try { streakCount = parseInt(streakData) || 0; } catch { streakCount = 0; }
-        }
-        
-        const lastPostDateData = await SafeStorage.get(LOCAL_STORAGE_KEYS.LAST_POST_DATE);
-        if (lastPostDateData) {
-            try { lastPostDate = new Date(lastPostDateData); } catch { lastPostDate = null; }
-        }
-
-        // Restore LAST_SYNC into memoryStore so TTL guard works correctly on first load
-        const lastSyncData = await SafeStorage.get(LOCAL_STORAGE_KEYS.LAST_SYNC);
-        if (lastSyncData) {
-            SafeStorage.memoryStore.set(LOCAL_STORAGE_KEYS.LAST_SYNC, lastSyncData);
-        }
-        
-    } catch (error) {}
-}
-
-// =============================================
-// BACKGROUND INITIALIZATION
-// =============================================
-async function startBackgroundInitialization() {
-    if (isBackgroundInitialized) return;
-    if (_backgroundInitStarted) return; // ← ADD THIS LINE
-    _backgroundInitStarted = true; // ← ADD THIS LINE
-    
-    try {
-        onTokenReady(async () => {
-            try {
-                await loadFreshDataInBackground();
-                isBackgroundInitialized = true;
-                
-                if (parentCoordinator.handshakeComplete && parentReady) {
-                    safeSendAction('UI_READY', {
-                        module: MODULE_NAME
-                    });
-                }
-                
-                const bgKey = 'background_init_complete';
-                if (!_loggedMessages.has(bgKey)) {
-                    _loggedMessages.add(bgKey);
-                    logStatus('SUCCESS', 'Background initialization complete');
-                }
-            } catch (error) {}
-        });
-        
-        if ((isSessionReady() && __isValidSession({ token: getSessionToken(), userId: getSessionUserId() })) || parentCoordinator.handshakeComplete || state.token || (state.sessionMirror.validated && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id }))) {
-            try {
-                await loadFreshDataInBackground();
-                isBackgroundInitialized = true;
-                
-                if (parentCoordinator.handshakeComplete && parentReady) {
-                    safeSendAction('UI_READY', {
-                        module: MODULE_NAME
-                    });
-                }
-                
-                const bgKey = 'background_init_complete';
-                if (!_loggedMessages.has(bgKey)) {
-                    _loggedMessages.add(bgKey);
-                    logStatus('SUCCESS', 'Background initialization complete');
-                }
-            } catch (error) {}
-        }
-        
-    } catch (error) {}
-}
-
-async function loadFreshDataInBackground() {
-    try {
-        // --- TTL guard: skip full refresh if data was synced recently (< 60 s) ---
-        const SYNC_TTL_MS = 60_000;
-        const lastSyncRaw = SafeStorage.memoryStore.get(LOCAL_STORAGE_KEYS.LAST_SYNC);
-        if (lastSyncRaw) {
-            const age = Date.now() - parseInt(lastSyncRaw, 10);
-            if (age < SYNC_TTL_MS) {
-                logStatus('INFO', `Skipping background refresh — data is ${Math.round(age/1000)}s old (TTL ${SYNC_TTL_MS/1000}s)`);
-                return;
-            }
-        }
-
-        const loadPromises = [];
-        if (typeof loadStatusesInBackground        !== 'undefined') loadPromises.push(safeApiOperation(() => loadStatusesInBackground()));
-        if (typeof loadMyStatusesInBackground      !== 'undefined') loadPromises.push(safeApiOperation(() => loadMyStatusesInBackground()));
-        if (typeof loadFriendsStatusesInBackground !== 'undefined') loadPromises.push(safeApiOperation(() => loadFriendsStatusesInBackground()));
-        if (typeof loadHighlightsInBackground      !== 'undefined') loadPromises.push(safeApiOperation(() => loadHighlightsInBackground()));
-        if (typeof loadUserDataInBackground        !== 'undefined') loadPromises.push(safeApiOperation(() => loadUserDataInBackground()));
-        await Promise.allSettled(loadPromises);
-
-        // Final dedup-merge: combine all three silos into one unified sorted list
-        // so every tab (All / Friends / Close Friends) has complete data to render.
-        const allIds = new Set();
-        const merged = [...(myStatuses || []), ...(friendsStatuses || []), ...(statuses || [])]
-            .filter(s => {
-                if (!s || !s.id) return false;
-                const key = String(s.id);
-                if (allIds.has(key)) return false;
-                allIds.add(key);
-                return true;
-            })
-            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-        if (merged.length > 0) {
-            statuses             = merged;
-            statusState.statuses = merged;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, merged);
-        }
-
-        if (typeof scheduleAllPrecisionExpiries === 'function') scheduleAllPrecisionExpiries(merged);
-        notifyStatusObservers();
-
-        // Stamp the sync time
-        SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_SYNC, String(Date.now()));
-    } catch (error) {}
-}
-
-async function safeApiOperation(operation, retries = 2) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            if (!isAuthenticated()) throw new Error('Not authenticated');
-            return await operation();
-        } catch (error) {
-            const isTimeout = error.message && error.message.includes('timeout');
-            if (isTimeout && attempt < retries) {
-                // Brief pause before retry on timeout
-                await new Promise(r => setTimeout(r, 1500 * attempt));
-                logStatus('WARNING', `Retry ${attempt}/${retries - 1} after timeout`);
-                continue;
-            }
-            return null;
-        }
-    }
-    return null;
-}
-
-
-async function loadStatusesInBackground() {
-    if (statusAuthBlocked) {
-        logStatus('WARNING', 'Status API auth blocked - serving cache only');
-        return;
-    }
-
-    // Wait for token before attempting API call
-    try {
-        await waitForTokenReady();
-    } catch (err) {
-        logStatus('WARNING', 'Token wait timeout for /status - skipping');
-        return;
-    }
-    
-    if (!isSessionReady() && !getSessionToken()) {
-        logStatus('WARNING', 'No token available for /status - skipping');
-        return;
-    }
-    
-    try {
-        // ── FIX: was /api/status (public, unauthenticated route — only returns
-        //         isPublic:true records and ignores the current user entirely).
-        //         Must use /api/status/friends which is authenticated and returns
-        //         only accepted-friend statuses for the logged-in user.
-        const response = await secureApiCall('/api/status/friends');
-        const list = response?.statuses || response?.data?.statuses || [];
-        if (list && list.length >= 0) {
-            statuses = list;
-            if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
-            statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-            // Persist to IndexedDB for offline-first on next load
-            StatusDB.putMany(statuses).catch(() => {});
-            logStatus('SUCCESS', `Loaded ${statuses.length} statuses`);
-        }
-    } catch (error) {
-        if (isAuthorizationFailure(error)) {
-            statusAuthBlocked = true;
-            logStatus('WARNING', 'Status API unauthorized - staying on cached statuses');
-            return;
-        }
-        logStatus('FAILED', `loadStatusesInBackground: ${error.message}`);
-        throw error;
-    }
-}
-
-// Helper function to wait for token with timeout
-async function waitForToken(timeout = 5000) {
-    const startTime = Date.now();
-    
-    while (Date.now() - startTime < timeout) {
-        if (isSessionReady() && getSessionToken()) {
-            return getSessionToken();
-        }
-        if (isTokenReady && getSessionToken()) {
-            return getSessionToken();
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    return null;
-}
-
-async function loadMyStatusesInBackground() {
-    if (statusAuthBlocked) {
-        logStatus('WARNING', 'My-status API auth blocked - serving cache only');
-        return;
-    }
-
-    // Wait for token to be available using the existing token readiness system
-    try {
-        await waitForTokenReady();
-    } catch (err) {
-        logStatus('WARNING', 'Token wait timeout for /status/my - skipping');
-        return;
-    }
-    
-    // Double-check token is actually ready
-    if (!isSessionReady() && !getSessionToken()) {
-        logStatus('WARNING', 'No token available for /status/my - skipping');
-        return;
-    }
-    
-    try {
-        // secureApiCall has a bridge→direct-fetch fallback so it doesn't time out
-        // like makeApiRequest (bridge-only) did — fixing "status gone after refresh"
-        const response = await secureApiCall('/api/status/my');
-        const list = response?.statuses || response?.data?.statuses || [];
-        if (Array.isArray(list)) {
-            myStatuses = list;
-            statusState.myStatuses = myStatuses;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-            StatusDB.putMany(myStatuses).catch(() => {});
-            // Merge into unified statuses list so the All tab shows own statuses
-            const existingIds = new Set((statusState.statuses || []).map(s => String(s.id)));
-            const myNew = myStatuses.filter(s => s && s.id && !existingIds.has(String(s.id)));
-            if (myNew.length > 0) {
-                statusState.statuses = [...(statusState.statuses || []), ...myNew]
-                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                statuses = statusState.statuses;
-            }
-            if (typeof scheduleAllPrecisionExpiries === 'function') scheduleAllPrecisionExpiries(myStatuses);
-            logStatus('SUCCESS', `Loaded ${myStatuses.length} my statuses`);
-        }
-    } catch (error) {
-        if (isAuthorizationFailure(error)) {
-            statusAuthBlocked = true;
-            logStatus('WARNING', 'My-status API unauthorized - using cached data');
-            return;
-        }
-        logStatus('FAILED', `loadMyStatusesInBackground: ${error.message}`);
-        // Serve IndexedDB cache first, fall back to SafeStorage
-        try {
-            const uid = getSessionUserId();
-            const idbMine = uid ? await StatusDB.getAllMine(uid) : [];
-            if (idbMine.length > 0) {
-                myStatuses = idbMine;
-                logStatus('INFO', `Serving ${idbMine.length} IndexedDB my-statuses after fetch failure`);
-            } else {
-                const cached = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.MY_STATUSES);
-                if (cached && Array.isArray(cached) && cached.length > 0) {
-                    myStatuses = cached;
-                    logStatus('INFO', `Serving ${cached.length} cached my-statuses after fetch failure`);
-                }
-            }
-        } catch (_) {}
-        throw error;
-    }
-}
-async function loadFriendsStatusesInBackground() {
-    try {
-        const response = await secureApiCall('/api/status/friends');
-        const list = response?.statuses || response?.data?.statuses || [];
-        if (Array.isArray(list) && list.length > 0) {
-            friendsStatuses = list;
-            // Merge into unified statuses list
-            const existingIds = new Set((statusState.statuses || []).map(s => String(s.id)));
-            const newOnes = friendsStatuses.filter(s => s && s.id && !existingIds.has(String(s.id)));
-            if (newOnes.length > 0) {
-                statusState.statuses = [...(statusState.statuses || []), ...newOnes]
-                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                statuses = statusState.statuses;
-                StatusDB.putMany(newOnes).catch(() => {});
-            }
-            if (typeof scheduleAllPrecisionExpiries === 'function') scheduleAllPrecisionExpiries(list);
-            logStatus('SUCCESS', `Loaded ${friendsStatuses.length} friends statuses`);
-            notifyStatusObservers();
-        }
-    } catch (error) {
-        logStatus('WARNING', `loadFriendsStatusesInBackground: ${error.message}`);
-    }
-}
-
-async function loadHighlightsInBackground() {
-    if (statusAuthBlocked) {
-        logStatus('WARNING', 'Highlights API auth blocked - serving cache only');
-        return;
-    }
-
-    // Wait for token before attempting API call
-    try {
-        await waitForTokenReady();
-    } catch (err) {
-        logStatus('WARNING', 'Token wait timeout for /highlights - skipping');
-        return;
-    }
-    
-    if (!isSessionReady() && !getSessionToken()) {
-        logStatus('WARNING', 'No token available for /highlights - skipping');
-        return;
-    }
-    
-    try {
-        // Use makeApiRequest directly (same as messages module)
-        const response = await makeApiRequest('/api/status/highlights', 'GET');
-        const list = response?.statuses || response?.data?.statuses || [];
-        if (Array.isArray(list)) {
-            // highlights endpoint returns top-liked/viewed statuses — keep all of them
-            highlights = list;
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
-            logStatus('SUCCESS', `Loaded ${highlights.length} highlights`);
-        }
-    } catch (error) {
-        if (isAuthorizationFailure(error)) {
-            statusAuthBlocked = true;
-            logStatus('WARNING', 'Highlights API unauthorized - using cached data');
-            return;
-        }
-        logStatus('FAILED', `loadHighlightsInBackground: ${error.message}`);
-        // Serve cache on failure
-        try {
-            const cached = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS);
-            if (cached && Array.isArray(cached) && cached.length > 0) {
-                highlights = cached;
-                logStatus('INFO', `Serving ${cached.length} cached highlights after fetch failure`);
-            }
-        } catch (_) {}
-        throw error;
-    }
-}
-
-async function loadUserDataInBackground() {
-    if (statusAuthBlocked) {
-        logStatus('WARNING', 'User profile API auth blocked - serving cache only');
-        return;
-    }
-
-    // Wait for token before attempting API call
-    try {
-        await waitForTokenReady();
-    } catch (err) {
-        logStatus('WARNING', 'Token wait timeout for /auth/me - skipping');
-        return;
-    }
-    
-    if (!isSessionReady() && !getSessionToken()) {
-        logStatus('WARNING', 'No token available for /auth/me - skipping');
-        return;
-    }
-    
-    try {
-        const response = await secureApiCall('/api/auth/me');
-        // makeApiRequest unwraps { success, data:{user} } → response = { user:{...} }
-        const user = response?.user || response?.data?.user || response;
-        if (user && (user.id || user.userId)) {
-            currentUser = user;
-            userData = user;
-            // Persist to SafeStorage so loadUserFromCache() can serve it on next load
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.USER, user);
-            logStatus('SUCCESS', 'User data loaded');
-        }
-    } catch (error) {
-        if (isAuthorizationFailure(error)) {
-            statusAuthBlocked = true;
-            logStatus('WARNING', 'User profile API unauthorized - using cached user');
-        }
-        logStatus('WARNING', `loadUserDataInBackground: ${error.message}`);
-        // Serve cached user on failure
-        const cached = loadUserFromCache();
-        if (cached && !currentUser) {
-            currentUser = cached;
-            userData = cached;
-            logStatus('INFO', 'Serving cached user data after fetch failure');
-        }
-    }
-}
-
-// =============================================
-// BOOTSTRAP APPLICATION
-// =============================================
-async function bootstrapApp() {
-    try {
-        initializeParentCoordination();
-        initializeUIWithCachedData();
-        startTokenReadinessCheck();
-        
-        setTimeout(() => {
-            safeSendAction('CHILD_LOADED', {
-                module: MODULE_NAME
-            });
-        }, 500);
-        
-        const bootKey = 'app_bootstrapped';
-        if (!_loggedMessages.has(bootKey)) {
-            _loggedMessages.add(bootKey);
-            logStatus('SUCCESS', 'App bootstrapped');
-        }
-        
-        return true;
-    } catch (error) {
-        const failKey = 'bootstrap_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `bootstrapApp: ${error.message}`);
-        }
-        return false;
-    }
-}
-
-const bootstrapApplication = bootstrapApp;
-
-// =============================================
-// AUTHENTICATION ERROR HANDLING
-// =============================================
-function handleAuthError(message) {
-    try {
-        if (parentCoordinator.handshakeComplete && parentReady) {
-            safeSendAction('NEEDS_AUTH', {
-                module: MODULE_NAME,
-                error: message
-            });
-        }
-        
-        if (statuses.length === 0 && myStatuses.length === 0) {
-            // No action needed
-        } else {
-            state.offlineModeEnabled = true;
-            isOfflineMode = true;
-            
-            logStatus('WAITING', 'Auth error - waiting for parent');
-        }
-        
-        const authKey = 'auth_error';
-        if (!_loggedMessages.has(authKey)) {
-            _loggedMessages.add(authKey);
-            logStatus('WARNING', message);
-        }
-    } catch (error) {}
-}
-
-async function initializeStatusSystem() {
-    try {
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout loading data')), 10000)
-        );
-        
-        await Promise.race([loadInitialData(), timeoutPromise]);
-        
-    } catch (error) {
-        loadCachedDataInstantly();
-        if (!state.offlineModeEnabled) state.offlineModeEnabled = true;
-        if (!isOfflineMode) isOfflineMode = true;
-        
-        logStatus('WAITING', 'Data load timeout - using cached data');
-        
-        const timeoutKey = 'data_load_timeout';
-        if (!_loggedMessages.has(timeoutKey)) {
-            _loggedMessages.add(timeoutKey);
-            logStatus('WARNING', 'Data load timeout, using cached data');
-        }
-    }
-}
-
-// ADD THESE VARIABLES RIGHT BEFORE THE FUNCTION
-let _initialDataLoading = false;
-let _initialDataPromise = null;
-
-async function loadInitialData() {
-    if (_initialDataLoading) {
-        return _initialDataPromise;
-    }
-    
-    _initialDataLoading = true;
-    _initialDataPromise = (async () => {
-        try {
-            // Use makeApiRequest for all calls
-            const statusesResponse = await makeApiRequest('/api/status', 'GET');
-            const list = statusesResponse?.statuses || statusesResponse?.data?.statuses || [];
-            if (list) {
-                statuses = list;
-                if (typeof filterStatusesByPrivacy !== 'undefined') statuses = filterStatusesByPrivacy(statuses);
-                statuses.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-            }
-            
-            const myStatusesResponse = await makeApiRequest('/api/status/my', 'GET');
-            const myList = myStatusesResponse?.statuses || myStatusesResponse?.data?.statuses || [];
-            if (myList) {
-                myStatuses = myList;
-                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-            }
-            
-            const friendsResponse = await makeApiRequest('/api/status/friends', 'GET');
-            const friendsList = friendsResponse?.statuses || friendsResponse?.data?.statuses || [];
-            if (friendsList) {
-                friendsStatuses = friendsList;
-            }
-            
-            const userResponse = await makeApiRequest('/api/auth/me', 'GET');
-            if (userResponse && (userResponse.data?.user || userResponse.user)) {
-                currentUser = userResponse.data?.user || userResponse.user;
-                userData = currentUser;
-            }
-            
-            logStatus('SUCCESS', 'Initial data loaded');
-        } catch (error) {
-            logStatus('FAILED', `loadInitialData: ${error.message}`);
-            throw error;
-        } finally {
-            _initialDataLoading = false;
-        }
-    })();
-    
-    return _initialDataPromise;
-}
-
-// =============================================
-// CORE STATUS FUNCTIONS
-// =============================================
-function filterStatusesByPrivacy(statuses) {
-    try {
-        if (!Array.isArray(statuses)) return [];
-        
-        return statuses.filter(status => {
-            if (!status || !status.userId) return false;
-            if (mutedUsers.has(status.userId)) return false;
-            
-            const privacy = status.privacy || 'friends';
-            
-            switch(privacy) {
-                case 'everyone': return true;
-                case 'friends': return true;
-                case 'close-friends': return false;
-                case 'except': return true;
-                case 'specific': return false;
-                case 'micro-circle': return false;
-                default: return true;
-            }
-        });
-    } catch (error) {
-        return [];
-    }
-}
-
-function getStatusPreviewText(status) {
-    try {
-        if (!status) return 'Status';
-        
-        if (status.type === 'text') {
-            return status.text && status.text.length > 30 ? status.text.substring(0, 30) + '...' : status.text || 'Text status';
-        } else if (status.type === 'media') {
-            return status.caption ? status.caption.substring(0, 30) + '...' : 'Media status';
-        } else if (status.type === 'poll') {
-            return status.question ? status.question.substring(0, 30) + '...' : 'Poll status';
-        }
-        return 'Status';
-    } catch (error) {
-        return 'Status';
-    }
-}
-
-function filterStatusesByType(type) {
-    try {
-        if (!Array.isArray(statuses)) return [];
-        
-        switch(type) {
-            case 'friends':
-                return statuses.filter(status => status && (status.privacy === 'friends' || status.privacy === 'everyone'));
-            case 'close-friends':
-                return statuses.filter(status => status && status.privacy === 'close-friends');
-            case 'pinned':
-                return statuses.filter(status => status && status.isPinned);
-            case 'muted':
-                return statuses.filter(status => status && mutedUsers.has(status.userId));
-            case 'micro-circle':
-                return statuses.filter(status => status && status.privacy === 'micro-circle');
-            default:
-                return statuses;
-        }
-    } catch (error) {
-        return [];
-    }
-}
-
-function getEmptyStateMessage() {
-    try {
-        if (activeFilters.size > 0) {
-            return `No statuses match your filters`;
-        }
-        if (currentIntentFilter) {
-            return `No statuses with "${statusIntents[currentIntentFilter]?.name || currentIntentFilter}" intent`;
-        }
-        if (currentMoodFilter) {
-            return `No statuses with "${statusMoods[currentMoodFilter]?.name || currentMoodFilter}" mood`;
-        }
-        return 'Be the first to post a status!';
-    } catch (error) {
-        return 'No statuses available';
-    }
-}
-
-// =============================================
-// STATUS ACTIONS - WITH PARENT ROUTING
-// =============================================
-const addReactionToStatus = createErrorBoundary(async function(statusId, reaction) {
-    if (!statusId || !reaction) throw new Error('Missing required parameters');
-    
-    const reactKey = `reaction_add_${statusId}_${reaction}`;
-    if (!_loggedMessages.has(reactKey)) {
-        _loggedMessages.add(reactKey);
-        logStatus('REACTION', `Adding ${reaction} to ${statusId}`);
-    }
-    
-    if (state.offlineModeEnabled) {
-        pendingReactions.push({ statusId, reaction, timestamp: new Date().toISOString() });
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-        return { success: true, offline: true };
-    }
-    
-    // Always call StatusAPI directly — never route through postMessage bridge
-    // which requires the parent to be ACTIVE and timesout frequently.
-    const api = window.StatusAPI;
-    if (api && api.addReaction) {
-        return api.addReaction(statusId, reaction);
-    }
-    // Fallback to postMessage only if StatusAPI is completely unavailable
-    return safeSendAction('ADD_REACTION', { statusId, reaction });
-}, 'addReactionToStatus', { success: false });
-
-const removeReactionFromStatus = createErrorBoundary(async function(statusId, reaction) {
-    if (!statusId || !reaction) throw new Error('Missing required parameters');
-    
-    const removeKey = `reaction_remove_${statusId}_${reaction}`;
-    if (!_loggedMessages.has(removeKey)) {
-        _loggedMessages.add(removeKey);
-        logStatus('REACTION', `Removing ${reaction} from ${statusId}`);
-    }
-    
-    if (state.offlineModeEnabled) {
-        pendingReactions = pendingReactions.filter(r => !(r.statusId === statusId && r.reaction === reaction));
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-        return { success: true, offline: true };
-    }
-    
-    // Use StatusAPI directly
-    const api = window.StatusAPI;
-    if (api && api.removeReaction) {
-        return api.removeReaction(statusId);
-    }
-    return safeSendAction('REMOVE_REACTION', { statusId, reaction });
-}, 'removeReactionFromStatus', { success: false });
-
-const changeReaction = createErrorBoundary(async function(statusId, oldEmoji, newEmoji) {
-    if (!statusId || !oldEmoji || !newEmoji) throw new Error('Missing required parameters');
-    
-    const changeKey = `reaction_change_${statusId}_${oldEmoji}_to_${newEmoji}`;
-    if (!_loggedMessages.has(changeKey)) {
-        _loggedMessages.add(changeKey);
-        logStatus('REACTION', `Changing from ${oldEmoji} to ${newEmoji} on ${statusId}`);
-    }
-    
-    if (state.offlineModeEnabled) {
-        pendingReactions = pendingReactions.filter(r => !(r.statusId === statusId && r.reaction === oldEmoji));
-        pendingReactions.push({ statusId, reaction: newEmoji, timestamp: new Date().toISOString() });
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-        const offlineKey = `reaction_change_offline_${statusId}`;
-        if (!_loggedMessages.has(offlineKey)) {
-            _loggedMessages.add(offlineKey);
-            logStatus('SUCCESS', `Reaction change queued offline`);
-        }
-        return { success: true, offline: true };
-    }
-    
-    return safeSendAction('CHANGE_REACTION', { statusId, oldEmoji, newEmoji });
-}, 'changeReaction', { success: false });
-
-const trackStatusView = createErrorBoundary(async function(statusId) {
-    if (!statusId) throw new Error('Missing status ID');
-    
-    if (viewedStatuses.has(statusId)) {
-        const viewedKey = `status_already_viewed_${statusId}`;
-        if (!_loggedMessages.has(viewedKey)) {
-            _loggedMessages.add(viewedKey);
-            logStatus('VIEW', `Status ${statusId} already viewed`);
-        }
-        return { success: true, alreadyViewed: true };
-    }
-    
-    const trackKey = `track_view_${statusId}`;
-    if (!_loggedMessages.has(trackKey)) {
-        _loggedMessages.add(trackKey);
-        logStatus('VIEW', `Tracking view for ${statusId}`);
-    }
-    
-    if (state.offlineModeEnabled) {
-        viewedStatuses.add(statusId);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatuses));
-        const offlineKey = `view_offline_${statusId}`;
-        if (!_loggedMessages.has(offlineKey)) {
-            _loggedMessages.add(offlineKey);
-            logStatus('VIEW', `View tracked offline for ${statusId}`);
-        }
-        return { success: true, offline: true };
-    }
-    
-    viewedStatuses.add(statusId);
-    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.VIEWED_STATUSES, Array.from(viewedStatuses));
-    
-    return safeSendAction('VIEW_STATUS', { statusId });
-}, 'trackStatusView', { success: false });
-
-const voteOnPoll = createErrorBoundary(async function(statusId, optionId) {
-    if (!statusId || !optionId) throw new Error('Missing required parameters');
-    
-    const voteKey = `vote_${statusId}_${optionId}`;
-    if (!_loggedMessages.has(voteKey)) {
-        _loggedMessages.add(voteKey);
-        logStatus('SENDING', `Voting on poll ${statusId}, option ${optionId}`);
-    }
-    
-    if (state.offlineModeEnabled) return { success: false, offline: true };
-    
-    return safeSendAction('VOTE_POLL', { statusId, optionId });
-}, 'voteOnPoll', { success: false });
-
-const pinStatus = createErrorBoundary(async function(statusData) {
-    if (!statusData || !statusData.id) throw new Error('Invalid status data');
-    
-    const pinKey = `pin_${statusData.id}`;
-    if (!_loggedMessages.has(pinKey)) {
-        _loggedMessages.add(pinKey);
-        logStatus('SENDING', `Pinning status ${statusData.id}`);
-    }
-    
-    return safeSendAction('PIN_STATUS', { statusId: statusData.id });
-}, 'pinStatus', { success: false });
-
-const unpinStatus = createErrorBoundary(async function(statusData) {
-    if (!statusData || !statusData.id) throw new Error('Invalid status data');
-    
-    const unpinKey = `unpin_${statusData.id}`;
-    if (!_loggedMessages.has(unpinKey)) {
-        _loggedMessages.add(unpinKey);
-        logStatus('SENDING', `Unpinning status ${statusData.id}`);
-    }
-    
-    return safeSendAction('UNPIN_STATUS', { statusId: statusData.id });
-}, 'unpinStatus', { success: false });
-
-const muteUser = createErrorBoundary(async function(userId) {
-    if (!userId) throw new Error('Invalid user ID');
-    
-    const muteKey = `mute_${userId}`;
-    if (!_loggedMessages.has(muteKey)) {
-        _loggedMessages.add(muteKey);
-        logStatus('SENDING', `Muting user ${userId}`);
-    }
-    
-    mutedUsers.add(userId);
-    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
-    
-    return safeSendAction('MUTE_USER', { userId });
-}, 'muteUser', { success: false });
-
-const unmuteUser = createErrorBoundary(async function(userId) {
-    if (!userId) throw new Error('Invalid user ID');
-    
-    const unmuteKey = `unmute_${userId}`;
-    if (!_loggedMessages.has(unmuteKey)) {
-        _loggedMessages.add(unmuteKey);
-        logStatus('SENDING', `Unmuting user ${userId}`);
-    }
-    
-    mutedUsers.delete(userId);
-    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MUTED_USERS, Array.from(mutedUsers));
-    
-    return safeSendAction('UNMUTE_USER', { userId });
-}, 'unmuteUser', { success: false });
-
-const postStatusLegacy = createErrorBoundary(async function(statusData) {
-    if (!statusData) throw new Error('Invalid status data');
-    
-    const postKey = `post_status_${Date.now()}`;
-    if (!_loggedMessages.has(postKey)) {
-        _loggedMessages.add(postKey);
-        logStatus('POST', 'Posting new status', { type: statusData.type });
-    }
-    
-    const sanitizedData = sanitizeStatusData(statusData);
-    
-    if (state.offlineModeEnabled) {
-        const offlineQueue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
-        sanitizedData.id = 'offline_' + Date.now();
-        sanitizedData.createdAt = new Date().toISOString();
-        sanitizedData.offline = true;
-        sanitizedData.expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
-        offlineQueue.push(sanitizedData);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, offlineQueue);
-        
-        statuses.unshift(sanitizedData);
-        myStatuses.unshift(sanitizedData);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-        
-        lastPostDate = new Date();
-        SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
-        updateStreakCounter();
-        
-        const offlineKey = 'status_queued_offline';
-        if (!_loggedMessages.has(offlineKey)) {
-            _loggedMessages.add(offlineKey);
-            logStatus('POST', 'Status queued offline');
-        }
-        
-        return { success: true, status: sanitizedData, offline: true };
-    }
-    
-    if (!isSessionReady()) {
-        debugWarn('Cannot post status - session not ready');
-        return { success: false, reason: 'SESSION_NOT_READY' };
-    }
-    
-    const messageId = safeSendAction('UPLOAD_STATUS', sanitizedData);
-    
-    if (messageId) {
-        const tempStatus = {
-            ...sanitizedData,
-            id: `temp_${Date.now()}`,
-            createdAt: new Date().toISOString(),
-            pending: true
-        };
-        
-        statuses.unshift(tempStatus);
-        myStatuses.unshift(tempStatus);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-        
-        lastPostDate = new Date();
-        SafeStorage.set(LOCAL_STORAGE_KEYS.LAST_POST_DATE, lastPostDate.toISOString());
-        updateStreakCounter();
-        
-        if (sanitizedData.mood) {
-            moodChartData.push({
-                mood: sanitizedData.mood,
-                value: 50 + Math.floor(Math.random() * 30),
-                date: new Date().toISOString()
-            });
-            if (moodChartData.length > 30) moodChartData = moodChartData.slice(-30);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MOOD_DATA, moodChartData);
-        }
-        
-        DiagnosticsAgent.increment('statusPosts');
-        
-        return { success: true, status: tempStatus, pending: true };
-    }
-    
-    return { success: false };
-}, 'postStatus', { success: false });
-
-function sanitizeStatusData(statusData) {
-    try {
-        const sanitized = { ...statusData };
-        
-        if (sanitized.text) sanitized.text = escapeHtml(sanitized.text);
-        if (sanitized.caption) sanitized.caption = escapeHtml(sanitized.caption);
-        if (sanitized.question) sanitized.question = escapeHtml(sanitized.question);
-        
-        if (sanitized.privacy && !privacySettings[sanitized.privacy]) sanitized.privacy = 'friends';
-        if (sanitized.mood && !statusMoods[sanitized.mood]) sanitized.mood = null;
-        if (sanitized.intent && !statusIntents[sanitized.intent]) sanitized.intent = null;
-        if (sanitized.category && !statusCategories[sanitized.category]) sanitized.category = null;
-        
-        if (typeof validateStatusPayload !== 'undefined') validateStatusPayload(sanitized);
-        
-        return sanitized;
-    } catch (error) {
-        return statusData;
-    }
-}
-
-function validateStatusPayload(payload) {
-    if (payload.type === 'text') {
-        if (!payload.text || typeof payload.text !== 'string' || payload.text.trim().length === 0) {
-            throw new Error('Text status requires non-empty text');
-        }
-        if (payload.text.length > 5000) throw new Error('Text too long (max 5000 characters)');
-    }
-    
-    if (payload.type === 'media') {
-        if (!payload.mediaUrls || !Array.isArray(payload.mediaUrls) || payload.mediaUrls.length === 0) {
-            throw new Error('Media status requires media URLs');
-        }
-        if (payload.caption && payload.caption.length > 1000) throw new Error('Caption too long (max 1000 characters)');
-    }
-    
-    if (payload.type === 'poll') {
-        if (!payload.question || typeof payload.question !== 'string' || payload.question.trim().length === 0) {
-            throw new Error('Poll requires a question');
-        }
-        if (!payload.options || !Array.isArray(payload.options) || payload.options.length < 2) {
-            throw new Error('Poll requires at least 2 options');
-        }
-        if (payload.options.length > 10) throw new Error('Too many poll options (max 10)');
-    }
-    
-    if (payload.duration && !durationOptions[payload.duration.toString()]) throw new Error('Invalid duration option');
-    if (payload.mood && !statusMoods[payload.mood]) throw new Error('Invalid mood');
-    if (payload.intent && !statusIntents[payload.intent]) throw new Error('Invalid intent');
-    if (payload.category && !statusCategories[payload.category]) throw new Error('Invalid category');
-    if (payload.privacy && !privacySettings[payload.privacy]) throw new Error('Invalid privacy setting');
-}
-
-function updateStreakCounter() {
-    try {
-        const today = new Date().toDateString();
-        if (lastPostDate && lastPostDate.toDateString() === today) return;
-        
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        
-        if (lastPostDate && lastPostDate.toDateString() === yesterday.toDateString()) {
-            streakCount++;
-        } else if (lastPostDate) {
-            streakCount = 1;
-        } else {
-            streakCount = 1;
-        }
-        
-        SafeStorage.set(LOCAL_STORAGE_KEYS.STREAK, streakCount.toString());
-    } catch (error) {}
-}
-
-const scheduleStatus = createErrorBoundary(async function(statusData, scheduleTime) {
-    if (!statusData || !scheduleTime) throw new Error('Missing required parameters');
-    
-    const scheduleKey = `schedule_${Date.now()}`;
-    if (!_loggedMessages.has(scheduleKey)) {
-        _loggedMessages.add(scheduleKey);
-        logStatus('SENDING', `Scheduling status for ${scheduleTime}`);
-    }
-    
-    const sanitizedData = sanitizeStatusData(statusData);
-    
-    const response = await safeSendAction('SCHEDULE_STATUS', {
-        ...sanitizedData,
-        scheduledFor: scheduleTime
-    });
-    
-    if (response) {
-        scheduledStatuses.push({ ...sanitizedData, scheduledFor: scheduleTime });
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.SCHEDULED, scheduledStatuses);
-        const successKey = 'schedule_success';
-        if (!_loggedMessages.has(successKey)) {
-            _loggedMessages.add(successKey);
-            logStatus('SUCCESS', 'Status scheduled');
-        }
-    }
-    return response;
-}, 'scheduleStatus', { success: false });
-
-function saveDraft(statusData) {
-    try {
-        if (!statusData) throw new Error('Invalid status data');
-        
-        const sanitizedData = sanitizeStatusData(statusData);
-        sanitizedData.id = 'draft_' + Date.now();
-        sanitizedData.createdAt = new Date().toISOString();
-        sanitizedData.isDraft = true;
-        drafts.unshift(sanitizedData);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.DRAFTS, drafts);
-        
-        const draftKey = 'draft_saved';
-        if (!_loggedMessages.has(draftKey)) {
-            _loggedMessages.add(draftKey);
-            logStatus('SUCCESS', 'Draft saved');
-        }
-        return { success: true };
-    } catch (error) {
-        throw error;
-    }
-}
-
-const reportStatus = createErrorBoundary(async function(statusId, reason, details) {
-    if (!statusId || !reason) throw new Error('Missing required parameters');
-    
-    const reportKey = `report_${statusId}`;
-    if (!_loggedMessages.has(reportKey)) {
-        _loggedMessages.add(reportKey);
-        logStatus('SENDING', `Reporting status ${statusId}`);
-    }
-    
-    const sanitizedDetails = escapeHtml(details || '');
-    
-    return safeSendAction('REPORT_STATUS', { statusId, reason, details: sanitizedDetails });
-}, 'reportStatus', { success: false });
-
-// =============================================
-// EXPIRATION MANAGEMENT
-// =============================================
-
-let expirationCheckInterval = null;
-
-function startExpirationMonitoring() {
-    if (expirationCheckInterval) {
-        clearInterval(expirationCheckInterval);
-    }
-    
-    const startKey = 'expiration_monitoring_start';
-    if (!_loggedMessages.has(startKey)) {
-        _loggedMessages.add(startKey);
-        logStatus('INFO', 'Starting expiration monitoring');
-    }
-    
-    expirationCheckInterval = setInterval(() => {
-        checkAndCleanExpiredStatuses();
-    }, 60000);
-    
-    state.intervals.add(expirationCheckInterval);
-}
-
-function stopExpirationMonitoring() {
-    if (expirationCheckInterval) {
-        clearInterval(expirationCheckInterval);
-        expirationCheckInterval = null;
-        state.intervals.delete(expirationCheckInterval);
-
-        const stopKey = 'expiration_monitoring_stop';
-        if (!_loggedMessages.has(stopKey)) {
-            _loggedMessages.add(stopKey);
-            logStatus('INFO', 'Expiration monitoring stopped');
-        }
-    }
-}
-
-// ── Precision per-status expiry countdowns ────────────────────────────────────
-// The 60-second polling interval catches expired statuses eventually, but
-// schedulePrecisionExpiry fires a one-shot setTimeout at the exact millisecond
-// each status expires so the UI updates at the right moment, not up to 60 s late.
-const _precisionExpiryTimers = new Map(); // statusId → timer handle
-
-function schedulePrecisionExpiry(status) {
-    if (!status || !status.id || !status.expiresAt) return;
-    const id = String(status.id);
-    if (_precisionExpiryTimers.has(id)) return; // already scheduled
-
-    const msUntilExpiry = new Date(status.expiresAt).getTime() - Date.now();
-    if (msUntilExpiry <= 0) {
-        // Already expired — clean up immediately
-        setTimeout(() => checkAndCleanExpiredStatuses(), 0);
-        return;
-    }
-    const timer = setTimeout(() => {
-        _precisionExpiryTimers.delete(id);
-        logStatus('EXPIRE', `Precision expiry for status ${id}`);
-        checkAndCleanExpiredStatuses();
-    }, msUntilExpiry);
-    _precisionExpiryTimers.set(id, timer);
-}
-
-function scheduleAllPrecisionExpiries(list) {
-    if (!Array.isArray(list)) return;
-    list.forEach(s => schedulePrecisionExpiry(s));
-}
-
-window.schedulePrecisionExpiry      = schedulePrecisionExpiry;
-window.scheduleAllPrecisionExpiries = scheduleAllPrecisionExpiries;
-
-function checkAndCleanExpiredStatuses() {
-    const now = Date.now();
-    let hasExpired = false;
-    let expiredCount = 0;
-    
-    const initialStatusCount = statuses.length;
-    statuses = statuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) {
-                hasExpired = true;
-                expiredCount++;
-                
-                const expireKey = `status_expired_${status.id}`;
-                if (!_loggedMessages.has(expireKey)) {
-                    _loggedMessages.add(expireKey);
-                    logStatus('EXPIRE', `Status ${status.id} expired`);
-                }
-                
-                safeSendAction('STATUS_EXPIRED', {
-                    statusId: status.id,
-                    userId: status.userId
-                });
-                
-                document.dispatchEvent(new CustomEvent('statusExpired', {
-                    detail: { statusId: status.id }
-                }));
-                
-                return false;
-            }
-        }
-        return true;
-    });
-    
-    if (initialStatusCount !== statuses.length) {
-        const removedKey = `expired_removed_${Date.now()}`;
-        if (!_loggedMessages.has(removedKey)) {
-            _loggedMessages.add(removedKey);
-            logStatus('EXPIRE', `Removed ${initialStatusCount - statuses.length} expired statuses`);
-        }
-    }
-    
-    myStatuses = myStatuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) return false;
-        }
-        return true;
-    });
-    
-    friendsStatuses = friendsStatuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) return false;
-        }
-        return true;
-    });
-    
-    closeFriendsStatuses = closeFriendsStatuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) return false;
-        }
-        return true;
-    });
-    
-    pinnedStatuses = pinnedStatuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) return false;
-        }
-        return true;
-    });
-    
-    mutedStatuses = mutedStatuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) return false;
-        }
-        return true;
-    });
-    
-    microCirclesStatuses = microCirclesStatuses.filter(status => {
-        if (status.expiresAt) {
-            const expiresAt = new Date(status.expiresAt).getTime();
-            if (now >= expiresAt) return false;
-        }
-        return true;
-    });
-    
-    if (hasExpired) {
-        highlights.forEach(highlight => {
-            if (highlight.statusIds) {
-                const originalLength = highlight.statusIds.length;
-                highlight.statusIds = highlight.statusIds.filter(id => {
-                    return statuses.some(s => s.id === id) || myStatuses.some(s => s.id === id);
-                });
-                if (highlight.statusIds.length !== originalLength) {
-                    highlight.count = highlight.statusIds.length;
-                }
-            }
-        });
-        
-        DiagnosticsAgent.metrics.statusExpired += expiredCount;
-
-        // Sync statusState with cleaned module-level arrays
-        statusState.statuses   = statuses;
-        statusState.myStatuses = myStatuses;
-
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.HIGHLIGHTS, highlights);
-
-        // Purge expired records from IDB so they can't be rehydrated on next load
-        if (window.StatusCache && typeof window.StatusCache.purgeExpired === 'function') {
-            window.StatusCache.purgeExpired().catch(() => {});
-        }
-
-        // Notify all subscribers so tabs re-render immediately without expired items
-        notifyStatusObservers();
-
-        document.dispatchEvent(new CustomEvent('statusUpdate', {
-            detail: { type: 'expired', statuses: statuses.slice(0, 10) }
-        }));
-    }
-}
-
-// =============================================
-// USER STATUS TRACKING
-// =============================================
-let userStatusInterval = null;
-let lastActivityTime = Date.now();
-let isOnlineGlobal = typeof navigator !== 'undefined' ? navigator.onLine : true;
-let heartbeatIntervalGlobal = null;
-let isTrackingInitialized = false;
-let lastOnlineStatus = typeof navigator !== 'undefined' ? navigator.onLine : true;
-let activityThrottleTimer = null;
-let activityEventHandlers = [];
-
-function initializeUserStatusTracking() {
-    if (isTrackingInitialized) return;
-    
-    try {
-        isOnlineGlobal = typeof navigator !== 'undefined' ? navigator.onLine : true;
-        lastOnlineStatus = isOnlineGlobal;
-        state.isOnline = isOnlineGlobal;
-        
-        setupNetworkDetection();
-        setupActivityTracking();
-        updateUserStatus();
-        
-        isTrackingInitialized = true;
-        
-        const trackKey = 'user_tracking_initialized';
-        if (!_loggedMessages.has(trackKey)) {
-            _loggedMessages.add(trackKey);
-            logStatus('SUCCESS', 'User status tracking initialized');
-        }
-        
-    } catch (error) {}
-}
-
-function setupNetworkDetection() {
-    try {
-        if (typeof window === 'undefined') return;
-        
-        const handleNetworkChange = () => {
-            const currentOnline = navigator.onLine;
-            if (currentOnline === lastOnlineStatus) return;
-            
-            lastOnlineStatus = currentOnline;
-            state.isOnline = currentOnline;
-            
-            if (currentOnline) {
-                handleOnlineStatus();
-            } else {
-                handleOfflineStatus();
-            }
-        };
-        
-        window.removeEventListener('online', handleNetworkChange);
-        window.removeEventListener('offline', handleNetworkChange);
-        
-        window.addEventListener('online', handleNetworkChange);
-        window.addEventListener('offline', handleNetworkChange);
-        
-        activityEventHandlers.push({ element: window, type: 'online', handler: handleNetworkChange });
-        activityEventHandlers.push({ element: window, type: 'offline', handler: handleNetworkChange });
-    } catch (error) {}
-}
-
-function setupActivityTracking() {
-    try {
-        if (typeof document === 'undefined') return;
-        
-        const activityEvents = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
-        
-        const updateActivity = () => {
-            if (activityThrottleTimer) clearTimeout(activityThrottleTimer);
-            activityThrottleTimer = setTimeout(() => {
-                lastActivityTime = Date.now();
-                activityThrottleTimer = null;
-            }, 1000);
-        };
-        
-        activityEvents.forEach(eventType => {
-            document.removeEventListener(eventType, updateActivity);
-        });
-        
-        activityEvents.forEach(eventType => {
-            document.addEventListener(eventType, updateActivity);
-            activityEventHandlers.push({ element: document, type: eventType, handler: updateActivity });
-        });
-    } catch (error) {}
-}
-
-function handleOnlineStatus() {
-    try {
-        if (isOnlineGlobal) return;
-        
-        isOnlineGlobal = true;
-        state.isOnline = true;
-        
-        setTimeout(() => { updateUserStatus(); }, 100);
-        
-        if (state.offlineModeEnabled) {
-            state.offlineModeEnabled = false;
-            isOfflineMode = false;
-            setTimeout(() => { syncPendingData(); }, 500);
-            
-            const onlineKey = 'online_status';
-            if (!_loggedMessages.has(onlineKey)) {
-                _loggedMessages.add(onlineKey);
-                logStatus('SUCCESS', 'Online - syncing pending data');
-            }
-        }
-        
-        if (!parentReady && RecoveryManager.canRecover()) {
-            logStatus('WAITING', 'Recovery - waiting for parent');
-        }
-    } catch (error) {}
-}
-
-function handleOfflineStatus() {
-    try {
-        if (!isOnlineGlobal) return;
-        
-        isOnlineGlobal = false;
-        state.isOnline = false;
-        
-        setTimeout(() => { updateUserStatus(); }, 100);
-        
-        if (!state.offlineModeEnabled) {
-            state.offlineModeEnabled = true;
-            isOfflineMode = true;
-            
-            const offlineKey = 'offline_status';
-            if (!_loggedMessages.has(offlineKey)) {
-                _loggedMessages.add(offlineKey);
-                logStatus('WARNING', 'Offline mode enabled');
-            }
-            
-            logStatus('WAITING', 'Offline - waiting for parent');
-        }
-    } catch (error) {}
-}
-
-function sendUserActive() {
-    try {
-        if (parentCoordinator.handshakeComplete && parentReady && currentUser?.id) {
-            safeSendAction('USER_ACTIVE', {
-                userId: currentUser.id
-            });
-        }
-    } catch (error) {}
-}
-
-function sendUserInactive() {
-    try {
-        if (parentCoordinator.handshakeComplete && parentReady && currentUser?.id) {
-            safeSendAction('USER_INACTIVE', {
-                userId: currentUser.id,
-                lastActive: lastActivityTime
-            });
-        }
-    } catch (error) {}
-}
-
-async function updateUserStatus() {
-    try {
-        if (!currentUser && !state.user && !isAuthenticated()) return;
-        
-        const userId = currentUser?.id || state.user?.id;
-        if (!userId) return;
-        
-        const status = isOnlineGlobal ? 'online' : 'offline';
-        
-        if (currentUser) {
-            currentUser.status = status;
-            currentUser.lastSeen = new Date().toISOString();
-        }
-        
-        if (parentCoordinator.handshakeComplete && parentReady) {
-            safeSendAction('STATUS_UPDATE', {
-                userId: userId,
-                status: status,
-                lastSeen: new Date().toISOString(),
-                isOnline: isOnlineGlobal
-            });
-        }
-    } catch (error) {}
-}
-
-if (isOnlineGlobal && !state.offlineModeEnabled && parentReady && isSessionReady()) {
-    // The backend doesn't have a /api/user/status endpoint
-    // Instead, just update local state and notify parent
-    if (parentCoordinator.handshakeComplete && parentReady) {
-        safeSendAction('USER_STATUS_UPDATE', {
-            userId: userId,
-            status: status,
-            lastSeen: new Date().toISOString()
-        });
-    }
-}
-
-async function syncPendingData() {
-    if (!isAuthenticated() || !isSessionReady()) {
-        logStatus('WARNING', 'syncPendingData: skipping — not authenticated');
-        return;
-    }
-
-    try {
-        // ── 1. Sync pending reactions with retry ──────────────────────────────
-        const reactionsToSync = [...pendingReactions];
-        const failedReactions = [];
-        for (const reaction of reactionsToSync) {
-            let synced = false;
-            for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
-                try {
-                    await makeApiRequest(
-                        `/api/status/${reaction.statusId}/like`,
-                        reaction.remove ? 'DELETE' : 'POST',
-                        {}
-                    );
-                    synced = true;
-                } catch (err) {
-                    if (attempt < 3) {
-                        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
-                    }
-                }
-            }
-            if (!synced) failedReactions.push(reaction);
-        }
-        // Keep only items that still failed
-        pendingReactions = failedReactions;
-        SafeStorage.setJSON(LOCAL_STORAGE_KEYS.PENDING_REACTIONS, pendingReactions);
-
-        // ── 2. Drain offline status queue with retry ──────────────────────────
-        const offlineQueue = await SafeStorage.getJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE) || [];
-        const stillQueued = [];
-        for (const statusData of offlineQueue) {
-            let posted = false;
-            let serverStatus = null;
-            for (let attempt = 1; attempt <= 3 && !posted; attempt++) {
-                try {
-                    const res = await makeApiRequest('/api/status', 'POST', statusData);
-                    serverStatus = res?.status || res?.data?.status || null;
-                    posted = true;
-                } catch (err) {
-                    if (attempt < 3) {
-                        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
-                    }
-                }
-            }
-            if (posted) {
-                // Remove the offline-prefixed temp entry from IndexedDB
-                if (statusData._tempId) {
-                    StatusDB.remove(statusData._tempId).catch(() => {});
-                    // Also evict from in-memory arrays
-                    statuses    = statuses.filter(s => s.id !== statusData._tempId);
-                    myStatuses  = myStatuses.filter(s => s.id !== statusData._tempId);
-                }
-                // Save the real server status to IDB
-                if (serverStatus) {
-                    StatusDB.put(serverStatus).catch(() => {});
-                    if (!statuses.find(s => s.id === serverStatus.id)) statuses.unshift(serverStatus);
-                    if (!myStatuses.find(s => s.id === serverStatus.id)) myStatuses.unshift(serverStatus);
-                }
-            } else {
-                stillQueued.push(statusData);
-            }
-        }
-        if (stillQueued.length > 0) {
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE, stillQueued);
-            logStatus('WARNING', `syncPendingData: ${stillQueued.length} status(es) still queued after retries`);
-        } else {
-            SafeStorage.remove(LOCAL_STORAGE_KEYS.OFFLINE_QUEUE);
-        }
-        // Refresh UI with synced data
-        if (offlineQueue.length > stillQueued.length) {
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.STATUSES, statuses);
-            SafeStorage.setJSON(LOCAL_STORAGE_KEYS.MY_STATUSES, myStatuses);
-            if (typeof notifyStatusObservers === 'function') notifyStatusObservers();
-        }
-
-        // ── 3. Force a fresh data pull (bypassing TTL) ────────────────────────
-        SafeStorage.memoryStore.delete(LOCAL_STORAGE_KEYS.LAST_SYNC); // clear TTL so refresh runs
-        await loadFreshDataInBackground();
-
-        logStatus('SUCCESS', 'Pending data synced');
-
-    } catch (error) {
-        logStatus('FAILED', `syncPendingData: ${error.message}`);
-    }
-}
-
-// =============================================
-// UTILITY FUNCTIONS
-// =============================================
-function escapeHtml(text) {
-    try {
-        if (!text) return '';
-        if (typeof document === 'undefined') return text;
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    } catch (error) {
-        return text || '';
-    }
-}
-
-function formatTimeAgo(date) {
-    try {
-        if (!date) return 'Unknown';
-        
-        const dateObj = date instanceof Date ? date : new Date(date);
-        if (isNaN(dateObj.getTime())) return 'Unknown';
-        
-        const now = new Date();
-        const diffMs = now - dateObj;
-        const diffMins = Math.floor(diffMs / 60000);
-        const diffHours = Math.floor(diffMs / 3600000);
-        const diffDays = Math.floor(diffMs / 86400000);
-        
-        if (diffMins < 1) return 'Just now';
-        if (diffMins < 60) return `${diffMins}m ago`;
-        if (diffHours < 24) return `${diffHours}h ago`;
-        if (diffDays < 7) return `${diffDays}d ago`;
-        return `${Math.floor(diffDays / 7)}w ago`;
-    } catch (error) {
-        return 'Unknown';
-    }
-}
-
-async function retryOperation(operation, maxRetries = 3) {
-    try {
-        let lastError;
-        
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                return await operation();
-            } catch (error) {
-                lastError = error;
-                if (i < maxRetries - 1) {
-                    const baseDelay = IframeEnvironment.isVPNNetwork ? 2000 : 1000;
-                    const delay = Math.min(baseDelay * Math.pow(2, i), 10000);
-                    const jitter = Math.random() * 200;
-                    await new Promise(resolve => setTimeout(resolve, delay + jitter));
-                }
-            }
-        }
-        
-        throw lastError;
-    } catch (error) {
-        throw error;
-    }
-}
-
-function generateSampleMoodData() {
-    try {
-        const moods = Object.keys(statusMoods);
-        const sampleData = [];
-        const now = new Date();
-        
-        for (let i = 29; i >= 0; i--) {
-            const date = new Date(now);
-            date.setDate(date.getDate() - i);
-            
-            const randomMood = moods[Math.floor(Math.random() * moods.length)];
-            sampleData.push({
-                mood: randomMood,
-                value: 40 + Math.floor(Math.random() * 50),
-                date: date.toISOString().split('T')[0],
-                timestamp: date.getTime()
-            });
-        }
-        
-        sampleData.sort((a, b) => a.timestamp - b.timestamp);
-        return sampleData;
-    } catch (error) {
-        return [];
-    }
-}
-
-// =============================================
-// SAFE LOG ERROR UTILITY
-// =============================================
-let errorLogCounts = {};
-let maxErrorLogs = 1;
-let retryCounts = {};
-let maxRetries = 3;
-let messageCacheGlobal = new Set();
-
-function safeLogError(module, functionName, error, data = null) {
-    try {
-        const errorKey = `${module}:${functionName}:${error?.message || 'unknown'}`;
-        
-        if (!errorLogCounts[errorKey]) errorLogCounts[errorKey] = 0;
-        errorLogCounts[errorKey]++;
-        
-        if (errorLogCounts[errorKey] <= maxErrorLogs) {
-            logStatus('FAILED', `${module}: ${functionName} - ${error?.message || error}`);
-        }
-        
-        if (functionName.includes('get') || functionName.includes('load')) {
-            return Array.isArray(data) ? [] : null;
-        }
-    } catch (e) {}
-}
-
-// =============================================
-// USER GUARD AND API GUARD
-// =============================================
-function withUserGuard(fn, defaultValue = null) {
-    return function(...args) {
-        try {
-            if (!state.sessionActive && !state.isGuestMode && !currentUser && !parentCoordinator.sessionData && !state.sessionMirror.validated && !isSessionReady()) {
-                safeLogError('Status', fn.name || 'anonymous', new Error('No user session'));
-                return defaultValue;
-            }
-            return fn(...args);
-        } catch (error) {
-            safeLogError('Status', fn.name || 'anonymous', error);
-            return defaultValue;
-        }
-    };
-}
-
-function withApiGuard(fn, defaultValue = null) {
-    return async function(...args) {
-        try {
-            return await fn(...args);
-        } catch (error) {
-            safeLogError('Status', fn.name || 'anonymous', error);
-            return defaultValue;
-        }
-    };
-}
-
-function safeGetElement(selector) {
-    try {
-        const element = document.querySelector(selector);
-        if (!element) safeLogError('Status', 'safeGetElement', new Error(`Element not found: ${selector}`));
-        return element;
-    } catch (error) {
-        safeLogError('Status', 'safeGetElement', error);
-        return null;
-    }
-}
-
-// =============================================
-// STUB FUNCTIONS FOR COMPATIBILITY
-// =============================================
-function getFriendsStatuses() {
-    try { return friendsStatuses || []; } catch (error) { safeLogError('Status', 'getFriendsStatuses', error); return []; }
-}
-
-function getCloseFriendsStatuses() {
-    try { return closeFriendsStatuses || []; } catch (error) { safeLogError('Status', 'getCloseFriendsStatuses', error); return []; }
-}
-
-function getMicroCirclesStatuses() {
-    try { return microCirclesStatuses || []; } catch (error) { safeLogError('Status', 'getMicroCirclesStatuses', error); return []; }
-}
-
-function getMutedStatuses() {
-    try { return mutedStatuses || []; } catch (error) { safeLogError('Status', 'getMutedStatuses', error); return []; }
-}
-
-function setCurrentViewerStatus(status) {
-    try { currentViewerStatus = status; } catch (error) { safeLogError('Status', 'setCurrentViewerStatus', error); }
-}
-
-function getCurrentViewerStatus() {
-    try { return currentViewerStatus; } catch (error) { safeLogError('Status', 'getCurrentViewerStatus', error); return null; }
-}
-
-function setCurrentSlideIndex(index) {
-    try { currentSlideIndex = index || 0; } catch (error) { safeLogError('Status', 'setCurrentSlideIndex', error); }
-}
-
-function getCurrentSlideIndex() {
-    try { return currentSlideIndex || 0; } catch (error) { safeLogError('Status', 'getCurrentSlideIndex', error); return 0; }
-}
-
-function toggleAutoAdvancePause() {
-    try { isAutoAdvancePaused = !isAutoAdvancePaused; return isAutoAdvancePaused; } catch (error) { safeLogError('Status', 'toggleAutoAdvancePause', error); return false; }
-}
-
-function setCurrentCategoryFilter(category) {
-    try { currentCategoryFilter = category || 'all'; } catch (error) { safeLogError('Status', 'setCurrentCategoryFilter', error); }
-}
-
-function getCurrentCategoryFilter() {
-    try { return currentCategoryFilter || 'all'; } catch (error) { safeLogError('Status', 'getCurrentCategoryFilter', error); return 'all'; }
-}
-
-function setCurrentIntentFilter(intent) {
-    try { currentIntentFilter = intent; } catch (error) { safeLogError('Status', 'setCurrentIntentFilter', error); }
-}
-
-function getCurrentIntentFilter() {
-    try { return currentIntentFilter; } catch (error) { safeLogError('Status', 'getCurrentIntentFilter', error); return null; }
-}
-
-function setCurrentMoodFilter(mood) {
-    try { currentMoodFilter = mood; } catch (error) { safeLogError('Status', 'setCurrentMoodFilter', error); }
-}
-
-function getCurrentMoodFilter() {
-    try { return currentMoodFilter; } catch (error) { safeLogError('Status', 'getCurrentMoodFilter', error); return null; }
-}
-
-function getPendingReplies() {
-    try { return pendingReplies || []; } catch (error) { safeLogError('Status', 'getPendingReplies', error); return []; }
-}
-
-function getPendingReactions() {
-    try { return pendingReactions || []; } catch (error) { safeLogError('Status', 'getPendingReactions', error); return []; }
-}
-
-
-function getMoodChartData() {
-    try { return moodChartData || []; } catch (error) { safeLogError('Status', 'getMoodChartData', error); return []; }
-}
-
-function getStreakCount() {
-    try { return streakCount || 0; } catch (error) { safeLogError('Status', 'getStreakCount', error); return 0; }
-}
-
-function getLastPostDate() {
-    try { return lastPostDate; } catch (error) { safeLogError('Status', 'getLastPostDate', error); return null; }
-}
-
-function getActiveFilters() {
-    try { return activeFilters || new Set(); } catch (error) { safeLogError('Status', 'getActiveFilters', error); return new Set(); }
-}
-
-function getSelectedDraft() {
-    try { return selectedDraft; } catch (error) { safeLogError('Status', 'getSelectedDraft', error); return null; }
-}
-
-function setSelectedDraft(draft) {
-    try { selectedDraft = draft; } catch (error) { safeLogError('Status', 'setSelectedDraft', error); }
-}
-
-// =============================================
-// NEW FUNCTION: updateLocalStateWithSession - REQUIRED BY status-ui.js
-// =============================================
-function updateLocalStateWithSession(sessionData) {
-    try {
-        if (!sessionData) return false;
-        
-        // Validate session before updating
-        if (!__isValidSession(sessionData)) {
-            logStatus('FAILED', 'Invalid session in updateLocalStateWithSession - rejected');
-            return false;
-        }
-        
-        if (sessionData.user) {
-            currentUser = sessionData.user;
-            userData = sessionData.user;
-        }
-        
-        if (sessionData.token) {
-            state.token = sessionData.token;
-            setSession(sessionData.token, sessionData.user || currentUser, sessionData.expiry);
-        }
-        
-        if (sessionData.refreshToken) {
-            SafeStorage.setJSON('REFRESH_TOKEN', sessionData.refreshToken);
-            state.sessionMirror.refreshToken = sessionData.refreshToken;
-        }
-        
-        if (sessionData.permissions && Array.isArray(sessionData.permissions)) {
-            state.permissionsGranted = [...sessionData.permissions];
-        }
-        
-        if (sessionData.capabilities && Array.isArray(sessionData.capabilities)) {
-            state.sessionMirror.capabilities = [...sessionData.capabilities];
-        }
-        
-        if (sessionData.sessionId) {
-            state.sessionId = sessionData.sessionId;
-        }
-        
-        updateSessionMirror(sessionData, 'local_update');
-        SessionClient.updateSession(sessionData, 'local_update');
-        
-        isTokenReady = true;
-        triggerTokenReadyCallbacks();
-        processPendingApiRequests();
-        
-        const updateKey = 'local_state_updated';
-        if (!_loggedMessages.has(updateKey)) {
-            _loggedMessages.add(updateKey);
-            logStatus('SUCCESS', 'Local state updated with session');
-        }
-        
-        return true;
-    } catch (error) {
-        const failKey = 'local_state_update_fail';
-        if (!_loggedMessages.has(failKey)) {
-            _loggedMessages.add(failKey);
-            logStatus('FAILED', `updateLocalStateWithSession: ${error.message}`);
-        }
-        return false;
-    }
-}
-
-// =============================================
-// DIAGNOSTICS AND MONITORING
-// =============================================
-function enableDiagnostics() {
-    state.diagnosticsEnabled = true;
-    window.__IFRAME_DEBUG__ = true;
-    DiagnosticsAgent.enable();
-    
-    const enableKey = 'diagnostics_enabled';
-    if (!_loggedMessages.has(enableKey)) {
-        _loggedMessages.add(enableKey);
-        logStatus('INFO', 'Diagnostics enabled');
-    }
-}
-
-function disableDiagnostics() {
-    state.diagnosticsEnabled = false;
-    window.__IFRAME_DEBUG__ = false;
-    DiagnosticsAgent.disable();
-    
-    const disableKey = 'diagnostics_disabled';
-    if (!_loggedMessages.has(disableKey)) {
-        _loggedMessages.add(disableKey);
-        logStatus('INFO', 'Diagnostics disabled');
-    }
-}
-
-function getDiagnostics() {
-    return {
-        health: getHealthMetrics(),
-        diagnosticLog: state.diagnosticData,
-        lifecycle: getLifecycleState(),
-        handshake: {
-            state: state.handshakeState,
-            startTime: state.handshakeStartTime,
-            endTime: state.handshakeEndTime,
-            duration: state.handshakeEndTime ? state.handshakeEndTime - state.handshakeStartTime : null,
-            childReadySent: state.childReadySent,
-            parentReadyReceived: state.parentReadyReceived,
-            handshakeAckReceived: state.handshakeAckReceived,
-            sessionSyncReceived: state.sessionSyncReceived,
-            pageActivated: state.pageActivated
-        },
-        session: getSessionMirror(),
-        security: state.securityContext,
-        frame: {
-            id: state.frameId,
-            instanceId: state.instanceId
-        },
-        parent: {
-            detected: state.parentDetected,
-            origin: state.securityContext.parentOrigin,
-            protocol: state.parentProtocolVersion,
-            capabilities: Array.from(state.parentCapabilities),
-            ready: parentReady
-        },
-        retry: {
-            queueSize: state.retryQueue.length,
-            pendingAcks: state.pendingAcks.size
-        },
-        offline: {
-            enabled: state.offlineModeEnabled,
-            isOnline: state.isOnline,
-            bufferSize: state.offlineBuffer.length
-        },
-        environment: {
-            type: IframeEnvironment.type,
-            isLocalDev: IframeEnvironment.isLocalDev,
-            isRenderHosted: IframeEnvironment.isRenderHosted,
-            isVPNNetwork: IframeEnvironment.isVPNNetwork,
-            isProduction: IframeEnvironment.isProduction,
-            isSandboxed: IframeEnvironment.isSandboxed,
-            latency: IframeEnvironment.latency,
-            connectionType: IframeEnvironment.connectionType
-        },
-        sessionClient: {
-            sessionValid: SessionClient.sessionValid,
-            sessionExpiry: SessionClient.sessionExpiry,
-            offlineMode: SessionClient.offlineMode
-        },
-        transport: IframeTransport.getStatus(),
-        navigation: NavigationGuard.getState(),
-        diagnostics: DiagnosticsAgent.getReport(),
-        sessionReady: isSessionReady()
-    };
-}
-
-// =============================================
-// SANDBOX DETECTION
-// =============================================
-function detectSandbox() {
-    try {
-        const sandboxed = !window.parent || window.parent === window || 
-                          (() => { try { return !window.parent.location; } catch { return true; } })();
-        
-        if (sandboxed) {
-            state.securityContext.signatureRequired = false;
-            state.securityContext.encryptionRequired = false;
-            state.securityContext.replayProtection = false;
-            
-            try {
-                if (document.referrer) {
-                    const referrerOrigin = new URL(document.referrer).origin;
-                    TRUSTED_ORIGINS.add(referrerOrigin);
-                }
-            } catch (e) {}
-            
-            const sandboxKey = 'sandbox_detected';
-            if (!_loggedMessages.has(sandboxKey)) {
-                _loggedMessages.add(sandboxKey);
-                logStatus('INFO', 'Sandbox detected');
-            }
-            
-            return true;
-        }
-        
-        return false;
-    } catch (error) {
-        return true;
-    }
-}
-
-// =============================================
-// CLEANUP AND MEMORY MANAGEMENT
-// =============================================
-function cleanup() {
-    try {
-        stopExpirationMonitoring();
-        
-        if (apiCheckInterval) { clearInterval(apiCheckInterval); apiCheckInterval = null; }
-        if (parentCoordinator.handshakeInterval) { clearInterval(parentCoordinator.handshakeInterval); parentCoordinator.handshakeInterval = null; }
-        if (heartbeatIntervalGlobal) { clearInterval(heartbeatIntervalGlobal); heartbeatIntervalGlobal = null; }
-        if (autoAdvanceInterval) { clearInterval(autoAdvanceInterval); autoAdvanceInterval = null; }
-        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-        if (parentCoordinator.handshakeTimeout) { clearTimeout(parentCoordinator.handshakeTimeout); parentCoordinator.handshakeTimeout = null; }
-        if (activityThrottleTimer) { clearTimeout(activityThrottleTimer); activityThrottleTimer = null; }
-        if (HandshakeClient.timer) { clearTimeout(HandshakeClient.timer); HandshakeClient.timer = null; }
-        
-        state.retryTimers.forEach((timer) => clearTimeout(timer));
-        state.retryTimers.clear();
-        
-        cleanupEventListeners();
-        
-        tokenReadyCallbacks = [];
-        pendingApiRequests = [];
-        state.retryQueue = [];
-        
-        _sentMessages.clear();
-        processedMessageIds.clear();
-        
-        parentCoordinator.handshakeInProgress = false;
-        parentCoordinator.sessionValid = false;
-        parentCoordinator.sessionRequestSent = false;
-        parentCoordinator.handshakeRetries = 0;
-        
-        errorLogCounts = {};
-        retryCounts = {};
-        messageCacheGlobal.clear();
-        
-        clearSession();
-        
-        const cleanupKey = 'cleanup_complete';
-        if (!_loggedMessages.has(cleanupKey)) {
-            _loggedMessages.add(cleanupKey);
-            logStatus('INFO', 'Cleanup complete');
-        }
-        
-        shutdownCore().catch(() => {});
-        
-    } catch (error) {
-        safeLogError('Status', 'cleanup', error);
-    }
-}
-
-function cleanupEventListeners() {
-    try {
-        activityEventHandlers.forEach(({ element, type, handler }) => {
-            try { element.removeEventListener(type, handler); } catch (error) {}
-        });
-        activityEventHandlers = [];
-        
-        window.removeEventListener('message', handleEnhancedParentMessage);
-        window.removeEventListener('message', receiveFromParent);
-        
-        isTrackingInitialized = false;
-    } catch (error) {
-        safeLogError('Status', 'cleanupEventListeners', error);
-    }
-}
-
-// =============================================
-// MODULE LIFECYCLE CONTROLLER
-// =============================================
-const ModuleLifecycleController = {
-    _initialized: false,
-    _started: false,
-    
-    init() {
-        if (this._initialized) return this;
-        this._initialized = true;
-        logStatus('LIFECYCLE', 'ModuleLifecycleController initialized');
-        return this;
-    },
-    
-    start() {
-        if (this._started) return this;
-        this._started = true;
-        logStatus('LIFECYCLE', 'ModuleLifecycleController started');
-        return this;
-    },
-    
-    getState() {
-        return {
-            initialized: this._initialized,
-            started: this._started,
-            lifecycleState: currentState
-        };
-    },
-    
-    reset() {
-        this._initialized = false;
-        this._started = false;
-        logStatus('LIFECYCLE', 'ModuleLifecycleController reset');
-        return this;
-    }
-};
-
-// =============================================
-// EVENT BUS
-// =============================================
-const EventBus = {
-    _events: new Map(),
-    
-    on(event, callback) {
-        if (!this._events.has(event)) {
-            this._events.set(event, []);
-        }
-        this._events.get(event).push(callback);
-        return () => this.off(event, callback);
-    },
-    
-    off(event, callback) {
-        const callbacks = this._events.get(event);
-        if (callbacks) {
-            const index = callbacks.indexOf(callback);
-            if (index !== -1) callbacks.splice(index, 1);
-        }
-    },
-    
-    emit(event, data) {
-        const callbacks = this._events.get(event);
-        if (callbacks) {
-            callbacks.forEach(cb => {
-                try {
-                    cb(data);
-                } catch (e) {}
-            });
-        }
-    },
-    
-    clear() {
-        this._events.clear();
-    }
-};
+SecurityValidator.init();
 
 // =============================================
 // PARENT CONNECTION MANAGER
 // =============================================
 const ParentConnectionManager = {
-    _connected: false,
+    _connectionState: 'disconnected',
+    _parentWindow: null,
+    _parentOrigin: null,
+    _reconnectAttempts: 0,
+    _maxReconnectAttempts: 3,
+    _reconnectDelay: 1000,
+    _connectionCheckInterval: null,
     _listeners: new Set(),
+    _silent: true,
     
-    isConnected() {
-        return this._connected || parentReady;
-    },
-    
-    addListener(callback) {
-        this._listeners.add(callback);
-        return () => this._listeners.delete(callback);
-    },
-    
-    notifyListeners(status) {
-        this._listeners.forEach(cb => {
-            try {
-                cb(status);
-            } catch (e) {}
-        });
-    },
-    
-    setConnected(connected) {
-        this._connected = connected;
-        this.notifyListeners(connected);
-    }
-};
-
-// =============================================
-// UIBRIDGE - UI Communication Bridge
-// =============================================
-const UIBridge = {
-    subscriptions: new Map(),
-    validators: new Map(),
-    messageQueue: [],
-    processing: false,
-    
-    initialize() {
-        this.registerValidators();
-        this.setupCoreSubscriptions();
-        logStatus('INFO', 'UIBridge initialized');
+    init() {
+        initLog('ParentConnectionManager initializing');
+        this._detectParent();
+        successLog('ParentConnectionManager initialized');
         return this;
     },
-
-    registerValidators() {
-        this.validators.set('statusUpdate', (data) => {
-            return data && typeof data === 'object' && data.id;
-        });
-
-        this.validators.set('sessionData', (data) => {
-            return data && typeof data === 'object' && (data.user || data.token) && __isValidSession(data);
-        });
-
-        this.validators.set('reaction', (data) => {
-            return data && data.statusId && data.reaction;
-        });
-
-        this.validators.set('handshake', (data) => {
-            return data && data.status && ['connecting', 'connected', 'failed', 'reconnecting'].includes(data.status);
-        });
-
-        this.validators.set('apiResponse', (data) => {
-            return data && data.requestId;
-        });
-
-        this.validators.set('navigation', (data) => {
-            return data && data.path;
-        });
-        
-        this.validators.set('lifecycle', (data) => {
-            return data && data.state && Object.values(LIFECYCLE_STATES).includes(data.state);
-        });
-        
-        this.validators.set('statusState', (data) => {
-            return data && (data.statuses !== undefined || data.myStatuses !== undefined);
-        });
-        
-        this.validators.set('viewerUpdate', (data) => {
-            return data && data.statusId;
-        });
-        
-        this.validators.set('reactionUpdate', (data) => {
-            return data && data.statusId && data.reaction;
-        });
-        
-        this.validators.set('statusExpired', (data) => {
-            return data && data.statusId;
-        });
-    },
-
-    setupCoreSubscriptions() {
-        document.addEventListener('statusUpdate', (e) => {
-            this.handleCoreEvent('statusUpdate', e.detail);
-        });
-
-        document.addEventListener('coreData', (e) => {
-            this.handleCoreEvent('coreData', e.detail);
-        });
-
-        document.addEventListener('sessionReady', (e) => {
-            this.handleCoreEvent('sessionReady', e.detail);
-        });
-
-        document.addEventListener('handshakeUpdate', (e) => {
-            this.handleCoreEvent('handshake', e.detail);
-        });
-
-        document.addEventListener('connectionLost', (e) => {
-            this.handleCoreEvent('connectionLost', e.detail);
-        });
-
-        document.addEventListener('connectionRestored', (e) => {
-            this.handleCoreEvent('connectionRestored', e.detail);
-        });
-        
-        document.addEventListener('governorStateChange', (e) => {
-            if (e.detail.newState === 'ACTIVE') {
-                this.handleCoreEvent('handshake', { status: 'connected' });
-                this.handleCoreEvent('lifecycle', { state: LIFECYCLE_STATES.ACTIVE });
-            } else if (e.detail.newState === 'DEGRADED') {
-                this.handleCoreEvent('handshake', { status: 'failed' });
-            } else if (e.detail.newState === 'RECOVERING') {
-                this.handleCoreEvent('handshake', { status: 'reconnecting' });
-            }
-        });
-
-        document.addEventListener('apiResponse', (e) => {
-            this.handleCoreEvent('apiResponse', e.detail);
-        });
-
-        document.addEventListener('navigate', (e) => {
-            this.handleCoreEvent('navigation', e.detail);
-        });
-
-        document.addEventListener('uiRecovery', (e) => {
-            this.handleCoreEvent('uiRecovery', e.detail);
-            this.processMessageQueue();
-        });
-
-        document.addEventListener('configApplied', (e) => {
-            this.handleCoreEvent('configApplied', e.detail);
-        });
-        
-        document.addEventListener('viewerUpdate', (e) => {
-            this.handleCoreEvent('viewerUpdate', e.detail);
-        });
-        
-        document.addEventListener('reactionUpdate', (e) => {
-            this.handleCoreEvent('reactionUpdate', e.detail);
-        });
-        
-        document.addEventListener('statusExpired', (e) => {
-            this.handleCoreEvent('statusExpired', e.detail);
-        });
-        
-        document.addEventListener('moduleActive', (e) => {
-            this.handleCoreEvent('lifecycle', { state: LIFECYCLE_STATES.ACTIVE, detail: e.detail });
-        });
-        
-        document.addEventListener('statusStateChanged', (e) => {
-            if (e.detail.state) {
-                this.handleCoreEvent('statusState', e.detail.state);
-            }
-        });
-    },
-
-    handleCoreEvent(type, data) {
-        if (!data) return;
-
-        const validator = this.validators.get(type);
-        if (validator && !validator(data)) return;
-
-        this.messageQueue.push({ type, data, timestamp: Date.now() });
-
-        if (!this.processing) {
-            this.processMessageQueue();
-        }
-    },
-
-    async processMessageQueue() {
-        if (this.processing || this.messageQueue.length === 0) return;
-
-        this.processing = true;
-
-        while (this.messageQueue.length > 0) {
-            const item = this.messageQueue.shift();
-
-            if (Date.now() - item.timestamp > 60000) continue;
-
-            const handlers = this.subscriptions.get(item.type) || [];
-            handlers.forEach(handler => {
-                try {
-                    handler(this.sanitizeEventData(item.data));
-                } catch (error) {
-                    debugError('Bridge', `Handler failed for ${item.type}`, error);
-                }
-            });
-
-            await new Promise(r => setTimeout(r, 10));
-        }
-
-        this.processing = false;
-    },
-
-    sanitizeEventData(data) {
-        if (!data || typeof data !== 'object') return data;
-        
+    
+    _detectParent() {
         try {
-            return JSON.parse(JSON.stringify(data, (key, value) => {
-                if (key === 'token' || key === 'accessToken' || key === 'refreshToken') {
-                    return '[REDACTED]';
+            if (window.parent && window.parent !== window) {
+                this._parentWindow = window.parent;
+                
+                try {
+                    if (window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0) {
+                        this._parentOrigin = window.location.ancestorOrigins[0];
+                    } else {
+                        this._parentOrigin = document.referrer ? new URL(document.referrer).origin : '*';
+                    }
+                } catch (e) {
+                    this._parentOrigin = '*';
                 }
-                if (typeof value === 'string' && value.length > 5000) {
-                    return value.slice(0, 5000) + '... [truncated]';
-                }
-                return value;
-            }));
-        } catch (e) {
-            return data;
+                
+                OriginAdapter.setParentOrigin(this._parentOrigin);
+                parentOrigin = this._parentOrigin;
+                this._connectionState = 'connected';
+                this.emit('connected', { origin: this._parentOrigin });
+            } else {
+                this._connectionState = 'no_parent';
+                this.emit('no_parent', {});
+            }
+        } catch (error) {
+            this._connectionState = 'error';
+            this.emit('error', { error });
         }
     },
-
-    subscribe(event, handler) {
-        if (!this.subscriptions.has(event)) {
-            this.subscriptions.set(event, new Set());
-        }
-        this.subscriptions.get(event).add(handler);
-        
-        return () => {
-            const handlers = this.subscriptions.get(event);
-            if (handlers) {
-                handlers.delete(handler);
+    
+    isConnected() {
+        return this._connectionState === 'connected' && 
+               this._parentWindow && 
+               this._parentWindow !== window;
+    },
+    
+    getConnectionState() {
+        return this._connectionState;
+    },
+    
+    getParentOrigin() {
+        return this._parentOrigin;
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
             }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            connectionState: this._connectionState,
+            parentOrigin: this._parentOrigin,
+            reconnectAttempts: this._reconnectAttempts,
+            maxReconnectAttempts: this._maxReconnectAttempts
         };
     },
-
-    unsubscribe(event, handler) {
-        const handlers = this.subscriptions.get(event);
-        if (handlers) {
-            handlers.delete(handler);
-        }
-    },
-
-    clearSubscriptions() {
-        this.subscriptions.clear();
-        this.messageQueue = [];
-        logStatus('INFO', 'UIBridge subscriptions cleared');
+    
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Initialize UIBridge
-UIBridge.initialize();
+ParentConnectionManager.init();
 
 // =============================================
-// SAFE INITIALIZATION WITH PARENT HANDSHAKE
+// HANDSHAKE MANAGER - NO RETRY LOOPS
 // =============================================
-let _PARENT_READY_ = false;
-let _HANDSHAKE_DONE_ = false;
-let _HANDSHAKE_RETRIES_ = 0;
-const MAX_HANDSHAKE = 3;
-let _INITIALIZATION_STARTED_ = false;
-let _UI_BINDING_DONE_ = false;
-let _CORE_READY_ = false;
-let _PAGE_LOADED_ = false;
-let _LOADING_MESSAGE_ = null;
-let _ERROR_CACHE_ = new Set();
-
-function logOnce(level, msg) {
-    if (_ERROR_CACHE_.has(msg)) return;
-    _ERROR_CACHE_.add(msg);
-    logStatus(level === 'error' ? 'FAILED' : 'WARNING', msg);
-}
-async function safeInit() {
-    if (_INITIALIZATION_STARTED_) {
-        return;
-    }
+const HandshakeManager = {
+    _handshakeState: 'INITIAL',
+    _handshakeId: null,
+    _handshakeAttempts: 0,
+    _maxAttempts: 1,
+    _backoffMs: 1000,
+    _parentReady: false,
+    _handshakeComplete: false,
+    _listeners: new Set(),
+    _inProgress: false,
+    _silent: true,
     
-    _INITIALIZATION_STARTED_ = true;
+    states: {
+        INITIAL: 'INITIAL',
+        WAITING_FOR_PARENT: 'WAITING_FOR_PARENT',
+        REGISTERING: 'REGISTERING',
+        REGISTERED: 'REGISTERED',
+        ACTIVE: 'ACTIVE'
+    },
     
-    let tries = 0;
-    const maxTries = 5;
+    init() {
+        initLog('HandshakeManager initializing');
+        successLog('HandshakeManager initialized');
+        return this;
+    },
     
-    const initKey = 'safe_init_start';
-    if (!_loggedMessages.has(initKey)) {
-        _loggedMessages.add(initKey);
-        logStatus('INIT', 'Starting safe initialization');
-    }
+    getState() {
+        return this._handshakeState;
+    },
     
-    IframeEnvironment.detect();
-    detectSandbox();
-    
-    window.addEventListener('message', handleParentMessage);
-    state.listeners.add({ type: 'message', handler: handleParentMessage });
-    
-    const parentAvailable = await ParentDetector.detect();
-    
-    if (parentAvailable) {
-        const parentKey = 'parent_available';
-        if (!_loggedMessages.has(parentKey)) {
-            _loggedMessages.add(parentKey);
-            logStatus('INFO', 'Parent available, starting handshake');
+    transition(newState, reason = '') {
+        const oldState = this._handshakeState;
+        this._handshakeState = newState;
+        
+        if (!this._silent) {
+            debugLog(`Handshake: ${oldState} → ${newState} (${reason})`);
         }
         
-        // CRITICAL: Call initializeModule to start the handshake
-        initializeModule();
+        this.emit('transition', { from: oldState, to: newState, reason });
         
-    } else {
-        const noParentKey = 'parent_not_available';
-        if (!_loggedMessages.has(noParentKey)) {
-            _loggedMessages.add(noParentKey);
-            logStatus('WARNING', 'Parent not available');
-        }
-        // Still call initializeModule to set up the state machine
-        initializeModule();
-        
-        if (state.sessionMirror.validated && isSessionReady() && __isValidSession({ token: state.sessionMirror.token, userId: state.sessionMirror.user?.id })) {
-            transitionTo(LifecycleState.ACTIVE, 'cached_session');
-            logStatus('SUCCESS', 'Session activated from cache');
-        } else {
-            enableGuestMode();
-        }
-    }
+        return true;
+    },
     
-    try {
-        initializeUIWithCachedData();
-        startExpirationMonitoring();
-        
-        const uiKey = 'ui_cached_init_complete';
-        if (!_loggedMessages.has(uiKey)) {
-            _loggedMessages.add(uiKey);
-            logStatus('SUCCESS', 'UI initialized with cached data');
+    async startHandshake(options = {}) {
+        if (this._handshakeComplete) {
+            return { success: true, cached: true };
         }
         
-        setTimeout(async () => {
-            try {
-                await bootstrapApp();
-                setTimeout(() => { initializeUserStatusTracking(); }, 1000);
-            } catch (error) {
-                safeLogError('Status', 'safeInit.bootstrap', error);
+        if (this._inProgress) {
+            return { success: false, inProgress: true };
+        }
+        
+        this._inProgress = true;
+        
+        try {
+            this.transition('WAITING_FOR_PARENT', 'handshake_started');
+            
+            await this._registerModule();
+            
+            this._handshakeComplete = true;
+            this.transition('ACTIVE', 'handshake_complete');
+            this._inProgress = false;
+            return { success: true };
+        } catch (error) {
+            this._inProgress = false;
+            return { success: false, error: error.message };
+        }
+    },
+    
+    async _registerModule() {
+        return { success: true };
+    },
+    
+    reset() {
+        this._handshakeState = 'INITIAL';
+        this._handshakeComplete = false;
+        this._handshakeAttempts = 0;
+        this._inProgress = false;
+    },
+    
+    isComplete() {
+        return this._handshakeComplete || registrationCompleted;
+    },
+    
+    isInProgress() {
+        return this._inProgress;
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
             }
-        }, 50);
-        
-    } catch (e) {
-        logOnce('error', `Initialization failed: ${e.message}`);
-    }
-}
-
-function notifyParentReady() {
-    if (!_childReadySent && isInState(LifecycleState.READY)) {
-        sendChildReady();
-    }
-}
-function initPageCore() {
-    try {
-        setTimeout(() => {
-            safeInit().catch(error => {
-                safeLogError('Status', 'initPageCore.safeInit', error);
-            });
-        }, 10);
-    } catch (error) {
-        safeLogError('Status', 'initPageCore', error);
-    }
-}
-
-// Expose initPageCore to window so it can be called from outside the IIFE
-window.initPageCore = initPageCore;
-
-// =============================================
-// FETCH FAILURE SAFE HANDLING
-// =============================================
-const _fetchAttempts = {};
-
-async function safeFetch(url, options = {}) {
-    if (!navigator.onLine) {
-        logStatus('WARNING', 'Network offline');
-        return { success: false, message: "Network offline", offline: true };
-    }
-    
-    const fetchKey = `fetch_${url}`;
-    
-    try {
-        const response = await fetch(url, {
-            credentials: "include",
-            ...options
         });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error ${response.status}`);
-        }
-
-        const data = await response.json();
-        
-        if (_fetchAttempts[fetchKey]) {
-            delete _fetchAttempts[fetchKey];
-        }
-        
-        if (!_loggedMessages.has(`fetch_success_${url}`)) {
-            _loggedMessages.add(`fetch_success_${url}`);
-            logStatus('SUCCESS', `Fetch: ${url}`);
-        }
-        
-        return data;
-    } catch (error) {
-        _fetchAttempts[fetchKey] = (_fetchAttempts[fetchKey] || 0) + 1;
-        
-        if (_fetchAttempts[fetchKey] === 1 && !_loggedMessages.has(`fetch_fail_${url}`)) {
-            _loggedMessages.add(`fetch_fail_${url}`);
-            logStatus('FAILED', `Fetch: ${url} - ${error.message}`);
-        }
-        
-        return { success: false, message: "Network issue", error: error.message };
-    }
-}
-
-// =============================================
-// PAGE CORE COMPATIBILITY LAYER
-// =============================================
-const pageCore = {
-    isReady: () => state.initialized,
-    getData: (type) => {
-        switch(type) {
-            case 'statuses': return statuses;
-            case 'myStatuses': return myStatuses;
-            case 'friendsList': return [];
-            case 'notifications': return [];
-            default: return null;
-        }
-    },
-    updateData: () => {},
-    showMessage: () => {},
-    sendToParent
-};
-
-// =============================================
-// AUTO-CLEANUP ON UNLOAD
-// =============================================
-if (typeof window !== 'undefined') {
-    try {
-        window.addEventListener('beforeunload', cleanup);
-        window.addEventListener('pagehide', cleanup);
-    } catch (error) {
-        safeLogError('Status', 'initPageCore.eventListeners', error);
-    }
-}
-
-// =============================================
-// PUBLIC API EXPOSURE
-// =============================================
-const StatusCore = {
-    version: MODULE_VERSION,
-    
-    // Lifecycle
-    getState: getLifecycleState,
-    isReady: () => currentState === LIFECYCLE_STATES.ACTIVE,
-    ensureActive: ensureActive,
-    
-    // Session
-    SessionManager: {
-        getToken: getSessionToken,
-        getUser: getSessionUser,
-        getUserId: getSessionUserId,
-        isAuthenticated: isSessionReady,
-        setSession: setSession,
-        clearSession: clearSession
+        return this;
     },
     
-    // Status API - REAL END-TO-END
-    loadStatuses,
-    postStatus,
-    markStatusViewed,
-    deleteStatus,
-    addReaction,
-    removeReaction,
-    
-    // State
-    getStatuses: () => [...statusState.statuses],
-    getMyStatuses: () => [...statusState.myStatuses],
-    getStatusState: () => ({ ...statusState }),
-    subscribe: (callback) => statusObservers.add(callback),
-    
-    // UI Bridge
-    UI: UIBridge,
-    
-    // Event Bus
-    on: (event, callback) => EventBus.on(event, callback),
-    off: (event, callback) => EventBus.off(event, callback),
-    emit: (event, data) => EventBus.emit(event, data),
-    
-    // Retry
-    retryLoad: () => {
-        if (currentState === LIFECYCLE_STATES.ACTIVE && isSessionReady()) {
-            loadStatuses();
-        }
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
     },
     
-    // Legacy compatibility
-    addReactionToStatus,
-    removeReactionFromStatus,
-    changeReaction,
-    trackStatusView,
-    voteOnPoll,
-    pinStatus,
-    unpinStatus,
-    muteUser,
-    unmuteUser,
-    postStatusLegacy,
-    scheduleStatus,
-    saveDraft,
-    reportStatus,
+    getDiagnostics() {
+        return {
+            state: this._handshakeState,
+            attempts: this._handshakeAttempts,
+            maxAttempts: this._maxAttempts,
+            complete: this.isComplete(),
+            inProgress: this._inProgress
+        };
+    },
     
-    // Helpers
-    escapeHtml,
-    formatTimeAgo,
-    retryOperation,
-    generateSampleMoodData,
-    
-    // State getters
-    getFriendsStatuses,
-    getCloseFriendsStatuses,
-    getMicroCirclesStatuses,
-    getMutedStatuses,
-    setCurrentViewerStatus,
-    getCurrentViewerStatus,
-    setCurrentSlideIndex,
-    getCurrentSlideIndex,
-    toggleAutoAdvancePause,
-    setCurrentCategoryFilter,
-    getCurrentCategoryFilter,
-    setCurrentIntentFilter,
-    getCurrentIntentFilter,
-    setCurrentMoodFilter,
-    getCurrentMoodFilter,
-    getPendingReplies,
-    getPendingReactions,
-    getMoodChartData,
-    getStreakCount,
-    getLastPostDate,
-    getActiveFilters,
-    getSelectedDraft,
-    setSelectedDraft,
-    
-    // Expiration
-    startExpirationMonitoring,
-    stopExpirationMonitoring,
-    checkAndCleanExpiredStatuses,
-    
-    // Parent communication
-    sendToParent,
-    requestSession: requestSessionWrapper,
-    
-    // Diagnostics
-    enableDiagnostics,
-    disableDiagnostics,
-    getDiagnostics,
-    DiagnosticsAgent,
-    getHealthMetrics,
-    
-    // Storage
-    SafeStorage,
-    StorageProxy,
-    
-    // Module lifecycle
-    ModuleLifecycleController,
-    
-    // Debug
-    debug: {
-        getState: getLifecycleState,
-        getStatusState: () => ({ ...statusState }),
-        getPendingRequests: () => Array.from(pendingRequests.keys()),
-        ParentConnectionManager,
-        DiagnosticsAgent
+    setSilent(silent) {
+        this._silent = silent;
     }
 };
 
-// Add additional exports to window for status-ui.js to import
-window.StatusCore = StatusCore;
+HandshakeManager.init();
 
-// Export addStatus / removeStatus so status-websocket.js can call window.addStatus(status)
-// to inject a friend's real-time status. Previously module-scoped only → silent no-op.
-window.addStatus    = addStatus;
-window.removeStatus = removeStatus;
-
-// Expose live statusState as a getter so external readers always see current data
-Object.defineProperty(window, 'statusState', { get: () => statusState, configurable: true });
-window.__STATUS_MODULE_NAME__ = MODULE_NAME;
-window.__STATUS_VERSION__ = MODULE_VERSION;
-window.DiagnosticsAgent = DiagnosticsAgent;
-window.SafeStorage = SafeStorage;
-window.StorageProxy = StorageProxy;
-window.UIBridge = UIBridge;
-window.LifecycleState = LIFECYCLE_STATES;
-window.ModuleLifecycleController = ModuleLifecycleController;
-window.EventBus = EventBus;
-window.ParentConnectionManager = ParentConnectionManager;
+const IframeHandshakeAuthority = HandshakeManager;
 
 // =============================================
-// INITIALIZATION
+// MODULE LIFECYCLE CONTROLLER
 // =============================================
-
-// =============================================
-// INITIALIZATION
-// =============================================
-console.log(`[${MODULE_NAME}] 🚀 Status Core v${MODULE_VERSION} (Strict Parent-Controlled Protocol | Real Data Only)`);
-
-try {
-    setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
+const ModuleLifecycleController = {
+    _lifecycleState: 'stopped',
+    _startTime: null,
+    _listeners: new Set(),
+    _silent: true,
     
-    ModuleLifecycleController.init();
-    ModuleLifecycleController.start();
+    states: {
+        STOPPED: 'stopped',
+        STARTING: 'starting',
+        RUNNING: 'running',
+        STOPPING: 'stopping',
+        ERROR: 'error'
+    },
     
-    stateListeners.add((toState) => {
-        if (toState === LIFECYCLE_STATES.ACTIVE) {
-            console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
+    init() {
+        initLog('ModuleLifecycleController initializing');
+        successLog('ModuleLifecycleController initialized');
+        return this;
+    },
+    
+    start() {
+        if (this._lifecycleState === 'running') return this;
+        
+        this._lifecycleState = 'starting';
+        this._startTime = Date.now();
+        this.emit('starting', { timestamp: this._startTime });
+        
+        this._lifecycleState = 'running';
+        this.emit('started', { timestamp: Date.now() });
+        
+        return this;
+    },
+    
+    stop() {
+        if (this._lifecycleState === 'stopped') return this;
+        
+        this._lifecycleState = 'stopping';
+        this.emit('stopping', { timestamp: Date.now() });
+        
+        HeartbeatClient.stop();
+        clearAllTimers();
+        
+        this._lifecycleState = 'stopped';
+        this.emit('stopped', { timestamp: Date.now() });
+        
+        return this;
+    },
+    
+    error(error) {
+        this._lifecycleState = 'error';
+        this.emit('error', { error, timestamp: Date.now() });
+        return this;
+    },
+    
+    getState() {
+        return this._lifecycleState;
+    },
+    
+    getUptime() {
+        if (!this._startTime || this._lifecycleState !== 'running') return 0;
+        return Date.now() - this._startTime;
+    },
+    
+    isRunning() {
+        return this._lifecycleState === 'running';
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
+            }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            state: this._lifecycleState,
+            uptime: this.getUptime(),
+            startTime: this._startTime
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+ModuleLifecycleController.init();
+
+// =============================================
+// RECOVERY MANAGER
+// =============================================
+const RecoveryManager = {
+    _attempts: 0,
+    _maxAttempts: 3,
+    _backoffMs: 1000,
+    _recoveryInProgress: false,
+    _recoveryTimer: null,
+    _listeners: new Set(),
+    _recoveryStrategies: new Map(),
+    _silent: true,
+    
+    init() {
+        initLog('RecoveryManager initializing');
+        this._registerDefaultStrategies();
+        successLog('RecoveryManager initialized');
+        return this;
+    },
+    
+    _registerDefaultStrategies() {
+        this.registerStrategy('connection_lost', async () => {
+            ParentConnectionManager._detectParent();
+            if (ParentConnectionManager.isConnected()) {
+                return true;
+            }
+            return false;
+        });
+        
+        this.registerStrategy('heartbeat_failure', async () => {
+            HeartbeatClient.stop();
+            if (currentState === LifecycleState.ACTIVE) {
+                HeartbeatClient.start();
+                return HeartbeatClient.isHealthy();
+            }
+            return false;
+        });
+        
+        this.registerStrategy('registration_failed', async () => {
+            moduleRegistered = false;
+            return moduleRegistered;
+        });
+        
+        this.registerStrategy('session_expired', async () => {
+            if (!isAuthenticated) return false;
+            if (!window.session.token) return false;
+            const response = await MessageTransport.send('SESSION_REFRESH', {});
+            if (response && response.payload && response.payload.session) {
+                const sessionData = response.payload.session;
+                if (!__isValidSession(sessionData)) {
+                    console.warn(`[${MODULE_NAME}] ⚠️ RecoveryManager received invalid session`);
+                    return false;
+                }
+                updateSession(
+                    sessionData.user,
+                    sessionData.token,
+                    sessionData.expiry
+                );
+                return isSessionValid();
+            }
+            return false;
+        });
+        
+        this.registerStrategy('handshake_timeout', async () => {
+            if (parentReadyReceived) return true;
+            sendChildReady();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return parentReadyReceived;
+        });
+        
+        this.registerStrategy('settings_load_failed', async () => {
+            if (!isAuthenticated) return false;
+            try {
+                await SettingsState.load();
+                return SettingsState.loaded;
+            } catch (error) {
+                return false;
+            }
+        });
+    },
+    
+    registerStrategy(name, strategy) {
+        this._recoveryStrategies.set(name, strategy);
+        return this;
+    },
+    
+    async attemptRecovery(options = {}) {
+        const { reason = 'unknown', force = false } = options;
+        
+        if (this._recoveryInProgress && !force) {
+            return { success: false, error: 'recovery_in_progress' };
         }
-    });
-    
-    // CRITICAL: Start the initialization sequence
-    // This must be called to transition from BOOT → INITIALIZING → READY → WAIT_PARENT
-    setTimeout(() => {
-        initializeModule();
-    }, 10);
-    
-    console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation`);
-    
-} catch (error) {
-    console.error(`[${MODULE_NAME}] Initialization error:`, error);
-}
-})();
-// =============================================
-// ES MODULE EXPORTS - ADD THIS AFTER THE IIFE CLOSES
-// =============================================
-
-// Since the file is wrapped in an IIFE, we need to expose the exports
-// after the IIFE executes by capturing them from the global scope
-
-// Wait for the IIFE to execute and expose things to window
-setTimeout(() => {
-    // Create the export object from window properties
-    const exports = {
-        // Core state & session
-        currentUser: window.currentUser,
-        userData: window.userData,
-        statuses: window.statuses,
-        myStatuses: window.myStatuses,
-        friendsStatuses: window.friendsStatuses,
-        closeFriendsStatuses: window.closeFriendsStatuses,
-        pinnedStatuses: window.pinnedStatuses,
-        mutedStatuses: window.mutedStatuses,
-        microCirclesStatuses: window.microCirclesStatuses,
-        highlights: window.highlights,
-        drafts: window.drafts,
-        scheduledStatuses: window.scheduledStatuses,
-        viewedStatuses: window.viewedStatuses,
-        mutedUsers: window.mutedUsers,
-        currentViewerStatus: window.currentViewerStatus,
-        currentSlideIndex: window.currentSlideIndex,
-        autoAdvanceInterval: window.autoAdvanceInterval,
-        isAutoAdvancePaused: window.isAutoAdvancePaused,
-        progressInterval: window.progressInterval,
-        currentCategoryFilter: window.currentCategoryFilter,
-        currentIntentFilter: window.currentIntentFilter,
-        currentMoodFilter: window.currentMoodFilter,
-        isMobile: window.isMobile,
-        isOfflineMode: window.isOfflineMode,
-        pendingReplies: window.pendingReplies,
-        pendingReactions: window.pendingReactions,
-        moodChartData: window.moodChartData,
-        streakCount: window.streakCount,
-        lastPostDate: window.lastPostDate,
-        activeFilters: window.activeFilters,
-        selectedDraft: window.selectedDraft,
-        isBackgroundInitialized: window.isBackgroundInitialized,
-        isTokenReady: window.isTokenReady,
         
-        // Status definitions
-        statusTypes: window.statusTypes,
-        statusIntents: window.statusIntents,
-        statusMoods: window.statusMoods,
-        statusCategories: window.statusCategories,
-        actionButtons: window.actionButtons,
-        privacySettings: window.privacySettings,
-        durationOptions: window.durationOptions,
-        reportReasons: window.reportReasons,
-        reactions: window.reactions,
-        emojis: window.emojis,
-        backgroundOptions: window.backgroundOptions,
-        statusTemplates: window.statusTemplates,
+        if (this._attempts >= this._maxAttempts && !force) {
+            this.emit('max_attempts_reached', { reason, attempts: this._attempts });
+            return { success: false, error: 'max_attempts_reached' };
+        }
         
-        // Storage keys
-        LOCAL_STORAGE_KEYS: window.LOCAL_STORAGE_KEYS,
+        this._recoveryInProgress = true;
+        this._attempts++;
+        this.emit('recovery_started', { reason, attempt: this._attempts });
         
-        // Core functions
-        loadStatuses: window.loadStatuses,
-        postStatus: window.postStatus,
-        markStatusViewed: window.markStatusViewed,
-        deleteStatus: window.deleteStatus,
-        addReaction: window.addReaction,
-        removeReaction: window.removeReaction,
-        
-        // Helper functions
-        sendToParent: window.sendToParent,
-        updateLocalStateWithSession: window.updateLocalStateWithSession,
-        handleLogout: window.handleLogout,
-        handleParentUnavailable: window.handleParentUnavailable,
-        makeParentApiRequest: window.makeParentApiRequest,
-        waitForTokenReady: window.waitForTokenReady,
-        onTokenReady: window.onTokenReady,
-        triggerTokenReadyCallbacks: window.triggerTokenReadyCallbacks,
-        getUnifiedToken: window.getUnifiedToken,
-        isAuthenticated: window.isAuthenticated,
-        queueApiRequest: window.queueApiRequest,
-        processPendingApiRequests: window.processPendingApiRequests,
-        startTokenReadinessCheck: window.startTokenReadinessCheck,
-        initializeUIWithCachedData: window.initializeUIWithCachedData,
-        loadCachedDataInstantly: window.loadCachedDataInstantly,
-        startBackgroundInitialization: window.startBackgroundInitialization,
-        loadFreshDataInBackground: window.loadFreshDataInBackground,
-        safeApiOperation: window.safeApiOperation,
-        loadStatusesInBackground: window.loadStatusesInBackground,
-        loadMyStatusesInBackground: window.loadMyStatusesInBackground,
-        loadHighlightsInBackground: window.loadHighlightsInBackground,
-        loadUserDataInBackground: window.loadUserDataInBackground,
-        bootstrapApplication: window.bootstrapApplication,
-        handleAuthError: window.handleAuthError,
-        loadInitialData: window.loadInitialData,
-        filterStatusesByPrivacy: window.filterStatusesByPrivacy,
-        getStatusPreviewText: window.getStatusPreviewText,
-        filterStatusesByType: window.filterStatusesByType,
-        getEmptyStateMessage: window.getEmptyStateMessage,
-        addReactionToStatus: window.addReactionToStatus,
-        removeReactionFromStatus: window.removeReactionFromStatus,
-        changeReaction: window.changeReaction,
-        trackStatusView: window.trackStatusView,
-        voteOnPoll: window.voteOnPoll,
-        pinStatus: window.pinStatus,
-        unpinStatus: window.unpinStatus,
-        muteUser: window.muteUser,
-        unmuteUser: window.unmuteUser,
-        postStatusLegacy: window.postStatusLegacy,
-        updateStreakCounter: window.updateStreakCounter,
-        scheduleStatus: window.scheduleStatus,
-        saveDraft: window.saveDraft,
-        reportStatus: window.reportStatus,
-        escapeHtml: window.escapeHtml,
-        formatTimeAgo: window.formatTimeAgo,
-        retryOperation: window.retryOperation,
-        generateSampleMoodData: window.generateSampleMoodData,
-        initPageCore: window.initPageCore,
-        getSession: window.getSession,
-        isSessionValid: window.isSessionValid,
-        
-        // Enhanced core exports
-        getHealthMetrics: window.getHealthMetrics,
-        getDiagnostics: window.getDiagnostics,
-        refreshToken: window.refreshToken,
-        requestParentConfig: window.requestParentConfig,
-        SessionClient: window.SessionClient,
-        IframeHandshakeAuthority: window.IframeHandshakeAuthority,
-        StartupGovernor: window.StartupGovernor,
-        DiagnosticsAgent: window.DiagnosticsAgent,
-        SafeStorage: window.SafeStorage,
-        StorageProxy: window.StorageProxy,
-        NavigationGuard: window.NavigationGuard,
-        IframeEnvironment: window.IframeEnvironment,
-        logStatus: window.logStatus,
-        UIBridge: window.UIBridge,
-        EventBus: window.EventBus,
-        ParentConnectionManager: window.ParentConnectionManager,
-        ModuleLifecycleController: window.ModuleLifecycleController,
-        
-        // Setter functions for constants
-        setCurrentIntentFilter: window.setCurrentIntentFilter,
-        setCurrentMoodFilter: window.setCurrentMoodFilter,
-        setCurrentCategoryFilter: window.setCurrentCategoryFilter,
-        
-        // Lifecycle exports
-        LifecycleState: window.LifecycleState,
-        isInState: window.isInState,
-        assertActive: window.assertActive,
-        getLifecycleState: window.getLifecycleState,
-        parentReady: window.parentReady,
-        messageQueue: window.messageQueue,
-        flushQueue: window.flushQueue,
-        sendMessage: window.sendMessage,
-        safeSend: window.safeSend,
-        handleParentMessage: window.handleParentMessage,
-        genId: window.genId,
-        genReqId: window.genReqId,
-        onTokenReady: window.onTokenReady,  // Add this line
-
-        // Session functions
-        isSessionReady: window.isSessionReady,
-        getSessionToken: window.getSessionToken,
-        getSessionUser: window.getSessionUser,
-        
-        // Module version
-        MODULE_VERSION: window.MODULE_VERSION
-    };
-    
-    if (typeof module !== 'undefined' && module.exports) {
-    module.exports = StatusCore;
-}
-
-// CRITICAL: Start the initialization
-// This ensures the module starts even if DOMContentLoaded already fired
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initPageCore);
-} else {
-    initPageCore();
-}
-
-// ── SETTINGS CACHE BOOTSTRAP ─────────────────────────────────────────────────
-// On load, ask the parent for the cached settings so this module starts with
-// the right theme/font/preferences before the first SETTINGS_UPDATED arrives.
-(function bootstrapSettingsCache() {
-    try {
-        // Request cached settings from parent via StorageProxy (now wired)
-        SafeStorage.getJSON('knecta_settings_cache').then(settings => {
-            if (settings && typeof applySettingToStatusModule === 'function') {
-                Object.entries(settings).forEach(([sec, secVal]) => {
-                    if (secVal && typeof secVal === 'object') {
-                        Object.entries(secVal).forEach(([k, v]) => {
-                            try { applySettingToStatusModule(sec, k, v); } catch(_) {}
-                        });
-                    }
-                });
-                if (typeof logStatus === 'function') {
-                    logStatus('INFO', 'Settings applied from cache on startup');
+        try {
+            const strategy = this._recoveryStrategies.get(reason);
+            
+            if (strategy) {
+                const result = await strategy();
+                if (result) {
+                    this._recoveryInProgress = false;
+                    this._attempts = 0;
+                    this.emit('recovery_succeeded', { reason });
+                    return { success: true };
+                }
+            } else {
+                const results = [];
+                for (const [name, strat] of this._recoveryStrategies) {
+                    try {
+                        const result = await strat();
+                        results.push({ strategy: name, success: result });
+                        if (result) break;
+                    } catch (e) {}
+                }
+                if (results.some(r => r.success)) {
+                    this._recoveryInProgress = false;
+                    this._attempts = 0;
+                    this.emit('recovery_succeeded', { reason, strategies: results });
+                    return { success: true, strategies: results };
                 }
             }
-        }).catch(() => {});
-    } catch(_) {}
-})();
+            
+            if (this._attempts < this._maxAttempts) {
+                const backoffDelay = this._backoffMs * Math.pow(1.5, this._attempts - 1);
+                this._recoveryTimer = safeSetTimeout(() => {
+                    this.attemptRecovery({ reason, force });
+                }, backoffDelay);
+                activeTimers.add(this._recoveryTimer);
+                this.emit('recovery_retry', { reason, attempt: this._attempts, delay: backoffDelay });
+                return { success: false, retrying: true, attempt: this._attempts };
+            } else {
+                this._recoveryInProgress = false;
+                this.emit('recovery_failed', { reason, attempts: this._attempts });
+                return { success: false, error: 'recovery_failed' };
+            }
+        } catch (error) {
+            this._recoveryInProgress = false;
+            this.emit('recovery_error', { reason, error: error.message });
+            return { success: false, error: error.message };
+        }
+    },
     
-    // Also make available as a named export
-    if (typeof exports !== 'undefined') {
-        Object.keys(exports).forEach(key => {
-            if (typeof exports !== 'undefined' && exports[key] !== undefined) {
+    reset() {
+        this._attempts = 0;
+        this._recoveryInProgress = false;
+        if (this._recoveryTimer) {
+            clearTimeout(this._recoveryTimer);
+            activeTimers.delete(this._recoveryTimer);
+            this._recoveryTimer = null;
+        }
+        this.emit('reset', {});
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
+            }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
                 try {
-                    // This is for ES module compatibility
-                    if (typeof globalThis !== 'undefined') {
-                        globalThis[key] = exports[key];
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            attempts: this._attempts,
+            maxAttempts: this._maxAttempts,
+            recoveryInProgress: this._recoveryInProgress,
+            strategies: Array.from(this._recoveryStrategies.keys())
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+RecoveryManager.init();
+
+// =============================================
+// NAVIGATION GUARD
+// =============================================
+const NavigationGuard = {
+    _enabled: true,
+    _pendingNavigation: null,
+    _listeners: new Set(),
+    _guardedPaths: ['/settings', '/profile', '/account'],
+    _silent: true,
+    
+    init() {
+        initLog('NavigationGuard initializing');
+        this._setupBeforeUnload();
+        this._setupHistoryAPI();
+        successLog('NavigationGuard initialized');
+    },
+    
+    _setupBeforeUnload() {
+        window.addEventListener('beforeunload', (e) => {
+            if (unsavedChanges && this._enabled) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+            }
+        });
+    },
+    
+    _setupHistoryAPI() {
+        const originalPushState = history.pushState;
+        history.pushState = (...args) => {
+            if (this._shouldAllowNavigation(args[2])) {
+                originalPushState.apply(history, args);
+            }
+        };
+        
+        const originalReplaceState = history.replaceState;
+        history.replaceState = (...args) => {
+            if (this._shouldAllowNavigation(args[2])) {
+                originalReplaceState.apply(history, args);
+            }
+        };
+        
+        window.addEventListener('popstate', (e) => {
+            if (!this._shouldAllowNavigation(document.location.pathname)) {
+                history.pushState(null, '', this._pendingNavigation || document.location.pathname);
+                e.preventDefault();
+            }
+        });
+    },
+    
+    _shouldAllowNavigation(path) {
+        if (!this._enabled) return true;
+        if (currentState !== LifecycleState.ACTIVE) return true;
+        
+        const isGuarded = this._guardedPaths.some(p => path?.includes(p));
+        
+        if (isGuarded && unsavedChanges) {
+            this._promptUser(path);
+            return false;
+        }
+        
+        return true;
+    },
+    
+    _promptUser(targetPath) {
+        const confirmed = confirm('You have unsaved changes. Are you sure you want to leave?');
+        if (confirmed) {
+            unsavedChanges = false;
+            this._pendingNavigation = targetPath;
+            window.location.href = targetPath;
+        }
+    },
+    
+    guardPath(path) {
+        if (!this._guardedPaths.includes(path)) {
+            this._guardedPaths.push(path);
+        }
+    },
+    
+    unguardPath(path) {
+        const index = this._guardedPaths.indexOf(path);
+        if (index !== -1) {
+            this._guardedPaths.splice(index, 1);
+        }
+    },
+    
+    enable() {
+        this._enabled = true;
+    },
+    
+    disable() {
+        this._enabled = false;
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        return {
+            enabled: this._enabled,
+            guardedPaths: [...this._guardedPaths],
+            pendingNavigation: this._pendingNavigation
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+NavigationGuard.init();
+
+// =============================================
+// UI FAILSAFE
+// =============================================
+const UIFailsafe = {
+    _enabled: true,
+    _errorCount: 0,
+    _maxErrors: 5,
+    _recoveryTimer: null,
+    _listeners: new Set(),
+    _fallbackMode: false,
+    _disabledElements: new Set(),
+    _silent: true,
+    
+    init() {
+        initLog('UIFailsafe initializing');
+        this._setupErrorHandling();
+        this._setupElementProtection();
+        successLog('UIFailsafe initialized');
+    },
+    
+    _setupErrorHandling() {
+        window.addEventListener('error', (event) => {
+            if (currentState !== LifecycleState.ACTIVE) return;
+            if (event.target && (event.target.tagName === 'BUTTON' || 
+                                 event.target.tagName === 'INPUT' ||
+                                 event.target.tagName === 'SELECT')) {
+                this._handleUIError(event.target, event.error);
+            }
+        }, true);
+        
+        window.addEventListener('unhandledrejection', (event) => {
+            if (currentState !== LifecycleState.ACTIVE) return;
+            this._handleUIError(null, event.reason);
+        });
+    },
+    
+    _setupElementProtection() {
+        const criticalButtons = [
+            'backToAppBtn',
+            'saveSectionBtn',
+            'resetSectionBtn',
+            'settingsSearch'
+        ];
+        
+        criticalButtons.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                const originalClick = el.onclick;
+                el.onclick = (e) => {
+                    if (currentState !== LifecycleState.ACTIVE) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
                     }
-                } catch(e) {}
+                    if (this._fallbackMode && id !== 'backToAppBtn') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return false;
+                    }
+                    if (originalClick) {
+                        return originalClick.call(el, e);
+                    }
+                };
+            }
+        });
+    },
+    
+    _handleUIError(element, error) {
+        this._errorCount++;
+        
+        if (this._errorCount >= this._maxErrors && !this._fallbackMode) {
+            this.enterFallbackMode();
+        }
+        
+        if (element && element.id) {
+            this._disabledElements.add(element.id);
+            element.disabled = true;
+            element.classList.add('failsafe-disabled');
+        }
+        
+        this.emit('error', { element, error, count: this._errorCount });
+    },
+    
+    enterFallbackMode() {
+        if (this._fallbackMode) return;
+        if (currentState !== LifecycleState.ACTIVE) return;
+        
+        this._fallbackMode = true;
+        
+        document.querySelectorAll('button, input, select, textarea').forEach(el => {
+            if (el.id !== 'backToAppBtn' && !el.classList.contains('failsafe-protected')) {
+                this._disabledElements.add(el.id || el.className);
+                el.disabled = true;
+                el.classList.add('failsafe-disabled');
+            }
+        });
+        
+        const container = document.getElementById('settingsContent');
+        if (container) {
+            const fallbackMsg = document.createElement('div');
+            fallbackMsg.className = 'failsafe-message';
+            fallbackMsg.style.cssText = `
+                background: var(--warning-color);
+                color: white;
+                padding: 12px 20px;
+                margin-bottom: 20px;
+                border-radius: 8px;
+                text-align: center;
+                font-size: 14px;
+            `;
+            fallbackMsg.innerHTML = `
+                <i class="fas fa-exclamation-triangle"></i> Limited mode
+                <button onclick="UIFailsafe.exitFallbackMode()" style="margin-left: 10px; padding: 4px 12px; background: white; color: var(--warning-color); border: none; border-radius: 4px; cursor: pointer;">
+                    Retry
+                </button>
+            `;
+            container.prepend(fallbackMsg);
+        }
+        
+        this.emit('fallback', true);
+        
+        this._recoveryTimer = safeSetTimeout(() => {
+            this.exitFallbackMode();
+        }, 30000);
+        activeTimers.add(this._recoveryTimer);
+    },
+    
+    exitFallbackMode() {
+        if (!this._fallbackMode) return;
+        
+        this._fallbackMode = false;
+        this._errorCount = 0;
+        
+        this._disabledElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.disabled = false;
+                el.classList.remove('failsafe-disabled');
+            }
+        });
+        this._disabledElements.clear();
+        
+        const msg = document.querySelector('.failsafe-message');
+        if (msg) msg.remove();
+        
+        if (this._recoveryTimer) {
+            clearTimeout(this._recoveryTimer);
+            activeTimers.delete(this._recoveryTimer);
+        }
+        
+        this.emit('fallback', false);
+    },
+    
+    protectElement(id) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.classList.add('failsafe-protected');
+        }
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    isInFallback() {
+        return this._fallbackMode;
+    },
+    
+    getDiagnostics() {
+        return {
+            enabled: this._enabled,
+            fallbackMode: this._fallbackMode,
+            errorCount: this._errorCount,
+            maxErrors: this._maxErrors,
+            disabledElements: Array.from(this._disabledElements)
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+UIFailsafe.init();
+
+// =============================================
+// MULTI-MODULE COORDINATOR
+// =============================================
+const MODULE_DISCOVERY = 'MODULE_DISCOVERY';
+const MODULE_PRESENCE = 'MODULE_PRESENCE';
+const ORIGIN_BIND = 'ORIGIN_BIND';
+
+const MultiModuleCoordinator = {
+    _modules: new Map(),
+    _moduleId: `settings_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    _moduleType: MODULE_NAME,
+    _busListeners: new Map(),
+    _sharedSession: null,
+    _masterModule: false,
+    _handshakeCoordinator: null,
+    _silent: true,
+    _broadcastChannel: null,
+    
+    init() {
+        initLog('MultiModuleCoordinator initializing');
+        if (!window.__MODULE_COORDINATOR__) {
+            window.__MODULE_COORDINATOR__ = this;
+            this._masterModule = true;
+        }
+        
+        this.registerModule(this._moduleType, this._moduleId);
+        
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data._moduleBus) {
+                this._handleModuleMessage(event.data);
+            }
+        });
+        
+        try {
+            this._broadcastChannel = new BroadcastChannel('knecta_settings');
+            this._broadcastChannel.onmessage = (event) => {
+                if (event.data && event.data.type) {
+                    this._handleBroadcastMessage(event.data);
+                }
+            };
+        } catch (e) {}
+        
+        successLog('MultiModuleCoordinator initialized');
+    },
+    
+    _handleBroadcastMessage(data) {
+        if (data.type === 'SETTINGS_UPDATED' && data.source !== this._moduleId) {
+            if (currentState === LifecycleState.ACTIVE && isAuthenticated) {
+                MessageTransport.send('SETTINGS_LOAD_REQUEST', {});
+            }
+        }
+        
+        if (data.type === 'LANGUAGE_CHANGED' && data.source !== this._moduleId) {
+            const event = new CustomEvent('languageChanged', {
+                detail: { language: data.language, source: 'broadcast' }
+            });
+            window.dispatchEvent(event);
+        }
+        
+        if (data.type === 'THEME_CHANGED' && data.source !== this._moduleId) {
+            if (data.theme) {
+                applyTheme(data.theme);
+            }
+        }
+        
+        if (data.type === 'PRIVACY_UPDATED' && data.source !== this._moduleId) {
+            const event = new CustomEvent('privacyUpdated', {
+                detail: { privacy: data.privacy, source: 'broadcast' }
+            });
+            window.dispatchEvent(event);
+        }
+    },
+    
+    registerModule(type, id) {
+        this._modules.set(id, {
+            type,
+            id,
+            lastSeen: Date.now(),
+            ready: currentState === LifecycleState.ACTIVE,
+            handshakeComplete: registrationCompleted,
+            sessionValid: isSessionValid(),
+            authenticated: isAuthenticated
+        });
+        
+        this._broadcast({
+            _moduleBus: true,
+            type: MODULE_PRESENCE,
+            moduleType: type,
+            moduleId: id,
+            timestamp: Date.now()
+        });
+    },
+    
+    _handleModuleMessage(data) {
+        const { type, sourceId, moduleType, target } = data;
+        
+        if (target && target !== this._moduleId && target !== 'all') return;
+        
+        switch (type) {
+            case MODULE_PRESENCE:
+                this._modules.set(sourceId, {
+                    type: moduleType,
+                    id: sourceId,
+                    lastSeen: Date.now(),
+                    ready: data.ready || false,
+                    handshakeComplete: data.handshakeComplete || false,
+                    sessionValid: data.sessionValid || false,
+                    authenticated: data.authenticated || false
+                });
+                break;
+                
+            case MODULE_DISCOVERY:
+                this._broadcast({
+                    _moduleBus: true,
+                    type: MODULE_PRESENCE,
+                    moduleType: this._moduleType,
+                    moduleId: this._moduleId,
+                    ready: currentState === LifecycleState.ACTIVE,
+                    handshakeComplete: registrationCompleted,
+                    sessionValid: isSessionValid(),
+                    authenticated: isAuthenticated,
+                    timestamp: Date.now(),
+                    target: sourceId
+                });
+                break;
+                
+            default:
+                const listeners = this._busListeners.get(type) || [];
+                listeners.forEach(listener => {
+                    try {
+                        listener(data);
+                    } catch (e) {}
+                });
+        }
+    },
+    
+    _broadcast(message) {
+        message.sourceId = this._moduleId;
+        message.timestamp = Date.now();
+        
+        MessageTransport.send('MODULE_BROADCAST', {
+            payload: message
+        });
+    },
+    
+    on(event, listener) {
+        if (!this._busListeners.has(event)) {
+            this._busListeners.set(event, []);
+        }
+        this._busListeners.get(event).push(listener);
+    },
+    
+    emit(event, data) {
+        this._broadcast({
+            _moduleBus: true,
+            type: event,
+            ...data
+        });
+    },
+    
+    getModules() {
+        const now = Date.now();
+        this._modules.forEach((module, id) => {
+            if (now - module.lastSeen > 60000) {
+                this._modules.delete(id);
+            }
+        });
+        
+        return Array.from(this._modules.values());
+    },
+    
+    hasModule(type) {
+        return Array.from(this._modules.values()).some(m => m.type === type);
+    },
+    
+    getSharedSession() {
+        return window.session.user ? { user: window.session.user } : null;
+    },
+    
+    setSharedSession(sessionData) {
+    },
+    
+    getDiagnostics() {
+        return {
+            moduleId: this._moduleId,
+            moduleType: this._moduleType,
+            masterModule: this._masterModule,
+            modulesCount: this._modules.size,
+            modules: Array.from(this._modules.values())
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+MultiModuleCoordinator.init();
+
+// =============================================
+// UI BRIDGE
+// =============================================
+const UIBridge = {
+    _listeners: new Map(),
+    _domEvents: new Map(),
+    _initialized: false,
+    _silent: true,
+    
+    init() {
+        if (this._initialized) return this;
+        initLog('UIBridge initializing');
+        this._setupDefaultListeners();
+        this._initialized = true;
+        successLog('UIBridge initialized');
+        return this;
+    },
+    
+    _setupDefaultListeners() {
+        this.register('updateSetting', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+                errorLog('Cannot update setting: auth not ready');
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                const result = await SettingsState.update(data.section, data.key, data.value);
+                return result;
+            } catch (error) {
+                errorLog('Error updating setting:', error);
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('saveSettings', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                await saveSettings();
+                return { success: true };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('resetSettings', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                await SettingsState.reset();
+                return { success: true };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('loadSettings', async () => {
+            if (currentState !== LifecycleState.ACTIVE) {
+                return { success: false, error: 'Module not active' };
+            }
+            
+            if (!isAuthenticated) {
+                return { success: false, error: 'Auth not ready' };
+            }
+            
+            try {
+                const settings = await SettingsState.load();
+                return { success: true, data: settings };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+        
+        this.register('sendMessage', (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            MessageTransport.send('SEND_MESSAGE', data);
+        });
+        
+        this.register('updateProfile', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('profile', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updatePrivacy', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('privacy', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateNotifications', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('notifications', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateAppearance', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('appearance', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateSecurity', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('security', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateChat', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('chat', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateFriends', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('friends', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateGroups', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('groups', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateCalls', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('calls', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateStatus', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('status', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateStorage', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('storage', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateMood', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('mood', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateAdvanced', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('advanced', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateBackup', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('backup', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('updateDanger', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await updateSetting('danger', data.key, data.value);
+            } catch (error) {}
+        });
+        
+        this.register('logout', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await handleLogout();
+            } catch (error) {}
+        });
+        
+        this.register('terminateSession', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await terminateSession(data.sessionId);
+            } catch (error) {}
+        });
+        
+        this.register('terminateAllSessions', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await terminateAllSessions();
+            } catch (error) {}
+        });
+        
+        this.register('unblockUser', async (data) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await unblockUser(data.userId);
+            } catch (error) {}
+        });
+        
+        this.register('clearChatCache', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await clearChatCache();
+            } catch (error) {}
+        });
+        
+        this.register('clearMediaCache', async () => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            try {
+                await clearMediaCache();
+            } catch (error) {}
+        });
+    },
+    
+    register(event, handler) {
+        if (!this._listeners.has(event)) {
+            this._listeners.set(event, []);
+        }
+        this._listeners.get(event).push(handler);
+        return this;
+    },
+    
+    unregister(event, handler) {
+        const handlers = this._listeners.get(event);
+        if (handlers) {
+            const index = handlers.indexOf(handler);
+            if (index !== -1) handlers.splice(index, 1);
+        }
+        return this;
+    },
+    
+    trigger(event, data) {
+        const handlers = this._listeners.get(event) || [];
+        handlers.forEach(handler => {
+            try {
+                handler(data);
+            } catch (e) {
+                errorLog(`Error in UI bridge handler for ${event}:`, e);
+            }
+        });
+        return handlers.length > 0;
+    },
+    
+    attachDomEvent(elementId, eventType, bridgeEvent, transform = null) {
+        const element = document.getElementById(elementId);
+        if (!element) return this;
+        
+        const handler = (domEvent) => {
+            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            const data = transform ? transform(domEvent) : { value: domEvent.target.value };
+            this.trigger(bridgeEvent, data);
+        };
+        
+        element.addEventListener(eventType, handler);
+        
+        if (!this._domEvents.has(elementId)) {
+            this._domEvents.set(elementId, []);
+        }
+        this._domEvents.get(elementId).push({ eventType, handler, bridgeEvent });
+        
+        return this;
+    },
+    
+    detachDomEvents(elementId) {
+        const events = this._domEvents.get(elementId);
+        if (!events) return this;
+        
+        const element = document.getElementById(elementId);
+        if (element) {
+            events.forEach(({ eventType, handler }) => {
+                element.removeEventListener(eventType, handler);
+            });
+        }
+        
+        this._domEvents.delete(elementId);
+        return this;
+    },
+    
+    detachAll() {
+        this._domEvents.forEach((events, elementId) => {
+            this.detachDomEvents(elementId);
+        });
+        this._domEvents.clear();
+        this._listeners.clear();
+    },
+    
+    getDiagnostics() {
+        return {
+            listenersCount: this._listeners.size,
+            domEventsCount: this._domEvents.size,
+            initialized: this._initialized
+        };
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+    }
+};
+
+UIBridge.init();
+
+// =============================================
+// MODULE CORE CONTROLLER
+// =============================================
+const ModuleCoreController = {
+    _initialized: false,
+    _startTime: null,
+    _components: new Map(),
+    _listeners: new Set(),
+    _silent: true,
+    
+    init() {
+        initLog('ModuleCoreController initializing');
+        this._registerComponents();
+        successLog('ModuleCoreController initialized');
+        return this;
+    },
+    
+    _registerComponents() {
+        this._components.set('environment', IframeEnvironment);
+        this._components.set('storage', SafeStorage);
+        this._components.set('compatibility', CompatibilityBridge);
+        this._components.set('origin', OriginAdapter);
+        this._components.set('governor', StartupGovernor);
+        this._components.set('transport', IframeTransport);
+        this._components.set('heartbeat', HeartbeatClient);
+        this._components.set('session', SessionClient);
+        this._components.set('reliability', ReliabilityLayer);
+        this._components.set('dispatcher', MessageDispatcher);
+        this._components.set('security', SecurityValidator);
+        this._components.set('connection', ParentConnectionManager);
+        this._components.set('handshake', HandshakeManager);
+        this._components.set('lifecycle', ModuleLifecycleController);
+        this._components.set('recovery', RecoveryManager);
+        this._components.set('ui', UIBridge);
+        this._components.set('api', ApiCore);
+        this._components.set('navigation', NavigationGuard);
+        this._components.set('failsafe', UIFailsafe);
+        this._components.set('coordinator', MultiModuleCoordinator);
+        this._components.set('reliabilityEngine', ReliabilityEngine);
+        this._components.set('settingsState', SettingsState);
+    },
+    
+    async start() {
+        if (this._initialized) return this;
+        
+        this._startTime = Date.now();
+        this.emit('starting', { timestamp: this._startTime });
+        
+        try {
+            this.emit('component_starting', { component: 'environment' });
+            IframeEnvironment.detect();
+            
+            this.emit('component_starting', { component: 'security' });
+            SecurityValidator.init();
+            
+            this.emit('component_starting', { component: 'connection' });
+            ParentConnectionManager.init();
+            
+            this.emit('component_starting', { component: 'dispatcher' });
+            MessageDispatcher.init();
+            
+            this.emit('component_starting', { component: 'reliability' });
+            ReliabilityLayer.init();
+            
+            this.emit('component_starting', { component: 'handshake' });
+            HandshakeManager.init();
+            
+            this.emit('component_starting', { component: 'session' });
+            SessionClient.init();
+            
+            this.emit('component_starting', { component: 'ui' });
+            
+            this.emit('component_starting', { component: 'lifecycle' });
+            ModuleLifecycleController.start();
+            
+            this._initialized = true;
+            this.emit('started', { timestamp: Date.now() });
+            
+        } catch (error) {
+            this.emit('error', { error: error.message });
+            ModuleLifecycleController.error(error);
+        }
+        
+        return this;
+    },
+    
+    stop() {
+        ModuleLifecycleController.stop();
+        HeartbeatClient.stop();
+        clearAllTimers();
+        this._initialized = false;
+        this.emit('stopped', { timestamp: Date.now() });
+        return this;
+    },
+    
+    getComponent(name) {
+        return this._components.get(name);
+    },
+    
+    isInitialized() {
+        return this._initialized;
+    },
+    
+    on(event, listener) {
+        this._listeners.add({ event, listener });
+        return this;
+    },
+    
+    off(event, listener) {
+        this._listeners.forEach(item => {
+            if (item.event === event && item.listener === listener) {
+                this._listeners.delete(item);
+            }
+        });
+        return this;
+    },
+    
+    emit(event, data) {
+        this._listeners.forEach(item => {
+            if (item.event === event) {
+                try {
+                    item.listener(data);
+                } catch (e) {}
+            }
+        });
+    },
+    
+    getDiagnostics() {
+        const diag = {
+            initialized: this._initialized,
+            uptime: this._startTime ? Date.now() - this._startTime : 0,
+            components: {}
+        };
+        
+        this._components.forEach((component, name) => {
+            if (component.getDiagnostics) {
+                diag.components[name] = component.getDiagnostics();
+            }
+        });
+        
+        return diag;
+    },
+    
+    setSilent(silent) {
+        this._silent = silent;
+        this._components.forEach(component => {
+            if (component.setSilent) {
+                component.setSilent(silent);
             }
         });
     }
-}, 0);
+};
 
-function applySettingToStatusModule(section, key, value) {
-    // NOTE: This function is outside the main IIFE, so logStatus is not accessible here.
-    // Use console.log directly for any debug output needed.
-    if (section === 'appearance') {
-        if (key === 'theme') {
-            const theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
-            document.documentElement.setAttribute('data-theme', theme);
-            document.body.setAttribute('data-theme', theme);
+ModuleCoreController.init();
+
+// =============================================
+// CORE DATA STORAGE
+// =============================================
+const coreData = {
+    friendsList: [],
+    groupsList: [],
+    chatHistory: [],
+    notifications: [],
+    settings: null,
+    user: null
+};
+
+// =============================================
+// EXPORT SETTINGS_MENU
+// =============================================
+const SETTINGS_MENU = [
+    { id: 'profile', icon: 'fas fa-user', title: 'Profile' },
+    { id: 'security', icon: 'fas fa-shield-alt', title: 'Security' },
+    { id: 'privacy', icon: 'fas fa-lock', title: 'Privacy' },
+    { id: 'chat', icon: 'fas fa-comments', title: 'Chat' },
+    { id: 'friends', icon: 'fas fa-user-friends', title: 'Friends' },
+    { id: 'groups', icon: 'fas fa-users', title: 'Groups' },
+    { id: 'calls', icon: 'fas fa-phone', title: 'Calls' },
+    { id: 'status', icon: 'fas fa-circle', title: 'Status' },
+    { id: 'notifications', icon: 'fas fa-bell', title: 'Notifications' },
+    { id: 'appearance', icon: 'fas fa-palette', title: 'Appearance' },
+    { id: 'storage', icon: 'fas fa-database', title: 'Storage' },
+    { id: 'mood', icon: 'fas fa-smile', title: 'Mood' },
+    { id: 'advanced', icon: 'fas fa-cogs', title: 'Advanced' },
+    { id: 'backup', icon: 'fas fa-cloud-upload-alt', title: 'Backup & Restore' },
+    { id: 'danger', icon: 'fas fa-exclamation-triangle', title: 'Danger Zone', danger: true }
+];
+
+// =============================================
+// PARENT MESSAGE TYPES
+// =============================================
+const PARENT_MESSAGE_TYPES = {
+    READY: 'READY',
+    ACK: 'ACK',
+    SESSION: 'SESSION',
+    DATA: 'DATA',
+    ERROR: 'ERROR',
+    HEARTBEAT: 'HEARTBEAT',
+    STATUS: 'STATUS',
+    HANDSHAKE: 'HANDSHAKE',
+    SESSION_REQUEST: 'SESSION_REQUEST',
+    SESSION_RESPONSE: 'SESSION_RESPONSE',
+    SESSION_UPDATE: 'SESSION_UPDATE',
+    CHILD_READY: 'CHILD_READY',
+    PARENT_READY: 'PARENT_READY',
+    AUTH_READY: 'AUTH_READY',
+    AUTH_ERROR: 'AUTH_ERROR',
+    AUTH_LOST: 'AUTH_LOST',
+    LOGOUT: 'LOGOUT',
+    REFRESH_DATA: 'REFRESH_DATA',
+    UPDATE_DATA: 'UPDATE_DATA',
+    CORE_READY: 'CORE_READY',
+    IFRAME_AUTH_STATE: 'IFRAME_AUTH_STATE',
+    IFRAME_AUTH_ERROR: 'IFRAME_AUTH_ERROR',
+    CHILD_CLOSING: 'CHILD_CLOSING',
+    
+    PING: 'PING',
+    PONG: 'PONG',
+    
+    SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+    SETTINGS_LOAD_REQUEST: 'SETTINGS_LOAD_REQUEST',
+    SETTINGS_LOAD_RESPONSE: 'SETTINGS_LOAD_RESPONSE',
+    SETTINGS_UPDATE_CONFIRMED: 'SETTINGS_UPDATE_CONFIRMED',
+    SETTINGS_PROFILE_UPDATED: 'SETTINGS_PROFILE_UPDATED',
+    SETTINGS_PRIVACY_UPDATED: 'SETTINGS_PRIVACY_UPDATED',
+    SETTINGS_NOTIFICATIONS_UPDATED: 'SETTINGS_NOTIFICATIONS_UPDATED',
+    SETTINGS_APPEARANCE_UPDATED: 'SETTINGS_APPEARANCE_UPDATED',
+    SETTINGS_SECURITY_UPDATED: 'SETTINGS_SECURITY_UPDATED',
+    SETTINGS_STORAGE_UPDATED: 'SETTINGS_STORAGE_UPDATED',
+    SETTINGS_MOOD_UPDATED: 'SETTINGS_MOOD_UPDATED',
+    USER_BLOCKED: 'USER_BLOCKED',
+    USER_UNBLOCKED: 'USER_UNBLOCKED',
+    SESSION_TERMINATED: 'SESSION_TERMINATED',
+    ALL_SESSIONS_TERMINATED: 'ALL_SESSIONS_TERMINATED',
+    PROFILE_PHOTO_UPDATED: 'PROFILE_PHOTO_UPDATED',
+    PASSWORD_CHANGED: 'PASSWORD_CHANGED',
+    DATA_EXPORT_REQUESTED: 'DATA_EXPORT_REQUESTED',
+    ACCOUNT_DELETION_REQUESTED: 'ACCOUNT_DELETION_REQUESTED',
+    CACHE_CLEARED: 'CACHE_CLEARED',
+    SETTINGS_DATA: 'SETTINGS_DATA',
+    SETTINGS_FETCH: 'SETTINGS_FETCH',
+    SETTINGS_FETCH_ERROR: 'SETTINGS_FETCH_ERROR',
+    SETTINGS_UPDATE: 'SETTINGS_UPDATE',
+    SETTINGS_UPDATE_ERROR: 'SETTINGS_UPDATE_ERROR',
+    SETTINGS_GLOBAL_UPDATE: 'SETTINGS_GLOBAL_UPDATE'
+};
+
+// =============================================
+// LOAD FROM LOCAL STORAGE
+// =============================================
+async function loadFromLocalStorage() {
+    try {
+        const cachedUser = SafeStorage.getJSON('current_user', null);
+        if (cachedUser) {
+            const sessionData = {
+                userId: cachedUser.id || cachedUser.userId,
+                token: null,
+                user: cachedUser
+            };
+            if (__isValidSession(sessionData)) {
+                currentUser = cachedUser;
+                coreData.user = cachedUser;
+                window.session.user = cachedUser;
+                if (DEBUG) console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
+            } else {
+                console.warn('[settings-core] ⚠️ Cached user invalid, not loading');
+            }
         }
-        if (key === 'fontSize') {
-            document.documentElement.style.fontSize = value + 'px';
+        
+        const savedSettings = SafeStorage.getJSON('user_settings', null);
+        if (savedSettings) {
+            userSettings = savedSettings;
+            coreData.settings = savedSettings;
+            SettingsState.data = savedSettings;
+            SettingsState.loaded = true;
+            
+            SettingsStore.load({
+                account: savedSettings.profile || {},
+                privacy: savedSettings.privacy || {},
+                notifications: savedSettings.notifications || {},
+                appearance: savedSettings.appearance || {}
+            });
+        } else {
+            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            SettingsState.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            
+            SettingsStore.load({
+                account: DEFAULT_SETTINGS.profile || {},
+                privacy: DEFAULT_SETTINGS.privacy || {},
+                notifications: DEFAULT_SETTINGS.notifications || {},
+                appearance: DEFAULT_SETTINGS.appearance || {}
+            });
         }
-        if (key === 'language') window.__appLanguage = value;
-        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
-    }
-    if (section === 'notifications') {
-        if (key === 'soundEnabled' || key === 'notificationSound') {
-            window.__notificationSoundEnabled = value;
-            if (typeof window.updateNotificationSound === 'function') window.updateNotificationSound(value);
-        }
-        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
-        if (key === 'desktopEnabled') {
-            window.desktopNotificationsEnabled = value;
-            if (typeof window.updateDesktopNotifications === 'function') window.updateDesktopNotifications(value);
-        }
-        if (key === 'enableNotifications' || key === 'messageNotifications') window.__messageNotificationsEnabled = value;
-    }
-    if (section === 'privacy') {
-        if (key === 'onlineStatus') window.__showOnlineStatus = value;
-        if (key === 'lastSeen')     window.__showLastSeen     = value;
-    }
-    if (section === 'chat') {
-        if (key === 'enterToSend')    window.__enterToSend    = value;
-        if (key === 'showTimestamps') window.__showTimestamps = value;
+        
+        Object.keys(DEFAULT_SETTINGS).forEach(section => {
+            if (!userSettings[section]) {
+                userSettings[section] = JSON.parse(JSON.stringify(DEFAULT_SETTINGS[section]));
+            }
+        });
+        
+        calculateStorageUsage();
+        return true;
+    } catch (error) {
+        if (DEBUG) console.log('[settings-core] ⚠️ Error loading from localStorage:', error);
+        userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        coreData.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        SettingsState.data = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        
+        SettingsStore.load({
+            account: DEFAULT_SETTINGS.profile || {},
+            privacy: DEFAULT_SETTINGS.privacy || {},
+            notifications: DEFAULT_SETTINGS.notifications || {},
+            appearance: DEFAULT_SETTINGS.appearance || {}
+        });
+        return false;
     }
 }
+
+// =============================================
+// APPLY THEME
+// =============================================
+function applyTheme(theme) {
+    if (!theme) return;
+    if (currentState !== LifecycleState.ACTIVE) return;
+    
+    try {
+        const root = document.documentElement;
+        
+        if (theme === 'auto') {
+            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+        } else {
+            root.setAttribute('data-theme', theme);
+        }
+        
+        const event = new CustomEvent('themeApplied', {
+            detail: { theme, timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {}
+}
+
+function dispatchSettingsLoadedEvent() {
+    try {
+        const event = new CustomEvent('settingsLoaded', {
+            detail: {
+                settings: userSettings,
+                timestamp: Date.now()
+            }
+        });
+        window.dispatchEvent(event);
+    } catch (error) {}
+}
+
+function disableSettingsControls() {
+    const event = new CustomEvent('settingsControlsDisabled', {
+        detail: {
+            timestamp: Date.now(),
+            reason: 'no_session'
+        }
+    });
+    window.dispatchEvent(event);
+}
+
+// =============================================
+// CALCULATE STORAGE USAGE
+// =============================================
+function calculateStorageUsage() {
+    try {
+        if (!userSettings || !userSettings.storage) return 0;
+        const chatSize = userSettings.storage.storageBreakdown?.chats || 0;
+        const mediaSize = userSettings.storage.storageBreakdown?.media || 0;
+        const otherSize = userSettings.storage.storageBreakdown?.other || 0;
+        userSettings.storage.totalStorageUsed = chatSize + mediaSize + otherSize;
+        userSettings.storage.chatCacheSize = chatSize;
+        userSettings.storage.mediaCacheSize = mediaSize;
+        userSettings.storage.otherCacheSize = otherSize;
+        return userSettings.storage.totalStorageUsed;
+    } catch (error) {
+        return 0;
+    }
+}
+
+// =============================================
+// FORMAT STORAGE SIZE
+// =============================================
+function formatStorageSize(bytes) {
+    if (bytes === 0 || !bytes) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// =============================================
+// GET MOOD TEXT
+// =============================================
+function getMoodText(mood) {
+    const moodTexts = {
+        neutral: 'Neutral',
+        happy: 'Happy',
+        calm: 'Calm',
+        energetic: 'Energetic',
+        focused: 'Focused',
+        relaxed: 'Relaxed',
+        stressed: 'Stressed',
+        tired: 'Tired',
+        excited: 'Excited'
+    };
+    return moodTexts[mood] || 'Neutral';
+}
+
+// =============================================
+// GET MOOD COLOR
+// =============================================
+function getMoodColor(mood) {
+    const colors = {
+        neutral: '#A9A9A9',
+        happy: '#FFD700',
+        calm: '#4A90E2',
+        energetic: '#FF6B6B',
+        focused: '#7B68EE',
+        relaxed: '#4ECDC4',
+        stressed: '#FF8C00',
+        tired: '#808080',
+        excited: '#FF1493'
+    };
+    return colors[mood] || '#A9A9A9';
+}
+
+// =============================================
+// LOAD USER DATA - USES authorizedRequest
+// =============================================
+async function loadUserData() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    
+    try {
+        const response = await authorizedRequest('/api/profile', { method: 'GET' });
+        if (response.success && response.data) {
+            const user = response.data.user || response.data;
+            if (user) {
+                const sessionData = {
+                    userId: user.id || user.userId,
+                    token: null,
+                    user: user
+                };
+                if (__isValidSession(sessionData)) {
+                    currentUser = user;
+                    coreData.user = user;
+                    window.session.user = user;
+                    SafeStorage.setJSON('current_user', currentUser);
+                    updateUserUI();
+                } else {
+                    console.warn('[settings-core] ⚠️ Loaded user data invalid');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[settings-core] Error loading user data:', error);
+    }
+}
+
+// =============================================
+// LOAD ACTIVE SESSIONS - USES authorizedRequest
+// =============================================
+async function loadActiveSessions() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    
+    try {
+        const response = await authorizedRequest('/api/auth/sessions', { method: 'GET' });
+        if (response.success && response.data) {
+            activeSessions = response.data.sessions || response.data || [];
+            
+            const event = new CustomEvent('activeSessionsLoaded', {
+                detail: { sessions: activeSessions, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {
+        console.error('[settings-core] Error loading active sessions:', error);
+    }
+}
+
+// =============================================
+// LOAD BLOCKED USERS - USES authorizedRequest
+// =============================================
+async function loadBlockedUsers() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    
+    try {
+        const response = await authorizedRequest('/api/users/blocked', { method: 'GET' });
+        if (response.success && response.data) {
+            blockedUsers = response.data.blockedUsers || response.data || [];
+            
+            const event = new CustomEvent('blockedUsersLoaded', {
+                detail: { users: blockedUsers, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {
+        console.error('[settings-core] Error loading blocked users:', error);
+    }
+}
+
+// =============================================
+// LOAD USER CONTACTS - USES authorizedRequest
+// =============================================
+async function loadUserContacts() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    
+    try {
+        const response = await authorizedRequest('/api/friends/contacts', { method: 'GET' });
+        if (response.success && response.data) {
+            userContacts = response.data.contacts || response.data || [];
+            
+            const event = new CustomEvent('userContactsLoaded', {
+                detail: { contacts: userContacts, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {
+        console.error('[settings-core] Error loading contacts:', error);
+    }
+}
+
+// =============================================
+// LOAD USER GROUPS - USES authorizedRequest
+// =============================================
+async function loadUserGroups() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    
+    try {
+        const response = await authorizedRequest('/api/groups', { method: 'GET' });
+        if (response.success && response.data) {
+            userGroups = response.data.groups || response.data || [];
+            coreData.groupsList = userGroups;
+            
+            const event = new CustomEvent('userGroupsLoaded', {
+                detail: { groups: userGroups, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+        }
+    } catch (error) {
+        console.error('[settings-core] Error loading groups:', error);
+    }
+}
+
+// =============================================
+// UPDATE SETTING - REAL BACKEND PERSISTENCE
+// =============================================
+async function updateSetting(section, key, value) {
+    // No connection/auth gate - always allow updates
+    return await SettingsState.update(section, key, value);
+}
+
+// =============================================
+// SAVE ALL SETTINGS
+// =============================================
+async function saveSettings() {
+    try {
+        // Always save to localStorage first (works offline/standalone)
+        SafeStorage.setJSON('user_settings', userSettings);
+        coreData.settings = userSettings;
+        SettingsState._saveToCache();
+
+        // Push full settings into AppSettings (single source of truth)
+        if (window.AppSettings) {
+            window.AppSettings.merge(userSettings);
+        }
+        
+        if (userSettings.appearance) {
+            applyTheme(userSettings.appearance.theme || 'auto');
+        }
+        
+        // If offline, queue the entire settings object for later sync
+        if (!OfflineQueue.isOnline()) {
+            // Queue each setting individually
+            for (const [section, values] of Object.entries(userSettings)) {
+                if (values && typeof values === 'object') {
+                    for (const [key, value] of Object.entries(values)) {
+                        OfflineQueue.enqueue(section, key, value);
+                    }
+                }
+            }
+            console.log(`[${MODULE_NAME}] 📦 Queued settings for offline sync`);
+        } else {
+            // If online, try to sync all pending queue items
+            try {
+                await OfflineQueue.syncAll();
+            } catch (e) {
+                console.warn(`[${MODULE_NAME}] ⚠️ Could not sync queue on save:`, e.message);
+            }
+        }
+        
+        // Broadcast to parent frame (fire-and-forget — ok if no parent)
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SETTINGS_UPDATED',
+                    module: MODULE_NAME,
+                    settings: userSettings,
+                    timestamp: Date.now()
+                }, '*');
+            }
+        } catch (e) { /* no parent — that's fine */ }
+        
+        // Also broadcast to all frames in the same window (chat, etc.)
+        try {
+            window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                detail: { settings: userSettings, timestamp: Date.now() }
+            }));
+        } catch (e) {}
+        
+        unsavedChanges = false;
+        
+        const event = new CustomEvent('settingsSaved', {
+            detail: { timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+        
+        return true;
+    } catch (error) {
+        throw error;
+    }
+}
+
+// =============================================
+// HANDLE LOGOUT - USES authorizedRequest
+// =============================================
+async function handleLogout() {
+    if (!isAuthenticated) {
+        return false;
+    }
+    
+    try {
+        await authorizedRequest('/api/auth/logout', { method: 'POST' });
+        
+        await MessageTransport.send('SESSION_INVALIDATED', {});
+        
+        isAuthenticated = false;
+        clearSession();
+        parentSessionReceived = false;
+        sessionValidated = false;
+        
+        HeartbeatClient.stop();
+        disableSettingsControls();
+        
+        setState(LifecycleState.WAITING_AUTH, 'user_logout');
+        
+        const event = new CustomEvent('userLoggedOut', {
+            detail: { timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+        
+        return true;
+    } catch (error) {
+        console.error('[settings-core] Logout error:', error);
+        return false;
+    }
+}
+
+// =============================================
+// TERMINATE SESSION - USES authorizedRequest
+// =============================================
+async function terminateSession(sessionId) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+        throw new Error('Not ready');
+    }
+    
+    try {
+        const response = await authorizedRequest('/api/auth/terminate-session', {
+            method: 'POST',
+            body: { sessionId }
+        });
+        
+        if (response.success) {
+            await loadActiveSessions();
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.SESSION_TERMINATED, {
+                sessionId
+            });
+            
+            const event = new CustomEvent('sessionTerminated', {
+                detail: { sessionId, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        if (userSettings.storage) {
+            userSettings.storage.storageBreakdown.chats = 0;
+            calculateStorageUsage();
+            unsavedChanges = true;
+            window.dispatchEvent(new CustomEvent('chatCacheCleared', {
+                detail: { timestamp: Date.now(), mode: 'local-fallback' }
+            }));
+            return true;
+        }
+        throw error;
+    }
+}
+
+// =============================================
+// TERMINATE ALL SESSIONS - USES authorizedRequest
+// =============================================
+async function terminateAllSessions() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+        throw new Error('Not ready');
+    }
+    
+    try {
+        const response = await authorizedRequest('/api/auth/terminate-all-sessions', {
+            method: 'POST'
+        });
+        
+        if (response.success) {
+            await loadActiveSessions();
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.ALL_SESSIONS_TERMINATED, {});
+            
+            const event = new CustomEvent('allSessionsTerminated', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        if (userSettings.storage) {
+            userSettings.storage.storageBreakdown.media = 0;
+            calculateStorageUsage();
+            unsavedChanges = true;
+            window.dispatchEvent(new CustomEvent('mediaCacheCleared', {
+                detail: { timestamp: Date.now(), mode: 'local-fallback' }
+            }));
+            return true;
+        }
+        throw error;
+    }
+}
+
+// =============================================
+// UNBLOCK USER - USES authorizedRequest
+// =============================================
+async function unblockUser(userId) {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+        throw new Error('Not ready');
+    }
+    
+    try {
+        const response = await authorizedRequest(`/api/friends/${encodeURIComponent(userId)}/unblock`, {
+            method: 'POST',
+            body: null
+        });
+        
+        if (response.success) {
+            await loadBlockedUsers();
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.USER_UNBLOCKED, {
+                userId
+            });
+            
+            const event = new CustomEvent('userUnblocked', {
+                detail: { userId, timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        throw error;
+    }
+}
+
+// =============================================
+// CLEAR CHAT CACHE - USES authorizedRequest
+// =============================================
+async function clearChatCache() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+        throw new Error('Not ready');
+    }
+    
+    try {
+        const response = await authorizedRequest('/api/storage/clear-chat-cache', {
+            method: 'POST'
+        });
+        
+        if (response.success && userSettings.storage) {
+            userSettings.storage.storageBreakdown.chats = 0;
+            userSettings.storage.totalStorageUsed = 
+                (userSettings.storage.storageBreakdown.media || 0) + 
+                (userSettings.storage.storageBreakdown.other || 0);
+            calculateStorageUsage();
+            unsavedChanges = true;
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
+                cacheType: 'chat'
+            });
+            
+            const event = new CustomEvent('chatCacheCleared', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        throw error;
+    }
+}
+
+// =============================================
+// CLEAR MEDIA CACHE - USES authorizedRequest
+// =============================================
+async function clearMediaCache() {
+    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+        throw new Error('Not ready');
+    }
+    
+    try {
+        const response = await authorizedRequest('/api/storage/clear-media-cache', {
+            method: 'POST'
+        });
+        
+        if (response.success && userSettings.storage) {
+            userSettings.storage.storageBreakdown.media = 0;
+            userSettings.storage.totalStorageUsed = 
+                (userSettings.storage.storageBreakdown.chats || 0) + 
+                (userSettings.storage.storageBreakdown.other || 0);
+            calculateStorageUsage();
+            unsavedChanges = true;
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
+                cacheType: 'media'
+            });
+            
+            const event = new CustomEvent('mediaCacheCleared', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        throw error;
+    }
+}
+
+// =============================================
+// UPDATE USER UI
+// =============================================
+function updateUserUI() {
+    try {
+        const event = new CustomEvent('userUIUpdate', {
+            detail: {
+                user: currentUser,
+                timestamp: Date.now()
+            }
+        });
+        window.dispatchEvent(event);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// INITIALIZE UI
+// =============================================
+function initializeUI() {
+    if (currentState !== LifecycleState.ACTIVE) return false;
+    
+    try {
+        const event = new CustomEvent('coreUIInitialized', {
+            detail: {
+                timestamp: Date.now(),
+                mode: isAuthenticated ? 'authenticated' : 'no_session',
+                user: currentUser,
+                environment: IframeEnvironment.getEnvironment()
+            }
+        });
+        window.dispatchEvent(event);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// SECURE FETCH WRAPPER - USES authorizedRequest
+// =============================================
+async function secureFetchWrapper(endpoint, method = 'GET', data = null, options = {}) {
+    if (currentState !== LifecycleState.ACTIVE) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Cannot perform action: not ACTIVE state',
+            data: null
+        };
+    }
+    
+    if (!isAuthenticated) {
+        return {
+            success: false,
+            status: 'error',
+            message: 'Authentication not ready',
+            data: null
+        };
+    }
+    
+    try {
+        const response = await authorizedRequest(endpoint, {
+            method: method,
+            body: data,
+            headers: options.headers
+        });
+        
+        return response;
+    } catch (error) {
+        return {
+            success: false,
+            status: 'error',
+            message: error.message || 'Request failed',
+            data: null
+        };
+    }
+}
+
+// =============================================
+// SAFE LOAD USER DATA
+// =============================================
+async function safeLoadUserData() {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+        return null;
+    }
+    
+    try {
+        if (window.session.user) {
+            const sessionData = {
+                userId: window.session.user.id || window.session.user.userId,
+                token: window.session.token,
+                user: window.session.user
+            };
+            if (__isValidSession(sessionData)) {
+                currentUser = window.session.user;
+                coreData.user = window.session.user;
+                SafeStorage.setJSON('current_user', currentUser);
+                return currentUser;
+            }
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD SETTINGS
+// =============================================
+async function safeLoadSettings() {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+        return null;
+    }
+    
+    try {
+        const settings = await SettingsState.load();
+        if (settings) {
+            userSettings = settings;
+            coreData.settings = settings;
+            return settings;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD BLOCKED USERS
+// =============================================
+async function safeLoadBlockedUsers() {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/users/blocked', 'GET');
+        const blockedData = response?.data?.blockedUsers || response?.blockedUsers || [];
+        if (blockedData) {
+            blockedUsers = blockedData;
+            return blockedUsers;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD ACTIVE SESSIONS
+// =============================================
+async function safeLoadActiveSessions() {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
+        const sessionsData = response?.data?.sessions || response?.sessions || [];
+        if (sessionsData) {
+            activeSessions = sessionsData;
+            return activeSessions;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD USER CONTACTS
+// =============================================
+async function safeLoadUserContacts() {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/friends/contacts', 'GET');
+        const contactsData = response?.data?.contacts || response?.contacts || [];
+        if (contactsData) {
+            userContacts = contactsData;
+            return userContacts;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// SAFE LOAD USER GROUPS
+// =============================================
+async function safeLoadUserGroups() {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    
+    try {
+        const response = await secureFetchWrapper('/api/groups', 'GET');
+        const groupsData = response?.data?.groups || response?.groups || [];
+        if (groupsData) {
+            userGroups = groupsData;
+            coreData.groupsList = groupsData;
+            return userGroups;
+        }
+        return null;
+    } catch (error) {
+        return null;
+    }
+}
+
+// =============================================
+// MAKE SAFE REQUEST
+// =============================================
+async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
+    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+        throw new Error('Authentication not available');
+    }
+    return await secureFetchWrapper(endpoint, method, data, options);
+}
+
+// =============================================
+// NOTIFY PARENT AUTH STATE
+// =============================================
+function notifyParentAuthState(hasAuth) {
+    try {
+        MessageTransport.send('IFRAME_AUTH_STATE', {
+            hasAuth: hasAuth,
+            iframeId: FRAME_ID
+        });
+    } catch (error) {}
+}
+
+// =============================================
+// NOTIFY PARENT AUTH ERROR
+// =============================================
+let authErrorNotified = false;
+function notifyParentAuthError() {
+    if (authErrorNotified) return;
+    try {
+        MessageTransport.send('IFRAME_AUTH_ERROR', {
+            iframeId: FRAME_ID,
+            message: 'Authentication required',
+            tokenExpired: true
+        });
+        authErrorNotified = true;
+    } catch (error) {}
+}
+
+// =============================================
+// GET SECURE TOKEN
+// =============================================
+function getSecureToken() {
+    return window.session.token;
+}
+
+// =============================================
+// WAIT FOR TOKEN
+// =============================================
+async function waitForToken(timeout = 10000) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+        if (isAuthenticated && window.session.token) return true;
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return false;
+}
+
+// =============================================
+// START PASSIVE AUTH MONITORING
+// =============================================
+function startPassiveAuthMonitoring() {}
+
+// =============================================
+// START BACKGROUND TASKS - AUTH-GATED
+// =============================================
+function startBackgroundTasks() {
+    try {
+        if (backgroundTasksStarted) return;
+        if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+            console.log(`[${MODULE_NAME}] ⏳ Cannot start background tasks: auth not ready`);
+            return;
+        }
+        
+        console.log(`[${MODULE_NAME}] 🚀 Starting background tasks`);
+        backgroundTasksStarted = true;
+        
+        Promise.allSettled([
+            loadUserData(),
+            loadActiveSessions(),
+            loadBlockedUsers(),
+            loadUserContacts(),
+            loadUserGroups()
+        ]).then(() => {
+            console.log(`[${MODULE_NAME}] ✅ Background tasks completed`);
+        }).catch((error) => {
+            console.error(`[${MODULE_NAME}] ❌ Background tasks error:`, error);
+        });
+    } catch (error) {
+        backgroundTasksStarted = false;
+        console.error(`[${MODULE_NAME}] ❌ Failed to start background tasks:`, error);
+    }
+}
+
+// =============================================
+// CHECK AUTHENTICATION STATE
+// =============================================
+function checkAuthenticationState() {
+    return isAuthenticated && isSessionValid();
+}
+
+// =============================================
+// VERIFY PARENT PRESENCE
+// =============================================
+function verifyParentPresence() {
+    return OriginAdapter.isParentVerified();
+}
+
+// =============================================
+// SETUP SECURE MESSAGING CHANNEL
+// =============================================
+function setupSecureMessagingChannel() {
+    return true;
+}
+
+// =============================================
+// START PARENT HANDSHAKE
+// =============================================
+function startParentHandshake(options = {}) {
+    return HandshakeManager.startHandshake(options);
+}
+
+// =============================================
+// SEND MESSAGE TO PARENT
+// =============================================
+function sendMessageToParent(message) {
+    return safeSend(message);
+}
+
+// =============================================
+// RESET UI FOR LOGOUT
+// =============================================
+function resetUIForLogout() {
+    try {
+        isAuthenticated = false;
+        clearSession();
+        parentSessionReceived = false;
+        sessionValidated = false;
+        window.parentReady = false;
+        parentReadyReceived = false;
+        parentCommunicationReady = false;
+        
+        if (currentState === LifecycleState.ACTIVE) {
+            setState(LifecycleState.WAITING_AUTH, 'ui_logout');
+        }
+        
+        HeartbeatClient.stop();
+        
+        const event = new CustomEvent('uiResetForLogout', {
+            detail: { timestamp: Date.now() }
+        });
+        window.dispatchEvent(event);
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// SHOW RECONNECTION STATE
+// =============================================
+function showReconnectionState() {
+    try {
+        const event = new CustomEvent('coreReconnecting', {
+            detail: {
+                timestamp: Date.now(),
+                state: currentState,
+                connectionQuality: connectionQuality,
+                environment: IframeEnvironment.getEnvironment()
+            }
+        });
+        window.dispatchEvent(event);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// BOOTSTRAP IFRAME
+// =============================================
+async function bootstrapIframe() {
+    try {
+        IframeEnvironment.detect();
+        CompatibilityBridge.detect();
+        OriginAdapter.init();
+        await loadFromLocalStorage();
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// WAIT FOR SESSION
+// =============================================
+async function waitForSession(timeout = 10000) {
+    return new Promise((resolve) => {
+        if (isAuthenticated && isSessionValid()) {
+            resolve(true);
+            return;
+        }
+        const startTime = Date.now();
+        const checkInterval = safeSetInterval(() => {
+            try {
+                if (isAuthenticated && isSessionValid()) {
+                    clearInterval(checkInterval);
+                    activeIntervals.delete(checkInterval);
+                    clearTimeout(timeoutId);
+                    activeTimers.delete(timeoutId);
+                    resolve(true);
+                } else if (Date.now() - startTime > timeout) {
+                    clearInterval(checkInterval);
+                    activeIntervals.delete(checkInterval);
+                    resolve(false);
+                }
+            } catch (error) {
+                clearInterval(checkInterval);
+                activeIntervals.delete(checkInterval);
+                resolve(false);
+            }
+        }, 100);
+        activeIntervals.add(checkInterval);
+        const timeoutId = safeSetTimeout(() => {
+            clearInterval(checkInterval);
+            activeIntervals.delete(checkInterval);
+            resolve(false);
+        }, timeout);
+        activeTimers.add(timeoutId);
+    });
+}
+
+// =============================================
+// INITIALIZE BASIC UI
+// =============================================
+function initializeBasicUI() {
+    try {
+        if (!userSettings) {
+            userSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+            coreData.settings = userSettings;
+        }
+        const event = new CustomEvent('basicUIReady', {
+            detail: {
+                timestamp: Date.now(),
+                state: currentState,
+                environment: IframeEnvironment.getEnvironment(),
+                authenticated: isAuthenticated
+            }
+        });
+        window.dispatchEvent(event);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// SETUP BASIC EVENT LISTENERS
+// =============================================
+function setupBasicEventListeners() {
+    try {
+        const backToAppBtn = document.getElementById('backToAppBtn');
+        if (backToAppBtn) {
+            const handler = () => {
+                if (unsavedChanges) {
+                    const event = new CustomEvent('confirmNavigation', {
+                        detail: {
+                            message: 'You have unsaved changes. Are you sure you want to leave?',
+                            callback: () => {
+                                MessageTransport.send('CHILD_CLOSING', {
+                                    childId: FRAME_ID,
+                                    unsavedChanges: true
+                                });
+                            }
+                        }
+                    });
+                    window.dispatchEvent(event);
+                } else {
+                    MessageTransport.send('CHILD_CLOSING', {
+                        childId: FRAME_ID
+                    });
+                }
+            };
+            backToAppBtn.addEventListener('click', handler);
+        }
+        
+        window.addEventListener('beforeunload', (e) => {
+            if (unsavedChanges) {
+                e.preventDefault();
+                e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+            }
+        });
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// =============================================
+// START TOKEN MONITORING
+// =============================================
+function startTokenMonitoring() {}
+
+// =============================================
+// CHECK TOKEN AVAILABILITY
+// =============================================
+function checkTokenAvailability() {}
+
+// =============================================
+// NOTIFY TOKEN READY
+// =============================================
+function notifyTokenReady() {}
+
+// =============================================
+// NOTIFY TOKEN LOST
+// =============================================
+function notifyTokenLost() {}
+
+// =============================================
+// GET HEALTH METRICS
+// =============================================
+function getHealthMetrics() {
+    return {
+        uptime: Date.now() - (stateHistory[0]?.timestamp || Date.now()),
+        state: currentState,
+        authenticated: isAuthenticated,
+        sessionValid: isSessionValid(),
+        heartbeatHealthy: HeartbeatClient.isHealthy(),
+        parentVerified: OriginAdapter.isParentVerified(),
+        ready: isReady,
+        environment: IframeEnvironment.getEnvironment(),
+        settingsLoaded: SettingsState.loaded
+    };
+}
+
+// =============================================
+// GET CORE DIAGNOSTICS
+// =============================================
+function getCoreDiagnostics() {
+    return DiagnosticsAgent.getFullReport();
+}
+
+// =============================================
+// FORCE RECOVERY
+// =============================================
+function forceRecovery() {
+    if (DEBUG) console.log('[settings-core] Forcing recovery');
+    RecoveryManager.attemptRecovery({ reason: 'manual', force: true });
+}
+
+// =============================================
+// ON READY CALLBACK
+// =============================================
+const readyCallbacks = [];
+
+function onReady(callback) {
+    if (isReady && isAuthenticated) {
+        callback();
+    } else {
+        readyCallbacks.push(callback);
+    }
+}
+
+function executeReadyCallbacks() {
+    readyCallbacks.forEach(cb => {
+        try {
+            cb();
+        } catch (e) {}
+    });
+    readyCallbacks.length = 0;
+}
+
+// =============================================
+// SET SILENT MODE FUNCTION
+// =============================================
+function setSilentMode(silent = !DEBUG) {
+    CONSOLE_NOISE_SUPPRESSED = silent;
+    ModuleCoreController.setSilent(silent);
+    StartupGovernor.setSilent(silent);
+    IframeTransport.setSilent(silent);
+    HeartbeatClient.setSilent(silent);
+    MessageTransport.setSilent(silent);
+    
+    if (DEBUG && !silent) {
+        console.log('[settings-core] 🔇 Silent mode disabled');
+    }
+}
+
+// =============================================
+// SHUTDOWN CORE FUNCTION
+// =============================================
+function shutdownCore() {
+    try {
+        ModuleLifecycleController.stop();
+        HeartbeatClient.stop();
+        clearAllTimers();
+        
+        MessageTransport.send('SHUTDOWN', {
+            reason: 'normal_shutdown'
+        });
+        
+        currentState = LifecycleState.INITIALIZING;
+        isReady = false;
+        initializationLock = false;
+        window.parentReady = false;
+        parentReadyReceived = false;
+        parentCommunicationReady = false;
+        parentSessionReceived = false;
+        sessionValidated = false;
+        authReady = false;
+        tokenReady = false;
+        tokenAvailable = false;
+        backgroundTasksStarted = false;
+        isAuthenticated = false;
+        clearSession();
+        
+        window.__SETTINGS_STATE__ = currentState;
+        window.__SETTINGS_SESSION_ACTIVE__ = false;
+        window.__SETTINGS_READY__ = false;
+        
+        stateHistory = [];
+        
+        if (DEBUG) {
+            console.log('[settings-core] ✅ Shutdown complete');
+        }
+        return true;
+        
+    } catch (error) {
+        if (DEBUG) {
+            console.error('[settings-core] ❌ Shutdown error:', error);
+        }
+        return false;
+    }
+}
+
+// =============================================
+// INITIALIZE CORE - MAIN ENTRY POINT
+// =============================================
+let initializationPromise = null;
+let coreError = null;
+
+async function initializeCore(options = {}) {
+    if (initializationPromise) {
+        return initializationPromise;
+    }
+    
+    if (currentState !== LifecycleState.BOOT && currentState !== LifecycleState.INITIALIZING) {
+        return { success: true, state: currentState, authenticated: isAuthenticated };
+    }
+    
+    initializationPromise = (async () => {
+        if (initializationLock) return { success: false, error: 'initialization_in_progress' };
+        initializationLock = true;
+        coreError = null;
+        
+        const {
+            debug = DEBUG
+        } = options;
+        
+        if (debug) {
+            DEBUG_ENABLED = true;
+        }
+        
+        try {
+            setupMessageListener();
+            
+            await ModuleCoreController.start();
+            
+            await loadFromLocalStorage();
+            
+            setupMessageHandlers();
+            
+            LifecycleController.init();
+            
+            initializationLock = false;
+            initializationPromise = null;
+            
+            return { 
+                success: true, 
+                state: currentState, 
+                authenticated: isAuthenticated 
+            };
+            
+        } catch (error) {
+            coreError = error;
+            initializationLock = false;
+            initializationPromise = null;
+            
+            return {
+                success: false,
+                state: currentState,
+                error: error.message,
+                authenticated: false
+            };
+        }
+    })();
+    
+    return initializationPromise;
+}
+
+// =============================================
+// SETUP MESSAGE HANDLERS
+// =============================================
+function setupMessageHandlers() {
+    MessageTransport.on('MODULE_REGISTERED', handleModuleRegisteredMessage);
+    MessageTransport.on('PARENT_READY', handleParentReady);
+    MessageTransport.on('SESSION_DATA', handleSessionData);
+    MessageTransport.on('SESSION_ACTIVE', handleSessionActive);
+    MessageTransport.on('SESSION_RESPONSE', handleSessionResponse);
+    MessageTransport.on('SESSION_UPDATE', handleSessionUpdateMessage);
+    MessageTransport.on('SESSION_NULL', handleSessionNull);
+    MessageTransport.on('SESSION_REFRESHED', handleSessionRefreshed);
+    MessageTransport.on('SESSION_INVALIDATED', handleSessionInvalidatedMessage);
+    MessageTransport.on('SETTINGS_LOAD_RESPONSE', handleSettingsLoadResponseMessage);
+    MessageTransport.on('SETTINGS_UPDATE_CONFIRMED', handleSettingsUpdateConfirmedMessage);
+    MessageTransport.on('SETTINGS_UPDATED', handleSettingsUpdatedMessage);
+    MessageTransport.on('ERROR', handleErrorMessageMessage);
+    MessageTransport.on('SETTINGS_DATA', handleSettingsDataResponse);
+    MessageTransport.on('SETTINGS_GLOBAL_UPDATE', handleSettingsGlobalUpdateMessage);
+    MessageTransport.on('AUTH_READY', (message) => {
+        isAuthenticated = true;
+        authCheckComplete = true;
+        processRequestQueue();
+        console.log('[settings-core] ✅ AUTH_READY received');
+    });
+    MessageTransport.on('AUTH_ERROR', (message) => {
+        isAuthenticated = false;
+        console.error('[settings-core] ❌ AUTH_ERROR received');
+    });
+    
+    MessageTransport.on('PROFILE_UPDATED', handleProfileUpdatedMessage);
+    MessageTransport.on('PRIVACY_UPDATED', handlePrivacyUpdatedMessage);
+    MessageTransport.on('NOTIFICATIONS_UPDATED', handleNotificationsUpdatedMessage);
+    MessageTransport.on('LANGUAGE_CHANGED', handleLanguageChangedMessage);
+    MessageTransport.on('THEME_CHANGED', handleThemeChangedMessage);
+    MessageTransport.on('ACCOUNT_LOGGED_OUT', handleAccountLoggedOutMessage);
+    MessageTransport.on('BLOCKED_USERS_UPDATED', handleBlockedUsersUpdatedMessage);
+    MessageTransport.on('ACTIVE_SESSIONS_UPDATED', handleActiveSessionsUpdatedMessage);
+    MessageTransport.on('USER_CONTACTS_UPDATED', handleUserContactsUpdatedMessage);
+    MessageTransport.on('USER_GROUPS_UPDATED', handleUserGroupsUpdatedMessage);
+    MessageTransport.on('STORAGE_USAGE_UPDATED', handleStorageUsageUpdatedMessage);
+}
+
+function handleSessionActive(message) {}
+function handleSessionResponse(message) {}
+function handleSessionNull() {}
+function handleSessionRefreshed(message) {}
+
+// =============================================
+// DIAGNOSTICS AGENT
+// =============================================
+const DiagnosticsAgent = {
+    _enabled: true,
+    _logBuffer: [],
+    _maxBuffer: 500,
+    _startTime: Date.now(),
+    _metrics: {
+        messagesSent: 0,
+        messagesReceived: 0,
+        handshakes: 0,
+        handshakeFailures: 0,
+        sessionUpdates: 0,
+        sessionFailures: 0,
+        pings: 0,
+        pongs: 0,
+        acks: 0,
+        errors: 0,
+        settingsUpdates: 0,
+        settingsUpdateFailures: 0
+    },
+    _stateSnapshots: [],
+    
+    enable(debug = false) {
+        this._enabled = true;
+        if (debug) {
+            window.__SETTINGS_DEBUG__ = true;
+            DEBUG_ENABLED = true;
+        }
+        window.__getDiagnostics = () => this.getFullReport();
+    },
+    
+    disable() {
+        this._enabled = false;
+    },
+    
+    log(level, message, data = null) {
+        if (!this._enabled) return;
+        if (!DEBUG && level !== 'error' && level !== 'init' && level !== 'success') return;
+        
+        const entry = {
+            level,
+            message,
+            data: data ? (typeof data === 'object' ? JSON.stringify(data).substring(0, 200) : String(data)) : null,
+            timestamp: Date.now(),
+            timeStr: new Date().toISOString().slice(11, 23),
+            state: currentState,
+            environment: IframeEnvironment.getEnvironment(),
+            authenticated: isAuthenticated
+        };
+        
+        this._logBuffer.push(entry);
+        
+        if (this._logBuffer.length > this._maxBuffer) {
+            this._logBuffer.shift();
+        }
+    },
+    
+    track(event, details = {}) {
+        if (!this._enabled) return;
+        
+        if (this._metrics.hasOwnProperty(event)) {
+            this._metrics[event]++;
+        }
+        
+        this._stateSnapshots.push({
+            event,
+            details,
+            timestamp: Date.now(),
+            state: currentState,
+            authenticated: isAuthenticated,
+            sessionValid: isSessionValid(),
+            environment: IframeEnvironment.getEnvironment(),
+            settingsLoaded: SettingsState.loaded
+        });
+        
+        if (this._stateSnapshots.length > 50) {
+            this._stateSnapshots.shift();
+        }
+    },
+    
+    getMetrics() {
+        return {
+            ...this._metrics,
+            uptime: Date.now() - this._startTime,
+            environment: IframeEnvironment.getEnvironment(),
+            compatibility: CompatibilityBridge.isEnabled(),
+            authenticated: isAuthenticated,
+            settingsLoaded: SettingsState.loaded
+        };
+    },
+    
+    getFullReport() {
+        return {
+            timestamp: Date.now(),
+            state: {
+                current: currentState,
+                history: stateHistory.slice(-5)
+            },
+            auth: {
+                authenticated: isAuthenticated,
+                sessionValid: isSessionValid()
+            },
+            environment: {
+                type: IframeEnvironment.getEnvironment(),
+                features: { ...IframeEnvironment._features },
+                compatibility: CompatibilityBridge.isEnabled(),
+                compatibilityReason: CompatibilityBridge.getReason()
+            },
+            session: {
+                valid: isSessionValid(),
+                hasToken: !!window.session.token,
+                user: window.session.user ? { id: window.session.user.id, name: window.session.user.name } : null,
+                expiresAt: window.session.expiresAt,
+                version: window.session.version
+            },
+            settings: {
+                loaded: SettingsState.loaded,
+                lastSynced: SettingsState.lastSynced,
+                pendingUpdates: SettingsState.pendingUpdates.size
+            },
+            heartbeat: HeartbeatClient.getDiagnostics(),
+            origin: OriginAdapter.getDiagnostics(),
+            transport: IframeTransport.getDiagnostics(),
+            metrics: this.getMetrics(),
+            logs: this._logBuffer.slice(-20),
+            stateSnapshots: this._stateSnapshots.slice(-10),
+            moduleRegistered,
+            parentSessionReceived,
+            queueLength: requestQueue.length
+        };
+    },
+    
+    reset() {
+        this._logBuffer = [];
+        this._metrics = {
+            messagesSent: 0,
+            messagesReceived: 0,
+            handshakes: 0,
+            handshakeFailures: 0,
+            sessionUpdates: 0,
+            sessionFailures: 0,
+            pings: 0,
+            pongs: 0,
+            acks: 0,
+            errors: 0,
+            settingsUpdates: 0,
+            settingsUpdateFailures: 0
+        };
+        this._stateSnapshots = [];
+        this._startTime = Date.now();
+        this.log('INFO', 'Diagnostics reset');
+    }
+};
+
+// =============================================
+// EXPORT DEFAULT_SETTINGS
+// =============================================
+const DEFAULT_SETTINGS = {
+    profile: {
+        displayName: '',
+        username: '',
+        bio: '',
+        email: '',
+        photoUrl: null,
+        profileVisibility: 'everyone',
+        lastSeen: true,
+        currentMood: 'neutral'
+    },
+    privacy: {
+        whoCanAddMe: 'everyone',
+        canMessageMe: 'everyone',
+        readReceipts: true,
+        typingIndicators: true,
+        contactDiscovery: true
+    },
+    security: {
+        twoFactorAuth: false,
+        loginNotifications: true,
+        sessionTimeout: '30min',
+        changePassword: false
+    },
+    notifications: {
+        messageNotifications: true,
+        groupNotifications: true,
+        callNotifications: true,
+        mentionNotifications: true,
+        emailNotifications: false
+    },
+    appearance: {
+        theme: 'auto',
+        accentColor: '#0084ff',
+        fontSize: 16,
+        language: 'en',
+        compactMode: false,
+        animations: true
+    },
+    chat: {
+        enterKeySends: true,
+        mediaAutoDownload: 'wifiOnly',
+        messageHistory: 'forever',
+        showTimestamps: true,
+        showReadReceipts: true,
+        allowReactions: true
+    },
+    calls: {
+        whoCanCallMe: 'friendsOnly',
+        callVibration: true,
+        videoQuality: 'auto',
+        voiceQuality: 'high',
+        allowScreenShare: true
+    },
+    friends: {
+        discoverByPhone: true,
+        discoverByEmail: true,
+        friendSuggestions: true,
+        autoAcceptFriends: false,
+        friendRequestPrivacy: 'everyone'
+    },
+    groups: {
+        groupInvitations: 'friendsOnly',
+        groupAnnouncements: true,
+        allowGroupCreation: true,
+        maxGroupSize: 200,
+        groupAdminPermissions: 'moderate'
+    },
+    status: {
+        whoCanViewMyStatus: 'friendsOnly',
+        autoExpireStatus: '24h',
+        allowStatusReplies: true,
+        showStatusTo: 'friendsOnly'
+    },
+    storage: {
+        totalStorageUsed: 0,
+        storageTotal: 1024 * 1024 * 1024,
+        chatCacheSize: 0,
+        mediaCacheSize: 0,
+        otherCacheSize: 0,
+        autoClearCache: false,
+        clearCacheOnExit: false,
+        storageBreakdown: {
+            chats: 0,
+            media: 0,
+            other: 0
+        }
+    },
+    mood: {
+        autoMoodDetection: true,
+        currentMood: 'neutral',
+        showMoodTo: 'friendsOnly',
+        moodColors: {
+            neutral: '#A9A9A9',
+            happy: '#FFD700',
+            calm: '#4A90E2',
+            energetic: '#FF6B6B',
+            focused: '#7B68EE',
+            relaxed: '#4ECDC4',
+            stressed: '#FF8C00',
+            tired: '#808080',
+            excited: '#FF1493'
+        }
+    },
+    advanced: {
+        offlineMode: false,
+        debugMode: false,
+        developerTools: false,
+        experimentalFeatures: false,
+        performanceMode: false,
+        reduceMotion: false
+    },
+    backup: {
+        autoBackup: false,
+        backupFrequency: 'weekly',
+        lastBackup: null,
+        backupLocation: 'cloud',
+        restoreOnLogin: true
+    },
+    danger: {
+        deleteAccount: false,
+        exportData: false,
+        clearAllData: false,
+        resetAllSettings: false
+    }
+};
+
+// =============================================
+// GET PARENT READY VALUE FUNCTION
+// =============================================
+function getParentReadyValue() {
+    return window.parentReady;
+}
+
+// Session reference - create a module-level variable
+const sessionWindow = window.session;
+
+// Parent ready reference for export - FIX #6: Use parentReadyReceived which is dynamic
+const parentReadyFlag = window.parentReady;
+
+// =============================================
+// EXPORT ALL PUBLIC FUNCTIONS AND CONSTANTS
+// =============================================
+export {
+    // Core state
+    currentUser,
+    userSettings,
+    currentSection,
+    unsavedChanges,
+    blockedUsers,
+    activeSessions,
+    userContacts,
+    userGroups,
+    
+    // Auth state
+    isAuthenticated,
+    authReady,
+    apiInitialized,
+    backgroundTasksStarted,
+    tokenReady,
+    tokenAvailable,
+    tokenInitialized,
+    parentCommunicationReady,
+    parentSessionReceived,
+    parentOrigin,
+    parentSessionData,
+    sessionValidated,
+    
+    // Constants
+    MAX_API_RETRIES,
+    AUTH_CHECK_INTERVAL,
+    TOKEN_CHECK_INTERVAL,
+    HANDSHAKE_RETRY_INTERVAL,
+    SESSION_SYNC_TIMEOUT,
+    HEARTBEAT_INTERVAL,
+    PING_INTERVAL,
+    PING_TIMEOUT,
+    MAX_PING_FAILURES,
+    RECOVERY_BACKOFF_BASE,
+    RECOVERY_MAX_BACKOFF,
+    VISIBILITY_THROTTLE_DELAY,
+    TOKEN_BINDING_NONCE_LENGTH,
+    
+    // Defaults
+    DEFAULT_SETTINGS,
+    SETTINGS_MENU,
+    PARENT_MESSAGE_TYPES,
+    
+    // Core functions
+    verifyParentPresence,
+    setupSecureMessagingChannel,
+    startParentHandshake,
+    resetUIForLogout,
+    showReconnectionState,
+    checkAuthenticationState,
+    bootstrapIframe,
+    waitForSession,
+    initializeBasicUI,
+    setupBasicEventListeners,
+    startTokenMonitoring,
+    checkTokenAvailability,
+    notifyTokenReady,
+    notifyTokenLost,
+    getSecureToken,
+    secureFetchWrapper,
+    waitForToken,
+    startPassiveAuthMonitoring,
+    startBackgroundTasks,
+    safeLoadUserData,
+    safeLoadSettings,
+    safeLoadBlockedUsers,
+    safeLoadActiveSessions,
+    safeLoadUserContacts,
+    safeLoadUserGroups,
+    makeSafeRequest,
+    saveSettings,
+    notifyParentAuthState,
+    notifyParentAuthError,
+    loadFromLocalStorage,
+    updateUserUI,
+    initializeUI,
+    calculateStorageUsage,
+    formatStorageSize,
+    getMoodText,
+    getMoodColor,
+    terminateSession,
+    terminateAllSessions,
+    unblockUser,
+    clearChatCache,
+    clearMediaCache,
+    onReady,
+    isReady,
+        OfflineQueue,
+
+        // Enhanced exports from hardened core
+    getCoreDiagnostics,
+    getHealthMetrics,
+    forceRecovery,
+    connectionQuality,
+    StartupGovernor,
+    SessionClient,
+    ReliabilityEngine,
+    DiagnosticsAgent,
+    CompatibilityBridge,
+    MultiModuleCoordinator,
+    IframeEnvironment,
+    SafeStorage,
+    IframeTransport,
+    IframeHandshakeAuthority,
+    RecoveryManager,
+    NavigationGuard,
+    UIFailsafe,
+    
+    // API Core and secure wrapper
+    secureApiCall,
+    ApiCore,
+    safeGet,
+    safeArray,
+    safeObject,
+    
+    // Module identifiers
+    MODULE_NAME,
+    MODULE_VERSION,
+    FRAME_ID,
+    DEBUG,
+    LifecycleState,
+    currentState,
+    
+    // Session object - export the module-level variable
+    sessionWindow,
+    
+    // Additional core functions
+    setState,
+    isSessionValid,
+    updateSetting,
+    handleLogout,
+    sendMessageToParent,
+    setSilentMode,
+    shutdownCore,
+    initializeCore,
+    authorizedFetch,
+    
+    // Settings state
+    SettingsState,
+    
+    // Expose queue and parentReady for debugging - FIX #6: Use parentReadyReceived
+    messageQueue,
+    parentReadyReceived as parentReady,
+    
+    // Request queue
+    requestQueue
+};
+
+// =============================================
+// CALL SETSILENTMODE AFTER ALL COMPONENTS ARE INITIALIZED
+// =============================================
+setSilentMode(!DEBUG);
+
+// =============================================
+// AUTO-START
+// =============================================
+let domContentLoadedFired = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (domContentLoadedFired) return;
+    domContentLoadedFired = true;
+    
+    // === CACHE-FIRST: Load settings from localStorage immediately so UI renders fast ===
+    try {
+        const cached = localStorage.getItem('knecta_settings_cache');
+        if (cached) {
+            const parsed = JSON.parse(cached);
+            const data = (parsed && parsed.data) ? parsed.data : parsed;
+            if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+                const ageMs = parsed.timestamp ? (Date.now() - parsed.timestamp) : Infinity;
+                if (ageMs < 86400000) { // < 24h
+                    SettingsState.data = data;
+                    SettingsState.loaded = true;
+                    // Apply appearance/theme immediately before any async work
+                    if (data.appearance?.theme) {
+                        const t = data.appearance.theme;
+                        const resolved = t === 'auto'
+                            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                            : t;
+                        document.documentElement.setAttribute('data-theme', resolved);
+                    }
+                    if (data.appearance?.fontSize) {
+                        document.documentElement.style.fontSize = data.appearance.fontSize + 'px';
+                    }
+                    if (data.appearance?.accentColor) {
+                        document.documentElement.style.setProperty('--accent-color', data.appearance.accentColor);
+                    }
+                    if (data.appearance?.compactMode) {
+                        document.body.classList.toggle('compact-mode', !!data.appearance.compactMode);
+                    }
+                    console.log('[settings-core] ✅ Cache-first settings loaded instantly');
+                }
+            }
+        }
+    } catch(e) {}
+    
+    try {
+        initLog('DOMContentLoaded - starting core initialization');
+        initializeCore({ 
+            debug: DEBUG
+        }).then(result => {
+            if (result.success) {
+                if (result.state === LifecycleState.ACTIVE) {
+                    successLog('Core initialized and active');
+                } else if (result.state === LifecycleState.WAITING_AUTH) {
+                    successLog(`Core initialized, waiting for authentication`);
+                } else {
+                    successLog(`Core initialized, state: ${result.state}`);
+                }
+            } else {
+                errorLog('Core initialization failed:', result);
+            }
+        }).catch(error => {
+            errorLog('Core initialization error:', error);
+        });
+    } catch (error) {}
+});
+
+// =============================================
+// EXPOSE GLOBALS FOR DEBUGGING
+// =============================================
+window.__SETTINGS_DEBUG__ = DEBUG;
+window.__getDiagnostics = () => DiagnosticsAgent.getFullReport();
+window.__forceRecovery = forceRecovery;
+window.__resetCore = () => {
+    shutdownCore();
+    safeSetTimeout(() => initializeCore(), 1000);
+};
+window.__getOfflineQueue = () => OfflineQueue.getDiagnostics();
+window.__syncOfflineQueue = () => OfflineQueue.syncAll();
+window.__getEnvironment = () => IframeEnvironment.getInfo();
+window.__getTransportStatus = () => IframeTransport.getDiagnostics();
+window.__getSessionStatus = () => ({
+    valid: isSessionValid(),
+    authenticated: isAuthenticated,
+    hasToken: !!window.session.token,
+    user: window.session.user,
+    expiresAt: window.session.expiresAt,
+    version: window.session.version
+});
+window.__getLifecycleState = () => currentState;
+window.__getLifecycleHistory = () => stateHistory;
+window.__getParentReady = () => window.parentReady;
+window.__getMessageQueue = () => messageQueue.length;
+window.__getSettingsState = () => ({
+    loaded: SettingsState.loaded,
+    lastSynced: SettingsState.lastSynced,
+    pendingUpdates: SettingsState.pendingUpdates.size
+});
+window.__getAuthState = () => ({
+    authenticated: isAuthenticated,
+    queueLength: requestQueue.length
+});
+
+// =============================================
+// END OF FILE
+// =============================================

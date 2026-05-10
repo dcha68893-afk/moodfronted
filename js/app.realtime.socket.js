@@ -1007,6 +1007,67 @@
                     });
                 });
 
+                // ── FIX: settings_updated listener ────────────────────────────────────
+                // Root cause: no listener was registered for this event, so even when
+                // the server emitted it nothing happened client-side — settings changes
+                // made on one device/tab were invisible to all other open tabs.
+                //
+                // Fix: register all known server-side naming variants, then for each:
+                //   1. Post SOCKET_EVENT / settings_updated to the parent frame so
+                //      chat.html picks it up and fans it out to every module iframe.
+                //   2. Directly merge the updated settings into window.AppSettings if
+                //      that object exists in this frame (covers same-frame consumers).
+                const settingsEventNames = [
+                    'settings_updated',   // canonical server event
+                    'settings:updated',   // colon-style alias some backends use
+                    'user_settings_updated',
+                    'profile_updated',    // some backends fold profile + settings together
+                ];
+
+                settingsEventNames.forEach(eventType => {
+                    if (this._registeredSocketListeners.has(eventType)) return;
+                    this._registeredSocketListeners.add(eventType);
+
+                    this._socket.on(eventType, (payload) => {
+                        const settings = (payload && typeof payload === 'object')
+                            ? (payload.settings || payload.data || payload)
+                            : {};
+
+                        // 1. Post to parent frame → chat.html fans out to all module iframes
+                        const outbound = {
+                            type:    'SOCKET_EVENT',
+                            event:   'settings_updated',
+                            payload: settings,
+                            source:  'realtime-socket',
+                            timestamp: Date.now()
+                        };
+                        try { window.parent.postMessage(outbound, '*'); } catch (_) {}
+                        // Also dispatch as a local window event so same-frame listeners fire
+                        try {
+                            window.dispatchEvent(new CustomEvent('settings_updated', { detail: settings }));
+                            window.dispatchEvent(new CustomEvent('kyn:settingsUpdated', { detail: settings }));
+                        } catch (_) {}
+
+                        // 2. Merge directly into window.AppSettings if available
+                        if (window.AppSettings && typeof window.AppSettings === 'object' &&
+                            settings && typeof settings === 'object') {
+                            Object.assign(window.AppSettings, settings);
+                            // Notify any AppSettings watchers
+                            try {
+                                window.dispatchEvent(new CustomEvent('AppSettingsChanged', { detail: settings }));
+                            } catch (_) {}
+                        }
+
+                        // 3. Route through the standard bridge so EventBus subscribers also fire
+                        this._routeMessage({ type: eventType, payload: settings });
+
+                        if (window.KynectaEventBus) {
+                            window.KynectaEventBus.emit('REALTIME_settings_updated', settings, { async: true });
+                        }
+                    });
+                });
+                // ── end settings_updated fix ──────────────────────────────────────────
+
                 console.log('[Realtime] ✅ Message bridge listeners registered');
             }
         }
@@ -1055,30 +1116,27 @@
         if (!evt.data || typeof evt.data !== 'object') return;
         const { type, payload } = evt.data;
 
-        // ── FIX: Cross-module friend sync ────────────────────────────────────
-        // When friend-core (inside its iframe) posts FRIENDS_SYNC or
-        // FRIEND_RELATIONSHIP_CHANGED, we rebroadcast it to every OTHER iframe
-        // so chat, call, status, groups etc. all see the updated friends list
-        // instantly without requiring a page refresh.
+        // FIX: Cross-module friend sync relay — rebroadcast FRIENDS_SYNC, FRIENDS_DATA
+        // and FRIEND_RELATIONSHIP_CHANGED to every OTHER iframe so chat, calls, status,
+        // groups all see updated friends instantly without a poll cycle.
         if (type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA' || type === 'FRIEND_RELATIONSHIP_CHANGED') {
-            const iframes = document.querySelectorAll('iframe');
-            iframes.forEach(function (frame) {
+            var _iframes = document.querySelectorAll('iframe');
+            _iframes.forEach(function (frame) {
                 if (frame.contentWindow === evt.source) return; // don't echo back to sender
                 try { frame.contentWindow.postMessage(evt.data, '*'); } catch (_) {}
             });
-            // Also expose on window globals for same-frame consumers
             if (evt.data.friends && Array.isArray(evt.data.friends)) {
                 window.friends = evt.data.friends;
                 window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: evt.data.friends, source: type } }));
-                window.dispatchEvent(new CustomEvent('FRIENDS_SYNC', { detail: evt.data }));
             }
             return;
         }
 
-        // ── FIX: friend:removed from any iframe → forward named event to all iframes ─
-        if (type === 'FRIEND_REMOVED' || type === 'FRIEND_REJECTED') {
-            const iframes = document.querySelectorAll('iframe');
-            iframes.forEach(function (frame) {
+        // Relay FRIEND_ACCEPTED / FRIEND_REMOVED to all sibling iframes
+        if (type === 'FRIEND_ACCEPTED' || type === 'FRIEND_REQUEST_ACCEPTED' ||
+            type === 'FRIEND_REMOVED'  || type === 'FRIEND_REJECTED') {
+            var _iframes2 = document.querySelectorAll('iframe');
+            _iframes2.forEach(function (frame) {
                 if (frame.contentWindow === evt.source) return;
                 try { frame.contentWindow.postMessage(evt.data, '*'); } catch (_) {}
             });
@@ -1251,20 +1309,6 @@
                 // friend-core.js listens for FRIEND_REQUEST_ACCEPTED (named action).
                 // Posting both forms ensures the sender's client updates its local
                 // store and friend list regardless of which unwrapper path fires.
-                // FIX: When friend-core posts FRIEND_ACCEPTED (sender accepted request),
-                // forward to ALL other iframes so chat/call/status modules update
-                // friendship status without waiting for a poll cycle.
-                if (eventType === 'FRIEND_ACCEPTED' || eventType === 'FRIEND_REQUEST_ACCEPTED') {
-                    var _faccId = 'rt_facc_top_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-                    iframes.forEach(function (frame) {
-                        try {
-                            frame.contentWindow.postMessage({ type: 'FRIEND_REQUEST_ACCEPTED', payload: payload || {}, id: _faccId }, '*');
-                            frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:accepted', payload: payload || {}, id: _faccId + '_re' }, '*');
-                        } catch (_) {}
-                    });
-                    return;
-                }
-
                 if (eventType === 'friend:accepted') {
                     var _accId = 'rt_facc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
                     iframes.forEach(function (frame) {

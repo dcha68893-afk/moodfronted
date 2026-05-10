@@ -15,7 +15,7 @@
 (function () {
     'use strict';
 
-    const SYNC_INTERVAL      = 120_000;  // Full sync every 120s — socket handles realtime updates
+    const SYNC_INTERVAL      = 120_000;  // Full sync every 120s — socket handles realtime
     const SYNC_DEBOUNCE      = 400;      // Debounce rapid consecutive calls
     const REQUEST_TIMEOUT_MS = 15_000;
     const MAX_BACKOFF_MS     = 300_000;  // Max 5 minutes backoff
@@ -116,7 +116,7 @@
             this._emit('FRIEND_SYNC_STARTED');
             // FIXED: Reduced noise - only log sync start if not recently synced
             if (Date.now() - this._lastSync > SYNC_INTERVAL) {
-                // console.log('[FriendSync] Starting full sync…');
+                console.log('[FriendSync] Starting full sync…');
             }
 
             try {
@@ -849,49 +849,46 @@
 
                 window.KynectaEventBus.on?.('FRIEND_REMOVED', () => this.syncType('friends'));
             }
+            window.addEventListener('kyn:friendsSynced', () => {}); // no-op sentinel
 
-            // FIX: Listen for FRIENDS_SYNC broadcast from parent (app_realtime_socket.js)
-            // so modules like chat, status, call that embed this engine get instant updates
-            // when a friend accept/remove happens in friend-core's iframe.
+            // FIX: Handle FRIENDS_SYNC broadcast from parent (app_realtime_socket / chat.html)
+            // so modules embedding this engine (chat, status, call, groups) instantly reflect
+            // friend state changes without waiting for the next 120s poll cycle.
             window.addEventListener('message', (evt) => {
                 if (!evt.data || typeof evt.data !== 'object') return;
-                const { type, friends, requests } = evt.data;
+                const { type, friends: _f, requests: _r } = evt.data;
 
                 if (type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA') {
-                    // Update window globals so all inline consumers see fresh data
-                    if (Array.isArray(friends)) {
-                        window.friends = friends;
-                        // Merge into FriendCacheManager if available
-                        if (window.FriendCacheManager && typeof window.FriendCacheManager.setFriend === 'function') {
-                            friends.forEach(f => {
-                                if (f && f.id) window.FriendCacheManager.setFriend(f);
-                            });
+                    if (Array.isArray(_f) && _f.length > 0) {
+                        window.friends = _f;
+                        if (window.FriendCacheManager?.setFriends) {
+                            window.FriendCacheManager.setFriends(_f);
                             window.FriendCacheManager.syncToGlobals?.();
                         }
                         window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                            detail: { friends, source: type, realtime: true }
+                            detail: { friends: _f, source: type, realtime: true }
                         }));
                         window.dispatchEvent(new CustomEvent('updateFriendCounts'));
                     }
-                    if (Array.isArray(requests)) {
-                        window.friendRequests = requests;
+                    if (Array.isArray(_r)) {
+                        window.friendRequests = _r;
                         window.dispatchEvent(new CustomEvent('requestsUpdated', {
-                            detail: { requests, source: type }
+                            detail: { requests: _r, source: type }
                         }));
                     }
                 }
 
                 if (type === 'FRIEND_RELATIONSHIP_CHANGED') {
-                    const { action, friendId, friend } = evt.data;
-                    if (action === 'accepted' && friendId) {
-                        if (window.FriendCacheManager?.setFriend && friend) {
-                            window.FriendCacheManager.setFriend({ ...friend, id: String(friendId) });
+                    const { action, friendId: _fid, friend: _friend } = evt.data;
+                    if (action === 'accepted' && _fid) {
+                        if (_friend && window.FriendCacheManager?.setFriend) {
+                            window.FriendCacheManager.setFriend({ ..._friend, id: String(_fid) });
                             window.FriendCacheManager.syncToGlobals?.();
                         }
                         this.syncType('friends');
-                    } else if (action === 'removed') {
+                    } else if (action === 'removed' && _fid) {
                         if (window.FriendCacheManager?.removeFriend) {
-                            window.FriendCacheManager.removeFriend(String(friendId));
+                            window.FriendCacheManager.removeFriend(String(_fid));
                             window.FriendCacheManager.syncToGlobals?.();
                         }
                         this.syncType('friends');
@@ -899,19 +896,17 @@
                 }
             });
 
-            // Also handle the window-level FRIENDS_SYNC CustomEvent (same-frame)
+            // Same-frame FRIENDS_SYNC CustomEvent path
             window.addEventListener('FRIENDS_SYNC', (evt) => {
-                const { friends } = evt.detail || {};
-                if (Array.isArray(friends) && window.FriendCacheManager?.setFriend) {
-                    friends.forEach(f => { if (f && f.id) window.FriendCacheManager.setFriend(f); });
+                const { friends: _sf } = evt.detail || {};
+                if (Array.isArray(_sf) && window.FriendCacheManager?.setFriends) {
+                    window.FriendCacheManager.setFriends(_sf);
                     window.FriendCacheManager.syncToGlobals?.();
                     window.dispatchEvent(new CustomEvent('friendsUpdated', {
-                        detail: { friends, source: 'FRIENDS_SYNC', realtime: true }
+                        detail: { friends: _sf, source: 'FRIENDS_SYNC', realtime: true }
                     }));
                 }
             });
-
-            window.addEventListener('kyn:friendsSynced', () => {}); // no-op sentinel
         }
 
         // ── Backoff retry mechanism ────────────────────────────────────────

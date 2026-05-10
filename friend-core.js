@@ -63,7 +63,7 @@ const EXPECTED_PARENT_ORIGIN = window.location.origin;
 // =============================================
 
 const POLLING_CONFIG = {
-    INCOMING_REQUESTS_INTERVAL: 60000,  // 60s — socket handles realtime; polling is fallback only
+    INCOMING_REQUESTS_INTERVAL: 60000,  // 60s — socket handles realtime; polling is offline fallback
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 5000,
     ENABLED: true
@@ -3217,10 +3217,8 @@ const FriendCacheManager = {
     
     setFriend(friend) {
         if (!friend || !friend.id) return false;
-        // FIX: Always use String key — integer 5 and string "5" are different Map keys,
-        // causing the same friend to appear twice in getAllFriends().
         const key = String(friend.id);
-        // FIX: Never add the current user as their own friend
+        // Never add current user as their own friend
         const _selfId = __session?.user?.id || currentUser?.id;
         if (_selfId && key === String(_selfId)) return false;
         this._cache.friends.set(key, { ...friend, id: key });
@@ -3234,18 +3232,15 @@ const FriendCacheManager = {
         const _selfId = __session?.user?.id || currentUser?.id;
         friendsArray.forEach(f => {
             if (!f || !f.id) return;
-            // FIX: Never add the current user as their own friend
-            if (_selfId && String(f.id) === String(_selfId)) return;
-            // FIX: Reject records with pending/blocked/removed/presence-only statuses.
+            const key = String(f.id);
+            // Never add current user as their own friend
+            if (_selfId && key === String(_selfId)) return;
             const st = f.status;
             if (st === 'pending_sent' || st === 'pending_received' ||
                 st === 'pending' || st === 'blocked' || st === 'removed' ||
                 st === 'none') return;
-            // Allow: 'accepted', undefined/null (legacy), or presence statuses
-            // only when the record has friend-module-specific fields
             if ((st === 'online' || st === 'offline' || st === 'away' || st === 'busy') &&
                 !(f.addedAt || f.friendId || f.localId || f.serverId)) return;
-            const key = String(f.id);
             this._cache.friends.set(key, { ...f, id: key });
             this._timestamps.set(`friend_${key}`, Date.now());
         });
@@ -3450,11 +3445,11 @@ const FriendCacheManager = {
         // Callers that actually have new data (loadFriendsFromBackend, FRIEND_REMOVED, etc.)
         // dispatch friendsUpdated explicitly after syncToGlobals returns.
         window.dispatchEvent(new CustomEvent('updateFriendCounts'));
-        // Broadcast to parent (chat/call/status/groups) with 80ms debounce to avoid flooding.
+        // Broadcast to parent (chat/call/status/groups) with 80ms debounce
         if (!FriendCacheManager._syncBroadcastTimer) {
             FriendCacheManager._syncBroadcastTimer = setTimeout(() => {
                 FriendCacheManager._syncBroadcastTimer = null;
-                const _syncPayload = {
+                const _p = {
                     type: 'FRIENDS_SYNC',
                     friends: Array.from(FriendCacheManager._cache.friends.values()),
                     requests: Array.from(FriendCacheManager._cache.requests.values()),
@@ -3462,8 +3457,8 @@ const FriendCacheManager = {
                     source: 'friend-core',
                     timestamp: Date.now()
                 };
-                try { window.parent.postMessage(_syncPayload, '*'); } catch (_) {}
-                window.dispatchEvent(new CustomEvent('FRIENDS_SYNC', { detail: _syncPayload }));
+                try { window.parent.postMessage(_p, '*'); } catch (_) {}
+                window.dispatchEvent(new CustomEvent('FRIENDS_SYNC', { detail: _p }));
             }, 80);
         }
     },
@@ -4180,15 +4175,14 @@ const FriendRequestManager = {
                 window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true } }));
                 if (typeof showNotification === 'function') showNotification(`You are now friends with ${newFriend.displayName}!`, 'success');
                 const _sid = existingRequest?.senderId || existingRequest?.sender?.id || existingRequest?.requesterId || friendId;
-                const _acceptPayload = {
+                safeSend({ type: 'FRIEND_ACCEPTED', payload: {
                     requestId, friendId, friend: newFriend,
                     targetUserId: String(_sid), acceptedById: String(__session.user?.id || ''),
                     acceptedByName: __session.user?.displayName || __session.user?.username || '',
                     acceptedByAvatar: __session.user?.avatar || __session.user?.photoURL || '',
                     timestamp: Date.now()
-                };
-                safeSend({ type: 'FRIEND_ACCEPTED', payload: _acceptPayload });
-                // Immediately push the full updated friends list to parent so ALL modules
+                }});
+                // Immediately push full friends list to parent so ALL modules
                 // (chat, call, status, groups) update without waiting for next poll.
                 try {
                     window.parent.postMessage({
@@ -4217,16 +4211,6 @@ const FriendRequestManager = {
                     FriendCacheManager.syncToGlobals(); FriendCacheManager.persist();
                     window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { friends: FriendCacheManager.getAllFriends(), realtime: true, delayed: true } }));
                     window.dispatchEvent(new CustomEvent('updateFriendCounts'));
-                    // Second broadcast after backend reload confirms data
-                    try {
-                        window.parent.postMessage({
-                            type: 'FRIENDS_DATA',
-                            friends: FriendCacheManager.getAllFriends(),
-                            source: 'friend-core',
-                            trigger: 'accept-reload',
-                            timestamp: Date.now()
-                        }, '*');
-                    } catch (_) {}
                 }, 1000);
                 return { success: true, friend: newFriend };
             } else {
@@ -7451,10 +7435,10 @@ async function loadFriendsFromBackend() {
                 friendsData = [response.data];
             }
             
-            // Format friends data consistently, excluding self
-            const _selfId = __session?.user?.id || currentUser?.id;
+            // Format friends data consistently, always excluding the current user
+            const _selfId2 = __session?.user?.id || currentUser?.id;
             const validFriends = friendsData
-                .filter(f => f && f.id && (!_selfId || String(f.id) !== String(_selfId)))
+                .filter(f => f && f.id && (!_selfId2 || String(f.id) !== String(_selfId2)))
                 .map(friend => ({
                 id: friend.id,
                 displayName: friend.displayName || friend.username || 'User',
@@ -8816,28 +8800,29 @@ async function startCameraScanner() {
     }
 }
 
-// FIXED: QR scanner with optimized 100ms interval scan for instant detection
+// FIXED: QR scanner stops after result (Bug #6)
 function startRealQRCodeScanning(video, canvas) {
     if (!featureFlags.qrCode) return;
     
     const ctx = canvas.getContext('2d');
     scanningActive = true;
     let scanRequestSent = false;
-    let _qrScanActive = true;
-    let _scanInterval = null;
+    let _qrScanActive = true;  // FIXED: Add stop flag for QR scanning
     
     function scan() {
         if (!scanningActive || !document.getElementById('cameraScannerModal')?.classList.contains('active')) {
-            if (_scanInterval) { clearInterval(_scanInterval); _scanInterval = null; }
             return;
         }
         
-        if (!_qrScanActive || scanRequestSent) {
-            if (_scanInterval) { clearInterval(_scanInterval); _scanInterval = null; }
+        if (!_qrScanActive) {  // FIXED: Exit if scan is complete
             return;
         }
         
-        // Accept any ready state >= HAVE_CURRENT_DATA (2) for faster start
+        if (scanRequestSent) {
+            return;
+        }
+        
+        // Accept readyState >= HAVE_CURRENT_DATA (2) for faster start
         if (video.readyState >= 2) {
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
@@ -8864,9 +8849,13 @@ function startRealQRCodeScanning(video, canvas) {
         }
     }
     
-    // Use interval at 100ms (10fps scan) — faster than waiting for rAF + HAVE_ENOUGH_DATA
-    _scanInterval = setInterval(scan, 100);
-    // Also run immediately on first frame via rAF for the very first detection
+    // Use 100ms interval (10 fps scan) instead of rAF + HAVE_ENOUGH_DATA wait
+    let _scanInterval = setInterval(() => {
+        if (!scanningActive || !_qrScanActive || scanRequestSent) {
+            clearInterval(_scanInterval); _scanInterval = null;
+        } else { scan(); }
+    }, 100);
+    // Also try immediately on first rAF
     requestAnimationFrame(scan);
     
     function drawQRCodeRect(location, ctx) {
@@ -8887,9 +8876,10 @@ function startRealQRCodeScanning(video, canvas) {
 // FIXED: QR scanner stops after result (Bug #6)
 function processScannedQRCodeReal(qrData) {
     QRCodeManager.processScannedQR(qrData).then(result => {
-        // Stop scanner flags + camera
-        scanningActive = false;
-        stopCameraScanner();
+        // FIXED: Stop scanner first before processing result
+        _qrScanActive = false;   // ← STOP loop
+        scanningActive = false;   // ← Stop scanning flag
+        stopCameraScanner();      // ← Stop camera
         
         if (!result.success) {
             showNotification?.(result.error, 'error');
@@ -9789,9 +9779,9 @@ async function initialize() {
                 startParallelDataLoading();
                 
                 setTimeout(() => {
-                    Logger.debug('Init', 'Loading all users for discovery');
+                    console.log('[Init] Loading all users for discovery...');
                     fetchAllUsersFromBackend().then(result => {
-                        Logger.debug('Init', `All users loaded: ${result.count}`);
+                        console.log(`[Init] All users loaded: ${result.count} discoverable users`);
                         if (result.users && result.users.length > 0) {
                             window.allUsersList = result.users;
                             if (window.FriendCore) {
@@ -10303,12 +10293,12 @@ window.friendCore = friendCore;
 // [NEARBY MANAGER] - Real geolocation-based discovery
 // =============================================
 const NearbyManager = {
-    _searching:   false,
-    _watchId:     null,
-    _coords:      null,
-    _onResult:    null,
-    _onStatus:    null,
-    _pollTimer:   null,
+    _searching:  false,
+    _watchId:    null,
+    _coords:     null,
+    _onResult:   null,
+    _onStatus:   null,
+    _pollTimer:  null,
 
     start(onResult, onStatus) {
         if (this._searching) return;
@@ -10319,66 +10309,54 @@ const NearbyManager = {
 
         if (!navigator.geolocation) {
             this._onStatus('Location not supported — showing online users');
-            this._fetchNearby(); // fallback: fetch online users
+            this._fetchNearby();
             return;
         }
 
-        // FIX: Fire getCurrentPosition FIRST for instant result, then watchPosition for updates
+        // Fire getCurrentPosition FIRST for an instant first result (watchPosition can take 5–30s)
         navigator.geolocation.getCurrentPosition(
-            (position) => {
-                this._coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+            (pos) => {
+                this._coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                 this._onStatus('Searching nearby...');
-                this._updatePresence();  // push our location to backend
-                this._fetchNearby();     // fetch immediately — no waiting for watch
+                this._pushPresence();
+                this._fetchNearby();
             },
-            (err) => {
-                Logger.warn('NearbyManager', 'getCurrentPosition error', err);
-                this._onStatus('Location permission denied — showing online users');
+            () => {
+                this._onStatus('Location denied — showing online users');
                 this._fetchNearby();
             },
             { enableHighAccuracy: true, timeout: 8000, maximumAge: 10000 }
         );
 
-        // Watch for ongoing updates
+        // Also watch for ongoing movement updates
         this._watchId = navigator.geolocation.watchPosition(
-            (position) => {
+            (pos) => {
                 const prev = this._coords;
-                this._coords = { lat: position.coords.latitude, lng: position.coords.longitude };
-                // Only re-fetch if moved more than ~50m (avoids constant re-fetching)
-                const moved = !prev || Math.abs(prev.lat - this._coords.lat) > 0.0005 || Math.abs(prev.lng - this._coords.lng) > 0.0005;
-                if (moved) {
-                    this._onStatus('Updating nearby...');
-                    this._updatePresence();
-                    this._fetchNearby();
-                }
+                this._coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                const moved = !prev ||
+                    Math.abs(prev.lat - this._coords.lat) > 0.0005 ||
+                    Math.abs(prev.lng - this._coords.lng) > 0.0005;
+                if (moved) { this._pushPresence(); this._fetchNearby(); }
             },
-            (err) => {
-                Logger.warn('NearbyManager', 'watchPosition error', err);
-            },
+            () => {},
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
         );
 
-        // Periodic refresh every 15s regardless of movement
+        // Periodic refresh every 15s
         this._pollTimer = setInterval(() => { if (this._searching) this._fetchNearby(); }, 15000);
     },
 
     stop() {
         this._searching = false;
-        if (this._watchId !== null) {
-            navigator.geolocation.clearWatch(this._watchId);
-            this._watchId = null;
-        }
+        if (this._watchId !== null) { navigator.geolocation.clearWatch(this._watchId); this._watchId = null; }
         if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
-        this._coords  = null;
-        this._onResult = null;
-        this._onStatus = null;
+        this._coords = null; this._onResult = null; this._onStatus = null;
     },
 
-    // FIX: Push our location to backend so other users can discover us
-    async _updatePresence() {
+    async _pushPresence() {
         if (!this._coords || !__session.token) return;
         try {
-            await authorizedRequest('/api/users/presence', {
+            await authorizedRequest('/api/friends/nearby/presence', {
                 method: 'POST',
                 body: JSON.stringify({ lat: this._coords.lat, lng: this._coords.lng, status: 'online' })
             });
@@ -10389,27 +10367,22 @@ const NearbyManager = {
         if (!this._searching) return;
         try {
             let url = '/api/friends/nearby';
-            if (this._coords) {
-                url += `?lat=${this._coords.lat}&lng=${this._coords.lng}&radius=5000`;
-            }
+            if (this._coords) url += `?lat=${this._coords.lat}&lng=${this._coords.lng}&radius=5000`;
             const response = await authorizedRequest(url);
             if (response.success && this._onResult) {
                 const users = response.data?.users || [];
-                users.forEach(user => {
-                    user.photoURL = user.photoURL || user.avatar || '';
-                });
+                users.forEach(u => { u.photoURL = u.photoURL || u.avatar || ''; });
                 if (users.length > 0 || response.data?.mode) {
                     this._onResult(users, response.data?.mode || 'geo');
                     return;
                 }
             }
-            // Fallback to online users from cache
-            const fallbackUsers = (window._allUsersCache || []).filter(u => u.online === true || u.status === 'online');
-            if (this._onResult) this._onResult(fallbackUsers, 'fallback');
+            const fallback = (window._allUsersCache || []).filter(u => u.online === true || u.status === 'online');
+            if (this._onResult) this._onResult(fallback, 'fallback');
         } catch (err) {
             Logger.error('NearbyManager', 'Failed to fetch nearby users', err);
-            const fallbackUsers = (window._allUsersCache || []).filter(u => u.online === true || u.status === 'online');
-            if (this._onResult) this._onResult(fallbackUsers, 'fallback');
+            const fallback = (window._allUsersCache || []).filter(u => u.online === true || u.status === 'online');
+            if (this._onResult) this._onResult(fallback, 'fallback');
         }
     }
 };

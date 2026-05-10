@@ -5841,7 +5841,6 @@
     // CALL RETURN HANDLER - re-opens the same chat after call ends
 
     function setupCallReturnHandler() {
-        // Guard: only register this listener ONCE per page load
         if (window.__callReturnHandlerBound) return;
         window.__callReturnHandlerBound = true;
 
@@ -5852,14 +5851,14 @@
             
 
             if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED') {
-                // Dedup: ignore if we already handled a call-end within the last 3 seconds
-                const now = Date.now();
-                if (window.__lastCallEndedHandled && (now - window.__lastCallEndedHandled) < 3000) return;
-                window.__lastCallEndedHandled = now;
+                const _now = Date.now();
+                if (window.__lastCallEndedHandled && (_now - window.__lastCallEndedHandled) < 3000) return;
+                window.__lastCallEndedHandled = _now;
 
                 console.log('[CallHandler] Call ended, returning to chat');
 
                 
+
                 const returnUserId = window.__messageChatReturnUserId;
 
                 const returnChatId = window.__messageChatReturnId;
@@ -9721,7 +9720,6 @@ Type: ${message.type || 'text'}`;
                 const chats = core?.getConversations?.() || [];
 
                 UIRenderer.renderMultiSendChats(chats);
-                // FIX: loadMultiSendHistory lives on window.messagesUI, not on `this`
                 if (window.messagesUI && typeof window.messagesUI.loadMultiSendHistory === 'function') {
                     window.messagesUI.loadMultiSendHistory();
                 }
@@ -11662,15 +11660,13 @@ Type: ${message.type || 'text'}`;
         
 
         loadChatByFriendId: (friendId, friendName) => {
-            // DEDUP: prevent opening same friend chat multiple times within 1.5s
-            const _dedupFriendKey = `loadchat_${friendId}`;
-            const _nowFriend = Date.now();
-            if (window.__loadChatDedup && window.__loadChatDedup[_dedupFriendKey]) {
-                if ((_nowFriend - window.__loadChatDedup[_dedupFriendKey]) < 1500) return;
-            }
+            // Dedup: prevent same chat opening multiple times within 1.5s
+            const _dk = 'loadchat_' + friendId;
+            const _nt = Date.now();
+            if (window.__loadChatDedup && window.__loadChatDedup[_dk] && (_nt - window.__loadChatDedup[_dk]) < 1500) return;
             if (!window.__loadChatDedup) window.__loadChatDedup = {};
-            window.__loadChatDedup[_dedupFriendKey] = _nowFriend;
-            setTimeout(() => { if (window.__loadChatDedup) delete window.__loadChatDedup[_dedupFriendKey]; }, 1500);
+            window.__loadChatDedup[_dk] = _nt;
+            setTimeout(() => { if (window.__loadChatDedup) delete window.__loadChatDedup[_dk]; }, 1500);
 
             const core = getMessagesCore();
 
@@ -12490,30 +12486,22 @@ Type: ${message.type || 'text'}`;
     UIRenderer.renderMultiSendHistory = function(historyItems) {
         const listEl = UIFailsafe.safeGetElement('multiSendHistoryList');
         if (!listEl) return;
-
         const items = Array.isArray(historyItems) ? historyItems : [];
         UIFailsafe.safeSetStyle(listEl, 'display', 'block');
-
         if (items.length === 0) {
             UIFailsafe.safeSetHTML(listEl, '<div style="color:#64748b;font-size:12px;padding:8px 0;text-align:center;">No multi-send history yet</div>');
             return;
         }
-
         const html = items.slice(0, 20).map((item) => {
-            const recipients = Array.isArray(item.recipients) ? item.recipients.length : (Array.isArray(item.recipientIds) ? item.recipientIds.length : (parseInt(item.deliveryCount, 10) || 0));
+            const cnt = Array.isArray(item.recipients) ? item.recipients.length : (parseInt(item.deliveryCount, 10) || 0);
             const preview = (item.content || '').substring(0, 60) + ((item.content || '').length > 60 ? '…' : '');
             const ts = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
-            return `
-                <button type="button" data-batch-id="${item.batchId || item.id}" class="multi-send-history-item"
-                    style="width:100%;text-align:left;border:none;background:#fff;padding:10px 12px;border-radius:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(15,23,42,0.08);cursor:pointer;">
-                    <div style="font-weight:600;color:#0f172a;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${preview}</div>
-                    <div style="font-size:11px;color:#64748b;margin-top:4px;">${recipients} recipients · ${parseInt(item.deliveryCount,10)||0} delivered · ${parseInt(item.seenCount,10)||0} seen${ts ? ' · ' + ts : ''}</div>
-                </button>
-            `;
+            return '<button type="button" data-batch-id="' + (item.batchId || item.id) + '" class="multi-send-history-item" style="width:100%;text-align:left;border:none;background:#fff;padding:10px 12px;border-radius:12px;margin-bottom:8px;box-shadow:0 1px 3px rgba(15,23,42,0.08);cursor:pointer;">' +
+                '<div style="font-weight:600;color:#0f172a;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + preview + '</div>' +
+                '<div style="font-size:11px;color:#64748b;margin-top:4px;">' + cnt + ' recipients · ' + (parseInt(item.seenCount, 10) || 0) + ' seen' + (ts ? ' · ' + ts : '') + '</div>' +
+                '</button>';
         }).join('');
-
         UIFailsafe.safeSetHTML(listEl, html);
-
         listEl.querySelectorAll('[data-batch-id]').forEach((button) => {
             button.addEventListener('click', () => {
                 window.messagesUI?.openMultiSendHistory?.(button.dataset.batchId);
@@ -12643,8 +12631,8 @@ Type: ${message.type || 'text'}`;
                     if (!resp.ok || result.success === false) {
                         throw new Error(result.message || result.error || 'Failed to send');
                     }
-                    const sentCount = Array.isArray(result.data?.messages) ? result.data.messages.length : selectedChats.size;
-                    UIRenderer.showNotification('Sent to ' + sentCount + ' chats');
+                    const sentCount = result.data?.successCount || (Array.isArray(result.data?.results) ? result.data.results.filter(r=>r&&r.success).length : selectedChats.size);
+                    UIRenderer.showNotification('✓ Sent to ' + sentCount + ' chat' + (sentCount !== 1 ? 's' : ''));
                     window.messagesUI?.loadMultiSendHistory?.();
                     if (input) input.value = '';
                     if (core?.multiSendSelectedChats) core.multiSendSelectedChats.clear();

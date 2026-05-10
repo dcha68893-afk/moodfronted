@@ -1182,69 +1182,93 @@ export const RenderPipeline = {
             const isRealtime     = event.detail?.realtime === true;
             const isPresence     = event.detail?.presenceUpdate === true;
 
-            // Presence-only updates: just re-render the status dots in the active list
             if (isPresence) {
                 const { userId, online } = event.detail || {};
                 if (userId) updateFriendPresence(userId, online, null);
                 return;
             }
 
-            // FIX: Debounce renders to prevent the loop:
-            // friendsUpdated → renderFriends → loadFriendsFromBackend → syncToGlobals → friendsUpdated
-            // Use a minimum 200ms debounce so rapid-fire events collapse into one render.
             const _delay = isRealtime ? 0 : (fromCache ? 50 : 300);
             this.queueRender('friends', debounce(() => {
                 updateFriendCounts();
                 if (UIState.activeSection === 'friendsSection') renderFriends();
                 else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
-                else {
-                    // Off-screen update: just update counts, render when user navigates here
-                    updateFriendCounts();
-                }
-            // FIX: Use 500ms minimum debounce — multiple iframe instances (chat.html,
-            // calls.html sub-iframes) each fire friendsUpdated within milliseconds of each
-            // other on load, causing redundant renders and duplicate list entries.
+                else { updateFriendCounts(); }
             }, Math.max(_delay, isRealtime ? 50 : 500)));
         });
 
-        // FIX: Also handle FRIENDS_SYNC postMessage from parent (cross-module sync).
-        // When another module (chat, status, call) or the parent rebroadcasts friend data,
-        // we merge it into local state and re-render — so this module never shows stale data.
+        // FIX: Handle FRIENDS_SYNC / FRIENDS_DATA / FRIEND_RELATIONSHIP_CHANGED from parent
+        // so this module immediately reflects friend state changes made in other modules.
         window.addEventListener('message', (evt) => {
             if (!evt.data || typeof evt.data !== 'object') return;
-            const { type, friends } = evt.data;
-            if ((type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA') && Array.isArray(friends)) {
-                if (window.FriendCacheManager?.setFriend) {
-                    friends.forEach(f => { if (f && f.id) window.FriendCacheManager.setFriend(f); });
-                    window.FriendCacheManager.syncToGlobals?.();
-                } else {
-                    window.friends = friends;
-                }
-                updateFriendCounts();
-                this.queueRender('friends', debounce(() => {
-                    if (UIState.activeSection === 'friendsSection') renderFriends();
-                    else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+            const { type, friends: inboundFriends, requests } = evt.data;
+
+            if (type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA') {
+                if (Array.isArray(inboundFriends) && inboundFriends.length > 0) {
+                    if (window.FriendCacheManager?.setFriends) {
+                        window.FriendCacheManager.setFriends(inboundFriends);
+                        window.FriendCacheManager.syncToGlobals?.();
+                    } else {
+                        window.friends = inboundFriends;
+                    }
                     updateFriendCounts();
-                }, 200));
+                    this.queueRender('friends', debounce(() => {
+                        if (UIState.activeSection === 'friendsSection') renderFriends();
+                        else if (UIState.activeSection === 'allFriendsSection') renderAllFriendsList();
+                        updateFriendCounts();
+                    }, 200));
+                }
             }
-            if (type === 'FRIEND_RELATIONSHIP_CHANGED' && evt.data.action === 'accepted') {
-                // Force refresh the friend action button for this user
-                const fid = evt.data.friendId;
-                if (fid) {
-                    document.querySelectorAll(`[data-user-id="${fid}"] .friend-action-btn, .friend-action-btn[data-user-id="${fid}"]`).forEach(btn => {
-                        btn.textContent = 'Friends';
-                        btn.dataset.status = 'accepted';
+
+            if (type === 'FRIEND_RELATIONSHIP_CHANGED') {
+                const { action, friendId, friend } = evt.data;
+                if (action === 'accepted' && friendId) {
+                    if (friend && window.FriendCacheManager?.setFriend) {
+                        window.FriendCacheManager.setFriend(friend);
+                        window.FriendCacheManager.syncToGlobals?.();
+                    }
+                    // Flip any visible "Add Friend" buttons to "Friends"
+                    document.querySelectorAll(
+                        `[data-user-id="${friendId}"] .friend-action-btn[data-action="add"],
+                         .friend-action-btn[data-action="add"][data-user-id="${friendId}"]`
+                    ).forEach(btn => {
+                        btn.innerHTML = '<i class="fas fa-check"></i>';
+                        btn.title = 'Friends';
+                        btn.dataset.action = 'friends';
                         btn.disabled = true;
+                        btn.classList.remove('success');
+                        btn.classList.add('friends-already');
                     });
-                }
-                updateFriendCounts();
-                this.queueRender('friends', debounce(() => {
-                    if (UIState.activeSection === 'friendsSection') renderFriends();
                     updateFriendCounts();
-                }, 150));
+                    this.queueRender('friends', debounce(() => {
+                        if (UIState.activeSection === 'friendsSection') renderFriends();
+                        updateFriendCounts();
+                    }, 150));
+                } else if (action === 'removed' && friendId) {
+                    if (window.FriendCacheManager?.removeFriend) {
+                        window.FriendCacheManager.removeFriend(String(friendId));
+                        window.FriendCacheManager.syncToGlobals?.();
+                    }
+                    this.queueRender('friends', debounce(() => {
+                        if (UIState.activeSection === 'friendsSection') renderFriends();
+                        updateFriendCounts();
+                    }, 150));
+                }
+            }
+
+            // Also handle FRIENDS_SYNC dispatched as a window CustomEvent (same-frame path)
+            if (type === 'friend:accepted') {
+                const { friend: acceptedFriend } = evt.data.payload || {};
+                if (acceptedFriend && window.FriendCacheManager?.setFriend) {
+                    window.FriendCacheManager.setFriend(acceptedFriend);
+                    window.FriendCacheManager.syncToGlobals?.();
+                    updateFriendCounts();
+                    this.queueRender('friends', debounce(() => {
+                        renderFriends(); renderAllFriendsList(); updateFriendCounts();
+                    }, 200));
+                }
             }
         });
-
 
         // Catch any data load completion events and update counts
         window.addEventListener('requestsUpdated', () => updateFriendCounts());

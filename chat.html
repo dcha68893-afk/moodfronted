@@ -4490,6 +4490,7 @@
                     if (window.SettingsStore) {
                         window.SettingsStore.set(`${section}.${key}`, value);
                     }
+                    // ── appearance ─────────────────────────────────────────────
                     if (section === 'appearance') {
                         if (key === 'theme') {
                             const resolvedTheme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
@@ -4503,20 +4504,52 @@
                         if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
                         if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
                     }
+                    // ── advanced ───────────────────────────────────────────────
                     if (section === 'advanced') {
                         if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
                         if (key === 'performanceMode') document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false');
                     }
+                    // ── notifications ──────────────────────────────────────────
+                    if (section === 'notifications') {
+                        document.documentElement.setAttribute(`data-notification-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
+                    }
+                    // ── privacy ────────────────────────────────────────────────
+                    if (section === 'privacy') {
+                        document.documentElement.setAttribute(`data-privacy-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
+                    }
+                    // ── chat ───────────────────────────────────────────────────
+                    if (section === 'chat') {
+                        document.documentElement.setAttribute(`data-chat-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
+                    }
+                    // ── calls ──────────────────────────────────────────────────
+                    if (section === 'calls') {
+                        document.documentElement.setAttribute(`data-calls-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
+                    }
+                    // ── groups ─────────────────────────────────────────────────
+                    if (section === 'groups') {
+                        document.documentElement.setAttribute(`data-groups-${key}`, value === true ? 'true' : value === false ? 'false' : String(value));
+                    }
+                    // ── mood ───────────────────────────────────────────────────
                     if (section === 'mood' && key === 'currentMood') document.documentElement.setAttribute('data-mood', value);
                     updateCachedSettingsPath(section, key, value);
+                    // Broadcast as SETTING_CHANGED so all iframes get section/key/value
                     emitGlobalAppEvent('SETTING_CHANGED', {
-                        section,
-                        key,
-                        value,
+                        section, key, value,
                         source: data.source || 'settings',
                         timestamp: Date.now()
                     }, { async: true });
                     dispatchEventToModules({ type: 'SETTING_CHANGED', payload: { section, key, value, timestamp: Date.now() }, originalSource: 'settings' });
+                    // Also relay as SETTINGS_GLOBAL_UPDATE so iframes that listen to that event name receive it too
+                    dispatchEventToModules({ type: 'SETTINGS_GLOBAL_UPDATE', payload: { section, key, value, timestamp: Date.now() }, originalSource: 'settings' });
+                }
+
+                // ── settings_updated socket event relay ─────────────────────────
+                // When the realtime socket receives a settings_updated event from
+                // the server (e.g. settings changed on another device), relay to all iframes.
+                if (data.type === 'SOCKET_EVENT' && data.event === 'settings_updated') {
+                    const settingsPayload = data.payload || data.data || {};
+                    dispatchEventToModules({ type: 'SETTINGS_GLOBAL_UPDATE', payload: settingsPayload, originalSource: 'socket' });
+                    emitGlobalAppEvent('SETTINGS_UPDATED', { settings: settingsPayload, source: 'socket', timestamp: Date.now() }, { async: true });
                 }
 
                 // ✅ ROOT-FIX: ADD_REACTION — previously silently dropped.
@@ -5229,38 +5262,43 @@
                 // ── REAL-TIME MESSAGE BRIDGE ──────────────────────────────────
                 // Forward incoming chat messages from WebSocket to the messages iframe.
                 // This is what makes the receiver's screen update instantly without polling.
+                // Tracks which socket event triggered _fwdNewMessage so echo prevention
+                // can be skipped for recipient-only events (receive_message / message:received).
+                let _fwdNewMessageSourceEvent = null;
                 function _fwdNewMessage(payload) {
                     const msgIframe = document.getElementById('messagesIframe');
                     if (!msgIframe || !msgIframe.contentWindow) return;
 
-                    // ECHO PREVENTION in parent bridge: if the WebSocket echoes the
-                    // sender's own message back, forward ONLY a status-update so the
-                    // optimistic bubble's tick upgrades to "sent/delivered".
-                    // Never re-add the message as a new one on the sender's side.
-                    const _wsPayloadSenderId = payload && (payload.senderId || (payload.sender && payload.sender.id));
-                    const _wsCurrentUserId   = cachedUserId ? String(cachedUserId) : null;
-                    if (_wsPayloadSenderId && _wsCurrentUserId &&
-                        String(_wsPayloadSenderId) === _wsCurrentUserId) {
-                        // It's our own echo — only forward a status confirmation
-                        msgIframe.contentWindow.postMessage({
-                            type: 'message:sent',
-                            payload: {
-                                localId:  payload.localId  || null,
-                                serverId: payload.id       || payload.serverId || null,
-                                messageId: payload.id      || payload.localId  || null,
-                                status:   payload.status   || 'sent'
-                            },
-                            source: 'ws-bridge'
-                        }, '*');
-                        return; // Do NOT forward as new_message
+                    // ECHO PREVENTION: skip for receive_message / message:received —
+                    // those are sent ONLY to the recipient's room, never to the sender.
+                    const _isRecipientEvent = (_fwdNewMessageSourceEvent === 'receive_message' ||
+                                              _fwdNewMessageSourceEvent === 'message:received');
+                    if (!_isRecipientEvent) {
+                        const _wsPayloadSenderId = payload && (payload.senderId || (payload.sender && payload.sender.id));
+                        const _wsCurrentUserId   = cachedUserId ? String(cachedUserId) : null;
+                        if (_wsPayloadSenderId && _wsCurrentUserId &&
+                            String(_wsPayloadSenderId) === _wsCurrentUserId) {
+                            // It's our own echo — only forward a status confirmation
+                            msgIframe.contentWindow.postMessage({
+                                type: 'message:sent',
+                                payload: {
+                                    localId:  payload.localId  || null,
+                                    serverId: payload.id       || payload.serverId || null,
+                                    messageId: payload.id      || payload.localId  || null,
+                                    status:   payload.status   || 'sent'
+                                },
+                                source: 'ws-bridge'
+                            }, '*');
+                            _fwdNewMessageSourceEvent = null;
+                            return; // Do NOT forward as new_message
+                        }
                     }
+                    _fwdNewMessageSourceEvent = null;
 
-                    // FIX: Send only ONE message type to avoid double-processing in the iframe.
-                    // messages-core.js window.addEventListener handles both 'message:new' and 'new_message',
-                    // and its dedup set catches duplicates — but sending one is cleaner.
+                    // Forward to iframe — dedup set in messages-core prevents double-rendering
                     msgIframe.contentWindow.postMessage({ type: 'message:new', payload: payload, source: 'ws-bridge' }, '*');
 
-                    // Also update the sidebar unread badge by bumping conversation last message
+                    // Also update the sidebar unread badge / last message preview
                     if (payload && payload.chatId) {
                         msgIframe.contentWindow.postMessage({
                             type: 'CONVERSATION_UPDATED',
@@ -5306,6 +5344,12 @@
                 window.wsService.on('new_message',        _fwdNewMessage);
                 window.wsService.on('newMessage',         _fwdNewMessage);
                 window.wsService.on('chat:message',       _fwdNewMessage);
+                // FIX: receive_message / message:received are sent ONLY to the recipient's
+                // user room by the backend. Without binding these the receiver NEVER sees
+                // the incoming message in their chat panel — the payload reaches the parent
+                // window but is silently dropped because no listener existed for it.
+                window.wsService.on('receive_message',    function(p) { _fwdNewMessageSourceEvent = 'receive_message';  _fwdNewMessage(p); });
+                window.wsService.on('message:received',   function(p) { _fwdNewMessageSourceEvent = 'message:received'; _fwdNewMessage(p); });
                 window.wsService.on('message:delivered',  _fwdMessageDelivered);
                 window.wsService.on('message_delivered',  _fwdMessageDelivered);
                 window.wsService.on('message:read',       _fwdMessageRead);
@@ -5313,6 +5357,17 @@
                 window.wsService.on('user:online',        _fwdPresence);
                 window.wsService.on('user:offline',       d => _fwdPresence({ ...d, online: false }));
                 window.wsService.on('presence:update',    _fwdPresence);
+
+                // FIX: Forward message:deleted so receiver UI removes deleted messages in realtime
+                function _fwdMessageDeleted(payload) {
+                    const msgIframe = document.getElementById('messagesIframe');
+                    if (msgIframe && msgIframe.contentWindow) {
+                        msgIframe.contentWindow.postMessage({ type: 'message:deleted', payload: payload, source: 'ws-bridge' }, '*');
+                        msgIframe.contentWindow.postMessage({ type: 'message_deleted', payload: payload, source: 'ws-bridge' }, '*');
+                    }
+                }
+                window.wsService.on('message:deleted',    _fwdMessageDeleted);
+                window.wsService.on('message_deleted',    _fwdMessageDeleted);
 
                 // ✅ ROOT-FIX: Forward message:reaction from server WebSocket to messages iframe.
                 // Server calls wsService.broadcastToChat(chatId, 'message:reaction', {...})

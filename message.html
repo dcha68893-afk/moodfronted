@@ -1990,32 +1990,26 @@
 
             if (data.type === 'OPEN_CHAT_WITH_USER') {
                 console.log('[Message HTML] Opening chat with user:', data.payload);
-                
+
                 const { userId, userName, recipientId, recipientName } = data.payload || {};
                 const targetUserId = userId || recipientId;
                 const targetUserName = userName || recipientName || 'User';
-                
-                if (!targetUserId) {
-                    console.error('[Message HTML] No userId provided');
+
+                if (!targetUserId) { console.error('[Message HTML] No userId provided'); return; }
+
+                // DEDUP: ignore duplicate OPEN_CHAT_WITH_USER for same user within 2s
+                const _dk = 'open_chat_' + targetUserId;
+                const _nt = Date.now();
+                if (window.__openChatDedup && window.__openChatDedup[_dk] && (_nt - window.__openChatDedup[_dk]) < 2000) {
+                    try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nt }, '*'); } catch(_) {}
                     return;
                 }
-
-                // DEDUP: ignore duplicate OPEN_CHAT_WITH_USER for same user within 2 seconds
-                const _dedupKey = `open_chat_${targetUserId}`;
-                const _nowTs = Date.now();
-                if (window.__openChatDedup && window.__openChatDedup[_dedupKey]) {
-                    if ((_nowTs - window.__openChatDedup[_dedupKey]) < 2000) {
-                        try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nowTs }, '*'); } catch(_) {}
-                        return;
-                    }
-                }
                 if (!window.__openChatDedup) window.__openChatDedup = {};
-                window.__openChatDedup[_dedupKey] = _nowTs;
-                setTimeout(() => { if (window.__openChatDedup) delete window.__openChatDedup[_dedupKey]; }, 2000);
+                window.__openChatDedup[_dk] = _nt;
+                setTimeout(() => { if (window.__openChatDedup) delete window.__openChatDedup[_dk]; }, 2000);
 
                 // ACK parent so retry loop stops
-                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nowTs }, '*'); } catch(_) {}
-                // Clear stale sessionStorage so old pending_chat doesn't reopen on next navigation
+                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nt }, '*'); } catch(_) {}
                 sessionStorage.removeItem('open_chat_on_load');
                 sessionStorage.removeItem('pending_chat');
 
@@ -2026,7 +2020,6 @@
                     recipientName: targetUserName
                 };
 
-                // FIX: getState() returns {state:'ACTIVE',...} not a bare string.
                 let _fired = false;
                 const tryOpen = (attempts) => {
                     if (_fired) return;

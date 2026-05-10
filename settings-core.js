@@ -521,23 +521,58 @@ const SettingsState = {
     },
     
     async _sendUpdateToBackend(section, key, value) {
-        // Map settings sections to the actual server routes that exist.
-        // settings.js has: GET /, PUT /profile, PUT /notifications, PUT /privacy
-        // There is NO generic /update endpoint, so we route per-section.
-        const sectionEndpointMap = {
-            profile:       { endpoint: '/api/settings/profile',       method: 'PUT' },
-            appearance:    { endpoint: '/api/settings/profile',       method: 'PUT' }, // theme/language on profile
-            notifications: { endpoint: '/api/settings/notifications', method: 'PUT' },
-            privacy:       { endpoint: '/api/profile/privacy',        method: 'PUT' },
-            account:       { endpoint: '/api/settings/profile',       method: 'PUT' },
-        };
-        const route = sectionEndpointMap[section] || { endpoint: '/api/settings/profile', method: 'PUT' };
+        // Route each settings section to the correct backend endpoint.
+        // settings.js has: GET /, PUT /, PUT /profile, PUT /notifications, PUT /privacy, PUT /theme, PUT /language
         try {
-            const response = await authorizedRequest(route.endpoint, {
-                method: route.method,
-                body: { [key]: value, section }
-            });
-            // response is { success, data, statusCode } from chat.html's API_RESPONSE payload
+            let endpoint, method, body;
+
+            switch (section) {
+                case 'appearance':
+                    if (key === 'theme') {
+                        endpoint = '/api/settings/theme';
+                        method   = 'PUT';
+                        body     = { theme: value };
+                    } else if (key === 'language') {
+                        endpoint = '/api/settings/language';
+                        method   = 'PUT';
+                        body     = { language: value };
+                    } else {
+                        // accentColor, fontSize, etc. — use profile endpoint
+                        endpoint = '/api/settings/profile';
+                        method   = 'PUT';
+                        body     = { [key]: value, section };
+                    }
+                    break;
+
+                case 'notifications':
+                    endpoint = '/api/settings/notifications';
+                    method   = 'PUT';
+                    body     = { [key]: value };
+                    break;
+
+                case 'privacy':
+                    endpoint = '/api/settings/privacy';
+                    method   = 'PUT';
+                    body     = { [key]: value };
+                    break;
+
+                case 'account':
+                case 'profile':
+                    endpoint = '/api/settings/profile';
+                    method   = 'PUT';
+                    body     = { [key]: value, section };
+                    break;
+
+                default:
+                    // chat, calls, groups, friends, advanced, status
+                    // Use the bulk PUT / endpoint so all sections are persisted
+                    endpoint = '/api/settings';
+                    method   = 'PUT';
+                    body     = { [section]: { [key]: value } };
+                    break;
+            }
+
+            const response = await authorizedRequest(endpoint, { method, body });
             return { success: response?.success !== false };
         } catch (error) {
             throw new Error(error.message || 'Update failed');
@@ -720,7 +755,10 @@ const SettingsState = {
     async _fetchFromBackend() {
         try {
             const response = await authorizedRequest('/api/settings', { method: 'GET' });
-            return { success: true, data: response.data || response };
+            // New shape: { success:true, data:{ settings:{...AppSettings sections...} } }
+            // Legacy shape: { success:true, data:{...} }
+            const raw = response?.data?.settings || response?.data || response || {};
+            return { success: true, data: raw };
         } catch (error) {
             throw new Error('Fetch failed: ' + error.message);
         }
@@ -1850,8 +1888,45 @@ function handleModuleRegisteredMessage(message) {}
 function handleSessionSyncMessage(message) {}
 function handleSessionUpdateMessage(message) {}
 function handleSessionInvalidatedMessage(message) {}
-function handleSettingsLoadResponseMessage(message) {}
-function handleSettingsUpdatedMessage(message) {}
+function handleSettingsLoadResponseMessage(message) {
+    // Settings data returned from parent's cache/backend — merge into SettingsState
+    const settings = message?.settings || message?.data?.settings || message?.data || null;
+    if (settings && typeof settings === 'object' && Object.keys(settings).length > 0) {
+        SettingsState.data = Object.assign({}, SettingsState.data, settings);
+        SettingsState.loaded = true;
+        SettingsState._saveToCache();
+        if (window.AppSettings) window.AppSettings.merge(SettingsState.data);
+        applySettingsToUI(SettingsState.data);
+    }
+}
+
+function handleSettingsUpdatedMessage(message) {
+    // Incoming settings update — could be from another device via socket relay,
+    // from a sibling iframe, or from the parent frame broadcasting a change.
+    const settings = message?.settings || message?.data?.settings || message?.data || null;
+    if (!settings || typeof settings !== 'object') return;
+
+    // Deep-merge into SettingsState so we never lose existing keys
+    Object.keys(settings).forEach(section => {
+        if (settings[section] && typeof settings[section] === 'object') {
+            SettingsState.data[section] = Object.assign({}, SettingsState.data[section] || {}, settings[section]);
+        } else if (settings[section] !== undefined) {
+            SettingsState.data[section] = settings[section];
+        }
+    });
+    SettingsState.lastSynced = Date.now();
+    SettingsState._saveToCache();
+
+    // Propagate into AppSettings (single source of truth)
+    if (window.AppSettings) window.AppSettings.merge(SettingsState.data);
+
+    // Apply effects to this page's DOM immediately
+    applySettingsToUI(SettingsState.data);
+
+    window.dispatchEvent(new CustomEvent('settingsUpdated', {
+        detail: { settings: SettingsState.data, partial: settings, timestamp: Date.now() }
+    }));
+}
 function handleProfileUpdatedMessage(message) {}
 function handlePrivacyUpdatedMessage(message) {}
 function handleNotificationsUpdatedMessage(message) {}

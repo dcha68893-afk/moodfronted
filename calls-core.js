@@ -13851,61 +13851,40 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
         close: function() {
-
-
-
             if (this._connectionTimeout) {
-
-
-
                 clearTimeout(this._connectionTimeout);
-
-
-
                 this._connectionTimeout = null;
-
-
-
             }
-
-
-
             if (this._peerConnection) {
-
-
-
-                this._peerConnection.close();
-
-
-
+                // Remove all listeners before closing to prevent stale callbacks
+                try { this._peerConnection.ontrack = null; } catch(e) {}
+                try { this._peerConnection.onicecandidate = null; } catch(e) {}
+                try { this._peerConnection.oniceconnectionstatechange = null; } catch(e) {}
+                try { this._peerConnection.onnegotiationneeded = null; } catch(e) {}
+                try { this._peerConnection.close(); } catch(e) {}
                 this._peerConnection = null;
-
-
-
             }
-
-
+            // ✅ FIX: Clear remote audio/video streams so second call starts fresh
+            if (this._remoteAudioStream) {
+                this._remoteAudioStream.getTracks().forEach(function(t){ try{t.stop();}catch(e){} });
+                this._remoteAudioStream = null;
+            }
+            if (this._remoteVideoStream) {
+                this._remoteVideoStream.getTracks().forEach(function(t){ try{t.stop();}catch(e){} });
+                this._remoteVideoStream = null;
+            }
+            // Clear DOM elements
+            var remAudio = document.getElementById('remoteAudio');
+            if (remAudio) { remAudio.srcObject = null; remAudio.load(); }
+            var remVideo = document.getElementById('remoteVideo');
+            if (remVideo) { remVideo.srcObject = null; remVideo.style.display = 'none'; }
 
             this._iceCandidates = [];
-
-
-
             this._iceRestartCount = 0;
-
-
-
             this._remoteStreams.clear();
-
-
-
             this._dataChannel = null;
-
-
-
             this._currentCallId = null;
-
-
-
+            console.log('[WebRTCManager] ✅ Full cleanup done — ready for next call');
         },
 
 
@@ -14422,9 +14401,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
     callsState.callStartTime = null;
     callsState.connectionState = 'new';
     callsState.signalingState = 'new';
-    // ✅ FIX: Clear caller flags on reset
+    // ✅ FIX: Clear caller flags and pending queues on reset
     callsState._isCaller = false;
     window.__callerCallId = null;
+    window.__pendingOfferPayload = null;
+    window.__pendingAnswerPayload = null;
 
 
 
@@ -16558,6 +16539,8 @@ initiateCall: async function(callType, participants = []) {
         callsState.localCallId  = null;
         callsState._isCaller    = false;
         window.__callerCallId   = null;
+        window.__pendingOfferPayload = null;
+        window.__pendingAnswerPayload = null;
         // Close PC if still open
         if (WebRTCManager && WebRTCManager._peerConnection) {
             try { WebRTCManager._peerConnection.close(); } catch(e) {}
@@ -30027,7 +30010,8 @@ window.CallHandlers = {
 
         // FIX: allow all valid mid-call states for signal answer too
         const _validAnsStates = ['initiating','initiated','connecting','in-call',
-                                  'in_call','starting','ringing','connected'];
+                                  'in_call','starting','ringing','connected',
+                                  'in-progress','accepted','answering','call_ready','incoming'];
         if (!callsState.callActive && !_validAnsStates.includes(callsState.callState)) {
 
 
@@ -30048,18 +30032,26 @@ window.CallHandlers = {
 
 
 
+        // ✅ FIX: Queue answer if no peer connection yet (timing issue)
         if (!WebRTCManager._peerConnection) {
-
-
-
-            logWarn(MODULE, 'No peer connection for signal answer');
-
-
-
+            if (!window.__pendingAnswerPayload) {
+                window.__pendingAnswerPayload = payload;
+                var _ansRetries = 0;
+                var _ansInterval = setInterval(function() {
+                    _ansRetries++;
+                    if (WebRTCManager._peerConnection) {
+                        clearInterval(_ansInterval);
+                        var q = window.__pendingAnswerPayload; window.__pendingAnswerPayload = null;
+                        if (q) handleSignalAnswer(q);
+                    } else if (_ansRetries >= 15) {
+                        clearInterval(_ansInterval);
+                        window.__pendingAnswerPayload = null;
+                        logWarn(MODULE, 'Answer dropped: no peer connection after 3s');
+                    }
+                }, 200);
+            }
+            logWarn(MODULE, 'Signal answer queued — waiting for peer connection');
             return;
-
-
-
         }
 
 
