@@ -3190,9 +3190,10 @@
 
                                             status === 'failed' ? 'fa-exclamation-circle' :
 
-                                            status === 'read' ? 'fa-check-double' : 'fa-check';
+                                            (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
                             statusIcon.className = `fas ${iconClass}`;
+                            statusIcon.style.color = status === 'read' ? '#53bdeb' : '';
 
                         }
 
@@ -3433,7 +3434,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3529,7 +3530,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3595,7 +3596,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3661,7 +3662,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3735,7 +3736,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3815,7 +3816,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3881,7 +3882,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -3979,7 +3980,7 @@
 
                               status === 'failed' ? 'fa-exclamation-circle' :
 
-                              status === 'read' ? 'fa-check-double' : 'fa-check';
+                              (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
             
 
@@ -5348,7 +5349,8 @@
 
                 const selectedSet = core?.multiSendSelectedChats;
 
-                const isSelected = selectedSet instanceof Set ? selectedSet.has(chat.id) : false;
+                const normalizedChatId = String(chat.id);
+                const isSelected = selectedSet instanceof Set ? selectedSet.has(normalizedChatId) : false;
 
                 const name = chat.friendName || chat.name || 'Chat';
 
@@ -5362,11 +5364,11 @@
 
                 html += `
 
-                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}"
+                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${normalizedChatId}"
 
                          style="display:flex;align-items:center;padding:10px 14px;gap:10px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,0.05);${isSelected ? 'background:rgba(102,126,234,0.08);' : ''}"
 
-                         onclick="window.messagesUI?.toggleMultiSendItem('${chat.id}', this)">
+                         onclick="window.messagesUI?.toggleMultiSendItem('${normalizedChatId}', this)">
 
                         <input type="checkbox" class="multi-send-checkbox" ${isSelected ? 'checked' : ''}
 
@@ -5374,7 +5376,7 @@
 
                                onclick="event.stopPropagation()"
 
-                               onchange="window.messagesUI?.toggleMultiSendItem('${chat.id}', this.closest('.chat-item'))">
+                               onchange="window.messagesUI?.toggleMultiSendItem('${normalizedChatId}', this.closest('.chat-item'))">
 
                         <div style="width:38px;height:38px;border-radius:50%;flex-shrink:0;overflow:hidden;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;">
 
@@ -5390,7 +5392,7 @@
 
                         <div style="flex:1;min-width:0;">
 
-                            <div style="font-weight:600;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+                            <div class="chat-name" style="font-weight:600;font-size:13px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
 
                             ${lastMsg ? `<div style="font-size:12px;color:#9ca3af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${lastMsg}</div>` : ''}
 
@@ -9771,31 +9773,12 @@ Type: ${message.type || 'text'}`;
 
 
         async _handleMultiSend() {
-
-            const input = UIFailsafe.safeGetElement('multiSendInput');
-            const msgContent = (input && input.value && input.value.trim()) || '';
-            const core = getMessagesCore();
-            if (!msgContent) { UIRenderer.showNotification('Please type a message first', 'error'); return; }
-            const selectedChats = core && core.multiSendSelectedChats;
-            if (!selectedChats || selectedChats.size === 0) { UIRenderer.showNotification('Select at least one chat', 'error'); return; }
-            const chatIds = Array.from(selectedChats);
-            let ok = 0, fail = 0;
-            // FIX: direct API call per target chat — core.sendMessage() binds to active chat
-            let token = null;
-            try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
-            for (const chatId of chatIds) {
-                try {
-                    const resp = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify({ chatId: chatId, content: msgContent, type: 'text' }) });
-                    const result = await resp.json().catch(function() { return {}; });
-                    if (resp.ok && result.success !== false) { ok++; } else { fail++; console.warn('[MultiSend] Failed chatId=' + chatId, result); }
-                } catch(e) { fail++; console.warn('[MultiSend] Error chatId=' + chatId, e); }
+            if (window.messagesUI && typeof window.messagesUI.handleSendToMultiple === 'function') {
+                await window.messagesUI.handleSendToMultiple({ closePanelOnSuccess: true });
+                return;
             }
-            if (ok > 0) {
-                UIRenderer.showNotification('\u2713 Sent to ' + ok + ' chat' + (ok > 1 ? 's' : '') + (fail > 0 ? ' (' + fail + ' failed)' : ''));
-                this._closeMultiSend();
-                if (input) input.value = '';
-                if (core && core.multiSendSelectedChats) core.multiSendSelectedChats.clear();
-            } else { UIRenderer.showNotification('Failed to send — please try again', 'error'); }
+
+            UIRenderer.showNotification('Multi-send helper is not ready yet', 'error');
 
         },
 
@@ -11499,7 +11482,7 @@ Type: ${message.type || 'text'}`;
 
             }
 
-            const id = parseInt(chatId, 10);
+            const id = String(chatId || '').trim();
 
             if (!id) return;
 
@@ -11541,7 +11524,7 @@ Type: ${message.type || 'text'}`;
 
             if (!(core.multiSendSelectedChats instanceof Set)) core.multiSendSelectedChats = new Set();
 
-            const id = parseInt(chatId, 10);
+            const id = String(chatId || '').trim();
 
             if (!id) return;
 
@@ -12302,6 +12285,9 @@ Type: ${message.type || 'text'}`;
     // FIX: expose UIRenderer to window so installSettingsUIBridge IIFE can use it
     // (that IIFE is outside this closure, so UIRenderer would otherwise be undefined)
     window.UIRenderer = UIRenderer;
+    // FIX: expose UIFailsafe to window for the same reason — multi-send history
+    // functions added after this IIFE close reference UIFailsafe which is scoped here
+    window.UIFailsafe = UIFailsafe;
 
 })();
 
@@ -12494,12 +12480,12 @@ Type: ${message.type || 'text'}`;
     window.messagesUI = window.messagesUI || {};
 
     (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistory = function(historyItems) {
-        const listEl = UIFailsafe.safeGetElement('multiSendHistoryList');
+        const listEl = window.UIFailsafe?.safeGetElement('multiSendHistoryList');
         if (!listEl) return;
         const items = Array.isArray(historyItems) ? historyItems : [];
-        UIFailsafe.safeSetStyle(listEl, 'display', 'block');
+        window.UIFailsafe?.safeSetStyle(listEl, 'display', 'block');
         if (items.length === 0) {
-            UIFailsafe.safeSetHTML(listEl, '<div style="color:#64748b;font-size:12px;padding:8px 0;text-align:center;">No multi-send history yet</div>');
+            window.UIFailsafe?.safeSetHTML(listEl, '<div style="color:#64748b;font-size:12px;padding:8px 0;text-align:center;">No multi-send history yet</div>');
             return;
         }
         const html = items.slice(0, 20).map((item) => {
@@ -12511,7 +12497,7 @@ Type: ${message.type || 'text'}`;
                 '<div style="font-size:11px;color:#64748b;margin-top:4px;">' + cnt + ' recipients · ' + (parseInt(item.seenCount,10)||0) + ' seen' + (ts ? ' · ' + ts : '') + '</div>' +
                 '</button>';
         }).join('');
-        UIFailsafe.safeSetHTML(listEl, html);
+        window.UIFailsafe?.safeSetHTML(listEl, html);
 
         listEl.querySelectorAll('[data-batch-id]').forEach((button) => {
             button.addEventListener('click', () => {
@@ -12521,10 +12507,10 @@ Type: ${message.type || 'text'}`;
     };
 
     (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistoryDetail = function(detail) {
-        const detailEl = UIFailsafe.safeGetElement('multiSendHistoryDetail');
+        const detailEl = window.UIFailsafe?.safeGetElement('multiSendHistoryDetail');
         if (!detailEl) return;
         if (!detail) {
-            UIFailsafe.safeSetStyle(detailEl, 'display', 'none');
+            window.UIFailsafe?.safeSetStyle(detailEl, 'display', 'none');
             return;
         }
 
@@ -12537,17 +12523,17 @@ Type: ${message.type || 'text'}`;
             </div>`;
         }).join('');
 
-        UIFailsafe.safeSetHTML(detailEl, `
+        window.UIFailsafe?.safeSetHTML(detailEl, `
             <div style="font-weight:700;color:#0f172a;margin-bottom:6px;">Sent To Multiple History</div>
             <div style="font-size:13px;color:#334155;margin-bottom:10px;">${detail.content || ''}</div>
             <div style="font-size:12px;color:#64748b;margin-bottom:8px;">Reply mode: ${detail.replyVisibility === 'creator_only' ? 'Creator only' : 'Public'}</div>
             <div>${recipientHtml || '<div style="color:#64748b;font-size:12px;">No recipients</div>'}</div>
         `);
-        UIFailsafe.safeSetStyle(detailEl, 'display', 'block');
+        window.UIFailsafe?.safeSetStyle(detailEl, 'display', 'block');
     };
 
     window.messagesUI.loadMultiSendHistory = async function() {
-        const listEl = UIFailsafe.safeGetElement('multiSendHistoryList');
+        const listEl = window.UIFailsafe?.safeGetElement('multiSendHistoryList');
         if (!listEl) return;
         const core = getMessagesCore();
         let token = null;
@@ -12560,12 +12546,14 @@ Type: ${message.type || 'text'}`;
             (window.UIRenderer || {showNotification:function(){},renderMultiSendHistory:function(){},renderMultiSendHistoryDetail:function(){}}).renderMultiSendHistory(Array.isArray(result.data) ? result.data : []);
         } catch (error) {
             console.warn('[MultiSend] Failed to load history:', error);
-            UIFailsafe.safeSetStyle(listEl, 'display', 'none');
+            window.UIFailsafe?.safeSetStyle(listEl, 'display', 'none');
         }
     };
 
     window.messagesUI.openMultiSendHistory = async function(batchId) {
         if (!batchId) return;
+        console.log('[MultiSend] Opening history detail:', batchId);
+        window.messagesUI?.showMultiSendHistoryPanel?.({ detailOnly: true });
         const core = getMessagesCore();
         let token = null;
         try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
@@ -12584,11 +12572,124 @@ Type: ${message.type || 'text'}`;
         }
     };
 
+    window.messagesUI.showMultiSendHistoryPanel = function(options) {
+        const settings = options || {};
+        const listEl = window.UIFailsafe?.safeGetElement('multiSendHistoryList');
+        const detailEl = window.UIFailsafe?.safeGetElement('multiSendHistoryDetail');
+        if (listEl) window.UIFailsafe?.safeSetStyle(listEl, 'display', 'block');
+        if (detailEl && !settings.detailOnly) window.UIFailsafe?.safeSetStyle(detailEl, 'display', 'none');
+        if (listEl && typeof listEl.scrollIntoView === 'function') {
+            listEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        console.log('[MultiSend] History panel opened', settings);
+    };
+
+    window.messagesUI.setMultiSendButtonState = function(isLoading) {
+        const button = document.getElementById('multiSendBtn');
+        if (!button) return;
+        button.disabled = !!isLoading;
+        button.dataset.loading = isLoading ? 'true' : 'false';
+        button.style.opacity = isLoading ? '0.7' : '';
+        button.style.pointerEvents = isLoading ? 'none' : '';
+        button.innerHTML = isLoading
+            ? '<i class="fas fa-spinner fa-spin"></i>'
+            : '<i class="fas fa-paper-plane"></i>';
+    };
+
+    window.messagesUI.handleSendToMultiple = async function(options) {
+        const settings = options || {};
+        const input = document.getElementById('multiSendInput');
+        const msgContent = (input && input.value && input.value.trim()) || '';
+        const core = getMessagesCore();
+        const replyVisibility = document.getElementById('multiSendReplyVisibility')?.value || 'public';
+        const selectedChats = core && core.multiSendSelectedChats;
+
+        console.log('[MultiSend] Send triggered', {
+            selectedCount: selectedChats instanceof Set ? selectedChats.size : 0,
+            replyVisibility
+        });
+
+        if (!msgContent) {
+            (window.UIRenderer || {showNotification:function(){}}).showNotification('Please type a message first', 'error');
+            return { success: false, error: 'empty_message' };
+        }
+        if (!(selectedChats instanceof Set) || selectedChats.size === 0) {
+            (window.UIRenderer || {showNotification:function(){}}).showNotification('Select at least one chat', 'error');
+            return { success: false, error: 'no_selected_chats' };
+        }
+
+        const normalizedConversationIds = Array.from(selectedChats)
+            .map((chatId) => String(chatId || '').trim())
+            .filter(Boolean);
+
+        if (normalizedConversationIds.length === 0) {
+            (window.UIRenderer || {showNotification:function(){}}).showNotification('Select at least one valid chat', 'error');
+            return { success: false, error: 'invalid_selected_chats' };
+        }
+
+        let token = null;
+        try {
+            const sess = core && core.getSession && core.getSession();
+            token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+        } catch(_e){}
+
+        window.messagesUI.setMultiSendButtonState(true);
+
+        try {
+            const payload = {
+                conversationIds: normalizedConversationIds,
+                content: msgContent,
+                type: 'text',
+                replyVisibility
+            };
+            console.log('[MultiSend] API request start', payload);
+
+            const resp = await fetch('/api/messages/bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+                body: JSON.stringify(payload)
+            });
+            const result = await resp.json().catch(function() { return {}; });
+            console.log('[MultiSend] API response', { ok: resp.ok, result: result });
+
+            if (!resp.ok || result.success === false) {
+                throw new Error(result.message || result.error || 'Failed to send');
+            }
+
+            const sentCount = result.data?.successCount
+                || (Array.isArray(result.data?.results) ? result.data.results.filter((item) => item && item.success).length : normalizedConversationIds.length);
+
+            (window.UIRenderer || {showNotification:function(){}}).showNotification('✓ Sent to ' + sentCount + ' chat' + (sentCount !== 1 ? 's' : ''));
+            window.messagesUI?.showMultiSendHistoryPanel?.();
+            await window.messagesUI?.loadMultiSendHistory?.();
+
+            if (input) input.value = '';
+            if (core?.multiSendSelectedChats) core.multiSendSelectedChats.clear();
+            UIRenderer.updateSelectedCount();
+
+            if (settings.closePanelOnSuccess) {
+                const panel = document.getElementById('multiSendPanel');
+                if (panel) panel.classList.remove('active');
+                UIStateManager.setState('multiSendVisible', false);
+            }
+
+            return { success: true, result };
+        } catch (error) {
+            console.warn('[MultiSend] Error sending bulk message:', error);
+            (window.UIRenderer || {showNotification:function(){}}).showNotification(error.message || 'Failed to send', 'error');
+            return { success: false, error: error.message || 'send_failed' };
+        } finally {
+            window.messagesUI.setMultiSendButtonState(false);
+        }
+    };
+
     const bindMultiSendEnhancements = function() {
         const historyBtn = document.getElementById('multiSendHistoryBtn');
         if (historyBtn && !historyBtn.dataset.boundHistory) {
             historyBtn.dataset.boundHistory = 'true';
             historyBtn.addEventListener('click', function() {
+                console.log('[MultiSend] History button clicked');
+                window.messagesUI?.showMultiSendHistoryPanel?.();
                 window.messagesUI?.loadMultiSendHistory?.();
             });
         }
@@ -12597,7 +12698,9 @@ Type: ${message.type || 'text'}`;
         if (toggleBtn && !toggleBtn.dataset.boundHistoryLoad) {
             toggleBtn.dataset.boundHistoryLoad = 'true';
             toggleBtn.addEventListener('click', function() {
+                console.log('[MultiSend] Panel toggle clicked');
                 setTimeout(function() {
+                    window.messagesUI?.showMultiSendHistoryPanel?.();
                     window.messagesUI?.loadMultiSendHistory?.();
                 }, 50);
             }, true);

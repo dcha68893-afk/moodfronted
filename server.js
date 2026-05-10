@@ -58,10 +58,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DEV_STATE_DIR = path.join(__dirname, "data");
 const DEV_STATE_FILE = path.join(DEV_STATE_DIR, "dev-state.json");
+const DEV_UPLOADS_DIR = path.join(DEV_STATE_DIR, "uploads");
 
 function ensureDevStateDir() {
   try {
     fs.mkdirSync(DEV_STATE_DIR, { recursive: true });
+    fs.mkdirSync(DEV_UPLOADS_DIR, { recursive: true });
   } catch (error) {
     console.warn("[DEV-STATE] Failed to ensure data directory:", error.message);
   }
@@ -327,6 +329,7 @@ function snapshotDevState() {
   return {
     users: serializeMap(devState.users),
     settings: serializeMap(devState.settings),
+    userSettings: serializeMap(devState.settings),
     friends: serializeMap(devState.friends),
     friendRequestsIncoming: serializeMap(devState.friendRequestsIncoming),
     friendRequestsSent: serializeMap(devState.friendRequestsSent),
@@ -365,7 +368,7 @@ function hydrateDevState() {
   try {
     const parsed = JSON.parse(fs.readFileSync(DEV_STATE_FILE, "utf8"));
     devState.users = hydrateMap(parsed.users);
-    devState.settings = hydrateMap(parsed.settings);
+    devState.settings = hydrateMap(parsed.userSettings || parsed.settings);
     devState.friends = hydrateMap(parsed.friends);
     devState.friendRequestsIncoming = hydrateMap(parsed.friendRequestsIncoming);
     devState.friendRequestsSent = hydrateMap(parsed.friendRequestsSent);
@@ -763,16 +766,410 @@ function resolveRequestUser(req) {
 }
 
 function defaultSettings(userId) {
+  const now = new Date().toISOString();
   return {
-    userId,
+    userId: String(userId),
+    user_id: String(userId),
     theme: "light",
+    notification_enabled: true,
+    ringtone_enabled: true,
+    dark_mode: false,
     language: "en",
-    notifications: { messages: true, calls: true, groups: true },
-    privacy: { lastSeen: "everyone", readReceipts: true, statusVisibility: "everyone" },
-    chat: { autoDownloadMedia: true, fontSize: "medium" },
-    syncEnabled: false,
-    updatedAt: new Date().toISOString(),
+    privacy_last_seen: "everyone",
+    privacy_profile_photo: "everyone",
+    privacy_status: "everyone",
+    read_receipts: true,
+    auto_download_media: true,
+    font_size: "medium",
+    wallpaper: "default",
+    call_settings: {
+      ringtone: "default",
+      vibration: true,
+      speaker_default: false,
+      video_quality: "auto",
+      microphone_default: "default",
+      noise_cancellation: true,
+      echo_cancellation: true
+    },
+    chat_settings: {
+      wallpaper: "default",
+      font_size: "medium",
+      auto_download_media: true,
+      enter_to_send: false,
+      bubble_style: "default"
+    },
+    appearance: {
+      theme: "light",
+      accentColor: "#4F46E5",
+      fontSize: 16,
+      reduceMotion: false,
+      language: "en",
+      timeFormat: "12h",
+      dateFormat: "mm/dd/yyyy",
+      moodColorScheme: "vibrant",
+      moodAnimation: true
+    },
+    notifications: {
+      enabled: true,
+      messageNotifications: true,
+      groupNotifications: true,
+      friendRequestNotifications: true,
+      callNotifications: true,
+      statusNotifications: true,
+      moodNotifications: true,
+      notificationSound: true,
+      notificationVibration: true,
+      popupNotifications: true,
+      doNotDisturb: false
+    },
+    privacy: {
+      whoCanAddMe: "friendsOfFriends",
+      readReceipts: true,
+      typingIndicators: true,
+      messageForwarding: true,
+      contactDiscovery: true,
+      lastSeen: "everyone",
+      onlineStatus: true,
+      profileVisibility: "everyone",
+      photoVisibility: "everyone",
+      statusVisibility: "everyone"
+    },
+    chat: {
+      wallpaper: "default",
+      enterKeySends: false,
+      mediaDownload: "wifi",
+      saveMedia: false,
+      messageHistory: "forever",
+      disappearingMessages: "off",
+      fontSize: "medium",
+      autoDownloadMedia: true,
+      bubbleStyle: "default"
+    },
+    friends: {
+      discoverByPhone: true,
+      discoverByEmail: false,
+      nearbyDiscovery: false,
+      friendSuggestions: true,
+      friendCategories: true
+    },
+    groups: {
+      autoJoinGroups: false,
+      groupInvitations: "friends",
+      groupPrivacy: "public",
+      groupAnnouncements: true,
+      groupMediaDownload: true,
+      messageApproval: false,
+      keywordFiltering: false,
+      groupSpamDetection: true,
+      memberWarnings: true
+    },
+    calls: {
+      whoCanCallMe: "friends",
+      callVerification: false,
+      ringtone: "default",
+      callVibration: true,
+      autoAnswer: false,
+      autoReject: false,
+      speakerDefault: false,
+      videoQuality: "auto",
+      microphoneDefault: "default",
+      cameraDefault: "front",
+      noiseCancellation: true,
+      echoCancellation: true,
+      liveReactions: true,
+      inCallChat: true
+    },
+    status: {
+      visibility: "everyone",
+      autoDownloadMedia: true,
+      moodAutoShare: false
+    },
+    account: {
+      displayName: "User",
+      username: String(userId),
+      bio: "Hello! I'm using MoodChat",
+      profileVisibility: "everyone",
+      photoVisibility: "everyone",
+      lastSeen: "everyone",
+      onlineStatus: true
+    },
+    advanced: {
+      offlineMode: true,
+      lowBandwidth: false,
+      debugMode: false,
+      dataSaver: false,
+      syncEnabled: true
+    },
+    syncEnabled: true,
+    updatedAt: now,
+    updated_at: now
   };
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function deepMergeSettings(target, source) {
+  if (!isPlainObject(source)) return target;
+  const out = isPlainObject(target) ? { ...target } : {};
+  Object.keys(source).forEach((key) => {
+    const incoming = source[key];
+    if (isPlainObject(incoming) && isPlainObject(out[key])) {
+      out[key] = deepMergeSettings(out[key], incoming);
+      return;
+    }
+    if (incoming !== undefined) {
+      out[key] = incoming;
+    }
+  });
+  return out;
+}
+
+function normalizeFontSize(value) {
+  if (value === "small" || value === "medium" || value === "large") return value;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "medium";
+  if (numeric <= 14) return "small";
+  if (numeric >= 18) return "large";
+  return "medium";
+}
+
+function normalizeTheme(theme, darkMode = null) {
+  if (theme === "dark" || theme === "light" || theme === "auto" || theme === "system") {
+    return theme === "system" ? "auto" : theme;
+  }
+  if (darkMode === true) return "dark";
+  if (darkMode === false) return "light";
+  return "light";
+}
+
+function normalizeUserSettings(userId, incoming = {}) {
+  const defaults = defaultSettings(userId);
+  const merged = deepMergeSettings(defaults, incoming || {});
+  const theme = normalizeTheme(
+    merged.appearance?.theme || merged.theme,
+    merged.dark_mode
+  );
+  const language = merged.appearance?.language || merged.language || "en";
+  const fontSize = normalizeFontSize(
+    merged.chat?.fontSize ||
+    merged.chat_settings?.font_size ||
+    merged.font_size ||
+    merged.appearance?.fontSize
+  );
+  const wallpaper = merged.chat?.wallpaper || merged.chat_settings?.wallpaper || merged.wallpaper || "default";
+  const notificationsEnabled = merged.notification_enabled !== false
+    && merged.notifications?.enabled !== false;
+  const ringtoneEnabled = merged.ringtone_enabled !== false
+    && merged.notifications?.notificationSound !== false;
+  const lastSeen = merged.privacy?.lastSeen || merged.privacy_last_seen || "everyone";
+  const photoVisibility = merged.privacy?.photoVisibility || merged.privacy_profile_photo || "everyone";
+  const statusVisibility = merged.privacy?.statusVisibility || merged.privacy_status || "everyone";
+  const readReceipts = merged.privacy?.readReceipts !== false && merged.read_receipts !== false;
+  const autoDownloadMedia = merged.chat?.autoDownloadMedia !== false && merged.auto_download_media !== false;
+  const now = new Date().toISOString();
+  const callSettings = deepMergeSettings(defaults.call_settings, merged.call_settings || {});
+  const chatSettings = deepMergeSettings(defaults.chat_settings, merged.chat_settings || {});
+
+  return {
+    ...merged,
+    userId: String(userId),
+    user_id: String(userId),
+    theme,
+    notification_enabled: notificationsEnabled,
+    ringtone_enabled: ringtoneEnabled,
+    dark_mode: theme === "dark",
+    language,
+    privacy_last_seen: lastSeen,
+    privacy_profile_photo: photoVisibility,
+    privacy_status: statusVisibility,
+    read_receipts: readReceipts,
+    auto_download_media: autoDownloadMedia,
+    font_size: fontSize,
+    wallpaper,
+    call_settings: {
+      ...callSettings,
+      ringtone: merged.calls?.ringtone || callSettings.ringtone || "default",
+      vibration: merged.calls?.callVibration !== false && callSettings.vibration !== false,
+      speaker_default: merged.calls?.speakerDefault === true || callSettings.speaker_default === true,
+      video_quality: merged.calls?.videoQuality || callSettings.video_quality || "auto",
+      microphone_default: merged.calls?.microphoneDefault || callSettings.microphone_default || "default",
+      noise_cancellation: merged.calls?.noiseCancellation !== false && callSettings.noise_cancellation !== false,
+      echo_cancellation: merged.calls?.echoCancellation !== false && callSettings.echo_cancellation !== false
+    },
+    chat_settings: {
+      ...chatSettings,
+      wallpaper,
+      font_size: fontSize,
+      auto_download_media: autoDownloadMedia,
+      enter_to_send: merged.chat?.enterKeySends === true || chatSettings.enter_to_send === true,
+      bubble_style: merged.chat?.bubbleStyle || chatSettings.bubble_style || "default"
+    },
+    appearance: {
+      ...defaults.appearance,
+      ...(merged.appearance || {}),
+      theme,
+      language,
+      fontSize: fontSize === "small" ? 14 : fontSize === "large" ? 18 : 16
+    },
+    notifications: {
+      ...defaults.notifications,
+      ...(merged.notifications || {}),
+      enabled: notificationsEnabled,
+      messageNotifications: notificationsEnabled && merged.notifications?.messageNotifications !== false,
+      groupNotifications: notificationsEnabled && merged.notifications?.groupNotifications !== false,
+      friendRequestNotifications: notificationsEnabled && merged.notifications?.friendRequestNotifications !== false,
+      callNotifications: notificationsEnabled && merged.notifications?.callNotifications !== false,
+      statusNotifications: notificationsEnabled && merged.notifications?.statusNotifications !== false,
+      moodNotifications: notificationsEnabled && merged.notifications?.moodNotifications !== false,
+      notificationSound: ringtoneEnabled,
+      notificationVibration: merged.notifications?.notificationVibration !== false,
+      popupNotifications: notificationsEnabled && merged.notifications?.popupNotifications !== false
+    },
+    privacy: {
+      ...defaults.privacy,
+      ...(merged.privacy || {}),
+      lastSeen,
+      photoVisibility,
+      profileVisibility: merged.privacy?.profileVisibility || photoVisibility,
+      statusVisibility,
+      readReceipts
+    },
+    chat: {
+      ...defaults.chat,
+      ...(merged.chat || {}),
+      wallpaper,
+      fontSize,
+      autoDownloadMedia: autoDownloadMedia,
+      mediaDownload: autoDownloadMedia ? (merged.chat?.mediaDownload || "wifi") : "never",
+      bubbleStyle: merged.chat?.bubbleStyle || merged.chat_settings?.bubble_style || "default",
+      enterKeySends: merged.chat?.enterKeySends === true || merged.chat_settings?.enter_to_send === true
+    },
+    calls: {
+      ...defaults.calls,
+      ...(merged.calls || {}),
+      ringtone: merged.calls?.ringtone || callSettings.ringtone || "default",
+      callVibration: merged.calls?.callVibration !== false && callSettings.vibration !== false,
+      speakerDefault: merged.calls?.speakerDefault === true || callSettings.speaker_default === true,
+      videoQuality: merged.calls?.videoQuality || callSettings.video_quality || "auto",
+      microphoneDefault: merged.calls?.microphoneDefault || callSettings.microphone_default || "default",
+      noiseCancellation: merged.calls?.noiseCancellation !== false && callSettings.noise_cancellation !== false,
+      echoCancellation: merged.calls?.echoCancellation !== false && callSettings.echo_cancellation !== false
+    },
+    advanced: {
+      ...defaults.advanced,
+      ...(merged.advanced || {}),
+      syncEnabled: merged.advanced?.syncEnabled !== false && merged.syncEnabled !== false
+    },
+    account: {
+      ...defaults.account,
+      ...(merged.account || {}),
+      profileVisibility: merged.account?.profileVisibility || photoVisibility,
+      photoVisibility,
+      lastSeen
+    },
+    status: {
+      ...defaults.status,
+      ...(merged.status || {}),
+      visibility: statusVisibility,
+      autoDownloadMedia
+    },
+    syncEnabled: merged.advanced?.syncEnabled !== false && merged.syncEnabled !== false,
+    updatedAt: merged.updatedAt || merged.updated_at || now,
+    updated_at: now
+  };
+}
+
+function buildSettingsPatch(routePath, body = {}) {
+  if (routePath === "/settings/theme") {
+    const theme = normalizeTheme(body.theme, body.dark_mode);
+    return {
+      theme,
+      dark_mode: theme === "dark",
+      appearance: {
+        ...(body.accentColor !== undefined ? { accentColor: body.accentColor } : {}),
+        ...(body.fontSize !== undefined ? { fontSize: body.fontSize } : {}),
+        theme
+      }
+    };
+  }
+
+  if (routePath === "/settings/language") {
+    return {
+      language: body.language || "en",
+      appearance: { language: body.language || "en" }
+    };
+  }
+
+  if (routePath === "/settings/privacy") {
+    return {
+      privacy_last_seen: body.lastSeen,
+      privacy_profile_photo: body.photoVisibility || body.profileVisibility,
+      privacy_status: body.statusVisibility,
+      read_receipts: body.readReceipts,
+      privacy: {
+        ...body,
+        ...(body.photoVisibility || body.profileVisibility
+          ? {
+              photoVisibility: body.photoVisibility || body.profileVisibility,
+              profileVisibility: body.profileVisibility || body.photoVisibility
+            }
+          : {})
+      }
+    };
+  }
+
+  if (routePath === "/settings/notifications") {
+    const nextNotifications = { ...body };
+    if (body.enabled === false) {
+      nextNotifications.messageNotifications = false;
+      nextNotifications.groupNotifications = false;
+      nextNotifications.friendRequestNotifications = false;
+      nextNotifications.callNotifications = false;
+      nextNotifications.statusNotifications = false;
+      nextNotifications.moodNotifications = false;
+      nextNotifications.notificationSound = false;
+      nextNotifications.popupNotifications = false;
+    }
+    return {
+      notification_enabled: body.enabled,
+      ringtone_enabled: body.notificationSound,
+      notifications: nextNotifications
+    };
+  }
+
+  if (routePath === "/settings/profile") {
+    const section = body.section;
+    if (section === "appearance") {
+      return {
+        appearance: { ...body },
+        ...(body.theme !== undefined ? { theme: body.theme } : {}),
+        ...(body.language !== undefined ? { language: body.language } : {}),
+        ...(body.fontSize !== undefined ? { font_size: normalizeFontSize(body.fontSize) } : {})
+      };
+    }
+    if (section === "account" || section === "profile") {
+      return { account: { ...body } };
+    }
+    return { account: { ...body } };
+  }
+
+  return body || {};
+}
+
+function saveUserSettings(userId, patch, { replace = false } = {}) {
+  const current = ensureUserBucket(devState.settings, String(userId), () => defaultSettings(String(userId)));
+  const candidate = replace ? patch : deepMergeSettings(current, patch || {});
+  const next = normalizeUserSettings(String(userId), candidate);
+  devState.settings.set(String(userId), next);
+  scheduleDevStatePersist();
+  webSocketService.sendToUser(String(userId), "settings_updated", {
+    userId: String(userId),
+    settings: next,
+    updatedAt: next.updated_at || next.updatedAt || new Date().toISOString()
+  });
+  return next;
 }
 
 function ensureMarketplaceSeed() {
@@ -815,6 +1212,468 @@ function ensureSeedUser(userId, overrides = {}) {
   ensureUserBucket(devState.chats, normalizedUserId, () => []);
   ensureUserBucket(devState.calls, normalizedUserId, () => []);
   return userRecord;
+}
+
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function uniqueIds(values = []) {
+  return Array.from(new Set((values || []).map((value) => String(value)).filter(Boolean)));
+}
+
+function normalizeGroupSettings(settings = {}) {
+  return {
+    allowMedia: settings.allowMedia !== false,
+    allowReactions: settings.allowReactions !== false,
+    allowCalls: settings.allowCalls !== false,
+    onlyAdminsCanPost: settings.onlyAdminsCanPost === true,
+    muteNotifications: settings.muteNotifications === true,
+    wallpaper: settings.wallpaper || "default",
+    mediaPermissions: settings.mediaPermissions || "all",
+    disappearingMessages: settings.disappearingMessages || "off",
+    ...settings,
+  };
+}
+
+function normalizeGroupReactions(reactions = {}) {
+  const normalized = {};
+  Object.entries(reactions || {}).forEach(([emoji, userIds]) => {
+    const users = uniqueIds(Array.isArray(userIds) ? userIds : []);
+    if (users.length > 0) normalized[String(emoji)] = users;
+  });
+  return normalized;
+}
+
+function buildGroupMemberSummary(userId, overrides = {}) {
+  const normalizedUserId = String(userId);
+  const profile = getUserProfile(normalizedUserId) || ensureSeedUser(normalizedUserId);
+  return {
+    id: normalizedUserId,
+    userId: normalizedUserId,
+    memberId: normalizedUserId,
+    role: overrides.role || "member",
+    joinedAt: overrides.joinedAt || new Date().toISOString(),
+    displayName: overrides.displayName || profile.displayName || profile.username || normalizedUserId,
+    username: overrides.username || profile.username || normalizedUserId,
+    avatar: overrides.avatar || profile.avatar || null,
+    photoURL: overrides.photoURL || profile.avatar || null,
+    online: !!profile.online,
+    isOnline: !!profile.online,
+    status: profile.online ? "online" : "offline",
+    user: {
+      id: normalizedUserId,
+      username: profile.username || normalizedUserId,
+      displayName: profile.displayName || profile.username || normalizedUserId,
+      avatar: profile.avatar || null,
+      photoURL: profile.avatar || null,
+      online: !!profile.online,
+      isOnline: !!profile.online,
+      status: profile.online ? "online" : "offline",
+    },
+  };
+}
+
+function hydrateGroupRecord(rawGroup = {}) {
+  const createdBy = String(rawGroup.createdBy || rawGroup.ownerId || rawGroup.creatorId || "");
+  const existingMembers = Array.isArray(rawGroup.members) ? rawGroup.members : [];
+  const memberIdsFromMembers = existingMembers.map((member) => member?.userId || member?.id).filter(Boolean);
+  const memberIds = uniqueIds([
+    createdBy,
+    ...(Array.isArray(rawGroup.memberIds) ? rawGroup.memberIds : []),
+    ...(Array.isArray(rawGroup.members) ? memberIdsFromMembers : []),
+  ]);
+
+  const admins = uniqueIds([
+    createdBy,
+    ...(Array.isArray(rawGroup.adminIds) ? rawGroup.adminIds : []),
+    ...existingMembers
+      .filter((member) => String(member?.role || "").toLowerCase() === "admin" || String(member?.role || "").toLowerCase() === "owner")
+      .map((member) => member?.userId || member?.id),
+  ]);
+
+  const memberMap = new Map(
+    existingMembers.map((member) => [String(member?.userId || member?.id), member]).filter(([id]) => !!id)
+  );
+
+  const members = memberIds.map((memberId) => {
+    const existing = memberMap.get(String(memberId)) || {};
+    const role = createdBy && String(memberId) === createdBy
+      ? "owner"
+      : (admins.includes(String(memberId)) ? "admin" : (existing.role || "member"));
+    return buildGroupMemberSummary(memberId, {
+      ...existing,
+      role,
+      joinedAt: existing.joinedAt || rawGroup.createdAt || new Date().toISOString(),
+    });
+  });
+
+  const messages = Array.isArray(rawGroup.messages)
+    ? rawGroup.messages.map((message) => ({
+        ...message,
+        reactions: normalizeGroupReactions(message?.reactions || {}),
+        seenBy: uniqueIds(message?.seenBy || []),
+        deliveredTo: uniqueIds(message?.deliveredTo || []),
+      }))
+    : [];
+
+  const normalizedSettings = normalizeGroupSettings(rawGroup.settings || {});
+  const latestMessage = messages[messages.length - 1] || null;
+
+  return {
+    id: String(rawGroup.id || `group_${Date.now()}`),
+    name: rawGroup.name || "Untitled Group",
+    description: rawGroup.description || "",
+    topic: rawGroup.topic || "",
+    purpose: rawGroup.purpose || "",
+    mood: rawGroup.mood || "",
+    privacy: rawGroup.privacy || (rawGroup.isPublic ? "public" : "private"),
+    isPublic: rawGroup.isPublic === true || rawGroup.privacy === "public",
+    theme: rawGroup.theme || "blue",
+    avatar: rawGroup.avatar || rawGroup.photoURL || null,
+    photoURL: rawGroup.photoURL || rawGroup.avatar || null,
+    welcomeMessage: rawGroup.welcomeMessage || "",
+    rules: Array.isArray(rawGroup.rules) ? rawGroup.rules : [],
+    customReactions: Array.isArray(rawGroup.customReactions) ? rawGroup.customReactions : ["👍", "❤️", "😂", "😮"],
+    badges: Array.isArray(rawGroup.badges) ? rawGroup.badges : [],
+    postingRule: rawGroup.postingRule || (normalizedSettings.onlyAdminsCanPost ? "admins" : "everyone"),
+    quietHours: rawGroup.quietHours || {},
+    scheduledPosting: rawGroup.scheduledPosting || {},
+    participationModes: rawGroup.participationModes || {},
+    moderationSettings: rawGroup.moderationSettings || {},
+    createdBy,
+    ownerId: createdBy,
+    adminIds: admins,
+    memberIds,
+    members,
+    settings: normalizedSettings,
+    messages,
+    typingUsers: rawGroup.typingUsers && typeof rawGroup.typingUsers === "object" ? rawGroup.typingUsers : {},
+    transparency: Array.isArray(rawGroup.transparency) ? rawGroup.transparency : [],
+    links: Array.isArray(rawGroup.links) ? rawGroup.links : [],
+    media: Array.isArray(rawGroup.media) ? rawGroup.media : [],
+    files: Array.isArray(rawGroup.files) ? rawGroup.files : [],
+    createdAt: rawGroup.createdAt || new Date().toISOString(),
+    updatedAt: rawGroup.updatedAt || rawGroup.createdAt || new Date().toISOString(),
+    lastMessageAt: rawGroup.lastMessageAt || latestMessage?.createdAt || rawGroup.updatedAt || rawGroup.createdAt || new Date().toISOString(),
+    lastMessage: rawGroup.lastMessage || latestMessage?.content || "",
+    latestMessage,
+  };
+}
+
+function getGroupUserRole(group, userId) {
+  const normalizedUserId = String(userId || "");
+  if (!group || !normalizedUserId) return "member";
+  if (String(group.createdBy) === normalizedUserId) return "owner";
+  if (Array.isArray(group.adminIds) && group.adminIds.map(String).includes(normalizedUserId)) return "admin";
+  const member = Array.isArray(group.members)
+    ? group.members.find((item) => String(item?.userId || item?.id) === normalizedUserId)
+    : null;
+  return member?.role || "member";
+}
+
+function isGroupMember(group, userId) {
+  return !!group && uniqueIds(group.memberIds || []).includes(String(userId));
+}
+
+function isGroupAdmin(group, userId) {
+  const role = getGroupUserRole(group, userId);
+  return role === "owner" || role === "admin";
+}
+
+function serializeGroupForViewer(rawGroup, viewerId, { includeMessages = false, includeMembers = true } = {}) {
+  const group = hydrateGroupRecord(rawGroup);
+  const role = getGroupUserRole(group, viewerId);
+  const isCreator = String(group.createdBy) === String(viewerId);
+  const isAdmin = role === "owner" || role === "admin";
+
+  return {
+    ...group,
+    role,
+    isCreator,
+    isAdmin,
+    memberCount: group.memberIds.length,
+    stats: {
+      totalMembers: group.memberIds.length,
+      messages: group.messages.length,
+    },
+    members: includeMembers ? group.members : undefined,
+    messages: includeMessages ? group.messages : undefined,
+    latestMessage: group.latestMessage || group.messages[group.messages.length - 1] || null,
+  };
+}
+
+function getGroupCopies(groupId) {
+  const copies = [];
+  for (const [ownerId, groups] of devState.groups.entries()) {
+    const bucket = Array.isArray(groups) ? groups : [];
+    const index = bucket.findIndex((group) => String(group?.id) === String(groupId));
+    if (index >= 0) {
+      copies.push({ ownerId: String(ownerId), bucket, index, group: bucket[index] });
+    }
+  }
+  return copies;
+}
+
+function findGroupAcrossUsers(groupId) {
+  const copies = getGroupCopies(groupId);
+  return copies.length > 0 ? hydrateGroupRecord(copies[0].group) : null;
+}
+
+function syncGroupToMemberBuckets(rawGroup) {
+  const group = hydrateGroupRecord(rawGroup);
+  const memberIds = uniqueIds(group.memberIds || []);
+
+  memberIds.forEach((memberId) => {
+    const bucket = ensureUserBucket(devState.groups, memberId, () => []);
+    const nextGroup = serializeGroupForViewer(group, memberId, { includeMessages: true, includeMembers: true });
+    const index = bucket.findIndex((item) => String(item?.id) === String(group.id));
+    if (index >= 0) bucket[index] = nextGroup;
+    else bucket.unshift(nextGroup);
+  });
+
+  for (const [ownerId, groups] of devState.groups.entries()) {
+    if (memberIds.includes(String(ownerId))) continue;
+    devState.groups.set(
+      String(ownerId),
+      (Array.isArray(groups) ? groups : []).filter((groupItem) => String(groupItem?.id) !== String(group.id))
+    );
+  }
+
+  return group;
+}
+
+function removeGroupFromAllBuckets(groupId) {
+  for (const [ownerId, groups] of devState.groups.entries()) {
+    devState.groups.set(
+      String(ownerId),
+      (Array.isArray(groups) ? groups : []).filter((group) => String(group?.id) !== String(groupId))
+    );
+  }
+}
+
+function broadcastGroupEvent(rawGroup, eventNames, payload, { exceptUserId = null } = {}) {
+  const group = hydrateGroupRecord(rawGroup);
+  const events = Array.isArray(eventNames) ? eventNames : [eventNames];
+  uniqueIds(group.memberIds || []).forEach((memberId) => {
+    if (exceptUserId && String(memberId) === String(exceptUserId)) return;
+    events.forEach((eventName) => {
+      webSocketService.sendToUser(memberId, eventName, payload);
+    });
+  });
+}
+
+function recordGroupTransparency(group, action, details = "") {
+  const nextGroup = hydrateGroupRecord(group);
+  nextGroup.transparency = Array.isArray(nextGroup.transparency) ? nextGroup.transparency : [];
+  nextGroup.transparency.unshift({
+    id: `group_log_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
+    action,
+    details,
+    createdAt: new Date().toISOString(),
+  });
+  nextGroup.transparency = nextGroup.transparency.slice(0, 100);
+  return nextGroup;
+}
+
+function buildGroupReplySummary(group, replyToId) {
+  if (!replyToId) return null;
+  const normalizedGroup = hydrateGroupRecord(group);
+  const replyTo = normalizedGroup.messages.find((message) => String(message.id) === String(replyToId));
+  if (!replyTo) return null;
+  return {
+    id: replyTo.id,
+    messageId: replyTo.id,
+    content: replyTo.content || "",
+    type: replyTo.type || "text",
+    senderId: replyTo.senderId,
+    senderName: replyTo.senderName || getUserProfile(replyTo.senderId)?.displayName || String(replyTo.senderId),
+  };
+}
+
+function buildStoredGroupMessage(group, senderId, input = {}) {
+  const normalizedGroup = hydrateGroupRecord(group);
+  const profile = getUserProfile(senderId) || ensureSeedUser(senderId);
+  const createdAt = new Date().toISOString();
+  const attachment = input.attachment || input.metadata?.attachment || null;
+  const mediaUrl = input.mediaUrl || attachment?.url || input.metadata?.url || input.metadata?.mediaUrl || null;
+  const mimeType = input.mimeType || attachment?.mimeType || input.metadata?.mimeType || null;
+  const inferredType = input.type
+    || attachment?.type
+    || (mimeType?.startsWith("image/") ? "image" : mimeType?.startsWith("audio/") ? "audio" : mimeType?.startsWith("video/") ? "video" : (mediaUrl ? "file" : "text"));
+  const content = String(input.content || input.text || input.body || input.caption || "").trim();
+  const replyToId = normalizeEntityId(input.replyToId || input.replyTo?.id || input.replyTo);
+  const replyTo = buildGroupReplySummary(normalizedGroup, replyToId);
+  const otherMembers = uniqueIds(normalizedGroup.memberIds || []).filter((memberId) => String(memberId) !== String(senderId));
+
+  return {
+    id: input.id || `group_msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+    localId: input.localId || null,
+    serverId: input.serverId || null,
+    groupId: String(normalizedGroup.id),
+    senderId: String(senderId),
+    senderName: input.senderName || profile.displayName || profile.username || String(senderId),
+    senderAvatar: input.senderAvatar || profile.avatar || null,
+    sender: {
+      id: String(senderId),
+      userId: String(senderId),
+      displayName: profile.displayName || profile.username || String(senderId),
+      username: profile.username || String(senderId),
+      avatar: profile.avatar || null,
+    },
+    type: inferredType,
+    content,
+    text: content,
+    body: content,
+    mediaUrl,
+    media_url: mediaUrl,
+    imageUrl: inferredType === "image" ? mediaUrl : null,
+    thumbnailUrl: input.thumbnailUrl || attachment?.thumbnailUrl || input.metadata?.thumbnailUrl || null,
+    fileName: input.fileName || attachment?.name || input.metadata?.fileName || null,
+    file_name: input.fileName || attachment?.name || input.metadata?.fileName || null,
+    mimeType,
+    size: input.size || attachment?.size || input.metadata?.size || null,
+    replyToId,
+    replyTo,
+    metadata: input.metadata || {},
+    attachment: attachment || (mediaUrl ? {
+      url: mediaUrl,
+      thumbnailUrl: input.thumbnailUrl || null,
+      name: input.fileName || null,
+      mimeType,
+      size: input.size || null,
+      type: inferredType,
+    } : null),
+    reactions: normalizeGroupReactions(input.reactions || {}),
+    seenBy: [String(senderId)],
+    deliveredTo: otherMembers,
+    createdAt,
+    updatedAt: createdAt,
+    sentAt: createdAt,
+    deliveredAt: otherMembers.length > 0 ? createdAt : null,
+    readAt: null,
+    status: otherMembers.length > 0 ? "delivered" : "sent",
+    deleted: false,
+    edited: false,
+    deletedForEveryone: false,
+  };
+}
+
+function upsertGroupMessage(group, message) {
+  const normalizedGroup = hydrateGroupRecord(group);
+  const messages = Array.isArray(normalizedGroup.messages) ? normalizedGroup.messages : [];
+  const existingIndex = messages.findIndex((item) => String(item?.id) === String(message?.id));
+  if (existingIndex >= 0) messages[existingIndex] = { ...messages[existingIndex], ...message };
+  else messages.push(message);
+  messages.sort((left, right) => Date.parse(left.createdAt || 0) - Date.parse(right.createdAt || 0));
+  normalizedGroup.messages = messages;
+  normalizedGroup.lastMessage = message.content || message.fileName || message.type || "";
+  normalizedGroup.lastMessageAt = message.createdAt || new Date().toISOString();
+  normalizedGroup.updatedAt = new Date().toISOString();
+
+  if (message.mediaUrl) {
+    const mediaEntry = {
+      id: message.id,
+      url: message.mediaUrl,
+      thumbnailUrl: message.thumbnailUrl || null,
+      type: message.type,
+      fileName: message.fileName || null,
+      createdAt: message.createdAt,
+      senderId: message.senderId,
+    };
+    normalizedGroup.media = Array.isArray(normalizedGroup.media) ? normalizedGroup.media : [];
+    normalizedGroup.media.unshift(mediaEntry);
+    normalizedGroup.media = normalizedGroup.media.slice(0, 500);
+    if (message.type !== "image" && message.type !== "video") {
+      normalizedGroup.files = Array.isArray(normalizedGroup.files) ? normalizedGroup.files : [];
+      normalizedGroup.files.unshift(mediaEntry);
+      normalizedGroup.files = normalizedGroup.files.slice(0, 500);
+    }
+  }
+
+  return normalizedGroup;
+}
+
+function markGroupSeenByViewer(group, viewerId) {
+  const normalizedGroup = hydrateGroupRecord(group);
+  let changed = false;
+  normalizedGroup.messages = normalizedGroup.messages.map((message) => {
+    if (String(message.senderId) === String(viewerId)) return message;
+    const seenBy = uniqueIds(message.seenBy || []);
+    const deliveredTo = uniqueIds(message.deliveredTo || []);
+    if (!deliveredTo.includes(String(viewerId))) deliveredTo.push(String(viewerId));
+    if (!seenBy.includes(String(viewerId))) {
+      seenBy.push(String(viewerId));
+      changed = true;
+    }
+    return {
+      ...message,
+      seenBy,
+      deliveredTo,
+      readAt: seenBy.includes(String(viewerId)) ? (message.readAt || new Date().toISOString()) : message.readAt,
+      status: seenBy.length > 1 ? "seen" : (deliveredTo.length > 0 ? "delivered" : (message.status || "sent")),
+    };
+  });
+  return { group: normalizedGroup, changed };
+}
+
+function listGroupsForUser(userId) {
+  const bucket = ensureUserBucket(devState.groups, String(userId), () => []);
+  const groups = bucket.map((group) => serializeGroupForViewer(group, userId, { includeMessages: false, includeMembers: true }));
+  const myGroups = groups.filter((group) => group.isCreator);
+  const joinedGroups = groups.filter((group) => !group.isCreator);
+  const adminGroups = groups.filter((group) => group.isAdmin);
+  return { groups, myGroups, joinedGroups, adminGroups };
+}
+
+async function storeUploadedMedia(file, { folder = "groups" } = {}) {
+  if (!file) return null;
+
+  if (isCloudinaryConfigured) {
+    const uploadResult = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: `uniconnect/${folder}`,
+          resource_type: "auto",
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      uploadStream.end(file.buffer);
+    });
+
+    return {
+      id: uploadResult.public_id,
+      url: uploadResult.secure_url,
+      thumbnailUrl: uploadResult.secure_url,
+      fileName: file.originalname,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+      source: "cloudinary",
+      publicId: uploadResult.public_id,
+    };
+  }
+
+  ensureDevStateDir();
+  const safeBaseName = String(file.originalname || "upload.bin").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storedName = `${Date.now()}_${crypto.randomBytes(6).toString("hex")}_${safeBaseName}`;
+  const storedPath = path.join(DEV_UPLOADS_DIR, storedName);
+  fs.writeFileSync(storedPath, file.buffer);
+
+  return {
+    id: storedName,
+    url: `/data/uploads/${storedName}`,
+    thumbnailUrl: `/data/uploads/${storedName}`,
+    fileName: file.originalname,
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    size: file.size,
+    source: "local",
+    path: storedPath,
+  };
 }
 
 hydrateDevState();
@@ -896,6 +1755,77 @@ webSocketService.setMessageHandler(({ user, type, payload }) => {
     return;
   }
 
+  if (normalizedType === "join_group" || normalizedType === "group:join") {
+    const groupId = normalizeEntityId(payload.groupId || payload.id);
+    const group = groupId ? findGroupAcrossUsers(groupId) : null;
+    if (group && isGroupMember(group, user.id)) {
+      webSocketService.sendToUser(user.id, "group:joined", {
+        groupId,
+        group: serializeGroupForViewer(group, user.id, { includeMessages: false, includeMembers: true }),
+        joinedAt: Date.now(),
+      });
+    }
+    return;
+  }
+
+  if (normalizedType === "leave_group" || normalizedType === "group:leave") {
+    const groupId = normalizeEntityId(payload.groupId || payload.id);
+    const group = groupId ? findGroupAcrossUsers(groupId) : null;
+    if (group && isGroupMember(group, user.id)) {
+      const updatedGroup = hydrateGroupRecord(group);
+      updatedGroup.memberIds = uniqueIds(updatedGroup.memberIds || []).filter((memberId) => String(memberId) !== String(user.id));
+      updatedGroup.members = updatedGroup.members.filter((member) => String(member.userId || member.id) !== String(user.id));
+      updatedGroup.adminIds = uniqueIds(updatedGroup.adminIds || []).filter((adminId) => String(adminId) !== String(user.id));
+      updatedGroup.updatedAt = new Date().toISOString();
+      syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_left", `${user.id} left the group`));
+      scheduleDevStatePersist();
+    }
+    return;
+  }
+
+  if (
+    normalizedType === "send_group_message"
+    || normalizedType === "group:message"
+    || normalizedType === "group_message"
+    || normalizedType === "receive_group_message"
+  ) {
+    const groupId = normalizeEntityId(payload.groupId || payload.group_id);
+    const group = groupId ? findGroupAcrossUsers(groupId) : null;
+    if (!group || !isGroupMember(group, user.id)) return;
+
+    const message = buildStoredGroupMessage(group, user.id, payload);
+    const updatedGroup = syncGroupToMemberBuckets(upsertGroupMessage(group, message));
+    scheduleDevStatePersist();
+
+    const eventPayload = { groupId: updatedGroup.id, group_id: updatedGroup.id, message };
+    broadcastGroupEvent(updatedGroup, ["group:message", "group_message", "receive_group_message"], eventPayload);
+    return;
+  }
+
+  if (normalizedType === "typing" || normalizedType === "group:typing" || normalizedType === "stop_typing") {
+    const groupId = normalizeEntityId(payload.groupId || payload.group_id);
+    const group = groupId ? findGroupAcrossUsers(groupId) : null;
+    if (!group || !isGroupMember(group, user.id)) return;
+    const updatedGroup = hydrateGroupRecord(group);
+    updatedGroup.typingUsers = updatedGroup.typingUsers && typeof updatedGroup.typingUsers === "object" ? updatedGroup.typingUsers : {};
+    const isTyping = normalizedType !== "stop_typing" && payload.typing !== false;
+    if (isTyping) {
+      updatedGroup.typingUsers[String(user.id)] = Date.now();
+    } else {
+      delete updatedGroup.typingUsers[String(user.id)];
+    }
+    syncGroupToMemberBuckets(updatedGroup);
+    scheduleDevStatePersist();
+    broadcastGroupEvent(updatedGroup, "group:typing", {
+      groupId: updatedGroup.id,
+      userId: String(user.id),
+      isTyping,
+      typing: isTyping,
+      timestamp: Date.now(),
+    }, { exceptUserId: String(user.id) });
+    return;
+  }
+
   if (
     normalizedType === "webrtc:signal" ||
     normalizedType === "call_offer" ||
@@ -970,7 +1900,7 @@ function apiDataForPath(req, user) {
       email: req.body?.email || `${safeId}@local.dev`,
     };
     devState.users.set(safeId, userRecord);
-    ensureUserBucket(devState.settings, safeId, () => defaultSettings(safeId));
+    const userSettings = saveUserSettings(safeId, ensureUserBucket(devState.settings, safeId, () => defaultSettings(safeId)));
     ensureUserBucket(devState.friends, safeId, () => []);
     ensureUserBucket(devState.groups, safeId, () => []);
     ensureUserBucket(devState.statuses, safeId, () => []);
@@ -984,9 +1914,10 @@ function apiDataForPath(req, user) {
     return {
       body: {
         success: true,
-        data: { token, refreshToken: null, user: userRecord },
+        data: { token, refreshToken: null, user: userRecord, settings: userSettings },
         token,
         user: userRecord,
+        settings: userSettings,
       },
     };
   }
@@ -995,7 +1926,16 @@ function apiDataForPath(req, user) {
     if (!user) {
       return { status: 401, body: { success: false, error: "Unauthorized", data: null } };
     }
-    return { body: { success: true, data: user, user } };
+    return {
+      body: {
+        success: true,
+        data: {
+          user,
+          settings: normalizeUserSettings(user.id, ensureUserBucket(devState.settings, user.id, () => defaultSettings(user.id)))
+        },
+        user
+      }
+    };
   }
 
   if (routePath === "/auth/refresh") {
@@ -1013,19 +1953,25 @@ function apiDataForPath(req, user) {
     return { body: { success: true, data: { loggedOut: true } } };
   }
 
+  if (routePath === "/settings/reset" && method === "POST") {
+    if (!user) return { status: 401, body: { success: false, error: "Unauthorized", data: null } };
+    const resetSettings = saveUserSettings(user.id, defaultSettings(user.id), { replace: true });
+    return { body: { success: true, data: { settings: resetSettings }, settings: resetSettings } };
+  }
+
   if (routePath.startsWith("/settings")) {
     if (!user) return { status: 401, body: { success: false, error: "Unauthorized", data: null } };
-    const current = ensureUserBucket(devState.settings, user.id, () => defaultSettings(user.id));
+    const current = normalizeUserSettings(user.id, ensureUserBucket(devState.settings, user.id, () => defaultSettings(user.id)));
+    devState.settings.set(user.id, current);
     if (method === "GET") {
-      return { body: { success: true, data: { settings: current } } };
+      return { body: { success: true, data: { settings: current }, settings: current } };
     }
-    const next = {
-      ...current,
-      ...(req.body || {}),
-      updatedAt: new Date().toISOString(),
-    };
-    devState.settings.set(user.id, next);
-    return { body: { success: true, data: { settings: next } } };
+
+    const patch = routePath === "/settings"
+      ? (req.body || {})
+      : buildSettingsPatch(routePath, req.body || {});
+    const next = saveUserSettings(user.id, patch);
+    return { body: { success: true, data: { settings: next }, settings: next } };
   }
 
   if (routePath === "/friends" || routePath.startsWith("/friends/")) {
@@ -1496,6 +2442,7 @@ app.post(["/api/auth", "/api/auth/login"], apiLimiter, (req, res) => {
     displayName: req.body?.displayName || safeId,
     email: req.body?.email || `${safeId}@local.dev`,
   });
+  const userSettings = saveUserSettings(safeId, ensureUserBucket(devState.settings, safeId, () => defaultSettings(safeId)));
 
   const token = signDevToken({
     userId: safeId,
@@ -1508,6 +2455,7 @@ app.post(["/api/auth", "/api/auth/login"], apiLimiter, (req, res) => {
       token,
       refreshToken: null,
       user: userRecord,
+      settings: userSettings,
       userId: userRecord.id,
       authenticated: true,
     },
@@ -1516,10 +2464,13 @@ app.post(["/api/auth", "/api/auth/login"], apiLimiter, (req, res) => {
 });
 
 app.get("/api/auth/me", apiLimiter, authMiddleware, (req, res) => {
+  const settings = normalizeUserSettings(req.user.id, ensureUserBucket(devState.settings, req.user.id, () => defaultSettings(req.user.id)));
+  devState.settings.set(req.user.id, settings);
   return res.status(200).json({
     success: true,
     data: {
       user: req.user,
+      settings,
       userId: req.user.id,
       authenticated: true,
     },
@@ -1528,12 +2479,15 @@ app.get("/api/auth/me", apiLimiter, authMiddleware, (req, res) => {
 });
 
 app.get("/api/auth/verify", apiLimiter, authMiddleware, (req, res) => {
+  const settings = normalizeUserSettings(req.user.id, ensureUserBucket(devState.settings, req.user.id, () => defaultSettings(req.user.id)));
+  devState.settings.set(req.user.id, settings);
   return res.status(200).json({
     success: true,
     data: {
       valid: true,
       authenticated: true,
       user: req.user,
+      settings,
     },
     message: "Token valid",
   });
@@ -2044,6 +2998,28 @@ app.post("/api/friends/:friendId/block", apiLimiter, authMiddleware, (req, res) 
   return sendSuccess(res, { blocked: true, friendId }, 200, "User blocked");
 });
 
+app.post("/api/media/upload", apiLimiter, authMiddleware, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return sendError(res, "No file uploaded", 400);
+    }
+
+    const media = await storeUploadedMedia(req.file, { folder: "media" });
+    console.log("[GROUP_MEDIA_UPLOAD]", {
+      userId: String(req.user.id),
+      fileName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+      url: media?.url || null,
+    });
+
+    return sendSuccess(res, { media }, 201, "Media uploaded");
+  } catch (error) {
+    console.error("[GROUP_MEDIA_UPLOAD_ERROR]", error.message);
+    return sendError(res, "Media upload failed", 500);
+  }
+});
+
 app.get("/api/groups/invites/user", apiLimiter, authMiddleware, (req, res) => {
   const invites = ensureUserBucket(devState.groupInvites, req.user.id, () => []);
   return res.status(200).json({
@@ -2054,6 +3030,577 @@ app.get("/api/groups/invites/user", apiLimiter, authMiddleware, (req, res) => {
     },
     message: "Group invites loaded",
   });
+});
+
+app.get("/api/groups/purposes", apiLimiter, authMiddleware, (_req, res) => {
+  return sendSuccess(res, {
+    purposes: [
+      "Study",
+      "Work",
+      "Family",
+      "Friends",
+      "Community",
+      "Announcements",
+      "Support",
+    ],
+  }, 200, "Group purposes loaded");
+});
+
+app.get("/api/groups/moods", apiLimiter, authMiddleware, (_req, res) => {
+  return sendSuccess(res, {
+    moods: ["calm", "energetic", "focused", "celebration", "serious", "creative"],
+  }, 200, "Group moods loaded");
+});
+
+app.get("/api/groups/user", apiLimiter, authMiddleware, (req, res) => {
+  return sendSuccess(res, listGroupsForUser(req.user.id), 200, "Groups loaded");
+});
+
+app.get("/api/groups", apiLimiter, authMiddleware, (req, res) => {
+  return sendSuccess(res, listGroupsForUser(req.user.id), 200, "Groups loaded");
+});
+
+app.post("/api/groups", apiLimiter, authMiddleware, (req, res) => {
+  const creatorId = String(req.user.id);
+  const requestedMembers = uniqueIds([
+    creatorId,
+    ...(Array.isArray(req.body?.memberIds) ? req.body.memberIds : []),
+    ...(Array.isArray(req.body?.members) ? req.body.members : []),
+  ]);
+
+  const createdGroup = hydrateGroupRecord({
+    id: `group_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
+    name: String(req.body?.name || "Untitled Group").trim() || "Untitled Group",
+    description: String(req.body?.description || ""),
+    topic: String(req.body?.topic || ""),
+    purpose: String(req.body?.purpose || ""),
+    mood: String(req.body?.mood || ""),
+    privacy: req.body?.privacy === "public" ? "public" : "private",
+    isPublic: req.body?.privacy === "public",
+    theme: req.body?.theme || "blue",
+    photoURL: req.body?.photoURL || req.body?.avatar || null,
+    avatar: req.body?.avatar || req.body?.photoURL || null,
+    welcomeMessage: req.body?.welcomeMessage || "",
+    rules: Array.isArray(req.body?.rules) ? req.body.rules : [],
+    customReactions: Array.isArray(req.body?.customReactions) ? req.body.customReactions : ["👍", "❤️", "😂", "😮"],
+    badges: Array.isArray(req.body?.badges) ? req.body.badges : [],
+    postingRule: req.body?.postingRule || "everyone",
+    quietHours: req.body?.quietHours || {},
+    scheduledPosting: req.body?.scheduledPosting || {},
+    participationModes: req.body?.participationModes || {},
+    moderationSettings: req.body?.moderationSettings || {},
+    settings: req.body?.settings || {},
+    createdBy: creatorId,
+    memberIds: requestedMembers,
+    adminIds: [creatorId],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    transparency: [{
+      id: `group_log_${Date.now()}`,
+      action: "group_created",
+      details: `Created by ${creatorId}`,
+      createdAt: new Date().toISOString(),
+    }],
+  });
+
+  const storedGroup = syncGroupToMemberBuckets(createdGroup);
+  scheduleDevStatePersist();
+
+  const responseGroup = serializeGroupForViewer(storedGroup, creatorId, { includeMessages: false, includeMembers: true });
+  console.log("[GROUP_CREATE]", { groupId: storedGroup.id, creatorId, members: storedGroup.memberIds.length });
+  broadcastGroupEvent(storedGroup, ["group:created", "group_created"], { group: responseGroup, ...responseGroup });
+  broadcastGroupEvent(storedGroup, "group:refresh_needed", { groupId: storedGroup.id });
+
+  return sendSuccess(res, responseGroup, 201, "Group created");
+});
+
+app.get("/api/groups/:groupId", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id) && !group.isPublic) {
+    return sendError(res, "Access denied", 403);
+  }
+  return sendSuccess(res, serializeGroupForViewer(group, req.user.id, { includeMessages: false, includeMembers: true }), 200, "Group loaded");
+});
+
+app.put("/api/groups/:groupId", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupAdmin(group, req.user.id)) return sendError(res, "Only admins can update this group", 403);
+
+  const updatedGroup = hydrateGroupRecord({
+    ...group,
+    name: req.body?.name ?? group.name,
+    description: req.body?.description ?? group.description,
+    topic: req.body?.topic ?? group.topic,
+    purpose: req.body?.purpose ?? group.purpose,
+    mood: req.body?.mood ?? group.mood,
+    privacy: req.body?.privacy ?? group.privacy,
+    isPublic: (req.body?.privacy ?? group.privacy) === "public",
+    theme: req.body?.theme ?? group.theme,
+    photoURL: req.body?.photoURL ?? req.body?.avatar ?? group.photoURL,
+    avatar: req.body?.avatar ?? req.body?.photoURL ?? group.avatar,
+    postingRule: req.body?.postingRule ?? group.postingRule,
+    quietHours: req.body?.quietHours ?? group.quietHours,
+    scheduledPosting: req.body?.scheduledPosting ?? group.scheduledPosting,
+    participationModes: req.body?.participationModes ?? group.participationModes,
+    moderationSettings: req.body?.moderationSettings ?? group.moderationSettings,
+    settings: normalizeGroupSettings({ ...(group.settings || {}), ...(req.body?.settings || {}) }),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "group_updated", `Updated by ${req.user.id}`));
+  scheduleDevStatePersist();
+  const payload = serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true });
+  broadcastGroupEvent(storedGroup, "group:updated", { group: payload, ...payload });
+  broadcastGroupEvent(storedGroup, "group:refresh_needed", { groupId: storedGroup.id });
+  return sendSuccess(res, payload, 200, "Group updated");
+});
+
+app.put("/api/groups/:groupId/settings", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupAdmin(group, req.user.id)) return sendError(res, "Only admins can change settings", 403);
+
+  const updatedGroup = hydrateGroupRecord({
+    ...group,
+    settings: normalizeGroupSettings({ ...(group.settings || {}), ...(req.body?.settings || req.body || {}) }),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "settings_updated", `Settings updated by ${req.user.id}`));
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, "group:updated", {
+    group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }),
+  });
+  return sendSuccess(res, { settings: storedGroup.settings, group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }) }, 200, "Group settings updated");
+});
+
+app.delete("/api/groups/:groupId", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (String(group.createdBy) !== String(req.user.id)) return sendError(res, "Only the owner can delete this group", 403);
+
+  removeGroupFromAllBuckets(group.id);
+  scheduleDevStatePersist();
+  broadcastGroupEvent(group, ["group:deleted", "group_deleted"], { groupId: group.id, deletedBy: String(req.user.id) });
+  return sendSuccess(res, { groupId: group.id, deleted: true }, 200, "Group deleted");
+});
+
+app.post("/api/groups/:groupId/join", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (isGroupMember(group, userId)) {
+    return sendSuccess(res, { group: serializeGroupForViewer(group, userId, { includeMessages: false, includeMembers: true }), joined: false }, 200, "Already joined");
+  }
+
+  const invites = ensureUserBucket(devState.groupInvites, userId, () => []);
+  const invited = invites.some((invite) => String(invite.groupId) === String(group.id));
+  if (!group.isPublic && !invited) {
+    return sendError(res, "This private group requires an invitation", 403);
+  }
+
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.memberIds = uniqueIds([...(updatedGroup.memberIds || []), userId]);
+  updatedGroup.members.push(buildGroupMemberSummary(userId, { role: "member" }));
+  updatedGroup.updatedAt = new Date().toISOString();
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_joined", `${userId} joined the group`));
+  devState.groupInvites.set(userId, invites.filter((invite) => String(invite.groupId) !== String(group.id)));
+  scheduleDevStatePersist();
+
+  const memberPayload = { groupId: storedGroup.id, memberId: userId, userId, member: buildGroupMemberSummary(userId, { role: "member" }) };
+  broadcastGroupEvent(storedGroup, ["group:member:joined", "group:member:added", "GROUP_MEMBER_ADDED", "group:membership_change"], memberPayload);
+  broadcastGroupEvent(storedGroup, "group:refresh_needed", { groupId: storedGroup.id });
+  console.log("[GROUP_JOIN]", { groupId: storedGroup.id, userId });
+
+  return sendSuccess(res, { group: serializeGroupForViewer(storedGroup, userId, { includeMessages: false, includeMembers: true }), joined: true }, 200, "Joined group");
+});
+
+app.post("/api/groups/:groupId/leave", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, userId)) return sendError(res, "You are not a member of this group", 403);
+  if (String(group.createdBy) === userId) return sendError(res, "The owner cannot leave without deleting the group", 400);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.memberIds = uniqueIds(updatedGroup.memberIds || []).filter((memberId) => String(memberId) !== userId);
+  updatedGroup.members = updatedGroup.members.filter((member) => String(member.userId || member.id) !== userId);
+  updatedGroup.adminIds = uniqueIds(updatedGroup.adminIds || []).filter((adminId) => String(adminId) !== userId);
+  updatedGroup.updatedAt = new Date().toISOString();
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_left", `${userId} left the group`));
+  scheduleDevStatePersist();
+
+  const memberPayload = { groupId: storedGroup.id, memberId: userId, userId };
+  broadcastGroupEvent(storedGroup, ["group:member:left", "group:member:removed", "GROUP_MEMBER_REMOVED"], memberPayload);
+  broadcastGroupEvent(storedGroup, "group:refresh_needed", { groupId: storedGroup.id });
+  console.log("[GROUP_LEAVE]", { groupId: storedGroup.id, userId });
+
+  return sendSuccess(res, { groupId: storedGroup.id, left: true }, 200, "Left group");
+});
+
+app.get("/api/groups/:groupId/members", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  return sendSuccess(res, { members: group.members, total: group.members.length }, 200, "Members loaded");
+});
+
+app.post("/api/group-members/:groupId/invitations", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  const inviteeId = normalizeEntityId(req.body?.inviteeId || req.body?.userId || req.body?.memberId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!inviteeId) return sendError(res, "inviteeId is required", 400);
+  if (!isGroupAdmin(group, req.user.id)) return sendError(res, "Only admins can invite", 403);
+  ensureSeedUser(inviteeId);
+
+  if (isGroupMember(group, inviteeId)) {
+    return sendSuccess(res, { action: "already_member", groupId: group.id, inviteeId }, 200, "User is already a member");
+  }
+
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.memberIds = uniqueIds([...(updatedGroup.memberIds || []), inviteeId]);
+  updatedGroup.members.push(buildGroupMemberSummary(inviteeId, { role: "member" }));
+  updatedGroup.updatedAt = new Date().toISOString();
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_added", `${inviteeId} added by ${req.user.id}`));
+  scheduleDevStatePersist();
+
+  const memberPayload = { groupId: storedGroup.id, memberId: inviteeId, userId: inviteeId, member: buildGroupMemberSummary(inviteeId, { role: "member" }) };
+  broadcastGroupEvent(storedGroup, ["group:member:joined", "group:member:added", "GROUP_MEMBER_ADDED", "group:membership_change"], memberPayload);
+  webSocketService.sendToUser(inviteeId, "group:created", { group: serializeGroupForViewer(storedGroup, inviteeId, { includeMessages: false, includeMembers: true }) });
+  webSocketService.sendToUser(inviteeId, "group:refresh_needed", { groupId: storedGroup.id });
+
+  return sendSuccess(res, { action: "member_added", group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }), inviteeId }, 200, "Member added");
+});
+
+app.post("/api/groups/:groupId/members/:memberId/promote", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  const memberId = String(req.params.memberId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupAdmin(group, req.user.id)) return sendError(res, "Only admins can promote", 403);
+  if (!isGroupMember(group, memberId)) return sendError(res, "Member not found", 404);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.adminIds = uniqueIds([...(updatedGroup.adminIds || []), memberId]);
+  updatedGroup.members = updatedGroup.members.map((member) => (
+    String(member.userId || member.id) === memberId ? { ...member, role: "admin" } : member
+  ));
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_promoted", `${memberId} promoted by ${req.user.id}`));
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, "group:updated", { group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }) });
+  return sendSuccess(res, { group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }), memberId }, 200, "Member promoted");
+});
+
+app.post("/api/groups/:groupId/members/:memberId/demote", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  const memberId = String(req.params.memberId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (String(group.createdBy) !== String(req.user.id)) return sendError(res, "Only the owner can demote admins", 403);
+  if (!isGroupMember(group, memberId)) return sendError(res, "Member not found", 404);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.adminIds = uniqueIds(updatedGroup.adminIds || []).filter((adminId) => String(adminId) !== memberId && String(adminId) !== String(group.createdBy));
+  updatedGroup.members = updatedGroup.members.map((member) => (
+    String(member.userId || member.id) === memberId ? { ...member, role: "member" } : member
+  ));
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_demoted", `${memberId} demoted by ${req.user.id}`));
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, "group:updated", { group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }) });
+  return sendSuccess(res, { group: serializeGroupForViewer(storedGroup, req.user.id, { includeMessages: false, includeMembers: true }), memberId }, 200, "Member demoted");
+});
+
+app.delete("/api/groups/:groupId/members/:memberId", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  const memberId = String(req.params.memberId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupAdmin(group, req.user.id)) return sendError(res, "Only admins can remove members", 403);
+  if (!isGroupMember(group, memberId)) return sendError(res, "Member not found", 404);
+  if (String(group.createdBy) === memberId) return sendError(res, "Cannot remove the group owner", 400);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.memberIds = uniqueIds(updatedGroup.memberIds || []).filter((id) => String(id) !== memberId);
+  updatedGroup.members = updatedGroup.members.filter((member) => String(member.userId || member.id) !== memberId);
+  updatedGroup.adminIds = uniqueIds(updatedGroup.adminIds || []).filter((id) => String(id) !== memberId);
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "member_removed", `${memberId} removed by ${req.user.id}`));
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, ["group:member:removed", "GROUP_MEMBER_REMOVED"], { groupId: storedGroup.id, memberId, userId: memberId });
+  webSocketService.sendToUser(memberId, "group:refresh_needed", { groupId: storedGroup.id });
+  return sendSuccess(res, { groupId: storedGroup.id, memberId, removed: true }, 200, "Member removed");
+});
+
+app.get("/api/groups/:groupId/messages", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, userId)) return sendError(res, "Access denied", 403);
+
+  const limit = Math.max(1, Number(req.query.limit || 80));
+  const before = req.query.before ? Date.parse(req.query.before) : null;
+  let messages = Array.isArray(group.messages) ? group.messages : [];
+  if (Number.isFinite(before)) {
+    messages = messages.filter((message) => Date.parse(message.createdAt || 0) < before);
+  }
+  messages = messages.slice(-limit);
+
+  const seenResult = markGroupSeenByViewer(group, userId);
+  if (seenResult.changed) {
+    syncGroupToMemberBuckets(seenResult.group);
+    scheduleDevStatePersist();
+  }
+
+  console.log("[GROUP_MESSAGES_LOAD]", { groupId: group.id, userId, count: messages.length });
+  return sendSuccess(res, messages, 200, "Group messages loaded");
+});
+
+app.post("/api/groups/:groupId/messages", apiLimiter, authMiddleware, upload.single("file"), async (req, res) => {
+  try {
+    const userId = String(req.user.id);
+    const group = findGroupAcrossUsers(req.params.groupId);
+    if (!group) return sendError(res, "Group not found", 404);
+    if (!isGroupMember(group, userId)) return sendError(res, "Access denied", 403);
+    if (group.settings?.onlyAdminsCanPost === true && !isGroupAdmin(group, userId)) {
+      return sendError(res, "Only admins can post in this group", 403);
+    }
+
+    let attachment = req.body?.metadata?.attachment || null;
+    let metadata = req.body?.metadata;
+    if (typeof metadata === "string") {
+      try { metadata = JSON.parse(metadata); } catch { metadata = {}; }
+    }
+    if (metadata && typeof metadata === "object" && metadata.attachment) attachment = metadata.attachment;
+
+    if (req.file) {
+      if (group.settings?.allowMedia === false) {
+        return sendError(res, "Media sharing is disabled in this group", 403);
+      }
+      const media = await storeUploadedMedia(req.file, { folder: "groups" });
+      attachment = {
+        id: media.id,
+        url: media.url,
+        thumbnailUrl: media.thumbnailUrl,
+        name: media.originalName || media.fileName || req.file.originalname,
+        mimeType: media.mimeType || req.file.mimetype,
+        size: media.size || req.file.size,
+        type: req.body?.type || (req.file.mimetype.startsWith("image/") ? "image" : req.file.mimetype.startsWith("audio/") ? "audio" : req.file.mimetype.startsWith("video/") ? "video" : "file"),
+      };
+      metadata = { ...(metadata || {}), attachment };
+    }
+
+    const content = String(req.body?.content || req.body?.text || "").trim();
+    if (!content && !attachment) {
+      return sendError(res, "Message content or media is required", 400);
+    }
+
+    const message = buildStoredGroupMessage(group, userId, {
+      type: req.body?.type || attachment?.type || "text",
+      content,
+      replyToId: req.body?.replyToId || req.body?.replyTo,
+      localId: req.body?.localId || null,
+      metadata: metadata || {},
+      attachment,
+    });
+
+    const storedGroup = syncGroupToMemberBuckets(upsertGroupMessage(group, message));
+    scheduleDevStatePersist();
+
+    const payload = { groupId: storedGroup.id, group_id: storedGroup.id, message };
+    broadcastGroupEvent(storedGroup, ["group:message", "group_message", "receive_group_message"], payload);
+    console.log("[GROUP_MESSAGE_SEND]", { groupId: storedGroup.id, userId, messageId: message.id, type: message.type, media: !!message.mediaUrl });
+
+    return sendSuccess(res, message, 201, "Group message sent");
+  } catch (error) {
+    console.error("[GROUP_MESSAGE_SEND_ERROR]", error.message);
+    return sendError(res, "Failed to send group message", 500);
+  }
+});
+
+app.put("/api/groups/:groupId/messages/:messageId", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  const messageIndex = updatedGroup.messages.findIndex((message) => String(message.id) === String(req.params.messageId));
+  if (messageIndex < 0) return sendError(res, "Message not found", 404);
+  const existingMessage = updatedGroup.messages[messageIndex];
+  if (String(existingMessage.senderId) !== String(req.user.id) && !isGroupAdmin(updatedGroup, req.user.id)) {
+    return sendError(res, "You cannot edit this message", 403);
+  }
+
+  const nextContent = String(req.body?.content || req.body?.text || "").trim();
+  updatedGroup.messages[messageIndex] = {
+    ...existingMessage,
+    content: nextContent,
+    text: nextContent,
+    body: nextContent,
+    edited: true,
+    updatedAt: new Date().toISOString(),
+  };
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "message_edited", `${req.params.messageId} edited by ${req.user.id}`));
+  scheduleDevStatePersist();
+  const message = storedGroup.messages.find((item) => String(item.id) === String(req.params.messageId));
+  broadcastGroupEvent(storedGroup, ["group:message:edited", "message_edited"], { groupId: storedGroup.id, message });
+  return sendSuccess(res, message, 200, "Message edited");
+});
+
+app.delete("/api/groups/:groupId/messages/:messageId", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, userId)) return sendError(res, "Access denied", 403);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  const messageIndex = updatedGroup.messages.findIndex((message) => String(message.id) === String(req.params.messageId));
+  if (messageIndex < 0) return sendError(res, "Message not found", 404);
+  const existingMessage = updatedGroup.messages[messageIndex];
+  if (String(existingMessage.senderId) !== userId && !isGroupAdmin(updatedGroup, userId)) {
+    return sendError(res, "You cannot delete this message", 403);
+  }
+
+  updatedGroup.messages[messageIndex] = {
+    ...existingMessage,
+    content: "This message was deleted",
+    text: "This message was deleted",
+    body: "This message was deleted",
+    mediaUrl: null,
+    media_url: null,
+    imageUrl: null,
+    attachment: null,
+    deleted: true,
+    deletedForEveryone: true,
+    updatedAt: new Date().toISOString(),
+  };
+  const storedGroup = syncGroupToMemberBuckets(recordGroupTransparency(updatedGroup, "message_deleted", `${req.params.messageId} deleted by ${userId}`));
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, ["group:message:deleted", "message_deleted"], { groupId: storedGroup.id, messageId: req.params.messageId, deletedBy: userId });
+  return sendSuccess(res, { groupId: storedGroup.id, messageId: req.params.messageId, deleted: true }, 200, "Message deleted");
+});
+
+app.post("/api/groups/:groupId/messages/:messageId/reactions", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const emoji = String(req.body?.reaction || req.body?.emoji || "").trim();
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, userId)) return sendError(res, "Access denied", 403);
+  if (!emoji) return sendError(res, "reaction is required", 400);
+  if (group.settings?.allowReactions === false) return sendError(res, "Reactions are disabled in this group", 403);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  const message = updatedGroup.messages.find((item) => String(item.id) === String(req.params.messageId));
+  if (!message) return sendError(res, "Message not found", 404);
+  message.reactions = normalizeGroupReactions(message.reactions || {});
+  message.reactions[emoji] = uniqueIds([...(message.reactions[emoji] || []), userId]);
+  message.updatedAt = new Date().toISOString();
+  const storedGroup = syncGroupToMemberBuckets(updatedGroup);
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, "group:reaction", { groupId: storedGroup.id, messageId: message.id, reactions: message.reactions, emoji, userId, action: "added" });
+  return sendSuccess(res, { messageId: message.id, reactions: message.reactions, emoji, action: "added" }, 200, "Reaction added");
+});
+
+app.delete("/api/groups/:groupId/messages/:messageId/reactions/:reaction", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const emoji = String(req.params.reaction || "").trim();
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, userId)) return sendError(res, "Access denied", 403);
+  if (!emoji) return sendError(res, "reaction is required", 400);
+
+  const updatedGroup = hydrateGroupRecord(group);
+  const message = updatedGroup.messages.find((item) => String(item.id) === String(req.params.messageId));
+  if (!message) return sendError(res, "Message not found", 404);
+  message.reactions = normalizeGroupReactions(message.reactions || {});
+  message.reactions[emoji] = (message.reactions[emoji] || []).filter((id) => String(id) !== userId);
+  if (message.reactions[emoji].length === 0) delete message.reactions[emoji];
+  message.updatedAt = new Date().toISOString();
+  const storedGroup = syncGroupToMemberBuckets(updatedGroup);
+  scheduleDevStatePersist();
+  broadcastGroupEvent(storedGroup, "group:reaction", { groupId: storedGroup.id, messageId: message.id, reactions: message.reactions, emoji, userId, action: "removed" });
+  return sendSuccess(res, { messageId: message.id, reactions: message.reactions, emoji, action: "removed" }, 200, "Reaction removed");
+});
+
+app.post("/api/groups/:groupId/typing", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, userId)) return sendError(res, "Access denied", 403);
+
+  const isTyping = req.body?.typing !== false;
+  const updatedGroup = hydrateGroupRecord(group);
+  updatedGroup.typingUsers = updatedGroup.typingUsers && typeof updatedGroup.typingUsers === "object" ? updatedGroup.typingUsers : {};
+  if (isTyping) updatedGroup.typingUsers[userId] = Date.now();
+  else delete updatedGroup.typingUsers[userId];
+  syncGroupToMemberBuckets(updatedGroup);
+  scheduleDevStatePersist();
+  broadcastGroupEvent(updatedGroup, "group:typing", {
+    groupId: updatedGroup.id,
+    userId,
+    isTyping,
+    typing: isTyping,
+    timestamp: Date.now(),
+  }, { exceptUserId: userId });
+  return sendSuccess(res, { groupId: updatedGroup.id, userId, isTyping }, 200, "Typing state updated");
+});
+
+app.get("/api/groups/:groupId/media", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  return sendSuccess(res, { media: group.media || [], total: (group.media || []).length }, 200, "Group media loaded");
+});
+
+app.get("/api/groups/:groupId/search", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  const query = String(req.query.q || req.query.query || "").trim().toLowerCase();
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  const messages = (group.messages || []).filter((message) => (
+    !query
+      || String(message.content || "").toLowerCase().includes(query)
+      || String(message.mediaUrl || "").toLowerCase().includes(query)
+      || String(message.fileName || "").toLowerCase().includes(query)
+  ));
+  return sendSuccess(res, { query, messages, total: messages.length }, 200, "Group search completed");
+});
+
+app.get("/api/groups/:groupId/transparency", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  return sendSuccess(res, { logs: group.transparency || [], total: (group.transparency || []).length }, 200, "Transparency log loaded");
+});
+
+app.get("/api/groups/:groupId/notes", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  return sendSuccess(res, { notes: [], total: 0 }, 200, "Group notes loaded");
+});
+
+app.get("/api/groups/:groupId/events", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  return sendSuccess(res, { events: [], total: 0 }, 200, "Group events loaded");
+});
+
+app.post("/api/groups/:groupId/calls", apiLimiter, authMiddleware, (req, res) => {
+  const group = findGroupAcrossUsers(req.params.groupId);
+  if (!group) return sendError(res, "Group not found", 404);
+  if (!isGroupMember(group, req.user.id)) return sendError(res, "Access denied", 403);
+  if (group.settings?.allowCalls === false) return sendError(res, "Calls are disabled in this group", 403);
+
+  const payload = {
+    callId: `group_call_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`,
+    groupId: group.id,
+    groupName: group.name,
+    callerId: String(req.user.id),
+    callerName: getUserProfile(req.user.id)?.displayName || String(req.user.id),
+    callType: req.body?.callType || req.body?.type || "voice",
+    startedAt: new Date().toISOString(),
+  };
+  broadcastGroupEvent(group, "group:call-started", payload, { exceptUserId: String(req.user.id) });
+  return sendSuccess(res, payload, 201, "Group call started");
 });
 
 app.use("/api/calls", apiLimiter, createCallRouter({
@@ -2139,7 +3686,7 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
   const messageId = `msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
   const normalizedParticipants = Array.from(new Set(participantIds.map(String)));
   const recipientIds = normalizedParticipants.filter((participantId) => String(participantId) !== senderId);
-  const deliveredTo = recipientIds.filter((participantId) => webSocketService.isUserOnline(participantId));
+  const deliveredTo = [];
   const replyTo = replyToId
     ? (ensureUserBucket(devState.chats, senderId, () => [])
       .flatMap((chat) => chat.messages || [])
@@ -2171,9 +3718,9 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     createdAt,
     updatedAt: createdAt,
     sentAt: createdAt,
-    deliveredAt: deliveredTo.length > 0 ? createdAt : null,
+    deliveredAt: null,
     readAt: null,
-    status: deliveredTo.length > 0 ? "delivered" : "sent",
+    status: "sent",
     deletedFor: [],
     deletedForEveryone: false,
     deliveredTo,
@@ -2214,26 +3761,11 @@ app.post("/api/messages", apiLimiter, authMiddleware, (req, res) => {
     status: "sent",
   });
 
-  if (deliveredTo.length > 0) {
-    const deliveryPayload = {
-      messageId,
-      localId,
-      serverId: messageId,
-      chatId,
-      deliveredAt: createdAt,
-      deliveredTo,
-      status: "delivered",
-    };
-    webSocketService.sendToUser(senderId, "message_delivered", deliveryPayload);
-    webSocketService.sendToUser(senderId, "message:delivered", deliveryPayload);
-    webSocketService.sendToUser(senderId, "message_delivered", deliveryPayload);
-  }
-
   return sendSuccess(res, {
     message,
     chatId,
     conversation: buildChatSummaryForUser(senderId, ensureChatRecord(senderId, chatId, normalizedParticipants)),
-    delivered: deliveredTo.length > 0,
+    delivered: false,
   }, 201, "Message created");
 });
 
@@ -2306,6 +3838,103 @@ app.delete("/api/messages/:messageId", apiLimiter, authMiddleware, (req, res) =>
   });
 
   return sendSuccess(res, payload, 200, "Message deleted");
+});
+
+app.post("/api/messages/mark-delivered/batch", apiLimiter, authMiddleware, (req, res) => {
+  const userId = String(req.user.id);
+  const chatId = normalizeEntityId(req.body?.chatId || req.body?.conversationId);
+  const incomingIds = Array.isArray(req.body?.messageIds) ? req.body.messageIds.map(String) : [];
+  if (!chatId || incomingIds.length === 0) {
+    return sendError(res, "chatId and messageIds are required", 400);
+  }
+
+  const chats = ensureUserBucket(devState.chats, userId, () => []);
+  const chat = chats.find((item) => String(item.id) === chatId);
+  if (!chat) {
+    return sendSuccess(res, { chatId, messageIds: [], updated: 0 }, 200, "Nothing to mark as delivered");
+  }
+
+  const participantIds = getParticipantIdsForChat(chatId, chat.participantIds || [userId]);
+  const deliveredAt = new Date().toISOString();
+  const deliveredMessages = [];
+
+  syncChatMessage(chatId, participantIds, (message) => {
+    if (!incomingIds.includes(String(message.id))) return message;
+    if (String(message.senderId) === userId) return message;
+
+    const deliveredTo = Array.isArray(message.deliveredTo) ? message.deliveredTo.map(String) : [];
+    if (!deliveredTo.includes(userId)) deliveredTo.push(userId);
+
+    const seenBy = Array.isArray(message.seenBy) ? message.seenBy.map(String) : [];
+    const next = {
+      ...message,
+      deliveredTo,
+      deliveredAt: message.deliveredAt || deliveredAt,
+      updatedAt: deliveredAt,
+      status: seenBy.includes(userId) ? "read" : "delivered",
+    };
+
+    if (!deliveredMessages.some((item) => String(item.id) === String(next.id))) {
+      deliveredMessages.push(next);
+    }
+
+    return next;
+  });
+
+  (devState.messageBatches || []).forEach((batch) => {
+    batch.messages = (batch.messages || []).map((message) => {
+      if (!incomingIds.includes(String(message.id))) return message;
+      return {
+        ...message,
+        deliveredAt: message.deliveredAt || deliveredAt,
+      };
+    });
+    batch.updatedAt = deliveredAt;
+  });
+
+  scheduleDevStatePersist();
+
+  const senderIds = Array.from(new Set(
+    deliveredMessages
+      .map((message) => String(message.senderId || ""))
+      .filter((senderId) => senderId && senderId !== userId)
+  ));
+
+  senderIds.forEach((senderId) => {
+    const senderMessages = deliveredMessages.filter((message) => String(message.senderId) === senderId);
+    const batchPayload = {
+      chatId,
+      messageIds: senderMessages.map((message) => message.id),
+      deliveredTo: [userId],
+      deliveredBy: userId,
+      deliveredAt,
+      status: "delivered",
+    };
+    webSocketService.sendToUser(senderId, "message:delivered", batchPayload);
+    webSocketService.sendToUser(senderId, "message_delivered", batchPayload);
+
+    senderMessages.forEach((message) => {
+      const singlePayload = {
+        messageId: message.id,
+        localId: message.localId || null,
+        serverId: message.id,
+        chatId,
+        deliveredAt,
+        deliveredTo: [userId],
+        deliveredBy: userId,
+        status: "delivered",
+      };
+      webSocketService.sendToUser(senderId, "message:delivered", singlePayload);
+      webSocketService.sendToUser(senderId, "message_delivered", singlePayload);
+    });
+  });
+
+  return sendSuccess(res, {
+    chatId,
+    messageIds: deliveredMessages.map((message) => message.id),
+    updated: deliveredMessages.length,
+    deliveredAt,
+  }, 200, "Messages marked as delivered");
 });
 
 app.post("/api/messages/mark-read/batch", apiLimiter, authMiddleware, (req, res) => {
@@ -2439,7 +4068,7 @@ app.post("/api/messages/bulk", apiLimiter, authMiddleware, (req, res) => {
     });
     const participantIds = Array.from(new Set(context.participantIds.map(String)));
     const recipientId = participantIds.find((participantId) => participantId !== senderId) || inferredRecipient || null;
-    const deliveredTo = recipientId && webSocketService.isUserOnline(recipientId) ? [recipientId] : [];
+    const deliveredTo = [];
     const messageId = `msg_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
     const message = {
       id: messageId,
@@ -2459,9 +4088,9 @@ app.post("/api/messages/bulk", apiLimiter, authMiddleware, (req, res) => {
       createdAt,
       updatedAt: createdAt,
       sentAt: createdAt,
-      deliveredAt: deliveredTo.length > 0 ? createdAt : null,
+      deliveredAt: null,
       readAt: null,
-      status: deliveredTo.length > 0 ? "delivered" : "sent",
+      status: "sent",
       deletedFor: [],
       deletedForEveryone: false,
       deliveredTo,
@@ -2486,7 +4115,7 @@ app.post("/api/messages/bulk", apiLimiter, authMiddleware, (req, res) => {
       recipients.push({
         chatId: context.chatId,
         userId: recipientId,
-        delivered: deliveredTo.includes(recipientId),
+        delivered: false,
         seen: false,
       });
     }

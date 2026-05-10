@@ -1817,6 +1817,9 @@
     <!-- API.js must load BEFORE status.js -->
 
     <!-- New Status System Components -->
+    <script src="/js/AppSettings.js"></script>
+    <script src="/js/settings-global-propagation.js"></script>
+    <script src="/js/settings-module-subscriptions.js"></script>
     <!-- Load status-api, status-cache, status-websocket as regular non-module scripts -->
     <script src="/js/status-api.js" defer onerror="console.warn('[Status] status-api.js not found')"></script>
     <script src="/js/status-cache.js" defer onerror="console.warn('[Status] status-cache.js not found')"></script>

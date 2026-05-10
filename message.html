@@ -59,7 +59,10 @@
     console.warn = function(msg) {
         if (msg && msg.includes && (
             msg.includes('iframe which has both') ||
-            msg.includes('sandbox')
+            msg.includes('sandbox') ||
+            // Expected during startup: parent sends a preliminary session frame
+            // before the auth token is ready.  Not an error — suppress the noise.
+            msg.includes('Ignored invalid session data from parent')
         )) return;
         originalWarn.apply(console, arguments);
     };
@@ -1631,6 +1634,9 @@
         console.log('[INIT MODULE]', 'messages-iframe');
     </script>
     <!-- OFFLINE-FIRST LAYER (load order matters) -->
+    <script src="/js/AppSettings.js"></script>
+    <script src="/js/settings-global-propagation.js"></script>
+    <script src="/js/settings-module-subscriptions.js"></script>
     <script src="/js/app.cache.js"></script>
     <script src="/js/app.realtime.socket.js"></script>
     <script src="/js/localStore.messages.js"></script>

@@ -1556,6 +1556,24 @@
     <div id="toolsContent" class="iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
     </div>
+    <style>
+        .mobile-nav-icon[data-page="tools"] .ecom-nav-badge,
+        .nav-icon[data-page="tools"] .ecom-nav-badge {
+            position: absolute; top: 6px; right: calc(50% - 20px);
+            min-width: 17px; height: 17px; padding: 0 3px;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: #fff; font-size: 9px; font-weight: 800;
+            border-radius: 10px; display: none; align-items: center;
+            justify-content: center; border: 2px solid rgba(10,13,22,0.98);
+            line-height: 1; pointer-events: none;
+            animation: badgePop 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
+        }
+        .mobile-nav-icon[data-page="tools"] .ecom-notif-dot {
+            position: absolute; top: 8px; right: calc(50% - 16px);
+            width: 8px; height: 8px; background: #ef4444;
+            border-radius: 50%; border: 2px solid rgba(10,13,22,0.98); display: none;
+        }
+    </style>
 
     <script>
         // ======================================================================
@@ -3020,6 +3038,9 @@
     </script>
 
     <!-- Core Scripts -->
+    <script src="/js/AppSettings.js"></script>
+    <script src="/js/settings-global-propagation.js"></script>
+    <script src="/js/settings-module-subscriptions.js"></script>
     <script src="js/app.cache.js"></script>
     <script src="js/app.cache.unified.js"></script>
     <script src="js/app.offline.bootstrap.js"></script>
@@ -4646,7 +4667,10 @@
                 // the server (e.g. settings changed on another device), relay to all iframes.
                 if (data.type === 'SOCKET_EVENT' && data.event === 'settings_updated') {
                     const settingsPayload = data.payload || data.data || {};
-                    dispatchEventToModules({ type: 'SETTINGS_GLOBAL_UPDATE', payload: settingsPayload, originalSource: 'socket' });
+                    if (window.AppSettings && typeof window.AppSettings.merge === 'function') {
+                        window.AppSettings.merge(settingsPayload, { skipBroadcast: true, source: 'parent-socket-relay' });
+                    }
+                    dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings: settingsPayload, timestamp: Date.now() }, originalSource: 'socket' });
                     emitGlobalAppEvent('SETTINGS_UPDATED', { settings: settingsPayload, source: 'socket', timestamp: Date.now() }, { async: true });
                 }
 
@@ -5136,12 +5160,56 @@
 
                 // WebRTC Signaling Bridge
                 if (data.type === 'SIGNAL_OFFER' || data.type === 'SIGNAL_ANSWER' || data.type === 'ICE_CANDIDATE') {
-                    if (window.wsService && typeof window.wsService.send === 'function') {
-                        const wsEventMap = { 'SIGNAL_OFFER': 'call_offer', 'SIGNAL_ANSWER': 'call_answer', 'ICE_CANDIDATE': 'ice_candidate' };
-                        try { window.wsService.send(wsEventMap[data.type], data.payload || {}); } catch(sigErr) { console.warn('[Parent] WebRTC signal forward failed:', sigErr.message); }
-                    } else if (window.wsService && typeof window.wsService.emit === 'function') {
-                        const wsEventMap = { 'SIGNAL_OFFER': 'call_offer', 'SIGNAL_ANSWER': 'call_answer', 'ICE_CANDIDATE': 'ice_candidate' };
-                        window.wsService.emit(wsEventMap[data.type], data.payload || {});
+                    const payload = data.payload || {};
+                    const localOrServerCallId = payload.callId || payload.id || null;
+                    const resolvedCallId = (window.__callIdMap && window.__callIdMap[localOrServerCallId]) || localOrServerCallId;
+                    const baseUrl = window.__getApiBase();
+                    let token = cachedToken;
+                    try {
+                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+                    } catch(e) {}
+
+                    if (!resolvedCallId || !token) {
+                        console.warn('[Parent] WebRTC signal dropped - missing callId or token', { type: data.type, hasCallId: !!resolvedCallId, hasToken: !!token });
+                        return;
+                    }
+
+                    try {
+                        if (data.type === 'ICE_CANDIDATE') {
+                            const iceResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/ice`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({
+                                    candidate: payload.candidate,
+                                    timestamp: payload.timestamp || Date.now()
+                                })
+                            });
+                            if (!iceResp.ok) throw new Error(`ICE relay failed with ${iceResp.status}`);
+                            console.log('[Parent] ICE candidate relayed via /calls/:id/ice', resolvedCallId);
+                        } else {
+                            const signalType = data.type === 'SIGNAL_OFFER' ? 'offer' : 'answer';
+                            const sdpPayload = data.type === 'SIGNAL_OFFER' ? payload.offer : payload.answer;
+                            const signalResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/signal`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${token}`
+                                },
+                                body: JSON.stringify({
+                                    type: signalType,
+                                    sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
+                                    targetUserId: payload.targetUserId || payload.toUserId || null,
+                                    timestamp: payload.timestamp || Date.now()
+                                })
+                            });
+                            if (!signalResp.ok) throw new Error(`${signalType} relay failed with ${signalResp.status}`);
+                            console.log(`[Parent] ${signalType.toUpperCase()} relayed via /calls/:id/signal`, resolvedCallId);
+                        }
+                    } catch(sigErr) {
+                        console.warn('[Parent] WebRTC signal relay failed:', sigErr.message);
                     }
                     return;
                 }
@@ -5149,24 +5217,42 @@
                 // ── ADD PARTICIPANT to an existing call (group call) ─────────────
                 if (data.type === 'CALL_ADD_PARTICIPANT') {
                     const payload = data.payload || {};
+                    const localOrServerCallId = payload.callId || null;
+                    const resolvedCallId = (window.__callIdMap && window.__callIdMap[localOrServerCallId]) || localOrServerCallId;
+                    const baseUrl = window.__getApiBase();
+                    let token = cachedToken;
+                    try {
+                        if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+                    } catch(e) {}
+
                     console.log('[Parent] Adding participant to call', payload);
-                    // Forward to WebSocket server — server sends incoming-call notification to target user
-                    if (window.wsService) {
-                        const _wsSend = window.wsService.send || window.wsService.emit;
-                        if (typeof _wsSend === 'function') {
-                            try {
-                                _wsSend.call(window.wsService, 'call:add_participant', {
-                                    callId:         payload.callId,
-                                    targetUserId:   payload.targetUserId,
-                                    targetUserName: payload.targetUserName,
-                                    callType:       payload.existingCallType || 'voice',
-                                    invitedBy:      window.__currentUserId || null
-                                });
-                                console.log('[Parent] call:add_participant sent → userId', payload.targetUserId);
-                            } catch(e) {
-                                console.warn('[Parent] call:add_participant failed:', e.message);
-                            }
+
+                    if (!resolvedCallId || !payload.targetUserId || !token) {
+                        console.warn('[Parent] call participant invite dropped - missing callId, targetUserId, or token');
+                        return;
+                    }
+
+                    try {
+                        const inviteResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/participants`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`
+                            },
+                            body: JSON.stringify({
+                                targetUserId: payload.targetUserId,
+                                targetUserName: payload.targetUserName || null,
+                                callType: payload.existingCallType || 'voice',
+                                invitedBy: window.__currentUserId || null
+                            })
+                        });
+                        const inviteData = await inviteResp.json().catch(() => ({}));
+                        if (!inviteResp.ok || inviteData.success === false || inviteData.status === 'error') {
+                            throw new Error(inviteData.message || 'Invite failed');
                         }
+                        console.log('[Parent] participant invite sent successfully -> userId', payload.targetUserId);
+                    } catch(e) {
+                        console.warn('[Parent] call participant invite failed:', e.message);
                     }
                     return;
                 }
@@ -5243,6 +5329,79 @@
                         .then(responseData => { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: responseData.data || { listings: [], total: 0 } } }, '*'); })
                         .catch(() => { if (event.source) event.source.postMessage({ type: 'FETCH_LISTINGS_RESPONSE', requestId, payload: { data: { listings: [], total: 0 } } }, '*'); });
                 }
+
+                // ── MARKETPLACE BRIDGE ────────────────────────────────────────────────
+                // Forward realtime ecom events from WebSocket → Tools.html iframe.
+                // Also handles cart badge, notification dot, and chat-seller requests.
+                const _mpEvTypes = new Set([
+                    'product:updated','product:created','product:deleted','product:stock_updated',
+                    'order:created','order:status_changed','payment:confirmed','review:new','delivery:updated'
+                ]);
+                if (_mpEvTypes.has(data.type)) {
+                    const toolsIframe = document.getElementById('toolsIframe');
+                    if (toolsIframe && toolsIframe.contentWindow) {
+                        toolsIframe.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + data.type, payload: data.payload || {}, source: 'parent-mp-bridge' }, '*');
+                    }
+                    try { window.dispatchEvent(new CustomEvent('realtime:' + data.type, { detail: data.payload || {} })); } catch(_) {}
+                    return;
+                }
+
+                // Cart badge sync — Tools.html posts this when cart changes
+                if (data.type === 'ECOM_CART_UPDATE') {
+                    const count = data.payload?.count || 0;
+                    document.querySelectorAll('.nav-icon[data-page="tools"], .mobile-nav-icon[data-page="tools"]').forEach(function(icon) {
+                        let badge = icon.querySelector('.ecom-nav-badge');
+                        if (!badge) {
+                            badge = document.createElement('span');
+                            badge.className = 'ecom-nav-badge';
+                            icon.style.position = 'relative';
+                            icon.appendChild(badge);
+                        }
+                        badge.textContent = count > 99 ? '99+' : (count || '');
+                        badge.style.display = count > 0 ? 'flex' : 'none';
+                    });
+                    return;
+                }
+
+                // Notification dot — new order/review received
+                if (data.type === 'ECOM_NOTIFICATION_PUSH') {
+                    document.querySelectorAll('.mobile-nav-icon[data-page="tools"]').forEach(function(icon) {
+                        let dot = icon.querySelector('.ecom-notif-dot');
+                        if (!dot) {
+                            dot = document.createElement('span');
+                            dot.className = 'ecom-notif-dot';
+                            icon.style.position = 'relative';
+                            icon.appendChild(dot);
+                        }
+                        dot.style.display = 'block';
+                    });
+                    return;
+                }
+
+                // Clear notification dot when market opens
+                if (data.type === 'ECOM_NOTIFICATIONS_READ') {
+                    document.querySelectorAll('.ecom-notif-dot').forEach(function(d) { d.style.display = 'none'; });
+                }
+
+                // Chat-seller bridge — marketplace requests opening a DM
+                if (data.type === 'OPEN_CHAT' && data.payload?.product_id) {
+                    const chatPayload = {
+                        userId:    data.payload.userId || data.payload.seller_id,
+                        userName:  data.payload.userName || data.payload.seller_name || 'Seller',
+                        message:   data.payload.message || '',
+                        productId: data.payload.product_id,
+                        timestamp: Date.now()
+                    };
+                    navigateToPage('messages');
+                    setTimeout(function() {
+                        const msgIframe = document.getElementById('messagesIframe');
+                        if (msgIframe && msgIframe.contentWindow) {
+                            msgIframe.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: chatPayload, source: 'marketplace-bridge' }, '*');
+                        }
+                    }, 400);
+                    return;
+                }
+                // ── END MARKETPLACE BRIDGE ────────────────────────────────────────────
             });
 
             // ======================================================================
@@ -5334,6 +5493,36 @@
                     const f = document.getElementById('callsIframe');
                     if (f && f.contentWindow) f.contentWindow.postMessage({ type, payload, source: 'ws-bridge' }, '*');
                 }
+                function _normalizeSignalSdp(raw) {
+                    if (!raw) return null;
+                    if (typeof raw === 'string') {
+                        try { return JSON.parse(raw); } catch (_) { return raw; }
+                    }
+                    return raw;
+                }
+                function _fwdWebrtcSignal(signal) {
+                    const signalType = String(signal?.type || signal?.signalType || '').toLowerCase();
+                    if (signalType === 'offer') {
+                        _fwdToCallsIframe('SIGNAL_OFFER', {
+                            ...signal,
+                            offer: _normalizeSignalSdp(signal.sdp || signal.offer)
+                        });
+                        return;
+                    }
+                    if (signalType === 'answer') {
+                        _fwdToCallsIframe('SIGNAL_ANSWER', {
+                            ...signal,
+                            answer: _normalizeSignalSdp(signal.sdp || signal.answer)
+                        });
+                        return;
+                    }
+                    if (signalType === 'ice' || signalType === 'ice_candidate' || signalType === 'candidate') {
+                        _fwdToCallsIframe('ICE_CANDIDATE', {
+                            ...signal,
+                            candidate: signal.candidate || signal.iceCandidate || null
+                        });
+                    }
+                }
 
                 // ── Incoming call — all naming conventions ────────────────────
                 window.wsService.on('call:incoming',  _fwdIncoming);
@@ -5376,8 +5565,8 @@
                 window.wsService.on('call:offer',          d => _fwdToCallsIframe('SIGNAL_OFFER',   d));
                 window.wsService.on('call:answer',         d => _fwdToCallsIframe('SIGNAL_ANSWER',  d));
                 window.wsService.on('call:ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
-                window.wsService.on('webrtc:signal',       d => _fwdToCallsIframe('WEBRTC_SIGNAL',  d));
-                window.wsService.on('webrtc_signal',       d => _fwdToCallsIframe('WEBRTC_SIGNAL',  d));
+                window.wsService.on('webrtc:signal',       d => _fwdWebrtcSignal(d));
+                window.wsService.on('webrtc_signal',       d => _fwdWebrtcSignal(d));
 
                 // ── REAL-TIME MESSAGE BRIDGE ──────────────────────────────────
                 // Forward incoming chat messages from WebSocket to the messages iframe.
@@ -5577,6 +5766,10 @@
                 window.wsService.on('group_created',             _fwdGroupCreated);
                 window.wsService.on('group:message',             _fwdGroupMessage);
                 window.wsService.on('group_message',             _fwdGroupMessage);
+                window.wsService.on('group:reaction',            function(d) { _fwdToGroupIframe('group:reaction',        d); });
+                window.wsService.on('group:message:deleted',     function(d) { _fwdToGroupIframe('group:message:deleted', d); });
+                window.wsService.on('message_deleted',           function(d) { _fwdToGroupIframe('message_deleted',       d); });
+                window.wsService.on('group:message:edited',      function(d) { _fwdToGroupIframe('group:message:edited',  d); });
                 window.wsService.on('group:localSync',           _fwdGroupLocalSync);
                 window.wsService.on('group:updated',             function(d) {
                     _fwdToGroupIframe('group:localSync', { action: 'update', group: (d && d.group) || d, groupId: d && (d.id || (d.group && d.group.id)) });
@@ -5790,11 +5983,36 @@
                 [
                     ['kyn:call:offer',         'SIGNAL_OFFER'],  ['kyn:call_offer',         'SIGNAL_OFFER'],
                     ['kyn:call:answer',        'SIGNAL_ANSWER'], ['kyn:call_answer',        'SIGNAL_ANSWER'],
-                    ['kyn:webrtc:signal',      'WEBRTC_SIGNAL'], ['kyn:webrtc_signal',      'WEBRTC_SIGNAL'],
                     ['kyn:call:ice',           'ICE_CANDIDATE'], ['kyn:call_ice',           'ICE_CANDIDATE'],
                     ['kyn:call_ice_candidate', 'ICE_CANDIDATE'],
                 ].forEach(([evt, type]) => {
                     window.addEventListener(evt, (e) => _post('callsIframe', type, e.detail || {}));
+                });
+                ['kyn:webrtc:signal', 'kyn:webrtc_signal'].forEach((evt) => {
+                    window.addEventListener(evt, (e) => {
+                        const signal = e.detail || {};
+                        const signalType = String(signal.type || signal.signalType || '').toLowerCase();
+                        let parsedSdp = signal.sdp;
+                        if (typeof parsedSdp === 'string') {
+                            try { parsedSdp = JSON.parse(parsedSdp); } catch (_) {}
+                        }
+                        if (signalType === 'offer') {
+                            _post('callsIframe', 'SIGNAL_OFFER', {
+                                ...signal,
+                                offer: parsedSdp || signal.offer
+                            });
+                        } else if (signalType === 'answer') {
+                            _post('callsIframe', 'SIGNAL_ANSWER', {
+                                ...signal,
+                                answer: parsedSdp || signal.answer
+                            });
+                        } else if (signalType === 'ice' || signalType === 'ice_candidate' || signalType === 'candidate') {
+                            _post('callsIframe', 'ICE_CANDIDATE', {
+                                ...signal,
+                                candidate: signal.candidate || signal.iceCandidate || null
+                            });
+                        }
+                    });
                 });
 
                 // Messages → messages iframe

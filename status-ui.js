@@ -3120,46 +3120,68 @@ const LiveUpdateEngine = {
 // ── showStatusGroupViewer ─────────────────────────────────────────────────
 // Entry point for opening a group of statuses (WhatsApp-style carousel)
 function showStatusGroupViewer(statusGroup) {
-    if (!ensureUIActive('viewStatus')) return;
-    if (!statusGroup || !statusGroup.length) return;
+    try {
+        if (!ensureUIActive('viewStatus')) {
+            console.warn('[status-ui] showStatusGroupViewer blocked by ensureUIActive');
+            return;
+        }
+        if (!statusGroup || !statusGroup.length) {
+            console.warn('[status-ui] showStatusGroupViewer: empty statusGroup');
+            return;
+        }
 
-    // Determine if current user is the owner
-    const myId = currentUser?.id || currentUser?.userId ||
-        (function() {
-            try {
-                const s = JSON.parse(localStorage.getItem('currentUser') || '{}');
-                return s.id || s.userId || null;
-            } catch(_) { return null; }
-        })();
-    const ownerId = statusGroup[0].userId || statusGroup[0].user?.id;
-    const isOwner = myId && String(myId) === String(ownerId);
+        // Determine if current user is the owner
+        const myId = (currentUser && (currentUser.id || currentUser.userId)) ||
+            (function() {
+                try {
+                    const s = JSON.parse(localStorage.getItem('currentUser') || '{}');
+                    return s.id || s.userId || null;
+                } catch(_) { return null; }
+            })() ||
+            (function() {
+                try {
+                    const a = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+                    return a && (a.id || a.userId || (a.user && (a.user.id || a.user.userId))) || null;
+                } catch(_) { return null; }
+            })();
+        const ownerId = statusGroup[0].userId || statusGroup[0].user_id ||
+                        (statusGroup[0].user && statusGroup[0].user.id);
+        const isOwner = myId && String(myId) === String(ownerId);
 
-    // Store group state
-    currentViewerGroup    = statusGroup;
-    currentViewerSlot     = 0;   // which status in the group we're on
-    currentViewerStatus   = statusGroup[0];
-    UIStateManager.saveViewerState && UIStateManager.saveViewerState();
+        // Store group state
+        currentViewerGroup    = statusGroup;
+        currentViewerSlot     = 0;
+        currentViewerStatus   = statusGroup[0];
+        UIStateManager.saveViewerState && UIStateManager.saveViewerState();
 
-    const viewer = UIElements.statusViewerPanel || document.querySelector('.status-viewer-panel');
-    if (!viewer) return;
+        const viewer = document.getElementById('statusViewerPanel')
+            || document.querySelector('.status-viewer-panel');
+        if (!viewer) {
+            console.error('[status-ui] showStatusGroupViewer: #statusViewerPanel not found in DOM');
+            return;
+        }
 
-    viewer.classList.add('active');
-    if (typeof document.body.style.overflow !== 'undefined') document.body.style.overflow = 'hidden';
+        viewer.classList.add('active');
+        document.body.style.overflow = 'hidden';
 
-    // Set up owner/friend mode
-    _applyViewerMode(isOwner, statusGroup[0]);
+        // Set up owner/friend mode
+        _applyViewerMode(isOwner, statusGroup[0]);
 
-    // Build progress segments
-    _buildProgressSegments(statusGroup.length);
+        // Build progress segments
+        _buildProgressSegments(statusGroup.length);
 
-    // Set up tap zones
-    _setupTapZones();
+        // Set up tap zones (hold-to-pause)
+        _setupTapZones();
 
-    // Load first status
-    _loadSlot(0, isOwner, statusGroup);
+        // Load first status content
+        _loadSlot(0, isOwner, statusGroup);
 
-    // Start auto-advance
-    _startSlideTimer(isOwner, statusGroup);
+        // Start auto-advance timer
+        _startSlideTimer(isOwner, statusGroup);
+
+    } catch(err) {
+        console.error('[status-ui] showStatusGroupViewer crashed:', err);
+    }
 }
 
 // Keep old single-status entry point working (called by other code paths)
@@ -3470,12 +3492,19 @@ function _bindOwnerButtons(status) {
 
 function loadViewerContent(statusData) {
     const sanitized = UISanitizer.validateStatusData(statusData);
-    if (!sanitized) return;
-    const viewerUserInfo = UIElements.getElement('viewerUserInfo');
-    const viewerContent = UIElements.getElement('viewerContent');
-    const progressIndicators = UIElements.getElement('progressIndicators');
-    const actionButtonsOverlay = UIElements.getElement('actionButtonsOverlay');
-    if (!viewerUserInfo || !viewerContent) return;
+    if (!sanitized) {
+        console.error('[status-ui] loadViewerContent: validateStatusData returned null', statusData);
+        return;
+    }
+    const viewerUserInfo  = UIElements.getElement('viewerUserInfo')  || document.getElementById('viewerUserInfo');
+    const viewerContent   = UIElements.getElement('viewerContent')   || document.getElementById('viewerContent');
+    const progressIndicators   = UIElements.getElement('progressIndicators')   || document.getElementById('progressIndicators');
+    const actionButtonsOverlay = UIElements.getElement('actionButtonsOverlay') || document.getElementById('actionButtonsOverlay');
+    if (!viewerUserInfo || !viewerContent) {
+        console.error('[status-ui] loadViewerContent: missing DOM elements',
+            { viewerUserInfo: !!viewerUserInfo, viewerContent: !!viewerContent });
+        return;
+    }
     const user = sanitized.user || { displayName: 'Unknown User' };
     const initials = user.displayName
         .split(' ')
@@ -4481,7 +4510,9 @@ function renderStatusesListUI(container, statusesList) {
     });
     container.innerHTML = '';
     container.appendChild(fragment);
-    setTimeout(() => bindGroupedStatusHandlers(container), 50);
+    // Bind immediately + short delay for any async renders
+    bindGroupedStatusHandlers(container);
+    setTimeout(() => bindGroupedStatusHandlers(container), 100);
 
     // Show "Recent updates" label when there are friend statuses
     const recentLabel = document.getElementById('recentUpdatesLabel');
@@ -4503,8 +4534,8 @@ function createGroupedStatusElement(statuses) {
 
     const item = document.createElement('div');
     item.className = 'status-group-item';
-    item.dataset.userId = String(first.userId || user.id || '');
-    item.dataset.statusIds = statuses.map(s => s.id).join(',');
+    item.dataset.userId = String(first.userId || user.id || (first.user && first.user.id) || '');
+    item.dataset.statusIds = statuses.map(s => String(s.id)).join(',');
 
     // Build segmented ring for multiple statuses
     let ringHtml = '';
@@ -4536,38 +4567,80 @@ function createGroupedStatusElement(statuses) {
 // Bind click handlers on grouped items
 function bindGroupedStatusHandlers(container) {
     container.querySelectorAll('.status-group-item').forEach(item => {
-        if (item._bound) return;
+        // Always reassign onclick — never use _bound flag so re-renders get fresh handlers
         item._bound = true;
-        item.addEventListener('click', () => {
-            const ids = item.dataset.statusIds.split(',').filter(Boolean);
+        item.onclick = function() {
+            const ids = (item.dataset.statusIds || '').split(',').filter(Boolean);
+            if (!ids.length) return;
 
-            // Build status pool from every available source
+            // ── Build pool from ALL sources including friendsStatuses ──────
             const core = getCore();
             const pool = [
-                ...(core && core.getStatuses ? core.getStatuses() : []),
-                ...(typeof statusState !== 'undefined' && statusState.statuses ? statusState.statuses : []),
-                ...(typeof statuses !== 'undefined' && Array.isArray(statuses) ? statuses : []),
+                // Own statuses from core
+                ...(core && core !== window && typeof core.getStatuses === 'function' ? (core.getStatuses() || []) : []),
+                // Friend statuses from core
+                ...(core && core !== window && typeof core.getFriendsStatuses === 'function' ? (core.getFriendsStatuses() || []) : []),
+                // Module-level arrays (always check these — they are the primary store)
+                ...(Array.isArray(friendsStatuses) ? friendsStatuses : []),
+                ...(Array.isArray(myStatuses)      ? myStatuses      : []),
+                ...(Array.isArray(statuses)        ? statuses        : []),
+                // statusState backup
+                ...(typeof statusState !== 'undefined' && Array.isArray(statusState.statuses) ? statusState.statuses : []),
             ];
+
             // Deduplicate by id
             const seen = new Set();
-            const unique = pool.filter(s => { const k = String(s.id); if (seen.has(k)) return false; seen.add(k); return true; });
+            const unique = pool.filter(s => {
+                if (!s || s.id == null) return false;
+                const k = String(s.id);
+                if (seen.has(k)) return false;
+                seen.add(k);
+                return true;
+            });
 
-            const group = ids.map(id => unique.find(st => String(st.id) === String(id))).filter(Boolean);
+            const group = ids
+                .map(id => unique.find(st => String(st.id) === String(id)))
+                .filter(Boolean);
 
             if (group.length) {
                 showStatusGroupViewer(group);
-            } else {
-                // Fallback: re-fetch and try again
-                const core2 = getCore();
-                if (core2 && core2.loadStatuses) {
-                    core2.loadStatuses().then(() => {
-                        const fresh = core2.getStatuses ? core2.getStatuses() : [];
-                        const g2 = ids.map(id => fresh.find(st => String(st.id) === String(id))).filter(Boolean);
-                        if (g2.length) showStatusGroupViewer(g2);
-                    }).catch(() => {});
-                }
+                return;
             }
-        });
+
+            // ── Fallback: fetch from API by id then open ──────────────────
+            const api = window.StatusAPI;
+            if (api && api.getStatus) {
+                Promise.all(ids.map(id => api.getStatus(id).catch(() => null)))
+                    .then(results => {
+                        const fetched = results
+                            .map(r => r && (r.status || r.data || r))
+                            .filter(s => s && s.id);
+                        if (fetched.length) {
+                            // Cache into friendsStatuses so next click is instant
+                            fetched.forEach(s => {
+                                const sid = String(s.id);
+                                if (!friendsStatuses.find(f => String(f.id) === sid)) {
+                                    friendsStatuses.push(s);
+                                }
+                            });
+                            showStatusGroupViewer(fetched);
+                        }
+                    })
+                    .catch(() => {});
+                return;
+            }
+
+            // Last resort: refresh friend statuses and retry once
+            if (typeof _fetchFriendStatusesDirect === 'function') {
+                _fetchFriendStatusesDirect().then && _fetchFriendStatusesDirect();
+                setTimeout(() => {
+                    const retry = ids
+                        .map(id => [...friendsStatuses, ...statuses].find(s => String(s.id) === String(id)))
+                        .filter(Boolean);
+                    if (retry.length) showStatusGroupViewer(retry);
+                }, 800);
+            }
+        };
     });
 }
 
@@ -4575,6 +4648,83 @@ function bindGroupedStatusHandlers(container) {
 // BASIC EVENT LISTENERS SETUP
 // =============================================
 function setupBasicEventListeners() {
+    // ── Delegated click handler on allStatusList ──────────────────────────
+    // This survives DOM re-renders: we listen on the stable container,
+    // not on individual items which get replaced on each render.
+    const allStatusList = document.getElementById('allStatusList');
+    if (allStatusList && !allStatusList._delegateBound) {
+        allStatusList._delegateBound = true;
+        allStatusList.addEventListener('click', function(e) {
+            const item = e.target.closest('.status-group-item');
+            if (!item) return;
+            e.stopPropagation();
+
+            const ids = (item.dataset.statusIds || '').split(',').filter(Boolean);
+            if (!ids.length) {
+                console.warn('[status-ui] clicked status item has no statusIds dataset', item);
+                return;
+            }
+
+            console.log('[status-ui] Status item clicked, ids:', ids);
+
+            // Search every pool for these IDs
+            const core = getCore();
+            const pool = [
+                ...(Array.isArray(friendsStatuses) ? friendsStatuses : []),
+                ...(Array.isArray(myStatuses)      ? myStatuses      : []),
+                ...(Array.isArray(statuses)        ? statuses        : []),
+                ...(typeof statusState !== 'undefined' && Array.isArray(statusState.statuses) ? statusState.statuses : []),
+                ...(core && core !== window && typeof core.getStatuses === 'function' ? (core.getStatuses() || []) : []),
+                ...(core && core !== window && typeof core.getFriendsStatuses === 'function' ? (core.getFriendsStatuses() || []) : []),
+            ];
+            const seen = new Set();
+            const unique = pool.filter(s => {
+                if (!s || s.id == null) return false;
+                const k = String(s.id);
+                if (seen.has(k)) return false;
+                seen.add(k); return true;
+            });
+            console.log('[status-ui] Pool size:', unique.length, '| Looking for:', ids);
+            const group = ids.map(id => unique.find(s => String(s.id) === String(id))).filter(Boolean);
+
+            if (group.length) {
+                console.log('[status-ui] Opening viewer with', group.length, 'status(es)');
+                showStatusGroupViewer(group);
+                return;
+            }
+
+            console.warn('[status-ui] Status not found in pool — fetching from API for ids:', ids);
+            // Fallback: fetch directly from API by id
+            const api = window.StatusAPI;
+            if (api && api.getStatus) {
+                Promise.all(ids.map(id => api.getStatus(id).catch(() => null)))
+                    .then(results => {
+                        const fetched = results
+                            .map(r => r && (r.status || r.data || r))
+                            .filter(s => s && s.id);
+                        if (fetched.length) {
+                            fetched.forEach(s => {
+                                const sid = String(s.id);
+                                if (!friendsStatuses.find(f => String(f.id) === sid)) friendsStatuses.push(s);
+                            });
+                            showStatusGroupViewer(fetched);
+                        } else {
+                            console.error('[status-ui] API returned no status data for ids:', ids);
+                        }
+                    }).catch(err => console.error('[status-ui] API fetch failed:', err));
+            } else if (typeof _fetchFriendStatusesDirect === 'function') {
+                _fetchFriendStatusesDirect();
+                setTimeout(() => {
+                    const retry = ids.map(id =>
+                        [...friendsStatuses, ...statuses].find(s => String(s.id) === String(id))
+                    ).filter(Boolean);
+                    if (retry.length) showStatusGroupViewer(retry);
+                    else console.error('[status-ui] Still no status found after refresh for ids:', ids);
+                }, 800);
+            }
+        });
+    }
+
     // FIX: was '.category-tabs' — HTML uses '.status-categories'
     const categoryContainer = document.querySelector('.status-categories');
     if (categoryContainer && !categoryContainer._hasListener) {

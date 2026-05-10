@@ -314,6 +314,30 @@
             };
         }
 
+        off(type, handler = null) {
+            const listeners = this._listeners.get(type);
+            if (!listeners) return false;
+
+            if (typeof handler !== 'function') {
+                this._listeners.delete(type);
+                return true;
+            }
+
+            let removed = false;
+            for (const entry of Array.from(listeners)) {
+                if (entry.handler === handler) {
+                    listeners.delete(entry);
+                    removed = true;
+                }
+            }
+
+            if (listeners.size === 0) {
+                this._listeners.delete(type);
+            }
+
+            return removed;
+        }
+
         getState() { return this._state; }
         isConnected() { return this._state === CONNECTION_STATE.AUTHENTICATED; }
         isUserOnline(u) { return this._onlineUsers.has(String(u)); }
@@ -980,7 +1004,12 @@
                 'friend:offline',    // a friend went offline
             ];
 
-            const allEvents = [...messageEvents, ...callEvents, ...friendEvents];
+            const marketplaceEvents = [
+                'product:updated', 'product:created', 'product:deleted', 'product:stock_updated',
+                'order:created', 'order:status_changed', 'payment:confirmed',
+                'review:new', 'delivery:updated',
+            ];
+            const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents];
 
             if (this._socket && typeof this._socket.on === 'function') {
                 allEvents.forEach(eventType => {
@@ -1051,11 +1080,9 @@
                         // 2. Merge directly into window.AppSettings if available
                         if (window.AppSettings && typeof window.AppSettings === 'object' &&
                             settings && typeof settings === 'object') {
-                            Object.assign(window.AppSettings, settings);
-                            // Notify any AppSettings watchers
-                            try {
-                                window.dispatchEvent(new CustomEvent('AppSettingsChanged', { detail: settings }));
-                            } catch (_) {}
+                            if (typeof window.AppSettings.merge === 'function') {
+                                window.AppSettings.merge(settings, { silent: false, source: 'realtime-socket' });
+                            }
                         }
 
                         // 3. Route through the standard bridge so EventBus subscribers also fire
@@ -1098,6 +1125,7 @@
         sendSignal: realtimeManager.sendSignal.bind(realtimeManager),
         emit: realtimeManager.emit.bind(realtimeManager),
         on: realtimeManager.on.bind(realtimeManager),
+        off: realtimeManager.off.bind(realtimeManager),
         getState: realtimeManager.getState.bind(realtimeManager),
         isConnected: realtimeManager.isConnected.bind(realtimeManager),
         isUserOnline: realtimeManager.isUserOnline.bind(realtimeManager),
@@ -1359,6 +1387,12 @@
                         try { frame.contentWindow.postMessage({ type: 'REALTIME_EVENT:friend:rejected', payload: payload || {}, id: _rejId }, '*'); } catch (_) {}
                     });
                     return;
+                }
+
+                // Marketplace events: also fire as CustomEvent for EcomMarketplace engines
+                const _mpEvSet = new Set(['product:updated','product:created','product:deleted','product:stock_updated','order:created','order:status_changed','payment:confirmed','review:new','delivery:updated']);
+                if (_mpEvSet.has(eventType)) {
+                    try { window.dispatchEvent(new CustomEvent('realtime:' + eventType, { detail: payload || {} })); } catch (_) {}
                 }
 
                 var _evId = 'rt_ev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);

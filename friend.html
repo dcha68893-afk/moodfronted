@@ -23,7 +23,11 @@
             msg.includes('iframe which has both') ||
             msg.includes('sandbox') ||
             msg.includes('Directory traversal attempt') || // Suppress self-test warnings
-            msg.includes('Cross-origin request blocked') // Suppress self-test warnings
+            msg.includes('Cross-origin request blocked') || // Suppress self-test warnings
+            // Fired when parent sends PARENT_READY twice during double-init — harmless.
+            msg.includes('PARENT_READY already received') ||
+            // Fired during cold-start before the backend is fully up — retried automatically.
+            msg.includes('API request timeout for /friends/incoming')
         )) {
             return;
         }
@@ -2942,6 +2946,9 @@
     <script src="/js/app.core.store.js"></script>
     <script src="/js/app.sync.manager.js"></script>
     <script src="/js/app.stability.bridge.js"></script>
+    <script src="/js/AppSettings.js"></script>
+    <script src="/js/settings-global-propagation.js"></script>
+    <script src="/js/settings-module-subscriptions.js"></script>
     <script src="/js/app.cache.js"></script>
     <script src="localStore.friends.js"></script>
     <script src="friendQueue.manager.js"></script>

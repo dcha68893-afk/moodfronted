@@ -95,10 +95,14 @@ async function _api(method, endpoint, body = null) {
         const fn = window._ecomApiCall || (typeof safeApiCall === 'function' ? safeApiCall : null);
         if (fn) return await fn(method, endpoint, body);
 
-        // Fallback: direct fetch with token from window globals
-        const token = window.__kynToken || window.__accessToken || '';
-        const baseUrl = window.__kynAPI?.baseUrl?.replace(/\/$/, '') || '';
-        const res = await fetch(baseUrl + endpoint, {
+        // Fallback: direct fetch — resolve token from all known locations
+        const token = window.__kynToken || window.__accessToken || window.__PARENT_SESSION__?.token ||
+            localStorage.getItem('authToken') || localStorage.getItem('token') ||
+            localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken') || '';
+        const baseUrl = window.__kynAPI?.baseUrl?.replace(/\/$/, '') ||
+            (window.__getApiBase ? window.__getApiBase().replace(/\/api$/, '') : '') ||
+            window.__getApiOrigin?.() || 'http://localhost:4000';
+        const res = await fetch(baseUrl + '/api' + endpoint, {
             method,
             headers: {
                 'Content-Type': 'application/json',
@@ -108,7 +112,7 @@ async function _api(method, endpoint, body = null) {
         });
         return await res.json();
     } catch(e) {
-        console.warn('[Ecom] API error:', method, endpoint, e.message);
+        // Silent fail — marketplace works offline, errors are non-critical
         return null;
     }
 }
@@ -131,7 +135,6 @@ export const ProductEngine = {
         const savedNotifs = _lsLoad(_LS.NOTIFS, []);
         _store.notifications = savedNotifs;
         _store.initialized = true;
-        console.log('[Ecom] ProductEngine initialized');
     },
 
     /** Fetch all products from backend and populate store */
@@ -1014,7 +1017,6 @@ function _initRealtimeListeners() {
         NotificationEngine.push({ type: 'new_message', from: data.sender_name, message: data.preview || 'New message', timestamp: new Date().toISOString() });
     });
 
-    console.log('[Ecom] Realtime listeners registered');
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1208,8 +1210,13 @@ window.addEventListener('message', (e) => {
 
 export async function initEcommerceMarketplace() {
     await ProductEngine.init();
-    await WishlistEngine.syncFromServer().catch(() => {});
     _initRealtimeListeners();
+    // Defer server calls until token confirmed available
+    const _hasToken = () => !!(window.__kynToken || window.__accessToken || window.__PARENT_SESSION__?.token ||
+        localStorage.getItem('authToken') || localStorage.getItem('token'));
+    if (_hasToken()) {
+        WishlistEngine.syncFromServer().catch(() => {});
+    }
 
     // Load initial data
     await Promise.allSettled([
@@ -1235,23 +1242,39 @@ export async function initEcommerceMarketplace() {
     };
 
     window.dispatchEvent(new CustomEvent('ecom:ready', { detail: { timestamp: Date.now() } }));
-    console.log('[Ecom] ✅ Full ecommerce marketplace initialized');
     return window.EcomMarketplace;
 }
 
 // Auto-init when DOM is ready and after Tool-core.js session is active
 function _autoInit() {
-    // Wait for marketplaceCoreReady event from Tool-core.js
     const tryInit = () => {
-        if (window.EcomMarketplace) return; // Already done
-        initEcommerceMarketplace().catch(e => console.warn('[Ecom] Init error:', e.message));
+        if (window.EcomMarketplace) return;
+        initEcommerceMarketplace().catch(() => {});
     };
+
+    // Listen for session from parent (Tools.html receives SESSION_DATA from chat.html)
+    window.addEventListener('message', function _onSessionForEcom(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        const t = evt.data.type;
+        if ((t === 'SESSION_DATA' || t === 'AUTH_READY' || t === 'PARENT_READY') && !window.EcomMarketplace) {
+            const session = evt.data.payload || {};
+            const token = session.token || session.session?.token;
+            if (token) {
+                window.__kynToken = token;
+                window.__accessToken = token;
+            }
+            if (!window.EcomMarketplace) {
+                window.removeEventListener('message', _onSessionForEcom);
+                tryInit();
+            }
+        }
+    });
 
     window.addEventListener('marketplaceCoreReady', tryInit, { once: true });
     window.addEventListener('ecom:force-init', tryInit, { once: true });
 
-    // Also try after 3s regardless
-    setTimeout(() => { if (!window.EcomMarketplace) tryInit(); }, 3000);
+    // Fallback: try after 4s if session never arrived
+    setTimeout(() => { if (!window.EcomMarketplace) tryInit(); }, 4000);
 }
 
 if (document.readyState === 'loading') {

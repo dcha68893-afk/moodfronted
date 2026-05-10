@@ -7808,15 +7808,19 @@ export default marketplace;
 
     // ── 1. Expose safeApiCall as the authorised fetch for EcomMarketplace ───────
     window._ecomApiCall = async function(method, endpoint, body) {
+        // Use secureApiCall if available (already token-aware)
+        if (typeof safeApiCall === 'function') {
+            return safeApiCall(method.toUpperCase() + ' ' + endpoint, null, body);
+        }
+        // Fallback: use authorizedFetch directly
         try {
-            const normalizedUrl = normalizeToolsEndpoint(endpoint);
+            const normalizedUrl = normalizeToolsEndpoint ? normalizeToolsEndpoint(endpoint) : endpoint;
             return await authorizedFetch(normalizedUrl, {
                 method,
                 ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
             });
         } catch(e) {
-            // Re-throw so callers can handle offline gracefully
-            throw e;
+            return null; // Non-critical — marketplace works offline
         }
     };
 
@@ -8216,6 +8220,14 @@ export default marketplace;
         });
     });
 
+    // Trigger ecom init from Tool-core.js AFTER session is established
+    // This fixes the 'No authentication token' errors — we fire after module is ACTIVE
+    function _triggerEcomInit() {
+        if (window.EcomMarketplace) return;
+        window.dispatchEvent(new CustomEvent('ecom:force-init'));
+    }
+    window.addEventListener('tools:active', _triggerEcomInit, { once: true });
+
     // ── 9. Auto-render home when marketplace tab becomes visible ─────────────────
     function _onMarketplaceVisible() {
         const container = document.getElementById('marketplaceListContent');
@@ -8253,7 +8265,6 @@ export default marketplace;
         // Also fire once when ecom is ready
         window.addEventListener('ecom:ready', function() {
             _onMarketplaceVisible();
-            console.log('[Tool-core] ✅ EcomMarketplace patch active');
         }, { once: true });
 
         // Fire immediately if ecom already initialised

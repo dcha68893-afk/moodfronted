@@ -277,6 +277,9 @@
 
     function hydrateSettings() {
         const settings =
+            (window.AppSettings && typeof window.AppSettings.getAll === 'function'
+                ? window.AppSettings.getAll()
+                : null) ||
             (window.LocalStoreSettings && typeof window.LocalStoreSettings.getAll === 'function'
                 ? window.LocalStoreSettings.getAll()
                 : null) ||
@@ -304,12 +307,21 @@
     function applyThemeSettings(settings) {
         if (!settings) return;
 
-        const theme = settings.theme || 'light';
+        const theme = settings.appearance?.theme || settings.theme || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+        document.documentElement.classList.toggle('theme-light', theme !== 'dark');
         document.body.classList.toggle('theme-dark', theme === 'dark');
 
-        if (settings.accentColor) {
-            document.documentElement.style.setProperty('--theme-accent', settings.accentColor);
-            document.documentElement.style.setProperty('--primary-color', settings.accentColor);
+        const accentColor = settings.appearance?.accentColor || settings.accentColor;
+        if (accentColor) {
+            document.documentElement.style.setProperty('--theme-accent', accentColor);
+            document.documentElement.style.setProperty('--primary-color', accentColor);
+        }
+
+        const language = settings.appearance?.language || settings.language;
+        if (language) {
+            document.documentElement.setAttribute('lang', language);
         }
     }
 

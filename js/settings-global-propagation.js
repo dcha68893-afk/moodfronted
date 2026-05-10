@@ -26,6 +26,25 @@
     if (global.__SETTINGS_PROPAGATION__) return;
     global.__SETTINGS_PROPAGATION__ = true;
 
+    function isDebugEnabled() {
+        try {
+            return global.__APP_SETTINGS_DEBUG__ === true
+                || global.localStorage?.getItem('app_settings_debug') === '1';
+        } catch (_) {
+            return global.__APP_SETTINGS_DEBUG__ === true;
+        }
+    }
+
+    function debugLog() {
+        if (!isDebugEnabled()) return;
+        console.log.apply(console, arguments);
+    }
+
+    function debugWarn() {
+        if (!isDebugEnabled()) return;
+        console.warn.apply(console, arguments);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
     function _get(path)        { return global.AppSettings ? global.AppSettings.get(path) : undefined; }
     function _dom()            { return document.documentElement; }
@@ -111,6 +130,19 @@
                 detail: { notifications: notif }
             }));
         } catch (_) {}
+
+        if (notif.enabled === false || notif.notificationSound === false) {
+            try {
+                if (global._callerRingtone && typeof global._callerRingtone.pause === 'function') {
+                    global._callerRingtone.pause();
+                    global._callerRingtone = null;
+                }
+                if (global._incomingRingtone && typeof global._incomingRingtone.pause === 'function') {
+                    global._incomingRingtone.pause();
+                    global._incomingRingtone = null;
+                }
+            } catch (_) {}
+        }
     }
 
     // ── Privacy ───────────────────────────────────────────────────────────────
@@ -162,6 +194,8 @@
         _attr('data-calls-auto-answer',  String(!!callsCfg.autoAnswer));
         _attr('data-calls-ringtone',     callsCfg.ringtone || 'default');
         _attr('data-calls-vibration',    String(callsCfg.callVibration !== false));
+        _attr('data-calls-speaker-default', String(callsCfg.speakerDefault === true));
+        _attr('data-calls-microphone-default', callsCfg.microphoneDefault || 'default');
         _attr('data-calls-noise-cancel', String(callsCfg.noiseCancellation !== false));
         _attr('data-calls-video-quality',callsCfg.videoQuality || 'auto');
 
@@ -216,6 +250,9 @@
         _attr('data-chat-media-download', chat.mediaDownload || 'wifi');
         _attr('data-chat-disappearing',   chat.disappearingMessages || 'off');
         _attr('data-chat-font-size',      chat.fontSize || 'medium');
+        _attr('data-chat-wallpaper',      chat.wallpaper || 'default');
+        _attr('data-chat-bubble-style',   chat.bubbleStyle || 'default');
+        _attr('data-chat-auto-download',  String(chat.autoDownloadMedia !== false));
 
         try {
             global.dispatchEvent(new CustomEvent('chatSettingsApplied', {
@@ -267,7 +304,7 @@
     // ─── PostMessage listener — receive from parent/sibling iframes ───────────
     global.addEventListener('message', (evt) => {
         const d = evt.data || {};
-        if (d.source === 'AppSettings') return; // ignore our own echo
+        if (evt.source === global) return;
 
         // Parent broadcasting a full settings update
         if (d.type === 'SETTINGS_UPDATED' && d.settings) {
@@ -295,6 +332,7 @@
             setTimeout(_hook, 200);
             return;
         }
+        global.__SETTINGS_PROPAGATION_HOOKED__ = true;
 
         // Subscribe: called immediately with current settings AND on every future change
         AS.subscribe((settings, path, value) => {
@@ -331,10 +369,7 @@
         setTimeout(() => { if (!global.__SETTINGS_PROPAGATION_HOOKED__) _hook(); }, 500);
     }
 
-    global.__SETTINGS_PROPAGATION_HOOKED__ = false; // set to true in _hook once actually hooked
-    const _origHook = _hook;
-    // Mark as hooked after first run
-    setTimeout(() => { global.__SETTINGS_PROPAGATION_HOOKED__ = true; }, 600);
+    global.__SETTINGS_PROPAGATION_HOOKED__ = false;
 
     // ─── Utility ──────────────────────────────────────────────────────────────
     function _shadeColor(color, percent) {

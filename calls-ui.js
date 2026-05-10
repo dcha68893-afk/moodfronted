@@ -646,6 +646,12 @@ window.showCallingScreen = showCallingScreen;
 window.startCallWithUser = startCallWithUser;
 
 function showIdleScreen() {
+    // ✅ FIX: Skip showing idle if we just ended a call and parent is navigating away.
+    // This prevents the dark idle flash between call-end and parent navigation.
+    if (window.__callEndedNavigating) {
+        console.log('[UI] showIdleScreen skipped — parent navigation in progress');
+        return;
+    }
     console.log('[UI] showIdleScreen → returning to idle (no arrows)');
     // Expose on window immediately so cancelBtn.onclick can always reach it
     window.showIdleScreen = showIdleScreen;
@@ -5290,13 +5296,12 @@ handleContactItemClick: function(e) {
             const callContainer = document.getElementById('callContainer');
             if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
             if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
-            // ✅ FIX: Show idleScreen immediately so the user never sees a blank dark iframe
-            // while waiting for the parent to navigate away via SWITCH_MODULE.
-            // Keep callContainer visible so idleScreen (its child) is actually rendered.
+            // ✅ FIX: Do NOT show callContainer after call ends — it shows a blank dark screen.
+            // The parent shell navigates away (SWITCH_MODULE) so this iframe becomes hidden.
+            // If somehow still visible, keep callContainer hidden and only show idleScreen inside it.
             if (callContainer) {
-                callContainer.classList.add('active');
-                callContainer.classList.add('idle-active');
-                callContainer.style.removeProperty('display');
+                callContainer.classList.remove('active');
+                callContainer.style.setProperty('display', 'none', 'important');
             }
             if (idleScreen)    { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
 
@@ -5428,63 +5433,71 @@ handleContactItemClick: function(e) {
 
             // ── Restore sidebar icons to parent shell ────────────────────────
             if (window.parent && window.parent !== window) {
+                // ✅ FIX: Set flag so showIdleScreen() is suppressed during navigation
+                window.__callEndedNavigating = true;
+                setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
                 window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
             }
 
-            // ── Navigate back to origin module IMMEDIATELY (no delay) ──
-            // The idle screen is already shown above, so there's no dark flash.
-            // Send SWITCH_MODULE right away for instant UX.
-            if (window.parent && window.parent !== window) {
-                if (returnTo === 'messages' && chatUserId) {
-                    // Return to messages module AND re-open the specific chat
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'messages',
-                        payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: chatUserName },
-                        timestamp: Date.now()
-                    }, '*');
-                } else if (returnTo === 'friends') {
-                    // Return to friends/contacts page
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'friends',
-                        payload: { returnFromCall: true },
-                        timestamp: Date.now()
-                    }, '*');
-                } else if (returnTo && returnTo !== 'calls') {
-                    // Return to any other named module
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: returnTo,
-                        payload: { returnFromCall: true },
-                        timestamp: Date.now()
-                    }, '*');
-                } else {
-                    // Fallback: always go to messages, never the calls panel
-                    window.parent.postMessage({
-                        type: 'SWITCH_MODULE',
-                        module: 'messages',
-                        payload: { returnFromCall: true },
-                        timestamp: Date.now()
-                    }, '*');
+            // ── Navigate back to origin module (with short delay for animation) ──
+            setTimeout(() => {
+                if (window.parent && window.parent !== window) {
+                    if (returnTo === 'messages' && chatUserId) {
+                        // Return to messages module AND re-open the specific chat
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true, openChatWith: chatUserId, openChatWithName: chatUserName },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo === 'friends') {
+                        // Return to friends/contacts page
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'friends',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else if (returnTo && returnTo !== 'calls') {
+                        // Return to any other named module
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: returnTo,
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    } else {
+                        // Fallback: always go to messages, never the calls panel
+                        window.parent.postMessage({
+                            type: 'SWITCH_MODULE',
+                            module: 'messages',
+                            payload: { returnFromCall: true },
+                            timestamp: Date.now()
+                        }, '*');
+                    }
                 }
-            }
 
-            // NEVER hide sidebar or main content - always use overlay
-            const sidebar = document.getElementById('sidebar');
-            if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
-
-            // Ensure idle screen is showing (already done above, but belt-and-suspenders)
-            if (typeof showIdleScreen === 'function') {
-                showIdleScreen();
-            } else {
-                const _idleScreen = document.getElementById('idleScreen');
-                const _callingOverlay = document.getElementById('callingScreen');
-                if (_idleScreen) { _idleScreen.classList.add('active'); _idleScreen.style.display = 'flex'; }
-                if (_callingOverlay) { _callingOverlay.classList.remove('active'); _callingOverlay.style.display = 'none'; }
-            }
-            UIState.currentView = 'sidebar';
+                // NEVER hide sidebar or main content - always use overlay
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
+                
+                // ✅ FIX: Do NOT call showIdleScreen() immediately — it causes dark flash
+                // before parent navigates away. Instead just hide call screens,
+                // let parent navigate, then show idle after 1.5s if still on calls page.
+                const _callingScr = document.getElementById('callingScreen');
+                const _inCallScr  = document.getElementById('inCallScreen');
+                if (_callingScr) { _callingScr.classList.remove('active'); _callingScr.style.display = ''; }
+                if (_inCallScr)  { _inCallScr.classList.remove('active');  _inCallScr.style.display = ''; }
+                document.body.classList.remove('call-active', 'call-connected');
+                // Show idle only after parent nav has had time to hide this iframe
+                setTimeout(function() {
+                    if (!window.__callActive && typeof showIdleScreen === 'function') {
+                        showIdleScreen();
+                    }
+                }, 1500);
+                UIState.currentView = 'sidebar';
+            }, 350); // 350ms — enough for overlay fade but snappy UX
 
             // ── Refresh call history ─────────────────────────────────────────
             setTimeout(() => {

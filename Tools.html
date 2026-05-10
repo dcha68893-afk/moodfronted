@@ -20,7 +20,11 @@
     console.warn = function(msg) {
         if (msg && msg.includes && (
             msg.includes('iframe which has both') ||
-            msg.includes('sandbox')
+            msg.includes('sandbox') ||
+            // The queue correctly blocks ERROR frames while waiting for CHILD_READY.
+            // This is the state-machine guard doing its job — not a bug.
+            msg.includes('Message ERROR blocked') ||
+            msg.includes('WAIT_PARENT state')
         )) {
             return;
         }

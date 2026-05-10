@@ -5850,8 +5850,32 @@ try {
         // can all fire for the same payload — without dedup the message renders 4+ times.
         if (!window.__realtimeProcessedIds) window.__realtimeProcessedIds = new Set();
         if (!window.__realtimeSentIds)      window.__realtimeSentIds      = new Set();
+        if (!window.__realtimeDeliveredAckIds) window.__realtimeDeliveredAckIds = new Set();
         const _realtimeProcessedIds = window.__realtimeProcessedIds;
         const _realtimeSentIds      = window.__realtimeSentIds;
+        const _realtimeDeliveredAckIds = window.__realtimeDeliveredAckIds;
+
+        const ackMessageDelivered = async function(message) {
+            const chatId = String(message?.chatId || message?.conversationId || '');
+            const messageId = String(message?.serverId || message?.id || '');
+            if (!chatId || !messageId) return;
+
+            const ackKey = `${chatId}:${messageId}`;
+            if (_realtimeDeliveredAckIds.has(ackKey)) return;
+            _realtimeDeliveredAckIds.add(ackKey);
+            setTimeout(function() { _realtimeDeliveredAckIds.delete(ackKey); }, 30000);
+
+            try {
+                console.log('[messages-core] 📬 delivery ack send', { chatId, messageId });
+                await makeApiRequest('/messages/mark-delivered/batch', 'POST', {
+                    chatId,
+                    messageIds: [messageId]
+                });
+                console.log('[messages-core] ✅ delivery ack success', { chatId, messageId });
+            } catch (error) {
+                console.warn('[messages-core] Delivery ack failed:', error && error.message ? error.message : error);
+            }
+        };
 
         const handleRealtimePayload = async function(type, payload) {
             const normalizedType = String(type || '').toLowerCase();
@@ -5945,6 +5969,7 @@ try {
                 }
 
                 renderRealtimeUpdate(chatId, normalizedMessage);
+                ackMessageDelivered(normalizedMessage).catch(() => {});
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
                 return;
@@ -6112,6 +6137,9 @@ try {
         if (!hasRealtimeBinding && window.wsService?.on) {
             hasRealtimeBinding = true;
             ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {
+                if (typeof window.wsService.off === 'function') {
+                    window.wsService.off(eventName);
+                }
                 window.wsService.on(eventName, (payload) => {
                     handleRealtimePayload(eventName, payload);
                 });
@@ -6127,6 +6155,9 @@ try {
             rt.__msgCoreBound = true;
             ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
              'message:delivered', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {
+                if (typeof rt.off === 'function') {
+                    rt.off(eventName);
+                }
                 rt.on(eventName, (payload) => {
                     handleRealtimePayload(eventName, payload);
                 });

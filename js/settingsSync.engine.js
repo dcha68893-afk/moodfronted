@@ -111,7 +111,8 @@
         const rawBase = (window.__getApiBase && window.__getApiBase()) || 'http://localhost:4000/api';
         // Normalize: remove trailing /api or /api/ so we can cleanly re-add it
         const baseOrigin = rawBase.replace(/\/api\/?$/, '');
-        const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+        const strippedEndpoint = String(endpoint || '').replace(/^\/?api\/?/, '');
+        const cleanEndpoint = strippedEndpoint.startsWith('/') ? strippedEndpoint : '/' + strippedEndpoint;
         const url = `${baseOrigin}/api${cleanEndpoint}`;
 
         const token = _getToken();

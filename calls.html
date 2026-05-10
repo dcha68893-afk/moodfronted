@@ -41,7 +41,8 @@
     console.warn = function(msg) {
         if (msg && msg.includes && (
             msg.includes('iframe which has both') ||
-            msg.includes('sandbox')
+            msg.includes('sandbox') ||
+            msg.includes('Backend settings load failed')
         )) {
             return;
         }
@@ -122,6 +123,15 @@ window.__CALLS_IFRAME__ = {
                 if (_resolved && _resolved !== 'User') _nameEl.textContent = _resolved;
             }
         } else {
+            // ✅ FIX: If parent is navigating away after call-end, suppress idle screen rendering.
+            // Only remove active from call screens (hiding them cleanly) — do NOT show callContainer
+            // or idleScreen. No visible content = no dark flash before parent hides this iframe.
+            if (window.__callEndedNavigating) {
+                if (calling) calling.classList.remove('active');
+                if (inCall)  inCall.classList.remove('active');
+                _stopDeclineTimer();
+                return;
+            }
             // idle: show idle screen via callContainer
             if (container) {
                 container.classList.add('idle-active');
@@ -600,6 +610,39 @@ function _declineVideoUpgrade() {
     });
 
     // ── Boot sequence ────────────────────────────────────────────────────────
+    function _callAudioAllowed() {
+        try {
+            var settings = window.AppSettings && typeof window.AppSettings.getAll === 'function'
+                ? window.AppSettings.getAll()
+                : null;
+            if (!settings) return true;
+
+            var notifications = settings.notifications || {};
+            var calls = settings.calls || {};
+
+            return notifications.enabled !== false &&
+                notifications.callNotifications !== false &&
+                notifications.notificationSound !== false &&
+                calls.ringtone !== 'none' &&
+                calls.ringtone !== 'silent';
+        } catch (_) {
+            return true;
+        }
+    }
+
+    function _stopCallRingtones() {
+        try {
+            if (window._callerRingtone && typeof window._callerRingtone.pause === 'function') {
+                window._callerRingtone.pause();
+            }
+            if (window._incomingRingtone && typeof window._incomingRingtone.pause === 'function') {
+                window._incomingRingtone.pause();
+            }
+        } catch (_) {}
+        window._callerRingtone = null;
+        window._incomingRingtone = null;
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
         _suppressCallOverlay();
         // Start the idle screen by default
@@ -624,6 +667,10 @@ function _declineVideoUpgrade() {
 
         // ✅ RINGTONE: Caller outgoing ringtone
         window._playOutgoingRing = function() {
+            if (!_callAudioAllowed()) {
+                _stopCallRingtones();
+                return null;
+            }
             if (window._callerRingtone) return;
             try {
                 var audio = new Audio();
@@ -649,6 +696,10 @@ function _declineVideoUpgrade() {
 
         // ✅ RINGTONE: Incoming ringtone for receiver
         window._playIncomingRing = function() {
+            if (!_callAudioAllowed()) {
+                _stopCallRingtones();
+                return null;
+            }
             if (window._incomingRingtone) return;
             try {
                 var ctx2 = new (window.AudioContext || window.webkitAudioContext)();
@@ -679,6 +730,12 @@ function _declineVideoUpgrade() {
                 window._incomingRingtone = { pause: function() { clearInterval(_ringInterval2); ctx2.close(); }, currentTime: 0 };
             } catch(e) { window._incomingRingtone = null; }
         };
+
+        window.addEventListener('appSettingsChanged', function() {
+            if (!_callAudioAllowed()) {
+                _stopCallRingtones();
+            }
+        });
     });
 
     // If DOM already loaded
@@ -3913,6 +3970,9 @@ function _declineVideoUpgrade() {
     <script src="/js/vendor/chart.min.js"></script>
     <script src="/js/vendor/pickr.min.js"></script>
     <script src="/js/vendor/marked.min.js"></script>
+    <script src="/js/AppSettings.js"></script>
+    <script src="/js/settings-global-propagation.js"></script>
+    <script src="/js/settings-module-subscriptions.js"></script>
     <script src="localStore.calls.js"></script>
     <script src="callSession.manager.js"></script>
     <script src="callRetry.engine.js"></script>
@@ -3921,6 +3981,248 @@ function _declineVideoUpgrade() {
     <!-- Application modules (ES6 modules) - loaded in correct order -->
     <script type="module" src="calls-core.js"></script>
     <script type="module" src="calls-ui.js"></script>
+    <script>
+        (function() {
+            'use strict';
+
+            function log() {
+                try {
+                    console.log.apply(console, ['[CallProfessionalFix]'].concat(Array.from(arguments)));
+                } catch (_) {}
+            }
+
+            function getUIState() {
+                return window.UIState || (window.callsUI && window.callsUI.UIState) || null;
+            }
+
+            function isCallActive() {
+                const ui = getUIState();
+                if (window.callsUI && typeof window.callsUI.isInCall === 'function') {
+                    try { return !!window.callsUI.isInCall(); } catch (_) {}
+                }
+                return !!(ui && (ui.callActive || ['incoming', 'ringing', 'initiating', 'connecting', 'connected', 'ongoing', 'in_call', 'call_ready'].includes(ui.callState)));
+            }
+
+            function stopTracks(stream) {
+                if (!stream || !stream.getTracks) return;
+                stream.getTracks().forEach(function(track) {
+                    try { track.stop(); } catch (_) {}
+                });
+            }
+
+            function stopRingtones() {
+                ['_incomingRingtone', '_callerRingtone', '_outgoingRingtone'].forEach(function(key) {
+                    const audio = window[key];
+                    if (!audio) return;
+                    try { audio.pause(); } catch (_) {}
+                    try { audio.currentTime = 0; } catch (_) {}
+                    window[key] = null;
+                });
+            }
+
+            function clearTimer(key, clearFn) {
+                if (!window[key]) return;
+                try { clearFn(window[key]); } catch (_) {}
+                window[key] = null;
+            }
+
+            function resetMediaDom() {
+                const remoteAudio = document.getElementById('remoteAudio');
+                if (remoteAudio) {
+                    try { remoteAudio.pause(); } catch (_) {}
+                    try { remoteAudio.srcObject = null; } catch (_) {}
+                    try { remoteAudio.load(); } catch (_) {}
+                }
+
+                const remoteVideo = document.getElementById('remoteVideo');
+                if (remoteVideo) {
+                    try { remoteVideo.pause(); } catch (_) {}
+                    try { remoteVideo.srcObject = null; } catch (_) {}
+                    remoteVideo.style.display = 'none';
+                }
+
+                const pipVideo = document.getElementById('pipVideo');
+                if (pipVideo) {
+                    try { pipVideo.pause(); } catch (_) {}
+                    try { pipVideo.srcObject = null; } catch (_) {}
+                }
+
+                const pipContainer = document.getElementById('pipContainer');
+                if (pipContainer) pipContainer.style.display = 'none';
+
+                const avatarWrap = document.getElementById('incallAvatarWrap');
+                if (avatarWrap) avatarWrap.style.display = '';
+
+                const inCallScreen = document.getElementById('inCallScreen');
+                if (inCallScreen) inCallScreen.classList.remove('video-active');
+
+                const participantLabel = document.getElementById('remoteParticipantLabel');
+                if (participantLabel) {
+                    participantLabel.style.display = 'none';
+                    participantLabel.textContent = '';
+                }
+            }
+
+            function hardReset(reason, options) {
+                const opts = Object.assign({
+                    stopLocalMedia: true,
+                    resetCore: true
+                }, options || {});
+
+                const ui = getUIState();
+
+                stopRingtones();
+                clearTimer('_receiverShowFallback', clearTimeout);
+                clearTimer('_currentCallTimer', clearInterval);
+                clearTimer('_callRingTimer', clearInterval);
+                clearTimer('_outgoingRingTimer', clearInterval);
+                clearTimer('_incomingCallTimer', clearInterval);
+
+                window.__callAcceptedHandled = 0;
+                window.__callReceiverAccepted = false;
+                window.__pendingOfferPayload = null;
+                window.__pendingAnswerPayload = null;
+                window.__pendingSignals = [];
+                window.__activePeerName = null;
+                window.__activePeerType = null;
+                window.__activePeerAvatar = null;
+
+                resetMediaDom();
+
+                if (ui && opts.stopLocalMedia) {
+                    stopTracks(ui.localStream);
+                    stopTracks(ui.screenStream);
+                    ui.localStream = null;
+                    ui.screenStream = null;
+                }
+
+                if (ui && ui.remoteStreams && typeof ui.remoteStreams.clear === 'function') {
+                    ui.remoteStreams.clear();
+                }
+                if (ui) {
+                    ui.remoteStream = null;
+                    if (!isCallActive()) {
+                        ui.callParticipants = [];
+                    }
+                }
+
+                if (opts.resetCore && window.callCore) {
+                    try {
+                        if (typeof window.callCore.resetCallState === 'function') window.callCore.resetCallState();
+                    } catch (_) {}
+                    try {
+                        if (typeof window.callCore.clearActiveCall === 'function') window.callCore.clearActiveCall();
+                    } catch (_) {}
+                    try {
+                        if (typeof window.callCore.getPeerConnection === 'function' && window.callCore.getPeerConnection()) {
+                            window.callCore.getPeerConnection().close();
+                        }
+                    } catch (_) {}
+                }
+
+                log('hard reset complete', reason || 'n/a');
+            }
+
+            function patchWhenReady() {
+                if (!window.showCallingScreen || !window.transitionToInCall || !window.callsUI) {
+                    setTimeout(patchWhenReady, 250);
+                    return;
+                }
+
+                if (window.__callProfessionalFixInstalled) return;
+                window.__callProfessionalFixInstalled = true;
+                window.__performCallVisualReset = hardReset;
+
+                const originalShowCallingScreen = window.showCallingScreen;
+                window.showCallingScreen = function(callInfo) {
+                    if (!isCallActive()) {
+                        hardReset('before-outgoing-call', { stopLocalMedia: true, resetCore: false });
+                    }
+                    return originalShowCallingScreen.apply(this, arguments);
+                };
+
+                const originalTransitionToInCall = window.transitionToInCall;
+                window.transitionToInCall = function(callInfo) {
+                    stopRingtones();
+                    resetMediaDom();
+                    return originalTransitionToInCall.apply(this, arguments);
+                };
+
+                const originalEndCall = window.callsUI.endCall;
+                if (typeof originalEndCall === 'function') {
+                    window.callsUI.endCall = async function() {
+                        try {
+                            return await originalEndCall.apply(this, arguments);
+                        } finally {
+                            setTimeout(function() {
+                                hardReset('after-end-call', { stopLocalMedia: true, resetCore: false });
+                            }, 100);
+                        }
+                    };
+                }
+
+                const originalDeclineCall = window.callsUI.declineIncomingCall;
+                if (typeof originalDeclineCall === 'function') {
+                    window.callsUI.declineIncomingCall = async function() {
+                        try {
+                            return await originalDeclineCall.apply(this, arguments);
+                        } finally {
+                            setTimeout(function() {
+                                hardReset('after-decline-call', { stopLocalMedia: true, resetCore: false });
+                            }, 100);
+                        }
+                    };
+                }
+
+                window.addEventListener('message', function(event) {
+                    const type = event && event.data && event.data.type;
+                    if (!type) return;
+
+                    if (type === 'WEBRTC_SIGNAL') {
+                        const payload = event.data.payload || {};
+                        const signalType = String(payload.type || payload.signalType || '').toLowerCase();
+                        let parsedSdp = payload.sdp;
+                        if (typeof parsedSdp === 'string') {
+                            try { parsedSdp = JSON.parse(parsedSdp); } catch (_) {}
+                        }
+                        if (signalType === 'offer' && window.callCore && typeof window.callCore.handleRemoteOffer === 'function') {
+                            window.callCore.handleRemoteOffer({
+                                ...payload,
+                                offer: parsedSdp || payload.offer
+                            });
+                        } else if (signalType === 'answer' && window.callCore && typeof window.callCore.handleRemoteAnswer === 'function') {
+                            window.callCore.handleRemoteAnswer({
+                                ...payload,
+                                answer: parsedSdp || payload.answer
+                            });
+                        } else if ((signalType === 'ice' || signalType === 'ice_candidate' || signalType === 'candidate') && window.callCore && typeof window.callCore.handleIceCandidate === 'function') {
+                            window.callCore.handleIceCandidate({
+                                ...payload,
+                                candidate: payload.candidate || payload.iceCandidate || null
+                            });
+                        }
+                        return;
+                    }
+
+                    if (type === 'CALL_ENDED' || type === 'CALL_FORCE_ENDED' || type === 'CALL_REJECTED' || type === 'CALL_CANCELLED') {
+                        setTimeout(function() {
+                            if (!isCallActive()) {
+                                hardReset('post-message-' + type.toLowerCase(), { stopLocalMedia: true, resetCore: false });
+                            }
+                        }, 120);
+                    }
+                });
+
+                log('professional call fix installed');
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', patchWhenReady, { once: true });
+            } else {
+                patchWhenReady();
+            }
+        })();
+    </script>
     
     <!-- Silent background initialization - no visual indicators -->
     <script>
@@ -4853,10 +5155,54 @@ function _declineVideoUpgrade() {
             _callEndedAt     = Date.now();
 
             _log('Call ended →', reason);
-            _fullReset(reason);
+
+            // ✅ FIX: Do NOT call _fullReset() — it calls showScreen('idle') which causes
+            // the dark idle flash before parent navigates away. Instead: stop media tracks,
+            // remove active classes from call screens, clear state flags, then post CALL_ENDED_RETURN.
+            // A 1.2-second fallback calls showScreen('idle') only if parent hasn't navigated away.
+
+            // Stop media tracks directly
+            try {
+                if (window.UIState && window.UIState.localStream) {
+                    window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} });
+                    window.UIState.localStream = null;
+                }
+            } catch(e) {}
+
+            // Remove active classes from call screens (hide them cleanly, no flash)
+            var _cs = document.getElementById('callingScreen');
+            var _is = document.getElementById('inCallScreen');
+            var _ic = document.getElementById('incomingCallModal');
+            if (_cs) { _cs.classList.remove('active'); }
+            if (_is) { _is.classList.remove('active'); }
+            if (_ic) { _ic.classList.remove('active'); }
+            document.body.classList.remove('call-active', 'call-connected');
+
+            // Clear state flags
+            window.__callActive = false;
+            if (window.callsState) {
+                window.callsState.callActive = false;
+                window.callsState.callState  = 'idle';
+            }
+            if (window.UIState) {
+                window.UIState.callActive = false;
+                window.UIState.callState  = 'idle';
+            }
+
+            // Post CALL_ENDED_RETURN — parent will navigate away and hide this iframe
             _sendToParent('CALL_ENDED_RETURN', {
                 origin: window._callOrigin || window.__pendingCallReturnTo || 'calls'
             });
+
+            // 1.2-second fallback: only show idle if parent hasn't navigated away
+            // (handles edge cases like same-page calls or parent nav failure)
+            setTimeout(function() {
+                if (!window.__callEndedNavigating) {
+                    if (typeof window.showScreen === 'function') {
+                        window.showScreen('idle');
+                    }
+                }
+            }, 1200);
         }
 
         // ── 12. PARENT postMessage HANDLER ───────────────────────────────
@@ -5027,6 +5373,9 @@ function _declineVideoUpgrade() {
         // to calls page), we must ensure the screens are properly visible.
         // This handles the dark screen on 2nd+ call from either user.
         function _onIframeVisible() {
+            // ✅ FIX: Clear the navigating flag — iframe is visible again, suppress window is over
+            window.__callEndedNavigating = false;
+
             // ✅ FIX: Only reset to idle if NO call is currently active
             // If a call IS in progress, leave the current screen alone
             var callInProgress = (window.callsState && (window.callsState.callActive || 

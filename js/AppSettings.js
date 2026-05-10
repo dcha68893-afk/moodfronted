@@ -1,626 +1,1226 @@
 /**
- * AppSettings.js  — v1.0.0
- * ═══════════════════════════════════════════════════════════════════════════
- * SINGLE SOURCE OF TRUTH for all settings across every module.
+ * AppSettings.js
+ * Canonical global settings store for all modules/pages.
  *
- * LOAD ORDER: must come BEFORE settingsManager.js, settings-core.js,
- *             settings-ui.js and any module (friends, calls, groups, status…)
- *
- * DESIGN
- * ──────
- *  • Cache-first: reads from localStorage synchronously at boot.
- *  • Reactive:   any module can subscribe; all are notified on every change.
- *  • Offline-safe: writes succeed even with no network.
- *  • Bridge:     stays in sync with the existing SettingsState / MoodChatSettingsManager
- *                objects so we don't break any existing code.
- *
- * PUBLIC API
- * ──────────
- *  window.AppSettings.get(keyPath?)           → value | full settings object
- *  window.AppSettings.set(keyPath, value)     → void  (triggers subscribers)
- *  window.AppSettings.merge(partialSettings)  → void  (deep merge + notify)
- *  window.AppSettings.subscribe(fn)           → unsubscribe()
- *  window.AppSettings.reset()                 → void  (resets to defaults)
- *  window.AppSettings.getAll()                → deep-clone of current settings
- *  window.AppSettings.ready                   → Promise resolved when loaded
- *
- * ═══════════════════════════════════════════════════════════════════════════
+ * Responsibilities:
+ * - Load cached settings immediately on startup
+ * - Namespace cache per user to avoid cross-account bleed
+ * - Fetch backend settings as soon as auth is available
+ * - Apply theme/privacy/notification/chat/call settings globally
+ * - Notify all subscribers and frames on every change
+ * - Mirror settings to legacy caches that older modules still read
  */
 
 (function (global) {
     'use strict';
 
-    // Guard: only one instance
     if (global.AppSettings) {
-        console.warn('[AppSettings] Already loaded — skipping');
         return;
     }
 
-    // ─── Constants ────────────────────────────────────────────────────────────
-    const STORAGE_KEY   = 'app_settings_global';
-    const LEGACY_KEY    = 'knecta_settings_cache'; // written by settings-core.js
-    const BROADCAST_CH  = 'app_settings_global';
+    const STORAGE_PREFIX = 'app_settings_global';
+    const LAST_USER_KEY = 'app_settings_last_user';
+    const LEGACY_CACHE_KEY = 'knecta_settings_cache';
+    const BROADCAST_CHANNEL = 'app_settings_global';
+    const DEBUG_FLAG_KEY = 'app_settings_debug';
+    const VERSION = '2.0.0';
 
-    // ─── Default settings (superset of all modules) ───────────────────────────
     const DEFAULTS = {
         appearance: {
-            theme:           'light',
-            accentColor:     '#4F46E5',
-            fontSize:        16,
-            reduceMotion:    false,
-            language:        'en',
-            timeFormat:      '12h',
-            dateFormat:      'mm/dd/yyyy',
+            theme: 'light',
+            accentColor: '#4F46E5',
+            fontSize: 16,
+            reduceMotion: false,
+            language: 'en',
+            timeFormat: '12h',
+            dateFormat: 'mm/dd/yyyy',
             moodColorScheme: 'vibrant',
-            moodAnimation:   true
+            moodAnimation: true
         },
         notifications: {
-            messageNotifications:      true,
-            groupNotifications:        true,
-            friendRequestNotifications:true,
-            callNotifications:         true,
-            statusNotifications:       true,
-            moodNotifications:         true,
-            notificationSound:         true,
-            notificationVibration:     true,
-            popupNotifications:        false,
-            doNotDisturb:              false
+            enabled: true,
+            messageNotifications: true,
+            groupNotifications: true,
+            friendRequestNotifications: true,
+            callNotifications: true,
+            statusNotifications: true,
+            moodNotifications: true,
+            notificationSound: true,
+            notificationVibration: true,
+            popupNotifications: true,
+            doNotDisturb: false
         },
         privacy: {
-            whoCanAddMe:       'friendsOfFriends',
-            readReceipts:      true,
-            typingIndicators:  true,
+            whoCanAddMe: 'friendsOfFriends',
+            readReceipts: true,
+            typingIndicators: true,
             messageForwarding: true,
-            contactDiscovery:  true,
-            lastSeen:          true,
-            onlineStatus:      true,
-            profileVisibility: 'friends',
-            statusVisibility:  'everyone',
-            moodVisibility: {
-                showMoodTo:    'friends',
-                moodHistory:   true,
-                moodAnalytics: true
-            }
+            contactDiscovery: true,
+            lastSeen: 'everyone',
+            onlineStatus: true,
+            profileVisibility: 'everyone',
+            photoVisibility: 'everyone',
+            statusVisibility: 'everyone'
         },
         chat: {
-            wallpaper:            'default',
-            enterKeySends:        false,
-            mediaDownload:        'wifi',
-            saveMedia:            false,
-            messageHistory:       'forever',
+            wallpaper: 'default',
+            enterKeySends: false,
+            mediaDownload: 'wifi',
+            saveMedia: false,
+            messageHistory: 'forever',
             disappearingMessages: 'off',
-            fontSize:             'medium',
-            autoDownloadMedia:    true,
+            fontSize: 'medium',
+            autoDownloadMedia: true,
+            bubbleStyle: 'default',
             aiFeatures: {
-                smartReplies:       true,
+                smartReplies: true,
                 messageTranslation: false,
-                chatSummarization:  false,
-                spamDetection:      true
+                chatSummarization: false,
+                spamDetection: true
             }
         },
         friends: {
-            discoverByPhone:    true,
-            discoverByEmail:    false,
-            nearbyDiscovery:    false,
-            friendSuggestions:  true,
-            temporaryFriends:   false,
-            friendCategories:   true,
-            trustScore:         false,
-            friendAnalytics:    false
+            discoverByPhone: true,
+            discoverByEmail: false,
+            nearbyDiscovery: false,
+            friendSuggestions: true,
+            friendCategories: true,
+            trustScore: false
         },
         groups: {
-            autoJoinGroups:      false,
-            groupInvitations:    'friends',
-            groupPrivacy:        'public',
-            groupAnnouncements:  true,
-            groupMediaDownload:  false,
-            messageApproval:     false,
-            keywordFiltering:    false,
-            groupSpamDetection:  true,
-            memberWarnings:      true
+            autoJoinGroups: false,
+            groupInvitations: 'friends',
+            groupPrivacy: 'public',
+            groupAnnouncements: true,
+            groupMediaDownload: true,
+            messageApproval: false,
+            keywordFiltering: false,
+            groupSpamDetection: true,
+            memberWarnings: true
         },
         calls: {
-            whoCanCallMe:       'friends',
-            callVerification:   false,
-            ringtone:           'default',
-            callVibration:      true,
-            autoAnswer:         false,
-            autoReject:         false,
-            videoQuality:       'auto',
-            cameraDefault:      'front',
-            noiseCancellation:  true,
-            echoCancellation:   true,
-            liveReactions:      true,
-            inCallChat:         true
+            whoCanCallMe: 'friends',
+            callVerification: false,
+            ringtone: 'default',
+            callVibration: true,
+            autoAnswer: false,
+            autoReject: false,
+            speakerDefault: false,
+            videoQuality: 'auto',
+            microphoneDefault: 'default',
+            cameraDefault: 'front',
+            noiseCancellation: true,
+            echoCancellation: true,
+            liveReactions: true,
+            inCallChat: true
         },
         status: {
-            visibility:         'everyone',
-            autoDownloadMedia:  true,
-            moodAutoShare:      false
+            visibility: 'everyone',
+            autoDownloadMedia: true,
+            moodAutoShare: false
         },
         account: {
-            displayName:        'User',
-            username:           'user123',
-            bio:                "Hello! I'm using MoodChat",
-            profileVisibility:  'friends',
-            lastSeen:           true,
-            onlineStatus:       true,
-            photoVisibility:    'friends'
+            displayName: 'User',
+            username: 'user',
+            bio: "Hello! I'm using MoodChat",
+            profileVisibility: 'everyone',
+            photoVisibility: 'everyone',
+            lastSeen: 'everyone',
+            onlineStatus: true
         },
         advanced: {
-            offlineMode:        true,
-            lowBandwidth:       false,
-            debugMode:          false,
-            dataSaver:          false,
-            syncEnabled:        false
+            offlineMode: true,
+            lowBandwidth: false,
+            debugMode: false,
+            dataSaver: false,
+            syncEnabled: true
         }
     };
 
-    // ─── Internal state ───────────────────────────────────────────────────────
-    let _data        = {};                // live settings object
-    let _subscribers = [];               // [{id, fn, filter}]
-    let _bc          = null;             // BroadcastChannel
+    let _data = clone(DEFAULTS);
+    let _subscribers = [];
+    let _broadcast = null;
+    let _activeUserId = 'guest';
+    let _serverSyncPromise = null;
     let _readyResolve;
-    const _ready = new Promise(r => { _readyResolve = r; });
+    const _ready = new Promise((resolve) => { _readyResolve = resolve; });
+    let _notificationProxyInstalled = false;
+    let _callAudioProxyInstalled = false;
+    let _settingsServiceBridgeInstalled = false;
+    let _showNotificationImpl = null;
+    let _playOutgoingRingImpl = null;
+    let _playIncomingRingImpl = null;
+    let _legacySettingsCallbacks = {};
+    const _warnedKeys = new Set();
 
-    // ─── Deep helpers ─────────────────────────────────────────────────────────
-    function _clone(obj) {
-        try { return JSON.parse(JSON.stringify(obj)); } catch (_) { return obj; }
+    function clone(value) {
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_) {
+            return value;
+        }
     }
 
-    function _merge(target, source) {
-        if (!source || typeof source !== 'object') return target;
-        const out = Object.assign({}, target);
-        Object.keys(source).forEach(k => {
-            if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k]) &&
-                target[k] !== null && typeof target[k] === 'object' && !Array.isArray(target[k])) {
-                out[k] = _merge(target[k], source[k]);
-            } else if (source[k] !== undefined) {
-                out[k] = source[k];
+    function isDebugEnabled() {
+        try {
+            return global.__APP_SETTINGS_DEBUG__ === true
+                || global.localStorage?.getItem(DEBUG_FLAG_KEY) === '1';
+        } catch (_) {
+            return global.__APP_SETTINGS_DEBUG__ === true;
+        }
+    }
+
+    function debugLog() {
+        if (!isDebugEnabled()) return;
+        console.log.apply(console, arguments);
+    }
+
+    function debugWarn() {
+        if (!isDebugEnabled()) return;
+        console.warn.apply(console, arguments);
+    }
+
+    function warnOnce(key) {
+        if (_warnedKeys.has(key)) return;
+        _warnedKeys.add(key);
+        console.warn.apply(console, Array.prototype.slice.call(arguments, 1));
+    }
+
+    function isEqual(left, right) {
+        try {
+            return JSON.stringify(left) === JSON.stringify(right);
+        } catch (_) {
+            return left === right;
+        }
+    }
+
+    function isObject(value) {
+        return !!value && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function mergeDeep(target, source) {
+        if (!isObject(source)) return clone(target);
+        const base = isObject(target) ? clone(target) : {};
+        Object.keys(source).forEach((key) => {
+            const incoming = source[key];
+            if (isObject(incoming) && isObject(base[key])) {
+                base[key] = mergeDeep(base[key], incoming);
+            } else if (incoming !== undefined) {
+                base[key] = clone(incoming);
             }
         });
-        return out;
+        return base;
     }
 
-    function _getByPath(obj, path) {
+    function getByPath(obj, path) {
         if (!path) return obj;
-        return path.split('.').reduce((cur, k) => (cur != null && typeof cur === 'object' ? cur[k] : undefined), obj);
+        return String(path).split('.').reduce((current, key) => (
+            current != null && typeof current === 'object' ? current[key] : undefined
+        ), obj);
     }
 
-    function _setByPath(obj, path, value) {
-        const keys = path.split('.');
-        let cur = obj;
-        for (let i = 0; i < keys.length - 1; i++) {
-            if (!cur[keys[i]] || typeof cur[keys[i]] !== 'object') cur[keys[i]] = {};
-            cur = cur[keys[i]];
+    function setByPath(obj, path, value) {
+        const keys = String(path).split('.');
+        let cursor = obj;
+        for (let i = 0; i < keys.length - 1; i += 1) {
+            const key = keys[i];
+            if (!isObject(cursor[key])) cursor[key] = {};
+            cursor = cursor[key];
         }
-        cur[keys[keys.length - 1]] = value;
+        cursor[keys[keys.length - 1]] = value;
     }
 
-    // ─── Persistence ──────────────────────────────────────────────────────────
-    function _persist() {
+    function createFallbackNotification(message, type, duration) {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                data:      _data,
-                version:   '1.0.0',
-                updatedAt: Date.now()
-            }));
-        } catch (e) {
-            console.warn('[AppSettings] localStorage write failed:', e.message);
+            if (!document || !document.body) return null;
+
+            let container = document.getElementById('notification-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'notification-container';
+                container.style.cssText = [
+                    'position:fixed',
+                    'top:20px',
+                    'right:20px',
+                    'z-index:9999',
+                    'max-width:400px',
+                    'display:flex',
+                    'flex-direction:column',
+                    'gap:10px'
+                ].join(';');
+                document.body.appendChild(container);
+            }
+
+            const notification = document.createElement('div');
+            const background = type === 'error'
+                ? '#f87171'
+                : type === 'success'
+                    ? '#10b981'
+                    : type === 'warning'
+                        ? '#f59e0b'
+                        : '#3b82f6';
+
+            notification.className = `notification notification-${type || 'info'}`;
+            notification.style.cssText = [
+                `background:${background}`,
+                'color:white',
+                'padding:12px 16px',
+                'border-radius:8px',
+                'box-shadow:0 4px 6px rgba(0,0,0,0.15)',
+                'display:flex',
+                'align-items:center',
+                'justify-content:space-between',
+                'gap:12px'
+            ].join(';');
+            notification.innerHTML = `
+                <span>${String(message || '')}</span>
+                <button type="button" style="background:transparent;border:none;color:white;cursor:pointer;font-size:18px;">&times;</button>
+            `;
+
+            const close = function () {
+                if (notification.parentNode) notification.remove();
+            };
+
+            container.appendChild(notification);
+            const button = notification.querySelector('button');
+            if (button) button.addEventListener('click', close);
+
+            if (duration > 0) {
+                setTimeout(close, duration);
+            }
+
+            return notification;
+        } catch (error) {
+            debugWarn('[AppSettings] Fallback notification failed:', error.message);
+            return null;
         }
     }
 
-    function _loadFromStorage() {
-        // Priority 1: our own key
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                if (parsed && parsed.data && typeof parsed.data === 'object') {
-                    return parsed.data;
-                }
-            }
-        } catch (_) {}
-
-        // Priority 2: legacy knecta_settings_cache (written by settings-core.js)
-        try {
-            const raw = localStorage.getItem(LEGACY_KEY);
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                // settings-core stores {data:{…}, timestamp:…, version:…}
-                const data = parsed.data || parsed;
-                if (data && typeof data === 'object' && Object.keys(data).length > 0) {
-                    return _normalizeLegacy(data);
-                }
-            }
-        } catch (_) {}
-
-        return null;
+    function notificationsEnabled() {
+        return _data.notifications?.enabled !== false && _data.notifications?.popupNotifications !== false;
     }
 
-    /**
-     * The legacy knecta_settings_cache uses section keys like appearance, notifications…
-     * Normalize them into our expected shape.
-     */
-    function _normalizeLegacy(data) {
-        const out = _clone(DEFAULTS);
-        if (data.appearance)    out.appearance    = _merge(out.appearance,    data.appearance);
-        if (data.notifications) out.notifications = _merge(out.notifications, data.notifications);
-        if (data.privacy)       out.privacy       = _merge(out.privacy,       data.privacy);
-        if (data.chat)          out.chat          = _merge(out.chat,          data.chat);
-        if (data.friends)       out.friends       = _merge(out.friends,       data.friends);
-        if (data.groups)        out.groups        = _merge(out.groups,        data.groups);
-        if (data.calls)         out.calls         = _merge(out.calls,         data.calls);
-        if (data.status)        out.status        = _merge(out.status,        data.status);
-        if (data.account)       out.account       = _merge(out.account,       data.account);
-        if (data.advanced)      out.advanced      = _merge(out.advanced,      data.advanced);
-        // Flat LocalStoreSettings shape (theme, language, syncEnabled at top level)
-        if (data.theme)         out.appearance.theme = data.theme;
-        if (data.language)      out.appearance.language = data.language;
-        if (data.syncEnabled !== undefined) out.advanced.syncEnabled = data.syncEnabled;
-        return out;
+    function notificationSoundsEnabled() {
+        return _data.notifications?.enabled !== false
+            && _data.notifications?.notificationSound !== false;
     }
 
-    // ─── Notification ─────────────────────────────────────────────────────────
-    function _notify(path, value, all) {
-        const snapshot = _clone(_data);
-        _subscribers.forEach(sub => {
+    function callAudioEnabled() {
+        return notificationSoundsEnabled()
+            && _data.notifications?.callNotifications !== false
+            && _data.calls?.ringtone !== 'none'
+            && _data.calls?.ringtone !== 'silent';
+    }
+
+    function stopManagedAudio() {
+        ['_callerRingtone', '_incomingRingtone'].forEach((key) => {
             try {
-                if (!sub.filter || path.startsWith(sub.filter)) {
-                    sub.fn(snapshot, path, value);
+                const audio = global[key];
+                if (audio && typeof audio.pause === 'function') {
+                    audio.pause();
+                    if (typeof audio.currentTime === 'number') {
+                        audio.currentTime = 0;
+                    }
                 }
-            } catch (e) {
-                console.error('[AppSettings] Subscriber error:', e);
+                global[key] = null;
+            } catch (_) {}
+        });
+    }
+
+    function installNotificationProxy() {
+        if (_notificationProxyInstalled) return;
+
+        const wrappedShowNotification = function (message, type, duration) {
+            if (!notificationsEnabled()) {
+                return null;
+            }
+
+            if (_showNotificationImpl) {
+                try {
+                    return _showNotificationImpl(message, type, duration);
+                } catch (error) {
+                    console.warn('[AppSettings] Notification delegate failed:', error.message);
+                }
+            }
+
+            return createFallbackNotification(message, type || 'info', duration || 5000);
+        };
+
+        try {
+            if (typeof global.showNotification === 'function') {
+                _showNotificationImpl = global.showNotification.bind(global);
+            }
+
+            const descriptor = Object.getOwnPropertyDescriptor(global, 'showNotification');
+            if (descriptor && descriptor.configurable === false) {
+                try {
+                    global.showNotification = wrappedShowNotification;
+                    _notificationProxyInstalled = global.showNotification === wrappedShowNotification;
+                    return;
+                } catch (_) {
+                    _notificationProxyInstalled = false;
+                    return;
+                }
+            }
+
+            Object.defineProperty(global, 'showNotification', {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return wrappedShowNotification;
+                },
+                set(fn) {
+                    if (fn === wrappedShowNotification) return;
+                    _showNotificationImpl = typeof fn === 'function' ? fn.bind(global) : null;
+                }
+            });
+
+            _notificationProxyInstalled = true;
+        } catch (error) {
+            debugWarn('[AppSettings] Notification proxy install failed:', error.message);
+        }
+    }
+
+    function installCallAudioProxy() {
+        if (_callAudioProxyInstalled) return;
+
+        const wrappedOutgoing = function () {
+            if (!callAudioEnabled()) {
+                stopManagedAudio();
+                return null;
+            }
+            return _playOutgoingRingImpl ? _playOutgoingRingImpl.apply(global, arguments) : null;
+        };
+
+        const wrappedIncoming = function () {
+            if (!callAudioEnabled()) {
+                stopManagedAudio();
+                return null;
+            }
+            return _playIncomingRingImpl ? _playIncomingRingImpl.apply(global, arguments) : null;
+        };
+
+        try {
+            if (typeof global._playOutgoingRing === 'function') {
+                _playOutgoingRingImpl = global._playOutgoingRing.bind(global);
+            }
+            if (typeof global._playIncomingRing === 'function') {
+                _playIncomingRingImpl = global._playIncomingRing.bind(global);
+            }
+
+            Object.defineProperty(global, '_playOutgoingRing', {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return wrappedOutgoing;
+                },
+                set(fn) {
+                    if (fn === wrappedOutgoing) return;
+                    _playOutgoingRingImpl = typeof fn === 'function' ? fn.bind(global) : null;
+                }
+            });
+
+            Object.defineProperty(global, '_playIncomingRing', {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return wrappedIncoming;
+                },
+                set(fn) {
+                    if (fn === wrappedIncoming) return;
+                    _playIncomingRingImpl = typeof fn === 'function' ? fn.bind(global) : null;
+                }
+            });
+
+            _callAudioProxyInstalled = true;
+        } catch (error) {
+            console.warn('[AppSettings] Call audio proxy install failed:', error.message);
+        }
+    }
+
+    function toLegacySettingsServiceShape(settings) {
+        return {
+            theme: settings.appearance?.theme || 'light',
+            language: settings.appearance?.language || 'en',
+            accentColor: settings.appearance?.accentColor || '#4F46E5',
+            fontSize: settings.appearance?.fontSize || 16,
+            notifications: settings.notifications?.messageNotifications !== false,
+            soundEnabled: settings.notifications?.notificationSound !== false,
+            popupNotifications: settings.notifications?.popupNotifications !== false,
+            wallpaper: settings.chat?.wallpaper || 'default',
+            privacy: clone(settings.privacy || {}),
+            syncEnabled: settings.advanced?.syncEnabled !== false,
+            appearance: clone(settings.appearance || {}),
+            chat: clone(settings.chat || {}),
+            calls: clone(settings.calls || {}),
+            groups: clone(settings.groups || {}),
+            status: clone(settings.status || {}),
+            account: clone(settings.account || {}),
+            advanced: clone(settings.advanced || {})
+        };
+    }
+
+    function resolveLegacySetting(key) {
+        const legacy = toLegacySettingsServiceShape(_data);
+        if (!key) return clone(legacy);
+        if (Object.prototype.hasOwnProperty.call(legacy, key)) return clone(legacy[key]);
+        return clone(getByPath(_data, key));
+    }
+
+    function notifyLegacySettingsCallbacks() {
+        const payload = toLegacySettingsServiceShape(_data);
+        Object.entries(_legacySettingsCallbacks).forEach(([name, callback]) => {
+            if (typeof callback !== 'function') return;
+            try {
+                callback(clone(payload));
+            } catch (error) {
+                console.warn('[AppSettings] Legacy settings callback failed:', name, error.message);
             }
         });
+    }
 
-        // Dispatch DOM event for modules that use addEventListener
+    function installSettingsServiceBridge() {
+        if (!_settingsServiceBridgeInstalled && global._settingsCallbacks && typeof global._settingsCallbacks === 'object') {
+            _legacySettingsCallbacks = Object.assign({}, global._settingsCallbacks);
+        }
+
+        const target = global.SETTINGS_SERVICE && typeof global.SETTINGS_SERVICE === 'object'
+            ? global.SETTINGS_SERVICE
+            : {};
+
         try {
-            global.dispatchEvent(new CustomEvent('appSettingsChanged', {
-                detail: { settings: snapshot, path, value, timestamp: Date.now() }
-            }));
-        } catch (_) {}
+            Object.defineProperty(target, 'current', {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return toLegacySettingsServiceShape(_data);
+                }
+            });
+        } catch (_) {
+            target.current = toLegacySettingsServiceShape(_data);
+        }
 
-        // Cross-tab via BroadcastChannel
-        if (_bc) {
+        target.applyTheme = function () {
+            applyToDOM(_data);
+            return _data.appearance?.theme || 'light';
+        };
+
+        target.getSetting = function (key) {
+            return resolveLegacySetting(key);
+        };
+
+        target.clearUserSettings = function () {
             try {
-                _bc.postMessage({ type: 'SETTINGS_CHANGE', path, value, data: snapshot, ts: Date.now() });
+                localStorage.removeItem('moodchat_settings');
+            } catch (_) {}
+            AppSettings.reset();
+        };
+
+        target.registerPageCallback = function (name, callback) {
+            if (typeof callback !== 'function') return function noop() {};
+            const callbackName = name || `callback_${Date.now()}`;
+            _legacySettingsCallbacks[callbackName] = callback;
+            try {
+                callback(clone(toLegacySettingsServiceShape(_data)));
+            } catch (_) {}
+            global._settingsCallbacks = _legacySettingsCallbacks;
+            return function unregisterCallback() {
+                delete _legacySettingsCallbacks[callbackName];
+                global._settingsCallbacks = _legacySettingsCallbacks;
+            };
+        };
+
+        global.SETTINGS_SERVICE = target;
+        global._settingsCallbacks = _legacySettingsCallbacks;
+        _settingsServiceBridgeInstalled = true;
+    }
+
+    function normalizeFontSizeLabel(value) {
+        if (value === 'small' || value === 'medium' || value === 'large') return value;
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 'medium';
+        if (numeric <= 14) return 'small';
+        if (numeric >= 18) return 'large';
+        return 'medium';
+    }
+
+    function normalizeIncomingSettings(raw) {
+        const merged = mergeDeep(DEFAULTS, raw || {});
+        const theme = merged.appearance?.theme || raw?.theme || 'light';
+        const language = merged.appearance?.language || raw?.language || 'en';
+        const fontLabel = normalizeFontSizeLabel(
+            merged.chat?.fontSize || raw?.font_size || merged.chat_settings?.font_size || merged.appearance?.fontSize
+        );
+        const wallpaper = merged.chat?.wallpaper || raw?.wallpaper || merged.chat_settings?.wallpaper || 'default';
+        const lastSeen = merged.privacy?.lastSeen || raw?.privacy_last_seen || 'everyone';
+        const photoVisibility = merged.privacy?.photoVisibility || raw?.privacy_profile_photo || merged.privacy?.profileVisibility || 'everyone';
+        const statusVisibility = merged.privacy?.statusVisibility || raw?.privacy_status || 'everyone';
+        const notificationsEnabled = raw?.notification_enabled !== false && merged.notifications?.enabled !== false;
+        const ringtoneEnabled = raw?.ringtone_enabled !== false && merged.notifications?.notificationSound !== false;
+        const readReceipts = raw?.read_receipts !== false && merged.privacy?.readReceipts !== false;
+        const autoDownloadMedia = raw?.auto_download_media !== false && merged.chat?.autoDownloadMedia !== false;
+
+        return mergeDeep(merged, {
+            appearance: {
+                theme,
+                language,
+                fontSize: fontLabel === 'small' ? 14 : fontLabel === 'large' ? 18 : 16
+            },
+            notifications: {
+                enabled: notificationsEnabled,
+                messageNotifications: notificationsEnabled && merged.notifications?.messageNotifications !== false,
+                groupNotifications: notificationsEnabled && merged.notifications?.groupNotifications !== false,
+                friendRequestNotifications: notificationsEnabled && merged.notifications?.friendRequestNotifications !== false,
+                callNotifications: notificationsEnabled && merged.notifications?.callNotifications !== false,
+                statusNotifications: notificationsEnabled && merged.notifications?.statusNotifications !== false,
+                moodNotifications: notificationsEnabled && merged.notifications?.moodNotifications !== false,
+                notificationSound: ringtoneEnabled,
+                popupNotifications: notificationsEnabled && merged.notifications?.popupNotifications !== false
+            },
+            privacy: {
+                lastSeen,
+                photoVisibility,
+                profileVisibility: merged.privacy?.profileVisibility || photoVisibility,
+                statusVisibility,
+                readReceipts
+            },
+            chat: {
+                wallpaper,
+                fontSize: fontLabel,
+                autoDownloadMedia,
+                mediaDownload: autoDownloadMedia ? (merged.chat?.mediaDownload || 'wifi') : 'never',
+                bubbleStyle: merged.chat?.bubbleStyle || merged.chat_settings?.bubble_style || 'default',
+                enterKeySends: merged.chat?.enterKeySends === true || merged.chat_settings?.enter_to_send === true
+            },
+            calls: {
+                ringtone: merged.calls?.ringtone || merged.call_settings?.ringtone || 'default',
+                callVibration: merged.calls?.callVibration !== false && merged.call_settings?.vibration !== false,
+                speakerDefault: merged.calls?.speakerDefault === true || merged.call_settings?.speaker_default === true,
+                videoQuality: merged.calls?.videoQuality || merged.call_settings?.video_quality || 'auto',
+                microphoneDefault: merged.calls?.microphoneDefault || merged.call_settings?.microphone_default || 'default',
+                noiseCancellation: merged.calls?.noiseCancellation !== false && merged.call_settings?.noise_cancellation !== false,
+                echoCancellation: merged.calls?.echoCancellation !== false && merged.call_settings?.echo_cancellation !== false
+            },
+            status: {
+                visibility: statusVisibility,
+                autoDownloadMedia
+            },
+            account: {
+                profileVisibility: merged.account?.profileVisibility || photoVisibility,
+                photoVisibility,
+                lastSeen
+            },
+            advanced: {
+                syncEnabled: merged.advanced?.syncEnabled !== false && raw?.syncEnabled !== false
+            },
+            theme,
+            language,
+            notification_enabled: notificationsEnabled,
+            ringtone_enabled: ringtoneEnabled,
+            dark_mode: theme === 'dark',
+            privacy_last_seen: lastSeen,
+            privacy_profile_photo: photoVisibility,
+            privacy_status: statusVisibility,
+            read_receipts: readReceipts,
+            auto_download_media: autoDownloadMedia,
+            font_size: fontLabel,
+            wallpaper,
+            syncEnabled: merged.advanced?.syncEnabled !== false && raw?.syncEnabled !== false
+        });
+    }
+
+    function storageKeyForUser(userId) {
+        return `${STORAGE_PREFIX}:${String(userId || 'guest')}`;
+    }
+
+    function toLocalStoreShape(settings) {
+        return {
+            userId: _activeUserId,
+            theme: settings.appearance?.theme || 'light',
+            language: settings.appearance?.language || 'en',
+            notifications: {
+                messages: settings.notifications?.messageNotifications !== false,
+                calls: settings.notifications?.callNotifications !== false,
+                groups: settings.notifications?.groupNotifications !== false
+            },
+            privacy: {
+                lastSeen: settings.privacy?.lastSeen || 'everyone',
+                readReceipts: settings.privacy?.readReceipts !== false,
+                statusVisibility: settings.privacy?.statusVisibility || 'everyone'
+            },
+            chat: {
+                autoDownloadMedia: settings.chat?.autoDownloadMedia !== false,
+                fontSize: settings.chat?.fontSize || 'medium',
+                enterKeySends: settings.chat?.enterKeySends === true
+            },
+            syncEnabled: settings.advanced?.syncEnabled !== false,
+            updatedAt: new Date().toISOString()
+        };
+    }
+
+    function persist() {
+        const payload = {
+            version: VERSION,
+            userId: _activeUserId,
+            updatedAt: Date.now(),
+            data: _data
+        };
+
+        try {
+            localStorage.setItem(storageKeyForUser(_activeUserId), JSON.stringify(payload));
+            localStorage.setItem(LAST_USER_KEY, String(_activeUserId));
+            localStorage.setItem(LEGACY_CACHE_KEY, JSON.stringify(payload));
+        } catch (error) {
+            console.warn('[AppSettings] Failed to persist cache:', error.message);
+        }
+
+        try {
+            if (global.LocalStoreSettings && typeof global.LocalStoreSettings.merge === 'function') {
+                global.LocalStoreSettings.merge(toLocalStoreShape(_data));
+            }
+        } catch (error) {
+            console.warn('[AppSettings] LocalStoreSettings sync failed:', error.message);
+        }
+    }
+
+    function loadFromStorage(userId) {
+        const candidates = [
+            storageKeyForUser(userId),
+            storageKeyForUser(localStorage.getItem(LAST_USER_KEY) || 'guest'),
+            LEGACY_CACHE_KEY
+        ];
+
+        for (let i = 0; i < candidates.length; i += 1) {
+            const key = candidates[i];
+            if (!key) continue;
+            try {
+                const raw = localStorage.getItem(key);
+                if (!raw) continue;
+                const parsed = JSON.parse(raw);
+                const data = parsed?.data || parsed;
+                if (data && typeof data === 'object') {
+                    return normalizeIncomingSettings(data);
+                }
             } catch (_) {}
         }
+
+        return clone(DEFAULTS);
     }
 
-    function _notifyFull(settings) {
-        _notify('*', null, settings);
-    }
+    function readAuthSnapshot() {
+        let userId = null;
+        let token = global.__kynToken || global.__accessToken || null;
 
-    // ─── BroadcastChannel (cross-tab sync) ────────────────────────────────────
-    function _setupBroadcast() {
-        if (typeof BroadcastChannel === 'undefined') return;
         try {
-            _bc = new BroadcastChannel(BROADCAST_CH);
-            _bc.onmessage = (evt) => {
-                const msg = evt.data || {};
-                if (msg.type !== 'SETTINGS_CHANGE') return;
-                // Silently apply without re-broadcasting
-                if (msg.path && msg.path !== '*') {
-                    _setByPath(_data, msg.path, msg.value);
-                } else if (msg.data) {
-                    _data = _merge(_clone(DEFAULTS), msg.data);
-                }
-                _persist();
-                // Notify local subscribers (but skip cross-tab broadcast this time)
-                const snapshot = _clone(_data);
-                _subscribers.forEach(sub => {
-                    try { sub.fn(snapshot, msg.path, msg.value); } catch (_) {}
-                });
-                try {
-                    global.dispatchEvent(new CustomEvent('appSettingsChanged', {
-                        detail: { settings: snapshot, path: msg.path, value: msg.value, fromBroadcast: true }
-                    }));
-                } catch (_) {}
-            };
-        } catch (e) {
-            console.warn('[AppSettings] BroadcastChannel unavailable:', e.message);
+            const auth = localStorage.getItem('kynecta_auth');
+            if (auth) {
+                const parsed = JSON.parse(auth);
+                userId = parsed?.userId || parsed?.user?.id || userId;
+                token = parsed?.token || token;
+            }
+        } catch (_) {}
+
+        if (!token) {
+            try {
+                token = localStorage.getItem('authToken')
+                    || localStorage.getItem('token')
+                    || localStorage.getItem('moodchat_token')
+                    || localStorage.getItem('accessToken')
+                    || null;
+            } catch (_) {}
         }
-    }
 
-    // ─── Bridge: keep legacy stores in sync ───────────────────────────────────
-    /**
-     * When AppSettings changes, push the update into existing stores
-     * (MoodChatSettingsManager, SettingsState, LocalStoreSettings, SettingsStore)
-     * so that old code that reads those stores still works.
-     */
-    function _bridgeLegacyStores(path, value) {
-        // SettingsStore (simple key/value)
-        try {
-            if (global.SettingsStore && path !== '*') {
-                global.SettingsStore.set(path, value);
-            }
-        } catch (_) {}
-
-        // LocalStoreSettings
-        try {
-            if (global.LocalStoreSettings && path && path !== '*') {
-                global.LocalStoreSettings.set(path, value);
-            }
-        } catch (_) {}
-
-        // MoodChatSettingsManager
-        try {
-            const mgr = global.MoodChatSettingsManager;
-            if (mgr && mgr.initialized && path && path !== '*') {
-                // Only if value differs to avoid infinite loop
-                const cur = mgr.getNestedValue ? mgr.getNestedValue(mgr.currentSettings, path) : undefined;
-                if (JSON.stringify(cur) !== JSON.stringify(value)) {
-                    mgr.setNestedValue && mgr.setNestedValue(mgr.currentSettings, path, value);
-                    mgr.applySetting && mgr.applySetting(path, value);
+        if (!userId) {
+            try {
+                const userRaw = localStorage.getItem('user') || localStorage.getItem('user_data');
+                if (userRaw) {
+                    const parsedUser = JSON.parse(userRaw);
+                    userId = parsedUser?.id || parsedUser?.userId || null;
                 }
-            }
-        } catch (_) {}
+            } catch (_) {}
+        }
+
+        return {
+            userId: String(userId || 'guest'),
+            token: token || null
+        };
     }
 
-    // ─── Apply settings effects to the DOM ────────────────────────────────────
-    function _applyToDOM(settings) {
-        if (!settings) return;
+    function normalizeApiBase(baseUrl) {
+        return String(baseUrl || '').replace(/\/+$/, '');
+    }
+
+    function resolveSettingsApiBase() {
+        const candidates = [
+            function () { return typeof global.__getApiBase === 'function' ? global.__getApiBase() : ''; },
+            function () { return typeof global.parent?.__getApiBase === 'function' ? global.parent.__getApiBase() : ''; },
+            function () { return global.__API_GATEWAY?.baseUrl || ''; },
+            function () { return global.parent?.__API_GATEWAY?.baseUrl || ''; },
+            function () { return global.API_CONFIG?.baseUrl || ''; },
+            function () { return global.parent?.API_CONFIG?.baseUrl || ''; },
+            function () { return global.API_BASE_URL || ''; },
+            function () { return global.parent?.API_BASE_URL || ''; },
+            function () {
+                if (!global.location) return '';
+                return /^(localhost|127\.0\.0\.1)$/i.test(global.location.hostname)
+                    ? 'http://localhost:4000/api'
+                    : '';
+            }
+        ];
+
+        for (let i = 0; i < candidates.length; i += 1) {
+            try {
+                const candidate = normalizeApiBase(candidates[i]());
+                if (candidate) return candidate;
+            } catch (_) {}
+        }
+
+        return '/api';
+    }
+
+    function getSettingsEndpoint() {
+        return `${resolveSettingsApiBase()}/settings`;
+    }
+
+    function applyToDOM(settings) {
         try {
             const root = document.documentElement;
+            const theme = settings.appearance?.theme || 'light';
 
-            // Theme
-            if (settings.appearance) {
-                const theme = settings.appearance.theme || 'light';
-                root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
-                root.classList.add('theme-' + theme);
-                root.setAttribute('data-theme', theme);
-                if (theme === 'dark') {
-                    root.style.setProperty('--bg-color', '#1a1a1a');
-                    root.style.setProperty('--text-primary', '#ffffff');
-                    root.style.setProperty('--text-secondary', '#b0b3b8');
-                    root.style.setProperty('--card-bg', '#242526');
-                    root.style.setProperty('--border-color', '#3e4042');
-                } else {
-                    root.style.setProperty('--bg-color', '#ffffff');
-                    root.style.setProperty('--text-primary', '#050505');
-                    root.style.setProperty('--text-secondary', '#65676b');
-                    root.style.setProperty('--card-bg', '#ffffff');
-                    root.style.setProperty('--border-color', '#dddfe2');
+            root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+            root.classList.add(`theme-${theme}`);
+            root.setAttribute('data-theme', theme);
+            root.setAttribute('lang', settings.appearance?.language || 'en');
+            root.style.fontSize = `${settings.appearance?.fontSize || 16}px`;
+            root.style.setProperty('--base-font-size', `${settings.appearance?.fontSize || 16}px`);
+            root.style.setProperty('--primary-color', settings.appearance?.accentColor || '#4F46E5');
+            root.classList.toggle('reduce-motion', !!settings.appearance?.reduceMotion);
+
+            if (theme === 'dark') {
+                root.style.setProperty('--bg-color', '#111b21');
+                root.style.setProperty('--text-primary', '#e9edef');
+                root.style.setProperty('--text-secondary', '#8696a0');
+                root.style.setProperty('--card-bg', '#202c33');
+                root.style.setProperty('--border-color', '#2f3b43');
+                root.style.setProperty('--input-bg', '#233138');
+                root.style.setProperty('--hover-bg', '#1f2c33');
+            } else {
+                root.style.setProperty('--bg-color', '#ffffff');
+                root.style.setProperty('--text-primary', '#111b21');
+                root.style.setProperty('--text-secondary', '#667781');
+                root.style.setProperty('--card-bg', '#ffffff');
+                root.style.setProperty('--border-color', '#d1d7db');
+                root.style.setProperty('--input-bg', '#f0f2f5');
+                root.style.setProperty('--hover-bg', '#f5f6f6');
+            }
+
+            Object.entries(settings.notifications || {}).forEach(([key, value]) => {
+                if (typeof value !== 'object') {
+                    root.setAttribute(`data-notification-${key}`, String(value));
                 }
-                if (settings.appearance.accentColor) {
-                    root.style.setProperty('--primary-color', settings.appearance.accentColor);
+            });
+
+            Object.entries(settings.privacy || {}).forEach(([key, value]) => {
+                if (typeof value !== 'object') {
+                    root.setAttribute(`data-privacy-${key}`, String(value));
                 }
-                if (settings.appearance.fontSize) {
-                    root.style.setProperty('--base-font-size', settings.appearance.fontSize + 'px');
-                    root.style.fontSize = settings.appearance.fontSize + 'px';
+            });
+
+            Object.entries(settings.chat || {}).forEach(([key, value]) => {
+                if (typeof value !== 'object') {
+                    root.setAttribute(`data-chat-${key}`, String(value));
                 }
-                if (settings.appearance.language) {
-                    root.lang = settings.appearance.language;
+            });
+
+            Object.entries(settings.calls || {}).forEach(([key, value]) => {
+                if (typeof value !== 'object') {
+                    root.setAttribute(`data-calls-${key}`, String(value));
                 }
-                if (settings.appearance.reduceMotion !== undefined) {
-                    root.classList.toggle('reduce-motion', !!settings.appearance.reduceMotion);
+            });
+
+            Object.entries(settings.groups || {}).forEach(([key, value]) => {
+                if (typeof value !== 'object') {
+                    root.setAttribute(`data-groups-${key}`, String(value));
                 }
+            });
+
+            Object.entries(settings.status || {}).forEach(([key, value]) => {
+                if (typeof value !== 'object') {
+                    root.setAttribute(`data-status-${key}`, String(value));
+                }
+            });
+
+            if (settings.chat?.wallpaper) {
+                root.setAttribute('data-chat-wallpaper', settings.chat.wallpaper);
             }
 
-            // Notifications
-            if (settings.notifications) {
-                Object.entries(settings.notifications).forEach(([k, v]) => {
-                    root.setAttribute('data-notification-' + k, String(v));
-                });
-                root.classList.toggle('do-not-disturb', !!settings.notifications.doNotDisturb);
+            if (!callAudioEnabled()) {
+                stopManagedAudio();
             }
-
-            // Privacy
-            if (settings.privacy) {
-                Object.entries(settings.privacy).forEach(([k, v]) => {
-                    if (typeof v !== 'object') {
-                        root.setAttribute('data-privacy-' + k, String(v));
-                    }
-                });
-            }
-
-            // Calls
-            if (settings.calls) {
-                root.setAttribute('data-calls-who-can-call', settings.calls.whoCanCallMe || 'friends');
-                root.setAttribute('data-calls-auto-reject', String(!!settings.calls.autoReject));
-            }
-
-            // Groups
-            if (settings.groups) {
-                root.setAttribute('data-groups-invitations', settings.groups.groupInvitations || 'friends');
-                root.setAttribute('data-groups-notifications', String(settings.groups.groupAnnouncements !== false));
-            }
-
-            // Status
-            if (settings.status) {
-                root.setAttribute('data-status-visibility', settings.status.visibility || 'everyone');
-            }
-        } catch (e) {
-            console.warn('[AppSettings] DOM apply error:', e.message);
+        } catch (error) {
+            console.warn('[AppSettings] DOM apply failed:', error.message);
         }
     }
 
-    // ─── Boot: load from storage, apply, then resolve ready promise ───────────
-    function _boot() {
-        const stored = _loadFromStorage();
-        _data = stored ? _merge(_clone(DEFAULTS), stored) : _clone(DEFAULTS);
-        _setupBroadcast();
-        _applyToDOM(_data);
-        _persist(); // ensure our own key is written
+    function syncLegacyStores() {
+        installSettingsServiceBridge();
 
-        // Signal readiness
+        try {
+            if (global.SettingsStore && typeof global.SettingsStore.load === 'function') {
+                global.SettingsStore.load();
+            }
+        } catch (_) {}
+
+        try {
+            if (global.MoodChatSettingsManager && global.MoodChatSettingsManager.currentSettings) {
+                global.MoodChatSettingsManager.currentSettings = clone(_data);
+            }
+        } catch (_) {}
+
+        notifyLegacySettingsCallbacks();
+    }
+
+    function broadcastMessage(message) {
+        if (!_broadcast) return;
+        try {
+            _broadcast.postMessage({
+                ...message,
+                userId: _activeUserId,
+                source: 'AppSettings',
+                timestamp: Date.now()
+            });
+        } catch (_) {}
+    }
+
+    function notifySubscribers(path, value, meta) {
+        const snapshot = clone(_data);
+        _subscribers.forEach((subscriber) => {
+            try {
+                if (!subscriber.filter || path === '*' || String(path || '').startsWith(subscriber.filter)) {
+                    subscriber.callback(snapshot, path, value, meta || {});
+                }
+            } catch (error) {
+                console.error('[AppSettings] Subscriber error:', error);
+            }
+        });
+
+        try {
+            global.dispatchEvent(new CustomEvent('appSettingsChanged', {
+                detail: {
+                    settings: snapshot,
+                    path,
+                    value,
+                    userId: _activeUserId,
+                    ...(meta || {})
+                }
+            }));
+        } catch (_) {}
+    }
+
+    function setActiveUser(userId) {
+        const nextUserId = String(userId || 'guest');
+        if (_activeUserId === nextUserId) return;
+        _activeUserId = nextUserId;
+        _data = loadFromStorage(_activeUserId);
+        applyToDOM(_data);
+        persist();
+        notifySubscribers('*', _data, { reason: 'user-switch' });
+        debugLog('[AppSettings] Switched cache namespace to user:', _activeUserId);
+    }
+
+    function setupBroadcast() {
+        if (typeof BroadcastChannel === 'undefined') return;
+        try {
+            _broadcast = new BroadcastChannel(BROADCAST_CHANNEL);
+            _broadcast.onmessage = function (event) {
+                const message = event.data || {};
+                if (message.source === 'AppSettings' && message.userId === _activeUserId) {
+                    if (message.type === 'set' && message.path) {
+                        AppSettings.set(message.path, message.value, { silent: false, skipBroadcast: true, source: 'broadcast' });
+                    }
+                    if (message.type === 'merge' && message.settings) {
+                        AppSettings.merge(message.settings, { silent: false, skipBroadcast: true, source: 'broadcast' });
+                    }
+                }
+            };
+        } catch (error) {
+            debugWarn('[AppSettings] BroadcastChannel unavailable:', error.message);
+        }
+    }
+
+    async function fetchServerSettings() {
+        const auth = readAuthSnapshot();
+        // Bail out silently — no token means we are pre-login or in an iframe that
+        // hasn't received the session yet.  Attempting the request would always fail
+        // with a 401/500 and flood the console with "Backend settings load failed".
+        if (!auth.token || !auth.userId || auth.userId === 'guest') return null;
+
+        setActiveUser(auth.userId);
+
+        const response = await fetch(getSettingsEndpoint(), {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${auth.token}`
+            },
+            credentials: 'include'
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload?.message || payload?.error || `HTTP ${response.status}`);
+        }
+        return payload?.data?.settings || payload?.settings || payload?.data || payload || null;
+    }
+
+    function setupAuthListeners() {
+        const loginHandler = function (event) {
+            const detail = event?.detail || {};
+            const incomingUserId = detail?.user?.id || detail?.userId || detail?.id || null;
+            if (incomingUserId) {
+                setActiveUser(incomingUserId);
+            }
+            if (detail.settings && typeof detail.settings === 'object') {
+                AppSettings.merge(detail.settings, { silent: false, source: 'login-event' });
+            }
+            AppSettings.refreshFromServer({ force: true, reason: 'login-event' }).catch(() => {});
+        };
+
+        global.addEventListener('session:ready', loginHandler);
+        global.addEventListener('user-login', loginHandler);
+        global.addEventListener('user-logged-in', loginHandler);
+        global.addEventListener('token:stored', function () {
+            AppSettings.refreshFromServer({ force: true, reason: 'token-stored' }).catch(() => {});
+        });
+
+        global.addEventListener('user-logout', function () {
+            setActiveUser('guest');
+        });
+
+        global.addEventListener('storage', function (event) {
+            if (event.key === 'kynecta_auth' || event.key === LAST_USER_KEY) {
+                const auth = readAuthSnapshot();
+                setActiveUser(auth.userId);
+                AppSettings.refreshFromServer({ force: true, reason: 'storage-sync' }).catch(() => {});
+            }
+        });
+    }
+
+    function boot() {
+        const auth = readAuthSnapshot();
+        _activeUserId = auth.userId || 'guest';
+        _data = loadFromStorage(_activeUserId);
+        installNotificationProxy();
+        installCallAudioProxy();
+        installSettingsServiceBridge();
+        setupBroadcast();
+        applyToDOM(_data);
+        persist();
+        setupAuthListeners();
+
         _readyResolve();
-        global.__APP_SETTINGS_READY__ = true;
         try {
             global.dispatchEvent(new CustomEvent('appSettingsReady', {
-                detail: { settings: _clone(_data), timestamp: Date.now() }
+                detail: {
+                    settings: clone(_data),
+                    userId: _activeUserId
+                }
             }));
         } catch (_) {}
 
-        console.log('[AppSettings] ✅ Loaded & ready');
+        debugLog('[AppSettings] Ready with local cache for user:', _activeUserId);
 
-        // If legacy SettingsState is already loaded, pull its data in
-        _syncFromLegacy();
+        if (auth.token && auth.userId && auth.userId !== 'guest') {
+            AppSettings.refreshFromServer({ force: false, reason: 'boot' }).catch(() => {});
+        }
     }
 
-    function _syncFromLegacy() {
-        try {
-            const legacyState = global.__SETTINGS_STATE_OBJ__;
-            if (legacyState && legacyState.loaded && legacyState.data && Object.keys(legacyState.data).length > 0) {
-                _data = _merge(_data, legacyState.data);
-                _persist();
-            }
-        } catch (_) {}
-        try {
-            const mgr = global.MoodChatSettingsManager;
-            if (mgr && mgr.initialized && mgr.currentSettings) {
-                _data = _merge(_data, mgr.currentSettings);
-                _persist();
-            }
-        } catch (_) {}
-    }
-
-    // ─── Public API ───────────────────────────────────────────────────────────
     const AppSettings = {
-        /**
-         * Resolved when settings are loaded from localStorage.
-         * Modules should await this before reading values.
-         */
-        get ready() { return _ready; },
+        get ready() {
+            return _ready;
+        },
 
-        /**
-         * Get a setting by dot-path, or the entire object if no path.
-         * e.g. AppSettings.get('appearance.theme')
-         */
+        get DEFAULTS() {
+            return DEFAULTS;
+        },
+
+        get currentUserId() {
+            return _activeUserId;
+        },
+
         get(path) {
-            if (!path) return _clone(_data);
-            const v = _getByPath(_data, path);
-            return v !== undefined ? _clone(v) : undefined;
+            if (!path) return clone(_data);
+            return clone(getByPath(_data, path));
         },
 
-        /**
-         * Get the full settings snapshot (deep clone).
-         */
         getAll() {
-            return _clone(_data);
+            return clone(_data);
         },
 
-        /**
-         * Set a single setting by dot-path.
-         * e.g. AppSettings.set('appearance.theme', 'dark')
-         *
-         * Saves to localStorage immediately, notifies all subscribers,
-         * and applies DOM effects.
-         */
-        set(path, value, options = {}) {
+        set(path, value, options) {
+            const opts = options || {};
             if (!path) return;
-            const prev = _getByPath(_data, path);
-            if (!options.force && JSON.stringify(prev) === JSON.stringify(value)) return;
 
-            _setByPath(_data, path, value);
-            _persist();
-            _applyToDOM(_data);
-            if (!options.silent) {
-                _notify(path, value, _data);
-                _bridgeLegacyStores(path, value);
+            const current = getByPath(_data, path);
+            if (!opts.force && isEqual(current, value)) return;
+
+            setByPath(_data, path, clone(value));
+            _data = normalizeIncomingSettings(_data);
+            persist();
+            applyToDOM(_data);
+            syncLegacyStores();
+
+            if (!opts.silent) {
+                notifySubscribers(path, value, { source: opts.source || 'local-set' });
             }
+
+            if (!opts.skipBroadcast) {
+                broadcastMessage({ type: 'set', path, value });
+            }
+
+            debugLog('[AppSettings] Applied setting:', path, value);
         },
 
-        /**
-         * Deep-merge a partial settings object.
-         * e.g. AppSettings.merge({ appearance: { theme: 'dark' }, calls: { autoReject: true } })
-         */
-        merge(partial, options = {}) {
+        merge(partial, options) {
+            const opts = options || {};
             if (!partial || typeof partial !== 'object') return;
-            _data = _merge(_data, partial);
-            _persist();
-            _applyToDOM(_data);
-            if (!options.silent) {
-                _notifyFull(_data);
+
+            const nextData = normalizeIncomingSettings(mergeDeep(_data, partial));
+            if (!opts.force && isEqual(_data, nextData)) return;
+
+            _data = nextData;
+            persist();
+            applyToDOM(_data);
+            syncLegacyStores();
+
+            if (!opts.silent) {
+                notifySubscribers('*', clone(_data), { source: opts.source || 'merge' });
             }
+
+            if (!opts.skipBroadcast) {
+                broadcastMessage({ type: 'merge', settings: clone(partial) });
+            }
+
+            debugLog('[AppSettings] Merged settings payload');
         },
 
-        /**
-         * Subscribe to settings changes.
-         * callback(settingsSnapshot, changedPath, changedValue)
-         * filter (optional): only receive callbacks when a path starting with filter changes
-         * Returns an unsubscribe function.
-         */
+        reset() {
+            _data = clone(DEFAULTS);
+            persist();
+            applyToDOM(_data);
+            syncLegacyStores();
+            notifySubscribers('*', clone(_data), { source: 'reset' });
+            broadcastMessage({ type: 'merge', settings: clone(_data) });
+        },
+
         subscribe(callback, filter) {
-            if (typeof callback !== 'function') return () => {};
-            const sub = { id: Date.now() + Math.random(), fn: callback, filter: filter || null };
-            _subscribers.push(sub);
-            // Immediately invoke with current settings
-            try { callback(_clone(_data), null, null); } catch (_) {}
+            if (typeof callback !== 'function') return function noop() {};
+            const subscription = {
+                id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+                callback,
+                filter: filter || null
+            };
+            _subscribers.push(subscription);
+            try {
+                callback(clone(_data), null, null, { source: 'initial' });
+            } catch (_) {}
             return function unsubscribe() {
-                const idx = _subscribers.indexOf(sub);
-                if (idx !== -1) _subscribers.splice(idx, 1);
+                _subscribers = _subscribers.filter((entry) => entry.id !== subscription.id);
             };
         },
 
-        /**
-         * Reset all settings to built-in defaults.
-         */
-        reset() {
-            _data = _clone(DEFAULTS);
-            _persist();
-            _applyToDOM(_data);
-            _notifyFull(_data);
-            console.log('[AppSettings] Reset to defaults');
+        loadLocal(userId) {
+            setActiveUser(userId || readAuthSnapshot().userId || 'guest');
+            return clone(_data);
         },
 
-        /**
-         * Force a re-sync from legacy stores (call after they initialize).
-         */
-        syncFromLegacy() {
-            _syncFromLegacy();
-            _applyToDOM(_data);
-            _notifyFull(_data);
+        async refreshFromServer(options) {
+            const opts = options || {};
+            if (_serverSyncPromise && !opts.force) return _serverSyncPromise;
+
+            _serverSyncPromise = fetchServerSettings()
+                .then((serverSettings) => {
+                    if (!serverSettings || typeof serverSettings !== 'object') return null;
+                    debugLog('[AppSettings] Loaded settings from backend');
+                    AppSettings.merge(serverSettings, {
+                        silent: false,
+                        skipBroadcast: true,
+                        source: opts.reason || 'server-sync'
+                    });
+                    return clone(_data);
+                })
+                .catch((error) => {
+                    const message = error?.message || 'Unknown error';
+                    // Only log in debug mode — these are expected while the backend
+                    // is starting up or when the user is not yet authenticated.
+                    // Using debugWarn (not console.warn) prevents console noise on every page load.
+                    debugWarn('[AppSettings] Backend settings load failed:', message);
+                    return null;
+                })
+                .finally(() => {
+                    _serverSyncPromise = null;
+                });
+
+            return _serverSyncPromise;
         },
 
-        /**
-         * Expose defaults for reference.
-         */
-        DEFAULTS,
+        syncOnLogin(detail) {
+            const payload = detail || {};
+            const incomingUserId = payload?.user?.id || payload?.userId || readAuthSnapshot().userId;
+            if (incomingUserId) {
+                setActiveUser(incomingUserId);
+            }
+            if (payload.settings && typeof payload.settings === 'object') {
+                AppSettings.merge(payload.settings, {
+                    silent: false,
+                    source: 'login-payload'
+                });
+            }
+            return AppSettings.refreshFromServer({ force: true, reason: 'sync-on-login' });
+        },
 
-        /**
-         * Diagnostics helper.
-         */
         diagnostics() {
             return {
+                version: VERSION,
+                userId: _activeUserId,
                 subscriberCount: _subscribers.length,
-                broadcastEnabled: !!_bc,
-                data: _clone(_data)
+                hasBroadcastChannel: !!_broadcast,
+                data: clone(_data)
             };
         }
     };
 
-    // Expose globally
     global.AppSettings = AppSettings;
 
-    // Boot immediately
+    global.addEventListener('settingsUpdated', function (event) {
+        const settings = event?.detail?.settings || event?.detail || null;
+        if (settings && typeof settings === 'object') {
+            AppSettings.merge(settings, { source: 'legacy-settingsUpdated' });
+        }
+    });
+
+    global.addEventListener('settings_updated', function (event) {
+        const settings = event?.detail?.settings || event?.detail || null;
+        if (settings && typeof settings === 'object') {
+            AppSettings.merge(settings, {
+                skipBroadcast: true,
+                source: 'socket-settings_updated'
+            });
+        }
+    });
+
+    global.addEventListener('SETTINGS_GLOBAL_UPDATE', function (event) {
+        const detail = event?.detail || {};
+        if (detail.section && detail.key !== undefined) {
+            AppSettings.set(`${detail.section}.${detail.key}`, detail.value, { source: 'legacy-global-update' });
+        }
+    });
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _boot, { once: true });
+        document.addEventListener('DOMContentLoaded', boot, { once: true });
     } else {
-        _boot();
+        boot();
     }
 
-    // Listen for legacy events so AppSettings stays in sync when old code fires events
-    global.addEventListener('settingsUpdated', (evt) => {
-        const s = evt.detail && evt.detail.settings;
-        if (s && typeof s === 'object') {
-            AppSettings.merge(s, { silent: false });
-        }
-    });
-
-    global.addEventListener('SETTINGS_GLOBAL_UPDATE', (evt) => {
-        const d = evt.detail || {};
-        if (d.section && d.key !== undefined) {
-            AppSettings.set(d.section + '.' + d.key, d.value);
-        }
-    });
-
-    // When SettingsState fires its own _notify, mirror to AppSettings
-    global.addEventListener('settingsSaved', () => { AppSettings.syncFromLegacy(); });
-    global.addEventListener('settings-store-ready', () => { AppSettings.syncFromLegacy(); });
-
-    console.log('[AppSettings] Module registered');
-
-})(typeof window !== 'undefined' ? window : global);
+    debugLog('[AppSettings] Module registered');
+})(typeof window !== 'undefined' ? window : globalThis);

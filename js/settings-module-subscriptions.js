@@ -187,8 +187,10 @@ window.applyFriendsSettings = window.applyFriendsSettings || function applyFrien
         root.setAttribute('data-friends-trust-score',   String(!!f.trustScore));
 
         // Visibility: hide last-seen if disabled
-        root.setAttribute('data-privacy-lastSeen',      String(p.lastSeen !== false));
+        root.setAttribute('data-privacy-lastSeen',      p.lastSeen || 'everyone');
         root.setAttribute('data-privacy-onlineStatus',  String(p.onlineStatus !== false));
+        root.setAttribute('data-privacy-profileVisibility', p.profileVisibility || 'everyone');
+        root.setAttribute('data-privacy-photoVisibility', p.photoVisibility || 'everyone');
 
         // Theme propagation
         if (settings.appearance && settings.appearance.theme) {
@@ -218,6 +220,8 @@ window.applyCallsSettings = window.applyCallsSettings || function applyCallsSett
         root.setAttribute('data-calls-auto-answer',   String(!!c.autoAnswer));
         root.setAttribute('data-calls-ringtone',      c.ringtone || 'default');
         root.setAttribute('data-calls-vibration',     String(c.callVibration !== false));
+        root.setAttribute('data-calls-speaker-default', String(c.speakerDefault === true));
+        root.setAttribute('data-calls-microphone-default', c.microphoneDefault || 'default');
         root.setAttribute('data-calls-video-quality', c.videoQuality || 'auto');
         root.setAttribute('data-calls-noise-cancel',  String(c.noiseCancellation !== false));
         root.setAttribute('data-calls-echo-cancel',   String(c.echoCancellation !== false));
@@ -294,6 +298,7 @@ window.applyStatusSettings = window.applyStatusSettings || function applyStatusS
         root.setAttribute('data-status-visibility',    visibility);
         root.setAttribute('data-status-auto-download', String(s.autoDownloadMedia !== false));
         root.setAttribute('data-status-mood-share',    String(!!s.moodAutoShare));
+        root.setAttribute('data-privacy-readReceipts', String(p.readReceipts !== false));
 
         // Mood visibility (nested privacy)
         if (p.moodVisibility) {
