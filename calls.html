@@ -122,9 +122,8 @@ window.__CALLS_IFRAME__ = {
                 if (_resolved && _resolved !== 'User') _nameEl.textContent = _resolved;
             }
         } else {
-            // ✅ FIX: If parent is navigating away after call-end, suppress idle screen rendering.
-            // Only remove active from call screens (hiding them cleanly) — do NOT show callContainer
-            // or idleScreen. No visible content = no dark flash before parent hides this iframe.
+            // ✅ FIX: If parent is navigating away after call-end, don't show idle screen.
+            // Only remove active from call screens. No visible content = no dark flash.
             if (window.__callEndedNavigating) {
                 if (calling) calling.classList.remove('active');
                 if (inCall)  inCall.classList.remove('active');
@@ -313,6 +312,10 @@ window.__CALLS_IFRAME__ = {
     // ── Navigate back to origin after call ends ───────────────────────────────
     function _navigateAfterCall() {
         try {
+            // ✅ FIX: Gate all screen-show paths immediately
+            window.__callEndedNavigating = true;
+            setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
+
             var origin = window._callOrigin || window.__pendingCallOrigin || 'calls';
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({
@@ -4732,6 +4735,20 @@ function _declineVideoUpgrade() {
         // ── 2. CALLING SCREEN ─────────────────────────────────────────────
         function _showCallingNow(callInfo) {
             callInfo = callInfo || {};
+
+            // ✅ FIX: If we just ended a call and parent is navigating away, do NOT re-show
+            // the calling screen. Stale CALL_INITIATED messages arrive after CALL_FORCE_ENDED
+            // and would re-flash the screen + restart the ringtone.
+            if (window.__callEndedNavigating) {
+                _log('_showCallingNow suppressed — __callEndedNavigating is set');
+                return;
+            }
+            // Also guard: if call ended within the last 2s, ignore (dedup window)
+            if (_callEndedAt > 0 && (Date.now() - _callEndedAt) < 2000) {
+                _log('_showCallingNow suppressed — call ended', Date.now() - _callEndedAt, 'ms ago');
+                return;
+            }
+
             _callDispatchedAt = Date.now();
             _callEndedAt = 0;
             // ✅ FIX: Set callActive flags immediately so _onIframeVisible doesn't reset to idle
@@ -5089,6 +5106,12 @@ function _declineVideoUpgrade() {
         function _onIncomingCall(data) {
             data = data || {};
 
+            // ✅ FIX: Suppress stale incoming call events if we just ended/navigated
+            if (window.__callEndedNavigating) {
+                _log('_onIncomingCall suppressed — __callEndedNavigating is set');
+                return;
+            }
+
             // Deduplicate within 1s
             var callId = data.callId || data.id || null;
             if (callId && callId === window.__lastIncomingCallId &&
@@ -5157,13 +5180,16 @@ function _declineVideoUpgrade() {
 
             _log('Call ended →', reason);
 
-            // ✅ FIX: Do NOT call _fullReset() — it calls showScreen('idle') which causes
-            // a dark flash before the parent navigates away. Instead, do direct cleanup:
+            // ✅ FIX: Set __callEndedNavigating IMMEDIATELY — this is the gate that prevents
+            // stale CALL_INITIATED / CALL_INCOMING messages (still in the event queue) from
+            // re-showing screens or restarting the ringtone after this point.
+            window.__callEndedNavigating = true;
+            setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
 
-            // 1. Stop ALL ringtones (covers both caller and receiver ring paths)
+            // 1. Stop ALL ringtones first — before anything else
             _stopRingtones();
 
-            // 2. Stop media tracks directly
+            // 2. Stop media tracks
             try {
                 if (window.UIState && window.UIState.localStream) {
                     window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} });
@@ -5171,46 +5197,39 @@ function _declineVideoUpgrade() {
                 }
             } catch(e) {}
 
-            // 3. Hide all call screens cleanly — no flash
+            // 3. Hide all call screens cleanly — no _fullReset (avoids flash)
             var _csEl = document.getElementById('callingScreen');
             var _isEl = document.getElementById('inCallScreen');
-            var _imEl = document.getElementById('incomingCallModal');  // receiver's ringing screen
+            var _imEl = document.getElementById('incomingCallModal');
             if (_csEl) { _csEl.classList.remove('active'); }
             if (_isEl) { _isEl.classList.remove('active'); }
             if (_imEl) {
-                // Clear the ring countdown timer on receiver side
                 var _imTimer = parseInt(_imEl.dataset && _imEl.dataset.timer);
                 if (_imTimer) clearInterval(_imTimer);
                 if (_imEl.dataset) _imEl.dataset.timer = '';
                 _imEl.classList.remove('active');
                 _imEl.style.cssText = 'display:none!important';
             }
+            // Also stop the 3-minute decline timer
+            _stopDeclineTimer();
             document.body.classList.remove('call-active', 'call-connected');
 
-            // 4. Clear state flags
+            // 4. Clear state flags — after setting __callEndedNavigating (order matters)
             window.__callActive = false;
             window._currentIncomingCallId = null;
-            if (window.callsState) {
-                window.callsState.callActive = false;
-                window.callsState.callState  = 'idle';
-            }
-            if (window.UIState) {
-                window.UIState.callActive = false;
-                window.UIState.callState  = 'idle';
-            }
+            if (window.callsState) { window.callsState.callActive = false; window.callsState.callState = 'idle'; }
+            if (window.UIState)    { window.UIState.callActive = false;    window.UIState.callState = 'idle'; }
 
-            // 5. Post CALL_ENDED_RETURN — parent will navigate away and hide iframe
+            // 5. Post CALL_ENDED_RETURN — parent navigates away and hides this iframe
             _sendToParent('CALL_ENDED_RETURN', {
                 origin: window._callOrigin || window.__pendingCallReturnTo || 'calls'
             });
 
-            // 6. 1.2s fallback: only show idle if parent hasn't navigated away
-            //    (handles edge cases: same-page calls, parent nav failure, receiver stayed on page)
+            // 6. 1.2s fallback: show idle ONLY if parent hasn't navigated away
+            //    (same-page calls, parent nav failure, or receiver kept on page)
             setTimeout(function() {
                 if (!window.__callEndedNavigating) {
-                    if (typeof window.showScreen === 'function') {
-                        window.showScreen('idle');
-                    }
+                    if (typeof window.showScreen === 'function') window.showScreen('idle');
                 }
             }, 1200);
         }
@@ -5233,6 +5252,11 @@ function _declineVideoUpgrade() {
 
             switch (t) {
                 case 'CALL_INITIATED':
+                    // ✅ FIX: Suppress if parent is navigating away after a recent call-end
+                    if (window.__callEndedNavigating) {
+                        _log('CALL_INITIATED suppressed — __callEndedNavigating is set');
+                        break;
+                    }
                     // ✅ FIX: Set flag before showing screen
                     window.__callActive = true;
                     if (window.UIState) window.UIState.callActive = true;
@@ -5244,6 +5268,11 @@ function _declineVideoUpgrade() {
                     break;
 
                 case 'CALL_INCOMING':
+                    // ✅ FIX: Suppress if parent is navigating away
+                    if (window.__callEndedNavigating) {
+                        _log('CALL_INCOMING suppressed — __callEndedNavigating is set');
+                        break;
+                    }
                     _onIncomingCall(pay);
                     break;
 
