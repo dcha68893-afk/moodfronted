@@ -4185,17 +4185,49 @@ handleContactItemClick: function(e) {
                     this.refreshCallHistory();
                     break;
                 case 'call_cancelled':
-                    // FIXED: Caller cancelled before receiver answered — dismiss incoming modal immediately
+                    // FIXED: Caller cancelled before receiver answered — dismiss incoming modal, stop ringtone, navigate back
+                    // Stop ALL ringtone paths (MasterFix WebAudio + legacy Audio object)
+                    if (typeof window._stopRingtones === 'function') window._stopRingtones();
+                    if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
                     if (window._incomingRingtone) {
                         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                         window._incomingRingtone = null;
                     }
-                    if (elements.incomingCallModal && elements.incomingCallModal.classList.contains('active')) {
-                        elements.incomingCallModal.classList.remove('active');
-                        UIState.activeModals.delete('incomingCallModal');
-                        const timerId = parseInt(elements.incomingCallModal.dataset.timer);
-                        if (timerId) clearInterval(timerId);
+                    // Clear the ring countdown timer
+                    if (elements.incomingCallModal) {
+                        const _cancelTimerId = parseInt(elements.incomingCallModal.dataset.timer);
+                        if (_cancelTimerId) clearInterval(_cancelTimerId);
                         elements.incomingCallModal.dataset.timer = '';
+                        elements.incomingCallModal.classList.remove('active');
+                        elements.incomingCallModal.style.setProperty('display', 'none', 'important');
+                        UIState.activeModals.delete('incomingCallModal');
+                    }
+                    // Clear incoming call tracking
+                    window._currentIncomingCallId = null;
+                    UIState.callState = 'idle';
+                    UIState.callActive = false;
+                    UIState.activeCallId = null;
+                    // Navigate receiver back to where they were before call came in
+                    if (window.parent && window.parent !== window) {
+                        window.__callEndedNavigating = true;
+                        setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
+                        window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+                        window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
+                        const _cancelReturn = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
+                            ? window.__callOriginReturnTo
+                            : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
+                                ? window.__pendingCallReturnTo
+                                : 'messages';
+                        setTimeout(function() {
+                            if (window.parent && window.parent !== window) {
+                                window.parent.postMessage({
+                                    type: 'SWITCH_MODULE',
+                                    module: _cancelReturn,
+                                    payload: { returnFromCall: true },
+                                    timestamp: Date.now()
+                                }, '*');
+                            }
+                        }, 350);
                     }
                     this.handleCallEnded(data);
                     this.refreshCallHistory();
@@ -4699,6 +4731,21 @@ handleContactItemClick: function(e) {
             UIState.callActive = false;
             UIState.activeCallId = incomingId;
             setCallParticipants([callerParticipant], { merge: false });
+
+            // ✅ FIX: Capture receiver's current origin so handleCallEnded / declineIncomingCall
+            // can navigate back after call ends or caller cancels. Only set if not already set
+            // (acceptIncomingCallGeneric also sets it to 'calls' as fallback).
+            if (!window.__callOriginReturnTo || window.__callOriginReturnTo === 'calls') {
+                const _incomingSource = callData.source || callData.returnTo || null;
+                window.__callOriginReturnTo = (_incomingSource && _incomingSource !== 'calls')
+                    ? _incomingSource : 'messages';
+                window.__pendingCallReturnTo = window.__callOriginReturnTo;
+                // Carry chat user context if caller is the open chat
+                if (callData.callerId || callData.userId) {
+                    window.__callOriginChatUserId = callData.callerId || callData.userId || null;
+                    window.__callOriginChatUserName = _callerName;
+                }
+            }
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
             if (!elements.incomingCallModal) {
                 if (typeof cacheElements === 'function') cacheElements();
@@ -5257,6 +5304,7 @@ handleContactItemClick: function(e) {
                 UIState.callState === 'calling' ||
                 UIState.callState === 'connecting' ||
                 UIState.callState === 'connected' ||
+                UIState.callState === 'ringing' ||   // ✅ FIX: receiver is ringing — must not drop ended event
                 (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active')) ||
                 (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
                 (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active'));
@@ -5296,6 +5344,18 @@ handleContactItemClick: function(e) {
             const callContainer = document.getElementById('callContainer');
             if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
             if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
+            // ✅ FIX: Also hide incomingCallModal and stop ringtone — covers receiver side
+            // where call ends while the incoming screen is still showing (e.g. caller hung up)
+            const _incomingModal = document.getElementById('incomingCallModal');
+            if (_incomingModal) {
+                const _imTimer = parseInt(_incomingModal.dataset.timer);
+                if (_imTimer) clearInterval(_imTimer);
+                _incomingModal.dataset.timer = '';
+                _incomingModal.classList.remove('active');
+                _incomingModal.style.setProperty('display', 'none', 'important');
+                UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
+            }
+            window._currentIncomingCallId = null;
             // ✅ FIX: Do NOT show callContainer after call ends — it shows a blank dark screen.
             // The parent shell navigates away (SWITCH_MODULE) so this iframe becomes hidden.
             // If somehow still visible, keep callContainer hidden and only show idleScreen inside it.
@@ -8231,6 +8291,30 @@ declineIncomingCall: async function() {
             type: 'CALL_REJECT',
             payload: { callId: callId, reason: 'declined', timestamp: Date.now() }
         }, '*');
+    }
+
+    // ── Navigate receiver back to where they were before the call came in ──
+    if (window.parent && window.parent !== window) {
+        window.__callEndedNavigating = true;
+        setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
+        window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
+        window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
+        // Determine return destination: use stored origin or default to messages
+        const _declineReturn = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
+            ? window.__callOriginReturnTo
+            : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
+                ? window.__pendingCallReturnTo
+                : 'messages';
+        setTimeout(function() {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SWITCH_MODULE',
+                    module: _declineReturn,
+                    payload: { returnFromCall: true },
+                    timestamp: Date.now()
+                }, '*');
+            }
+        }, 350);
     }
 
     showIdleScreen();

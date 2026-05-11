@@ -1347,6 +1347,11 @@ handleSettingsChange(message) {
                         }
                         GroupCore.saveGroups();
                         GroupCore.emit('group:member-added', { groupId, member });
+                        // Dispatch kyn:memberJoined so group-ui cards update immediately
+                        const _newCount = group ? (group.memberCount || (group.members && group.members.length) || 0) : 0;
+                        window.dispatchEvent(new CustomEvent('kyn:memberJoined', {
+                            detail: { groupId, member, newCount: _newCount }
+                        }));
                         // Refresh UI immediately
                         if (LifecycleState.isActive()) {
                             if (typeof updateGroupCounts === 'function') updateGroupCounts();

@@ -4224,7 +4224,22 @@
 
             if (!container) return;
 
-            const normalizedChats = ensureSafeArray(chats);
+            let normalizedChats = ensureSafeArray(chats);
+
+            // Apply hidden filtering + pin-first sorting
+            try {
+                const _hiddenIds2 = JSON.parse(localStorage.getItem('kyn_hidden_chats_v1') || '[]');
+                const _pinnedIds2 = JSON.parse(localStorage.getItem('kyn_pinned_chats_v1') || '[]');
+                normalizedChats = normalizedChats.filter(c => !_hiddenIds2.includes(String(c.id)));
+                normalizedChats = normalizedChats.slice().sort(function(a, b) {
+                    const ap = _pinnedIds2.includes(String(a.id)) ? 1 : 0;
+                    const bp = _pinnedIds2.includes(String(b.id)) ? 1 : 0;
+                    if (bp !== ap) return bp - ap;
+                    const ta = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+                    const tb = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+                    return tb - ta;
+                });
+            } catch(_normalizeErr) {}
 
             const normalizedCategory = ['all', 'unread', 'archived', 'blocked', 'notes'].includes(category) ? category : 'all';
 
@@ -4400,9 +4415,19 @@
 
                     : `<span style="width:100%;height:100%;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 68%,#06b6d4 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;border-radius:50%;">${avatarInitial}</span>`;
 
+                // Apply pin/block data attrs for CSS
+                const _isPinned  = (function(){ try{ return (JSON.parse(localStorage.getItem('kyn_pinned_chats_v1')||'[]')).includes(String(chat.id)); }catch(_){return false;} })();
+                const _isBlocked = (function(){ try{ return (JSON.parse(localStorage.getItem('kyn_blocked_chats_v1')||'[]')).includes(String(chat.id)); }catch(_){return false;} })();
                 html += `
 
-                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" onclick="window.messagesUI?.openChat(${safeChat})">
+                    <div class="chat-item ${isSelected ? 'selected' : ''}" data-chat-id="${chat.id}" data-pinned="${_isPinned}" data-blocked="${_isBlocked}" data-long-press-chat="${chat.id}"
+                         ontouchstart="window.messagesUI?._chatLongPressStart(event,'${chat.id}')"
+                         ontouchend="window.messagesUI?._chatLongPressEnd(event,'${chat.id}')"
+                         ontouchcancel="window.messagesUI?._chatLongPressCancel()"
+                         onmousedown="window.messagesUI?._chatLongPressStart(event,'${chat.id}')"
+                         onmouseup="window.messagesUI?._chatLongPressEnd(event,'${chat.id}')"
+                         onmouseleave="window.messagesUI?._chatLongPressCancel()"
+                         onclick="window.messagesUI?._chatItemClick(event,'${chat.id}',${safeChat})">
 
                         <div class="chat-avatar" style="overflow:hidden;">
 
@@ -12767,4 +12792,366 @@ Type: ${message.type || 'text'}`;
         bindMultiSendEnhancements();
     }
 
-})();
+    // ============================================================
+    // CHAT LONG-PRESS CONTEXT MENU + PIN/HIDE/BLOCK/DELETE SYSTEM
+    // ============================================================
+    (function installChatContextMenu() {
+        const STORAGE_KEY_PINNED  = 'kyn_pinned_chats_v1';
+        const STORAGE_KEY_HIDDEN  = 'kyn_hidden_chats_v1';
+        const STORAGE_KEY_BLOCKED = 'kyn_blocked_chats_v1';
+        const STORAGE_KEY_HIDDEN_PIN = 'kyn_hidden_pin_v1';
+
+        function _store(key) {
+            try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch(_) { return []; }
+        }
+        function _storeSave(key, arr) {
+            try { localStorage.setItem(key, JSON.stringify(arr)); } catch(_) {}
+        }
+        function _setAdd(key, id)    { const a = _store(key); if (!a.includes(String(id))) a.push(String(id)); _storeSave(key, a); }
+        function _setRemove(key, id) { _storeSave(key, _store(key).filter(x => x !== String(id))); }
+        function _setHas(key, id)    { return _store(key).includes(String(id)); }
+
+        let _lpTimer = null;
+        let _lpActive = false;
+
+        window.messagesUI = window.messagesUI || {};
+
+        // Long press helpers
+        window.messagesUI._chatLongPressStart = function(e, chatId) {
+            _lpActive = false;
+            _lpTimer = setTimeout(function() {
+                _lpActive = true;
+                window.messagesUI._showChatContextMenu(chatId, e);
+            }, 600);
+        };
+        window.messagesUI._chatLongPressEnd = function(e, chatId) {
+            if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+            // if long press fired, prevent the click
+            if (_lpActive) { e.preventDefault(); e.stopPropagation(); _lpActive = false; }
+        };
+        window.messagesUI._chatLongPressCancel = function() {
+            if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+            _lpActive = false;
+        };
+        // Normal click (fires only when NOT long-press)
+        window.messagesUI._chatItemClick = function(e, chatId, chatObj) {
+            if (_lpActive) { e.preventDefault(); e.stopPropagation(); return; }
+            // Check blocked — do not open blocked chats
+            if (_setHas(STORAGE_KEY_BLOCKED, chatId)) {
+                _showToast('This chat is blocked. Long-press to unblock.');
+                return;
+            }
+            window.messagesUI?.openChat(chatObj);
+        };
+
+        // Show context menu
+        window.messagesUI._showChatContextMenu = function(chatId, e) {
+            _removeChatContextMenu();
+            const isPinned  = _setHas(STORAGE_KEY_PINNED,  chatId);
+            const isHidden  = _setHas(STORAGE_KEY_HIDDEN,  chatId);
+            const isBlocked = _setHas(STORAGE_KEY_BLOCKED, chatId);
+
+            const menu = document.createElement('div');
+            menu.id = 'chatContextMenu';
+            menu.style.cssText = [
+                'position:fixed;z-index:99999;background:#1e293b;border-radius:18px;',
+                'padding:8px;box-shadow:0 8px 40px rgba(0,0,0,0.45);',
+                'display:flex;flex-direction:column;gap:4px;min-width:200px;',
+                'animation:ctxFadeIn .18s ease;'
+            ].join('');
+
+            const actions = [
+                { icon: '📌', label: isPinned  ? 'Unpin chat'    : 'Pin chat',     action: 'pin'    },
+                { icon: '🔒', label: isHidden  ? 'Unhide chat'   : 'Hide chat',    action: 'hide'   },
+                { icon: '🚫', label: isBlocked ? 'Unblock user'  : 'Block user',   action: 'block'  },
+                { icon: '🗑️', label: 'Delete chat',                                 action: 'delete' },
+            ];
+
+            actions.forEach(function(a) {
+                const btn = document.createElement('button');
+                btn.style.cssText = [
+                    'display:flex;align-items:center;gap:10px;padding:11px 16px;',
+                    'background:none;border:none;color:#e5e7eb;font-size:14px;',
+                    'font-weight:600;cursor:pointer;border-radius:12px;text-align:left;',
+                    'transition:background .15s;width:100%;'
+                ].join('');
+                btn.innerHTML = '<span style="font-size:18px;line-height:1;">' + a.icon + '</span><span>' + a.label + '</span>';
+                btn.onmouseenter = function() { this.style.background = 'rgba(255,255,255,0.08)'; };
+                btn.onmouseleave = function() { this.style.background = 'none'; };
+                btn.onclick = function(ev) {
+                    ev.stopPropagation();
+                    _removeChatContextMenu();
+                    window.messagesUI._handleChatAction(a.action, chatId);
+                };
+                menu.appendChild(btn);
+            });
+
+            // Position near touch/click
+            const x = (e.touches ? e.touches[0].clientX : e.clientX) || window.innerWidth/2;
+            const y = (e.touches ? e.touches[0].clientY : e.clientY) || window.innerHeight/2;
+            menu.style.left = Math.min(x, window.innerWidth  - 220) + 'px';
+            menu.style.top  = Math.min(y, window.innerHeight - 240) + 'px';
+
+            document.body.appendChild(menu);
+            setTimeout(function() { document.addEventListener('click', _removeChatContextMenu, { once:true }); }, 50);
+        };
+
+        function _removeChatContextMenu() {
+            const m = document.getElementById('chatContextMenu');
+            if (m) m.remove();
+        }
+
+        // Handle chosen action
+        window.messagesUI._handleChatAction = function(action, chatId) {
+            switch(action) {
+                case 'pin':
+                    if (_setHas(STORAGE_KEY_PINNED, chatId)) {
+                        _setRemove(STORAGE_KEY_PINNED, chatId);
+                        _showToast('Chat unpinned');
+                    } else {
+                        _setAdd(STORAGE_KEY_PINNED, chatId);
+                        _showToast('Chat pinned — appears at top');
+                    }
+                    window.messagesUI?.refreshChatsList?.();
+                    break;
+
+                case 'hide':
+                    if (_setHas(STORAGE_KEY_HIDDEN, chatId)) {
+                        // Unhide — ask for PIN
+                        window.messagesUI._showHiddenPinPrompt(function(ok) {
+                            if (ok) { _setRemove(STORAGE_KEY_HIDDEN, chatId); _showToast('Chat unhidden'); window.messagesUI?.refreshChatsList?.(); }
+                            else    { _showToast('Incorrect PIN', true); }
+                        });
+                    } else {
+                        // Set PIN then hide
+                        window.messagesUI._showSetHiddenPin(function(pin) {
+                            if (pin) {
+                                localStorage.setItem(STORAGE_KEY_HIDDEN_PIN, pin);
+                                _setAdd(STORAGE_KEY_HIDDEN, chatId);
+                                _showToast('Chat hidden — access via 🔒 Hidden Chats');
+                                window.messagesUI?.refreshChatsList?.();
+                            }
+                        });
+                    }
+                    break;
+
+                case 'block':
+                    if (_setHas(STORAGE_KEY_BLOCKED, chatId)) {
+                        _setRemove(STORAGE_KEY_BLOCKED, chatId);
+                        _showToast('User unblocked');
+                    } else {
+                        _setAdd(STORAGE_KEY_BLOCKED, chatId);
+                        _showToast('User blocked — messages will not be delivered');
+                        // Notify backend
+                        try {
+                            const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                            const friendId = chatId.replace('pending_','');
+                            // Best-effort — fire and forget
+                            fetch('/api/friends/' + friendId + '/block', {
+                                method:'POST',
+                                headers:{ Authorization:'Bearer ' + tok, 'Content-Type':'application/json' }
+                            }).catch(function(){});
+                        } catch(_) {}
+                    }
+                    window.messagesUI?.refreshChatsList?.();
+                    break;
+
+                case 'delete':
+                    _showConfirm('Delete this chat?', function(ok) {
+                        if (!ok) return;
+                        // Remove from local store
+                        if (window.KynectaLocalStore) {
+                            window.KynectaLocalStore.deleteMessage?.(chatId).catch(()=>{});
+                        }
+                        // Remove from ChatManager
+                        if (window.ChatManager && window.ChatManager._conversations) {
+                            window.ChatManager._conversations = window.ChatManager._conversations.filter(
+                                function(c) { return String(c.id) !== String(chatId); }
+                            );
+                            if (window.ChatManager._conversationsMap) window.ChatManager._conversationsMap.delete(String(chatId));
+                            if (window.ChatManager._saveToCache) window.ChatManager._saveToCache();
+                        }
+                        // Backend delete (best-effort)
+                        try {
+                            const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                            fetch('/api/chats/' + chatId, {
+                                method:'DELETE',
+                                headers:{ Authorization:'Bearer ' + tok }
+                            }).catch(function(){});
+                        } catch(_) {}
+                        _showToast('Chat deleted');
+                        window.messagesUI?.refreshChatsList?.();
+                    });
+                    break;
+            }
+        };
+
+        // ── Pinned / Hidden tabs in sidebar ──────────────────────────────
+        window.messagesUI.getPinnedChats = function() {
+            const ids = _store(STORAGE_KEY_PINNED);
+            if (!window.ChatManager || !window.ChatManager._conversations) return [];
+            return window.ChatManager._conversations.filter(c => ids.includes(String(c.id)));
+        };
+        window.messagesUI.getHiddenChats = function() {
+            const ids = _store(STORAGE_KEY_HIDDEN);
+            if (!window.ChatManager || !window.ChatManager._conversations) return [];
+            return window.ChatManager._conversations.filter(c => ids.includes(String(c.id)));
+        };
+        window.messagesUI.isBlocked = function(chatId) { return _setHas(STORAGE_KEY_BLOCKED, String(chatId)); };
+
+        // refreshChatsList re-renders with pin/hide/block applied
+        window.messagesUI.refreshChatsList = function() {
+            if (!window.ChatManager || !window.ChatManager._conversations) return;
+            const allConvs = window.ChatManager._conversations || [];
+            const hiddenIds  = _store(STORAGE_KEY_HIDDEN);
+            const pinnedIds  = _store(STORAGE_KEY_PINNED);
+            const blockedIds = _store(STORAGE_KEY_BLOCKED);
+
+            // Filter: hidden chats go to hidden vault; blocked chats appear dimmed
+            const visible  = allConvs.filter(c => !hiddenIds.includes(String(c.id)));
+            const pinned   = visible.filter(c =>  pinnedIds.includes(String(c.id)));
+            const rest     = visible.filter(c => !pinnedIds.includes(String(c.id)));
+            const ordered  = pinned.concat(rest);
+
+            window.dispatchEvent(new CustomEvent('renderChatsList', { detail: { conversations: ordered } }));
+        };
+
+        // ── Open hidden chats vault ───────────────────────────────────────
+        window.messagesUI.openHiddenChats = function() {
+            const pin = localStorage.getItem(STORAGE_KEY_HIDDEN_PIN);
+            if (!pin) { _showToast('No hidden chats yet', false); return; }
+            window.messagesUI._showHiddenPinPrompt(function(ok) {
+                if (!ok) { _showToast('Incorrect PIN', true); return; }
+                const hiddenConvs = window.messagesUI.getHiddenChats();
+                if (hiddenConvs.length === 0) { _showToast('No hidden chats', false); return; }
+                // Show a simple modal with the hidden chats
+                _showHiddenVault(hiddenConvs);
+            });
+        };
+
+        function _showHiddenVault(convs) {
+            const existing = document.getElementById('hiddenVaultModal');
+            if (existing) existing.remove();
+            const modal = document.createElement('div');
+            modal.id = 'hiddenVaultModal';
+            modal.style.cssText = 'position:fixed;inset:0;z-index:99990;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:#0f172a;border-radius:20px;padding:20px;width:90%;max-width:360px;max-height:70vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.6);';
+            box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="color:#e5e7eb;margin:0;font-size:16px;">🔒 Hidden Chats</h3><button id="hvClose" style="background:none;border:none;color:#9ca3af;font-size:20px;cursor:pointer;">✕</button></div>';
+            convs.forEach(function(c) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;cursor:pointer;transition:background .15s;';
+                row.onmouseenter = function(){ this.style.background='rgba(255,255,255,0.06)'; };
+                row.onmouseleave = function(){ this.style.background=''; };
+                row.innerHTML = '<div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#06b6d4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;">' +
+                    (c.friendName||'?').charAt(0).toUpperCase() + '</div>' +
+                    '<div><div style="color:#e5e7eb;font-weight:600;font-size:14px;">' + (c.friendName||'Unknown') + '</div>' +
+                    '<div style="color:#64748b;font-size:12px;">' + (c.lastMessage||'No messages') + '</div></div>';
+                row.onclick = function() {
+                    modal.remove();
+                    window.messagesUI?.openChat(c);
+                };
+                box.appendChild(row);
+            });
+            modal.appendChild(box);
+            document.body.appendChild(modal);
+            document.getElementById('hvClose').onclick = function() { modal.remove(); };
+            modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        }
+
+        // ── PIN prompt helpers ────────────────────────────────────────────
+        window.messagesUI._showSetHiddenPin = function(cb) {
+            _showPinDialog('Set a 4-digit PIN to lock this chat', function(pin) {
+                if (!pin || pin.length < 4) { cb(null); return; }
+                cb(pin);
+            }, true);
+        };
+        window.messagesUI._showHiddenPinPrompt = function(cb) {
+            const saved = localStorage.getItem(STORAGE_KEY_HIDDEN_PIN);
+            _showPinDialog('Enter your PIN to unlock', function(pin) {
+                cb(pin === saved);
+            }, false);
+        };
+
+        function _showPinDialog(title, cb, isSet) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:24px 20px;width:280px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
+                '<div style="font-size:32px;margin-bottom:8px;">🔒</div>' +
+                '<div style="color:#e5e7eb;font-size:15px;font-weight:600;margin-bottom:16px;">' + title + '</div>' +
+                '<input id="pinInput" type="password" maxlength="4" inputmode="numeric" pattern="[0-9]*" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;box-sizing:border-box;" placeholder="••••">' +
+                (isSet ? '<input id="pinConfirm" type="password" maxlength="4" inputmode="numeric" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;box-sizing:border-box;margin-top:8px;" placeholder="Confirm">' : '') +
+                '<div style="display:flex;gap:8px;margin-top:16px;">' +
+                '<button id="pinCancel" style="flex:1;padding:11px;border-radius:12px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>' +
+                '<button id="pinOk" style="flex:1;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,#2563eb,#06b6d4);color:#fff;font-weight:700;cursor:pointer;">OK</button>' +
+                '</div></div>';
+            document.body.appendChild(modal);
+            const pinInput = modal.querySelector('#pinInput');
+            const pinConfirm = modal.querySelector('#pinConfirm');
+            setTimeout(function(){ pinInput && pinInput.focus(); }, 50);
+            modal.querySelector('#pinCancel').onclick = function() { modal.remove(); cb(null); };
+            modal.querySelector('#pinOk').onclick = function() {
+                const pin = pinInput ? pinInput.value : '';
+                if (isSet) {
+                    const conf = pinConfirm ? pinConfirm.value : '';
+                    if (pin.length < 4) { _showToast('PIN must be 4 digits', true); return; }
+                    if (pin !== conf) { _showToast('PINs do not match', true); return; }
+                }
+                modal.remove();
+                cb(pin);
+            };
+        }
+
+        // ── Simple toast & confirm helpers ───────────────────────────────
+        function _showToast(msg, isErr) {
+            const t = document.createElement('div');
+            t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:99999;' +
+                'background:' + (isErr ? '#ef4444' : '#1e293b') + ';color:#fff;padding:10px 20px;border-radius:30px;' +
+                'font-size:13px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,0.35);pointer-events:none;' +
+                'animation:ctxFadeIn .2s ease;max-width:280px;text-align:center;';
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(function(){ t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(function(){ t.remove(); },300); }, 2500);
+        }
+        function _showConfirm(msg, cb) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;';
+            modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:24px;width:280px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
+                '<div style="color:#e5e7eb;font-size:15px;font-weight:600;margin-bottom:20px;">' + msg + '</div>' +
+                '<div style="display:flex;gap:8px;">' +
+                '<button id="cfNo"  style="flex:1;padding:11px;border-radius:12px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>' +
+                '<button id="cfYes" style="flex:1;padding:11px;border-radius:12px;border:none;background:#ef4444;color:#fff;font-weight:700;cursor:pointer;">Delete</button>' +
+                '</div></div>';
+            document.body.appendChild(modal);
+            modal.querySelector('#cfNo').onclick  = function(){ modal.remove(); cb(false); };
+            modal.querySelector('#cfYes').onclick = function(){ modal.remove(); cb(true);  };
+        }
+
+        // ── Inject CSS keyframe ───────────────────────────────────────────
+        if (!document.getElementById('ctxMenuStyle')) {
+            const s = document.createElement('style');
+            s.id = 'ctxMenuStyle';
+            s.textContent = '@keyframes ctxFadeIn { from{opacity:0;transform:scale(.92)} to{opacity:1;transform:scale(1)} }';
+            document.head.appendChild(s);
+        }
+
+        // ── Inject "Hidden Chats" button into sidebar header if present ───
+        function _injectHiddenChatsBtn() {
+            const header = document.querySelector('.sidebar-header, .chats-header, [class*="chat-header"]');
+            if (!header || document.getElementById('hiddenChatsBtn')) return;
+            const btn = document.createElement('button');
+            btn.id = 'hiddenChatsBtn';
+            btn.title = 'Hidden Chats';
+            btn.style.cssText = 'background:none;border:none;color:#9ca3af;font-size:20px;cursor:pointer;padding:4px 6px;border-radius:8px;transition:color .15s;';
+            btn.innerHTML = '🔒';
+            btn.onmouseenter = function(){ this.style.color='#e5e7eb'; };
+            btn.onmouseleave = function(){ this.style.color='#9ca3af'; };
+            btn.onclick = function() { window.messagesUI.openHiddenChats(); };
+            header.appendChild(btn);
+        }
+        setTimeout(_injectHiddenChatsBtn, 2000);
+        document.addEventListener('kyn:activeChanged', _injectHiddenChatsBtn, { once: true });
+
+    })(); // end installChatContextMenu
+
+})(); // end main IIFE

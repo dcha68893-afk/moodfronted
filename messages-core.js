@@ -33,9 +33,19 @@
     // =============================================
     function __isValidSession(session) {
         if (!session) return false;
-        
-        if (!session.token || typeof session.token !== 'string') {
-            return false;
+        // FIX: When the parent re-sends session on navigation it may omit the token
+        // (hasToken:false) but the userId is correct and we are already authenticated.
+        // Accept sessions that have a valid userId even without a token — the token
+        // is already stored in SessionManager._session from the initial handshake.
+        const hasToken = session.token && typeof session.token === 'string';
+        const hasUserId = !!(session.userId || (session.user && (session.user.id || session.user.userId)));
+        if (!hasToken && !hasUserId) return false;
+        // If we only have userId (no token), accept it as a partial re-auth ping
+        if (!hasToken) {
+            // Must have a real userId
+            const uid = session.userId || (session.user && (session.user.id || session.user.userId));
+            if (!uid || uid === 0 || uid === '0') return false;
+            return true; // userId present — treat as valid re-auth
         }
         
         let userId = session.userId;
@@ -1927,7 +1937,15 @@ try {
                     currentUserId !== undefined &&
                     String(currentUserId) === String(sessionData?.userId || '');
 
-                if (!sameAuthenticatedUser) {
+                if (sameAuthenticatedUser) {
+                    // Already authenticated as the same user — this is a navigation re-ping.
+                    // Refresh conversations so the chat panel is always up to date.
+                    if (typeof startDataFlow === 'function') {
+                        startDataFlow();
+                    } else if (ChatManager && typeof ChatManager.fetchConversationsFromBackend === 'function') {
+                        ChatManager.fetchConversationsFromBackend().catch(() => {});
+                    }
+                } else {
                     console.warn('[ParentConnectionManager] Ignored invalid session data from parent', {
                         hasToken: !!sessionData?.token,
                         userId: sessionData?.userId,

@@ -4068,3 +4068,50 @@ input:focus + .toggle-slider,
         transform: scale(0.94);
     }
 }
+
+/* ── Long-press context menu animations ─────────────────────── */
+@keyframes ctxFadeIn {
+    from { opacity: 0; transform: scale(0.92) translateY(4px); }
+    to   { opacity: 1; transform: scale(1)    translateY(0);   }
+}
+
+/* ── Pinned chat indicator ────────────────────────────────────── */
+.chat-item[data-pinned="true"] {
+    border-left: 3px solid #2563eb !important;
+    background: rgba(37, 99, 235, 0.06) !important;
+}
+.chat-item[data-pinned="true"]::after {
+    content: '📌';
+    position: absolute;
+    right: 14px;
+    top: 12px;
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+/* ── Blocked chat dimming ─────────────────────────────────────── */
+.chat-item[data-blocked="true"] {
+    opacity: 0.45;
+    pointer-events: auto;
+}
+.chat-item[data-blocked="true"] .chat-name::after {
+    content: ' 🚫';
+    font-size: 11px;
+}
+
+/* ── Hidden chats button in sidebar ──────────────────────────── */
+#hiddenChatsBtn {
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+#hiddenChatsBtn:hover {
+    opacity: 1;
+}
+
+/* ── Hidden vault modal scrollbar ────────────────────────────── */
+#hiddenVaultModal > div::-webkit-scrollbar { width: 4px; }
+#hiddenVaultModal > div::-webkit-scrollbar-track { background: transparent; }
+#hiddenVaultModal > div::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* ── Context menu touch ripple prevention ────────────────────── */
+#chatContextMenu * { user-select: none; -webkit-user-select: none; }

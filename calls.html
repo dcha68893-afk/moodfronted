@@ -41,8 +41,7 @@
     console.warn = function(msg) {
         if (msg && msg.includes && (
             msg.includes('iframe which has both') ||
-            msg.includes('sandbox') ||
-            msg.includes('Backend settings load failed')
+            msg.includes('sandbox')
         )) {
             return;
         }
@@ -1616,6 +1615,7 @@ function _declineVideoUpgrade() {
         /* ==================== MODALS ==================== */
         .new-call-modal,
         .incoming-call-modal,
+        .unified-incoming-screen,
         .mood-selection-modal,
         .intention-selection-modal,
         .private-notes-modal,
@@ -1630,12 +1630,13 @@ function _declineVideoUpgrade() {
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 1000;
+            z-index: 10002;
             backdrop-filter: blur(5px);
         }
 
         .new-call-modal.active,
         .incoming-call-modal.active,
+        .unified-incoming-screen.active,
         .mood-selection-modal.active,
         .intention-selection-modal.active,
         .private-notes-modal.active,
@@ -5157,11 +5158,12 @@ function _declineVideoUpgrade() {
             _log('Call ended →', reason);
 
             // ✅ FIX: Do NOT call _fullReset() — it calls showScreen('idle') which causes
-            // the dark idle flash before parent navigates away. Instead: stop media tracks,
-            // remove active classes from call screens, clear state flags, then post CALL_ENDED_RETURN.
-            // A 1.2-second fallback calls showScreen('idle') only if parent hasn't navigated away.
+            // a dark flash before the parent navigates away. Instead, do direct cleanup:
 
-            // Stop media tracks directly
+            // 1. Stop ALL ringtones (covers both caller and receiver ring paths)
+            _stopRingtones();
+
+            // 2. Stop media tracks directly
             try {
                 if (window.UIState && window.UIState.localStream) {
                     window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} });
@@ -5169,17 +5171,25 @@ function _declineVideoUpgrade() {
                 }
             } catch(e) {}
 
-            // Remove active classes from call screens (hide them cleanly, no flash)
-            var _cs = document.getElementById('callingScreen');
-            var _is = document.getElementById('inCallScreen');
-            var _ic = document.getElementById('incomingCallModal');
-            if (_cs) { _cs.classList.remove('active'); }
-            if (_is) { _is.classList.remove('active'); }
-            if (_ic) { _ic.classList.remove('active'); }
+            // 3. Hide all call screens cleanly — no flash
+            var _csEl = document.getElementById('callingScreen');
+            var _isEl = document.getElementById('inCallScreen');
+            var _imEl = document.getElementById('incomingCallModal');  // receiver's ringing screen
+            if (_csEl) { _csEl.classList.remove('active'); }
+            if (_isEl) { _isEl.classList.remove('active'); }
+            if (_imEl) {
+                // Clear the ring countdown timer on receiver side
+                var _imTimer = parseInt(_imEl.dataset && _imEl.dataset.timer);
+                if (_imTimer) clearInterval(_imTimer);
+                if (_imEl.dataset) _imEl.dataset.timer = '';
+                _imEl.classList.remove('active');
+                _imEl.style.cssText = 'display:none!important';
+            }
             document.body.classList.remove('call-active', 'call-connected');
 
-            // Clear state flags
+            // 4. Clear state flags
             window.__callActive = false;
+            window._currentIncomingCallId = null;
             if (window.callsState) {
                 window.callsState.callActive = false;
                 window.callsState.callState  = 'idle';
@@ -5189,13 +5199,13 @@ function _declineVideoUpgrade() {
                 window.UIState.callState  = 'idle';
             }
 
-            // Post CALL_ENDED_RETURN — parent will navigate away and hide this iframe
+            // 5. Post CALL_ENDED_RETURN — parent will navigate away and hide iframe
             _sendToParent('CALL_ENDED_RETURN', {
                 origin: window._callOrigin || window.__pendingCallReturnTo || 'calls'
             });
 
-            // 1.2-second fallback: only show idle if parent hasn't navigated away
-            // (handles edge cases like same-page calls or parent nav failure)
+            // 6. 1.2s fallback: only show idle if parent hasn't navigated away
+            //    (handles edge cases: same-page calls, parent nav failure, receiver stayed on page)
             setTimeout(function() {
                 if (!window.__callEndedNavigating) {
                     if (typeof window.showScreen === 'function') {

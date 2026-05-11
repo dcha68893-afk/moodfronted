@@ -3825,6 +3825,10 @@ function closeViewer() {
     window.__currentViewingStatusId = null;
     window.__activeStatusId = null;
     try { document.dispatchEvent(new CustomEvent('statusViewerClosed')); } catch(_) {}
+    // Re-render sidebar so viewed statuses move to Viewed updates section
+    setTimeout(() => {
+        if (typeof renderStatusListInstantlyUI === 'function') renderStatusListInstantlyUI();
+    }, 200);
 }
 
 // =============================================
@@ -4455,7 +4459,7 @@ function renderSectionContent(sectionId) {
     }
 }
 
-function renderStatusesListUI(container, statusesList) {
+function renderStatusesListUI(container, statusesList, allViewed) {
     if (!container) return;
     let filtered = Array.isArray(statusesList) ? [...statusesList] : [];
     if (currentIntentFilter) {
@@ -4505,7 +4509,7 @@ function renderStatusesListUI(container, statusesList) {
 
     const fragment = document.createDocumentFragment();
     sortedGroups.forEach(([uid, statuses]) => {
-        const el = createGroupedStatusElement(statuses);
+        const el = createGroupedStatusElement(statuses, allViewed);
         if (el) fragment.appendChild(el);
     });
     container.innerHTML = '';
@@ -4520,44 +4524,71 @@ function renderStatusesListUI(container, statusesList) {
 }
 
 // Create one list item that represents all statuses from one user
-function createGroupedStatusElement(statuses) {
+function createGroupedStatusElement(statuses, allViewedOverride) {
     if (!statuses || !statuses.length) return null;
     const first = statuses[0];
-    const user = first.user || { displayName: 'Unknown User' };
+    const user = first.statusUser || first.user || {};
     const total = statuses.length;
-    const viewedCount = statuses.filter(s => viewedStatuses?.has(s.id)).length;
-    const allViewed = viewedCount === total;
+    const viewedCount = statuses.filter(s =>
+        viewedStatuses?.has(String(s.id)) || viewedStatuses?.has(Number(s.id))
+    ).length;
+    // allViewedOverride = entire section is "viewed updates" → force dim style
+    const fullyViewed = allViewedOverride || (viewedCount === total);
     const timeAgo = first.createdAt ? formatTimeAgo(first.createdAt) : 'Just now';
 
-    const initials = (user.displayName || 'U')
-        .split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
+    // Build display name from multiple possible fields
+    const firstName   = user.firstName || '';
+    const lastName    = user.lastName  || '';
+    const displayName = user.displayName || (firstName + ' ' + lastName).trim() || user.username || 'Unknown';
+    const initials    = displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || '?';
+    const avatarUrl   = user.photoURL || user.avatar || user.profilePicture || '';
 
     const item = document.createElement('div');
-    item.className = 'status-group-item';
-    item.dataset.userId = String(first.userId || user.id || (first.user && first.user.id) || '');
+    item.className = 'status-group-item' + (fullyViewed ? ' status-viewed' : '');
+    item.dataset.userId    = String(first.userId || first.user_id || user.id || '');
     item.dataset.statusIds = statuses.map(s => String(s.id)).join(',');
 
-    // Build segmented ring for multiple statuses
-    let ringHtml = '';
-    if (total === 1) {
-        ringHtml = `<div class="status-group-ring ${allViewed ? 'viewed' : ''}"></div>`;
-    } else {
-        // CSS conic-gradient ring divided into segments
-        const pct = Math.round((viewedCount / total) * 100);
-        ringHtml = `<div class="status-group-ring multi" style="--filled:${pct}%"></div>`;
-    }
+    // ── SVG segmented ring — each segment = one status ────────────────────
+    // Unviewed segments: #00a884 (green). Viewed segments: rgba(255,255,255,0.22) (dim white).
+    const R  = 22;   // radius
+    const CX = 26, CY = 26;
+    const STROKE = 2.4;
+    const GAP_DEG = total > 1 ? 5 : 0;
+    const CIRC = 2 * Math.PI * R;
+    const segDeg = (360 - GAP_DEG * total) / total;
+    const segArc = (segDeg / 360) * CIRC;
 
-    const avatarStyle = user.photoURL ? `style="background-image:url('${user.photoURL}')"` : '';
+    let segs = '';
+    for (let i = 0; i < total; i++) {
+        const sv = allViewedOverride ||
+            viewedStatuses?.has(String(statuses[i].id)) ||
+            viewedStatuses?.has(Number(statuses[i].id));
+        const color  = sv ? 'rgba(255,255,255,0.28)' : '#00a884';
+        const rot    = -90 + i * (segDeg + GAP_DEG);
+        const offset = -(rot / 360) * CIRC + CIRC * 0.25;
+        segs += `<circle cx="${CX}" cy="${CY}" r="${R}"
+            fill="none" stroke="${color}" stroke-width="${STROKE}"
+            stroke-dasharray="${segArc} ${CIRC - segArc}"
+            stroke-dashoffset="${offset}"
+            transform="rotate(${rot},${CX},${CY})"/>`;
+    }
+    const ringSvg = `<svg viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg"
+        style="position:absolute;inset:-4px;width:calc(100%+8px);height:calc(100%+8px);pointer-events:none;z-index:2;">${segs}</svg>`;
+
+    const avatarBg = avatarUrl
+        ? `background-image:url('${avatarUrl}');background-size:cover;background-position:center;`
+        : '';
+
     item.innerHTML = `
-        <div class="status-group-avatar">
-            ${ringHtml}
-            <div class="status-group-avatar-inner" ${avatarStyle}>
-                ${user.photoURL ? '' : `<span>${initials}</span>`}
+        <div class="status-group-avatar" style="position:relative;">
+            ${ringSvg}
+            <div class="status-group-avatar-inner" style="${avatarBg}${fullyViewed ? 'opacity:0.7;' : ''}">
+                ${avatarUrl ? '' : `<span>${initials}</span>`}
             </div>
             ${total > 1 ? `<div class="status-group-count">${total}</div>` : ''}
         </div>
-        <div class="status-group-info">
-            <div class="status-group-name">${user.displayName || 'Unknown User'}</div>
+        <div class="status-group-info" style="${fullyViewed ? 'opacity:0.65;' : ''}">
+            <div class="status-group-name">${displayName}</div>
             <div class="status-group-meta">${timeAgo}${total > 1 ? ` · ${total} updates` : ''}</div>
         </div>
     `;
@@ -6883,68 +6914,97 @@ function clearAllFilters() {
 // RENDER FUNCTIONS
 // =============================================
 function renderStatusListInstantlyUI() {
-    const container = UIElements.allStatusList;
-    if (!container) return;
+    const recentContainer = UIElements.allStatusList   || document.getElementById('allStatusList');
+    const viewedContainer = document.getElementById('viewedStatusList');
+    if (!recentContainer) return;
 
     const core = getCore();
+    const currentUserId = String(
+        (currentUser && (currentUser.id || currentUser.userId)) ||
+        (window.currentUser && (window.currentUser.id || window.currentUser.userId)) || ''
+    );
 
-    // ── Collect own statuses ──────────────────────────────────────────────
-    let ownStatuses = [];
-    if (core && core !== window && core.getStatuses && typeof core.getStatuses === 'function') {
-        ownStatuses = core.getStatuses() || [];
-    } else if (typeof statusState !== 'undefined' && Array.isArray(statusState.statuses)) {
-        ownStatuses = statusState.statuses;
-    } else {
-        ownStatuses = Array.isArray(statuses) ? statuses : [];
-    }
-
-    // ── Collect friend statuses ───────────────────────────────────────────
+    // ── Collect friend statuses only (own = My Status row at top) ────────
     let friendData = [];
-    if (core && core !== window && core.getFriendsStatuses && typeof core.getFriendsStatuses === 'function') {
+    if (core && core !== window && typeof core.getFriendsStatuses === 'function') {
         friendData = core.getFriendsStatuses() || [];
-    } else if (Array.isArray(friendsStatuses)) {
+    }
+    if (!friendData.length && Array.isArray(friendsStatuses)) {
         friendData = friendsStatuses;
     }
 
-    // ── Merge: combine own + friend statuses, deduplicating by id ────────
-    const seen = new Set();
-    const currentUserId = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
-    // Friends panel: exclude own statuses (shown in My Status row instead)
-    const friendsOnly = friendData.filter(s => {
-        const sid = String(s.id);
-        if (seen.has(sid)) return false;
-        seen.add(sid);
-        // exclude own statuses from the friends list
-        const statusOwner = String(s.userId || s.user_id || (s.user && s.user.id) || '');
-        return !currentUserId || statusOwner !== currentUserId;
+    // Deduplicate, exclude own
+    const seenIds = new Set();
+    const allFriendStatuses = friendData
+        .filter(s => {
+            if (!s || s.id == null) return false;
+            const sid = String(s.id);
+            if (seenIds.has(sid)) return false;
+            seenIds.add(sid);
+            const owner = String(s.userId || s.user_id || (s.user && s.user.id) || '');
+            return !currentUserId || owner !== currentUserId;
+        })
+        .map(s => ({ ...s, id: String(s.id) }));
+
+    // ── Split into unviewed (recent) vs viewed ────────────────────────────
+    // Group by userId — if user has ANY unviewed status, ALL their statuses go to recent
+    // If user has ONLY viewed statuses, they go to viewed section
+    const byUser = {};
+    allFriendStatuses.forEach(s => {
+        const uid = String(s.userId || s.user_id || (s.user && s.user.id) || 'unknown');
+        if (!byUser[uid]) byUser[uid] = [];
+        byUser[uid].push(s);
     });
-    ownStatuses.forEach(s => seen.add(String(s.id)));
 
-    let liveStatuses = friendsOnly;
+    const recentGroups  = []; // user has at least one unviewed status
+    const viewedGroups  = []; // user's statuses all viewed
 
-    // Normalise IDs to strings
-    liveStatuses = liveStatuses.map(s => ({ ...s, id: String(s.id) }));
-    if (Array.isArray(statuses) && statuses.length > 0) {
-        statuses = statuses.map(s => ({ ...s, id: String(s.id) }));
+    Object.values(byUser).forEach(group => {
+        const hasUnviewed = group.some(s => !viewedStatuses?.has(String(s.id)));
+        if (hasUnviewed) {
+            recentGroups.push(...group);
+        } else {
+            viewedGroups.push(...group);
+        }
+    });
+
+    // Sort by newest first
+    const byDate = (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    recentGroups.sort(byDate);
+    viewedGroups.sort(byDate);
+
+    // ── Render Recent updates ─────────────────────────────────────────────
+    const recentLabel = document.getElementById('recentUpdatesLabel');
+    if (recentGroups.length) {
+        if (recentLabel) recentLabel.style.display = '';
+        renderStatusesListUI(recentContainer, recentGroups, false);
+    } else {
+        if (recentLabel) recentLabel.style.display = 'none';
+        recentContainer.innerHTML = '';
     }
 
-    if (!liveStatuses || liveStatuses.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-comment-dots"></i>
-                <p>No recent updates</p>
-                <p class="subtext">Status updates from your contacts will appear here</p>
-                ${isAuthenticated() ? `
-                    <button class="action-btn primary" onclick="document.getElementById('createStatusBtn')?.click()">
-                        <i class="fas fa-plus"></i> Add Status
-                    </button>
-                ` : ''}
-            </div>
-        `;
-        return;
+    // ── Render Viewed updates ─────────────────────────────────────────────
+    const viewedLabel = document.getElementById('viewedUpdatesLabel');
+    if (viewedContainer) {
+        if (viewedGroups.length) {
+            if (viewedLabel) viewedLabel.style.display = '';
+            renderStatusesListUI(viewedContainer, viewedGroups, true); // true = dim/viewed style
+        } else {
+            if (viewedLabel) viewedLabel.style.display = 'none';
+            viewedContainer.innerHTML = '';
+        }
     }
 
-    renderStatusesListUI(container, liveStatuses);
+    // Show empty state if nothing at all
+    if (!recentGroups.length && !viewedGroups.length) {
+        if (recentLabel) recentLabel.style.display = 'none';
+        recentContainer.innerHTML = `
+            <div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary,#8696a0);">
+                <i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i>
+                <p style="margin:0 0 4px;font-size:14px;">No recent updates</p>
+                <p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p>
+            </div>`;
+    }
 }
 
 function updateMyStatusPreviewUI() {
