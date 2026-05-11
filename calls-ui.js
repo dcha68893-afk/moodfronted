@@ -4186,14 +4186,14 @@ handleContactItemClick: function(e) {
                     break;
                 case 'call_cancelled':
                     // ✅ FIX: Caller cancelled before receiver answered.
-                    // Stop ALL ringtone paths (MasterFix WebAudio + legacy Audio object)
+                    // Stop ALL ringtone paths (MasterFix WebAudio + legacy Audio)
                     if (typeof window._stopRingtones === 'function') window._stopRingtones();
                     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
                     if (window._incomingRingtone) {
                         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                         window._incomingRingtone = null;
                     }
-                    // Clear the ring countdown timer and hide modal
+                    // Clear ring countdown timer and hide modal
                     if (elements.incomingCallModal) {
                         const _cancelTimerId = parseInt(elements.incomingCallModal.dataset.timer);
                         if (_cancelTimerId) clearInterval(_cancelTimerId);
@@ -4203,14 +4203,11 @@ handleContactItemClick: function(e) {
                         UIState.activeModals.delete('incomingCallModal');
                     }
                     window._currentIncomingCallId = null;
-                    UIState.callState = 'idle';
-                    UIState.callActive = false;
-                    UIState.activeCallId = null;
+                    UIState.callState = 'idle'; UIState.callActive = false; UIState.activeCallId = null;
                     // ✅ FIX: Navigate receiver back to where they were before call came in
                     if (window.parent && window.parent !== window) {
                         window.__callEndedNavigating = true;
                         setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
-                        window.parent.postMessage({ type: 'SHOW_SIDEBAR_ICONS', module: 'calls' }, '*');
                         window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
                         const _cancelReturn = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
                             ? window.__callOriginReturnTo
@@ -4218,10 +4215,8 @@ handleContactItemClick: function(e) {
                                 ? window.__pendingCallReturnTo : 'messages';
                         setTimeout(function() {
                             if (window.parent && window.parent !== window) {
-                                window.parent.postMessage({
-                                    type: 'SWITCH_MODULE', module: _cancelReturn,
-                                    payload: { returnFromCall: true }, timestamp: Date.now()
-                                }, '*');
+                                window.parent.postMessage({ type: 'SWITCH_MODULE', module: _cancelReturn,
+                                    payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
                             }
                         }, 350);
                     }
@@ -4727,13 +4722,14 @@ handleContactItemClick: function(e) {
             UIState.callActive = false;
             UIState.activeCallId = incomingId;
             setCallParticipants([callerParticipant], { merge: false });
-            // ✅ FIX: Capture receiver's return destination so handleCallEnded / declineIncomingCall
-            // can navigate back after call ends or caller cancels. Only set once per call.
+            // ✅ FIX: Capture receiver's return destination the moment a call arrives.
+            // Without this, handleCallEnded / declineIncomingCall / call_cancelled have no
+            // returnTo and the receiver is never navigated back after the call ends.
             if (!window.__callOriginReturnTo || window.__callOriginReturnTo === 'calls') {
-                const _src = callData.source || callData.returnTo || null;
+                const _src = (callData && (callData.source || callData.returnTo)) || null;
                 window.__callOriginReturnTo   = (_src && _src !== 'calls') ? _src : 'messages';
                 window.__pendingCallReturnTo  = window.__callOriginReturnTo;
-                window.__callOriginChatUserId = callData.callerId || callData.userId || null;
+                window.__callOriginChatUserId = (callData && (callData.callerId || callData.userId)) || null;
                 window.__callOriginChatUserName = _callerName;
             }
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
@@ -5327,15 +5323,26 @@ handleContactItemClick: function(e) {
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             }
-            // Reset screens inside iframe to idle
+
+            // ✅ FIX: Stop ALL ringtones (MasterFix WebAudio + legacy Audio)
+            if (typeof window._stopRingtones === 'function') window._stopRingtones();
+            if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
+            if (window._incomingRingtone) {
+                try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
+                window._incomingRingtone = null;
+            }
+
+            // ✅ FIX: Hide call screens — but only if a new call hasn't already started
+            // (prevents handleCallEnded from wiping a freshly-shown callingScreen)
             const callingScreen = document.getElementById('callingScreen');
             const inCallScreen  = document.getElementById('inCallScreen');
             const idleScreen    = document.getElementById('idleScreen');
             const callContainer = document.getElementById('callContainer');
-            if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
-            if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
-            // ✅ FIX: Also teardown incomingCallModal — covers receiver side where call ends
-            // while the ringing screen is still showing (caller hung up / cancelled)
+            if (!window.__callActive) {
+                if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
+                if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
+            }
+            // ✅ FIX: Always teardown incomingCallModal (receiver side ringing screen)
             const _incomingModal = document.getElementById('incomingCallModal');
             if (_incomingModal) {
                 const _imTimer = parseInt(_incomingModal.dataset.timer);
@@ -5346,19 +5353,21 @@ handleContactItemClick: function(e) {
                 UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
             }
             window._currentIncomingCallId = null;
-            // ✅ FIX: Stop all ringtones here too (MasterFix WebAudio + legacy Audio)
-            if (typeof window._stopRingtones === 'function') window._stopRingtones();
-            if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
-            // ✅ FIX: Do NOT show callContainer or idleScreen — parent navigates away.
-            // Showing idle causes the dark flash. Parent hides the iframe via SWITCH_MODULE.
-            if (callContainer) {
-                callContainer.classList.remove('active');
-                callContainer.style.setProperty('display', 'none', 'important');
-            }
-            // Only show idleScreen if parent is NOT navigating (edge case: same-page call)
-            if (idleScreen && !window.__callEndedNavigating) {
-                idleScreen.classList.add('active');
-                idleScreen.style.setProperty('display', 'block', 'important');
+
+            // ✅ FIX: Do NOT show callContainer/idleScreen if parent is navigating away.
+            // Showing them causes the dark flash before parent hides the iframe.
+            if (!window.__callEndedNavigating && !window.__callActive) {
+                if (callContainer) {
+                    callContainer.classList.add('active');
+                    callContainer.style.setProperty('display', 'flex', 'important');
+                }
+                if (idleScreen) { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
+            } else {
+                // Just hide callContainer — don't show idle
+                if (callContainer) {
+                    callContainer.classList.remove('active');
+                    callContainer.style.setProperty('display', 'none', 'important');
+                }
             }
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
@@ -5736,7 +5745,8 @@ handleContactItemClick: function(e) {
     const participantAvatar = payload.userAvatar || window.__activePeerAvatar || pendingUser.userAvatar || null;
     const participantId = payload.receiverId || pendingUser.userId || payload.userId || null;
 
-    UIEventHandlers.handleCallInitiated({
+    // ✅ FIX: handleCallInitiated lives on CoreIntegration (this), not UIEventHandlers
+    this.handleCallInitiated({
         ...payload,
         callId: payload.callId || payload.id || UIState.activeCallId,
         callType: payload.callType || payload.type || UIState.callType || pendingUser.callType || 'voice',
@@ -8289,7 +8299,7 @@ declineIncomingCall: async function() {
         }, '*');
     }
 
-    // ✅ FIX: Stop ALL ringtone paths before navigating
+    // ✅ FIX: Stop ALL ringtones before navigating
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
 
@@ -8304,10 +8314,8 @@ declineIncomingCall: async function() {
                 ? window.__pendingCallReturnTo : 'messages';
         setTimeout(function() {
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'SWITCH_MODULE', module: _declineReturn,
-                    payload: { returnFromCall: true }, timestamp: Date.now()
-                }, '*');
+                window.parent.postMessage({ type: 'SWITCH_MODULE', module: _declineReturn,
+                    payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
             }
         }, 350);
     }

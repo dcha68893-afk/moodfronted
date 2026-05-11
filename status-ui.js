@@ -545,6 +545,9 @@ function subscribeToStatusChanges() {
         const statusId = String(e.detail?.statusId || '');
         if (!statusId) return;
         const nextCount = Number(e.detail?.viewerCount ?? e.detail?.viewCount ?? 0);
+        // Also update the VBS count if sheet is open
+        const vbsCount = document.getElementById('vbsCount');
+        if (vbsCount) vbsCount.textContent = nextCount;
         const updateItems = (items) => {
             (items || []).forEach((item) => {
                 if (String(item.id) === statusId) {
@@ -3372,23 +3375,61 @@ function _loadSlot(index, isOwner, group) {
 function _applyViewerMode(isOwner, status) {
     const footer = document.getElementById('viewerFooter');
     if (!footer) return;
+
     if (isOwner) {
         footer.classList.add('owner-mode');
         footer.classList.remove('friend-mode');
-        // Load viewers list for owner
-        _loadViewersForOwner(status);
+        // Body class hides viewer header three-dots for owner
+        document.body.classList.add('viewer-owner-mode');
+        document.body.classList.remove('viewer-friend-mode');
+        // Update seen count from status data
+        const seenEl = document.getElementById('seenCountNum');
+        if (seenEl) seenEl.textContent = status.viewCount || status.views || 0;
     } else {
         footer.classList.add('friend-mode');
         footer.classList.remove('owner-mode');
-        // Load reaction buttons for friend
-        _loadReactionsForFriend(status);
+        document.body.classList.add('viewer-friend-mode');
+        document.body.classList.remove('viewer-owner-mode');
+        // Reset emoji trigger icon to default
+        const eti = document.getElementById('emojiTriggerIcon');
+        if (eti) eti.textContent = '😊';
+        const epBtns = document.querySelectorAll('.ep-btn');
+        epBtns.forEach(b => b.classList.remove('selected'));
     }
-    // Hide pause button - hold-to-pause is used instead
+
+    // Always hide pause button (hold-to-pause is used)
     const pauseBtn = document.getElementById('pauseResumeBtn');
     if (pauseBtn) pauseBtn.style.display = 'none';
-    // Show/hide report button (only for non-owners)
-    const reportBtn = document.getElementById('reportStatusBtn');
-    if (reportBtn) reportBtn.style.display = isOwner ? 'none' : '';
+}
+
+function _loadViewersForOwner(status) {
+    // No-op here — bottom sheet handles viewer loading on demand
+    const seenEl = document.getElementById('seenCountNum');
+    if (seenEl) seenEl.textContent = status.viewCount || status.views || 0;
+}
+
+function _loadReactionsForFriend(status) {
+    // Reactions are now handled by the inline emoji picker
+    // Pre-select if user already reacted
+    if (!status || !status.id) return;
+    const eti = document.getElementById('emojiTriggerIcon');
+    if (!eti) return;
+    // Check if current user already reacted
+    const uid = String((currentUser && (currentUser.id || currentUser.userId)) || '');
+    if (uid && status.reactions) {
+        const myReaction = Object.keys(status.reactions).find(emoji =>
+            Array.isArray(status.reactions[emoji])
+                ? status.reactions[emoji].some(r => String(r.userId || r) === uid)
+                : false
+        );
+        if (myReaction) {
+            eti.textContent = myReaction;
+            const epBtns = document.querySelectorAll('.ep-btn');
+            epBtns.forEach(b => {
+                b.classList.toggle('selected', b.dataset.emoji === myReaction);
+            });
+        }
+    }
 }
 
 function _loadViewersForOwner(status) {
@@ -3824,6 +3865,7 @@ function closeViewer() {
     // Clear current status ID + dispatch close event
     window.__currentViewingStatusId = null;
     window.__activeStatusId = null;
+    document.body.classList.remove('viewer-owner-mode', 'viewer-friend-mode');
     try { document.dispatchEvent(new CustomEvent('statusViewerClosed')); } catch(_) {}
     // Re-render sidebar so viewed statuses move to Viewed updates section
     setTimeout(() => {
@@ -7460,15 +7502,26 @@ if (typeof window !== 'undefined') {
         // Real-time UI update helpers (called by StatusWebSocket handlers)
         window.updateStatusReactionUI = function(statusId, emoji, count) {
             try {
-                // If viewer is open for this status, update its reaction button
-                if (currentViewerStatus && String(currentViewerStatus.id) === String(statusId)) {
-                    const container = UIElements.getElement('reactionsContainer');
-                    if (container) {
-                        const btn = container.querySelector(`[data-reaction="${Object.keys(reactions).find(k => reactions[k] === emoji)}"]`);
-                        if (btn && count !== undefined) {
-                            btn.innerHTML = `${emoji} <span class="reaction-count">${count}</span>`;
-                        }
+                const sid = String(statusId);
+                const currentSid = String(window.__currentViewingStatusId || (currentViewerStatus && currentViewerStatus.id) || '');
+                // Update emoji trigger icon when viewing that status
+                if (sid === currentSid) {
+                    const eti = document.getElementById('emojiTriggerIcon');
+                    if (eti) eti.textContent = emoji;
+                }
+                // Update reaction badge on sidebar list item
+                const listItem = document.querySelector('.status-group-item[data-status-ids*="' + sid + '"]');
+                if (listItem) {
+                    let badges = listItem.querySelector('.status-group-badges');
+                    if (!badges) {
+                        badges = document.createElement('div');
+                        badges.className = 'status-group-badges';
+                        const info = listItem.querySelector('.status-group-info');
+                        if (info) info.appendChild(badges);
                     }
+                    let rb = badges.querySelector('.reaction-badge');
+                    if (!rb) { rb = document.createElement('span'); rb.className = 'status-badge reaction-badge'; badges.appendChild(rb); }
+                    rb.textContent = emoji + (count > 1 ? ' ' + count : '');
                 }
             } catch (_) {}
         };

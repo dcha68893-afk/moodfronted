@@ -1612,24 +1612,18 @@ export function setupLiveUpdates() {
         if (typeof updateGroupCounts === 'function') updateGroupCounts();
     });
 
-    // When a member joins/leaves any group — update member count on card
+    // Live member count update when someone joins
     window.addEventListener('kyn:memberJoined', (e) => {
         const { groupId, newCount } = e.detail || {};
         if (!groupId) return;
-        // Update count badge on any visible card for this group
-        const cards = document.querySelectorAll('[data-group-id="' + groupId + '"]');
-        cards.forEach(card => {
-            const countEl = card.querySelector('.member-count, [data-member-count]');
-            if (countEl && newCount != null) countEl.textContent = newCount;
+        document.querySelectorAll('[data-group-id="' + groupId + '"]').forEach(card => {
+            const el = card.querySelector('.member-count, [data-member-count]');
+            if (el && newCount != null) el.textContent = newCount;
         });
-        // Also update GroupCore in-memory
         const GC = window.GroupCore;
         if (GC && GC.groups) {
             const g = GC.groups.find(x => String(x.id) === String(groupId));
-            if (g) {
-                g.memberCount = newCount;
-                if (g.stats) g.stats.totalMembers = newCount;
-            }
+            if (g) { g.memberCount = newCount; if (g.stats) g.stats.totalMembers = newCount; }
         }
     });
 
@@ -2062,13 +2056,15 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         const name = sanitizeInput(groupData.name || groupData.title || 'Unnamed Group');
         const description = sanitizeInput(groupData.description || groupData.subtitle || '');
         const avatar = validateURL(groupData.avatar) || groupData.avatar || null;
-        const memberCount = Math.max(0,
+        const memberCount = Math.max(
+            // creator is always inside the group — minimum 1
+            (typeof groupData.createdBy !== 'undefined' ? 1 : 0),
             parseInt(groupData.memberCount) ||
             parseInt(groupData.member_count) ||
             parseInt(groupData.stats && groupData.stats.totalMembers) ||
             parseInt(groupData.stats && groupData.stats.memberCount) ||
             parseInt(groupData._count && groupData._count.members) ||
-            0
+            parseInt(groupData.membersCount) || 0
         );
         const privacy = sanitizeInput(groupData.privacy || groupData.type || 'private');
         const purpose = sanitizeInput(groupData.purpose || 'social');
@@ -2137,15 +2133,13 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
                 </button>
             `;
         } else {
+            /* Open button on EVERY group card */
             html += `
-                <button class="group-action-btn chat" data-action="open-chat" title="Open Chat" aria-label="Open Chat">
-                    <i class="fas fa-comments"></i>
-                </button>
-                <button class="group-action-btn" data-action="info" title="Group Info" aria-label="Group Info">
-                    <i class="fas fa-info-circle"></i>
+                <button class="group-action-btn chat" data-action="open-chat" title="Open Group Chat" aria-label="Open Chat"
+                    style="background:var(--primary-color,#0084ff);color:#fff;border-radius:8px;padding:6px 12px;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;border:none;cursor:pointer;">
+                    <i class="fas fa-door-open"></i> Open
                 </button>
             `;
-            
             if (safeType === 'my_group' || safeType === 'admin') {
                 html += `
                     <button class="group-action-btn" data-action="manage" title="Manage Group" aria-label="Manage Group">
@@ -2153,7 +2147,6 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
                     </button>
                 `;
             }
-            
             if (safeType === 'joined') {
                 html += `
                     <button class="group-action-btn danger" data-action="leave" title="Leave Group" aria-label="Leave Group">
@@ -2167,20 +2160,23 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         
         groupItem.innerHTML = html;
         
+        /* Clicking the card body opens the group chat panel directly */
         registerUIEventListener(groupItem, 'click', (e) => {
-            if (!e.target.closest('.group-actions')) {
-                if (typeof showGroupDetails === 'function') {
-                    showGroupDetails(groupData, safeType);
-                }
+            if (e.target.closest('.group-actions')) return;
+            // Open the group panel (runtime patch's openPanel or core's openGroupChat)
+            const openFn = window.__gcOpenPanel || window.openGroupChat;
+            if (typeof openFn === 'function') {
+                openFn(groupData);
+            } else if (typeof showGroupDetails === 'function') {
+                showGroupDetails(groupData, safeType);
             }
         });
-        
         registerUIEventListener(groupItem, 'keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                if (typeof showGroupDetails === 'function') {
-                    showGroupDetails(groupData, safeType);
-                }
+                const openFn = window.__gcOpenPanel || window.openGroupChat;
+                if (typeof openFn === 'function') openFn(groupData);
+                else if (typeof showGroupDetails === 'function') showGroupDetails(groupData, safeType);
             }
         });
         
@@ -2189,6 +2185,11 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
             registerUIEventListener(btn, 'click', (e) => {
                 e.stopPropagation();
                 const action = btn.dataset.action;
+                if (action === 'open-chat') {
+                    // Prefer the runtime patch openPanel over core's openGroupChat
+                    const openFn = window.__gcOpenPanel || window.openGroupChat;
+                    if (typeof openFn === 'function') { openFn(groupData); return; }
+                }
                 if (typeof handleGroupAction === 'function') {
                     handleGroupAction(action, groupData, safeType, btn);
                 }
@@ -2215,34 +2216,26 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
     function() {
         const allGroupsList = safeGetElement('#allGroupsList');
         if (!allGroupsList) return;
+        
         allGroupsList.innerHTML = '';
+        
         const _gcR = window.GroupCore;
-        // Combine all arrays to show everything user is part of (deduped by id)
-        const _seen = new Set();
+        const _seenAll = new Set();
         const _liveAll = [
             ...(_gcR && _gcR.groups       || []),
             ...(_gcR && _gcR.myGroups     || []),
             ...(_gcR && _gcR.joinedGroups  || []),
         ].filter(g => {
             if (!g || !g.id) return false;
-            if (_seen.has(String(g.id))) return false;
-            _seen.add(String(g.id));
-            return true;
+            if (_seenAll.has(String(g.id))) return false;
+            _seenAll.add(String(g.id)); return true;
         });
         if (!_liveAll.length) {
-            // No cache — fetch from server and re-render
             if (_gcR && typeof _gcR.requestGroupList === 'function') {
                 allGroupsList.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading groups…</p></div>';
-                _gcR.requestGroupList().then(() => {
-                    _hydrateFromStore();
-                    renderAllGroupsSecure();
-                }).catch(() => {
-                    allGroupsList.innerHTML = '';
-                    allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
-                });
-            } else {
-                allGroupsList.appendChild(createSecureEmptyStateElement('groups'));
-            }
+                _gcR.requestGroupList().then(() => { _hydrateFromStore(); renderAllGroupsSecure(); })
+                    .catch(() => { allGroupsList.innerHTML = ''; allGroupsList.appendChild(createSecureEmptyStateElement('groups')); });
+            } else { allGroupsList.appendChild(createSecureEmptyStateElement('groups')); }
             return;
         }
         const fragment=document.createDocumentFragment();
@@ -2290,29 +2283,9 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
         
         myGroupsList.innerHTML = '';
         
-        const _gcMy = window.GroupCore;
-        const _myUid = String((_gcMy && _gcMy.currentUser && (_gcMy.currentUser.id || _gcMy.currentUser.uid)) || '');
-        // myGroups = explicitly tagged, OR groups created by me derived from groups array
-        let _liveMy = (_gcMy && _gcMy.myGroups && _gcMy.myGroups.length > 0)
-            ? _gcMy.myGroups
-            : (_myUid && _gcMy && _gcMy.groups)
-                ? _gcMy.groups.filter(g => String(g.createdBy) === _myUid || g.role === 'owner' || g.isCreator === true)
-                : (typeof myGroups !== 'undefined' ? (myGroups || []) : []);
-        if (!_liveMy.length) {
-            if (_gcMy && typeof _gcMy.requestGroupList === 'function') {
-                myGroupsList.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading your groups…</p></div>';
-                _gcMy.requestGroupList().then(() => {
-                    _hydrateFromStore();
-                    renderMyGroupsSecure();
-                }).catch(() => {
-                    myGroupsList.innerHTML = '';
-                    myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));
-                });
-            } else {
-                myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));
-            }
-            return;
-        }
+        const _gcMy=window.GroupCore;
+        const _liveMy=(_gcMy&&_gcMy.myGroups&&_gcMy.myGroups.length>0)?_gcMy.myGroups:(myGroups||[]);
+        if(!_liveMy.length){myGroupsList.appendChild(createSecureEmptyStateElement('myGroups'));return;}
         const fragment=document.createDocumentFragment();
         _liveMy.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2344,32 +2317,9 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
         
         joinedList.innerHTML = '';
         
-        const _gcJn = window.GroupCore;
-        const _jnUid = String((_gcJn && _gcJn.currentUser && (_gcJn.currentUser.id || _gcJn.currentUser.uid)) || '');
-        // joinedGroups = explicitly tagged, OR groups where I'm a member but not the creator
-        let _liveJn = (_gcJn && _gcJn.joinedGroups && _gcJn.joinedGroups.length > 0)
-            ? _gcJn.joinedGroups
-            : (_jnUid && _gcJn && _gcJn.groups)
-                ? _gcJn.groups.filter(g => {
-                    const isCreator = String(g.createdBy) === _jnUid || g.role === 'owner' || g.isCreator === true;
-                    return !isCreator;
-                  })
-                : (typeof joinedGroups !== 'undefined' ? (joinedGroups || []) : []);
-        if (!_liveJn.length) {
-            if (_gcJn && typeof _gcJn.requestGroupList === 'function') {
-                joinedList.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading joined groups…</p></div>';
-                _gcJn.requestGroupList().then(() => {
-                    _hydrateFromStore();
-                    renderJoinedGroupsSecure();
-                }).catch(() => {
-                    joinedList.innerHTML = '';
-                    joinedList.appendChild(createSecureEmptyStateElement('joined'));
-                });
-            } else {
-                joinedList.appendChild(createSecureEmptyStateElement('joined'));
-            }
-            return;
-        }
+        const _gcJn=window.GroupCore;
+        const _liveJn=(_gcJn&&_gcJn.joinedGroups&&_gcJn.joinedGroups.length>0)?_gcJn.joinedGroups:(joinedGroups||[]);
+        if(!_liveJn.length){joinedList.appendChild(createSecureEmptyStateElement('joined'));return;}
         const fragment=document.createDocumentFragment();
         _liveJn.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
@@ -2399,7 +2349,6 @@ export const renderGroupInvitesSecure = createUIErrorBoundary('renderGroupInvite
         const invitesList = safeGetElement('#invitesList');
         if (!invitesList) return;
         
-        // Always fetch fresh invitations from server — local cache is unreliable for invites
         _fetchInvites();
     }
 );
@@ -2650,16 +2599,13 @@ function _hydrateFromStore() {
         const storeAdmin  = store.get('groups.adminGroups') || [];
         const storeInvites= store.get('groups.invites')     || [];
 
-        // Always overwrite GroupCore arrays when store has data
-        // (the old "only if empty" guard prevented tabs from ever showing data)
-        if (GroupCore) {
-            if (storeGroups.length > 0) {
-                GroupCore.groups       = storeGroups;
-                GroupCore.myGroups     = storeMy.length > 0 ? storeMy : GroupCore.myGroups;
-                GroupCore.joinedGroups = storeJoined.length > 0 ? storeJoined : GroupCore.joinedGroups;
-                GroupCore.adminGroups  = storeAdmin.length > 0 ? storeAdmin : GroupCore.adminGroups;
-                GroupCore.groupInvites = storeInvites.length > 0 ? storeInvites : GroupCore.groupInvites;
-            }
+        // Always overwrite GroupCore when store has fresher data
+        if (GroupCore && storeGroups.length > 0) {
+            GroupCore.groups       = storeGroups;
+            GroupCore.myGroups     = storeMy.length   > 0 ? storeMy    : GroupCore.myGroups;
+            GroupCore.joinedGroups = storeJoined.length > 0 ? storeJoined : GroupCore.joinedGroups;
+            GroupCore.adminGroups  = storeAdmin.length  > 0 ? storeAdmin  : GroupCore.adminGroups;
+            GroupCore.groupInvites = storeInvites.length > 0 ? storeInvites : GroupCore.groupInvites;
         }
     } catch (e) { /* silent */ }
 }
@@ -2740,77 +2686,53 @@ function _hideOfflineBanner() {
  * KynectaStore pushes updated data into GroupCore arrays).
  */
 /**
- * _fetchTabData(section)
- * Fetches fresh data from the server for the given tab section and re-renders.
- * Called every time a tab is clicked — gives instant cache + background refresh.
+ * _fetchTabData — fetch fresh server data per tab and re-render
  */
 async function _fetchTabData(section) {
     if (!navigator.onLine) return;
     const GC = window.GroupCore;
     if (!GC) return;
-
     try {
-        // Special handling for invites tab — uses a different endpoint
-        if (section === 'invitesSection') {
-            _fetchInvites();
-            return;
-        }
-
-        // All other tabs: requestGroupList populates all arrays at once
+        if (section === 'invitesSection') { _fetchInvites(); return; }
         if (typeof GC.requestGroupList === 'function') {
             const result = await GC.requestGroupList();
             if (result && result.success) {
-                // After server data lands, re-render the active section
                 _hydrateFromStore();
                 _rerenderActiveSection();
                 if (typeof updateGroupCounts === 'function') updateGroupCounts();
             }
         }
-    } catch (e) { /* silent */ }
+    } catch(e) {}
 }
 
 /**
- * _fetchInvites()
- * Fetches pending invitations from the server and renders them.
+ * _fetchInvites — fetch pending invitations and render cards
  */
 async function _fetchInvites() {
-    const listEl = document.getElementById('invitesList');
+    const listEl = document.getElementById('invitesList') || document.getElementById('inviteBody');
     if (!listEl) return;
-
     listEl.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading invites…</p></div>';
-
     try {
         const tok = (window.KynectaStore && window.KynectaStore.get && window.KynectaStore.get('auth.token')) ||
                     localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const BASE = (window.__API_BASE) || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
-
-        // Received invites
         const res = await fetch(BASE + '/group-members/invitations?status=pending', {
             headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
         });
         const data = await res.json();
         const invites = (data.data && Array.isArray(data.data)) ? data.data :
-                        (data.data && data.data.invitations) || data.invitations || data.data || [];
-
+                        (data.data && data.data.invitations) || data.invitations || [];
         listEl.innerHTML = '';
-
         if (!invites.length) {
             listEl.innerHTML = '<div class="empty-state"><i class="fas fa-envelope-open" style="font-size:32px;opacity:.3"></i><p style="margin-top:10px">No pending invitations</p></div>';
             return;
         }
-
-        // Update badge
-        const badge = document.getElementById('invitesCount');
+        const badge = document.getElementById('invitesCount') || document.getElementById('invitesSectionCount');
         if (badge) badge.textContent = invites.length;
-        const sectionCount = document.getElementById('invitesSectionCount');
-        if (sectionCount) sectionCount.textContent = invites.length;
-
-        // Render invite cards
         invites.forEach(inv => {
-            const gname  = (inv.group && inv.group.name) || inv.groupName || 'Group';
-            const gavatar= (inv.group && inv.group.name || 'G').split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
-            const inviter= (inv.inviter && (inv.inviter.displayName || inv.inviter.firstName || inv.inviter.username)) ||
-                           inv.inviterName || 'Someone';
+            const gname   = (inv.group && inv.group.name) || inv.groupName || 'Group';
+            const gavatar = (gname).split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+            const inviter = (inv.inviter && (inv.inviter.displayName || inv.inviter.firstName || inv.inviter.username)) || inv.inviterName || 'Someone';
             const card = document.createElement('div');
             card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:12px;margin-bottom:10px;';
             card.innerHTML =
@@ -2823,43 +2745,33 @@ async function _fetchInvites() {
                   '<button class="inv-accept" data-id="' + inv.id + '" style="padding:7px 14px;border-radius:20px;background:var(--primary-color,#0084ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600;">Accept</button>' +
                   '<button class="inv-reject" data-id="' + inv.id + '" style="padding:7px 14px;border-radius:20px;background:rgba(128,128,128,.15);color:var(--text-secondary);border:none;cursor:pointer;font-size:13px;">Decline</button>' +
                 '</div>';
-
             card.querySelector('.inv-accept').addEventListener('click', async function() {
                 const btn = this; btn.disabled = true; btn.textContent = '…';
                 try {
                     const r2 = await fetch(BASE + '/group-members/invitations/' + btn.dataset.id + '/accept', {
-                        method: 'POST',
-                        headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
+                        method: 'POST', headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
                     });
                     const d2 = await r2.json();
                     if (d2.success !== false) {
                         card.remove();
                         if (typeof showNotification === 'function') showNotification('Invitation accepted!', 'success');
-                        // Refresh groups list so joined tab updates
                         const GC2 = window.GroupCore;
                         if (GC2 && typeof GC2.requestGroupList === 'function') GC2.requestGroupList().catch(() => {});
-                    } else {
-                        btn.disabled = false; btn.textContent = 'Accept';
-                        if (typeof showNotification === 'function') showNotification(d2.message || 'Failed', 'error');
-                    }
+                    } else { btn.disabled = false; btn.textContent = 'Accept'; if (typeof showNotification === 'function') showNotification(d2.message || 'Failed', 'error'); }
                 } catch(e) { btn.disabled = false; btn.textContent = 'Accept'; }
             });
-
             card.querySelector('.inv-reject').addEventListener('click', async function() {
                 const btn = this; btn.disabled = true; btn.textContent = '…';
                 try {
                     await fetch(BASE + '/group-members/invitations/' + btn.dataset.id + '/reject', {
-                        method: 'POST',
-                        headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
+                        method: 'POST', headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
                     });
                     card.remove();
                     if (typeof showNotification === 'function') showNotification('Invitation declined', 'info');
                 } catch(e) { btn.disabled = false; btn.textContent = 'Decline'; }
             });
-
             listEl.appendChild(card);
         });
-
     } catch(e) {
         listEl.innerHTML = '<div class="empty-state"><i class="fas fa-exclamation-circle" style="opacity:.4"></i><p>Could not load invitations</p></div>';
     }
@@ -3225,12 +3137,9 @@ export function setupCategoryTabs() {
         
         if (tabElement && sectionElement) {
             registerUIEventListener(tabElement, 'click', () => {
-                // ① Set active section and render immediately from whatever is in GroupCore
                 setActiveSection(section);
                 _hydrateFromStore();
                 _rerenderActiveSection();
-
-                // ② Fetch fresh data from server for this specific tab
                 _fetchTabData(section);
             });
         }

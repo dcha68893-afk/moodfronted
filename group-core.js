@@ -1347,11 +1347,6 @@ handleSettingsChange(message) {
                         }
                         GroupCore.saveGroups();
                         GroupCore.emit('group:member-added', { groupId, member });
-                        // Dispatch kyn:memberJoined so group-ui cards update immediately
-                        const _newCount = group ? (group.memberCount || (group.members && group.members.length) || 0) : 0;
-                        window.dispatchEvent(new CustomEvent('kyn:memberJoined', {
-                            detail: { groupId, member, newCount: _newCount }
-                        }));
                         // Refresh UI immediately
                         if (LifecycleState.isActive()) {
                             if (typeof updateGroupCounts === 'function') updateGroupCounts();
@@ -2266,18 +2261,29 @@ const GroupCore = {
                 if (existingIndex >= 0) {
                     // Merge - server data wins but preserve local-only fields
                     const existing = this.groups[existingIndex];
+                    const mcUpd = parseInt(serverGroup.memberCount) ||
+                                    parseInt(serverGroup.member_count) ||
+                                    parseInt(serverGroup.stats && serverGroup.stats.totalMembers) ||
+                                    parseInt(serverGroup._count && serverGroup._count.members) ||
+                                    parseInt(existing.memberCount) || 0;
                     this.groups[existingIndex] = {
                         ...serverGroup,
+                        // Creator is always a member — ensure at least 1
+                        memberCount: Math.max(mcUpd, serverGroup.isCreator ? 1 : mcUpd),
                         syncState: 'synced',
                         isLocalOnly: false,
-                        // Preserve local cache metadata
                         cachedAt: existing.cachedAt,
                         localMessages: existing.localMessages || []
                     };
                 } else {
-                    // New group from server
+                    // New group from server — normalise memberCount
+                    const mc = parseInt(serverGroup.memberCount) ||
+                                parseInt(serverGroup.member_count) ||
+                                parseInt(serverGroup.stats && serverGroup.stats.totalMembers) ||
+                                parseInt(serverGroup._count && serverGroup._count.members) || 0;
                     this.groups.push({
                         ...serverGroup,
+                        memberCount: Math.max(mc, serverGroup.isCreator ? 1 : mc),
                         syncState: 'synced',
                         isLocalOnly: false
                     });
@@ -2772,7 +2778,34 @@ const GroupCore = {
             if (response && response.success) {
                 this.emit('group:join-request-sent', { groupId });
                 debugLog('Join request sent');
-                return { success: true };
+                // Add the group to joinedGroups immediately so Joined tab updates
+                const joinedGrp = (response.data && (response.data.group || response.data)) || null;
+                if (joinedGrp && joinedGrp.id) {
+                    if (!this.groups.some(g => String(g.id) === String(joinedGrp.id))) {
+                        this.groups.push(joinedGrp);
+                    }
+                    if (!this.joinedGroups.some(g => String(g.id) === String(joinedGrp.id))) {
+                        this.joinedGroups.push(joinedGrp);
+                    }
+                    // Increment memberCount on the group object
+                    const gInList = this.groups.find(g => String(g.id) === String(joinedGrp.id));
+                    if (gInList) {
+                        gInList.memberCount = (gInList.memberCount || 0) + 1;
+                        if (gInList.stats) gInList.stats.totalMembers = gInList.memberCount;
+                    }
+                    this.saveGroups();
+                    // Dispatch live count update so cards refresh instantly
+                    window.dispatchEvent(new CustomEvent('kyn:memberJoined', {
+                        detail: { groupId, member: this.currentUser, newCount: gInList && gInList.memberCount }
+                    }));
+                    this.emit('groups:list-updated', {
+                        groups: this.groups, myGroups: this.myGroups,
+                        joinedGroups: this.joinedGroups, adminGroups: this.adminGroups, fromServer: false
+                    });
+                }
+                // Re-fetch fresh list in background to get accurate count from server
+                setTimeout(() => { this.requestGroupList().catch(() => {}); }, 1200);
+                return { success: true, data: joinedGrp };
             }
             return { success: false, error: 'Invalid response' };
         } catch (error) {

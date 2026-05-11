@@ -2315,6 +2315,171 @@
     })();
     </script>
 
+
+<style id="wa-viewer-overrides">
+/* ── Viewer header three-dots dropdown ─────────────────────── */
+.vmd-item {
+    display:flex; align-items:center; gap:10px;
+    width:100%; padding:12px 16px;
+    background:none; border:none;
+    color:#e9edef; font-size:14px; text-align:left; cursor:pointer;
+    transition:background .15s;
+}
+.vmd-item:hover { background:rgba(255,255,255,0.08); }
+.vmd-item i { width:16px; color:rgba(255,255,255,0.5); font-size:13px; }
+
+/* ── Friend footer bar ─────────────────────────────────────── */
+.friend-footer-bar {
+    display:flex; align-items:center; gap:8px;
+    padding:8px 12px; width:100%;
+}
+.reply-input-wrap {
+    flex:1; display:flex; align-items:center; gap:6px;
+    background:rgba(255,255,255,0.1); border-radius:24px;
+    padding:6px 12px;
+}
+.reply-input-wrap .reply-input {
+    flex:1; background:none; border:none; outline:none;
+    color:#fff; font-size:14px;
+}
+.reply-input-wrap .reply-input::placeholder { color:rgba(255,255,255,0.45); }
+.send-reply-btn {
+    background:none; border:none; color:#00a884;
+    font-size:18px; cursor:pointer; padding:0; line-height:1;
+}
+
+/* ── Emoji trigger button ──────────────────────────────────── */
+.emoji-trigger-wrap { flex-shrink:0; }
+.emoji-trigger-btn {
+    width:40px; height:40px; border-radius:50%;
+    background:rgba(255,255,255,0.12); border:none;
+    font-size:20px; display:flex; align-items:center;
+    justify-content:center; cursor:pointer;
+    transition:background .15s;
+}
+.emoji-trigger-btn:hover { background:rgba(255,255,255,0.2); }
+/* Pop-up row of 5 emojis */
+.emoji-picker-pop {
+    position:absolute;
+    bottom:52px; right:0;
+    background:rgba(20,20,20,0.96);
+    border-radius:30px; padding:8px 10px;
+    display:flex; gap:6px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.55);
+    z-index:100;
+    animation:ep-pop .18s ease;
+}
+@keyframes ep-pop {
+    from { opacity:0; transform:scale(0.7) translateY(8px); }
+    to   { opacity:1; transform:scale(1)   translateY(0);   }
+}
+.ep-btn {
+    background:none; border:none; font-size:24px;
+    cursor:pointer; padding:2px 4px; border-radius:50%;
+    transition:transform .12s;
+}
+.ep-btn:hover { transform:scale(1.35); }
+.ep-btn.selected { background:rgba(0,168,132,0.25); }
+
+/* ── Owner seen count pill ─────────────────────────────────── */
+.viewer-seen-count {
+    display:inline-flex; align-items:center; gap:5px;
+    cursor:pointer; padding:5px 12px; border-radius:20px;
+    background:rgba(255,255,255,0.12); color:#fff;
+    font-size:14px; font-weight:500;
+    transition:background .15s; user-select:none;
+}
+.viewer-seen-count:hover { background:rgba(255,255,255,0.2); }
+
+/* ── Viewers Bottom Sheet ──────────────────────────────────── */
+.viewers-bottom-sheet {
+    position:fixed; inset:0; z-index:10001;
+}
+.vbs-backdrop {
+    position:absolute; inset:0;
+    background:rgba(0,0,0,0.5);
+}
+.vbs-panel {
+    position:absolute; bottom:0; left:0; right:0;
+    background:#111b21;
+    border-radius:16px 16px 0 0;
+    max-height:85vh; display:flex; flex-direction:column;
+    animation:vbs-up .25s ease;
+}
+@keyframes vbs-up {
+    from { transform:translateY(100%); }
+    to   { transform:translateY(0); }
+}
+.vbs-drag-handle {
+    width:40px; height:4px; border-radius:2px;
+    background:rgba(255,255,255,0.2);
+    margin:10px auto 0;
+}
+.vbs-header { padding:8px 14px 10px; border-bottom:1px solid rgba(255,255,255,0.07); }
+.vbs-title-row {
+    display:flex; align-items:center;
+    justify-content:space-between; margin-top:8px;
+}
+.vbs-title { font-size:15px; color:#e9edef; font-weight:500; }
+.vbs-header-actions { display:flex; align-items:center; gap:4px; }
+.vbs-icon-btn {
+    width:36px; height:36px; border-radius:50%;
+    background:none; border:none; color:#e9edef;
+    font-size:18px; display:flex; align-items:center;
+    justify-content:center; cursor:pointer;
+    transition:background .15s;
+}
+.vbs-icon-btn:hover { background:rgba(255,255,255,0.1); }
+.vbs-icon-btn.vbs-close-btn { color:rgba(255,255,255,0.5); font-size:16px; }
+/* Share platform icon colors */
+#vbsShareFb { color:#1877f2; }
+#vbsShareTw { color:#1da1f2; }
+#vbsShareWa { color:#25d366; }
+
+.vbs-list { flex:1; overflow-y:auto; padding:6px 0 20px; }
+.vbs-loading { padding:20px; text-align:center; color:rgba(255,255,255,0.4); font-size:13px; }
+
+/* Viewer row */
+.vbs-row {
+    display:flex; align-items:center; gap:12px;
+    padding:10px 16px;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+    transition:background .12s;
+}
+.vbs-row:hover { background:rgba(255,255,255,0.04); }
+.vbs-avatar {
+    width:44px; height:44px; border-radius:50%;
+    background:rgba(255,255,255,0.1);
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px; font-weight:600; color:#fff; flex-shrink:0;
+    overflow:hidden; background-size:cover; background-position:center;
+}
+.vbs-row-info { flex:1; min-width:0; }
+.vbs-row-name { font-size:14px; font-weight:500; color:#e9edef; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vbs-row-time { font-size:12px; color:rgba(255,255,255,0.45); margin-top:1px; }
+.vbs-row-reaction { font-size:18px; margin-right:4px; }
+.vbs-row-actions { display:flex; gap:2px; flex-shrink:0; }
+.vbs-row-btn {
+    width:34px; height:34px; border-radius:50%;
+    background:none; border:none; color:rgba(255,255,255,0.5);
+    font-size:16px; display:flex; align-items:center;
+    justify-content:center; cursor:pointer;
+    transition:background .12s, color .12s;
+}
+.vbs-row-btn:hover { background:rgba(255,255,255,0.1); color:#fff; }
+
+/* ── owner-mode / friend-mode visibility ───────────────────── */
+.viewer-footer.owner-mode  .friend-footer-bar   { display:none !important; }
+.viewer-footer.friend-mode .owner-controls      { display:none !important; }
+.viewer-footer.friend-mode .viewers-bottom-sheet{ display:none !important; }
+.viewer-footer:not(.owner-mode):not(.friend-mode) .friend-footer-bar { display:none !important; }
+.viewer-footer:not(.owner-mode):not(.friend-mode) .owner-controls    { display:none !important; }
+
+/* Hide three-dots in viewer header when owner (owner has bottom sheet) */
+body.viewer-owner-mode #viewerControls  { display:none !important; }
+body.viewer-friend-mode #viewerControls { display:flex !important; }
+</style>
+
 </head>
 <body>
     <!-- Navigation Guard Indicator (hidden by default) -->
@@ -3117,21 +3282,19 @@
                     <i class="fas fa-arrow-left"></i>
                 </button>
                 <div class="viewer-user-info" id="viewerUserInfo">
-                    <!-- User info will be loaded here -->
+                    <!-- Populated by loadViewerContent -->
                 </div>
-                <div class="viewer-controls">
-                    <button class="viewer-control-btn" id="muteUserBtn" title="Mute User">
-                        <i class="fas fa-volume-mute"></i>
+                <!-- Three-dots menu (only for friends, hidden for owner) -->
+                <div class="viewer-controls" id="viewerControls" style="position:relative;">
+                    <button class="viewer-control-btn" id="viewerMoreBtn" title="More options">
+                        <i class="fas fa-ellipsis-v"></i>
                     </button>
-                    <button class="viewer-control-btn" id="shareStatusBtn" title="Share">
-                        <i class="fas fa-share"></i>
-                    </button>
-                    <button class="viewer-control-btn" id="saveStatusBtn" title="Save to Highlights">
-                        <i class="fas fa-bookmark"></i>
-                    </button>
-                    <button class="viewer-control-btn" id="reportStatusBtn" title="Report">
-                        <i class="fas fa-flag"></i>
-                    </button>
+                    <!-- Dropdown -->
+                    <div id="viewerMoreDropdown" style="display:none;position:absolute;top:40px;right:0;min-width:170px;background:rgba(20,20,20,0.97);border-radius:10px;z-index:999;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+                        <button class="vmd-item" id="muteUserBtn"><i class="fas fa-volume-mute"></i> Mute</button>
+                        <button class="vmd-item" id="saveStatusBtn"><i class="fas fa-bookmark"></i> Save</button>
+                        <button class="vmd-item" id="reportStatusBtn"><i class="fas fa-flag"></i> Report</button>
+                    </div>
                 </div>
             </div>
             
@@ -3156,44 +3319,88 @@
             <div class="viewer-footer" id="viewerFooter">
                 <!-- Owner controls — shown only to status creator -->
                 <div class="owner-controls" id="ownerControls">
-                    <!-- Seen count pill — tap to reveal who viewed -->
-                    <div class="viewer-seen-count" id="viewerSeenCount" title="Tap to see who viewed" style="cursor:pointer;">
-                        <i class="fas fa-eye" style="font-size:13px;"></i>
+                    <!-- 👁 N views pill — tap to open viewers bottom-sheet -->
+                    <div class="viewer-seen-count" id="viewerSeenCount" title="Tap to see who viewed">
+                        <i class="fas fa-eye"></i>
                         <span id="seenCountNum">0</span>
-                        <i class="fas fa-chevron-up" id="viewersChevron" style="font-size:9px;opacity:0.6;transition:transform 0.2s;"></i>
                     </div>
-                    <!-- Viewers list — hidden by default, shown on count tap -->
-                    <div id="viewersPanelInline" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:rgba(0,0,0,0.92);border-top:1px solid rgba(255,255,255,0.1);max-height:260px;overflow-y:auto;z-index:10;border-radius:12px 12px 0 0;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px 4px;">
-                            <span style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.5px;">Viewed by</span>
-                            <button id="closeViewersList" style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:18px;cursor:pointer;line-height:1;">&times;</button>
-                        </div>
-                        <div id="viewersListInline" style="padding:0 8px 10px;">
-                            <div style="padding:12px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px;">Loading…</div>
-                        </div>
-                    </div>
-                    <!-- Edit/Delete — hidden until hold -->
+                    <!-- Edit/Delete revealed on hold -->
                     <div class="owner-action-btns" id="ownerActionBtns" style="display:none;">
-                        <button id="editStatusBtn" title="Edit Status"><i class="fas fa-edit"></i></button>
-                        <button id="deleteStatusBtn" class="delete-btn" title="Delete Status"><i class="fas fa-trash"></i></button>
+                        <button id="editStatusBtn" title="Edit"><i class="fas fa-edit"></i></button>
+                        <button id="deleteStatusBtn" class="delete-btn" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
-                    <div class="hold-hint" id="holdHint" style="display:none;font-size:11px;opacity:0.55;text-align:center;padding:3px 0;">
-                        Hold to edit or delete
+                    <div class="hold-hint" id="holdHint" style="display:none;">Hold to edit or delete</div>
+                </div>
+
+                <!-- ═══ VIEWERS BOTTOM SHEET (full WhatsApp-style) ═══ -->
+                <div id="viewersBottomSheet" class="viewers-bottom-sheet" style="display:none;">
+                    <div class="vbs-backdrop" id="vbsBackdrop"></div>
+                    <div class="vbs-panel">
+                        <!-- Sheet header -->
+                        <div class="vbs-header">
+                            <div class="vbs-drag-handle"></div>
+                            <div class="vbs-title-row">
+                                <span class="vbs-title">Viewed by <strong id="vbsCount">0</strong></span>
+                                <div class="vbs-header-actions">
+                                    <!-- Share to platforms -->
+                                    <button class="vbs-icon-btn" id="vbsShareFb" title="Share to Facebook">
+                                        <i class="fab fa-facebook"></i>
+                                    </button>
+                                    <button class="vbs-icon-btn" id="vbsShareTw" title="Share to Twitter/X">
+                                        <i class="fab fa-twitter"></i>
+                                    </button>
+                                    <button class="vbs-icon-btn" id="vbsShareWa" title="Share to WhatsApp">
+                                        <i class="fab fa-whatsapp"></i>
+                                    </button>
+                                    <!-- Three-dots for more -->
+                                    <div style="position:relative;">
+                                        <button class="vbs-icon-btn" id="vbsMoreBtn" title="More">
+                                            <i class="fas fa-ellipsis-v"></i>
+                                        </button>
+                                        <div id="vbsMoreDropdown" style="display:none;position:absolute;top:36px;right:0;background:rgba(30,30,30,0.98);border-radius:8px;min-width:160px;z-index:999;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.5);">
+                                            <button class="vmd-item" id="vbsDeleteStatus"><i class="fas fa-trash"></i> Delete status</button>
+                                            <button class="vmd-item" id="vbsEditStatus"><i class="fas fa-edit"></i> Edit status</button>
+                                            <button class="vmd-item" id="vbsAddHighlight"><i class="fas fa-star"></i> Add to highlights</button>
+                                        </div>
+                                    </div>
+                                    <button class="vbs-icon-btn vbs-close-btn" id="vbsClose">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Viewers list -->
+                        <div class="vbs-list" id="vbsList">
+                            <div class="vbs-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Friend controls (reactions + reply) — shown to non-owners only -->
-                <!-- Reactions -->
-                <div class="reactions-container" id="reactionsContainer">
-                    <!-- Reaction buttons will be loaded here -->
-                </div>
-                
-                <!-- Reply Input -->
-                <div class="reply-input-container">
-                    <input type="text" class="reply-input" id="replyInput" placeholder="Reply to status...">
-                    <button class="send-reply-btn" id="sendReplyBtn">
-                        <i class="fas fa-paper-plane"></i>
-                    </button>
+                <!-- Friend controls — reactions + reply (non-owners only) -->
+                <div class="friend-footer-bar" id="friendFooterBar">
+                    <!-- Reply input -->
+                    <div class="reply-input-wrap">
+                        <input type="text" class="reply-input" id="replyInput" placeholder="Reply to status…">
+                        <button class="send-reply-btn" id="sendReplyBtn">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                    <!-- Single emoji trigger — expands to 5 choices -->
+                    <div class="emoji-trigger-wrap" id="emojiTriggerWrap" style="position:relative;">
+                        <button class="emoji-trigger-btn" id="emojiTriggerBtn" title="React">
+                            <span id="emojiTriggerIcon">😊</span>
+                        </button>
+                        <!-- Expanded emoji picker — hidden by default -->
+                        <div class="emoji-picker-pop" id="emojiPickerPop" style="display:none;">
+                            <button class="ep-btn" data-emoji="❤️">❤️</button>
+                            <button class="ep-btn" data-emoji="😂">😂</button>
+                            <button class="ep-btn" data-emoji="😮">😮</button>
+                            <button class="ep-btn" data-emoji="👍">👍</button>
+                            <button class="ep-btn" data-emoji="🙏">🙏</button>
+                        </div>
+                    </div>
+                    <!-- Hidden reactions container (keeps JS compat) -->
+                    <div id="reactionsContainer" style="display:none;"></div>
                 </div>
             </div>
         </div>
@@ -3439,6 +3646,241 @@
         var ab = document.getElementById('ownerActionBtns');
         if (ab) ab.classList.remove('revealed');
     };
+})();
+</script>
+
+
+<script id="wa-viewer-logic">
+(function() {
+    var APP_NAME = 'MoodChat'; // ← your app name for share text
+
+    document.addEventListener('DOMContentLoaded', boot);
+    if (document.readyState !== 'loading') boot();
+
+    function boot() {
+        wireViewerMoreMenu();
+        wireEmojiPicker();
+        wireViewerSeenCount();
+        wireVbsSheet();
+    }
+
+    // ── Viewer header three-dots ──────────────────────────────────────
+    function wireViewerMoreMenu() {
+        var btn  = document.getElementById('viewerMoreBtn');
+        var drop = document.getElementById('viewerMoreDropdown');
+        if (!btn || !drop) return;
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
+        });
+        document.addEventListener('click', function() {
+            if (drop) drop.style.display = 'none';
+        });
+    }
+
+    // ── Emoji picker collapse/expand ──────────────────────────────────
+    function wireEmojiPicker() {
+        var trigger = document.getElementById('emojiTriggerBtn');
+        var pop     = document.getElementById('emojiPickerPop');
+        var icon    = document.getElementById('emojiTriggerIcon');
+        if (!trigger || !pop) return;
+
+        trigger.addEventListener('click', function(e) {
+            e.stopPropagation();
+            pop.style.display = pop.style.display === 'none' ? 'flex' : 'none';
+        });
+        document.addEventListener('click', function() {
+            if (pop) pop.style.display = 'none';
+        });
+
+        // React on emoji click
+        pop.querySelectorAll('.ep-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var emoji = btn.dataset.emoji;
+                // Update trigger icon to chosen emoji
+                if (icon) icon.textContent = emoji;
+                pop.style.display = 'none';
+                // Mark selected
+                pop.querySelectorAll('.ep-btn').forEach(function(b) { b.classList.remove('selected'); });
+                btn.classList.add('selected');
+                // Fire existing reaction handler
+                var statusId = window.__currentViewingStatusId;
+                if (statusId) {
+                    var api = window.StatusAPI;
+                    if (api && api.reactToStatus) {
+                        api.reactToStatus(statusId, emoji).catch(function(){});
+                    }
+                    // Also dispatch DOM event for status-ui.js listeners
+                    document.dispatchEvent(new CustomEvent('status:react', {
+                        detail: { statusId: statusId, emoji: emoji }
+                    }));
+                }
+            });
+        });
+    }
+
+    // ── Seen count pill → open bottom sheet ──────────────────────────
+    function wireViewerSeenCount() {
+        var pill = document.getElementById('viewerSeenCount');
+        if (!pill) return;
+        pill.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var footer = document.getElementById('viewerFooter');
+            if (!footer || !footer.classList.contains('owner-mode')) return;
+            openVbs();
+        });
+    }
+
+    // ── Viewers Bottom Sheet ──────────────────────────────────────────
+    function wireVbsSheet() {
+        var sheet    = document.getElementById('viewersBottomSheet');
+        var backdrop = document.getElementById('vbsBackdrop');
+        var closeBtn = document.getElementById('vbsClose');
+        var moreBtn  = document.getElementById('vbsMoreBtn');
+        var moreDrop = document.getElementById('vbsMoreDropdown');
+        if (!sheet) return;
+
+        // Close triggers
+        function closeVbs() {
+            sheet.style.display = 'none';
+            if (moreDrop) moreDrop.style.display = 'none';
+        }
+        if (backdrop) backdrop.addEventListener('click', closeVbs);
+        if (closeBtn) closeBtn.addEventListener('click', closeVbs);
+        document.addEventListener('statusViewerClosed', closeVbs);
+
+        // Three-dots inside sheet
+        if (moreBtn && moreDrop) {
+            moreBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                moreDrop.style.display = moreDrop.style.display === 'none' ? 'block' : 'none';
+            });
+            document.addEventListener('click', function() {
+                if (moreDrop) moreDrop.style.display = 'none';
+            });
+        }
+
+        // Delete / Edit from sheet three-dots
+        var vbsDelete = document.getElementById('vbsDeleteStatus');
+        var vbsEdit   = document.getElementById('vbsEditStatus');
+        if (vbsDelete) vbsDelete.addEventListener('click', function() {
+            closeVbs();
+            var deleteBtn = document.getElementById('deleteStatusBtn');
+            if (deleteBtn) deleteBtn.click();
+        });
+        if (vbsEdit) vbsEdit.addEventListener('click', function() {
+            closeVbs();
+            var editBtn = document.getElementById('editStatusBtn');
+            if (editBtn) editBtn.click();
+        });
+
+        // Share buttons
+        var shareText = function(platform) {
+            var statusId = window.__currentViewingStatusId;
+            var url = window.location.origin + (statusId ? '/status/' + statusId : '');
+            var text = 'Check this out on ' + APP_NAME + ': ' + url;
+            var links = {
+                fb: 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url),
+                tw: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text),
+                wa: 'https://wa.me/?text=' + encodeURIComponent(text)
+            };
+            if (links[platform]) window.open(links[platform], '_blank', 'noopener,width=600,height=500');
+        };
+        var fbBtn = document.getElementById('vbsShareFb');
+        var twBtn = document.getElementById('vbsShareTw');
+        var waBtn = document.getElementById('vbsShareWa');
+        if (fbBtn) fbBtn.addEventListener('click', function() { shareText('fb'); });
+        if (twBtn) twBtn.addEventListener('click', function() { shareText('tw'); });
+        if (waBtn) waBtn.addEventListener('click', function() { shareText('wa'); });
+
+        // Store reference so openVbs can use it
+        window.__vbsClose = closeVbs;
+    }
+
+    // Open VBS and load viewers
+    window.openVbs = function() {
+        var sheet = document.getElementById('viewersBottomSheet');
+        var list  = document.getElementById('vbsList');
+        var countEl = document.getElementById('vbsCount');
+        var seenNum = document.getElementById('seenCountNum');
+        if (!sheet) return;
+
+        var count = seenNum ? parseInt(seenNum.textContent) || 0 : 0;
+        if (countEl) countEl.textContent = count;
+        sheet.style.display = 'block';
+        if (list) list.innerHTML = '<div class="vbs-loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>';
+
+        var statusId = window.__currentViewingStatusId;
+        if (!statusId) { if (list) list.innerHTML = '<div class="vbs-loading">No data</div>'; return; }
+
+        var api = window.StatusAPI;
+        if (!api || !api.getViewers) { if (list) list.innerHTML = '<div class="vbs-loading">Not available</div>'; return; }
+
+        api.getViewers(statusId).then(function(result) {
+            var viewers = (result && (result.viewers || (result.data && result.data.viewers))) || [];
+            if (countEl) countEl.textContent = result && result.totalViews ? result.totalViews : viewers.length;
+            if (!viewers.length) {
+                list.innerHTML = '<div class="vbs-loading" style="padding:30px;">No views yet</div>';
+                return;
+            }
+            list.innerHTML = viewers.map(function(v) {
+                var name     = (v.viewer && (v.viewer.displayName || v.viewer.firstName || v.viewer.username)) || ('User ' + v.viewerId);
+                var initial  = name.charAt(0).toUpperCase();
+                var avatarUrl = v.viewer && (v.viewer.avatar || v.viewer.photoURL) || '';
+                var avStyle  = avatarUrl ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;' : '';
+                var timeStr  = fmtTime(v.viewedAt);
+                var reaction = v.reaction ? '<span class="vbs-row-reaction">' + v.reaction + '</span>' : '';
+                var vid      = v.viewerId || (v.viewer && v.viewer.id) || '';
+                return '<div class="vbs-row">' +
+                    '<div class="vbs-avatar" style="' + avStyle + '">' + (avatarUrl ? '' : initial) + '</div>' +
+                    '<div class="vbs-row-info"><div class="vbs-row-name">' + esc(name) + '</div>' +
+                    '<div class="vbs-row-time">' + timeStr + '</div></div>' +
+                    reaction +
+                    '<div class="vbs-row-actions">' +
+                    '<button class="vbs-row-btn" title="Chat" onclick="openChatWith(' + vid + ')"><i class="fas fa-comment"></i></button>' +
+                    '<button class="vbs-row-btn" title="Call" onclick="callUser(' + vid + ')"><i class="fas fa-phone"></i></button>' +
+                    '</div></div>';
+            }).join('');
+        }).catch(function() {
+            list.innerHTML = '<div class="vbs-loading">Could not load viewers</div>';
+        });
+    };
+
+    // Chat/call helpers
+    window.openChatWith = function(userId) {
+        if (!userId) return;
+        if (window.__vbsClose) window.__vbsClose();
+        window.parent && window.parent.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: userId } }, '*');
+    };
+    window.callUser = function(userId) {
+        if (!userId) return;
+        if (window.__vbsClose) window.__vbsClose();
+        window.parent && window.parent.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: { userId: userId, callType: 'voice' } }, '*');
+    };
+
+    function fmtTime(iso) {
+        try {
+            if (!iso) return '';
+            var d   = new Date(iso);
+            var now = new Date();
+            var diff = Math.floor((now - d) / 1000);
+            if (diff < 60)   return 'Just now';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            // Same day
+            if (d.toDateString() === now.toDateString())
+                return 'Today, ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            // Yesterday
+            var yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+            if (d.toDateString() === yesterday.toDateString())
+                return 'Yesterday, ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return d.toLocaleDateString([], { day: '2-digit', month: 'short' }) +
+                   ', ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch(e) { return ''; }
+    }
+    function esc(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
 })();
 </script>
 
