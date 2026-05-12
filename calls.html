@@ -64,18 +64,18 @@ window.__CALLS_IFRAME__ = {
 };
 </script>
     <script>
-// ==================== SCREEN MANAGER — SINGLE SOURCE OF TRUTH ====================
+// ==================== SCREEN MANAGER v4.0 ===========================================
+// Single source of truth for all call screen transitions.
+// KEY DESIGN: showScreen('idle') has a guard -- never hides an active call screen.
+// Only window.endCallScreens() bypasses the guard (used when call is truly over).
 (function() {
     'use strict';
 
     var RING_DURATION = 180; // seconds (3 minutes)
-    var _declineIntervalId  = null;
+    var _declineIntervalId    = null;
     var _autoDeclineTimeoutId = null;
+    var _currentScreen        = 'idle';
 
-    // Track current screen so we never accidentally downgrade
-    var _currentScreen = 'idle'; // 'idle' | 'calling' | 'in-call'
-
-    // ── Core: switch between idle / calling / in-call screens ────────────────
     window.showScreen = function(screenName) {
         var idle      = document.getElementById('idleScreen');
         var calling   = document.getElementById('callingScreen');
@@ -84,41 +84,43 @@ window.__CALLS_IFRAME__ = {
         var overlay   = document.getElementById('callOverlay');
         var container = document.getElementById('callContainer');
 
-        // Always suppress callOverlay — it causes the floating call-panel bug
         if (overlay) {
             overlay.setAttribute('data-state', 'idle');
             overlay.style.cssText = 'pointer-events:none!important;opacity:0!important;visibility:hidden!important;display:none!important;';
         }
 
         if (screenName === 'calling') {
-            // Show outgoing calling screen. Never hide it from here — only _endCall() does that.
             _currentScreen = 'calling';
-            if (idle)    { idle.classList.remove('active'); }
-            if (inCall)  { inCall.classList.remove('active'); }
-            if (calling) { calling.classList.add('active'); calling.style.removeProperty('display'); }
+            if (idle)   idle.classList.remove('active');
+            if (inCall) inCall.classList.remove('active');
+            if (calling) {
+                calling.classList.add('active');
+                calling.style.setProperty('display', 'flex', 'important');
+            }
             document.body.classList.add('call-active');
 
         } else if (screenName === 'in-call') {
-            // Transition to connected in-call screen
             _currentScreen = 'in-call';
-            if (idle)    { idle.classList.remove('active'); }
-            if (calling) { calling.classList.remove('active'); }
+            if (idle)    idle.classList.remove('active');
+            if (calling) { calling.classList.remove('active'); calling.style.removeProperty('display'); }
             if (incoming) { incoming.classList.remove('active'); incoming.style.cssText = 'display:none!important'; }
-            if (inCall)  { inCall.classList.add('active'); inCall.style.removeProperty('display'); }
+            if (inCall) {
+                inCall.classList.add('active');
+                inCall.style.setProperty('display', 'flex', 'important');
+            }
             document.body.classList.add('call-active');
             _stopDeclineTimer();
-            // Populate peer name
             var _nameEl = document.getElementById('callWithName');
             if (_nameEl) {
                 var _n = window.__activePeerName || window.__incomingCallerName
-                    || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
-                    || null;
+                    || (window.UIState && window.UIState.callParticipants
+                        && window.UIState.callParticipants[0]
+                        && window.UIState.callParticipants[0].name) || null;
                 if (_n && _n !== 'User') _nameEl.textContent = _n;
             }
 
         } else if (screenName === 'idle') {
-            // ONLY go to idle if no call is active. This is the critical guard.
-            // Stale call_ended events from previous sessions MUST NOT hide an active call screen.
+            // GUARD: never go to idle while a call is active
             if (window.__callActive ||
                 window.__callEndedNavigating ||
                 _currentScreen === 'calling' ||
@@ -130,13 +132,12 @@ window.__CALLS_IFRAME__ = {
                     window.UIState.callState === 'connecting' ||
                     window.UIState.callState === 'connected'
                 ))) {
-                return; // Active call — ignore idle request
+                return;
             }
             _endCallScreens();
         }
     };
 
-    // Internal: actually show idle (only called when call is truly over)
     function _endCallScreens() {
         _currentScreen = 'idle';
         var idle      = document.getElementById('idleScreen');
@@ -144,31 +145,26 @@ window.__CALLS_IFRAME__ = {
         var inCall    = document.getElementById('inCallScreen');
         var incoming  = document.getElementById('incomingCallModal');
         var container = document.getElementById('callContainer');
-
-        if (calling)  { calling.classList.remove('active'); calling.style.setProperty('display','none','important'); }
-        if (inCall)   { inCall.classList.remove('active');  inCall.style.setProperty('display','none','important'); }
+        if (calling)  { calling.classList.remove('active');  calling.style.setProperty('display', 'none', 'important'); }
+        if (inCall)   { inCall.classList.remove('active');   inCall.style.setProperty('display', 'none', 'important'); }
         if (incoming) { incoming.classList.remove('active'); incoming.style.cssText = 'display:none!important'; }
         document.body.classList.remove('call-active');
         _stopDeclineTimer();
-
         if (container) { container.classList.add('idle-active'); container.classList.remove('active'); }
         if (idle) idle.classList.add('active');
     }
 
-    // ── Exposed end-call function for MasterFix / calls-ui.js ────────────────
-    // Call this when a call actually ends. It bypasses the guard in showScreen.
     window.endCallScreens = function() {
         window.__callEndedNavigating = true;
         setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
         _endCallScreens();
     };
 
-    // ── Decline/ring timer ────────────────────────────────────────────────────
     function _stopDeclineTimer() {
         if (_declineIntervalId)    { clearInterval(_declineIntervalId);   _declineIntervalId    = null; }
         if (_autoDeclineTimeoutId) { clearTimeout(_autoDeclineTimeoutId); _autoDeclineTimeoutId = null; }
     }
-    window._stopDeclineTimer = _stopDeclineTimer; // expose for MasterFix IIFE
+    window._stopDeclineTimer = _stopDeclineTimer;
 
     window.startDeclineTimer = function(onExpire) {
         _stopDeclineTimer();
@@ -178,18 +174,13 @@ window.__CALLS_IFRAME__ = {
         _declineIntervalId = setInterval(function() {
             remaining--;
             if (el) el.textContent = remaining;
-            if (remaining <= 0) {
-                _stopDeclineTimer();
-                if (typeof onExpire === 'function') onExpire();
-            }
+            if (remaining <= 0) { _stopDeclineTimer(); if (typeof onExpire === 'function') onExpire(); }
         }, 1000);
         _autoDeclineTimeoutId = setTimeout(function() {
-            _stopDeclineTimer();
-            if (typeof onExpire === 'function') onExpire();
+            _stopDeclineTimer(); if (typeof onExpire === 'function') onExpire();
         }, (RING_DURATION + 1) * 1000);
     };
 
-    // ── Core event listener ───────────────────────────────────────────────────
     function _hookCoreListeners() {
         if (!window.callCore) { setTimeout(_hookCoreListeners, 300); return; }
         var fn = window.callCore._addListener || window.callCore.addListener;
@@ -204,35 +195,31 @@ window.__CALLS_IFRAME__ = {
             case 'call_started':
             case 'call_initiated':
             case 'CALL_INITIATED':
-                // Show calling screen — guard is inside showScreen
                 showScreen('calling');
                 break;
 
             case 'incoming_call': {
-                // Show incoming modal + start 3-min countdown
                 var modal = document.getElementById('incomingCallModal');
                 if (modal) {
                     modal.style.removeProperty('display');
                     modal.classList.add('active');
                     if (data) {
                         var callerName = data.callerName || data.userName || data.name || 'Unknown';
-                        var nameEl   = document.getElementById('incomingCallName');
-                        var typeEl   = document.getElementById('incomingCallType');
-                        var avatarEl = document.getElementById('incomingCallAvatar');
-                        if (nameEl)   nameEl.textContent  = callerName;
-                        if (typeEl)   typeEl.textContent  = 'Voice Call';
+                        var nameEl     = document.getElementById('incomingCallName');
+                        var typeEl     = document.getElementById('incomingCallType');
+                        var avatarEl   = document.getElementById('incomingCallAvatar');
+                        if (nameEl)   nameEl.textContent   = callerName;
+                        if (typeEl)   typeEl.textContent   = 'Voice Call';
                         if (avatarEl) avatarEl.textContent = callerName[0].toUpperCase();
                         window.__incomingCallerName   = callerName;
                         window.__incomingCallerAvatar = data.callerAvatar || data.callerPhoto || null;
                     }
                 }
-                // 3-minute auto-decline
                 window.startDeclineTimer(function() {
-                    var declineBtn = document.getElementById('declineCallBtn');
-                    if (declineBtn) declineBtn.click();
-                    else if (window.callCore && window.callCore.declineCall) {
+                    var btn = document.getElementById('declineCallBtn');
+                    if (btn) btn.click();
+                    else if (window.callCore && window.callCore.declineCall)
                         window.callCore.declineCall(data && data.callId);
-                    }
                 });
                 break;
             }
@@ -240,40 +227,41 @@ window.__CALLS_IFRAME__ = {
             case 'call_accepted':
             case 'call_connected': {
                 var _n = window.__activePeerName || window.__incomingCallerName
-                    || (window.UIState && window.UIState.callParticipants && window.UIState.callParticipants[0] && window.UIState.callParticipants[0].name)
+                    || (window.UIState && window.UIState.callParticipants
+                        && window.UIState.callParticipants[0]
+                        && window.UIState.callParticipants[0].name)
                     || (data && (data.callerName || data.userName)) || null;
                 var _t = (window.UIState && window.UIState.callType) || (data && data.callType) || 'voice';
                 var _a = window.__activePeerAvatar || window.__incomingCallerAvatar || null;
-                if (typeof window.transitionToInCall === 'function' && _n) {
+                if (typeof window.transitionToInCall === 'function' && _n)
                     window.transitionToInCall({ userName: _n, callType: _t, userAvatar: _a });
-                } else {
-                    showScreen('in-call');
-                }
+                else showScreen('in-call');
                 break;
             }
 
-            // These are EXPLICIT end events — bypass guard and end screens
             case 'call_ended':
             case 'call_rejected':
             case 'call_cancelled':
             case 'call_initiation_failed':
             case 'call_failed':
-            case 'call_timeout':
-                // Only end screens if this callId matches the active one (stale echo protection)
+            case 'call_timeout': {
+                // KEY GUARD: forceResetCallState fires call_ended with no callId.
+                // If __callActive=true and no callId, this is a reset during initiation -- ignore.
+                // If callId mismatches active callId, this is a stale echo -- ignore.
+                var endedId  = (data && (data.callId || data.id)) || null;
                 var activeId = (window.UIState && window.UIState.activeCallId)
                     || (window.callsState && window.callsState.activeCallId) || null;
-                var endedId  = (data && (data.callId || data.id)) || null;
-                if (endedId && activeId && endedId !== activeId) {
-                    // Different callId — stale echo, ignore
-                    break;
+                if (window.__callActive) {
+                    if (!endedId) break;                             // forceReset -- ignore
+                    if (activeId && endedId !== activeId) break;     // stale echo -- ignore
                 }
                 _navigateAfterCall();
-                _endCallScreens(); // Bypass showScreen guard — this is a real end
+                _endCallScreens();
                 break;
+            }
         }
     }
 
-    // Fallback poll — only UPGRADES screen state, never downgrades to idle
     var _lastPollState = '';
     function _pollCallState() {
         setInterval(function() {
@@ -282,32 +270,26 @@ window.__CALLS_IFRAME__ = {
             var cs = state.callState || 'idle';
             if (cs === _lastPollState) return;
             _lastPollState = cs;
-            if (cs === 'initiating' || cs === 'ringing') {
-                showScreen('calling');
-            } else if (cs === 'in-call' || cs === 'connected' || cs === 'connecting') {
-                showScreen('in-call');
-            }
-            // 'idle' from poll is IGNORED — only explicit end events end the screen
+            if (cs === 'initiating' || cs === 'ringing') showScreen('calling');
+            else if (cs === 'in-call' || cs === 'connected' || cs === 'connecting') showScreen('in-call');
+            // idle from poll is IGNORED -- only explicit end events end screens
         }, 400);
     }
 
-    // ── Navigate back to origin after call ends ───────────────────────────────
     function _navigateAfterCall() {
         try {
             var origin = window._callOrigin || window.__pendingCallOrigin || 'calls';
-            if (window.parent && window.parent !== window) {
+            if (window.parent && window.parent !== window)
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', payload: { origin: origin, timestamp: Date.now() } }, '*');
-            }
             window._callOrigin = null;
         } catch(e) {}
     }
 
-    // ── Boot ──────────────────────────────────────────────────────────────────
     function _masterBoot() { _hookCoreListeners(); }
     if (document.readyState !== 'loading') _masterBoot();
     else document.addEventListener('DOMContentLoaded', _masterBoot);
 
-    console.log('[ScreenMgr] v4.0 loaded — stale-proof screen manager active');
+    console.log('[ScreenMgr] v4.0 loaded -- stale-proof, guard-protected');
     window._stopDeclineTimer = _stopDeclineTimer;
 })();
 
@@ -4725,53 +4707,19 @@ window.__CALLS_IFRAME__ = {
             _callEndedAt     = Date.now();
 
             _log('Call ended:', reason);
-
-            // Set flag first so showScreen/showIdleScreen guards fire
             window.__callEndedNavigating = true;
             setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
-
-            // Stop all ringtones
             _stopRingtones();
-
-            // Stop media tracks
-            try {
-                if (window.UIState && window.UIState.localStream) {
-                    window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} });
-                    window.UIState.localStream = null;
-                }
-            } catch(e) {}
-
-            // Clear state flags
+            try { if (window.UIState && window.UIState.localStream) { window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} }); window.UIState.localStream = null; } } catch(e) {}
             window.__callActive = false;
             window._currentIncomingCallId = null;
             if (window.callsState) { window.callsState.callActive = false; window.callsState.callState = 'idle'; }
-            if (window.UIState)    { window.UIState.callActive = false; window.UIState.callState = 'idle'; }
-
-            // Hide call screens via bypass function (skips active-call guard)
-            if (typeof window.endCallScreens === 'function') {
-                window.endCallScreens();
-            } else {
-                var _cs = document.getElementById('callingScreen');
-                var _is = document.getElementById('inCallScreen');
-                var _im = document.getElementById('incomingCallModal');
-                if (_cs) _cs.classList.remove('active');
-                if (_is) _is.classList.remove('active');
-                if (_im) { _im.classList.remove('active'); _im.style.cssText = 'display:none!important'; }
-                if (typeof window._stopDeclineTimer === 'function') window._stopDeclineTimer();
-            }
-            document.body.classList.remove('call-active', 'call-connected');
-
-            // Post CALL_ENDED_RETURN so parent navigates away
-            _sendToParent('CALL_ENDED_RETURN', {
-                origin: window._callOrigin || window.__pendingCallReturnTo || 'calls'
-            });
-
-            // 1.2s fallback: show idle only if parent did not navigate away
-            setTimeout(function() {
-                if (!window.__callEndedNavigating) {
-                    if (typeof window.showScreen === 'function') window.showScreen('idle');
-                }
-            }, 1200);
+            if (window.UIState) { window.UIState.callActive = false; window.UIState.callState = 'idle'; }
+            if (typeof window.endCallScreens === 'function') window.endCallScreens();
+            else { var _c=document.getElementById('callingScreen'),_i=document.getElementById('inCallScreen'),_m=document.getElementById('incomingCallModal'); if(_c)_c.classList.remove('active'); if(_i)_i.classList.remove('active'); if(_m){_m.classList.remove('active');_m.style.cssText='display:none!important';} if(typeof window._stopDeclineTimer==='function')window._stopDeclineTimer(); }
+            document.body.classList.remove('call-active','call-connected');
+            _sendToParent('CALL_ENDED_RETURN', { origin: window._callOrigin || window.__pendingCallReturnTo || 'calls' });
+            setTimeout(function() { if (!window.__callEndedNavigating && typeof window.showScreen==='function') window.showScreen('idle'); }, 1200);
         }
 
         // ── 12. PARENT postMessage HANDLER ───────────────────────────────
@@ -4943,7 +4891,7 @@ window.__CALLS_IFRAME__ = {
         // to calls page), we must ensure the screens are properly visible.
         // This handles the dark screen on 2nd+ call from either user.
         function _onIframeVisible() {
-            window.__callEndedNavigating = false; // iframe visible again
+            window.__callEndedNavigating = false;
             // ✅ FIX: Only reset to idle if NO call is currently active
             // If a call IS in progress, leave the current screen alone
             var callInProgress = (window.callsState && (window.callsState.callActive || 

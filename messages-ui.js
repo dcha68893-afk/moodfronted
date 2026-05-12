@@ -12572,7 +12572,9 @@ Type: ${message.type || 'text'}`;
     window.messagesUI.loadMultiSendHistory = async function() {
         const listEl = window.UIFailsafe?.safeGetElement('multiSendHistoryList');
         if (!listEl) return;
-        const core = getMessagesCore();
+        // FIXED: window.messagesCore is inside the IIFE and not reachable here.
+        // Use window.messagesCore directly which is the same reference.
+        const core = window.messagesCore || null;
         let token = null;
         try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
         try {
@@ -12591,7 +12593,7 @@ Type: ${message.type || 'text'}`;
         if (!batchId) return;
         console.log('[MultiSend] Opening history detail:', batchId);
         window.messagesUI?.showMultiSendHistoryPanel?.({ detailOnly: true });
-        const core = getMessagesCore();
+        const core = window.messagesCore;
         let token = null;
         try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
         try {
@@ -12637,7 +12639,7 @@ Type: ${message.type || 'text'}`;
         const settings = options || {};
         const input = document.getElementById('multiSendInput');
         const msgContent = (input && input.value && input.value.trim()) || '';
-        const core = getMessagesCore();
+        const core = window.messagesCore;
         const replyVisibility = document.getElementById('multiSendReplyVisibility')?.value || 'public';
         const selectedChats = core && core.multiSendSelectedChats;
 

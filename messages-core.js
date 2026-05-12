@@ -2625,6 +2625,13 @@ try {
                 return;
             }
 
+            // FIXED: Capture any realtime messages already stored for this chat
+            // before setMessages clears them. After server fetch we merge them back.
+            const _sid_str = String(conversationId || '');
+            const _preFetchedRealtime = (this._messages || []).filter(function(m) {
+                return String(m.chatId || m.conversationId || '') === _sid_str && !m.isLocalOnly;
+            });
+
             const fetchKey = String(conversationId);
             const now = Date.now();
             const forceFetch = options.force === true;
@@ -2692,6 +2699,20 @@ try {
                     });
 
                     this.setMessages(hydratedMessages, conversationId);
+
+                    // FIXED: Merge realtime messages that arrived before chat was opened
+                    if (_preFetchedRealtime && _preFetchedRealtime.length > 0) {
+                        const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        for (const _pm of _preFetchedRealtime) {
+                            const _pmId = String(_pm.id || _pm.serverId || '');
+                            if (_pmId && !this._messagesMap.has(_pmId)) {
+                                this._messages.push(_pm);
+                                this._messagesMap.set(_pmId, _pm);
+                            }
+                        }
+                        this._messages.sort(function(a, b) { return _tsF(a) - _tsF(b); });
+                    }
+
                     this._notifySuccess('Messages loaded');
                     return;
                 }
@@ -2714,6 +2735,7 @@ try {
                     messagesArray = response.data;
                 }
 
+                // FIXED: Note _preFetchedRealtime for merge after API load
                 if (messagesArray.length > 0) {
                     const normalizedMessages = messagesArray.map(msg => ({
                         id: msg.id,
@@ -6020,6 +6042,19 @@ try {
                 if (_sk !== ':' && _realtimeSentIds.has(_sk)) return;
                 if (_sk !== ':') { _realtimeSentIds.add(_sk); setTimeout(()=>_realtimeSentIds.delete(_sk), 15000); }
                 console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
+                // FIXED: Track serverId so echo prevention in chat.html can detect our own echoes
+                const _sentServerId = d.serverId || d.messageId || d.id;
+                if (_sentServerId) {
+                    try {
+                        const _sl = JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]');
+                        const _sid = String(_sentServerId);
+                        if (!_sl.includes(_sid)) {
+                            _sl.push(_sid);
+                            if (_sl.length > 200) _sl.splice(0, _sl.length - 200);
+                            localStorage.setItem('kynecta_sent_ids_v8', JSON.stringify(_sl));
+                        }
+                    } catch(_) {}
+                }
                 if (messageId && ChatManager.updateMessageStatus) {
                     ChatManager.updateMessageStatus(messageId, 'sent', {
                         localId:  d.localId  || null,

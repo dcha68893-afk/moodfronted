@@ -266,7 +266,18 @@ let microCirclesStatuses = [];
 let highlights = [];
 let drafts = [];
 let scheduledStatuses = [];
-let viewedStatuses = new Set();
+let viewedStatuses = (() => {
+    try {
+        // Load from localStorage — try both possible keys
+        const raw = localStorage.getItem('kyn_viewed_statuses')
+            || localStorage.getItem('knecta_viewed_statuses');
+        if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) return new Set(arr.map(String));
+        }
+    } catch (_) {}
+    return new Set();
+})();
 let mutedUsers = new Set();
 let currentViewerStatus = null;
 let currentSlideIndex = 0;
@@ -592,50 +603,104 @@ function subscribeToStatusChanges() {
     });
 
     document.addEventListener('viewerUpdate', (e) => {
-        const statusId = String(e.detail?.statusId || '');
+        const statusId  = String(e.detail?.statusId || '');
         if (!statusId) return;
         const nextCount = Number(e.detail?.viewerCount ?? e.detail?.viewCount ?? 0);
-        // Also update the VBS count if sheet is open
+
+        // 1. Update all local arrays
+        [statuses, myStatuses, friendsStatuses].forEach(arr => {
+            (arr || []).forEach(item => {
+                if (String(item.id) === statusId) item.viewCount = nextCount;
+            });
+        });
+
+        // 2. Update VBS sheet count if open
         const vbsCount = document.getElementById('vbsCount');
         if (vbsCount) vbsCount.textContent = nextCount;
-        const updateItems = (items) => {
-            (items || []).forEach((item) => {
-                if (String(item.id) === statusId) {
-                    item.viewCount = nextCount;
-                }
-            });
-        };
-        updateItems(statuses);
-        updateItems(myStatuses);
+
+        // 3. Update seenCountNum if viewer is open for this status
         if (currentViewerStatus && String(currentViewerStatus.id) === statusId) {
             currentViewerStatus.viewCount = nextCount;
             const el = document.getElementById('seenCountNum');
             if (el) el.textContent = String(nextCount);
         }
+
+        // 4. Even if viewer is closed, update the seenCountNum if it's the owner's status
+        // (creator may have the sidebar open but not the viewer)
+        const myStatusItem = (myStatuses || []).find(s => String(s.id) === statusId);
+        if (myStatusItem) {
+            myStatusItem.viewCount = nextCount;
+            // Update My Status preview sub-text if visible
+            const subEl = document.getElementById('myStatusText');
+            if (subEl && myStatuses.length > 0) {
+                const latest = myStatuses[0];
+                subEl.textContent = (myStatuses.length > 1 ? myStatuses.length + ' updates · ' : '')
+                    + formatTimeAgo(latest.createdAt);
+            }
+        }
+
+        console.log('[status-ui] 👁 View recorded for status', statusId, '→ count:', nextCount);
     });
 
     document.addEventListener('reactionUpdate', (e) => {
         const d = e.detail || {};
         if (!d.statusId) return;
-        // Update UI
+        const sid     = String(d.statusId);
+        const emoji   = d.emoji;
+        const count   = d.count;
+        const userId  = String(d.userId || d.reactorId || '');
+
+        // 1. Update UI (emoji trigger icon + sidebar badge)
         if (typeof window.updateStatusReactionUI === 'function') {
-            window.updateStatusReactionUI(d.statusId, d.emoji, d.count);
+            window.updateStatusReactionUI(sid, emoji, count);
         }
-        // Persist reaction into local arrays so sidebar shows badge on re-render
-        const sid = String(d.statusId);
+
+        // 2. Patch the SPECIFIC status in every local array
+        //    — reactions stored per status, per emoji, per user (one per user)
         const patchReaction = (arr) => {
             if (!Array.isArray(arr)) return;
             const s = arr.find(x => String(x.id) === sid);
-            if (s) {
-                if (!s.reactions) s.reactions = {};
-                if (!s.reactions[d.emoji]) s.reactions[d.emoji] = [];
-                s.latestReaction = d.emoji;
-                s.reactionCount  = (s.reactionCount || 0) + 1;
+            if (!s) return;
+            if (!s.reactions) s.reactions = {};
+            // One reaction per user — remove old reaction by this user across all emojis
+            if (userId) {
+                Object.keys(s.reactions).forEach(em => {
+                    if (Array.isArray(s.reactions[em])) {
+                        s.reactions[em] = s.reactions[em].filter(r =>
+                            String(r.userId || r) !== userId);
+                    }
+                });
             }
+            // Add new reaction
+            if (!s.reactions[emoji]) s.reactions[emoji] = [];
+            if (userId) s.reactions[emoji].push({ userId, emoji });
+            // Update convenience fields
+            s.latestReaction = emoji;
+            s.reactionCount  = Object.values(s.reactions)
+                .reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
+            console.log('[status-ui] 💬 Reaction', emoji, 'recorded on status', sid,
+                '| total reactions:', s.reactionCount);
         };
-        patchReaction(friendsStatuses);
-        patchReaction(statuses);
-        patchReaction(myStatuses);
+        [friendsStatuses, statuses, myStatuses].forEach(patchReaction);
+
+        // 3. Re-render sidebar badges without full re-render (just update the item)
+        const listItem = document.querySelector(`.status-group-item[data-status-ids*="${sid}"]`);
+        if (listItem) {
+            let badges = listItem.querySelector('.status-group-badges');
+            if (!badges) {
+                badges = document.createElement('div');
+                badges.className = 'status-group-badges';
+                const info = listItem.querySelector('.status-group-info');
+                if (info) info.appendChild(badges);
+            }
+            let rb = badges.querySelector('.reaction-badge');
+            if (!rb) {
+                rb = document.createElement('span');
+                rb.className = 'status-badge reaction-badge';
+                badges.appendChild(rb);
+            }
+            rb.textContent = emoji + (count > 1 ? ' ' + count : '');
+        }
     });
 
     document.addEventListener('statusReply', (e) => {
@@ -3431,9 +3496,16 @@ function _loadSlot(index, isOwner, group) {
     _applyViewerMode(isOwner, status);
 
     // Record view (friends only, deduplicated)
-    if (!isOwner && !viewedStatuses?.has(status.id)) {
-        if (viewedStatuses) viewedStatuses.add(status.id);
-        try { localStorage.setItem('kyn_viewed_statuses', JSON.stringify(Array.from(viewedStatuses))); } catch(_) {}
+    // Check both string and number forms (IDs may be either type)
+    const _sid = String(status.id);
+    const _alreadyViewed = viewedStatuses?.has(_sid) || viewedStatuses?.has(status.id);
+    if (!isOwner && !_alreadyViewed) {
+        if (viewedStatuses) { viewedStatuses.add(_sid); viewedStatuses.add(status.id); }
+        try {
+            const arr = JSON.stringify(Array.from(viewedStatuses));
+            localStorage.setItem('kyn_viewed_statuses',    arr);
+            localStorage.setItem('knecta_viewed_statuses', arr); // write both keys
+        } catch(_) {}
         // Update ring state in sidebar
         const groupItem = document.querySelector(`[data-status-ids*="${status.id}"]`);
         if (groupItem) {
@@ -3495,11 +3567,28 @@ function _applyViewerMode(isOwner, status) {
         footer.classList.remove('owner-mode');
         document.body.classList.add('viewer-friend-mode');
         document.body.classList.remove('viewer-owner-mode');
-        // Reset emoji trigger icon to default
+        // Reset emoji trigger for THIS specific status
         const eti = document.getElementById('emojiTriggerIcon');
-        if (eti) eti.textContent = '😊';
+        if (eti) {
+            // Check if user already reacted to this specific status
+            const sid = String(status.id);
+            const uid = String((currentUser && (currentUser.id || currentUser.userId)) || '');
+            const allPools = [...(friendsStatuses || []), ...(statuses || [])];
+            const thisStatus = allPools.find(s => String(s.id) === sid);
+            let existingReaction = null;
+            if (thisStatus && thisStatus.reactions && uid) {
+                existingReaction = Object.keys(thisStatus.reactions).find(em =>
+                    Array.isArray(thisStatus.reactions[em]) &&
+                    thisStatus.reactions[em].some(r => String(r.userId || r) === uid)
+                );
+            }
+            eti.textContent = existingReaction || '😊';
+        }
         const epBtns = document.querySelectorAll('.ep-btn');
-        epBtns.forEach(b => b.classList.remove('selected'));
+        epBtns.forEach(b => {
+            const hasExisting = eti && b.dataset.emoji === eti.textContent && eti.textContent !== '😊';
+            b.classList.toggle('selected', !!hasExisting);
+        });
     }
 
     // Always hide pause button (hold-to-pause is used)

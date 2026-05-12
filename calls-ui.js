@@ -330,6 +330,13 @@ const GlobalCallHistory = {
         return;
     }
     
+    // ✅ FIX: Set __callActive = true IMMEDIATELY — before forceResetCallState.
+    // forceResetCallState fires 'call_ended' from the core. ScreenMgr's _handleCoreEvent
+    // checks __callActive and skips _endCallScreens if true. Without this, the reset's
+    // call_ended would hide callingScreen the moment it shows.
+    window.__callActive = true;
+    if (window.UIState) { window.UIState.callActive = true; window.UIState.callState = 'calling'; }
+
     // Force reset any stale call state
     if (window.callCore && window.callCore.forceResetCallState) {
         console.log('[Calls UI] Force resetting call state');
@@ -646,7 +653,7 @@ window.showCallingScreen = showCallingScreen;
 window.startCallWithUser = startCallWithUser;
 
 function showIdleScreen() {
-    // Never show idle while a call is active or navigating away
+    // FIX: Never show idle while a call is active or navigating away
     if (window.__callActive ||
         window.__callEndedNavigating ||
         (window.UIState && (
@@ -654,7 +661,7 @@ function showIdleScreen() {
             window.UIState.callState === 'calling' ||
             window.UIState.callState === 'ringing'
         ))) {
-        console.log('[UI] showIdleScreen suppressed — call active or navigating');
+        console.log('[UI] showIdleScreen suppressed -- call active');
         return;
     }
     console.log('[UI] showIdleScreen');
@@ -4709,7 +4716,6 @@ handleContactItemClick: function(e) {
             UIState.callActive = false;
             UIState.activeCallId = incomingId;
             setCallParticipants([callerParticipant], { merge: false });
-            // FIX: Capture receiver return destination
             if (!window.__callOriginReturnTo || window.__callOriginReturnTo === 'calls') {
                 const _src = (callData && (callData.source || callData.returnTo)) || null;
                 window.__callOriginReturnTo  = (_src && _src !== 'calls') ? _src : 'messages';
@@ -5293,58 +5299,26 @@ handleContactItemClick: function(e) {
             window.__callEndedHandledAt = now;
             setTimeout(() => { window.__callEndedHandledAt = 0; }, 5000);
 
-            // ── FIX ORDER: set __callEndedNavigating BEFORE clearing __callActive ──
-            // Guards in showScreen/showIdleScreen check __callActive first;
-            // if we clear it before setting the flag, stale events slip through.
+                   // FIX: set __callEndedNavigating BEFORE __callActive=false
             if (window.parent && window.parent !== window) {
                 window.__callEndedNavigating = true;
                 setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
             }
-
-            // Stop ALL ringtones
             if (typeof window._stopRingtones === 'function') window._stopRingtones();
             if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
-            if (window._incomingRingtone) {
-                try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
-                window._incomingRingtone = null;
-            }
-
-            // Teardown incomingCallModal (receiver side)
-            const _incomingModal = document.getElementById('incomingCallModal');
-            if (_incomingModal) {
-                const _imTimer = parseInt(_incomingModal.dataset.timer);
-                if (_imTimer) clearInterval(_imTimer);
-                _incomingModal.dataset.timer = '';
-                _incomingModal.classList.remove('active');
-                _incomingModal.style.setProperty('display', 'none', 'important');
-                UIState.activeModals && UIState.activeModals.delete('incomingCallModal');
-            }
+            if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
+            const _imEl2 = document.getElementById('incomingCallModal');
+            if (_imEl2) { const _t2 = parseInt(_imEl2.dataset.timer); if (_t2) clearInterval(_t2); _imEl2.dataset.timer = ''; _imEl2.classList.remove('active'); _imEl2.style.setProperty('display','none','important'); UIState.activeModals && UIState.activeModals.delete('incomingCallModal'); }
             window._currentIncomingCallId = null;
-
-            // Now safe to clear call state flags
             window.__callActive = false;
             window.__callAcceptedHandled = 0;
             window.__callReceiverAccepted = false;
-            window.__activePeerName   = null;
-            window.__activePeerType   = null;
-            window.__activePeerAvatar = null;
-            window.__incomingCallerName = null;
-            window.__incomingCallerAvatar = null;
+            window.__activePeerName = null; window.__activePeerType = null; window.__activePeerAvatar = null;
+            window.__incomingCallerName = null; window.__incomingCallerAvatar = null;
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
-            }
-
-            // Hide call screens via ScreenMgr's bypass function (skips the active-call guard)
-            if (typeof window.endCallScreens === 'function') {
-                window.endCallScreens();
-            } else {
-                // Fallback if ScreenMgr not loaded
-                const callingScreen = document.getElementById('callingScreen');
-                const inCallScreen  = document.getElementById('inCallScreen');
-                if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display','none','important'); }
-                if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display','none','important'); }
-            }
+            if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
+            if (typeof window.endCallScreens === 'function') window.endCallScreens();
+            else { var _csX = document.getElementById('callingScreen'), _isX = document.getElementById('inCallScreen'); if (_csX) { _csX.classList.remove('active'); _csX.style.setProperty('display','none','important'); } if (_isX) { _isX.classList.remove('active'); _isX.style.setProperty('display','none','important'); } }
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
             (function _saveEndedLocally() {

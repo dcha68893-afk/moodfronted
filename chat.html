@@ -5578,50 +5578,55 @@
                     const msgIframe = document.getElementById('messagesIframe');
                     if (!msgIframe || !msgIframe.contentWindow) return;
 
-                    // FIXED ECHO PREVENTION: Only suppress our OWN sent message echo.
-                    // receive_message / message:received are recipient-only events — skip check.
+                    // FIXED ECHO PREVENTION:
+                    // receive_message / message:received are recipient-only socket events — skip echo check.
                     const _isRecipientEvent = (_fwdNewMessageSourceEvent === 'receive_message' ||
                                               _fwdNewMessageSourceEvent === 'message:received');
                     if (!_isRecipientEvent) {
                         const _wsPayloadSenderId = payload && (payload.senderId || (payload.sender && payload.sender.id));
                         const _wsCurrentUserId   = cachedUserId != null ? String(cachedUserId) : null;
-                        // FIXED: Only suppress if senderId matches OUR userId AND the message
-                        // carries a localId/requestId proving it is our own optimistic echo.
-                        // Without this extra guard, messages from any user whose id happens
-                        // to equal cachedUserId would be wrongly suppressed on the receiver.
                         if (_wsPayloadSenderId && _wsCurrentUserId &&
-                            String(_wsPayloadSenderId) === _wsCurrentUserId &&
-                            (payload.localId || payload.requestId)) {
-                            // It's our own echo — only forward a status confirmation
-                            msgIframe.contentWindow.postMessage({
-                                type: 'message:sent',
-                                payload: {
-                                    localId:   payload.localId   || null,
-                                    serverId:  payload.id        || payload.serverId || null,
-                                    messageId: payload.id        || payload.localId  || null,
-                                    status:    payload.status    || 'sent'
-                                },
-                                source: 'ws-bridge'
-                            }, '*');
-                            _fwdNewMessageSourceEvent = null;
-                            return;
+                            String(_wsPayloadSenderId) === _wsCurrentUserId) {
+                            // FIXED: Only treat as OUR echo if the message also has a localId/requestId
+                            // (optimistic echo) OR its serverId is in our sent-ids track list.
+                            // Without this, any message FROM us to ourselves is wrongly suppressed
+                            // even on the receiver side — and server echoes without localId pass through.
+                            const _sid = payload.id || payload.serverId;
+                            const _hasLocalMarker = !!(payload.localId || payload.requestId);
+                            const _alreadySent = _sid && (function() {
+                                try {
+                                    return JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]').includes(String(_sid));
+                                } catch(_) { return false; }
+                            })();
+                            if (_hasLocalMarker || _alreadySent) {
+                                // It's our own echo — only forward a status confirmation
+                                msgIframe.contentWindow.postMessage({
+                                    type: 'message:sent',
+                                    payload: {
+                                        localId:   payload.localId   || null,
+                                        serverId:  payload.id        || payload.serverId || null,
+                                        messageId: payload.id        || payload.localId  || null,
+                                        status:    payload.status    || 'sent'
+                                    },
+                                    source: 'ws-bridge'
+                                }, '*');
+                                _fwdNewMessageSourceEvent = null;
+                                return;
+                            }
+                            // No local marker and not in sent list — could be a message from another
+                            // device/tab or a race condition. Forward it so receiver always sees it.
                         }
                     }
                     _fwdNewMessageSourceEvent = null;
 
                     // FIXED: Enrich payload — ensure chatId is always present.
-                    // Some backend events send conversationId instead of chatId,
-                    // or use chat_id / roomId. Without chatId, messages-core drops
-                    // the message before it ever reaches the renderer.
                     const _enriched = { ...payload };
                     if (!_enriched.chatId && _enriched.conversationId) _enriched.chatId = _enriched.conversationId;
                     if (!_enriched.chatId && _enriched.chat_id)        _enriched.chatId = _enriched.chat_id;
                     if (!_enriched.chatId && _enriched.roomId)         _enriched.chatId = _enriched.roomId;
 
-                    // Forward to iframe — dedup set in messages-core prevents double-rendering
                     msgIframe.contentWindow.postMessage({ type: 'message:new', payload: _enriched, source: 'ws-bridge' }, '*');
 
-                    // Also update the sidebar unread badge / last message preview
                     const _cid = _enriched.chatId;
                     if (_cid) {
                         msgIframe.contentWindow.postMessage({
