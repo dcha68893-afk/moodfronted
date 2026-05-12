@@ -454,19 +454,51 @@ let _friendFetchLast    = 0;
 async function _fetchFriendStatusesDirect() {
     const now = Date.now();
     if (_friendFetchPending) return;
-    if (now - _friendFetchLast < 5000) return; // throttle: max once per 5s
+    if (now - _friendFetchLast < 5000) return;
     _friendFetchPending = true;
     _friendFetchLast = now;
     try {
         const api = window.StatusAPI;
-        if (!api || !api.getFriendsStatuses) return;
-        const result = await api.getFriendsStatuses({ limit: 100 });
-        if (result && result.success && Array.isArray(result.statuses) && result.statuses.length > 0) {
-            friendsStatuses = result.statuses;
+        if (!api) { console.warn('[status-ui] StatusAPI not available'); return; }
+
+        // Try getFriendsStatuses first
+        let statResult = null;
+        if (api.getFriendsStatuses) {
+            statResult = await api.getFriendsStatuses({ limit: 100 });
+        }
+
+        // If that fails or returns empty, try getTimeline (alternate endpoint)
+        if ((!statResult || !statResult.success || !Array.isArray(statResult.statuses) || !statResult.statuses.length)
+            && api.getTimeline) {
+            statResult = await api.getTimeline({ limit: 100 });
+        }
+
+        const fetched = (statResult && (statResult.statuses || statResult.data || []));
+        if (Array.isArray(fetched) && fetched.length > 0) {
+            console.log('[status-ui] ✅ Loaded', fetched.length, 'friend statuses');
+            const uid = String((currentUser && (currentUser.id || currentUser.userId))
+                || (window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
+            // Separate own vs friend statuses
+            fetched.forEach(s => {
+                const ownerId = String(s.userId || s.user_id || (s.user && s.user.id) || '');
+                if (uid && ownerId === uid) {
+                    // Own status → myStatuses
+                    if (!myStatuses.find(x => String(x.id) === String(s.id))) {
+                        myStatuses.unshift(s);
+                    }
+                } else {
+                    // Friend status → friendsStatuses
+                    if (!friendsStatuses.find(x => String(x.id) === String(s.id))) {
+                        friendsStatuses.push(s);
+                    }
+                }
+            });
             renderStatusListInstantlyUI();
-            // Show Recent updates label
+            updateMyStatusPreviewUI();
             const lbl = document.getElementById('recentUpdatesLabel');
-            if (lbl) lbl.style.display = '';
+            if (lbl && friendsStatuses.length > 0) lbl.style.display = '';
+        } else {
+            console.log('[status-ui] No friend statuses returned from API');
         }
     } catch (e) {
         console.warn('[status-ui] _fetchFriendStatusesDirect error:', e);
@@ -530,6 +562,24 @@ function subscribeToStatusChanges() {
     document.addEventListener('status_created', (e) => {
         if (typeof _fetchFriendStatusesDirect === 'function') _fetchFriendStatusesDirect();
     });
+
+    // ── Fetch friends whenever auth is ready (works before ACTIVE lifecycle) ──
+    const _earlyFetch = () => {
+        _friendFetchLast = 0;
+        if (typeof _fetchFriendStatusesDirect === 'function') {
+            setTimeout(_fetchFriendStatusesDirect, 500);
+        }
+    };
+    window.addEventListener('message', function _authReadyListener(e) {
+        const t = e.data && (e.data.type || (e.data.payload && e.data.payload.type));
+        if (t === 'AUTH_READY' || t === 'PARENT_READY' || t === 'SESSION_DATA') {
+            _earlyFetch();
+        }
+    });
+    // Also catch the DOM events from status-core lifecycle
+    document.addEventListener('statusModuleReady',  _earlyFetch, { once: true });
+    document.addEventListener('statusModuleActive', _earlyFetch, { once: true });
+    document.addEventListener('kyn:moduleActive',   _earlyFetch, { once: true });
 
     document.addEventListener('statusExpired', (e) => {
         const expiredId = e.detail && (e.detail.statusId || e.detail.id);
@@ -5886,6 +5936,12 @@ async function handlePostStatus() {
             }
 
             console.log(`[status-ui] ✅ STATUS RENDERED on sender UI id=${optimisticStatus.id}`);
+            // Broadcast so socket layer notifies friends
+            try {
+                document.dispatchEvent(new CustomEvent('status:created', {
+                    detail: { status: optimisticStatus, statusId: optimisticStatus.id }
+                }));
+            } catch (_) {}
 
             renderStatusListInstantlyUI();
             updateMyStatusPreviewUI();
@@ -7168,17 +7224,8 @@ function updateMyStatusPreviewUI() {
         }
     }
 
-    if (total === 0) {
-        if (ring) ring.classList.add('viewed');
-        if (indicator) indicator.classList.add('viewed');
-        if (statusText) statusText.textContent = 'No recent status';
-        preview.innerHTML = `
-            <div class="my-status-preview-placeholder">
-                <i class="fas fa-plus-circle"></i>
-                <span>Create your first status</span>
-            </div>
-        `;
-    }
+    // No statuses — ensure add-badge is visible (already handled above)
+    // Nothing else needed for empty state (sw-row shows "Tap to add status update")
 }
 
 function updateMoodChartUI() {
@@ -7264,6 +7311,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Initial render with cached data
         renderStatusListInstantlyUI();
+
+        // Fetch friend statuses early — StatusAPI uses parent bridge, no lifecycle needed
+        setTimeout(() => {
+            _friendFetchLast = 0;
+            if (typeof _fetchFriendStatusesDirect === 'function') _fetchFriendStatusesDirect();
+        }, 1000);
         
         UIRenderPipeline.setStage('initialRender');
         initializeUIComponents();
