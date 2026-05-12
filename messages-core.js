@@ -2845,6 +2845,8 @@ try {
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
                 if (_deleted.has(String(chat.id))) return;
+                // FIX: Also check numeric id variants
+                if (_deleted.has(String(parseInt(chat.id, 10)))) return;
                 
                 let friendId = getConversationPeerId(chat, currentUserId);
                 
@@ -6455,23 +6457,47 @@ try {
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
 
-        deleteConversation: function(chatId) {
+        deleteConversation: async function(chatId) {
             if (!chatId) return;
             const sid = String(chatId);
+            // Mark deleted in localStorage so server-sync can't resurrect it
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8') || [];
                 if (!_d.includes(sid)) { _d.push(sid); SafeStorage.setJSON('kynecta_deleted_chats_v8', _d); }
             } catch(_) {}
+            // Remove from in-memory state
             ChatManager._conversations = (ChatManager._conversations || []).filter(c => String(c.id) !== sid);
             if (ChatManager._conversationsMap) { ChatManager._conversationsMap.delete(chatId); ChatManager._conversationsMap.delete(sid); }
             if (ChatManager._activeConversation && String(ChatManager._activeConversation.id) === sid) {
                 ChatManager._activeConversation = null; ChatManager._messages = [];
             }
             ChatManager._saveToCache();
+            // Remove messages from localStorage
             try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`); } catch(_) {}
             try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
             ChatManager._notifySubscribers();
+            // Purge IndexedDB — prevents resurrection after refresh
+            try {
+                if (window.AppCache) {
+                    const _allMsgs = await window.AppCache.getAll('messages').catch(() => []);
+                    const _chatMsgs = (_allMsgs || []).filter(m => String(m.chatId || m.conversationId || '') === sid);
+                    for (const _m of _chatMsgs) {
+                        try { await window.AppCache.remove('messages', _m.id); } catch (_) {}
+                    }
+                    try { await window.AppCache.remove('chats', sid); } catch(_) {}
+                    // Also try numeric id
+                    const _numSid = parseInt(sid, 10);
+                    if (!isNaN(_numSid)) {
+                        try { await window.AppCache.remove('chats', _numSid); } catch(_) {}
+                    }
+                }
+                if (window.KynectaLocalStore && typeof window.KynectaLocalStore.clearAll !== 'undefined') {
+                    // selective: only remove this chat's messages from IDB
+                }
+            } catch(_idbErr) { console.warn('[deleteConversation] IDB purge error', _idbErr); }
+            // Notify backend (fire-and-forget)
             makeApiRequest(`/chats/${sid}`, 'DELETE').catch(() => {});
+            console.log('[MessagesCore] deleteConversation: permanently removed chatId=' + sid);
         },
 
         multiSendSelectedChats: new Set(),
@@ -6503,6 +6529,8 @@ try {
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
         
         openChatWithUser: (userId, userName, userAvatar) => openChatWithUser(userId, userName, userAvatar),
+        getSession: () => _storedSession || null,
+        getCurrentUserId: () => getCurrentUserId(),
         setCurrentCategory: (category) => ChatManager.setCurrentCategory(category),
         renderChatsList: () => ChatManager.renderChatsList(),
         

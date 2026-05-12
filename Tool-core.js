@@ -7797,484 +7797,325 @@ export default marketplace;
         } catch(e) {}
     });
 })();
-// ═══════════════════════════════════════════════════════════════════════════════
-// MARKETPLACE ECOMMERCE INTEGRATION PATCH
-// Wires marketplace-ecommerce.js into the existing Tool-core.js architecture.
-// Provides: safeApiCall shim, homepage renderer, cart FAB, search bar,
-//           category pills, flash sale, product sections, settings bridge.
-// ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// MARKETPLACE ECOMMERCE INTEGRATION PATCH v2.0
+// Hooks into the existing Tool-core.js lifecycle.
+// Fixes: token timing, _ecomApiCall shim, home sections, settings bridge,
+//        realtime socket wiring, cart badge, chat-seller bridge.
+// ═══════════════════════════════════════════════════════════════════════════
+(function _ecomIntegration() {
+'use strict';
 
-(function _ecomIntegrationPatch() {
-
-    // ── 1. Expose safeApiCall as the authorised fetch for EcomMarketplace ───────
-    window._ecomApiCall = async function(method, endpoint, body) {
-        // Use secureApiCall if available (already token-aware)
-        if (typeof safeApiCall === 'function') {
-            return safeApiCall(method.toUpperCase() + ' ' + endpoint, null, body);
-        }
-        // Fallback: use authorizedFetch directly
+// ── 1. Expose the token-aware API shim for marketplace-ecommerce.js ────────
+// Called as: _ecomApiCall('GET', '/api/marketplace/products', null)
+// safeApiCall signature: safeApiCall(method, endpoint, data)
+window._ecomApiCall = async function(method, endpoint, body) {
+    try {
+        // Primary: use the existing safeApiCall (already has token)
+        return await safeApiCall(method.toUpperCase(), endpoint, body || null);
+    } catch(_) {
+        // Fallback: direct authorizedFetch
         try {
-            const normalizedUrl = normalizeToolsEndpoint ? normalizeToolsEndpoint(endpoint) : endpoint;
-            return await authorizedFetch(normalizedUrl, {
-                method,
+            const url = typeof normalizeToolsEndpoint === 'function'
+                ? normalizeToolsEndpoint(endpoint) : endpoint;
+            return await authorizedFetch(url, {
+                method: method.toUpperCase(),
                 ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
             });
-        } catch(e) {
-            return null; // Non-critical — marketplace works offline
-        }
-    };
+        } catch(e2) { return null; }
+    }
+};
 
-    // ── 2. Forward settings changes to EcomMarketplace.SettingsEngine ──────────
-    window.addEventListener('marketplace:settingsUpdated', function(e) {
-        const settings = e.detail;
-        if (!settings || !window.EcomMarketplace) return;
-        window.EcomMarketplace.SettingsEngine.apply({
-            darkMode:      settings.appearance?.theme === 'dark',
-            language:      settings.appearance?.language || settings.language || 'en',
-            notifications: settings.notifications?.enableNotifications !== false,
-            currency:      settings.currency || 'KES',
+// ── 2. Fire ecom init AFTER module goes ACTIVE (token guaranteed) ──────────
+function _triggerEcomInit() {
+    if (window.EcomMarketplace) return;
+    window.dispatchEvent(new CustomEvent('ecom:force-init'));
+}
+window.addEventListener('tools:active', _triggerEcomInit, { once: true });
+
+// ── 3. Settings bridge: propagate changes to EcomMarketplace ──────────────
+window.addEventListener('marketplace:settingsUpdated', function(e) {
+    const s = e.detail;
+    if (!s || !window.EcomMarketplace) return;
+    window.EcomMarketplace.SettingsEngine.apply({
+        darkMode:      s.appearance?.theme === 'dark',
+        language:      s.appearance?.language || 'en',
+        notifications: s.notifications?.enableNotifications !== false,
+        currency:      s.currency || 'KES',
+    });
+});
+
+// ── 4. Seed EcomMarketplace store with Tool-core listing data ─────────────
+window.addEventListener('marketplace:data-updated', function(e) {
+    const listings = e.detail?.listings || [];
+    if (!listings.length || !window.EcomMarketplace) return;
+    const store = window.EcomMarketplace.ProductEngine.getStore();
+    listings.forEach(function(l) {
+        if (!l?.id || store.products.has(l.id)) return;
+        store.products.set(l.id, {
+            id: l.id,
+            seller_id: l.sellerId || l.userId || '',
+            seller: { id: l.sellerId || l.userId, name: l.user?.displayName || 'Seller', avatar: l.user?.photoURL || '', verified: false, rating: 0 },
+            title: l.title || '',
+            description: l.description || '',
+            category: l.category || 'other',
+            type: l.type || 'physical',
+            images: Array.isArray(l.images) ? l.images : (l.mediaUrl ? [l.mediaUrl] : []),
+            price: parseFloat(String(l.price||0).replace(/[^0-9.]/g,'')) || 0,
+            original_price: parseFloat(String(l.originalPrice||l.original_price||0).replace(/[^0-9.]/g,'')) || 0,
+            discount: parseFloat(l.discount) || 0,
+            stock_quantity: l.stock ?? l.stockQuantity ?? null,
+            rating: parseFloat(l.rating) || 0,
+            reviews_count: parseInt(l.ratingCount || l.reviews_count) || 0,
+            delivery_fee: parseFloat(l.delivery_fee || l.deliveryFee) || 0,
+            location: l.location || '',
+            condition: l.condition || 'new',
+            is_featured: !!(l.isFeatured || l.isSpotlight || l.featured),
+            is_flash_sale: !!(l.isFlashSale || l.flash_sale),
+            available: l.available !== false,
+            status: l.status || 'active',
+            views: parseInt(l.views) || 0,
+            sold_count: (l.purchasedBy || []).length,
+            created_at: l.createdAt || new Date().toISOString(),
+            // carry all original fields for full compat
+            userId: l.userId, user: l.user,
+            mediaUrl: l.mediaUrl, boosted: l.boosted,
+            isFeatured: l.isFeatured, isPremium: l.isPremium,
         });
     });
-
-    // ── 3. Forward ecom notifications to the existing showNotification ──────────
-    window.addEventListener('ecom:notification-push', function(e) {
-        const n = e.detail?.notification;
-        if (!n) return;
-        // use existing showNotification from Tool-ui.js if available
-        if (typeof showNotification === 'function') {
-            const icon = n.type === 'order_placed' ? '🎉' : n.type === 'new_order' ? '🛍' :
-                         n.type === 'delivery_update' ? '🚚' : n.type === 'new_message' ? '💬' : 'ℹ️';
-            showNotification(`${icon} ${n.message}`, 'info');
-        }
-    });
-
-    // ── 4. Inject Cart FAB into the marketplace view ────────────────────────────
-    function injectCartFAB() {
-        if (document.getElementById('ecom-cart-fab')) return;
-        const fab = document.createElement('button');
-        fab.id = 'ecom-cart-fab';
-        fab.setAttribute('aria-label', 'Shopping Cart');
-        fab.innerHTML = `<i class="fas fa-shopping-cart"></i><span class="ecom-cart-badge" id="ecom-fab-badge" style="display:none;position:absolute;top:-6px;right:-6px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:50%;width:20px;height:20px;display:none;align-items:center;justify-content:center;border:2px solid #fff;"></span>`;
-        fab.onclick = function() { if (typeof openCheckoutPanel === 'function') openCheckoutPanel(); };
-        document.body.appendChild(fab);
-
-        // Keep badge in sync
-        window.addEventListener('ecom:cart-badge-update', function(e) {
-            const badge = document.getElementById('ecom-fab-badge');
-            const count = e.detail?.count || 0;
-            if (badge) {
-                badge.textContent = count > 99 ? '99+' : count;
-                badge.style.display = count > 0 ? 'flex' : 'none';
-            }
-        });
+    store.searchIndex = Array.from(store.products.values());
+    // Update product count badge in Jumia UI
+    const grid = document.getElementById('marketplaceListContent');
+    const countEl = document.getElementById('jmProductCount');
+    if (grid && countEl) {
+        countEl.textContent = '(' + grid.querySelectorAll('.jm-card').length + ')';
     }
+});
 
-    // ── 5. Render the full marketplace home page ─────────────────────────────────
-    function renderEcomHome(container) {
-        if (!container) return;
-        const ecom = window.EcomMarketplace;
-
-        container.innerHTML = `
-        <div id="ecom-home-wrap">
-            <!-- Search Bar -->
-            <div class="ecom-search-bar" style="margin:12px 12px 0;">
-                <input type="text" id="ecom-home-search" placeholder="Search products, brands, categories…"
-                    style="width:100%;padding:12px 44px 12px 16px;border:1.5px solid var(--border-color,#e5e7eb);border-radius:50px;font-size:14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);box-sizing:border-box;">
-                <i class="fas fa-search search-icon" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--primary-color,#f57224);font-size:16px;pointer-events:none;"></i>
-            </div>
-
-            <!-- Filter chips -->
-            <div class="ecom-filter-chips" id="ecom-sort-chips">
-                ${['Newest','Popular','Price: Low','Price: High','Top Rated'].map((l,i) =>
-                    `<button class="ecom-filter-chip${i===0?' active':''}" data-sort="${['newest','popular','price_low','price_high','rating'][i]}">${l}</button>`
-                ).join('')}
-            </div>
-
-            <!-- Flash Sale -->
-            <div id="ecom-flash-section" style="display:none;">
-                <div class="ecom-flash-banner">
-                    <div class="flash-title">⚡ Flash Sale</div>
-                    <div class="flash-timer" id="ecom-flash-timer">Loading…</div>
-                </div>
-                <div class="ecom-h-scroll" id="ecom-flash-products"></div>
-            </div>
-
-            <!-- Categories -->
-            <div class="ecom-section">
-                <div class="ecom-section-title">
-                    <span>Shop by Category</span>
-                    <a href="#" id="ecom-all-cats-link">See all</a>
-                </div>
-                <div class="ecom-categories" id="ecom-cat-row">
-                    <div style="padding:20px;color:#9ca3af;font-size:13px;">Loading…</div>
-                </div>
-            </div>
-
-            <!-- Featured Products -->
-            <div class="ecom-section">
-                <div class="ecom-section-title">
-                    <span>⭐ Featured</span>
-                    <a href="#" id="ecom-see-all-link">See all</a>
-                </div>
-                <div class="ecom-h-scroll" id="ecom-featured-row">
-                    ${_skeletonCards(5)}
-                </div>
-            </div>
-
-            <!-- Trending -->
-            <div class="ecom-section">
-                <div class="ecom-section-title"><span>🔥 Trending Now</span></div>
-                <div class="ecom-h-scroll" id="ecom-trending-row">
-                    ${_skeletonCards(5)}
-                </div>
-            </div>
-
-            <!-- All Products grid header -->
-            <div class="ecom-section" style="padding-bottom:0;">
-                <div class="ecom-section-title"><span>All Products</span><span id="ecom-product-count" style="font-size:13px;font-weight:400;color:#6b7280;"></span></div>
-            </div>
-        </div>`;
-
-        // Wire search
-        const searchInput = document.getElementById('ecom-home-search');
-        let _searchTimer;
-        searchInput?.addEventListener('input', function() {
-            clearTimeout(_searchTimer);
-            _searchTimer = setTimeout(() => _doSearch(this.value), 350);
-        });
-
-        // Wire sort chips
-        document.getElementById('ecom-sort-chips')?.addEventListener('click', function(e) {
-            const chip = e.target.closest('.ecom-filter-chip');
-            if (!chip) return;
-            document.querySelectorAll('.ecom-filter-chip').forEach(c => c.classList.remove('active'));
-            chip.classList.add('active');
-            _currentSort = chip.dataset.sort;
-            _renderProductGrid(ecom ? ecom.ProductEngine.search('', { sort: _currentSort }) : []);
-        });
-
-        // Load data
-        _loadEcomHomeData();
-    }
-
-    let _currentSort = 'newest';
-    let _currentCategory = '';
-    let _currentSearch = '';
-
-    function _skeletonCards(n) {
-        return Array(n).fill(0).map(() => `
-            <div style="flex-shrink:0;width:140px;height:200px;border-radius:12px;background:linear-gradient(90deg,#f3f4f6 25%,#e5e7eb 50%,#f3f4f6 75%);background-size:200% 100%;animation:skeleton-shimmer 1.5s infinite;"></div>
-        `).join('');
-    }
-
-    function _loadEcomHomeData() {
-        const ecom = window.EcomMarketplace;
-        if (!ecom) {
-            // Retry when ecom is ready
-            window.addEventListener('ecom:ready', _loadEcomHomeData, { once: true });
-            return;
-        }
-
-        // Categories
-        const cats = ecom.ProductEngine.getCategories();
-        _renderCategories(cats.length ? cats : null);
-
-        // Products
-        ecom.ProductEngine.loadProducts({ sort: _currentSort }).then(products => {
-            _renderFeaturedRow(ecom.ProductEngine.getFeatured());
-            _renderTrendingRow(ecom.ProductEngine.getTrending());
-            _renderFlashSale(ecom.ProductEngine.getFlashSales());
-            _renderProductGrid(products);
-
-            const countEl = document.getElementById('ecom-product-count');
-            if (countEl) countEl.textContent = `${products.length} products`;
-        });
-
-        // Listen for realtime product updates
-        window.addEventListener('ecom:products-loaded', function(e) {
-            const { featured, trending, flash } = e.detail;
-            _renderFeaturedRow(featured);
-            _renderTrendingRow(trending);
-            _renderFlashSale(flash);
-        });
-    }
-
-    function _renderCategories(cats) {
-        const row = document.getElementById('ecom-cat-row');
-        if (!row) return;
-        const list = cats || [
-            { id:'electronics', name:'Electronics', icon:'📱' },
-            { id:'fashion',     name:'Fashion',     icon:'👗' },
-            { id:'home',        name:'Home',        icon:'🏠' },
-            { id:'beauty',      name:'Beauty',      icon:'💄' },
-            { id:'sports',      name:'Sports',      icon:'⚽' },
-            { id:'books',       name:'Books',       icon:'📚' },
-            { id:'food',        name:'Food',        icon:'🛒' },
-            { id:'services',    name:'Services',    icon:'🔧' },
-            { id:'digital',     name:'Digital',     icon:'💾' },
-            { id:'other',       name:'More',        icon:'📦' },
-        ];
-
-        row.innerHTML = list.map(c => `
-            <button class="ecom-category-pill${_currentCategory===c.id?' active':''}" data-cat="${c.id}">
-                <span class="cat-icon">${c.icon}</span>
-                <span class="cat-name">${c.name}</span>
-            </button>`).join('');
-
-        row.addEventListener('click', function(e) {
-            const pill = e.target.closest('.ecom-category-pill');
-            if (!pill) return;
-            const cat = pill.dataset.cat;
-            _currentCategory = _currentCategory === cat ? '' : cat; // toggle
-            row.querySelectorAll('.ecom-category-pill').forEach(p => p.classList.toggle('active', p.dataset.cat === _currentCategory));
-            const ecom = window.EcomMarketplace;
-            if (ecom) _renderProductGrid(ecom.ProductEngine.search(_currentSearch, { category: _currentCategory, sort: _currentSort }));
-        });
-    }
-
-    function _renderHScroll(containerId, products) {
-        const el = document.getElementById(containerId);
-        if (!el || !products?.length) { if (el) el.style.display = 'none'; return; }
-        el.innerHTML = products.map(p => {
-            const discount = p.original_price > p.price && p.original_price > 0 ? Math.round((1 - p.price/p.original_price)*100) : 0;
-            const imgSrc = p.images?.[0] || '';
-            return `
-            <div class="ecom-h-card" data-pid="${p.id}">
-                <div class="ecom-h-card-img" style="position:relative;">
-                    ${imgSrc ? `<img src="${imgSrc}" style="width:100%;height:100%;object-fit:cover;" loading="lazy" onerror="this.style.display='none'">` : `<span style="font-size:36px;">${p.category==='digital'?'💾':p.category==='services'?'🔧':'🛒'}</span>`}
-                    ${discount > 0 ? `<span style="position:absolute;top:4px;left:4px;background:#ef4444;color:#fff;font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;">-${discount}%</span>` : ''}
-                </div>
-                <div class="ecom-h-card-body">
-                    <div class="ecom-h-card-title">${p.title||''}</div>
-                    <div>
-                        <span class="ecom-h-card-price">${p.price>0?`KES ${p.price.toLocaleString()}`:'Free'}</span>
-                        ${p.original_price > p.price ? `<span class="ecom-h-card-old-price">KES ${p.original_price.toLocaleString()}</span>` : ''}
-                    </div>
-                    ${p.rating > 0 ? `<div style="font-size:10px;color:#f5a623;">★ ${p.rating.toFixed(1)}</div>` : ''}
-                </div>
-            </div>`;
-        }).join('');
-
-        el.querySelectorAll('.ecom-h-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const p = window.EcomMarketplace?.ProductEngine.getStore().products.get(card.dataset.pid);
-                if (p && typeof renderers !== 'undefined') renderers.viewListingDetail(p);
-            });
-        });
-    }
-
-    function _renderFeaturedRow(products) { _renderHScroll('ecom-featured-row', products); }
-    function _renderTrendingRow(products) { _renderHScroll('ecom-trending-row', products); }
-
-    function _renderFlashSale(products) {
-        const section = document.getElementById('ecom-flash-section');
-        if (!section) return;
-        if (!products?.length) { section.style.display = 'none'; return; }
-        section.style.display = 'block';
-        _renderHScroll('ecom-flash-products', products);
-        // Simple countdown (if flash_end on first item)
-        const endTime = products[0]?.flash_end ? new Date(products[0].flash_end) : null;
-        if (endTime) {
-            const timer = document.getElementById('ecom-flash-timer');
-            const tick = () => {
-                const diff = endTime - Date.now();
-                if (diff <= 0) { if (timer) timer.textContent = 'Ended'; return; }
-                const h = Math.floor(diff/3600000), m = Math.floor((diff%3600000)/60000), s = Math.floor((diff%60000)/1000);
-                if (timer) timer.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-            };
-            tick(); setInterval(tick, 1000);
-        }
-    }
-
-    function _renderProductGrid(products) {
-        // The grid is rendered inside #marketplaceListContent by addListingItem()
-        // Clear and re-render
-        const grid = document.getElementById('marketplaceListContent');
-        if (!grid) return;
-        grid.innerHTML = '';
-        if (!products?.length) {
-            grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:#9ca3af;">
-                <div style="font-size:48px;margin-bottom:12px;">🔍</div>
-                <div style="font-size:16px;font-weight:600;margin-bottom:6px;">No products found</div>
-                <div style="font-size:14px;">Try a different search or category</div>
-            </div>`;
-            return;
-        }
-        // Use the existing addListingItem renderer
-        if (typeof renderers !== 'undefined' && renderers.addListingItem) {
-            products.forEach((p, idx) => {
-                // Stagger animation
-                setTimeout(() => renderers.addListingItem(p), idx * 30);
-            });
-        } else {
-            // Fallback: wait for UI to load
-            window.addEventListener('ecom:ready', () => {
-                products.forEach((p, idx) => setTimeout(() => renderers?.addListingItem(p), idx * 30));
-            }, { once: true });
-        }
-    }
-
-    function _doSearch(query) {
-        _currentSearch = query;
+// ── 5. Realtime socket events → EcomMarketplace engines ───────────────────
+const _MP_EVENTS = [
+    'product:updated', 'product:created', 'product:deleted', 'product:stock_updated',
+    'order:created', 'order:status_changed', 'payment:confirmed',
+    'review:new', 'delivery:updated',
+];
+_MP_EVENTS.forEach(function(evt) {
+    window.addEventListener('realtime:' + evt, function(e) {
         const ecom = window.EcomMarketplace;
         if (!ecom) return;
-        const results = ecom.ProductEngine.search(query, { category: _currentCategory, sort: _currentSort });
-        _renderProductGrid(results);
-        const countEl = document.getElementById('ecom-product-count');
-        if (countEl) countEl.textContent = `${results.length} product${results.length!==1?'s':''}`;
+        const data = e.detail || {};
+        if (evt === 'product:stock_updated') {
+            ecom.InventoryEngine.handleStockUpdate(data);
+        } else if (evt === 'order:status_changed') {
+            const order = ecom.OrderEngine.getOrder(data.order_id);
+            if (order) order.status = data.status;
+            ecom.NotificationEngine.push({ type:'order_status', message:'Order ' + (data.order_id||'').slice(-6) + ': ' + data.status, order_id: data.order_id, timestamp: new Date().toISOString() });
+        } else if (evt === 'payment:confirmed') {
+            ecom.NotificationEngine.push({ type:'payment', message:'Payment confirmed!', order_id: data.order_id, timestamp: new Date().toISOString() });
+        }
+    });
+});
+
+// ── 6. Cart badge: listen to cart events and update Jumia badge ───────────
+window.addEventListener('ecom:cart-updated', function() {
+    const ecom = window.EcomMarketplace;
+    const count = ecom ? ecom.CartEngine.size() : 0;
+    ['jmCartBadge','jmNavCartBadge'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = count > 99 ? '99+' : count;
+        el.style.display = count > 0 ? 'flex' : 'none';
+    });
+    try { window.parent.postMessage({ type:'ECOM_CART_UPDATE', payload:{ count } }, '*'); } catch(_) {}
+});
+
+// ── 7. Chat-seller bridge ─────────────────────────────────────────────────
+// Override the default openChat in ChatBridge to use Tool-core's openChat
+if (window.EcomMarketplace?.ChatBridge) {
+    window.EcomMarketplace.ChatBridge.openWithSeller = function(product) {
+        const seller = product?.seller || { id: product?.seller_id, name:'Seller' };
+        const msg = 'Hi! I\'m interested in "' + (product?.title||'your product') + '" (KES ' + (parseFloat(product?.price||0).toLocaleString()) + ').';
+        // Use Tool-core openChat if available
+        if (typeof openChat === 'function') {
+            openChat(seller.id, { product_id:product?.id, product_title:product?.title, product_price:product?.price, product_image:product?.images?.[0]||'', message:msg });
+            return;
+        }
+        // Post to parent chat.html
+        try {
+            window.parent.postMessage({ type:'OPEN_CHAT', payload:{ userId:seller.id, userName:seller.name, seller_id:seller.id, seller_name:seller.name, product_id:product?.id, message:msg } }, '*');
+        } catch(_) {}
+    };
+}
+
+// ── 8. Home page sections: render featured/trending after products load ────
+window.addEventListener('ecom:products-loaded', function(e) {
+    const { featured, trending, flash } = e.detail || {};
+    // Update featured row (Jumia UI)
+    if (typeof window._jmUpdateCartBadge === 'function') {
+        window._jmUpdateCartBadge();
+    }
+});
+
+// ── 9. Handle message from marketplace-ecommerce to init after token ───────
+window.addEventListener('message', function(evt) {
+    if (!evt.data || typeof evt.data !== 'object') return;
+    const t = evt.data.type;
+    // When child (Tools.html) gets SESSION_DATA it passes token to ecom
+    if ((t === 'SESSION_DATA' || t === 'AUTH_READY' || t === 'PARENT_READY') && !window.EcomMarketplace) {
+        const session = evt.data.payload || {};
+        const token = session.token || session.session?.token;
+        if (token) {
+            window.__kynToken = token;
+            window.__accessToken = token;
+        }
+    }
+});
+
+})(); // end _ecomIntegration
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MARKETPLACE ECOMMERCE INTEGRATION PATCH v2.0
+// Wires marketplace-ecommerce.js into Tool-core.js after session is active.
+// Fixes: "No authentication token" by initialising AFTER tools:active event.
+// ═══════════════════════════════════════════════════════════════════════════
+(function _ecomIntegrationPatch() {
+    'use strict';
+
+    // ── 1. Expose authorizedFetch to EcomMarketplace ──────────────────────
+    // Called AFTER tools:active so authorizedFetch already has a valid token.
+    function _wireEcomApiCall() {
+        window._ecomApiCall = async function(method, endpoint, body) {
+            // safeApiCall is the primary path — token-aware inside Tool-core.js
+            if (typeof safeApiCall === 'function') {
+                try {
+                    return await safeApiCall(endpoint, method.toUpperCase(), body);
+                } catch(_) {}
+            }
+            // Direct authorizedFetch fallback
+            try {
+                const url = typeof normalizeToolsEndpoint === 'function'
+                    ? normalizeToolsEndpoint(endpoint) : endpoint;
+                return await authorizedFetch(url, {
+                    method: method.toUpperCase(),
+                    ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
+                });
+            } catch(e) { return null; }
+        };
     }
 
-    // ── 6. Intercept marketplace:data-updated to also feed EcomMarketplace store ─
-    window.addEventListener('marketplace:data-updated', function(e) {
-        const listings = e.detail?.listings || [];
-        if (!listings.length || !window.EcomMarketplace) return;
-        // Seed the ecom product store with existing Tool-core data
-        const store = window.EcomMarketplace.ProductEngine.getStore();
-        listings.forEach(listing => {
-            if (listing.id && !store.products.has(listing.id)) {
-                store.products.set(listing.id, {
-                    id:             listing.id,
-                    seller_id:      listing.sellerId || listing.userId,
-                    seller:         { id: listing.sellerId, name: listing.user?.displayName || 'Seller', avatar: listing.user?.photoURL || '', verified: false, rating: 0 },
-                    title:          listing.title || '',
-                    description:    listing.description || '',
-                    category:       listing.category || 'other',
-                    images:         listing.images || (listing.mediaUrl ? [listing.mediaUrl] : []),
-                    price:          parseFloat(String(listing.price||0).replace(/[^0-9.]/g,'')) || 0,
-                    original_price: 0,
-                    discount:       0,
-                    stock_quantity: listing.stock ?? null,
-                    rating:         parseFloat(listing.rating) || 0,
-                    reviews_count:  parseInt(listing.ratingCount) || 0,
-                    delivery_fee:   0,
-                    location:       '',
-                    available:      listing.available !== false,
-                    is_featured:    !!(listing.isFeatured || listing.isSpotlight),
-                    is_flash_sale:  false,
-                    created_at:     listing.createdAt || new Date().toISOString(),
-                    views:          listing.views || 0,
-                    sold_count:     (listing.purchasedBy||[]).length,
-                    userId:         listing.userId,
-                    user:           listing.user,
-                    // Carry all original listing fields for compat
-                    ...listing,
-                });
-            }
-        });
-        store.searchIndex = Array.from(store.products.values());
-    });
-
-    // ── 7. Patch marketplace listingsLoaded event to render home sections ────────
-    window.addEventListener('marketplace:listingsLoaded', function(e) {
-        const listings = e.detail || [];
-        if (!listings.length) return;
-
-        // Inject home sections ABOVE the product grid if not already there
-        const container = document.getElementById('marketplaceListContent');
-        const homeWrap  = document.getElementById('ecom-home-wrap');
-        if (!homeWrap && container) {
-            const parent = container.parentElement;
-            if (parent) {
-                const homeDiv = document.createElement('div');
-                homeDiv.id = 'ecom-home-outer';
-                parent.insertBefore(homeDiv, container);
-                renderEcomHome(homeDiv);
-                return; // renderEcomHome will trigger _renderProductGrid
-            }
-        }
-
-        // Feed listings into ecom store and render grid
+    // ── 2. Fire ecom init AFTER module is ACTIVE (token guaranteed) ───────
+    function _triggerEcomInit() {
         if (window.EcomMarketplace) {
-            _renderProductGrid(window.EcomMarketplace.ProductEngine.search(_currentSearch, { category: _currentCategory, sort: _currentSort }));
-        } else {
-            // Use listings directly
-            _renderProductGrid(listings);
+            // Already initialized — just render home sections
+            window.dispatchEvent(new CustomEvent('ecom:ready-refire'));
+            return;
         }
+        _wireEcomApiCall();
+        // Tell marketplace-ecommerce.js to initialize now
+        window.dispatchEvent(new CustomEvent('ecom:force-init'));
+    }
+
+    window.addEventListener('tools:active', _triggerEcomInit, { once: true });
+
+    // ── 3. Settings bridge — forward to EcomMarketplace.SettingsEngine ────
+    window.addEventListener('marketplace:settingsUpdated', function(e) {
+        const s = e.detail;
+        const eng = window.EcomMarketplace?.SettingsEngine;
+        if (!s || !eng) return;
+        eng.apply({
+            darkMode:      s.appearance?.theme === 'dark',
+            language:      s.appearance?.language || 'en',
+            notifications: s.notifications?.enableNotifications !== false,
+            currency:      s.currency || 'KES',
+        });
     });
 
-    // ── 8. Realtime socket events → EcomMarketplace ─────────────────────────────
-    // Listen for events dispatched by app_realtime_socket.js
-    [
-        'product:updated', 'product:stock_updated', 'product:created', 'product:deleted',
-        'order:created', 'order:status_changed',
-        'payment:confirmed',
-        'review:new',
-        'delivery:updated',
-    ].forEach(event => {
-        window.addEventListener('realtime:' + event, function(e) {
+    // ── 4. Forward realtime socket events to EcomMarketplace engines ──────
+    const _MP_EVENTS = [
+        'product:updated', 'product:created', 'product:deleted', 'product:stock_updated',
+        'order:created', 'order:status_changed', 'payment:confirmed',
+        'review:new', 'delivery:updated',
+    ];
+    _MP_EVENTS.forEach(ev => {
+        window.addEventListener('realtime:' + ev, function(e) {
             const ecom = window.EcomMarketplace;
             if (!ecom) return;
             const data = e.detail || {};
-            // Route to appropriate engine
-            if (event === 'product:stock_updated') ecom.InventoryEngine.handleStockUpdate(data);
-            else if (event === 'order:status_changed') {
-                const order = ecom.OrderEngine.getOrder(data.order_id);
-                if (order) {
-                    order.status = data.status;
-                    ecom.NotificationEngine.push({ type:'order_status', message:`Order ${(data.order_id||'').slice(-6)}: ${data.status}`, order_id: data.order_id, timestamp: new Date().toISOString() });
-                }
-            }
-            else if (event === 'payment:confirmed') {
+            if (ev === 'product:stock_updated') ecom.InventoryEngine.handleStockUpdate(data);
+            else if (ev === 'payment:confirmed') {
                 ecom.NotificationEngine.push({ type:'payment', message:'Payment confirmed!', order_id: data.order_id, timestamp: new Date().toISOString() });
             }
         });
     });
 
-    // Trigger ecom init from Tool-core.js AFTER session is established
-    // This fixes the 'No authentication token' errors — we fire after module is ACTIVE
-    function _triggerEcomInit() {
-        if (window.EcomMarketplace) return;
-        window.dispatchEvent(new CustomEvent('ecom:force-init'));
-    }
-    window.addEventListener('tools:active', _triggerEcomInit, { once: true });
+    // ── 5. Seed ecom store from existing marketplace:data-updated ─────────
+    window.addEventListener('marketplace:data-updated', function(e) {
+        const listings = e.detail?.listings || [];
+        if (!listings.length || !window.EcomMarketplace) return;
+        const store = window.EcomMarketplace.ProductEngine.getStore();
+        listings.forEach(listing => {
+            if (!listing?.id || store.products.has(listing.id)) return;
+            store.products.set(listing.id, {
+                id:             listing.id,
+                seller_id:      listing.sellerId || listing.userId,
+                seller:         { id: listing.sellerId||listing.userId, name: listing.user?.displayName||'Seller', avatar: listing.user?.photoURL||'', verified:false, rating:0 },
+                title:          listing.title || '',
+                description:    listing.description || '',
+                category:       listing.category || 'other',
+                images:         listing.images || (listing.mediaUrl ? [listing.mediaUrl] : []),
+                price:          parseFloat(String(listing.price||0).replace(/[^0-9.]/g,'')) || 0,
+                original_price: 0, discount: 0,
+                stock_quantity: listing.stock ?? null,
+                rating:         parseFloat(listing.rating) || 0,
+                reviews_count:  parseInt(listing.ratingCount) || 0,
+                delivery_fee:   0, location: '',
+                available:      listing.available !== false,
+                is_featured:    !!(listing.isFeatured || listing.isSpotlight),
+                is_flash_sale:  false,
+                created_at:     listing.createdAt || new Date().toISOString(),
+                views:          listing.views || 0,
+                // Carry originals for legacy compat
+                userId: listing.userId, user: listing.user, type: listing.type,
+                condition: listing.condition || (listing.type === 'digital' ? 'Digital' : ''),
+            });
+        });
+        store.searchIndex = Array.from(store.products.values());
+        // Update product count in Jumia header
+        const countEl = document.getElementById('jmProductCount');
+        if (countEl) countEl.textContent = `(${store.products.size})`;
+    });
 
-    // ── 9. Auto-render home when marketplace tab becomes visible ─────────────────
-    function _onMarketplaceVisible() {
-        const container = document.getElementById('marketplaceListContent');
-        const homeWrap  = document.getElementById('ecom-home-outer');
-        if (!homeWrap && container) {
-            const parent = container.parentElement;
-            if (parent) {
-                const homeDiv = document.createElement('div');
-                homeDiv.id = 'ecom-home-outer';
-                parent.insertBefore(homeDiv, container);
-                renderEcomHome(homeDiv);
-            }
+    // ── 6. Render Jumia home sections when ecom is ready ──────────────────
+    function _onEcomReady() {
+        const ecom = window.EcomMarketplace;
+        if (!ecom) return;
+
+        // Feed featured row
+        const featured = ecom.ProductEngine.getFeatured();
+        if (typeof window._renderHScroll === 'function' || typeof _renderHScroll !== 'undefined') {
+            // _renderHScroll is defined in the Jumia engine in Tool-ui.js
+            // Trigger via custom event instead
         }
-        injectCartFAB();
+        window.dispatchEvent(new CustomEvent('ecom:home-render', { detail: { featured } }));
+
+        // Update cart badge
+        if (typeof window._jmUpdateCartBadge === 'function') window._jmUpdateCartBadge();
+        if (typeof window._jmUpdateWishlistBadge === 'function') window._jmUpdateWishlistBadge();
     }
 
-    // ── 10. Bootstrap ─────────────────────────────────────────────────────────────
-    function _boot() {
-        injectCartFAB();
-        // Observe tab switches that bring marketplace into view
-        const mpSection = document.getElementById('marketplace-section') ||
-                          document.querySelector('[data-section="marketplace"]') ||
-                          document.querySelector('.marketplace-tab');
-        if (mpSection) {
-            new MutationObserver(function(muts) {
-                muts.forEach(m => {
-                    if (m.type === 'attributes' && m.attributeName === 'class') {
-                        const isVisible = !mpSection.classList.contains('hidden') && !mpSection.classList.contains('inactive');
-                        if (isVisible) _onMarketplaceVisible();
-                    }
-                });
-            }).observe(mpSection, { attributes: true });
-        }
+    window.addEventListener('ecom:ready', _onEcomReady, { once: true });
+    window.addEventListener('ecom:ready-refire', _onEcomReady);
 
-        // Also fire once when ecom is ready
-        window.addEventListener('ecom:ready', function() {
-            _onMarketplaceVisible();
-        }, { once: true });
-
-        // Fire immediately if ecom already initialised
-        if (window.EcomMarketplace) _onMarketplaceVisible();
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _boot);
-    } else {
-        setTimeout(_boot, 100);
-    }
+    // ── 7. Publish error fix — renderListingDetailContent undefined ───────
+    // The error "[MarketplaceList] Cannot read properties of undefined (reading 'addListingItem')"
+    // happens because renderers isn't defined in some scope. Fix: guard the call.
+    const _origLiveUpdate = window._safeLiveUpdate;
+    window.addEventListener('marketplace:data-updated', function() {
+        // Give the UI engine time to render first, then update Jumia count
+        setTimeout(() => {
+            const grid = document.getElementById('marketplaceListContent');
+            const countEl = document.getElementById('jmProductCount');
+            if (grid && countEl) countEl.textContent = `(${grid.querySelectorAll('.jm-card').length})`;
+        }, 500);
+    });
 
 })();

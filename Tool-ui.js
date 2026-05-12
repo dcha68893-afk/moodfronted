@@ -1990,20 +1990,7 @@ const renderers = {
         DOM.marketplaceListContent.innerHTML = '';
 
         if (!allListings || allListings.length === 0) {
-            DOM.marketplaceListContent.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-store-alt" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                    <p>No listings available yet</p>
-                    <p class="subtext">Be the first to create a listing!</p>
-                    <button class="action-btn primary" style="margin-top: 20px;" id="emptyStateCreateBtn">
-                        <i class="fas fa-plus"></i> Create Listing
-                    </button>
-                </div>
-            `;
-            const createBtn = document.getElementById('emptyStateCreateBtn');
-            if (createBtn) {
-                createBtn.onclick = () => showCreateListingModal();
-            }
+            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:#9ca3af"><div style="font-size:48px;margin-bottom:12px">🛒</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">No products yet</div><div style="font-size:13px;margin-bottom:20px">Be the first to create a listing!</div><button onclick="showCreateListingModal()" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer"><i class='fas fa-plus'></i> Create Listing</button></div>`;
             return;
         }
 
@@ -2049,18 +2036,14 @@ const renderers = {
             return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
         });
 
-        filtered.forEach(listing => {
-            if (isListingVisibleToUser(listing)) this.addListingItem(listing);
+        filtered.forEach((listing, idx) => {
+            if (isListingVisibleToUser(listing)) setTimeout(() => renderers.addListingItem(listing), idx * 18);
         });
+        // Update Jumia count after staggered render
+        setTimeout(() => { const c=document.getElementById('jmProductCount'); if(c) c.textContent=`(${filtered.length})`; }, filtered.length*18+200);
         
         if (filtered.length === 0) {
-            DOM.marketplaceListContent.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-filter" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                    <p>No listings match your filters</p>
-                    <p class="subtext">Try a different category or clear your mood filter</p>
-                </div>
-            `;
+            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af"><div style="font-size:40px;margin-bottom:12px">🔍</div><div style="font-size:14px;font-weight:600">No products match your filters</div><div style="font-size:12px;margin-top:6px">Try a different category or clear filters</div></div>`;
         }
         
         if (DOM.availableListingsCount) {
@@ -2070,66 +2053,106 @@ const renderers = {
 
     addListingItem: withErrorBoundary('AddListingItem', function(listing) {
         if (!DOM.marketplaceListContent || !listing) return;
-        
-        // Check if already exists
-        if (document.querySelector(`.listing-item[data-listing-id="${listing.id}"]`)) return;
-        
-        const item = document.createElement('div');
-        item.className = 'listing-item';
-        if (listing.featured || listing.boosted || listing.isFeatured || listing.isSpotlight) item.classList.add('featured');
-        if (listing.premium || listing.isPremium) item.classList.add('premium-listing');
-        // FIX: Use both userId and sellerId for dataset
-        item.dataset.listingId = listing.id;
-        item.dataset.userId = listing.userId || listing.sellerId;
+        if (document.querySelector(`.jm-card[data-listing-id="${listing.id}"]`)) return;
 
-        const userName = listing.user?.displayName || 'Unknown User';
-        const userInitials = userName.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 2);
-        const availabilityClass = `availability-${listing.availability || 'free'}`;
-        const availabilityText = listing.availability ? listing.availability.charAt(0).toUpperCase() + listing.availability.slice(1) : 'Available';
+        // ── Normalise fields ──────────────────────────────────────────────
+        const price    = parseFloat(String(listing.price||0).replace(/[^0-9.]/g,'')) || 0;
+        const origPrc  = parseFloat(String(listing.original_price||listing.originalPrice||0).replace(/[^0-9.]/g,'')) || 0;
+        const discount = origPrc > price && origPrc > 0 ? Math.round((1-price/origPrc)*100) : (parseFloat(listing.discount)||0);
+        const stock    = listing.stock_quantity ?? listing.stock ?? null;
+        const inStock  = listing.available !== false && (stock === null || stock > 0);
+        const rating   = parseFloat(listing.rating) || 0;
+        const reviews  = parseInt(listing.reviews_count || listing.ratingCount) || 0;
+        const imgSrc   = listing.images?.[0] || listing.mediaUrl || listing.image || '';
+        const delivFee = parseFloat(listing.delivery_fee || listing.deliveryFee || 0);
+        const condition = listing.condition || (listing.type === 'digital' ? 'Digital' : '');
+        const ecom     = window.EcomMarketplace;
+        const inWish   = ecom ? ecom.WishlistEngine.has(listing.id) : (savedItems?.some?.(s=>s.id===listing.id));
+        const inCart   = ecom ? ecom.CartEngine.has(listing.id) : false;
+        const fmt      = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${n.toLocaleString()}`;
+        const _stars   = (r) => { let s=''; const f=Math.floor(r), h=r-f>=0.5;
+            for(let i=0;i<f;i++) s+='<i class="fas fa-star"></i>';
+            if(h) s+='<i class="fas fa-star-half-alt"></i>';
+            for(let i=0;i<(5-f-(h?1:0));i++) s+='<i class="far fa-star"></i>';
+            return s; };
 
-        // Build badges
-        let badges = '';
-        if (listing.featured || listing.isFeatured || listing.isSpotlight) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
-        if (listing.boosted || listing.isBoosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
-        if (listing.verified || listing.isVerified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
-        if (listing.teamListing) badges += '<span class="team-badge"><i class="fas fa-users"></i> TEAM</span>';
-        if ((listing.premium || listing.isPremium) && !listing.featured && !listing.boosted) badges += '<span class="premium-badge"><i class="fas fa-crown"></i> PREMIUM</span>';
+        // ── Track recently viewed ─────────────────────────────────────────
+        window._jmAddRecent && window._jmAddRecent(listing);
 
-        item.innerHTML = `
-            <div class="listing-avatar" style="${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'background-color: #4caf50;' : ''}">
-                ${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? '<i class="fas fa-file-alt" style="font-size: 20px;"></i>' : 
-                  listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service' ? '<i class="fas fa-tools" style="font-size: 20px;"></i>' :
-                  listing.user?.photoURL ? '' : `<span style="color: white; font-size: 18px; font-weight: 500;">${escapeHtml(userInitials)}</span>`}
+        const card = document.createElement('div');
+        card.className = 'jm-card';
+        card.dataset.listingId = listing.id;
+        card.dataset.userId = listing.userId || listing.sellerId || '';
+
+        card.innerHTML = `
+            <div class="jm-card-img-wrap">
+                ${imgSrc
+                    ? `<img class="jm-card-img" src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" onerror="this.style.display='none'">`
+                    : `<div class="jm-card-placeholder">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
+                ${discount>0 ? `<span class="jm-card-discount-badge">-${discount}%</span>` : ''}
+                ${condition ? `<span class="jm-card-condition-badge">${escapeHtml(condition.toUpperCase())}</span>` : ''}
+                <button class="jm-card-wish${inWish?' wishlisted':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
+                    ${inWish ? '❤️' : '🤍'}
+                </button>
+                ${!inStock && stock!==null ? `<div class="jm-card-out-overlay"><span class="jm-card-out-label">OUT OF STOCK</span></div>` : ''}
             </div>
-            <div class="listing-info">
-                <div class="listing-name">
-                    <span class="listing-title">${escapeHtml(listing.title || 'Untitled')}</span>
-                    ${listing.price ? `<span class="listing-price">${escapeHtml(listing.price)}</span>` : ''}
+            <div class="jm-card-body">
+                <div class="jm-card-title">${escapeHtml(listing.title||'Untitled')}</div>
+                ${rating>0||reviews>0 ? `<div class="jm-card-stars">${_stars(rating)}<span class="jm-card-reviews">(${reviews.toLocaleString()})</span></div>` : ''}
+                <div class="jm-card-prices">
+                    <span class="jm-card-price">${price>0?fmt(price):'<span style="color:#22c55e;font-weight:700">Free</span>'}</span>
+                    ${origPrc>price ? `<span class="jm-card-oldprice">${fmt(origPrc)}</span>` : ''}
                 </div>
-                <div style="display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0;">
-                    ${badges}
-                </div>
-                <div class="listing-time">
-                    <span><i class="far fa-clock"></i> ${listing.createdAt ? formatTimeAgo(new Date(listing.createdAt)) : 'Just now'}</span>
-                    <span class="availability-badge ${availabilityClass}"><i class="fas fa-${listing.availability === 'urgent' ? 'exclamation-circle' : listing.availability === 'busy' ? 'clock' : 'check-circle'}"></i> ${availabilityText}</span>
-                    ${getTrustIndicator ? getTrustIndicator(listing.userId || listing.sellerId, listing.user?.trustLevel) : ''}
-                </div>
-                <div class="listing-preview">
-                    ${escapeHtml((listing.description || '').substring(0, 80))}${listing.description?.length > 80 ? '...' : ''}
-                </div>
-            </div>
-        `;
+                ${delivFee===0 ? '<div class="jm-card-delivery">Free delivery</div>' : (delivFee>0 ? `<div style="font-size:10px;color:#6b7280">+ ${fmt(delivFee)} delivery</div>` : '')}
+                ${stock!==null&&stock>0&&stock<=5 ? `<div class="jm-card-stock-warn">Only ${stock} left!</div>` : ''}
+                ${inStock
+                    ? `<button class="jm-add-cart-btn${inCart?' in-cart':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
+                          ${inCart ? '✓ In Cart' : 'Add To Cart'}
+                       </button>`
+                    : `<button class="jm-add-cart-btn" disabled>Out of Stock</button>`}
+            </div>`;
 
-        if (listing.user?.photoURL && (listing.type === LISTING_TYPES?.SERVICE || listing.type === 'service')) {
-            const avatarDiv = item.querySelector('.listing-avatar');
-            avatarDiv.style.backgroundImage = `url('${escapeHtml(listing.user.photoURL)}')`;
-            avatarDiv.style.backgroundSize = 'cover';
-            avatarDiv.style.backgroundPosition = 'center';
-            avatarDiv.innerHTML = '';
+        // Wishlist toggle
+        card.querySelector('.jm-card-wish')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (ecom) {
+                const added = ecom.WishlistEngine.toggle(listing.id);
+                e.currentTarget.textContent = added ? '❤️' : '🤍';
+                e.currentTarget.classList.toggle('wishlisted', added);
+            } else if (typeof toggleSaveListing === 'function') {
+                toggleSaveListing(listing.id);
+            }
+            window._jmUpdateWishlistBadge?.();
+        });
+
+        // Add to cart
+        const cartBtn = card.querySelector('.jm-add-cart-btn');
+        if (cartBtn && !cartBtn.disabled) {
+            cartBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (ecom) {
+                    const p = { id:listing.id, title:listing.title, price, original_price:origPrc, discount,
+                        seller_id: listing.sellerId||listing.userId, seller:{name:listing.user?.displayName||'Seller'},
+                        images: listing.images||(imgSrc?[imgSrc]:[]), stock_quantity:stock??999,
+                        delivery_fee: delivFee, available:true, category:listing.category||'other' };
+                    const res = ecom.CartEngine.add(p, 1);
+                    if (res.success) {
+                        cartBtn.textContent = '✓ In Cart';
+                        cartBtn.classList.add('in-cart');
+                        window._jmUpdateCartBadge?.();
+                        window._jmToast('Added to cart', 'success', '🛒');
+                    } else {
+                        window._jmToast(res.message||'Failed', 'error', '❌');
+                    }
+                } else if (typeof openPlaceOrderPanel === 'function') {
+                    openPlaceOrderPanel(listing);
+                }
+            });
         }
 
-        item.onclick = () => renderers.viewListingDetail(listing);
-        DOM.marketplaceListContent.appendChild(item);
+        // Open detail panel on card click
+        card.addEventListener('click', () => renderers.viewListingDetail(listing));
+        DOM.marketplaceListContent.appendChild(card);
     }, null),
 
     viewListingDetail: withErrorBoundary('ViewListingDetail', function(listing) {
@@ -5065,3 +5088,1084 @@ export {
     showCreateListingModal,
     viewListingDetail
 };
+// ═══════════════════════════════════════════════════════════════════════════
+// JUMIA-STYLE MARKETPLACE ENGINE v2.0
+// Complete ecommerce navigation, cart, wishlist, categories, orders,
+// account, recently viewed, product grid, search, realtime sync.
+// Runs as a self-contained IIFE so it never conflicts with existing code.
+// ═══════════════════════════════════════════════════════════════════════════
+(function _JumiaMPEngine() {
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+const _state = {
+    page:        'home',
+    catSelected: null,
+    sort:        'newest',
+    search:      '',
+    cart:        new Map(),   // id → {listing, qty}
+    wishlist:    new Set(),
+    recent:      [],          // [{listing,ts}]
+    orders:      [],
+    addresses:   [],
+    notifications: { orders: true, marketing: false },
+    initialized: false,
+};
+
+const MAX_RECENT = 20;
+const _LS = {
+    CART:    'jm_cart_v1',
+    WISH:    'jm_wish_v1',
+    RECENT:  'jm_recent_v1',
+    ORDERS:  'jm_orders_v1',
+    ADDRS:   'jm_addrs_v1',
+};
+
+// ── Local storage helpers ──────────────────────────────────────────────────
+const _ls = {
+    save: (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(_) {} },
+    load: (k,d=null) => { try { const r=localStorage.getItem(k); return r?JSON.parse(r):d; } catch(_) { return d; } },
+};
+
+// ── Format helpers ─────────────────────────────────────────────────────────
+function _fmt(n) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) return ecom.SettingsEngine.formatPrice(n);
+    return 'KES ' + parseFloat(n||0).toLocaleString('en-KE', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+function _stars(r, sm=false) {
+    const sz = sm ? '10px' : '12px';
+    let s=''; const f=Math.floor(r||0), h=(r||0)-f>=0.5;
+    for(let i=0;i<f;i++) s+=`<i class="fas fa-star" style="color:#f5a623;font-size:${sz}"></i>`;
+    if(h) s+=`<i class="fas fa-star-half-alt" style="color:#f5a623;font-size:${sz}"></i>`;
+    for(let i=0;i<(5-f-(h?1:0));i++) s+=`<i class="far fa-star" style="color:#ddd;font-size:${sz}"></i>`;
+    return s;
+}
+
+function _esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _price(listing) {
+    return parseFloat(String(listing.price||listing.price_display||0).replace(/[^0-9.]/g,'')) || 0;
+}
+function _origPrice(listing) {
+    return parseFloat(String(listing.original_price||listing.originalPrice||0).replace(/[^0-9.]/g,'')) || 0;
+}
+function _discount(listing) {
+    const p=_price(listing), o=_origPrice(listing);
+    return o>p&&o>0 ? Math.round((1-p/o)*100) : (parseFloat(listing.discount)||0);
+}
+function _img(listing) {
+    return listing.images?.[0] || listing.mediaUrl || listing.image || '';
+}
+function _inStock(listing) {
+    const s = listing.stock_quantity??listing.stock??null;
+    return listing.available!==false && (s===null||s>0);
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function _toast(msg, type='info', icon='ℹ️', dur=3000) {
+    let box = document.getElementById('jmToastContainer');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'jmToastContainer';
+        document.body.appendChild(box);
+    }
+    const t = document.createElement('div');
+    t.className = 'jm-toast ' + type;
+    t.innerHTML = `<span>${icon}</span><span>${_esc(msg)}</span>`;
+    box.appendChild(t);
+    setTimeout(() => { t.style.animation='jmToastOut 0.3s ease forwards'; setTimeout(()=>t.remove(),300); }, dur);
+}
+window._jmToast = _toast;
+
+// ── Cart badge update ──────────────────────────────────────────────────────
+function _updateCartBadge() {
+    const ecom = window.EcomMarketplace;
+    const count = ecom ? ecom.CartEngine.size() : _state.cart.size;
+    ['jmCartBadge','jmNavCartBadge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = count > 99 ? '99+' : count;
+        el.style.display = count > 0 ? 'flex' : 'none';
+    });
+    // notify parent (chat.html) for nav badge
+    try { window.parent.postMessage({ type:'ECOM_CART_UPDATE', payload:{count} }, '*'); } catch(_) {}
+}
+window._jmUpdateCartBadge = _updateCartBadge;
+
+// ── Wishlist badge ─────────────────────────────────────────────────────────
+function _updateWishlistBadge() {
+    const ecom = window.EcomMarketplace;
+    const count = ecom ? ecom.WishlistEngine.getWishlist().length : _state.wishlist.size;
+    const tab = document.querySelector('.jm-nav-tab[data-page="wishlist"] span');
+    if (tab) tab.textContent = count > 0 ? `Wishlist (${count})` : 'Wishlist';
+}
+window._jmUpdateWishlistBadge = _updateWishlistBadge;
+
+// ── Page navigation ────────────────────────────────────────────────────────
+function _nav(page, subpage) {
+    _state.page = page;
+    document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.jm-nav-tab').forEach(t => t.classList.remove('active'));
+
+    const pageEl = document.getElementById('jmPage' + page.charAt(0).toUpperCase() + page.slice(1));
+    if (pageEl) pageEl.classList.add('active');
+
+    const navTab = document.querySelector(`.jm-nav-tab[data-page="${page}"]`);
+    if (navTab) navTab.classList.add('active');
+
+    // Back button
+    const backBtn = document.getElementById('jmBackBtn');
+    if (backBtn) backBtn.style.display = page === 'home' ? 'none' : 'flex';
+
+    // Render page content
+    switch(page) {
+        case 'home':        _renderHome(); break;
+        case 'categories':  _renderCategories(); break;
+        case 'cart':        _renderCart(); break;
+        case 'wishlist':    _renderWishlist(); break;
+        case 'account':     _renderAccount(); break;
+        case 'orders':      _renderOrders(); break;
+        case 'recent':      _renderRecent(); break;
+        case 'products':    _renderProductsPage(subpage); break;
+        case 'notifprefs':  break; // static HTML
+        case 'addresses':   _renderAddresses(); break;
+        case 'vouchers':    _renderVouchers(); break;
+        case 'inbox':       _renderInbox(); break;
+        case 'follow-sellers': _renderFollowSellers(); break;
+        case 'reviews-page': _renderReviewsPage(); break;
+    }
+}
+window._jmNav = _nav;
+
+// ── More sheet ─────────────────────────────────────────────────────────────
+function _showMore() {
+    const overlay = document.getElementById('jmMoreOverlay');
+    const sheet   = document.getElementById('jmMoreSheet');
+    if (overlay) overlay.style.display = 'block';
+    if (sheet)   sheet.style.display   = 'block';
+}
+function _hideMore() {
+    const overlay = document.getElementById('jmMoreOverlay');
+    const sheet   = document.getElementById('jmMoreSheet');
+    if (overlay) overlay.style.display = 'none';
+    if (sheet)   sheet.style.display   = 'none';
+}
+function _navMore(page) {
+    _hideMore();
+    _nav(page);
+}
+window._jmShowMore = _showMore;
+window._jmHideMore = _hideMore;
+window._jmNavMore  = _navMore;
+
+// ── Recently Viewed ────────────────────────────────────────────────────────
+function _addRecent(listing) {
+    if (!listing?.id) return;
+    _state.recent = _state.recent.filter(r => r.id !== listing.id);
+    _state.recent.unshift({ ...listing, _recentTs: Date.now() });
+    if (_state.recent.length > MAX_RECENT) _state.recent.pop();
+    _ls.save(_LS.RECENT, _state.recent.map(r => ({ id:r.id, title:r.title, images:r.images, price:r.price, original_price:r.original_price, rating:r.rating, discount:r.discount, _recentTs:r._recentTs })));
+}
+function _clearRecent() {
+    _state.recent = [];
+    _ls.save(_LS.RECENT, []);
+    _renderRecent();
+    _toast('Cleared recently viewed', 'info', '🗑️');
+}
+window._jmAddRecent  = _addRecent;
+window._jmClearRecent = _clearRecent;
+
+// ── HOME PAGE render ───────────────────────────────────────────────────────
+function _renderHome() {
+    // Featured row
+    const ecom = window.EcomMarketplace;
+    if (ecom) {
+        const featured = ecom.ProductEngine.getFeatured();
+        _renderHScroll('jmFeaturedRow', featured, 'jmFeaturedSection');
+        const flash = ecom.ProductEngine.getFlashSales();
+        const flashBanner = document.getElementById('jmFlashBanner');
+        if (flashBanner) flashBanner.style.display = flash.length ? 'flex' : 'none';
+    }
+    // Product count
+    const grid = document.getElementById('marketplaceListContent');
+    const countEl = document.getElementById('jmProductCount');
+    if (grid && countEl) countEl.textContent = `(${grid.querySelectorAll('.jm-card').length})`;
+}
+
+// ── HORIZONTAL SCROLL render ───────────────────────────────────────────────
+function _renderHScroll(containerId, listings, sectionId) {
+    const el = document.getElementById(containerId);
+    const sec = sectionId ? document.getElementById(sectionId) : null;
+    if (!el) return;
+    if (!listings?.length) { if(sec) sec.style.display='none'; return; }
+    if (sec) sec.style.display = '';
+
+    el.innerHTML = listings.slice(0,10).map(p => {
+        const pr = _price(p), op = _origPrice(p), disc = _discount(p);
+        const img = _img(p);
+        return `<div class="jm-hcard" data-id="${p.id}">
+            ${img ? `<img class="jm-hcard-img" src="${_esc(img)}" loading="lazy" onerror="this.style.display='none'">` : `<div class="jm-hcard-img-placeholder">${p.type==='digital'?'💾':'🛒'}</div>`}
+            <div class="jm-hcard-body">
+                <div class="jm-hcard-title">${_esc(p.title||'')}</div>
+                <div><span class="jm-hcard-price">${pr>0?_fmt(pr):'Free'}</span>${op>pr?`<span class="jm-hcard-oldprice">${_fmt(op)}</span>`:''}</div>
+                ${disc>0?`<div class="jm-hcard-discount">-${disc}%</div>`:''}
+                ${p.rating>0?`<div class="jm-hcard-rating">★ ${p.rating.toFixed(1)}</div>`:''}
+            </div></div>`;
+    }).join('');
+
+    el.querySelectorAll('.jm-hcard').forEach(card => {
+        card.addEventListener('click', () => {
+            const ecom = window.EcomMarketplace;
+            const p = ecom?.ProductEngine.getStore().products.get(card.dataset.id);
+            if (p && typeof renderers !== 'undefined') renderers.viewListingDetail(p);
+        });
+    });
+}
+
+// ── CATEGORIES PAGE ────────────────────────────────────────────────────────
+const _JM_CATS = [
+    { id:'electronics',   name:'TVs & Audio',        icon:'📺',
+      subs:[ {name:'Televisions',emoji:'📺'}, {name:'Audio',emoji:'🔊'}, {name:'Cameras',emoji:'📷'}, {name:'Phones',emoji:'📱'} ] },
+    { id:'appliances',    name:'Appliances',          icon:'🏠',
+      subs:[ {name:'Fridges',emoji:'❄️'}, {name:'Washing Machines',emoji:'🫧'}, {name:'Cookers',emoji:'🔥'}, {name:'Microwaves',emoji:'📦'} ] },
+    { id:'health',        name:'Health & Beauty',     icon:'💄',
+      subs:[ {name:'Skincare',emoji:'🧴'}, {name:'Haircare',emoji:'💇'}, {name:'Vitamins',emoji:'💊'}, {name:'Fragrances',emoji:'🌸'} ] },
+    { id:'home',          name:'Home & Office',       icon:'🏡',
+      subs:[ {name:'Furniture',emoji:'🛋️'}, {name:'Bedding',emoji:'🛏️'}, {name:'Lighting',emoji:'💡'}, {name:'Office',emoji:'🖥️'} ] },
+    { id:'fashion',       name:'Fashion',             icon:'👗',
+      subs:[ {name:"Women's",emoji:'👗'}, {name:"Men's",emoji:'👔'}, {name:'Shoes',emoji:'👠'}, {name:'Bags',emoji:'👜'} ] },
+    { id:'computing',     name:'Computing',           icon:'💻',
+      subs:[ {name:'Laptops',emoji:'💻'}, {name:'Desktops',emoji:'🖥️'}, {name:'Accessories',emoji:'⌨️'}, {name:'Networking',emoji:'📡'} ] },
+    { id:'gaming',        name:'Gaming',              icon:'🎮',
+      subs:[ {name:'PlayStation',emoji:'🎮'}, {name:'Nintendo',emoji:'🕹️'}, {name:'Xbox',emoji:'🟩'}, {name:'PC Gaming',emoji:'🖥️'} ] },
+    { id:'baby',          name:'Baby Products',       icon:'🍼',
+      subs:[ {name:'Clothing',emoji:'👶'}, {name:'Toys',emoji:'🧸'}, {name:'Feeding',emoji:'🍼'}, {name:'Diapers',emoji:'🧷'} ] },
+    { id:'sports',        name:'Sporting Goods',      icon:'⚽',
+      subs:[ {name:'Exercise',emoji:'🏋️'}, {name:'Team Sports',emoji:'⚽'}, {name:'Nutrition',emoji:'💪'}, {name:'Outdoor',emoji:'⛺'} ] },
+    { id:'supermarket',   name:'Supermarket',         icon:'🛒',
+      subs:[ {name:'Food',emoji:'🥦'}, {name:'Beverages',emoji:'🥤'}, {name:'Snacks',emoji:'🍿'}, {name:'Household',emoji:'🧹'} ] },
+    { id:'garden',        name:'Garden & Outdoors',   icon:'🌿',
+      subs:[ {name:'Gardening',emoji:'🌱'}, {name:'Watering',emoji:'💧'}, {name:'Grills',emoji:'🔥'}, {name:'Lighting',emoji:'💡'} ] },
+    { id:'digital',       name:'Digital',             icon:'💾',
+      subs:[ {name:'Software',emoji:'💾'}, {name:'E-Books',emoji:'📚'}, {name:'Music',emoji:'🎵'}, {name:'Games',emoji:'🎮'} ] },
+    { id:'services',      name:'Services',            icon:'🔧',
+      subs:[ {name:'Repairs',emoji:'🔧'}, {name:'Cleaning',emoji:'🧹'}, {name:'Tutoring',emoji:'📚'}, {name:'Design',emoji:'🎨'} ] },
+];
+
+function _renderCategories() {
+    const sidebar  = document.getElementById('jmCatSidebar');
+    const content  = document.getElementById('jmCatContent');
+    if (!sidebar || !content) return;
+
+    sidebar.innerHTML = _JM_CATS.map((c,i) =>
+        `<div class="jm-cat-item${i===0?' active':''}" data-cat="${c.id}">${c.icon}<br>${_esc(c.name)}</div>`
+    ).join('');
+
+    sidebar.querySelectorAll('.jm-cat-item').forEach(item => {
+        item.addEventListener('click', () => {
+            sidebar.querySelectorAll('.jm-cat-item').forEach(x=>x.classList.remove('active'));
+            item.classList.add('active');
+            const cat = _JM_CATS.find(c=>c.id===item.dataset.cat);
+            if (cat) _renderCatContent(cat, content);
+        });
+    });
+
+    // Render first by default
+    _renderCatContent(_JM_CATS[0], content);
+}
+
+function _renderCatContent(cat, container) {
+    // Group subs into groups of 3–4 (like Jumia)
+    const groupSize = 3;
+    const groups = [];
+    for (let i=0; i<cat.subs.length; i+=groupSize) groups.push(cat.subs.slice(i,i+groupSize));
+
+    // Build a "All Products" row + subcategory groups
+    const ecom = window.EcomMarketplace;
+    const products = ecom ? ecom.ProductEngine.search('', { category: cat.id, sort:'newest' }) : [];
+
+    container.innerHTML = `
+        <div class="jm-cat-group">
+            <div class="jm-cat-group-header">
+                <span>All Products</span>
+                <button class="jm-cat-see-all" onclick="window._jmNav('products','${cat.id}')">›</button>
+            </div>
+        </div>
+        ${groups.map(group => `
+        <div class="jm-cat-group">
+            <div class="jm-cat-group-header">
+                <span>${_esc(group[0]?.name||'')}</span>
+                <button class="jm-cat-see-all" onclick="window._jmNav('products','${cat.id}')">See All</button>
+            </div>
+            <div class="jm-cat-group-divider"></div>
+            <div class="jm-subcat-grid">
+                ${group.map(sub => `
+                <div class="jm-subcat-item" onclick="window._jmNav('products','${cat.id}:${sub.name}')">
+                    <div class="jm-subcat-img-placeholder">${sub.emoji}</div>
+                    <div class="jm-subcat-name">${_esc(sub.name)}</div>
+                </div>`).join('')}
+            </div>
+        </div>`).join('')}
+    `;
+}
+
+// ── PRODUCTS LIST PAGE ─────────────────────────────────────────────────────
+function _renderProductsPage(subpage) {
+    const container = document.getElementById('jmProductsContent');
+    const title     = document.getElementById('jmProductsTitle');
+    if (!container) return;
+
+    const [catId, subcat] = (subpage||'').split(':');
+    if (title) title.innerHTML = `← ${subcat||catId||'Products'}`;
+
+    const ecom = window.EcomMarketplace;
+    let products = ecom ? ecom.ProductEngine.search('', { category: catId||'' }) : [];
+
+    if (!products.length) {
+        // Fall back to existing listings data
+        if (window.currentListings) products = window.currentListings.filter(l => !catId || l.category===catId);
+    }
+
+    _renderGrid(container, products);
+}
+
+// ── CART PAGE ──────────────────────────────────────────────────────────────
+function _renderCart() {
+    const container = document.getElementById('jmCartContent');
+    if (!container) return;
+
+    const ecom = window.EcomMarketplace;
+    const cart = ecom ? ecom.CartEngine.getCart() : _buildLocalCart();
+
+    const recentHTML = _state.recent.length ? `
+        <div class="jm-cart-recently">
+            <div class="jm-section-header" style="padding:10px 12px 6px">
+                <span style="font-size:13px;font-weight:700">Recently Viewed</span>
+                <button class="jm-see-all" onclick="window._jmNav('recent')">See All</button>
+            </div>
+            <div class="jm-hscroll" id="jmCartRecentRow"></div>
+        </div>` : '';
+
+    if (!cart.items.length) {
+        container.innerHTML = `
+            <div class="jm-cart-summary-bar">
+                <div><div class="jm-cart-label">CART SUMMARY</div><div class="jm-cart-label">Subtotal</div></div>
+                <div class="jm-cart-total">${_fmt(0)}</div>
+            </div>
+            <div class="jm-empty-state" style="flex:1">
+                <div class="jm-empty-icon">🛒</div>
+                <div class="jm-empty-title">Your cart is empty</div>
+                <div class="jm-empty-desc">Add items to get started</div>
+                <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
+            </div>
+            ${recentHTML}`;
+    } else {
+        container.innerHTML = `
+            <div class="jm-cart-summary-bar">
+                <div><div class="jm-cart-label">CART SUMMARY</div><div class="jm-cart-label">Subtotal</div></div>
+                <div class="jm-cart-total">${_fmt(cart.subtotal)}</div>
+            </div>
+            <div style="padding:8px 12px;font-size:12px;color:#6b7280;background:#f9fafb">Cart (${cart.count})</div>
+            <div class="jm-cart-items" id="jmCartItems">
+                ${cart.items.map(item => {
+                    const p = item.product || item;
+                    const pr = parseFloat(p.price||0);
+                    const op = parseFloat(p.original_price||0);
+                    const disc = op>pr&&op>0 ? Math.round((1-pr/op)*100) : 0;
+                    const img = p.images?.[0]||p.image||'';
+                    const inStock = (p.stock_quantity??999) > 0;
+                    return `<div class="jm-cart-item" data-pid="${p.id}">
+                        ${img ? `<img class="jm-cart-item-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-cart-item-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:28px">🛒</div>`}
+                        <div class="jm-cart-item-body">
+                            <div class="jm-cart-item-title">${_esc(p.title||'')}</div>
+                            <div>
+                                <span class="jm-cart-item-price">${_fmt(pr)}</span>
+                                ${op>pr?`<span class="jm-cart-item-oldprice">${_fmt(op)}</span><span class="jm-cart-item-discount">-${disc}%</span>`:''}
+                            </div>
+                            <div class="jm-cart-qty-row" style="margin-top:8px">
+                                <button class="jm-qty-btn" onclick="window._jmCartQty('${p.id}',-1)">−</button>
+                                <span class="jm-qty-val">${item.quantity||1}</span>
+                                <button class="jm-qty-btn" onclick="window._jmCartQty('${p.id}',1)">+</button>
+                                ${inStock
+                                    ? '<span></span>'
+                                    : '<button class="jm-cart-out-btn">Out Of Stock</button>'}
+                            </div>
+                            <div style="display:flex;justify-content:flex-end;margin-top:6px">
+                                <button class="jm-cart-remove" onclick="window._jmCartRemove('${p.id}')">Remove</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="jm-cart-footer">
+                <button class="jm-call-btn" title="Call support"><i class="fas fa-phone"></i></button>
+                <button class="jm-checkout-btn" onclick="window._jmCheckout()" ${cart.items.some(i=>(i.product?.stock_quantity??999)<=0)?'disabled':''}>
+                    Checkout — ${_fmt(cart.total)}
+                </button>
+            </div>
+            ${recentHTML}`;
+    }
+
+    // Render recently viewed row
+    setTimeout(() => {
+        const row = document.getElementById('jmCartRecentRow');
+        if (row) _renderHScroll('jmCartRecentRow', _state.recent.map(r=>r));
+    }, 50);
+}
+
+window._jmCartQty = function(pid, delta) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) {
+        const item = ecom.CartEngine.getItem(pid);
+        if (item) ecom.CartEngine.updateQuantity(pid, item.quantity+delta);
+        _updateCartBadge();
+    } else {
+        const item = _state.cart.get(pid);
+        if (item) { item.qty = Math.max(1, item.qty+delta); _ls.save(_LS.CART, [..._state.cart.values()]); }
+    }
+    _renderCart();
+};
+
+window._jmCartRemove = function(pid) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) ecom.CartEngine.remove(pid);
+    else { _state.cart.delete(pid); _ls.save(_LS.CART, [..._state.cart.values()]); }
+    _updateCartBadge();
+    _renderCart();
+};
+
+window._jmCheckout = function() {
+    // Trigger checkout panel if available, else show payment flow
+    if (typeof openCheckoutPanel === 'function') { openCheckoutPanel(); return; }
+    if (typeof window._ecomProceedToCheckout === 'function') { window._ecomProceedToCheckout(); return; }
+    _toast('Checkout coming soon', 'info', '🛒');
+};
+
+// ── WISHLIST PAGE ──────────────────────────────────────────────────────────
+function _renderWishlist() {
+    const container = document.getElementById('jmWishlistContent');
+    if (!container) return;
+
+    const ecom = window.EcomMarketplace;
+    const items = ecom ? ecom.WishlistEngine.getWishlist() : [];
+
+    const recentRow = _state.recent.length ? `
+        <div class="jm-section" style="margin-top:8px">
+            <div class="jm-section-header"><span>Recently Viewed</span><button class="jm-see-all" onclick="window._jmNav('recent')">See All</button></div>
+            <div class="jm-hscroll" id="jmWishRecentRow"></div>
+        </div>` : '';
+
+    if (!items.length) {
+        container.innerHTML = `
+            <div class="jm-empty-state">
+                <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">❤️</div>
+                <div class="jm-empty-title">You haven't saved an item yet!</div>
+                <div class="jm-empty-desc">Found something you like? Tap on the heart shaped icon next to the item to add it to your wishlist! All your saved items will appear here.</div>
+                <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
+            </div>
+            ${recentRow}`;
+    } else {
+        container.innerHTML = `<div class="jm-product-grid" id="jmWishGrid"></div>${recentRow}`;
+        _renderGrid(document.getElementById('jmWishGrid'), items);
+    }
+
+    setTimeout(() => { const r=document.getElementById('jmWishRecentRow'); if(r) _renderHScroll('jmWishRecentRow', _state.recent); }, 50);
+}
+
+// ── ACCOUNT PAGE ──────────────────────────────────────────────────────────
+function _renderAccount() {
+    const container = document.getElementById('jmAccountContent');
+    if (!container) return;
+
+    const user = window.currentUser || window.__kynUser || { displayName:'User', email:'', wallet:0 };
+    const name = user.displayName || user.username || 'User';
+    const email = user.email || '';
+    const wallet = user.walletBalance || 0;
+
+    container.innerHTML = `
+        <div class="jm-account-hero">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+                <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#f57224,#ff9a00);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:800;flex-shrink:0">
+                    ${_esc(name[0]?.toUpperCase()||'U')}
+                </div>
+                <div>
+                    <div class="jm-account-welcome">Welcome ${_esc(name)}!</div>
+                    <div class="jm-account-email">${_esc(email)}</div>
+                </div>
+            </div>
+            <div class="jm-account-balance">
+                <i class="fas fa-wallet" style="font-size:20px"></i>
+                Knecta balance: ${_fmt(wallet)}
+            </div>
+            <div class="jm-account-support-row">
+                <button class="jm-live-chat-btn" onclick="window._jmOpenSupport()">
+                    <i class="fas fa-comment"></i> Live Chat
+                </button>
+                <button class="jm-wa-btn" onclick="window._jmOpenWhatsApp()">
+                    <i class="fab fa-whatsapp"></i> WhatsApp
+                </button>
+            </div>
+        </div>
+
+        <div class="jm-account-section-label">Need Assistance?</div>
+        <div class="jm-account-menu-group">
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('inbox')">
+                <i class="fas fa-circle-info"></i><span>Help &amp; Support</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+        </div>
+
+        <div class="jm-account-section-label">My Knecta Account</div>
+        <div class="jm-account-menu-group">
+            <button class="jm-account-menu-item" onclick="window._jmNav('orders')">
+                <i class="fas fa-box"></i><span>Orders</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('inbox')">
+                <i class="fas fa-envelope"></i><span>Inbox</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('reviews-page')">
+                <i class="fas fa-star"></i><span>Ratings &amp; Reviews</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('vouchers')">
+                <i class="fas fa-ticket-alt"></i><span>Vouchers</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNav('wishlist')">
+                <i class="fas fa-heart"></i><span>Wishlist</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('follow-sellers')">
+                <i class="fas fa-store"></i><span>Follow Seller</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNav('recent')">
+                <i class="fas fa-history"></i><span>Recently Viewed</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+        </div>
+
+        <div class="jm-account-section-label">My Settings</div>
+        <div class="jm-account-menu-group">
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('addresses')">
+                <i class="fas fa-map-marker-alt"></i><span>Address Book</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('notifprefs')">
+                <i class="fas fa-bell"></i><span>Notification Preferences</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('analytics')">
+                <i class="fas fa-chart-bar"></i><span>Analytics</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('trust')">
+                <i class="fas fa-shield-alt"></i><span>Trust Stats</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('team')">
+                <i class="fas fa-users"></i><span>Team Management</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+        </div>
+
+        <button class="jm-account-logout" onclick="window._jmLogout()">
+            <i class="fas fa-sign-out-alt"></i><span>Log Out</span>
+        </button>`;
+}
+
+// ── ORDERS PAGE ────────────────────────────────────────────────────────────
+function _renderOrders() {
+    const container = document.getElementById('jmOrdersContent');
+    if (!container) return;
+
+    const ecom = window.EcomMarketplace;
+    let orders = ecom ? ecom.OrderEngine.getLocalOrders() : _state.orders;
+
+    // Tab switching
+    document.querySelectorAll('.jm-orders-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.jm-orders-tab').forEach(t=>t.classList.remove('active'));
+            tab.classList.add('active');
+            const filter = tab.dataset.tab;
+            const filtered = filter==='ongoing'
+                ? orders.filter(o=>!['cancelled','refunded'].includes(o.status))
+                : orders.filter(o=>['cancelled','refunded'].includes(o.status));
+            _renderOrderList(container, filtered);
+        });
+    });
+
+    // Notification promo row
+    const ongoingOrders = orders.filter(o=>!['cancelled','refunded'].includes(o.status));
+    _renderOrderList(container, ongoingOrders);
+}
+
+function _renderOrderList(container, orders) {
+    if (!orders.length) {
+        container.innerHTML = `<div class="jm-empty-state"><div class="jm-empty-icon">📦</div><div class="jm-empty-title">No orders found</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button></div>`;
+        return;
+    }
+
+    const notifBar = `<div class="jm-cat-group" style="margin:8px;border-radius:10px;cursor:pointer" onclick="window._jmNavMore('notifprefs')">
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px">
+            <div style="flex:1"><div style="font-weight:700;font-size:14px">Turn on system notifications</div><div style="font-size:12px;color:#6b7280;margin-top:4px">Stay up to date with order updates, shipment status and exclusive offers</div></div>
+            <div style="width:32px;height:32px;border-radius:50%;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-chevron-right"></i></div>
+        </div>
+    </div>`;
+
+    container.innerHTML = notifBar + orders.map(o => {
+        const items = o.items || [];
+        const firstItem = items[0] || {};
+        const img = firstItem.image || o.product?.images?.[0] || '';
+        const title = firstItem.title || o.product?.title || 'Order';
+        const ordNum = o.id?.slice(-9) || '';
+        const date = o.delivered_at || o.deliveredAt || o.created_at || o.createdAt;
+        const dateStr = date ? new Date(date).toLocaleDateString('en-KE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+        const statusClass = {delivered:'delivered',paid:'delivered',shipped:'shipped',pending:'pending',processing:'pending',cancelled:'cancelled',refunded:'cancelled'}[o.status] || 'pending';
+
+        return `<div class="jm-order-item" onclick="window._jmViewOrder('${o.id}')">
+            ${img ? `<img class="jm-order-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-order-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
+            <div class="jm-order-body">
+                <div class="jm-order-title">${_esc(title)}</div>
+                <div class="jm-order-num">Order #${_esc(ordNum)}</div>
+                <span class="jm-order-status ${statusClass}">${(o.status||'pending').toUpperCase()}</span>
+                ${dateStr?`<div class="jm-order-date">On ${dateStr}</div>`:''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+window._jmViewOrder = function(orderId) {
+    _toast('Order tracking coming soon', 'info', '📦');
+};
+
+// ── RECENTLY VIEWED PAGE ───────────────────────────────────────────────────
+function _renderRecent() {
+    const container = document.getElementById('jmRecentContent');
+    if (!container) return;
+    if (!_state.recent.length) {
+        container.innerHTML = `<div class="jm-empty-state" style="grid-column:1/-1"><div class="jm-empty-icon">🕐</div><div class="jm-empty-title">No recently viewed items</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button></div>`;
+        return;
+    }
+    _renderGrid(container, _state.recent);
+}
+
+// ── REVIEWS PAGE ───────────────────────────────────────────────────────────
+function _renderReviewsPage() {
+    const container = document.getElementById('jmReviewsContent');
+    if (!container) return;
+    const ecom = window.EcomMarketplace;
+    const orders = ecom ? ecom.OrderEngine.getLocalOrders().filter(o=>o.status==='delivered') : [];
+    if (!orders.length) {
+        container.innerHTML = `<div class="jm-empty-state"><div class="jm-empty-icon">⭐</div><div class="jm-empty-title">No orders to review yet</div><div class="jm-empty-desc">Complete orders to rate &amp; review products</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button></div>`;
+        return;
+    }
+    container.innerHTML = orders.map(o => {
+        const items = o.items||[];
+        return items.map(item => {
+            const img = item.image||'';
+            const date = o.delivered_at || o.deliveredAt || '';
+            const dateStr = date ? new Date(date).toLocaleDateString('en-KE') : '';
+            return `<div class="jm-review-item">
+                ${img ? `<img class="jm-review-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-review-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:500;margin-bottom:4px;line-height:1.3">${_esc(item.title||'')}</div>
+                    <div style="font-size:12px;color:#6b7280">Order No: ${o.id?.slice(-9)||''}</div>
+                    ${dateStr?`<div style="font-size:12px;font-weight:700;color:#22c55e;margin-top:4px">DELIVERED ON ${dateStr}</div>`:''}
+                </div>
+                <button class="jm-review-rate-btn" onclick="window._jmRateProduct('${item.product_id||''}','${o.id}')">Rate This Product</button>
+            </div>`;
+        }).join('');
+    }).join('');
+}
+
+window._jmRateProduct = function(productId, orderId) {
+    if (!productId) return;
+    if (typeof openWriteReviewPanel === 'function') { openWriteReviewPanel(productId); return; }
+    const rating = prompt('Rate this product (1-5):');
+    const r = parseInt(rating);
+    if (!r||r<1||r>5) return;
+    const text = prompt('Leave a comment (optional):') || '';
+    const ecom = window.EcomMarketplace;
+    if (ecom) ecom.ReviewEngine.submitReview({ productId, rating:r, text, order_id:orderId }).then(res => {
+        _toast(res.success ? 'Review submitted! Thank you.' : (res.message||'Failed'), res.success?'success':'error', res.success?'⭐':'❌');
+    });
+};
+
+// ── VOUCHERS PAGE ──────────────────────────────────────────────────────────
+function _renderVouchers() {
+    const container = document.getElementById('jmVouchersContent');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="jm-empty-state">
+            <div class="jm-empty-icon" style="background:none;box-shadow:none;font-size:52px">🎟️</div>
+            <div class="jm-empty-title">You currently have no available Vouchers</div>
+            <div class="jm-empty-desc">All your available Knecta Vouchers will be displayed here</div>
+            <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
+        </div>
+        <div class="jm-section">
+            <div class="jm-section-header"><span>Recommended for you</span><button class="jm-see-all" onclick="window._jmNav('home')">See All</button></div>
+            <div class="jm-hscroll" id="jmVoucherRecRow"></div>
+        </div>
+        <div class="jm-section">
+            <div class="jm-section-header"><span>Recently Viewed</span><button class="jm-see-all" onclick="window._jmNav('recent')">See All</button></div>
+            <div class="jm-hscroll" id="jmVoucherRecentRow"></div>
+        </div>`;
+    setTimeout(() => {
+        const ecom = window.EcomMarketplace;
+        const recs = ecom ? ecom.ProductEngine.getTrending().slice(0,6) : [];
+        _renderHScroll('jmVoucherRecRow', recs);
+        _renderHScroll('jmVoucherRecentRow', _state.recent);
+    }, 50);
+}
+
+// ── INBOX PAGE ─────────────────────────────────────────────────────────────
+function _renderInbox() {
+    const container = document.getElementById('jmInboxContent');
+    if (!container) return;
+    container.innerHTML = `<div class="jm-empty-state">
+        <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">✉️</div>
+        <div class="jm-empty-title">You don't have any messages</div>
+        <div class="jm-empty-desc">Here you will be able to see all the messages that we send you. Stay tuned</div>
+    </div>`;
+}
+
+// ── FOLLOW SELLERS PAGE ────────────────────────────────────────────────────
+function _renderFollowSellers() {
+    const container = document.getElementById('jmFollowSellersContent');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="jm-empty-state">
+            <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">🏪</div>
+            <div class="jm-empty-title">You don't follow any seller!</div>
+            <div class="jm-empty-desc">All your followed sellers will be displayed here</div>
+            <button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button>
+        </div>
+        <div style="background:#f3f4f6;padding:10px 16px;font-size:12px;color:#6b7280;font-weight:600">Suggested sellers for you</div>
+        <div id="jmSuggestedSellers"></div>`;
+
+    // Load suggested sellers from listings
+    const ecom = window.EcomMarketplace;
+    const listings = ecom ? ecom.ProductEngine.getAllProducts().slice(0,6) : (window.currentListings||[]).slice(0,6);
+    const sellers = {};
+    listings.forEach(l => {
+        const sid = l.seller_id||l.sellerId||l.userId;
+        if (sid && !sellers[sid]) sellers[sid] = { id:sid, name:l.seller?.name||l.user?.displayName||'Seller', products:[l], followers:Math.floor(Math.random()*2000)+100, score:Math.floor(Math.random()*30)+70 };
+        else if (sid) sellers[sid].products.push(l);
+    });
+    const suggestEl = document.getElementById('jmSuggestedSellers');
+    if (suggestEl) {
+        suggestEl.innerHTML = Object.values(sellers).slice(0,3).map(s => `
+            <div class="jm-seller-item">
+                <div class="jm-seller-header">
+                    <div class="jm-seller-icon">🏪</div>
+                    <div><div class="jm-seller-name">${_esc(s.name)}</div><div class="jm-seller-score">${s.score}% Seller Score &bull; ${s.followers.toLocaleString()} Followers</div></div>
+                    <i class="fas fa-chevron-right jm-seller-chevron"></i>
+                </div>
+                <button class="jm-follow-btn" onclick="window._jmFollowSeller('${s.id}',this)">Follow</button>
+                <div class="jm-seller-products">
+                    ${s.products.slice(0,2).map(p=>_img(p)?`<img class="jm-seller-product-thumb" src="${_esc(_img(p))}" loading="lazy">`:`<div class="jm-seller-product-thumb" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:22px">🛒</div>`).join('')}
+                    ${s.products.length>2?`<div class="jm-seller-see-all">SEE ALL</div>`:''}
+                </div>
+            </div>`).join('');
+    }
+}
+
+window._jmFollowSeller = function(sellerId, btn) {
+    const following = btn.classList.toggle('following');
+    btn.textContent = following ? 'Following' : 'Follow';
+    _toast(following ? 'Following seller' : 'Unfollowed', 'success', following?'🏪':'👋');
+};
+
+// ── ADDRESSES PAGE ─────────────────────────────────────────────────────────
+function _renderAddresses() {
+    const container = document.getElementById('jmAddressContent');
+    if (!container) return;
+    const addrs = _state.addresses.length ? _state.addresses : _ls.load(_LS.ADDRS, []);
+    _state.addresses = addrs;
+    if (!addrs.length) {
+        container.innerHTML = `<div style="padding:24px;text-align:center;color:#6b7280">No saved addresses.<br>Add one below.</div>`;
+        return;
+    }
+    container.innerHTML = `<div style="font-size:16px;font-weight:700;padding:14px 16px">Address book (${addrs.length})</div>` +
+        addrs.map((a,i) => `<div class="jm-address-item">
+            <div class="jm-address-name">${_esc(a.name)}</div>
+            <div class="jm-address-detail">${_esc(a.type||'pick up')}</div>
+            <div class="jm-address-detail">${_esc(a.city||'')}</div>
+            <div class="jm-address-detail">${_esc(a.area||'')}</div>
+            <div class="jm-address-phone">${_esc(a.phone||'')}</div>
+            ${i===0?`<div class="jm-address-default"><i class="fas fa-check-circle"></i> Default Address</div>`:''}
+            <div class="jm-address-actions">
+                <button class="jm-address-set-default" onclick="window._jmSetDefaultAddr(${i})">Set As Default</button>
+                <button class="jm-address-edit" onclick="window._jmEditAddr(${i})"><i class="fas fa-pencil-alt"></i></button>
+            </div>
+        </div>`).join('');
+}
+
+window._jmAddAddress = function() {
+    const name  = prompt('Full name:');
+    if (!name?.trim()) return;
+    const phone = prompt('Phone (07XXXXXXXX):') || '';
+    const city  = prompt('City:') || '';
+    const area  = prompt('Area/Street:') || '';
+    const type  = prompt('Type (pick up/delivery):') || 'pick up';
+    const addr  = { name:name.trim(), phone, city, area, type };
+    _state.addresses.push(addr);
+    _ls.save(_LS.ADDRS, _state.addresses);
+    _renderAddresses();
+    _toast('Address saved', 'success', '📍');
+};
+
+window._jmSetDefaultAddr = function(idx) {
+    const addr = _state.addresses.splice(idx,1)[0];
+    _state.addresses.unshift(addr);
+    _ls.save(_LS.ADDRS, _state.addresses);
+    _renderAddresses();
+};
+
+window._jmEditAddr = function(idx) {
+    const a = _state.addresses[idx];
+    const name = prompt('Full name:', a.name) || a.name;
+    const phone = prompt('Phone:', a.phone) || a.phone;
+    const city  = prompt('City:', a.city) || a.city;
+    const area  = prompt('Area:', a.area) || a.area;
+    _state.addresses[idx] = { ...a, name, phone, city, area };
+    _ls.save(_LS.ADDRS, _state.addresses);
+    _renderAddresses();
+};
+
+// ── PRODUCT GRID (shared) ──────────────────────────────────────────────────
+function _renderGrid(container, listings) {
+    if (!container) return;
+    if (!listings?.length) {
+        container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af"><div style="font-size:40px;margin-bottom:12px">🔍</div><div>No products found</div></div>`;
+        return;
+    }
+    container.innerHTML = '';
+    listings.forEach((listing, idx) => {
+        setTimeout(() => {
+            if (typeof renderers !== 'undefined' && renderers.addListingItem) {
+                // Temporarily override DOM reference if needed
+                const orig = DOM.marketplaceListContent;
+                DOM.marketplaceListContent = container;
+                if (renderers && renderers.addListingItem) renderers.addListingItem(listing);
+                DOM.marketplaceListContent = orig;
+            }
+        }, idx * 15);
+    });
+}
+
+// ── LOCAL CART FALLBACK ────────────────────────────────────────────────────
+function _buildLocalCart() {
+    const items = [..._state.cart.values()].map(i => ({ product: i.listing, quantity: i.qty||1 }));
+    const subtotal = items.reduce((s,i) => s + (_price(i.product)*i.quantity), 0);
+    return { items, count: items.reduce((s,i)=>s+i.quantity,0), subtotal, total: subtotal, delivery: 0, discount: 0 };
+}
+
+// ── SEARCH ──────────────────────────────────────────────────────────────────
+function _initSearch() {
+    const input   = document.getElementById('jmSearchInput');
+    const clear   = document.getElementById('jmSearchClear');
+    const sugEl   = document.getElementById('jmSuggestions');
+    if (!input) return;
+
+    let _timer;
+    const _recentSearches = _ls.load('jm_recent_searches', []);
+
+    input.addEventListener('focus', () => {
+        if (!input.value && _recentSearches.length) {
+            sugEl.innerHTML = '<div style="padding:8px 14px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase">Recent Searches</div>' +
+                _recentSearches.slice(0,5).map(q=>`<div class="jm-suggestion-item" data-q="${_esc(q)}"><i class="fas fa-history"></i>${_esc(q)}</div>`).join('');
+            sugEl.style.display = 'block';
+        }
+    });
+
+    input.addEventListener('input', () => {
+        const q = input.value.trim();
+        clear.style.display = q ? 'flex' : 'none';
+        clearTimeout(_timer);
+        if (!q) { sugEl.style.display='none'; return; }
+        _timer = setTimeout(() => {
+            const ecom = window.EcomMarketplace;
+            const results = ecom ? ecom.ProductEngine.search(q).slice(0,8) : (window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase())).slice(0,8);
+            // Trending searches
+            const trendingTerms = ['phones','laptops','fashion','electronics','supermarket','beauty'];
+            const trending = trendingTerms.filter(t=>t.includes(q.toLowerCase())||q.toLowerCase().includes(t));
+            sugEl.innerHTML = (trending.length ? `<div style="padding:8px 14px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase">Trending</div>` + trending.slice(0,3).map(t=>`<div class="jm-suggestion-item" data-q="${_esc(t)}"><i class="fas fa-fire" style="color:#f57224"></i>${_esc(t)}</div>`).join('') : '') +
+                (results.length ? `<div style="padding:8px 14px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase">Products</div>` + results.map(r=>`<div class="jm-suggestion-item" data-id="${r.id}"><i class="fas fa-search"></i>${_esc(r.title||'')}</div>`).join('') : '');
+            sugEl.style.display = sugEl.innerHTML ? 'block' : 'none';
+        }, 200);
+    });
+
+    sugEl.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-q],[data-id]');
+        if (!item) return;
+        if (item.dataset.id) {
+            const ecom = window.EcomMarketplace;
+            const p = ecom?.ProductEngine.getStore().products.get(item.dataset.id);
+            if (p) renderers.viewListingDetail(p);
+        } else if (item.dataset.q) {
+            input.value = item.dataset.q;
+            _doSearch(item.dataset.q);
+        }
+        sugEl.style.display = 'none';
+    });
+
+    clear.addEventListener('click', () => { input.value=''; clear.style.display='none'; sugEl.style.display='none'; _doSearch(''); });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { _doSearch(input.value.trim()); sugEl.style.display='none'; }
+        if (e.key === 'Escape') sugEl.style.display='none';
+    });
+
+    document.addEventListener('click', (e) => { if (!e.target.closest('#jmSearchWrap,#jmSuggestions')) sugEl.style.display='none'; });
+}
+
+function _doSearch(q) {
+    _state.search = q;
+    if (!q) { _nav('home'); return; }
+    // Save recent search
+    const searches = _ls.load('jm_recent_searches', []);
+    if (!searches.includes(q)) { searches.unshift(q); _ls.save('jm_recent_searches', searches.slice(0,10)); }
+
+    // Navigate to products page with search
+    const productsPage = document.getElementById('jmPageProducts');
+    if (productsPage) {
+        document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
+        document.querySelectorAll('.jm-nav-tab').forEach(t=>t.classList.remove('active'));
+        productsPage.classList.add('active');
+        const title = document.getElementById('jmProductsTitle');
+        if (title) title.textContent = `← Results: "${q}"`;
+        const ecom = window.EcomMarketplace;
+        const results = ecom ? ecom.ProductEngine.search(q) : (window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase()));
+        _renderGrid(document.getElementById('jmProductsContent'), results);
+        const backBtn = document.getElementById('jmBackBtn');
+        if (backBtn) backBtn.style.display='flex';
+    }
+}
+
+// ── SORT CHIPS ─────────────────────────────────────────────────────────────
+function _initSortChips() {
+    document.getElementById('jmFilterChips')?.addEventListener('click', (e) => {
+        const chip = e.target.closest('.jm-chip');
+        if (!chip) return;
+        document.querySelectorAll('.jm-chip').forEach(c=>c.classList.remove('active'));
+        chip.classList.add('active');
+        _state.sort = chip.dataset.sort;
+        const ecom = window.EcomMarketplace;
+        if (ecom) {
+            const sorted = ecom.ProductEngine.search(_state.search, { sort:_state.sort });
+            const grid = document.getElementById('marketplaceListContent');
+            if (grid) { grid.innerHTML=''; sorted.forEach((p,i)=>setTimeout(()=>renderers.addListingItem(p),i*15)); }
+            const countEl = document.getElementById('jmProductCount');
+            if (countEl) countEl.textContent = `(${sorted.length})`;
+        }
+    });
+}
+
+// ── SUPPORT ACTIONS ────────────────────────────────────────────────────────
+window._jmOpenSupport = function() {
+    if (typeof openChat === 'function') { openChat('support','Support'); return; }
+    _toast('Opening support chat…', 'info', '💬');
+};
+window._jmOpenWhatsApp = function() {
+    window.open('https://wa.me/254700000000?text=Hi%2C%20I%20need%20help%20with%20my%20order', '_blank');
+};
+window._jmLogout = function() {
+    if (confirm('Are you sure you want to log out?')) {
+        try { window.parent.postMessage({ type:'LOGOUT' }, '*'); } catch(_) {}
+        _toast('Logging out…', 'info', '👋');
+    }
+};
+window._jmRequestNotifPermission = function() {
+    if ('Notification' in window) {
+        Notification.requestPermission().then(perm => {
+            _toast(perm==='granted' ? 'Notifications enabled!' : 'Notifications blocked', perm==='granted'?'success':'error', perm==='granted'?'🔔':'🔕');
+        });
+    }
+};
+
+// ── REALTIME SYNC ──────────────────────────────────────────────────────────
+function _initRealtimeBridge() {
+    // Cart updates from EcomMarketplace
+    window.addEventListener('ecom:cart-updated', () => {
+        _updateCartBadge();
+        if (_state.page === 'cart') _renderCart();
+    });
+
+    // Wishlist updates
+    window.addEventListener('ecom:wishlist-updated', () => {
+        _updateWishlistBadge();
+        if (_state.page === 'wishlist') _renderWishlist();
+    });
+
+    // Order status
+    window.addEventListener('ecom:order-status-changed', () => {
+        if (_state.page === 'orders') _renderOrders();
+    });
+
+    // Stock changes — update card buttons
+    window.addEventListener('ecom:stock-updated', (e) => {
+        const { productId, quantity } = e.detail || {};
+        document.querySelectorAll(`.jm-card[data-listing-id="${productId}"] .jm-add-cart-btn`).forEach(btn => {
+            if (quantity <= 0) { btn.textContent='Out of Stock'; btn.disabled=true; btn.classList.remove('in-cart'); }
+        });
+    });
+
+    // Products loaded — update count
+    window.addEventListener('ecom:products-loaded', () => {
+        const grid = document.getElementById('marketplaceListContent');
+        const countEl = document.getElementById('jmProductCount');
+        if (grid && countEl) countEl.textContent = `(${grid.querySelectorAll('.jm-card').length})`;
+    });
+
+    // Notification push — show toast
+    window.addEventListener('ecom:notification-push', (e) => {
+        const n = e.detail?.notification;
+        if (!n) return;
+        const icons = { order_placed:'🎉', new_order:'🛍', delivery_update:'🚚', new_message:'💬', payment:'✅', order_status:'📦' };
+        _toast(n.message, 'info', icons[n.type]||'ℹ️');
+        // Notify parent for nav dot
+        try { window.parent.postMessage({ type:'ECOM_NOTIFICATION_PUSH', payload:n }, '*'); } catch(_) {}
+    });
+}
+
+// ── BACK BUTTON ───────────────────────────────────────────────────────────
+function _initBackButton() {
+    document.getElementById('jmBackBtn')?.addEventListener('click', () => _nav('home'));
+}
+
+// ── INITIALISE ─────────────────────────────────────────────────────────────
+function _init() {
+    if (_state.initialized) return;
+    _state.initialized = true;
+
+    // Restore from localStorage
+    _state.recent = _ls.load(_LS.RECENT, []);
+
+    _initSearch();
+    _initSortChips();
+    _initBackButton();
+    _initRealtimeBridge();
+
+    // Render home sections if ecom is ready
+    if (window.EcomMarketplace) {
+        _renderHome();
+    } else {
+        window.addEventListener('ecom:ready', _renderHome, { once:true });
+    }
+
+    // Update badges
+    _updateCartBadge();
+    _updateWishlistBadge();
+}
+
+// Boot when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _init);
+} else {
+    setTimeout(_init, 200);
+}
+
+// Also re-init when marketplace tab becomes active (iframe message)
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'tools:active' || e.data?.type === 'PARENT_READY') {
+        if (!_state.initialized) _init();
+        else { _updateCartBadge(); _updateWishlistBadge(); _renderHome(); }
+    }
+});
+
+})(); // end _JumiaMPEngine

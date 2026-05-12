@@ -3704,17 +3704,33 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 // Mark selected
                 pop.querySelectorAll('.ep-btn').forEach(function(b) { b.classList.remove('selected'); });
                 btn.classList.add('selected');
-                // Fire existing reaction handler
+                // Send reaction to backend — try all known method names
                 var statusId = window.__currentViewingStatusId;
                 if (statusId) {
                     var api = window.StatusAPI;
-                    if (api && api.reactToStatus) {
-                        api.reactToStatus(statusId, emoji).catch(function(){});
+                    if (api) {
+                        // Try every possible method name the API may expose
+                        var fn = api.addReaction || api.reactToStatus || api.react || api.sendReaction;
+                        if (fn) {
+                            fn.call(api, statusId, emoji).catch(function(e) {
+                                console.warn('[emoji-react] API call failed:', e);
+                            });
+                        }
                     }
-                    // Also dispatch DOM event for status-ui.js listeners
-                    document.dispatchEvent(new CustomEvent('status:react', {
-                        detail: { statusId: statusId, emoji: emoji }
-                    }));
+                    // Dispatch DOM events so status-ui.js + status-websocket.js handlers fire
+                    try {
+                        document.dispatchEvent(new CustomEvent('status:react', {
+                            detail: { statusId: statusId, emoji: emoji }
+                        }));
+                        document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                            detail: {
+                                statusId: statusId,
+                                emoji:    emoji,
+                                count:    1,
+                                userId:   window.currentUser && (window.currentUser.id || window.currentUser.userId)
+                            }
+                        }));
+                    } catch(_) {}
                 }
             });
         });
@@ -3741,60 +3757,78 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
         var moreDrop = document.getElementById('vbsMoreDropdown');
         if (!sheet) return;
 
-        // Close triggers
+        // ── Only backdrop + X button close the sheet ──────────────────
         function closeVbs() {
             sheet.style.display = 'none';
             if (moreDrop) moreDrop.style.display = 'none';
         }
-        if (backdrop) backdrop.addEventListener('click', closeVbs);
-        if (closeBtn) closeBtn.addEventListener('click', closeVbs);
+        // Backdrop click closes sheet
+        if (backdrop) backdrop.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeVbs();
+        });
+        // X button closes sheet
+        if (closeBtn) closeBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeVbs();
+        });
+        // Prevent clicks inside the panel from closing the sheet
+        var panel = sheet.querySelector('.vbs-panel');
+        if (panel) panel.addEventListener('click', function(e) { e.stopPropagation(); });
+
+        // statusViewerClosed only closes if viewer itself is closed
         document.addEventListener('statusViewerClosed', closeVbs);
 
-        // Three-dots inside sheet
+        // ── Three-dots inside sheet ───────────────────────────────────
         if (moreBtn && moreDrop) {
             moreBtn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 moreDrop.style.display = moreDrop.style.display === 'none' ? 'block' : 'none';
             });
-            document.addEventListener('click', function() {
-                if (moreDrop) moreDrop.style.display = 'none';
+            // Click outside dropdown closes it (but NOT the sheet)
+            sheet.addEventListener('click', function(e) {
+                if (!moreBtn.contains(e.target)) {
+                    moreDrop.style.display = 'none';
+                }
             });
         }
 
-        // Delete / Edit from sheet three-dots
+        // ── Delete / Edit from sheet three-dots ───────────────────────
         var vbsDelete = document.getElementById('vbsDeleteStatus');
         var vbsEdit   = document.getElementById('vbsEditStatus');
-        if (vbsDelete) vbsDelete.addEventListener('click', function() {
+        if (vbsDelete) vbsDelete.addEventListener('click', function(e) {
+            e.stopPropagation();
             closeVbs();
             var deleteBtn = document.getElementById('deleteStatusBtn');
             if (deleteBtn) deleteBtn.click();
         });
-        if (vbsEdit) vbsEdit.addEventListener('click', function() {
+        if (vbsEdit) vbsEdit.addEventListener('click', function(e) {
+            e.stopPropagation();
             closeVbs();
             var editBtn = document.getElementById('editStatusBtn');
             if (editBtn) editBtn.click();
         });
 
-        // Share buttons
-        var shareText = function(platform) {
+        // ── Share buttons ─────────────────────────────────────────────
+        var shareStatus = function(platform) {
             var statusId = window.__currentViewingStatusId;
-            var url = window.location.origin + (statusId ? '/status/' + statusId : '');
+            var url  = window.location.origin + (statusId ? '/status/' + statusId : '');
             var text = 'Check this out on ' + APP_NAME + ': ' + url;
             var links = {
                 fb: 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url),
-                tw: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text),
-                wa: 'https://wa.me/?text=' + encodeURIComponent(text)
+                tw: 'https://twitter.com/intent/tweet?text='        + encodeURIComponent(text),
+                wa: 'https://wa.me/?text='                          + encodeURIComponent(text)
             };
             if (links[platform]) window.open(links[platform], '_blank', 'noopener,width=600,height=500');
         };
         var fbBtn = document.getElementById('vbsShareFb');
         var twBtn = document.getElementById('vbsShareTw');
         var waBtn = document.getElementById('vbsShareWa');
-        if (fbBtn) fbBtn.addEventListener('click', function() { shareText('fb'); });
-        if (twBtn) twBtn.addEventListener('click', function() { shareText('tw'); });
-        if (waBtn) waBtn.addEventListener('click', function() { shareText('wa'); });
+        if (fbBtn) fbBtn.addEventListener('click', function(e) { e.stopPropagation(); shareStatus('fb'); });
+        if (twBtn) twBtn.addEventListener('click', function(e) { e.stopPropagation(); shareStatus('tw'); });
+        if (waBtn) waBtn.addEventListener('click', function(e) { e.stopPropagation(); shareStatus('wa'); });
 
-        // Store reference so openVbs can use it
+        // Expose close for external callers
         window.__vbsClose = closeVbs;
     }
 

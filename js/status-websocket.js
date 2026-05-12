@@ -240,35 +240,54 @@ class StatusWebSocket {
         if (!data || !data.statusId) return;
         console.log('[StatusWebSocket] ⚡ status:reaction received', data);
 
-        // 1. Update reaction button in active full-screen viewer
+        // 1. Dispatch 'reactionUpdate' DOM event so status-ui.js listener fires
+        try {
+            document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                detail: {
+                    statusId: data.statusId,
+                    emoji:    data.emoji,
+                    count:    data.count,
+                    userId:   data.reactorId || data.userId
+                }
+            }));
+        } catch (_) {}
+
+        // 2. Update emoji trigger icon directly (belt-and-suspenders)
         if (typeof window.updateStatusReactionUI === 'function') {
             window.updateStatusReactionUI(data.statusId, data.emoji, data.count);
         }
-
-        // 2. Update sidebar list badge immediately (no refresh needed)
-        const sid = String(data.statusId);
-        const listItems = document.querySelectorAll('.status-group-item');
-        listItems.forEach(function(item) {
-            const ids = (item.dataset.statusIds || '').split(',');
-            if (ids.includes(sid)) {
-                let badges = item.querySelector('.status-group-badges');
-                if (!badges) {
-                    badges = document.createElement('div');
-                    badges.className = 'status-group-badges';
-                    const info = item.querySelector('.status-group-info');
-                    if (info) info.appendChild(badges);
-                }
-                let rb = badges.querySelector('.reaction-badge');
-                if (!rb) {
-                    rb = document.createElement('span');
-                    rb.className = 'status-badge reaction-badge';
-                    badges.appendChild(rb);
-                }
-                rb.textContent = data.emoji + ' ' + data.count;
+        // Also update emoji trigger button directly
+        try {
+            const sid = String(data.statusId);
+            const curSid = String(window.__currentViewingStatusId || '');
+            if (sid === curSid) {
+                const eti = document.getElementById('emojiTriggerIcon');
+                if (eti) eti.textContent = data.emoji;
             }
+        } catch (_) {}
+
+        // 3. Update sidebar list badge
+        const sid = String(data.statusId);
+        document.querySelectorAll('.status-group-item').forEach(function(item) {
+            const ids = (item.dataset.statusIds || '').split(',');
+            if (!ids.includes(sid)) return;
+            let badges = item.querySelector('.status-group-badges');
+            if (!badges) {
+                badges = document.createElement('div');
+                badges.className = 'status-group-badges';
+                const info = item.querySelector('.status-group-info');
+                if (info) info.appendChild(badges);
+            }
+            let rb = badges.querySelector('.reaction-badge');
+            if (!rb) {
+                rb = document.createElement('span');
+                rb.className = 'status-badge reaction-badge';
+                badges.appendChild(rb);
+            }
+            rb.textContent = data.emoji + (data.count > 1 ? ' ' + data.count : '');
         });
 
-        // 3. Toast notification to status owner
+        // 4. Toast notification to status owner
         const currentUser = window.currentUser || (window.auth && window.auth.currentUser);
         const currentId   = currentUser && (currentUser.id || currentUser.userId);
         if (currentId && typeof window.showNotification === 'function') {
@@ -335,7 +354,34 @@ class StatusWebSocket {
     // ── STATUS VIEWED ─────────────────────────────────────────────────────────
     _handleStatusViewed(data) {
         if (!data) return;
-        console.log('[StatusWebSocket] status:viewed', data.statusId);
+        console.log('[StatusWebSocket] ⚡ status:viewed', data.statusId, 'viewCount:', data.viewCount);
+
+        // ── Dispatch 'viewerUpdate' DOM event so status-ui.js seenCountNum updates ──
+        try {
+            document.dispatchEvent(new CustomEvent('viewerUpdate', {
+                detail: {
+                    statusId:    data.statusId,
+                    viewerId:    data.viewerId,
+                    viewerCount: data.viewCount  || data.viewerCount || 0,
+                    viewCount:   data.viewCount  || data.viewerCount || 0,
+                    timestamp:   data.timestamp  || Date.now()
+                }
+            }));
+        } catch (_) {}
+
+        // Increment seenCountNum directly as belt-and-suspenders fallback
+        try {
+            const el = document.getElementById('seenCountNum');
+            if (el) {
+                const cur = parseInt(el.textContent) || 0;
+                el.textContent = data.viewCount != null ? data.viewCount : cur + 1;
+            }
+            // Also update VBS count if sheet is open
+            const vbsCount = document.getElementById('vbsCount');
+            if (vbsCount) {
+                vbsCount.textContent = data.viewCount != null ? data.viewCount : (parseInt(vbsCount.textContent)||0) + 1;
+            }
+        } catch (_) {}
 
         if (typeof window.updateStatusViewerCount === 'function') {
             window.updateStatusViewerCount(data.statusId, data.viewerId);
@@ -347,6 +393,7 @@ class StatusWebSocket {
                     if (!status.viewers) status.viewers = [];
                     if (!status.viewers.includes(data.viewerId)) {
                         status.viewers.push(data.viewerId);
+                        if (data.viewCount != null) status.viewCount = data.viewCount;
                         window.StatusCache.cacheStatus(status).catch(console.error);
                     }
                 }

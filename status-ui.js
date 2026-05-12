@@ -565,9 +565,27 @@ function subscribeToStatusChanges() {
     });
 
     document.addEventListener('reactionUpdate', (e) => {
+        const d = e.detail || {};
+        if (!d.statusId) return;
+        // Update UI
         if (typeof window.updateStatusReactionUI === 'function') {
-            window.updateStatusReactionUI(e.detail?.statusId, e.detail?.emoji, e.detail?.count);
+            window.updateStatusReactionUI(d.statusId, d.emoji, d.count);
         }
+        // Persist reaction into local arrays so sidebar shows badge on re-render
+        const sid = String(d.statusId);
+        const patchReaction = (arr) => {
+            if (!Array.isArray(arr)) return;
+            const s = arr.find(x => String(x.id) === sid);
+            if (s) {
+                if (!s.reactions) s.reactions = {};
+                if (!s.reactions[d.emoji]) s.reactions[d.emoji] = [];
+                s.latestReaction = d.emoji;
+                s.reactionCount  = (s.reactionCount || 0) + 1;
+            }
+        };
+        patchReaction(friendsStatuses);
+        patchReaction(statuses);
+        patchReaction(myStatuses);
     });
 
     document.addEventListener('statusReply', (e) => {
@@ -3282,32 +3300,58 @@ function _setupTapZones() {
         next.onclick = () => _advanceSlide(_isCurrentOwner(), currentViewerGroup);
     }
 
-    // ── Hold-to-pause: press+hold anywhere on viewer pauses; release resumes ──
+    // ── Hold-to-pause: hold on viewer content pauses; release resumes ──
+    // Exclude footer, inputs, buttons — so typing a reply never pauses the timer
     if (viewerPanel && !viewerPanel._holdBound) {
         viewerPanel._holdBound = true;
+        let _holdTimer = null;
 
-        const pauseSlide = () => {
+        const isInteractive = (target) =>
+            !!(target.closest('.viewer-footer') ||
+               target.closest('.viewer-header') ||
+               target.closest('.emoji-picker-pop') ||
+               target.closest('.emoji-trigger-wrap') ||
+               target.closest('.viewers-bottom-sheet') ||
+               target.tagName === 'INPUT' ||
+               target.tagName === 'TEXTAREA' ||
+               target.tagName === 'BUTTON' ||
+               target.tagName === 'A');
+
+        const pauseSlide = (e) => {
+            if (isInteractive(e.target)) return;
             if (!isAutoAdvancePaused) {
                 isAutoAdvancePaused = true;
                 _clearSlideTimer();
             }
         };
-        const resumeSlide = () => {
+        const resumeSlide = (e) => {
+            clearTimeout(_holdTimer);
             if (isAutoAdvancePaused) {
                 isAutoAdvancePaused = false;
                 _startSlideTimer(_isCurrentOwner(), currentViewerGroup);
             }
         };
 
-        // Mouse
-        viewerPanel.addEventListener('mousedown', pauseSlide);
-        viewerPanel.addEventListener('mouseup',   resumeSlide);
-        viewerPanel.addEventListener('mouseleave',resumeSlide);
-
-        // Touch
+        viewerPanel.addEventListener('mousedown',  pauseSlide);
+        viewerPanel.addEventListener('mouseup',    resumeSlide);
+        viewerPanel.addEventListener('mouseleave', resumeSlide);
         viewerPanel.addEventListener('touchstart', pauseSlide, { passive: true });
         viewerPanel.addEventListener('touchend',   resumeSlide, { passive: true });
         viewerPanel.addEventListener('touchcancel',resumeSlide, { passive: true });
+
+        // Pause timer when reply input is focused; resume when it loses focus
+        viewerPanel.addEventListener('focusin', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                isAutoAdvancePaused = true;
+                _clearSlideTimer();
+            }
+        });
+        viewerPanel.addEventListener('focusout', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                isAutoAdvancePaused = false;
+                _startSlideTimer(_isCurrentOwner(), currentViewerGroup);
+            }
+        });
     }
 }
 
@@ -3348,17 +3392,28 @@ function _loadSlot(index, isOwner, group) {
             const ring = groupItem.querySelector('.status-group-ring');
             if (ring && viewed === ids.length) ring.classList.add('viewed');
         }
-        // Call real API — record view on server
-        const api = window.StatusAPI;
-        if (api && api.viewStatus) {
-            api.viewStatus(status.id).then(result => {
-                // viewCount update is pushed to owner via status:viewed socket event
-                // but as fallback, update if visible in our own panel (owner may have opened viewer on another tab)
-                if (result?.success && result.viewCount !== undefined) {
-                    const el = document.getElementById('seenCountNum');
-                    if (el) el.textContent = result.viewCount;
-                }
-            }).catch(() => {});
+        // Record view on server — fire for non-owners only
+        if (!isOwner) {
+            const api = window.StatusAPI;
+            if (api && api.viewStatus) {
+                api.viewStatus(status.id).then(result => {
+                    if (result?.success && result.viewCount !== undefined) {
+                        // Update creator's seenCountNum (belt-and-suspenders — socket also fires)
+                        const el = document.getElementById('seenCountNum');
+                        if (el) el.textContent = result.viewCount;
+                        // Dispatch viewerUpdate so all listeners (sidebar, VBS) sync
+                        try {
+                            document.dispatchEvent(new CustomEvent('viewerUpdate', {
+                                detail: {
+                                    statusId:    String(status.id),
+                                    viewCount:   result.viewCount,
+                                    viewerCount: result.viewCount
+                                }
+                            }));
+                        } catch (_) {}
+                    }
+                }).catch(() => {});
+            }
         }
     }
 
@@ -4225,7 +4280,7 @@ function showReportModal() {
 
 async function sendReply() {
     if (!ensureUIActive('sendReply')) return;
-    const replyInput = UIElements.getElement('replyInput');
+    const replyInput = UIElements.getElement('replyInput') || document.getElementById('replyInput');
     const replyText = replyInput ? replyInput.value.trim() : '';
     if (!replyText || !currentViewerStatus) return;
 
@@ -4240,8 +4295,9 @@ async function sendReply() {
         }
         const result = await api.replyToStatus(currentViewerStatus.id, replyText);
         if (result && result.success) {
-            replyInput.value = '';
-            showNotification('Reply sent ✓', 'success');
+                        replyInput.value = '';
+            // Keep viewer open and refocus input so user can type again
+            setTimeout(function() { if (replyInput) replyInput.focus(); }, 50); showNotification('Reply sent ✓', 'success');
             // Close the status viewer and open the relevant chat
             const viewer = UIElements.statusViewerPanel;
             if (viewer) viewer.classList.remove('active');
@@ -7050,23 +7106,69 @@ function renderStatusListInstantlyUI() {
 }
 
 function updateMyStatusPreviewUI() {
-    const preview = UIElements.getElement('myStatusPreview');
+    const preview = document.getElementById('myStatusPreview') || UIElements.getElement('myStatusPreview');
     if (!preview) return;
-    const ring = UIElements.getElement('myStatusRing');
-    const indicator = UIElements.getElement('myStatusIndicator');
-    const statusText = UIElements.getElement('myStatusText');
-    if (myStatuses && myStatuses.length > 0) {
-        const latest = myStatuses[0];
-        if (ring) ring.classList.remove('viewed');
-        if (indicator) indicator.classList.remove('viewed');
-        if (statusText) statusText.textContent = getStatusPreviewText(latest);
-        preview.innerHTML = `
-            <div class="my-status-preview-content">
-                <div class="my-status-preview-text">${UISanitizer.sanitizeHTML(getStatusPreviewText(latest))}</div>
-                <div class="my-status-preview-time">${formatTimeAgo(latest.createdAt)}</div>
-            </div>
-        `;
-    } else {
+
+    const ringWrap  = document.getElementById('myStatusRing')    || preview.querySelector('.sw-avatar-wrap');
+    const avatarEl  = document.getElementById('myStatusAvatar')  || preview.querySelector('.sw-avatar');
+    const addBadge  = document.getElementById('myStatusAddBadge')|| preview.querySelector('.sw-add-badge');
+    const subEl     = document.getElementById('myStatusText')    || preview.querySelector('.sw-row-sub');
+
+    const total = Array.isArray(myStatuses) ? myStatuses.length : 0;
+
+    // ── SVG segmented ring — same style as friend status rows ──────────
+    if (ringWrap) {
+        const oldSvg = ringWrap.querySelector('svg.my-ring-svg');
+        if (oldSvg) oldSvg.remove();
+        if (total > 0) {
+            const R=22, CX=26, CY=26, STROKE=2.4;
+            const GAP = total > 1 ? 5 : 0;
+            const CIRC = 2*Math.PI*R;
+            const segDeg = (360 - GAP*total) / total;
+            const segArc = (segDeg/360)*CIRC;
+            let segs = '';
+            for (let i=0; i<total; i++) {
+                const rot = -90 + i*(segDeg+GAP);
+                const off = -(rot/360)*CIRC + CIRC*0.25;
+                segs += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none"
+                    stroke="#00a884" stroke-width="${STROKE}"
+                    stroke-dasharray="${segArc} ${CIRC-segArc}"
+                    stroke-dashoffset="${off}"
+                    transform="rotate(${rot},${CX},${CY})"/>`;
+            }
+            const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+            svg.setAttribute('viewBox','0 0 52 52');
+            svg.setAttribute('class','my-ring-svg');
+            svg.style.cssText='position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);pointer-events:none;z-index:2;';
+            svg.innerHTML = segs;
+            ringWrap.style.position = 'relative';
+            ringWrap.appendChild(svg);
+        }
+        if (addBadge) addBadge.style.display = total > 0 ? 'none' : '';
+    }
+
+    // ── Avatar photo ───────────────────────────────────────────────────
+    if (avatarEl && myStatuses && myStatuses[0]) {
+        const mediaUrl = myStatuses[0].mediaUrl || myStatuses[0].contentUrl || '';
+        if (mediaUrl) {
+            avatarEl.style.backgroundImage = `url('${mediaUrl}')`;
+            avatarEl.style.backgroundSize  = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            avatarEl.innerHTML = '';
+        }
+    }
+
+    // ── Sub text ───────────────────────────────────────────────────────
+    if (subEl) {
+        if (total > 0) {
+            const latest = myStatuses[0];
+            subEl.textContent = (total > 1 ? `${total} updates · ` : '') + formatTimeAgo(latest.createdAt);
+        } else {
+            subEl.textContent = 'Tap to add status update';
+        }
+    }
+
+    if (total === 0) {
         if (ring) ring.classList.add('viewed');
         if (indicator) indicator.classList.add('viewed');
         if (statusText) statusText.textContent = 'No recent status';

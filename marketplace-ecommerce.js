@@ -91,29 +91,28 @@ function _lsLoad(key, fallback = null) {
 
 async function _api(method, endpoint, body = null) {
     try {
-        // Primary: use secureApiCall / safeApiCall from Tool-core.js
-        const fn = window._ecomApiCall || (typeof safeApiCall === 'function' ? safeApiCall : null);
-        if (fn) return await fn(method, endpoint, body);
-
-        // Fallback: direct fetch — resolve token from all known locations
-        const token = window.__kynToken || window.__accessToken || window.__PARENT_SESSION__?.token ||
+        // Primary: window._ecomApiCall wraps Tool-core.js safeApiCall (has token)
+        if (typeof window._ecomApiCall === 'function') {
+            return await window._ecomApiCall(method, endpoint, body);
+        }
+        // Fallback: direct fetch using any available token
+        const token = window.__kynToken || window.__accessToken ||
+            window.__PARENT_SESSION__?.token ||
             localStorage.getItem('authToken') || localStorage.getItem('token') ||
             localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken') || '';
-        const baseUrl = window.__kynAPI?.baseUrl?.replace(/\/$/, '') ||
-            (window.__getApiBase ? window.__getApiBase().replace(/\/api$/, '') : '') ||
-            window.__getApiOrigin?.() || 'http://localhost:4000';
+        if (!token) return null; // No token — skip, don't error
+        const baseUrl = window.__kynAPI?.baseUrl?.replace(/\/api$/, '').replace(/\/$/, '') ||
+            (typeof window.__getApiBase === 'function' ? window.__getApiBase().replace(/\/api$/, '') : '') ||
+            'http://localhost:4000';
         const res = await fetch(baseUrl + '/api' + endpoint, {
-            method,
-            headers: {
-                'Content-Type': 'application/json',
-                ...(token ? { Authorization: `Bearer ${token}` } : {})
-            },
+            method: method.toUpperCase(),
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             ...(body && method !== 'GET' ? { body: JSON.stringify(body) } : {})
         });
+        if (!res.ok) return null;
         return await res.json();
     } catch(e) {
-        // Silent fail — marketplace works offline, errors are non-critical
-        return null;
+        return null; // Silent fail — marketplace works offline
     }
 }
 
@@ -1211,11 +1210,15 @@ window.addEventListener('message', (e) => {
 export async function initEcommerceMarketplace() {
     await ProductEngine.init();
     _initRealtimeListeners();
-    // Defer server calls until token confirmed available
-    const _hasToken = () => !!(window.__kynToken || window.__accessToken || window.__PARENT_SESSION__?.token ||
+    // Only sync wishlist if token is available (avoids 401 errors on startup)
+    const _hasToken = () => !!(window._ecomApiCall ||
+        window.__kynToken || window.__accessToken || window.__PARENT_SESSION__?.token ||
         localStorage.getItem('authToken') || localStorage.getItem('token'));
     if (_hasToken()) {
         WishlistEngine.syncFromServer().catch(() => {});
+    } else {
+        // Try again after token arrives via tools:active
+        window.addEventListener('tools:active', () => WishlistEngine.syncFromServer().catch(()=>{}), { once: true });
     }
 
     // Load initial data
@@ -1252,31 +1255,25 @@ function _autoInit() {
         initEcommerceMarketplace().catch(() => {});
     };
 
-    // Listen for session from parent (Tools.html receives SESSION_DATA from chat.html)
-    window.addEventListener('message', function _onSessionForEcom(evt) {
+    // PRIMARY: Tool-core.js patch fires this AFTER tools:active (token guaranteed)
+    window.addEventListener('ecom:force-init', tryInit, { once: true });
+    window.addEventListener('marketplaceCoreReady', tryInit, { once: true });
+
+    // SECONDARY: grab token from PARENT_READY postMessage
+    window.addEventListener('message', function _onSess(evt) {
         if (!evt.data || typeof evt.data !== 'object') return;
-        const t = evt.data.type;
-        if ((t === 'SESSION_DATA' || t === 'AUTH_READY' || t === 'PARENT_READY') && !window.EcomMarketplace) {
-            const session = evt.data.payload || {};
-            const token = session.token || session.session?.token;
-            if (token) {
-                window.__kynToken = token;
-                window.__accessToken = token;
-            }
-            if (!window.EcomMarketplace) {
-                window.removeEventListener('message', _onSessionForEcom);
-                tryInit();
-            }
+        if (evt.data.type === 'PARENT_READY' && !window.EcomMarketplace) {
+            const p = evt.data.payload || {};
+            const tok = p.token || p.session?.token;
+            if (tok) { window.__kynToken = tok; window.__accessToken = tok; }
+            window.removeEventListener('message', _onSess);
+            setTimeout(tryInit, 100);
         }
     });
 
-    window.addEventListener('marketplaceCoreReady', tryInit, { once: true });
-    window.addEventListener('ecom:force-init', tryInit, { once: true });
-
-    // Fallback: try after 4s if session never arrived
-    setTimeout(() => { if (!window.EcomMarketplace) tryInit(); }, 4000);
+    // LAST RESORT: 8s — well after session arrives
+    setTimeout(() => { if (!window.EcomMarketplace) tryInit(); }, 8000);
 }
-
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _autoInit);
 } else {

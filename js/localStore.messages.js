@@ -192,8 +192,16 @@
         async deleteMessage(id, options = {}) {
             // options: { forEveryone: bool, userId: string }
             if (options && options.forEveryone) {
-                // Hard delete for everyone
-                return this.updateMessage(id, { deleted: true, status: 'deleted' });
+                // Hard delete for everyone — permanently remove from IDB
+                try { await window.AppCache.remove('messages', String(id)); } catch (_) {}
+                // Also try by serverId lookup
+                try {
+                    const existing = await this._findExistingMessage({ id });
+                    if (existing && existing.id !== String(id)) {
+                        await window.AppCache.remove('messages', existing.id);
+                    }
+                } catch (_) {}
+                return true;
             } else if (options && options.userId) {
                 // Soft delete for me only — record userId in deletedFor array
                 const existing = await this._findExistingMessage({ id });
@@ -204,9 +212,27 @@
                 }
                 return this.updateMessage(id, { deletedFor, status: 'deleted_for_me' });
             } else {
-                // Legacy: mark as fully deleted
-                return this.updateMessage(id, { deleted: true, status: 'deleted' });
+                // Legacy: permanently remove from IDB
+                try { await window.AppCache.remove('messages', String(id)); } catch (_) {}
+                try {
+                    const existing2 = await this._findExistingMessage({ id });
+                    if (existing2 && existing2.id !== String(id)) {
+                        await window.AppCache.remove('messages', existing2.id);
+                    }
+                } catch (_) {}
+                return true;
             }
+        }
+
+        async deleteMessagesByChat(chatId) {
+            // NEW: Remove all IDB messages for a given chatId
+            await this.ready();
+            const all = await window.AppCache.getAll('messages').catch(() => []);
+            const toRemove = (all || []).filter(m => String(m.chatId || m.conversationId || '') === String(chatId));
+            for (const m of toRemove) {
+                try { await window.AppCache.remove('messages', m.id); } catch (_) {}
+            }
+            return toRemove.length;
         }
 
         async saveConversation(conv) {

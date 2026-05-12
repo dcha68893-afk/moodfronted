@@ -646,10 +646,15 @@ window.showCallingScreen = showCallingScreen;
 window.startCallWithUser = startCallWithUser;
 
 function showIdleScreen() {
-    // ✅ FIX: Skip showing idle if we just ended a call and parent is navigating away.
-    // This prevents the dark idle flash between call-end and parent navigation.
-    if (window.__callEndedNavigating) {
-        console.log('[UI] showIdleScreen skipped — parent navigation in progress');
+    // ✅ FIX: Never show idle while a call is active or parent is navigating away.
+    // showIdleScreen is called from many places including error paths and cancel buttons.
+    // If __callActive is true a new call is in progress — do NOT wipe its screen.
+    if (window.__callActive ||
+        window.__callEndedNavigating ||
+        (window.UIState && (window.UIState.callActive ||
+            window.UIState.callState === 'calling' ||
+            window.UIState.callState === 'ringing'))) {
+        console.log('[UI] showIdleScreen suppressed — call active or navigating');
         return;
     }
     console.log('[UI] showIdleScreen → returning to idle (no arrows)');
@@ -4185,40 +4190,25 @@ handleContactItemClick: function(e) {
                     this.refreshCallHistory();
                     break;
                 case 'call_cancelled':
-                    // ✅ FIX: Caller cancelled before receiver answered.
-                    // Stop ALL ringtone paths (MasterFix WebAudio + legacy Audio)
+                    // ✅ FIX: stop all ringtones, dismiss modal, navigate receiver back
                     if (typeof window._stopRingtones === 'function') window._stopRingtones();
                     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
-                    if (window._incomingRingtone) {
-                        try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
-                        window._incomingRingtone = null;
-                    }
-                    // Clear ring countdown timer and hide modal
+                    if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
                     if (elements.incomingCallModal) {
-                        const _cancelTimerId = parseInt(elements.incomingCallModal.dataset.timer);
-                        if (_cancelTimerId) clearInterval(_cancelTimerId);
+                        const _ct = parseInt(elements.incomingCallModal.dataset.timer); if (_ct) clearInterval(_ct);
                         elements.incomingCallModal.dataset.timer = '';
                         elements.incomingCallModal.classList.remove('active');
-                        elements.incomingCallModal.style.setProperty('display', 'none', 'important');
+                        elements.incomingCallModal.style.setProperty('display','none','important');
                         UIState.activeModals.delete('incomingCallModal');
                     }
                     window._currentIncomingCallId = null;
                     UIState.callState = 'idle'; UIState.callActive = false; UIState.activeCallId = null;
-                    // ✅ FIX: Navigate receiver back to where they were before call came in
                     if (window.parent && window.parent !== window) {
                         window.__callEndedNavigating = true;
                         setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
                         window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-                        const _cancelReturn = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
-                            ? window.__callOriginReturnTo
-                            : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
-                                ? window.__pendingCallReturnTo : 'messages';
-                        setTimeout(function() {
-                            if (window.parent && window.parent !== window) {
-                                window.parent.postMessage({ type: 'SWITCH_MODULE', module: _cancelReturn,
-                                    payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
-                            }
-                        }, 350);
+                        const _cr = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls') ? window.__callOriginReturnTo : 'messages';
+                        setTimeout(function() { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'SWITCH_MODULE', module: _cr, payload: { returnFromCall: true }, timestamp: Date.now() }, '*'); }, 350);
                     }
                     this.handleCallEnded(data);
                     this.refreshCallHistory();
@@ -4722,13 +4712,11 @@ handleContactItemClick: function(e) {
             UIState.callActive = false;
             UIState.activeCallId = incomingId;
             setCallParticipants([callerParticipant], { merge: false });
-            // ✅ FIX: Capture receiver's return destination the moment a call arrives.
-            // Without this, handleCallEnded / declineIncomingCall / call_cancelled have no
-            // returnTo and the receiver is never navigated back after the call ends.
+            // ✅ FIX: Capture receiver’s return destination the moment call arrives
             if (!window.__callOriginReturnTo || window.__callOriginReturnTo === 'calls') {
                 const _src = (callData && (callData.source || callData.returnTo)) || null;
-                window.__callOriginReturnTo   = (_src && _src !== 'calls') ? _src : 'messages';
-                window.__pendingCallReturnTo  = window.__callOriginReturnTo;
+                window.__callOriginReturnTo  = (_src && _src !== 'calls') ? _src : 'messages';
+                window.__pendingCallReturnTo = window.__callOriginReturnTo;
                 window.__callOriginChatUserId = (callData && (callData.callerId || callData.userId)) || null;
                 window.__callOriginChatUserName = _callerName;
             }
@@ -5288,9 +5276,9 @@ handleContactItemClick: function(e) {
             const _anyScreenActive =
                 UIState.callActive ||
                 UIState.callState === 'calling' ||
+                UIState.callState === 'ringing' ||    // receiver ringing
                 UIState.callState === 'connecting' ||
                 UIState.callState === 'connected' ||
-                UIState.callState === 'ringing' ||    // ✅ FIX: receiver ringing — must not drop ended event
                 (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active')) ||
                 (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
                 (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active'));
@@ -5308,23 +5296,15 @@ handleContactItemClick: function(e) {
             window.__callEndedHandledAt = now;
             setTimeout(() => { window.__callEndedHandledAt = 0; }, 5000);
 
-            // ── FIX: Immediately restore parent layout + reset to idle screen ──
-            window.__callActive = false;
-            // Clear the CALL_ACCEPTED dedup lock and peer globals so next call works
-            window.__callAcceptedHandled = 0;
-            window.__callReceiverAccepted = false;  // reset ICE timeout guard
-            window.__activePeerName   = null;
-            window.__activePeerType   = null;
-            window.__activePeerAvatar = null;
-            window.__incomingCallerName = null;
-            window.__incomingCallerAvatar = null;
-            // Disconnect the incoming-modal guard observer
-            if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
+            // ── FIX: Set navigation flag FIRST so showScreen/showIdleScreen are suppressed ──
+            // Order matters: __callEndedNavigating must be true BEFORE __callActive is cleared,
+            // otherwise the guards in showScreen/showIdleScreen won't fire.
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
+                window.__callEndedNavigating = true;
+                setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
             }
 
-            // ✅ FIX: Stop ALL ringtones (MasterFix WebAudio + legacy Audio)
+            // ✅ FIX: Stop ALL ringtones immediately
             if (typeof window._stopRingtones === 'function') window._stopRingtones();
             if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
             if (window._incomingRingtone) {
@@ -5332,17 +5312,31 @@ handleContactItemClick: function(e) {
                 window._incomingRingtone = null;
             }
 
-            // ✅ FIX: Hide call screens — but only if a new call hasn't already started
-            // (prevents handleCallEnded from wiping a freshly-shown callingScreen)
+            // Now safe to clear call state
+            window.__callActive = false;
+            // Clear the CALL_ACCEPTED dedup lock and peer globals so next call works
+            window.__callAcceptedHandled = 0;
+            window.__callReceiverAccepted = false;
+            window.__activePeerName   = null;
+            window.__activePeerType   = null;
+            window.__activePeerAvatar = null;
+            window.__incomingCallerName = null;
+            window.__incomingCallerAvatar = null;
+            if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
+            }
+
+            // ✅ FIX: Hide call screens cleanly — no display:none!important on callingScreen
+            // if a NEW call has just started (callActive was re-set by new call initiation)
             const callingScreen = document.getElementById('callingScreen');
             const inCallScreen  = document.getElementById('inCallScreen');
             const idleScreen    = document.getElementById('idleScreen');
             const callContainer = document.getElementById('callContainer');
-            if (!window.__callActive) {
-                if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.setProperty('display', 'none', 'important'); }
-                if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.setProperty('display', 'none', 'important'); }
-            }
-            // ✅ FIX: Always teardown incomingCallModal (receiver side ringing screen)
+            if (callingScreen) { callingScreen.classList.remove('active'); callingScreen.style.removeProperty('display'); }
+            if (inCallScreen)  { inCallScreen.classList.remove('active');  inCallScreen.style.removeProperty('display'); }
+
+            // ✅ FIX: Teardown incomingCallModal (receiver side ringing screen)
             const _incomingModal = document.getElementById('incomingCallModal');
             if (_incomingModal) {
                 const _imTimer = parseInt(_incomingModal.dataset.timer);
@@ -5354,16 +5348,16 @@ handleContactItemClick: function(e) {
             }
             window._currentIncomingCallId = null;
 
-            // ✅ FIX: Do NOT show callContainer/idleScreen if parent is navigating away.
-            // Showing them causes the dark flash before parent hides the iframe.
-            if (!window.__callEndedNavigating && !window.__callActive) {
+            // ✅ FIX: Only show idle/callContainer if parent is NOT navigating away.
+            // If navigating: keep everything hidden — parent hides the iframe.
+            // If not navigating (same-page call): show idle so UI resets properly.
+            if (!window.__callEndedNavigating) {
                 if (callContainer) {
                     callContainer.classList.add('active');
                     callContainer.style.setProperty('display', 'flex', 'important');
                 }
                 if (idleScreen) { idleScreen.classList.add('active'); idleScreen.style.setProperty('display', 'block', 'important'); }
             } else {
-                // Just hide callContainer — don't show idle
                 if (callContainer) {
                     callContainer.classList.remove('active');
                     callContainer.style.setProperty('display', 'none', 'important');
@@ -5745,7 +5739,7 @@ handleContactItemClick: function(e) {
     const participantAvatar = payload.userAvatar || window.__activePeerAvatar || pendingUser.userAvatar || null;
     const participantId = payload.receiverId || pendingUser.userId || payload.userId || null;
 
-    // ✅ FIX: handleCallInitiated lives on CoreIntegration (this), not UIEventHandlers
+    // ✅ FIX: handleCallInitiated is on CoreIntegration (this), not UIEventHandlers
     this.handleCallInitiated({
         ...payload,
         callId: payload.callId || payload.id || UIState.activeCallId,
@@ -8299,25 +8293,17 @@ declineIncomingCall: async function() {
         }, '*');
     }
 
-    // ✅ FIX: Stop ALL ringtones before navigating
+    // ✅ FIX: Stop ALL ringtones
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
 
-    // ✅ FIX: Navigate receiver back to where they were before the call came in
+    // ✅ FIX: Navigate receiver back
     if (window.parent && window.parent !== window) {
         window.__callEndedNavigating = true;
         setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
         window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-        const _declineReturn = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
-            ? window.__callOriginReturnTo
-            : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
-                ? window.__pendingCallReturnTo : 'messages';
-        setTimeout(function() {
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'SWITCH_MODULE', module: _declineReturn,
-                    payload: { returnFromCall: true }, timestamp: Date.now() }, '*');
-            }
-        }, 350);
+        const _dr = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls') ? window.__callOriginReturnTo : 'messages';
+        setTimeout(function() { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'SWITCH_MODULE', module: _dr, payload: { returnFromCall: true }, timestamp: Date.now() }, '*'); }, 350);
     }
 
     showIdleScreen();
