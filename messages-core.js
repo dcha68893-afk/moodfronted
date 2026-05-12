@@ -5908,17 +5908,34 @@ try {
                 // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
                 // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
                 // Unwrap one level if needed, then fall back to data itself.
-                const message = (data && data.payload && (data.payload.id || data.payload.chatId))
-                    ? data.payload
-                    : (data && data.data && (data.data.id || data.data.chatId))
-                        ? data.data
-                        : data;
-                const chatId = String(
-                    (message && (message.chatId || message.conversationId)) || ''
-                );
-                // ✅ FIX: Don't gate on message.id — server might not echo id back immediately.
-                // Gate only on chatId so we never silently drop a valid incoming message.
-                if (!message || !chatId) return;
+                // FIXED: Multi-level unwrap handles every wrapping convention the bridge uses.
+                // chat.html ws-bridge wraps as { type, payload:{...}, source }
+                // KynectaRealtime fires raw payload directly
+                // Backend may send { data:{...} } or flat object
+                let message = data;
+                if (data && data.payload && typeof data.payload === 'object' &&
+                    (data.payload.chatId || data.payload.conversationId || data.payload.id || data.payload.content)) {
+                    message = data.payload;
+                } else if (data && data.data && typeof data.data === 'object' &&
+                    (data.data.chatId || data.data.conversationId || data.data.id || data.data.content)) {
+                    message = data.data;
+                } else if (data && data.message && typeof data.message === 'object') {
+                    message = data.message;
+                }
+
+                // Resolve chatId — try every known field name, coerce to String
+                const _rawChatId = message.chatId || message.conversationId || message.chat_id ||
+                    message.room || data.chatId || data.conversationId || '';
+                const chatId = _rawChatId ? String(_rawChatId) : '';
+
+                // Only drop if truly no chatId AND no content (not just missing id)
+                if (!message || (!chatId && !message.content)) return;
+                // If still no chatId, try to recover from active chat
+                const _resolvedChatId = chatId || (function() {
+                    const _ac = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
+                    return _ac ? String(_ac.id || '') : '';
+                })();
+                if (!_resolvedChatId) return;
 
                 // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
@@ -5926,13 +5943,14 @@ try {
                 // Reject messages with no usable id to prevent corrupt dedup state
                 if (!_safeId && !_safeLocalId && !message.content) return;
 
-                // FIX: Dedup — chat.html posts 'message:new' AND 'new_message' for the same payload,
-                // and multiple event listeners can fire. Use a Set to process each message only once.
-                const _dedupKey = _safeId || _safeLocalId || (chatId + ':' + (message.content || '') + ':' + (message.createdAt || ''));
+                // FIXED DEDUP: Use chatId+id as key — never bare serverId alone.
+                // Using serverId alone caused cross-user dedup collisions on shared devices.
+                // Using localId alone causes misses when server echoes without localId.
+                const _dedupKey = (_resolvedChatId + ':' + (_safeId || _safeLocalId || '')) ||
+                    (_resolvedChatId + ':' + (message.content || '') + ':' + (message.createdAt || message.timestamp || ''));
                 if (_realtimeProcessedIds.has(_dedupKey)) return;
                 _realtimeProcessedIds.add(_dedupKey);
-                // Clean up the set after 10s to prevent memory growth
-                setTimeout(function() { _realtimeProcessedIds.delete(_dedupKey); }, 10000);
+                setTimeout(function() { _realtimeProcessedIds.delete(_dedupKey); }, 8000);
 
                 // ECHO PREVENTION: WebSocket echoes our own sent messages back.
                 // The optimistic message is already in the UI — only update its status.
@@ -5965,30 +5983,30 @@ try {
                     content: message.content || message.text || '',
                     type: message.type || 'text',
                     senderId: message.senderId || (message.sender && message.sender.id),
-                    sender: message.sender || null,
+                    sender: message.sender || { id: message.senderId },
                     replyToId: message.replyToId || null,
                     replyTo:   message.replyTo   || null,
                     reactions: message.reactions || {},
                     timestamp: _sca,
                     createdAt: _sca,
                     status: message.status || 'delivered',
-                    conversationId: chatId,
-                    chatId: chatId,
+                    conversationId: _resolvedChatId,
+                    chatId: _resolvedChatId,
                     isLocalOnly: false
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {
-                    const saved = await window.KynectaSyncEngine.ingestIncomingMessage(message, chatId).catch(() => null);
+                    const saved = await window.KynectaSyncEngine.ingestIncomingMessage(message, _resolvedChatId).catch(() => null);
                     if (saved) {
                         normalizedMessage = {
                             ...saved,
-                            conversationId: saved.chatId || saved.conversationId || chatId,
-                            chatId: saved.chatId || chatId
+                            conversationId: saved.chatId || saved.conversationId || _resolvedChatId,
+                            chatId: saved.chatId || _resolvedChatId
                         };
                     }
                 }
 
-                renderRealtimeUpdate(chatId, normalizedMessage);
+                renderRealtimeUpdate(_resolvedChatId, normalizedMessage);
                 ackMessageDelivered(normalizedMessage).catch(() => {});
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
