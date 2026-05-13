@@ -322,18 +322,15 @@ const GlobalCallHistory = {
     let listenerEstablished = false;
 
     async function startCallWithUser(userId, userName, callType) {
-    console.log('[Calls UI] startCallWithUser → userId:', userId, '| type:', callType);
+    console.log('[Calls UI] startCallWithUser userId:', userId, '| type:', callType);
     
     if (!userId) {
         console.error('[Calls UI] Cannot start call: No userId');
         showNotificationInCalls('Cannot start call: Missing user information', 'error');
         return;
     }
-    
-    // ✅ FIX: Set __callActive = true IMMEDIATELY — before forceResetCallState.
-    // forceResetCallState fires 'call_ended' from the core. ScreenMgr's _handleCoreEvent
-    // checks __callActive and skips _endCallScreens if true. Without this, the reset's
-    // call_ended would hide callingScreen the moment it shows.
+
+    // FIX: Set __callActive BEFORE forceResetCallState
     window.__callActive = true;
     if (window.UIState) { window.UIState.callActive = true; window.UIState.callState = 'calling'; }
 
@@ -653,14 +650,11 @@ window.showCallingScreen = showCallingScreen;
 window.startCallWithUser = startCallWithUser;
 
 function showIdleScreen() {
-    // FIX: Never show idle while a call is active or navigating away
     if (window.__callActive ||
         window.__callEndedNavigating ||
-        (window.UIState && (
-            window.UIState.callActive ||
-            window.UIState.callState === 'calling' ||
-            window.UIState.callState === 'ringing'
-        ))) {
+        (window.UIState && (window.UIState.callActive || window.UIState.callState === 'calling' || window.UIState.callState === 'ringing')) ||
+        (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active')) ||
+        (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active'))) {
         console.log('[UI] showIdleScreen suppressed -- call active');
         return;
     }
@@ -4199,21 +4193,9 @@ handleContactItemClick: function(e) {
                     if (typeof window._stopRingtones === 'function') window._stopRingtones();
                     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
                     if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
-                    if (elements.incomingCallModal) {
-                        const _ct = parseInt(elements.incomingCallModal.dataset.timer); if (_ct) clearInterval(_ct);
-                        elements.incomingCallModal.dataset.timer = '';
-                        elements.incomingCallModal.classList.remove('active');
-                        elements.incomingCallModal.style.setProperty('display','none','important');
-                        UIState.activeModals.delete('incomingCallModal');
-                    }
-                    window._currentIncomingCallId = null; UIState.callState = 'idle'; UIState.callActive = false;
-                    if (window.parent && window.parent !== window) {
-                        window.__callEndedNavigating = true;
-                        setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
-                        window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-                        const _cr = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls') ? window.__callOriginReturnTo : 'messages';
-                        setTimeout(function() { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'SWITCH_MODULE', module: _cr, payload: { returnFromCall: true }, timestamp: Date.now() }, '*'); }, 350);
-                    }
+                    if (elements.incomingCallModal) { const _ct = parseInt(elements.incomingCallModal.dataset.timer); if (_ct) clearInterval(_ct); elements.incomingCallModal.dataset.timer = ''; elements.incomingCallModal.classList.remove('active'); elements.incomingCallModal.style.setProperty('display','none','important'); UIState.activeModals.delete('incomingCallModal'); }
+                    window._currentIncomingCallId = null; UIState.callState = 'idle'; UIState.callActive = false; window.__callActive = false;
+                    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _cr=(window.__callOriginReturnTo&&window.__callOriginReturnTo!=='calls')?window.__callOriginReturnTo:'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_cr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
                     this.handleCallEnded(data);
                     this.refreshCallHistory();
                     showNotification('Call was cancelled by the caller', 'info');
@@ -5299,7 +5281,7 @@ handleContactItemClick: function(e) {
             window.__callEndedHandledAt = now;
             setTimeout(() => { window.__callEndedHandledAt = 0; }, 5000);
 
-                   // FIX: set __callEndedNavigating BEFORE __callActive=false
+          // FIX: set __callEndedNavigating BEFORE __callActive=false
             if (window.parent && window.parent !== window) {
                 window.__callEndedNavigating = true;
                 setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
@@ -5307,18 +5289,17 @@ handleContactItemClick: function(e) {
             if (typeof window._stopRingtones === 'function') window._stopRingtones();
             if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
             if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
-            const _imEl2 = document.getElementById('incomingCallModal');
-            if (_imEl2) { const _t2 = parseInt(_imEl2.dataset.timer); if (_t2) clearInterval(_t2); _imEl2.dataset.timer = ''; _imEl2.classList.remove('active'); _imEl2.style.setProperty('display','none','important'); UIState.activeModals && UIState.activeModals.delete('incomingCallModal'); }
+            const _imEl3 = document.getElementById('incomingCallModal');
+            if (_imEl3) { const _t3 = parseInt(_imEl3.dataset.timer); if (_t3) clearInterval(_t3); _imEl3.dataset.timer = ''; _imEl3.classList.remove('active'); _imEl3.style.setProperty('display','none','important'); UIState.activeModals && UIState.activeModals.delete('incomingCallModal'); }
             window._currentIncomingCallId = null;
             window.__callActive = false;
-            window.__callAcceptedHandled = 0;
-            window.__callReceiverAccepted = false;
+            window.__callAcceptedHandled = 0; window.__callReceiverAccepted = false;
             window.__activePeerName = null; window.__activePeerType = null; window.__activePeerAvatar = null;
             window.__incomingCallerName = null; window.__incomingCallerAvatar = null;
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             if (typeof window.endCallScreens === 'function') window.endCallScreens();
-            else { var _csX = document.getElementById('callingScreen'), _isX = document.getElementById('inCallScreen'); if (_csX) { _csX.classList.remove('active'); _csX.style.setProperty('display','none','important'); } if (_isX) { _isX.classList.remove('active'); _isX.style.setProperty('display','none','important'); } }
+            else { var _csY = document.getElementById('callingScreen'), _isY = document.getElementById('inCallScreen'); if (_csY) { _csY.classList.remove('active'); _csY.style.setProperty('display','none','important'); } if (_isY) { _isY.classList.remove('active'); _isY.style.setProperty('display','none','important'); } }
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
             (function _saveEndedLocally() {
@@ -5695,7 +5676,7 @@ handleContactItemClick: function(e) {
     const participantAvatar = payload.userAvatar || window.__activePeerAvatar || pendingUser.userAvatar || null;
     const participantId = payload.receiverId || pendingUser.userId || payload.userId || null;
 
-    // FIX: handleCallInitiated is on CoreIntegration (this), not UIEventHandlers
+    // FIX: on CoreIntegration, not UIEventHandlers
     this.handleCallInitiated({
         ...payload,
         callId: payload.callId || payload.id || UIState.activeCallId,
@@ -8250,13 +8231,7 @@ declineIncomingCall: async function() {
     }
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
-    if (window.parent && window.parent !== window) {
-        window.__callEndedNavigating = true;
-        setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
-        window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
-        const _dr = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls') ? window.__callOriginReturnTo : 'messages';
-        setTimeout(function() { if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'SWITCH_MODULE', module: _dr, payload: { returnFromCall: true }, timestamp: Date.now() }, '*'); }, 350);
-    }
+    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _dr=(window.__callOriginReturnTo&&window.__callOriginReturnTo!=='calls')?window.__callOriginReturnTo:'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
     showIdleScreen();
     showNotification('Call declined', 'info');
 

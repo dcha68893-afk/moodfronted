@@ -307,7 +307,7 @@ async function _loadMemberPicker(GC) {
         try {
             const token = _getToken();
             if (token) {
-                const base = window.__API_BASE_URL || window.API_BASE_URL || 'http://localhost:4000/api';
+                const base = window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
                 const res = await fetch(`${base}/friends`, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
                 if (res.ok) {
                     const d = await res.json();
@@ -553,7 +553,7 @@ async function _remapGroupId(GC, tempId, serverGroup) {
 async function _inviteMembers(groupId, memberIds, myUserId) {
     const token = _getToken();
     if (!token || !groupId) return;
-    const base = window.__API_BASE_URL || window.API_BASE_URL || 'http://localhost:4000/api';
+    const base = window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
     for (const uid of memberIds) {
         if (String(uid) === String(myUserId)) continue;
         try {
@@ -582,7 +582,7 @@ async function _apiBridge(endpoint, method = 'GET', body = null) {
 }
 
 async function _rawFetch(endpoint, method = 'GET', body = null) {
-    const base = window.__API_BASE_URL || window.API_BASE_URL || 'http://localhost:4000/api';
+    const base = window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
     const token = _getToken();
     const url = endpoint.startsWith('http') ? endpoint : `${base}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
     const opts = { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } };
@@ -844,28 +844,47 @@ function _patchSendGroupMessage(GC) {
     };
 
     // Also patch the apiRequest result normalisation inside GroupCore.
-    // GroupCore.sendGroupMessage() does:
-    //   response.data  ← but backend returns { data: { message: {...} } }
-    // We patch GroupCore's internal method to normalise the response shape.
-    const _origGCMethod = window.GroupCore?.sendGroupMessage;
-    if (_origGCMethod && window.GroupCore) {
+    // Replace GroupCore.sendGroupMessage with a direct-fetch version
+    // that uses the correct production URL and persists messages locally
+    if (window.GroupCore) {
         const GCref = window.GroupCore;
-        const __orig = GCref.sendGroupMessage.bind(GCref);
         GCref.sendGroupMessage = async function (groupId, content, topic, anonymous) {
-            // Call via apiRequest directly to intercept the raw response
+            if (!groupId || !content?.trim()) return { success: false, error: 'Missing groupId or content' };
             try {
-                const apiRequestFn = typeof apiRequest === 'function' ? apiRequest : _apiBridge;
-                const response = await apiRequestFn(`/groups/${groupId}/messages`, 'POST', {
-                    groupId, content, topic, anonymous
+                // Always use _rawFetch — bypasses the parent bridge which may route to localhost
+                const response = await _rawFetch(`/groups/${groupId}/messages`, 'POST', {
+                    content, topic, anonymous
                 });
-                // Normalise: backend may return data.message or data directly
                 const messageData = response?.data?.message
-                                 || (response?.data && !response.data.message ? response.data : null);
+                                 || response?.data?.data?.message
+                                 || (response?.data && typeof response.data === 'object' && response.data.id ? response.data : null)
+                                 || null;
 
                 if (response?.success && messageData) {
-                    // (log suppressed)
-                    this.addGroupMessage(groupId, messageData);
-                    this.emit('group:message-sent', { groupId, message: messageData });
+                    // Persist to localStorage (survives refresh)
+                    try {
+                        const cacheKey = 'grp_msgs_' + groupId;
+                        const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                        if (!cached.some(m => String(m.id) === String(messageData.id))) {
+                            cached.push(messageData);
+                            if (cached.length > 100) cached.splice(0, cached.length - 100);
+                            localStorage.setItem(cacheKey, JSON.stringify(cached));
+                        }
+                    } catch(e) {}
+
+                    // Add to GroupCore in-memory and emit for chat panel
+                    if (typeof this.addGroupMessage === 'function') {
+                        this.addGroupMessage(groupId, messageData);
+                    }
+                    this.emit('group:message-received', { groupId, message: messageData });
+                    this.emit('group:message-sent',     { groupId, message: messageData });
+
+                    // Broadcast via socket so OTHER members receive it
+                    const RT = window.KynectaRealtime;
+                    if (RT && typeof RT.emit === 'function') {
+                        try { RT.emit('send_group_message', { groupId, message: messageData }); } catch(e) {}
+                    }
+
                     return { success: true, data: messageData };
                 }
                 console.error('[GROUP FLOW] Message API failed:', response?.error);

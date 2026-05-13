@@ -1965,17 +1965,16 @@
             const _p  = normalizedData.payload || normalizedData;
 
             if (_nt === 'message:new' || _nt === 'new_message' || _nt === 'newMessage' || _nt === 'chat:message') {
-                // FIXED: Enrich _p with chatId before dispatching — messages-core drops
-                // messages with no chatId in the payload.
-                const _enrichedP = { ..._p };
-                if (!_enrichedP.chatId && _enrichedP.conversationId) _enrichedP.chatId = _enrichedP.conversationId;
-                if (!_enrichedP.chatId && _enrichedP.chat_id)        _enrichedP.chatId = _enrichedP.chat_id;
-                if (!_enrichedP.chatId && _enrichedP.roomId)         _enrichedP.chatId = _enrichedP.roomId;
-                // Also forward the original data wrapper fields in case payload is flat
-                if (!_enrichedP.chatId && data.chatId)               _enrichedP.chatId = data.chatId;
-                if (!_enrichedP.chatId && data.conversationId)       _enrichedP.chatId = data.conversationId;
-                try { document.dispatchEvent(new CustomEvent('message:new', { detail: _enrichedP })); } catch(_) {}
-                console.log('[Message HTML] FIX new message:', _nt, 'chatId:', _enrichedP.chatId);
+                // FIXED: Enrich _p with chatId before dispatching.
+                // messages-core drops messages with no chatId — backend may use conversationId instead.
+                const _ep = { ..._p };
+                if (!_ep.chatId && _ep.conversationId) _ep.chatId = _ep.conversationId;
+                if (!_ep.chatId && _ep.chat_id)        _ep.chatId = _ep.chat_id;
+                if (!_ep.chatId && _ep.roomId)         _ep.chatId = _ep.roomId;
+                if (!_ep.chatId && data && data.chatId) _ep.chatId = data.chatId;
+                if (!_ep.chatId && data && data.conversationId) _ep.chatId = data.conversationId;
+                try { document.dispatchEvent(new CustomEvent('message:new', { detail: _ep })); } catch(_) {}
+                console.log('[Message HTML] FIX new message:', _nt, 'chatId:', _ep.chatId);
             } else if (_nt === 'message:sent' || _nt === 'message_sent') {
                 try { document.dispatchEvent(new CustomEvent('message:sent',          { detail: _p })); } catch(_) {}
                 try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.localId || _p.messageId, status: 'sent', serverId: _p.serverId || _p.id } })); } catch(_) {}

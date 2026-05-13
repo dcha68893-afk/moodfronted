@@ -2262,11 +2262,26 @@ function closePanel(){
 /* ─── loadMsgs / renderMsgs ───────────────────────────────────── */
 function loadMsgs(gid){
     var box=document.getElementById('chatMessages');if(!box)return;
-    box.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-spinner fa-spin" style="font-size:22px"></i><p style="margin-top:8px;font-size:13px">Loading messages\u2026</p></div>';
+    /* Load cached messages instantly (survives refresh) */
+    var cached=[];
+    try{cached=JSON.parse(localStorage.getItem('grp_msgs_'+gid)||'[]');}catch(e){}
+    if(cached.length){
+        renderMsgs(box,cached);
+        var ri=document.createElement('div');ri.id='grp-refresh-ind';
+        ri.style.cssText='text-align:center;font-size:11px;color:var(--text-secondary);padding:4px;opacity:.6;';
+        ri.textContent='Refreshing\u2026';box.insertBefore(ri,box.firstChild);
+    }else{
+        box.innerHTML='<div style=\"text-align:center;padding:40px;color:var(--text-secondary)\"><i class=\"fas fa-spinner fa-spin\" style=\"font-size:22px\"></i><p style=\"margin-top:8px;font-size:13px\">Loading messages\u2026</p></div>';
+    }
     api('/groups/'+gid+'/messages?limit=60')
-        .then(function(d){var msgs=(d.data&&Array.isArray(d.data))?d.data:(d.data&&d.data.messages)||d.messages||[];renderMsgs(box,msgs);})
-        .catch(function(){box.innerHTML='<div data-empty="1" style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-comments" style="font-size:36px;opacity:.3"></i><p style="margin-top:10px;font-size:14px">No messages yet. Say hello! \ud83d\udc4b</p></div>';});
+        .then(function(d){
+            var msgs=(d.data&&Array.isArray(d.data))?d.data:(d.data&&d.data.messages)||d.messages||[];
+            if(msgs.length){try{localStorage.setItem('grp_msgs_'+gid,JSON.stringify(msgs.slice(-100)));}catch(e){}}
+            renderMsgs(box,msgs.length?msgs:cached);
+        })
+        .catch(function(){if(!cached.length){box.innerHTML='<div data-empty=\"1\" style=\"text-align:center;padding:40px;color:var(--text-secondary)\"><i class=\"fas fa-comments\" style=\"font-size:36px;opacity:.3\"></i><p style=\"margin-top:10px;font-size:14px\">No messages yet. Say hello! \ud83d\udc4b</p></div>';}});
 }
+
 function renderMsgs(box,msgs){
     box.innerHTML='';
     if(!msgs||!msgs.length){box.innerHTML='<div data-empty="1" style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-comments" style="font-size:36px;opacity:.3"></i><p style="margin-top:10px;font-size:14px">No messages yet. Say hello! \ud83d\udc4b</p></div>';return;}

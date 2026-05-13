@@ -1153,6 +1153,76 @@
         .rounded-full { border-radius: 9999px; }
         .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
     </style>
+    <style id="tools-header-nav-css">
+        /* ── Tools Header Nav strip ── */
+        #toolsHeaderNav {
+            display: none; /* hidden by default; shown when page === 'tools' */
+            align-items: center;
+            gap: 4px;
+            flex: 1 1 auto;
+            justify-content: center;
+        }
+        #toolsHeaderNav.thn-visible {
+            display: flex !important;
+        }
+        .thn-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+            padding: 6px 10px;
+            border: none;
+            background: transparent;
+            border-radius: 12px;
+            color: #6b7280;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.18s, color 0.18s;
+            white-space: nowrap;
+            position: relative;
+            min-width: 52px;
+        }
+        .thn-btn i {
+            font-size: 17px;
+        }
+        .thn-btn:hover {
+            background: rgba(249, 115, 22, 0.10);
+            color: #f97316;
+        }
+        .thn-btn.thn-active {
+            background: rgba(249, 115, 22, 0.15);
+            color: #f97316;
+        }
+        .thn-btn.thn-active i {
+            filter: drop-shadow(0 0 4px rgba(249,115,22,0.45));
+        }
+        /* Badge on Cart button */
+        #thnCartBadge {
+            position: absolute;
+            top: 2px;
+            right: 8px;
+            min-width: 16px;
+            height: 16px;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: #fff;
+            font-size: 9px;
+            font-weight: 800;
+            border-radius: 9px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0 3px;
+            border: 2px solid #fff;
+            line-height: 1;
+            pointer-events: none;
+        }
+        @media (max-width: 480px) {
+            .thn-btn { padding: 5px 7px; min-width: 40px; font-size: 9px; }
+            .thn-btn i { font-size: 15px; }
+        }
+    </style>
     <style id="group-hdr-css">
         /* ── Group chat context in globalHeader ── */
         #headerGroupCtx { display: none; align-items: center; flex: 1; gap: 8px; min-width: 0; overflow: hidden; }
@@ -1394,6 +1464,31 @@
                     <button class="hgm-item hgm-danger" data-hga="delete"><i class="fas fa-trash"></i> Delete Group</button>
                 </div>
             </div>
+        </div>
+
+        <!-- TOOLS HEADER NAV: 5-button strip, shown only on tools page -->
+        <div id="toolsHeaderNav">
+            <button class="thn-btn thn-active" data-thn-page="home" title="Home">
+                <i class="fas fa-home"></i>
+                <span>Home</span>
+            </button>
+            <button class="thn-btn" data-thn-page="categories" title="Categories">
+                <i class="fas fa-th-large"></i>
+                <span>Categories</span>
+            </button>
+            <button class="thn-btn" data-thn-page="cart" title="Cart" style="position:relative;">
+                <i class="fas fa-shopping-cart"></i>
+                <span id="thnCartBadge"></span>
+                <span>Cart</span>
+            </button>
+            <button class="thn-btn" data-thn-page="orders" title="Orders">
+                <i class="fas fa-box"></i>
+                <span>Orders</span>
+            </button>
+            <button class="thn-btn" data-thn-page="account" title="Account">
+                <i class="fas fa-user-circle"></i>
+                <span>Account</span>
+            </button>
         </div>
 
         <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
@@ -2612,6 +2707,17 @@
             }
             updateHeaderContext(page);
             updateHeaderActions(page);
+
+            // ── Tools Header Nav: show strip on tools page, hide profileTrigger ──
+            var _thnNav = document.getElementById('toolsHeaderNav');
+            var _profTrig = document.getElementById('profileTrigger');
+            if (page === 'tools') {
+                if (_thnNav)  _thnNav.classList.add('thn-visible');
+                if (_profTrig) _profTrig.style.visibility = 'hidden';
+            } else {
+                if (_thnNav)  _thnNav.classList.remove('thn-visible');
+                if (_profTrig) _profTrig.style.visibility = '';
+            }
             
             console.log('[Navigation] Hiding all iframe containers...');
             document.querySelectorAll('.iframe-container').forEach(c => {
@@ -5049,7 +5155,7 @@
                 if (data.type === 'OPEN_CHAT' || data.type === 'STATUS_REPLY_RECEIVED') {
                     const p = data.payload || {};
                     const targetUserId = p.userId || p.recipientId || p.ownerId;
-                    const targetChatId = p.chatId;
+                    const targetChatId = p.chatId || p.conversationId || p.chat_id || p.roomId;
 
                     const chatPayload = {
                         userId:       targetUserId,
@@ -5360,6 +5466,12 @@
                         badge.textContent = count > 99 ? '99+' : (count || '');
                         badge.style.display = count > 0 ? 'flex' : 'none';
                     });
+                    // Sync thnCartBadge in the Tools Header Nav strip
+                    const _thnCB = document.getElementById('thnCartBadge');
+                    if (_thnCB) {
+                        _thnCB.textContent = count > 99 ? '99+' : (count || '');
+                        _thnCB.style.display = count > 0 ? 'flex' : 'none';
+                    }
                     return;
                 }
 
@@ -5624,6 +5736,14 @@
                     if (!_enriched.chatId && _enriched.conversationId) _enriched.chatId = _enriched.conversationId;
                     if (!_enriched.chatId && _enriched.chat_id)        _enriched.chatId = _enriched.chat_id;
                     if (!_enriched.chatId && _enriched.roomId)         _enriched.chatId = _enriched.roomId;
+                    // Also check nested payload.message.* for chatId / conversationId / chat_id / roomId
+                    if (!_enriched.chatId && _enriched.message) {
+                        const _m = _enriched.message;
+                        if (_m.chatId)        _enriched.chatId = _m.chatId;
+                        else if (_m.conversationId) _enriched.chatId = _m.conversationId;
+                        else if (_m.chat_id)  _enriched.chatId = _m.chat_id;
+                        else if (_m.roomId)   _enriched.chatId = _m.roomId;
+                    }
 
                     msgIframe.contentWindow.postMessage({ type: 'message:new', payload: _enriched, source: 'ws-bridge' }, '*');
 
@@ -6039,8 +6159,13 @@
                 ['kyn:message:received', 'kyn:message:new', 'kyn:new_message'].forEach(evt => {
                     window.addEventListener(evt, (e) => {
                         const p = e.detail || {};
-                        _post('messagesIframe', 'message:new', p);
-                        if (p.chatId) _post('messagesIframe', 'CONVERSATION_UPDATED', { chatId: p.chatId, lastMessage: p.content, lastMessageAt: p.createdAt || Date.now() });
+                        // Normalize chatId from all known field names
+                        const _kynMsg = { ...p };
+                        if (!_kynMsg.chatId && _kynMsg.conversationId) _kynMsg.chatId = _kynMsg.conversationId;
+                        if (!_kynMsg.chatId && _kynMsg.chat_id)        _kynMsg.chatId = _kynMsg.chat_id;
+                        if (!_kynMsg.chatId && _kynMsg.roomId)         _kynMsg.chatId = _kynMsg.roomId;
+                        _post('messagesIframe', 'message:new', _kynMsg);
+                        if (_kynMsg.chatId) _post('messagesIframe', 'CONVERSATION_UPDATED', { chatId: _kynMsg.chatId, lastMessage: _kynMsg.content, lastMessageAt: _kynMsg.createdAt || Date.now() });
                     });
                 });
                 ['kyn:message:delivered', 'kyn:message_delivered'].forEach(evt => {
@@ -6337,6 +6462,59 @@ window.__groupHdrShow = showGroupHeader;
 window.__groupHdrHide = hideGroupHeader;
 })();
 </script>
+
+    <script>
+    /* ── Tools Header Nav JS ──────────────────────────────────────────── */
+    (function () {
+        'use strict';
+
+        /* Highlight active button and navigate inside Tools iframe */
+        window._thnNav = function _thnNav(page) {
+            document.querySelectorAll('.thn-btn').forEach(function (b) {
+                b.classList.toggle('thn-active', b.getAttribute('data-thn-page') === page);
+            });
+            var iframe = document.getElementById('toolsIframe');
+            if (!iframe || !iframe.contentWindow) return;
+            // Try direct same-origin call first, fall back to postMessage
+            try {
+                if (typeof iframe.contentWindow._jmNav === 'function') {
+                    iframe.contentWindow._jmNav(page);
+                    return;
+                }
+            } catch (e) { /* cross-origin guard */ }
+            iframe.contentWindow.postMessage({ type: 'JM_NAV', page: page }, '*');
+        };
+
+        /* Wire click handlers once DOM is ready */
+        function wireToolsNav() {
+            document.querySelectorAll('.thn-btn').forEach(function (btn) {
+                if (btn._thnWired) return;
+                btn._thnWired = true;
+                btn.addEventListener('click', function () {
+                    window._thnNav(btn.getAttribute('data-thn-page'));
+                });
+            });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', wireToolsNav);
+        } else {
+            wireToolsNav();
+        }
+
+        /* Keep strip active button in sync when Tools navigates internally */
+        window.addEventListener('message', function (e) {
+            if (!e.data || e.data.type !== 'JM_PAGE_CHANGE') return;
+            var page = e.data.page;
+            if (!page) return;
+            document.querySelectorAll('.thn-btn').forEach(function (b) {
+                b.classList.toggle('thn-active', b.getAttribute('data-thn-page') === page);
+            });
+        });
+
+        console.log('[THN] Tools Header Nav v1.0 loaded');
+    })();
+    </script>
 
     <script>
   // Keep backend alive — ping every 14 minutes (Render sleeps after 15)

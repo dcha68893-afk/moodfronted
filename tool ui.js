@@ -1990,20 +1990,7 @@ const renderers = {
         DOM.marketplaceListContent.innerHTML = '';
 
         if (!allListings || allListings.length === 0) {
-            DOM.marketplaceListContent.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-store-alt" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                    <p>No listings available yet</p>
-                    <p class="subtext">Be the first to create a listing!</p>
-                    <button class="action-btn primary" style="margin-top: 20px;" id="emptyStateCreateBtn">
-                        <i class="fas fa-plus"></i> Create Listing
-                    </button>
-                </div>
-            `;
-            const createBtn = document.getElementById('emptyStateCreateBtn');
-            if (createBtn) {
-                createBtn.onclick = () => showCreateListingModal();
-            }
+            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px 20px;color:#9ca3af"><div style="font-size:48px;margin-bottom:12px">🛒</div><div style="font-size:15px;font-weight:600;margin-bottom:6px">No products yet</div><div style="font-size:13px;margin-bottom:20px">Be the first to create a listing!</div><button onclick="showCreateListingModal()" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:700;cursor:pointer"><i class='fas fa-plus'></i> Create Listing</button></div>`;
             return;
         }
 
@@ -2049,18 +2036,14 @@ const renderers = {
             return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
         });
 
-        filtered.forEach(listing => {
-            if (isListingVisibleToUser(listing)) this.addListingItem(listing);
+        filtered.forEach((listing, idx) => {
+            if (isListingVisibleToUser(listing)) setTimeout(() => renderers.addListingItem(listing), idx * 18);
         });
+        // Update Jumia count after staggered render
+        setTimeout(() => { const c=document.getElementById('jmProductCount'); if(c) c.textContent=`(${filtered.length})`; }, filtered.length*18+200);
         
         if (filtered.length === 0) {
-            DOM.marketplaceListContent.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-filter" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5;"></i>
-                    <p>No listings match your filters</p>
-                    <p class="subtext">Try a different category or clear your mood filter</p>
-                </div>
-            `;
+            DOM.marketplaceListContent.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af"><div style="font-size:40px;margin-bottom:12px">🔍</div><div style="font-size:14px;font-weight:600">No products match your filters</div><div style="font-size:12px;margin-top:6px">Try a different category or clear filters</div></div>`;
         }
         
         if (DOM.availableListingsCount) {
@@ -2070,145 +2053,106 @@ const renderers = {
 
     addListingItem: withErrorBoundary('AddListingItem', function(listing) {
         if (!DOM.marketplaceListContent || !listing) return;
-        if (document.querySelector(`.listing-item[data-listing-id="${listing.id}"]`)) return;
+        if (document.querySelector(`.jm-card[data-listing-id="${listing.id}"]`)) return;
 
-        // ── Normalise product fields (works with both old listing schema and new product schema) ──
-        const ecom    = window.EcomMarketplace;
-        const price   = parseFloat(String(listing.price  || listing.price_display || 0).replace(/[^0-9.]/g, '')) || 0;
-        const origPrc = parseFloat(String(listing.original_price || listing.originalPrice || 0).replace(/[^0-9.]/g, '')) || 0;
-        const stock   = listing.stock_quantity ?? listing.stockQuantity ?? null;
-        const rating  = parseFloat(listing.rating) || 0;
-        const reviews = parseInt(listing.reviews_count || listing.reviewsCount) || 0;
-        const inStock = listing.available !== false && (stock === null || stock > 0);
-        const imgSrc  = (listing.images?.[0]) || listing.mediaUrl || listing.image || '';
-        const sellerName = listing.seller?.name || listing.user?.displayName || listing.sellerName || 'Seller';
-        const isWishlisted = ecom ? ecom.WishlistEngine.has(listing.id) : (savedItems?.some(s=>s.id===listing.id));
-        const inCart  = ecom ? ecom.CartEngine.has(listing.id) : false;
-        const discount= origPrc > price && origPrc > 0 ? Math.round((1 - price/origPrc)*100) : (parseFloat(listing.discount)||0);
-        const isFlash = listing.is_flash_sale || listing.isFlashSale;
-        const isFeatured = listing.featured || listing.isFeatured || listing.isSpotlight || listing.is_featured;
-        const isVerified = listing.verified || listing.isVerified || listing.seller?.verified;
+        // ── Normalise fields ──────────────────────────────────────────────
+        const price    = parseFloat(String(listing.price||0).replace(/[^0-9.]/g,'')) || 0;
+        const origPrc  = parseFloat(String(listing.original_price||listing.originalPrice||0).replace(/[^0-9.]/g,'')) || 0;
+        const discount = origPrc > price && origPrc > 0 ? Math.round((1-price/origPrc)*100) : (parseFloat(listing.discount)||0);
+        const stock    = listing.stock_quantity ?? listing.stock ?? null;
+        const inStock  = listing.available !== false && (stock === null || stock > 0);
+        const rating   = parseFloat(listing.rating) || 0;
+        const reviews  = parseInt(listing.reviews_count || listing.ratingCount) || 0;
+        const imgSrc   = listing.images?.[0] || listing.mediaUrl || listing.image || '';
+        const delivFee = parseFloat(listing.delivery_fee || listing.deliveryFee || 0);
+        const condition = listing.condition || (listing.type === 'digital' ? 'Digital' : '');
+        const ecom     = window.EcomMarketplace;
+        const inWish   = ecom ? ecom.WishlistEngine.has(listing.id) : (savedItems?.some?.(s=>s.id===listing.id));
+        const inCart   = ecom ? ecom.CartEngine.has(listing.id) : false;
+        const fmt      = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${n.toLocaleString()}`;
+        const _stars   = (r) => { let s=''; const f=Math.floor(r), h=r-f>=0.5;
+            for(let i=0;i<f;i++) s+='<i class="fas fa-star"></i>';
+            if(h) s+='<i class="fas fa-star-half-alt"></i>';
+            for(let i=0;i<(5-f-(h?1:0));i++) s+='<i class="far fa-star"></i>';
+            return s; };
 
-        // ── Stars HTML ──
-        const _stars = (r) => {
-            const full = Math.floor(r), half = r - full >= 0.5;
-            let s = '';
-            for (let i=0;i<full;i++) s += '<i class="fas fa-star" style="color:#f5a623"></i>';
-            if (half) s += '<i class="fas fa-star-half-alt" style="color:#f5a623"></i>';
-            const empty = 5 - full - (half?1:0);
-            for (let i=0;i<empty;i++) s += '<i class="far fa-star" style="color:#d1d5db"></i>';
-            return s;
-        };
+        // ── Track recently viewed ─────────────────────────────────────────
+        window._jmAddRecent && window._jmAddRecent(listing);
 
-        // ── Price display ──
-        const fmt = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${n.toLocaleString()}`;
-        const priceHTML = price > 0
-            ? `<span class="listing-price" style="color:var(--primary-color,#f57224);font-size:16px;font-weight:700">${fmt(price)}</span>${origPrc > price ? `<span style="text-decoration:line-through;color:#9ca3af;font-size:12px;margin-left:6px">${fmt(origPrc)}</span>` : ''}`
-            : `<span class="listing-price" style="color:#22c55e;font-weight:700">Free</span>`;
+        const card = document.createElement('div');
+        card.className = 'jm-card';
+        card.dataset.listingId = listing.id;
+        card.dataset.userId = listing.userId || listing.sellerId || '';
 
-        const item = document.createElement('div');
-        item.className = 'listing-item ecom-product-card';
-        if (isFeatured) item.classList.add('featured');
-        if (listing.premium || listing.isPremium) item.classList.add('premium-listing');
-        item.dataset.listingId = listing.id;
-        item.dataset.userId = listing.userId || listing.sellerId || listing.seller_id || '';
-        item.style.cssText = 'cursor:pointer;background:var(--card-bg,#fff);border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);transition:box-shadow 0.2s,transform 0.15s;display:flex;flex-direction:column;position:relative;';
-
-        item.innerHTML = `
-            <!-- Image area -->
-            <div style="position:relative;width:100%;padding-top:56.25%;background:#f3f4f6;overflow:hidden;flex-shrink:0;">
+        card.innerHTML = `
+            <div class="jm-card-img-wrap">
                 ${imgSrc
-                    ? `<img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform 0.3s;" onerror="this.style.display='none'">`
-                    : `<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:40px;color:#9ca3af">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
-                <!-- Badges overlay -->
-                <div style="position:absolute;top:8px;left:8px;display:flex;flex-direction:column;gap:4px;pointer-events:none;">
-                    ${discount > 0 ? `<span style="background:#ef4444;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">-${discount}%</span>` : ''}
-                    ${isFlash ? `<span style="background:#f59e0b;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">⚡ FLASH</span>` : ''}
-                    ${isFeatured ? `<span style="background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px">★ TOP</span>` : ''}
-                </div>
-                <!-- Wishlist button -->
-                <button class="ecom-wish-btn" data-pid="${listing.id}" style="position:absolute;top:8px;right:8px;background:rgba(255,255,255,0.9);border:none;border-radius:50%;width:32px;height:32px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;backdrop-filter:blur(4px);z-index:2;" title="Wishlist" onclick="event.stopPropagation()">
-                    ${isWishlisted ? '❤️' : '🤍'}
+                    ? `<img class="jm-card-img" src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" onerror="this.style.display='none'">`
+                    : `<div class="jm-card-placeholder">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
+                ${discount>0 ? `<span class="jm-card-discount-badge">-${discount}%</span>` : ''}
+                ${condition ? `<span class="jm-card-condition-badge">${escapeHtml(condition.toUpperCase())}</span>` : ''}
+                <button class="jm-card-wish${inWish?' wishlisted':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
+                    ${inWish ? '❤️' : '🤍'}
                 </button>
-                <!-- Out of stock overlay -->
-                ${!inStock && stock !== null ? `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center"><span style="color:#fff;font-size:13px;font-weight:700;background:#ef4444;padding:6px 14px;border-radius:20px">OUT OF STOCK</span></div>` : ''}
+                ${!inStock && stock!==null ? `<div class="jm-card-out-overlay"><span class="jm-card-out-label">OUT OF STOCK</span></div>` : ''}
             </div>
-            <!-- Info area -->
-            <div style="padding:10px 12px 12px;display:flex;flex-direction:column;flex:1;gap:4px;">
-                <div style="font-size:13px;color:#6b7280;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(listing.title||'Untitled')}</div>
-                <!-- Rating -->
-                ${rating > 0 ? `<div style="display:flex;align-items:center;gap:4px;font-size:11px;">${_stars(rating)}<span style="color:#6b7280">(${reviews.toLocaleString()})</span></div>` : ''}
-                <!-- Price -->
-                <div style="margin-top:2px;">${priceHTML}</div>
-                <!-- Seller + shipping info -->
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
-                    <div style="font-size:11px;color:#9ca3af;display:flex;align-items:center;gap:3px;">
-                        ${isVerified ? '<span title="Verified Seller" style="color:#3b82f6">✓</span>' : ''}
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px">${escapeHtml(sellerName)}</span>
-                    </div>
-                    ${listing.delivery_fee === 0 || listing.deliveryFee === 0 ? '<span style="font-size:10px;color:#22c55e;font-weight:600">Free delivery</span>' : listing.location ? `<span style="font-size:10px;color:#9ca3af">📍 ${escapeHtml(listing.location)}</span>` : ''}
+            <div class="jm-card-body">
+                <div class="jm-card-title">${escapeHtml(listing.title||'Untitled')}</div>
+                ${rating>0||reviews>0 ? `<div class="jm-card-stars">${_stars(rating)}<span class="jm-card-reviews">(${reviews.toLocaleString()})</span></div>` : ''}
+                <div class="jm-card-prices">
+                    <span class="jm-card-price">${price>0?fmt(price):'<span style="color:#22c55e;font-weight:700">Free</span>'}</span>
+                    ${origPrc>price ? `<span class="jm-card-oldprice">${fmt(origPrc)}</span>` : ''}
                 </div>
-                <!-- Stock indicator -->
-                ${stock !== null && stock > 0 && stock <= 5 ? `<div style="font-size:11px;color:#f59e0b;font-weight:600">Only ${stock} left!</div>` : ''}
-                <!-- Add to Cart button -->
-                ${inStock ? `<button class="ecom-cart-btn" data-pid="${listing.id}" style="margin-top:8px;background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:6px;transition:background 0.2s;" onclick="event.stopPropagation()">
-                    ${inCart ? '<i class="fas fa-check"></i> In Cart' : '<i class="fas fa-shopping-cart"></i> Add to Cart'}
-                </button>` : `<button disabled style="margin-top:8px;background:#e5e7eb;color:#9ca3af;border:none;border-radius:8px;padding:8px;font-size:12px;font-weight:600;cursor:not-allowed;width:100%;">Out of Stock</button>`}
-            </div>
-        `;
+                ${delivFee===0 ? '<div class="jm-card-delivery">Free delivery</div>' : (delivFee>0 ? `<div style="font-size:10px;color:#6b7280">+ ${fmt(delivFee)} delivery</div>` : '')}
+                ${stock!==null&&stock>0&&stock<=5 ? `<div class="jm-card-stock-warn">Only ${stock} left!</div>` : ''}
+                ${inStock
+                    ? `<button class="jm-add-cart-btn${inCart?' in-cart':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
+                          ${inCart ? '✓ In Cart' : 'Add To Cart'}
+                       </button>`
+                    : `<button class="jm-add-cart-btn" disabled>Out of Stock</button>`}
+            </div>`;
 
-        // ── Event handlers ──
         // Wishlist toggle
-        const wishBtn = item.querySelector('.ecom-wish-btn');
-        if (wishBtn) {
-            wishBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (ecom) {
-                    const added = ecom.WishlistEngine.toggle(listing.id);
-                    wishBtn.textContent = added ? '❤️' : '🤍';
-                } else {
-                    // Fallback: use existing toggleSave
-                    if (typeof toggleSaveListing === 'function') toggleSaveListing(listing.id);
-                }
-            });
-        }
+        card.querySelector('.jm-card-wish')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (ecom) {
+                const added = ecom.WishlistEngine.toggle(listing.id);
+                e.currentTarget.textContent = added ? '❤️' : '🤍';
+                e.currentTarget.classList.toggle('wishlisted', added);
+            } else if (typeof toggleSaveListing === 'function') {
+                toggleSaveListing(listing.id);
+            }
+            window._jmUpdateWishlistBadge?.();
+        });
 
         // Add to cart
-        const cartBtn = item.querySelector('.ecom-cart-btn');
-        if (cartBtn && inStock) {
+        const cartBtn = card.querySelector('.jm-add-cart-btn');
+        if (cartBtn && !cartBtn.disabled) {
             cartBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (ecom) {
-                    // Build product object from listing
-                    const product = {
-                        id: listing.id, title: listing.title, price,
-                        original_price: origPrc, discount, seller_id: listing.seller_id || listing.sellerId || listing.userId,
-                        seller: { name: sellerName }, images: listing.images || (imgSrc ? [imgSrc] : []),
-                        stock_quantity: stock ?? 999, delivery_fee: parseFloat(listing.delivery_fee || listing.deliveryFee) || 0,
-                        available: inStock, category: listing.category || 'general',
-                    };
-                    const result = ecom.CartEngine.add(product);
-                    if (result.success) {
-                        cartBtn.innerHTML = '<i class="fas fa-check"></i> In Cart';
-                        cartBtn.style.background = '#22c55e';
-                        _updateCartBadge();
+                    const p = { id:listing.id, title:listing.title, price, original_price:origPrc, discount,
+                        seller_id: listing.sellerId||listing.userId, seller:{name:listing.user?.displayName||'Seller'},
+                        images: listing.images||(imgSrc?[imgSrc]:[]), stock_quantity:stock??999,
+                        delivery_fee: delivFee, available:true, category:listing.category||'other' };
+                    const res = ecom.CartEngine.add(p, 1);
+                    if (res.success) {
+                        cartBtn.textContent = '✓ In Cart';
+                        cartBtn.classList.add('in-cart');
+                        window._jmUpdateCartBadge?.();
+                        window._jmToast('Added to cart', 'success', '🛒');
                     } else {
-                        cartBtn.textContent = result.message || 'Failed';
-                        setTimeout(() => { cartBtn.innerHTML = '<i class="fas fa-shopping-cart"></i> Add to Cart'; cartBtn.style.background = ''; }, 2000);
+                        window._jmToast(res.message||'Failed', 'error', '❌');
                     }
-                } else {
-                    if (typeof showNotification === 'function') showNotification('Product added to cart', 'success');
+                } else if (typeof openPlaceOrderPanel === 'function') {
+                    openPlaceOrderPanel(listing);
                 }
             });
         }
 
-        // Hover effects
-        item.addEventListener('mouseenter', () => { item.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)'; item.style.transform = 'translateY(-2px)'; });
-        item.addEventListener('mouseleave', () => { item.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; item.style.transform = ''; });
-
-        // Open detail panel on click
-        item.addEventListener('click', () => renderers.viewListingDetail(listing));
-        DOM.marketplaceListContent.appendChild(item);
+        // Open detail panel on card click
+        card.addEventListener('click', () => renderers.viewListingDetail(listing));
+        DOM.marketplaceListContent.appendChild(card);
     }, null),
 
     viewListingDetail: withErrorBoundary('ViewListingDetail', function(listing) {
@@ -2252,332 +2196,198 @@ const renderers = {
 
     renderListingDetailContent: withErrorBoundary('ListingDetailContent', function(listing, container) {
         if (!container) return;
+        let html = '';
 
-        const ecom    = window.EcomMarketplace;
-        const price   = parseFloat(String(listing.price||0).replace(/[^0-9.]/g,'')) || 0;
-        const origPrc = parseFloat(String(listing.original_price||listing.originalPrice||0).replace(/[^0-9.]/g,'')) || 0;
-        const stock   = listing.stock_quantity ?? listing.stockQuantity ?? null;
-        const rating  = parseFloat(listing.rating) || 0;
-        const reviews = parseInt(listing.reviews_count || listing.reviewsCount) || 0;
-        const inStock = listing.available !== false && (stock === null || stock > 0);
-        const images  = (listing.images?.length ? listing.images : listing.mediaUrl ? [listing.mediaUrl] : []);
-        const sellerName = listing.seller?.name || listing.user?.displayName || listing.sellerName || 'Seller';
-        const sellerId   = listing.seller?.id || listing.seller_id || listing.userId || listing.sellerId;
-        const sellerRating = parseFloat(listing.seller?.rating) || 0;
-        const discount = origPrc > price && origPrc > 0 ? Math.round((1-price/origPrc)*100) : (parseFloat(listing.discount)||0);
-        const fmt      = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${parseFloat(n).toLocaleString()}`;
-        const inWish   = ecom ? ecom.WishlistEngine.has(listing.id) : false;
-        const inCart   = ecom ? ecom.CartEngine.has(listing.id) : false;
-        const _stars   = (r,sm=false)=>{const full=Math.floor(r),half=r-full>=0.5,sz=sm?'11px':'14px';let s='';for(let i=0;i<full;i++)s+=`<i class="fas fa-star" style="color:#f5a623;font-size:${sz}"></i>`;if(half)s+=`<i class="fas fa-star-half-alt" style="color:#f5a623;font-size:${sz}"></i>`;const e=5-full-(half?1:0);for(let i=0;i<e;i++)s+=`<i class="far fa-star" style="color:#d1d5db;font-size:${sz}"></i>`;return s;};
-
-        container.innerHTML = `
-        <div class="ecom-detail-wrap" style="font-family:system-ui,sans-serif;padding-bottom:24px;">
-
-            <!-- Image Gallery -->
-            <div style="position:relative;background:#f3f4f6;border-radius:12px;overflow:hidden;margin-bottom:16px;">
-                ${images.length > 0
-                    ? `<div id="ecom-gallery" style="position:relative;width:100%;padding-top:66%;overflow:hidden;">
-                        <img id="ecom-main-img" src="${escapeHtml(images[0])}" alt="${escapeHtml(listing.title||'')}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#fff;" loading="lazy">
-                        ${discount > 0 ? `<span style="position:absolute;top:12px;left:12px;background:#ef4444;color:#fff;font-size:12px;font-weight:700;padding:4px 10px;border-radius:6px;">-${discount}%</span>` : ''}
-                        ${images.length > 1 ? `
-                        <button id="ecom-prev" style="position:absolute;left:8px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.9);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.15);">‹</button>
-                        <button id="ecom-next" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,0.9);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.15);">›</button>
-                        ` : ''}
-                      </div>
-                      ${images.length > 1 ? `<div id="ecom-thumbs" style="display:flex;gap:8px;padding:8px 12px;overflow-x:auto;">
-                        ${images.map((img,i)=>`<img src="${escapeHtml(img)}" data-idx="${i}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid ${i===0?'var(--primary-color,#f57224)':'transparent'};flex-shrink:0;" loading="lazy">`).join('')}
-                      </div>` : ''}`
-                    : `<div style="width:100%;height:200px;display:flex;align-items:center;justify-content:center;font-size:64px;">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
-                ${!inStock && stock !== null ? `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;"><span style="color:#fff;font-size:16px;font-weight:700;background:#ef4444;padding:10px 24px;border-radius:24px;">OUT OF STOCK</span></div>` : ''}
-            </div>
-
-            <!-- Title & Price -->
-            <h2 style="font-size:17px;font-weight:600;line-height:1.4;margin:0 0 8px;color:var(--text-primary,#111)">${escapeHtml(listing.title||'Untitled')}</h2>
-
-            <!-- Badges -->
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
-                ${listing.featured||listing.isFeatured?'<span style="background:#7c3aed;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">★ FEATURED</span>':''}
-                ${listing.verified||listing.isVerified?'<span style="background:#3b82f6;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">✓ VERIFIED</span>':''}
-                ${listing.is_flash_sale||listing.isFlashSale?'<span style="background:#f59e0b;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">⚡ FLASH SALE</span>':''}
-                ${listing.isPremium||listing.premium?'<span style="background:#d97706;color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px;">👑 PREMIUM</span>':''}
-                ${listing.condition?`<span style="background:#f3f4f6;color:#374151;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px;">${escapeHtml(listing.condition.toUpperCase())}</span>`:''}
-            </div>
-
-            <!-- Rating -->
-            ${rating > 0 || reviews > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-                <span style="font-size:16px;font-weight:700;color:#111">${rating.toFixed(1)}</span>
-                <div>${_stars(rating)}</div>
-                <span style="color:#6b7280;font-size:13px;">${reviews.toLocaleString()} review${reviews!==1?'s':''}</span>
-            </div>` : ''}
-
-            <!-- Price block -->
-            <div style="background:linear-gradient(135deg,#fff9f0,#fff);border:1px solid #fed7aa;border-radius:12px;padding:14px 16px;margin-bottom:14px;">
-                <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-                    <span style="font-size:26px;font-weight:800;color:var(--primary-color,#f57224)">${price > 0 ? fmt(price) : '<span style="color:#22c55e">Free</span>'}</span>
-                    ${origPrc > price ? `<span style="text-decoration:line-through;color:#9ca3af;font-size:15px;">${fmt(origPrc)}</span>` : ''}
-                    ${discount > 0 ? `<span style="background:#ef4444;color:#fff;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;">-${discount}%</span>` : ''}
+        // Media section
+        if (listing.videoIntro) {
+            html += `<div class="file-preview" style="margin-bottom: 20px;">
+                <video controls class="listing-detail-media" poster="${listing.mediaUrl || ''}">
+                    <source src="${escapeHtml(listing.videoIntro)}" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+            </div>`;
+        } else if (listing.mediaUrl) {
+            html += `<div class="file-preview">
+                <img src="${escapeHtml(listing.mediaUrl)}" class="listing-detail-media" alt="${escapeHtml(listing.title)}" loading="lazy">
+            </div>`;
+        }
+        
+        // AR Preview for premium
+        if (listing.arPreview && isUserPremium()) {
+            html += `<div class="ar-preview-container" style="margin-bottom: 20px;">
+                <div class="ar-preview-placeholder">
+                    <i class="fas fa-vr-cardboard" style="font-size: 48px; margin-bottom: 10px; color: var(--primary-color);"></i>
+                    <p style="font-weight: 500;">AR Preview Available</p>
+                    <button class="action-btn secondary" style="margin-top: 10px;" id="viewArBtn">
+                        <i class="fas fa-eye"></i> View in AR
+                    </button>
                 </div>
-                ${discount > 0 && origPrc > price ? `<div style="font-size:12px;color:#22c55e;margin-top:4px;font-weight:600;">You save ${fmt(origPrc-price)}</div>` : ''}
-                ${listing.delivery_fee === 0 || listing.deliveryFee === 0 ? '<div style="font-size:12px;color:#22c55e;margin-top:4px;font-weight:600;">🚚 Free delivery</div>' : listing.delivery_fee ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">Delivery: ${fmt(parseFloat(listing.delivery_fee||0))}</div>` : ''}
+            </div>`;
+        }
+
+        // Title and badges
+        let badges = '';
+        if (listing.featured || listing.isFeatured || listing.isSpotlight) badges += '<span class="featured-badge"><i class="fas fa-star"></i> FEATURED</span>';
+        if (listing.boosted || listing.isBoosted) badges += '<span class="premium-badge"><i class="fas fa-bolt"></i> BOOSTED</span>';
+        if (listing.verified || listing.isVerified) badges += '<span class="verified-badge"><i class="fas fa-check-circle"></i> VERIFIED</span>';
+        if (listing.teamListing) badges += '<span class="team-badge"><i class="fas fa-users"></i> TEAM</span>';
+
+        html += `
+            <h1 class="listing-detail-title">
+                ${escapeHtml(listing.title || 'Untitled')}
+                <div style="display: inline-flex; gap: 8px; margin-left: 10px;">${badges}</div>
+            </h1>
+            <div class="listing-detail-price">
+                ${listing.price ? escapeHtml(listing.price) : 'Free'}
+                ${listing.acceptsTips ? '<span class="tips-badge" style="margin-left: 10px;"><i class="fas fa-gift"></i> Accepts Tips</span>' : ''}
             </div>
-
-            <!-- Stock indicator -->
-            ${stock !== null ? `<div style="margin-bottom:12px;font-size:13px;">
-                ${stock > 5 ? `<span style="color:#22c55e;font-weight:600;">✓ In Stock</span>` : stock > 0 ? `<span style="color:#f59e0b;font-weight:600;">⚠ Only ${stock} left</span>` : `<span style="color:#ef4444;font-weight:600;">✗ Out of Stock</span>`}
-                ${listing.sold_count > 0 ? `<span style="color:#6b7280;margin-left:12px;">${parseInt(listing.sold_count||0).toLocaleString()} sold</span>` : ''}
-            </div>` : ''}
-
-            <!-- Quantity selector + action buttons -->
-            <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
-                ${inStock ? `
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
-                    <span style="font-size:13px;color:#374151;font-weight:500;">Qty:</span>
-                    <div style="display:flex;align-items:center;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
-                        <button id="ecom-qty-dec" style="padding:8px 14px;border:none;background:#f9fafb;cursor:pointer;font-size:16px;font-weight:600;">−</button>
-                        <span id="ecom-qty-val" style="padding:8px 16px;font-size:15px;font-weight:600;min-width:40px;text-align:center;">1</span>
-                        <button id="ecom-qty-inc" style="padding:8px 14px;border:none;background:#f9fafb;cursor:pointer;font-size:16px;font-weight:600;">+</button>
-                    </div>
+            <div class="listing-detail-description">
+                ${escapeHtml(listing.description || 'No description provided.').replace(/\n/g, '<br>')}
+            </div>
+            
+            <div class="listing-detail-meta">
+                <span class="meta-badge"><i class="fas fa-${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'file-alt' : 'tools'}"></i> ${listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital' ? 'Digital Item' : 'Service'}</span>
+                <span class="meta-badge availability-${listing.availability || 'free'}"><i class="fas fa-${listing.availability === 'urgent' ? 'exclamation-circle' : listing.availability === 'busy' ? 'clock' : 'check-circle'}"></i> ${listing.availability ? listing.availability.charAt(0).toUpperCase() + listing.availability.slice(1) : 'Available'}</span>
+                ${listing.visibility ? `<span class="meta-badge ${listing.visibility === 'premium' || listing.visibility === 'micro' ? 'premium-feature' : ''}"><i class="fas fa-${listing.visibility === 'friends' ? 'user-friends' : listing.visibility === 'groups' ? 'users' : listing.visibility === 'selected' ? 'user-check' : listing.visibility === 'premium' ? 'crown' : listing.visibility === 'micro' ? 'bullseye' : 'globe'}"></i> ${listing.visibility === 'friends' ? 'Friends Only' : listing.visibility === 'groups' ? 'Group Members' : listing.visibility === 'selected' ? 'Selected People' : listing.visibility === 'premium' ? 'Premium Only' : listing.visibility === 'micro' ? 'Micro-Audience' : 'Public'}</span>` : ''}
+                ${listing.moodContext ? `<span class="meta-badge ${listing.moodContext === 'creative' || listing.moodContext === 'business' ? 'premium-feature' : ''}"><i class="fas fa-${listing.moodContext === 'help' ? 'hands-helping' : listing.moodContext === 'learn' ? 'graduation-cap' : listing.moodContext === 'urgent' ? 'bolt' : listing.moodContext === 'creative' ? 'palette' : listing.moodContext === 'business' ? 'briefcase' : 'search'}"></i> ${listing.moodContext === 'help' ? 'Help Needed' : listing.moodContext === 'learn' ? 'Learning' : listing.moodContext === 'urgent' ? 'Urgent' : listing.moodContext === 'creative' ? 'Creative' : listing.moodContext === 'business' ? 'Business' : 'Browsing'}</span>` : ''}
+                ${listing.template ? `<span class="meta-badge ${listing.template === 'business' || listing.template === 'coaching' || listing.template === 'vip' ? 'premium-feature' : ''}"><i class="fas fa-${listing.template === 'business' ? 'briefcase' : listing.template === 'coaching' ? 'chalkboard-teacher' : listing.template === 'creative' ? 'palette' : listing.template === 'vip' ? 'crown' : listing.template === 'digital' ? 'download' : 'file-alt'}"></i> ${listing.template === 'business' ? 'Business' : listing.template === 'coaching' ? 'Coaching' : listing.template === 'creative' ? 'Creative' : listing.template === 'vip' ? 'VIP' : listing.template === 'digital' ? 'Digital' : 'Basic'}</span>` : ''}
+                <span class="meta-badge trust-${listing.user?.trustLevel || 'new'}"><i class="fas fa-${listing.user?.trustLevel === 'verified' ? 'shield-alt' : listing.user?.trustLevel === 'pro' ? 'crown' : listing.user?.trustLevel === 'responsive' ? 'comments' : 'star'}"></i> ${listing.user?.trustLevel ? listing.user.trustLevel.charAt(0).toUpperCase() + listing.user.trustLevel.slice(1) : 'New'}</span>
+            </div>
+            
+            ${listing.teamMembers && listing.teamMembers.length > 0 ? `<div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;"><i class="fas fa-users" style="font-size: 20px;"></i><div style="font-weight: 600;">Team Listing</div></div>
+                <div style="font-size: 14px;">Managed by ${listing.teamMembers.length} team member${listing.teamMembers.length > 1 ? 's' : ''}</div>
+                <div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;">
+                    ${listing.teamMembers.map(m => `<span style="background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 20px; font-size: 12px;">${escapeHtml(m.name || 'Team Member')}</span>`).join('')}
                 </div>
-                <button id="ecom-add-cart-btn" style="background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;transition:background 0.2s;">
-                    <i class="fas fa-shopping-cart"></i> ${inCart ? 'Update Cart' : 'Add to Cart'}
-                </button>
-                <button id="ecom-buy-now-btn" style="background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    <i class="fas fa-bolt"></i> Buy Now
-                </button>` : `<button disabled style="background:#e5e7eb;color:#9ca3af;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;width:100%;">Out of Stock</button>`}
-                <button id="ecom-wish-detail-btn" style="background:${inWish?'#fee2e2':'#f9fafb'};color:${inWish?'#ef4444':'#374151'};border:1px solid ${inWish?'#fca5a5':'#e5e7eb'};border-radius:10px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
-                    ${inWish ? '<i class="fas fa-heart"></i> Remove from Wishlist' : '<i class="far fa-heart"></i> Add to Wishlist'}
-                </button>
-            </div>
-
-            <!-- Description -->
-            <div style="margin-bottom:16px;">
-                <h3 style="font-size:15px;font-weight:700;margin-bottom:8px;color:#111;">Product Description</h3>
-                <div style="font-size:14px;color:#374151;line-height:1.6;white-space:pre-line;">${escapeHtml(listing.description||'No description provided.')}</div>
-            </div>
-
-            <!-- Delivery info -->
-            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px;margin-bottom:16px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:10px;color:#166534;">🚚 Delivery & Location</h3>
-                ${listing.location ? `<div style="font-size:13px;color:#374151;margin-bottom:6px;">📍 Ships from: <strong>${escapeHtml(listing.location)}</strong></div>` : ''}
-                <div style="font-size:13px;color:#374151;margin-bottom:6px;">📦 Estimated delivery: <strong>1-3 business days</strong></div>
-                ${listing.delivery_fee === 0 || listing.deliveryFee === 0
-                    ? '<div style="font-size:13px;font-weight:600;color:#22c55e;">✓ Free delivery on this item</div>'
-                    : listing.delivery_fee ? `<div style="font-size:13px;color:#374151;">Delivery fee: <strong>${fmt(parseFloat(listing.delivery_fee))}</strong></div>` : ''}
-                <button id="ecom-delivery-calc" style="margin-top:10px;background:transparent;color:#16a34a;border:1px solid #86efac;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;font-weight:600;">Calculate delivery to my location</button>
-            </div>
-
-            <!-- Seller info -->
-            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;margin-bottom:16px;">
-                <h3 style="font-size:14px;font-weight:700;margin-bottom:10px;color:#111;">🏪 About the Seller</h3>
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
-                    <div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--primary-color,#f57224),#ff9a00);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;flex-shrink:0;">
-                        ${escapeHtml((sellerName[0]||'S').toUpperCase())}
-                    </div>
+            </div>` : ''}
+            
+            ${listing.expiresAt ? `<div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-clock" style="color: var(--warning-color); font-size: 20px;"></i>
                     <div>
-                        <div style="font-weight:600;font-size:14px;color:#111;">${escapeHtml(sellerName)} ${listing.seller?.verified||listing.isVerified?'<span style="color:#3b82f6;font-size:13px;">✓</span>':''}</div>
-                        ${sellerRating > 0 ? `<div style="display:flex;align-items:center;gap:4px;margin-top:2px;">${_stars(sellerRating,true)}<span style="font-size:11px;color:#6b7280;">${sellerRating.toFixed(1)}</span></div>` : ''}
+                        <div style="font-weight: 500;">Expires ${formatTimeRemaining ? formatTimeRemaining(new Date(listing.expiresAt)) : listing.expiresAt}</div>
+                        <div style="font-size: 14px; color: var(--text-secondary); margin-top: 4px;">Listed ${formatTimeAgo(new Date(listing.createdAt || Date.now()))}</div>
                     </div>
                 </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button id="ecom-chat-seller-btn" style="flex:1;background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                        <i class="fas fa-comment"></i> Chat Seller
-                    </button>
-                    <button id="ecom-seller-profile-btn" style="flex:1;background:#f9fafb;color:#374151;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
-                        <i class="fas fa-store"></i> View Shop
-                    </button>
-                </div>
-            </div>
-
-            <!-- Reviews section -->
-            <div style="margin-bottom:16px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                    <h3 style="font-size:15px;font-weight:700;color:#111;">⭐ Reviews (${reviews.toLocaleString()})</h3>
-                    <button id="ecom-write-review-btn" style="background:transparent;color:var(--primary-color,#f57224);border:1px solid var(--primary-color,#f57224);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600;">Write Review</button>
-                </div>
-                ${rating > 0 ? `<div style="display:flex;align-items:center;gap:16px;background:#f9fafb;border-radius:10px;padding:12px;margin-bottom:10px;">
-                    <div style="text-align:center;"><div style="font-size:36px;font-weight:800;color:#111">${rating.toFixed(1)}</div><div>${_stars(rating)}</div><div style="font-size:11px;color:#9ca3af;margin-top:2px;">${reviews.toLocaleString()} reviews</div></div>
+                ${listing.autoRenew ? `<div style="margin-top: 10px; padding: 10px; background-color: rgba(52, 199, 89, 0.1); border-radius: 8px; border: 1px solid rgba(52, 199, 89, 0.2);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-sync-alt" style="color: var(--success-color);"></i>
+                        <span style="font-size: 14px;">Auto-renew enabled</span>
+                    </div>
                 </div>` : ''}
-                <div id="ecom-reviews-list" style="display:flex;flex-direction:column;gap:10px;">
-                    <div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">Loading reviews…</div>
+            </div>` : ''}
+            
+            ${listing.reactions?.length ? `<div style="margin-top: 20px;">
+                <div style="font-weight: 600; margin-bottom: 10px;">Reactions</div>
+                <div class="reaction-picker" style="justify-content: flex-start;">
+                    ${listing.reactions.map(r => `<div class="reaction-option ${r.premium ? 'premium' : ''}" style="cursor: default;">${r.emoji}<span style="font-size: 12px; margin-left: 5px; font-weight: 600;">${r.count}</span></div>`).join('')}
                 </div>
-                ${reviews > 5 ? `<button id="ecom-load-more-reviews" style="width:100%;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;margin-top:8px;font-weight:600;color:#374151;">Load more reviews</button>` : ''}
-            </div>
+            </div>` : ''}
+        `;
 
-            <!-- Related products placeholder -->
-            <div>
-                <h3 style="font-size:15px;font-weight:700;margin-bottom:10px;color:#111;">🛍 Related Products</h3>
-                <div id="ecom-related-products" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;">
-                    <div style="color:#9ca3af;font-size:13px;padding:8px;">Loading…</div>
-                </div>
-            </div>
+        container.innerHTML = html;
 
-            <!-- Share -->
-            <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
-                <button id="ecom-share-btn" style="flex:1;background:#f9fafb;color:#374151;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;">
-                    <i class="fas fa-share-alt"></i> Share
-                </button>
-                <button id="ecom-report-btn" style="background:#f9fafb;color:#9ca3af;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;">
-                    <i class="fas fa-flag"></i>
-                </button>
-            </div>
-        </div>`;
-
-        // ── Wire up all buttons ──
-        const _$ = (id) => container.querySelector('#' + id);
-        let _qty = 1;
-        const _maxQty = stock ?? 999;
-
-        // Quantity controls
-        _$('ecom-qty-dec')?.addEventListener('click', () => { if(_qty>1){_qty--;_$('ecom-qty-val').textContent=_qty;} });
-        _$('ecom-qty-inc')?.addEventListener('click', () => { if(_qty<_maxQty){_qty++;_$('ecom-qty-val').textContent=_qty;} });
-
-        // Add to Cart
-        const _addBtn = _$('ecom-add-cart-btn');
-        if (_addBtn && inStock) {
-            _addBtn.addEventListener('click', () => {
-                if (ecom) {
-                    const p = { id:listing.id, title:listing.title, price, original_price:origPrc, discount,
-                        seller_id:sellerId, seller:{name:sellerName}, images, stock_quantity:_maxQty,
-                        delivery_fee:parseFloat(listing.delivery_fee||listing.deliveryFee||0), available:true, category:listing.category||'general' };
-                    const res = ecom.CartEngine.add(p, _qty);
-                    if (res.success) {
-                        _addBtn.innerHTML = '<i class="fas fa-check"></i> Added to Cart';
-                        _addBtn.style.background = '#22c55e';
-                        _updateCartBadge();
-                        setTimeout(()=>{ _addBtn.innerHTML='<i class="fas fa-shopping-cart"></i> Add to Cart'; _addBtn.style.background=''; }, 2000);
-                    } else {
-                        ecom.NotificationEngine.show(res.message || 'Failed', 'error', '❌');
-                    }
-                }
-            });
-        }
-
-        // Buy Now
-        _$('ecom-buy-now-btn')?.addEventListener('click', () => {
-            if (ecom) {
-                const p = { id:listing.id, title:listing.title, price, seller_id:sellerId,
-                    seller:{name:sellerName}, images, stock_quantity:_maxQty, delivery_fee:parseFloat(listing.delivery_fee||0),
-                    available:true, category:listing.category||'general' };
-                ecom.CartEngine.add(p, _qty);
-                _updateCartBadge();
-                openCheckoutPanel();
-            }
-        });
-
-        // Wishlist
-        const _wishBtn = _$('ecom-wish-detail-btn');
-        _wishBtn?.addEventListener('click', () => {
-            if (ecom) {
-                const added = ecom.WishlistEngine.toggle(listing.id);
-                _wishBtn.innerHTML = added ? '<i class="fas fa-heart"></i> Remove from Wishlist' : '<i class="far fa-heart"></i> Add to Wishlist';
-                _wishBtn.style.background = added ? '#fee2e2' : '#f9fafb';
-                _wishBtn.style.color = added ? '#ef4444' : '#374151';
-                _wishBtn.style.borderColor = added ? '#fca5a5' : '#e5e7eb';
-            }
-        });
-
-        // Chat seller
-        _$('ecom-chat-seller-btn')?.addEventListener('click', () => {
-            if (ecom) { ecom.ChatBridge.openWithSeller({ ...listing, seller_id:sellerId, seller:{id:sellerId,name:sellerName} }); }
-            else if (typeof openChat === 'function') { openChat(sellerId, sellerName); }
-        });
-
-        // Seller profile
-        _$('ecom-seller-profile-btn')?.addEventListener('click', () => { if(sellerId) openSellerPanel(sellerId); });
-
-        // Delivery calculator
-        _$('ecom-delivery-calc')?.addEventListener('click', () => {
-            const area = prompt('Enter your area/city for delivery estimate:');
-            if (area && ecom) {
-                const fee = ecom.DeliveryEngine.calculateFee(listing.location||'', area);
-                alert(`Estimated delivery from ${listing.location||'seller location'} to ${area}:\nKES ${fee}`);
-            }
-        });
-
-        // Write review
-        _$('ecom-write-review-btn')?.addEventListener('click', () => openWriteReviewPanel(listing.id));
-
-        // Share
-        _$('ecom-share-btn')?.addEventListener('click', () => {
-            const url = `${window.location.origin}/?product=${listing.id}`;
-            if (navigator.share) { navigator.share({ title: listing.title, url }); }
-            else { navigator.clipboard?.writeText(url).then(()=>{ if(typeof showNotification==='function') showNotification('Link copied!','success'); }); }
-        });
-
-        // Gallery navigation
-        if (images.length > 1) {
-            let curIdx = 0;
-            const mainImg = _$('ecom-main-img');
-            const thumbs  = container.querySelectorAll('#ecom-thumbs img');
-            const _setImg = (idx) => {
-                curIdx = (idx + images.length) % images.length;
-                if (mainImg) mainImg.src = escapeHtml(images[curIdx]);
-                thumbs.forEach((t,i)=>{ t.style.borderColor = i===curIdx ? 'var(--primary-color,#f57224)' : 'transparent'; });
+        // Add AR button handler
+        const arBtn = document.getElementById('viewArBtn');
+        if (arBtn) {
+            arBtn.onclick = () => {
+                showNotification('AR preview feature coming soon!', 'info');
             };
-            _$('ecom-prev')?.addEventListener('click', (e)=>{ e.stopPropagation(); _setImg(curIdx-1); });
-            _$('ecom-next')?.addEventListener('click', (e)=>{ e.stopPropagation(); _setImg(curIdx+1); });
-            thumbs.forEach((t,i)=>{ t.addEventListener('click', (e)=>{ e.stopPropagation(); _setImg(i); }); });
         }
 
-        // Load reviews asynchronously
-        if (ecom && reviews > 0) {
-            ecom.ReviewEngine.getReviews(listing.id, { limit: 5 }).then(revList => {
-                const rl = _$('ecom-reviews-list');
-                if (!rl) return;
-                if (!revList.length) { rl.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">No reviews yet. Be the first!</div>'; return; }
-                rl.innerHTML = revList.map(r => `
-                    <div style="background:#f9fafb;border-radius:10px;padding:12px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#667eea,#764ba2);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;">${(r.user?.name||r.username||'U')[0].toUpperCase()}</div>
-                                <div>
-                                    <div style="font-size:13px;font-weight:600;">${escapeHtml(r.user?.name||r.username||'User')}</div>
-                                    <div style="font-size:11px;color:#9ca3af;">${r.created_at ? formatTimeAgo(new Date(r.created_at)) : ''}</div>
-                                </div>
-                            </div>
-                            <div style="display:flex;gap:1px;">${'<i class="fas fa-star" style="color:#f5a623;font-size:12px;"></i>'.repeat(r.rating||0)}</div>
-                        </div>
-                        ${r.text ? `<div style="font-size:13px;color:#374151;line-height:1.5;">${escapeHtml(r.text)}</div>` : ''}
-                        ${r.images?.length ? `<div style="display:flex;gap:6px;margin-top:8px;">${r.images.map(img=>`<img src="${escapeHtml(img)}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;">`).join('')}</div>` : ''}
-                        ${r.seller_response ? `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:8px 10px;margin-top:8px;border-radius:0 6px 6px 0;font-size:12px;color:#166534;"><strong>Seller response:</strong> ${escapeHtml(r.seller_response)}</div>` : ''}
-                    </div>`).join('');
-            }).catch(() => {
-                const rl = _$('ecom-reviews-list');
-                if (rl) rl.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">No reviews yet. Be the first!</div>';
-            });
-        } else {
-            const rl = _$('ecom-reviews-list');
-            if (rl) rl.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:16px;">No reviews yet. Be the first!</div>';
-        }
-
-        // Load related products asynchronously
-        const relEl = _$('ecom-related-products');
-        if (relEl && ecom) {
-            const related = ecom.ProductEngine.search('', { category: listing.category||'general' })
-                .filter(p => p.id !== listing.id).slice(0, 6);
-            if (related.length) {
-                relEl.innerHTML = related.map(p => `
-                    <div data-pid="${p.id}" style="flex-shrink:0;width:120px;cursor:pointer;background:#f9fafb;border-radius:10px;overflow:hidden;border:1px solid #f3f4f6;">
-                        <div style="width:100%;height:90px;background:#e5e7eb;overflow:hidden;">
-                            ${p.images[0] ? `<img src="${escapeHtml(p.images[0])}" style="width:100%;height:100%;object-fit:cover;" loading="lazy">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">🛒</div>`}
-                        </div>
-                        <div style="padding:6px 8px;">
-                            <div style="font-size:11px;font-weight:500;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.title)}</div>
-                            <div style="font-size:12px;font-weight:700;color:var(--primary-color,#f57224);margin-top:2px;">${p.price>0?`KES ${p.price.toLocaleString()}`:'Free'}</div>
-                        </div>
-                    </div>`).join('');
-                relEl.querySelectorAll('[data-pid]').forEach(el => {
-                    el.addEventListener('click', () => {
-                        const p = ecom.ProductEngine.getStore().products.get(el.dataset.pid);
-                        if (p) renderers.viewListingDetail(p);
-                    });
-                });
-            } else {
-                relEl.innerHTML = '<div style="color:#9ca3af;font-size:13px;">No related products found</div>';
+        // Add download button for digital items
+        if (listing.type === LISTING_TYPES?.DIGITAL || listing.type === 'digital') {
+            if (listing.fileUrl) {
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'action-btn primary';
+                downloadBtn.style.marginTop = '20px';
+                downloadBtn.style.width = '100%';
+                downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download File';
+                downloadBtn.onclick = () => {
+                    if (downloadDigitalFile) {
+                        downloadDigitalFile(listing.id, listing.fileUrl, listing.fileName || 'download');
+                    }
+                };
+                container.appendChild(downloadBtn);
+                
+                // Add file info if available
+                if (listing.fileName || listing.fileSize) {
+                    const fileInfo = document.createElement('div');
+                    fileInfo.className = 'file-info';
+                    fileInfo.style.marginBottom = '10px';
+                    fileInfo.style.padding = '10px';
+                    fileInfo.style.background = 'var(--secondary-color)';
+                    fileInfo.style.borderRadius = '8px';
+                    fileInfo.innerHTML = `
+                        <span><i class="fas fa-file"></i> ${escapeHtml(listing.fileName || 'File')}</span>
+                        <span style="float: right;">${listing.fileSize ? formatFileSize(listing.fileSize) : ''}</span>
+                    `;
+                    container.insertBefore(fileInfo, downloadBtn);
+                }
             }
         }
+        
+        // Add purchase button for paid listings
+        var priceVal = listing.price;
+        var hasPaidPrice = priceVal && priceVal !== '0' && priceVal !== 0 && 
+                           String(priceVal).toLowerCase() !== 'free' && 
+                           String(priceVal).toLowerCase() !== 'negotiable';
+        if (hasPaidPrice) {
+            const buyBtn = document.createElement('button');
+            buyBtn.className = 'action-btn primary';
+            buyBtn.style.marginTop = '20px';
+            buyBtn.style.width = '100%';
+            buyBtn.style.background = 'linear-gradient(135deg,#4CAF50,#2E7D32)';
+            // Format price display
+            var num = parseFloat(String(priceVal).replace(/[^0-9.]/g,''));
+            var priceDisplay = (!isNaN(num) && num > 0) ? 'KES ' + num.toLocaleString('en-KE') : String(priceVal);
+            buyBtn.innerHTML = '<i class="fas fa-shopping-cart"></i> Buy Now — ' + priceDisplay;
+            buyBtn.onclick = function() {
+                openPlaceOrderPanel(listing);
+            };
+            container.appendChild(buyBtn);
+        }
 
-    }, '<div class="error-placeholder">Failed to load product details</div>'),
+        // Message Seller button — always shown (not just for services)
+        const sellerId   = listing.userId || listing.sellerId;
+        const sellerName = listing.user?.displayName || listing.user?.username || 'Seller';
+        if (sellerId) {
+            const contactBtn = document.createElement('button');
+            contactBtn.className = 'action-btn secondary';
+            contactBtn.style.marginTop = '10px';
+            contactBtn.style.width = '100%';
+            contactBtn.innerHTML = '<i class="fas fa-comment"></i> Message Seller';
+            contactBtn.onclick = () => {
+                const chatFn = typeof openChat === 'function' ? openChat : window.openChat;
+                if (typeof chatFn === 'function') {
+                    chatFn(sellerId, sellerName);
+                } else {
+                    window.location.href = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName);
+                }
+            };
+            container.appendChild(contactBtn);
+        }
+
+        // Reviews button
+        const reviewsBtn = document.createElement('button');
+        reviewsBtn.className = 'action-btn secondary';
+        reviewsBtn.style.marginTop = '10px';
+        reviewsBtn.style.width = '100%';
+        reviewsBtn.innerHTML = '<i class="fas fa-star"></i> Reviews & Ratings';
+        reviewsBtn.onclick = () => openReviewsPanel(listing.id);
+        container.appendChild(reviewsBtn);
+
+        // Seller Profile button
+        const sellerBtn = document.createElement('button');
+        sellerBtn.className = 'action-btn secondary';
+        sellerBtn.style.marginTop = '10px';
+        sellerBtn.style.width = '100%';
+        sellerBtn.innerHTML = '<i class="fas fa-store"></i> View Seller Profile';
+        sellerBtn.onclick = () => openSellerPanel(listing.userId || listing.sellerId);
+        container.appendChild(sellerBtn);
+
+    }, '<div class="error-placeholder">Failed to load listing details</div>'),
 
     // FIX E: Spotlight renderer - show section when items exist
     spotlight: withErrorBoundary('Spotlight', function() {
@@ -5267,249 +5077,6 @@ window.addEventListener('tools:active', function() {
 
 })();
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ECOMMERCE HELPER FUNCTIONS — Cart badge, checkout panel, review writer
-// ══════════════════════════════════════════════════════════════════════════════
-
-/** Update the cart count badge in the header */
-function _updateCartBadge() {
-    const ecom = window.EcomMarketplace;
-    const count = ecom ? ecom.CartEngine.size() : 0;
-    let badge = document.getElementById('ecom-cart-count-badge');
-    if (!badge) {
-        // Try to find any cart button and attach badge
-        const cartBtns = document.querySelectorAll('[data-cart-trigger],[id*="cart"],[class*="cart-btn"]');
-        cartBtns.forEach(btn => {
-            let b = btn.querySelector('.ecom-cart-badge');
-            if (!b) {
-                b = document.createElement('span');
-                b.className = 'ecom-cart-badge';
-                b.id = 'ecom-cart-count-badge';
-                b.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;line-height:1;';
-                btn.style.position = 'relative';
-                btn.appendChild(b);
-                badge = b;
-            }
-        });
-    }
-    if (badge) badge.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
-    if (badge) badge.style.display = count > 0 ? 'flex' : 'none';
-
-    // Also dispatch event for any badge listeners
-    window.dispatchEvent(new CustomEvent('ecom:cart-badge-update', { detail: { count } }));
-}
-
-/** Open the full checkout/cart sidebar */
-function openCheckoutPanel() {
-    const ecom = window.EcomMarketplace;
-    // Remove existing panel if any
-    let panel = document.getElementById('ecom-checkout-panel');
-    if (panel) panel.remove();
-
-    const cart = ecom ? ecom.CartEngine.getCart() : { items: [], total: 0, subtotal: 0, delivery: 0, count: 0 };
-    const fmt  = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${parseFloat(n||0).toLocaleString()}`;
-
-    panel = document.createElement('div');
-    panel.id = 'ecom-checkout-panel';
-    panel.style.cssText = 'position:fixed;top:0;right:0;width:min(400px,100vw);height:100vh;background:#fff;z-index:99998;box-shadow:-8px 0 32px rgba(0,0,0,0.2);display:flex;flex-direction:column;transition:transform 0.3s ease;overflow:hidden;';
-
-    panel.innerHTML = `
-    <!-- Header -->
-    <div style="background:var(--primary-color,#f57224);color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-        <div style="display:flex;align-items:center;gap:10px;">
-            <i class="fas fa-shopping-cart" style="font-size:20px;"></i>
-            <h2 style="margin:0;font-size:18px;font-weight:700;">Your Cart (${cart.count})</h2>
-        </div>
-        <button onclick="document.getElementById('ecom-checkout-panel').remove()" style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:50%;width:32px;height:32px;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;">×</button>
-    </div>
-
-    <!-- Cart Items -->
-    <div id="ecom-checkout-items" style="flex:1;overflow-y:auto;padding:16px;">
-        ${cart.items.length === 0 ? `
-        <div style="text-align:center;padding:48px 20px;color:#9ca3af;">
-            <div style="font-size:64px;margin-bottom:16px;">🛒</div>
-            <div style="font-size:16px;font-weight:600;margin-bottom:8px;">Your cart is empty</div>
-            <div style="font-size:14px;">Add products to get started</div>
-        </div>` : cart.items.map(item => `
-        <div data-cart-item="${item.product.id}" style="display:flex;gap:12px;padding:14px 0;border-bottom:1px solid #f3f4f6;align-items:flex-start;">
-            <div style="width:72px;height:72px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#f3f4f6;">
-                ${item.product.images?.[0] ? `<img src="${escapeHtml(item.product.images[0])}" style="width:100%;height:100%;object-fit:cover;">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:28px;">🛒</div>`}
-            </div>
-            <div style="flex:1;min-width:0;">
-                <div style="font-size:13px;font-weight:600;color:#111;line-height:1.3;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${escapeHtml(item.product.title)}</div>
-                <div style="font-size:14px;font-weight:700;color:var(--primary-color,#f57224);margin-bottom:8px;">${fmt(item.product.price)}</div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <button onclick="_ecomQtyChange('${item.product.id}',-1)" style="background:#f3f4f6;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">−</button>
-                    <span style="font-size:14px;font-weight:600;min-width:24px;text-align:center;">${item.quantity}</span>
-                    <button onclick="_ecomQtyChange('${item.product.id}',1)" style="background:#f3f4f6;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">+</button>
-                    <button onclick="_ecomRemoveItem('${item.product.id}')" style="background:transparent;border:none;color:#ef4444;cursor:pointer;font-size:13px;margin-left:auto;">Remove</button>
-                </div>
-                ${item.product.delivery_fee > 0 ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px;">+ ${fmt(item.product.delivery_fee)} delivery</div>` : '<div style="font-size:11px;color:#22c55e;margin-top:4px;">Free delivery</div>'}
-            </div>
-            <div style="font-size:14px;font-weight:700;color:#111;flex-shrink:0;">${fmt(item.product.price * item.quantity)}</div>
-        </div>`).join('')}
-    </div>
-
-    <!-- Summary & Checkout -->
-    ${cart.items.length > 0 ? `
-    <div style="flex-shrink:0;padding:16px;border-top:1px solid #f3f4f6;background:#fff;">
-        <div style="background:#f9fafb;border-radius:12px;padding:14px;margin-bottom:14px;">
-            <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#6b7280;">
-                <span>Subtotal (${cart.count} items)</span><span>${fmt(cart.subtotal)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#6b7280;">
-                <span>Delivery</span><span>${cart.delivery > 0 ? fmt(cart.delivery) : '<span style="color:#22c55e">Free</span>'}</span>
-            </div>
-            ${cart.discount > 0 ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;color:#22c55e;"><span>Savings</span><span>-${fmt(cart.discount)}</span></div>` : ''}
-            <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:#111;border-top:1px solid #e5e7eb;padding-top:10px;margin-top:6px;">
-                <span>Total</span><span style="color:var(--primary-color,#f57224)">${fmt(cart.total)}</span>
-            </div>
-        </div>
-        <button id="ecom-proceed-checkout-btn" onclick="_ecomProceedToCheckout()" style="width:100%;background:var(--primary-color,#f57224);color:#fff;border:none;border-radius:12px;padding:16px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;">
-            <i class="fas fa-lock"></i> Proceed to Checkout
-        </button>
-        <button onclick="document.getElementById('ecom-checkout-panel').remove()" style="width:100%;background:#f3f4f6;color:#374151;border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;">
-            Continue Shopping
-        </button>
-    </div>` : ''}
-    `;
-
-    document.body.appendChild(panel);
-    requestAnimationFrame(() => { panel.style.transform = 'translateX(0)'; });
-}
-window.openCheckoutPanel = openCheckoutPanel;
-
-// Cart quantity helpers (called from onclick in injected HTML)
-window._ecomQtyChange = function(productId, delta) {
-    const ecom = window.EcomMarketplace;
-    if (!ecom) return;
-    const item = ecom.CartEngine.getItem(productId);
-    if (!item) return;
-    ecom.CartEngine.updateQuantity(productId, item.quantity + delta);
-    _updateCartBadge();
-    openCheckoutPanel(); // Re-render
-};
-window._ecomRemoveItem = function(productId) {
-    const ecom = window.EcomMarketplace;
-    if (ecom) ecom.CartEngine.remove(productId);
-    _updateCartBadge();
-    openCheckoutPanel(); // Re-render
-};
-window._ecomProceedToCheckout = function() {
-    const panel = document.getElementById('ecom-checkout-panel');
-    const body = panel?.querySelector('#ecom-checkout-items');
-    if (body) {
-        const ecom = window.EcomMarketplace;
-        const fmt = (n) => ecom ? ecom.SettingsEngine.formatPrice(n) : `KES ${parseFloat(n||0).toLocaleString()}`;
-        const cart = ecom ? ecom.CartEngine.getCart() : null;
-        if (!cart || !cart.items.length) return;
-
-        body.innerHTML = `
-        <h3 style="font-size:16px;font-weight:700;margin:0 0 16px;">Delivery Details</h3>
-        <div style="display:flex;flex-direction:column;gap:12px;">
-            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">FULL NAME</label>
-                <input id="eco-ch-name" type="text" placeholder="Your full name" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;"></div>
-            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">PHONE NUMBER</label>
-                <input id="eco-ch-phone" type="tel" placeholder="07XXXXXXXX" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;"></div>
-            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">DELIVERY ADDRESS</label>
-                <textarea id="eco-ch-addr" placeholder="Street, Area, City" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;min-height:72px;box-sizing:border-box;resize:vertical;"></textarea></div>
-            <div><label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">PAYMENT METHOD</label>
-                <select id="eco-ch-pay" style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;box-sizing:border-box;">
-                    <option value="mpesa">📱 M-Pesa (STK Push)</option>
-                    <option value="card">💳 Card Payment</option>
-                    <option value="cash">💵 Cash on Delivery</option>
-                    <option value="wallet">👛 Wallet</option>
-                </select></div>
-            <div id="eco-ch-mpesa-hint" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:13px;color:#166534;">
-                📲 You'll receive an M-Pesa prompt on your phone. Enter your PIN to complete payment.
-            </div>
-            <div style="background:#f9fafb;border-radius:10px;padding:12px;">
-                <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700;color:#111;">
-                    <span>Order Total</span><span style="color:var(--primary-color,#f57224)">${fmt(cart.total)}</span>
-                </div>
-            </div>
-        </div>`;
-
-        const footer = panel.querySelector('[id="ecom-proceed-checkout-btn"]')?.closest('div');
-        if (footer) {
-            footer.querySelector('#ecom-proceed-checkout-btn').textContent = '';
-            footer.querySelector('#ecom-proceed-checkout-btn').innerHTML = '<i class="fas fa-lock"></i> Place Order & Pay';
-            footer.querySelector('#ecom-proceed-checkout-btn').onclick = _ecomPlaceOrder;
-        }
-
-        // Toggle mpesa hint
-        document.getElementById('eco-ch-pay')?.addEventListener('change', function() {
-            const hint = document.getElementById('eco-ch-mpesa-hint');
-            if (hint) hint.style.display = this.value === 'mpesa' ? 'block' : 'none';
-        });
-    }
-};
-window._ecomPlaceOrder = async function() {
-    const ecom = window.EcomMarketplace;
-    if (!ecom) return;
-    const name   = document.getElementById('eco-ch-name')?.value?.trim();
-    const phone  = document.getElementById('eco-ch-phone')?.value?.trim();
-    const addr   = document.getElementById('eco-ch-addr')?.value?.trim();
-    const payMth = document.getElementById('eco-ch-pay')?.value || 'mpesa';
-    const btn    = document.getElementById('ecom-proceed-checkout-btn');
-
-    if (!name || !addr) { ecom.NotificationEngine.show('Please fill in all required fields', 'error', '❌'); return; }
-    if (payMth === 'mpesa' && !phone) { ecom.NotificationEngine.show('Phone number required for M-Pesa', 'error', '❌'); return; }
-
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Placing Order…'; }
-
-    try {
-        const result = await ecom.OrderEngine.checkout({
-            address: { name, phone, raw: addr },
-            payment_method: payMth, phone, notes: '',
-        });
-
-        if (result.success) {
-            document.getElementById('ecom-checkout-panel')?.remove();
-            _updateCartBadge();
-
-            // Initiate payment if M-Pesa
-            if (payMth === 'mpesa' && result.order?.id) {
-                setTimeout(async () => {
-                    const pRes = await ecom.PaymentEngine.initiateMpesa({ phone, amount: result.order.total, orderId: result.order.id });
-                    if (pRes.success) {
-                        ecom.NotificationEngine.show(pRes.message, 'success', '📱');
-                    }
-                }, 500);
-            }
-
-            ecom.NotificationEngine.show('Order placed successfully! 🎉', 'success', '✅');
-        }
-    } catch (e) {
-        ecom.NotificationEngine.show('Order failed: ' + e.message, 'error', '❌');
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-lock"></i> Place Order & Pay'; }
-    }
-};
-
-/** Open write-review panel for a product */
-function openWriteReviewPanel(productId) {
-    // If openReviewsPanel already exists (from the MP IIFE), use it
-    if (typeof window.openReviewsPanel === 'function') {
-        window.openReviewsPanel(productId, null);
-        return;
-    }
-    // Minimal fallback
-    const rating = prompt('Rate this product (1-5 stars):');
-    const ratingNum = parseInt(rating);
-    if (!ratingNum || ratingNum < 1 || ratingNum > 5) { alert('Invalid rating'); return; }
-    const comment = prompt('Leave a comment (optional):') || '';
-    const ecom = window.EcomMarketplace;
-    if (ecom) {
-        ecom.ReviewEngine.submitReview({ productId, rating: ratingNum, text: comment })
-            .then(r => { if (r.success) alert('Review submitted! Thank you.'); else alert('Failed: ' + r.message); });
-    }
-}
-window.openWriteReviewPanel = openWriteReviewPanel;
-
-// Listen to ecom cart events and update badge
-window.addEventListener('ecom:cart-updated', () => _updateCartBadge());
-window.addEventListener('ecom:ready', () => { _updateCartBadge(); console.log('[UI] Ecom marketplace ready'); });
-
 // ── Module exports ──────────────────────────────────────────────────────────
 // viewListingDetail lives on renderers — re-export as a named alias
 const viewListingDetail = (...args) => renderers.viewListingDetail(...args);
@@ -5521,3 +5088,1338 @@ export {
     showCreateListingModal,
     viewListingDetail
 };
+// ═══════════════════════════════════════════════════════════════════════════
+// JUMIA-STYLE MARKETPLACE ENGINE v2.0
+// Complete ecommerce navigation, cart, wishlist, categories, orders,
+// account, recently viewed, product grid, search, realtime sync.
+// Runs as a self-contained IIFE so it never conflicts with existing code.
+// ═══════════════════════════════════════════════════════════════════════════
+(function _JumiaMPEngine() {
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+const _state = {
+    page:        'home',
+    catSelected: null,
+    sort:        'newest',
+    search:      '',
+    cart:        new Map(),   // id → {listing, qty}
+    wishlist:    new Set(),
+    recent:      [],          // [{listing,ts}]
+    orders:      [],
+    addresses:   [],
+    notifications: { orders: true, marketing: false },
+    initialized: false,
+};
+
+const MAX_RECENT = 20;
+const _LS = {
+    CART:    'jm_cart_v1',
+    WISH:    'jm_wish_v1',
+    RECENT:  'jm_recent_v1',
+    ORDERS:  'jm_orders_v1',
+    ADDRS:   'jm_addrs_v1',
+};
+
+// ── Local storage helpers ──────────────────────────────────────────────────
+const _ls = {
+    save: (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(_) {} },
+    load: (k,d=null) => { try { const r=localStorage.getItem(k); return r?JSON.parse(r):d; } catch(_) { return d; } },
+};
+
+// ── Format helpers ─────────────────────────────────────────────────────────
+function _fmt(n) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) return ecom.SettingsEngine.formatPrice(n);
+    return 'KES ' + parseFloat(n||0).toLocaleString('en-KE', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+
+function _stars(r, sm=false) {
+    const sz = sm ? '10px' : '12px';
+    let s=''; const f=Math.floor(r||0), h=(r||0)-f>=0.5;
+    for(let i=0;i<f;i++) s+=`<i class="fas fa-star" style="color:#f5a623;font-size:${sz}"></i>`;
+    if(h) s+=`<i class="fas fa-star-half-alt" style="color:#f5a623;font-size:${sz}"></i>`;
+    for(let i=0;i<(5-f-(h?1:0));i++) s+=`<i class="far fa-star" style="color:#ddd;font-size:${sz}"></i>`;
+    return s;
+}
+
+function _esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _price(listing) {
+    return parseFloat(String(listing.price||listing.price_display||0).replace(/[^0-9.]/g,'')) || 0;
+}
+function _origPrice(listing) {
+    return parseFloat(String(listing.original_price||listing.originalPrice||0).replace(/[^0-9.]/g,'')) || 0;
+}
+function _discount(listing) {
+    const p=_price(listing), o=_origPrice(listing);
+    return o>p&&o>0 ? Math.round((1-p/o)*100) : (parseFloat(listing.discount)||0);
+}
+function _img(listing) {
+    return listing.images?.[0] || listing.mediaUrl || listing.image || '';
+}
+function _inStock(listing) {
+    const s = listing.stock_quantity??listing.stock??null;
+    return listing.available!==false && (s===null||s>0);
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function _toast(msg, type='info', icon='ℹ️', dur=3000) {
+    let box = document.getElementById('jmToastContainer');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'jmToastContainer';
+        document.body.appendChild(box);
+    }
+    const t = document.createElement('div');
+    t.className = 'jm-toast ' + type;
+    t.innerHTML = `<span>${icon}</span><span>${_esc(msg)}</span>`;
+    box.appendChild(t);
+    setTimeout(() => { t.style.animation='jmToastOut 0.3s ease forwards'; setTimeout(()=>t.remove(),300); }, dur);
+}
+window._jmToast = _toast;
+
+// ── Cart badge update ──────────────────────────────────────────────────────
+function _updateCartBadge() {
+    const ecom = window.EcomMarketplace;
+    const count = ecom ? ecom.CartEngine.size() : _state.cart.size;
+    ['jmCartBadge','jmNavCartBadge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = count > 99 ? '99+' : count;
+        el.style.display = count > 0 ? 'flex' : 'none';
+    });
+    // notify parent (chat.html) for nav badge
+    try { window.parent.postMessage({ type:'ECOM_CART_UPDATE', payload:{count} }, '*'); } catch(_) {}
+}
+window._jmUpdateCartBadge = _updateCartBadge;
+
+// ── Wishlist badge ─────────────────────────────────────────────────────────
+function _updateWishlistBadge() {
+    const ecom = window.EcomMarketplace;
+    const count = ecom ? ecom.WishlistEngine.getWishlist().length : _state.wishlist.size;
+    const tab = document.querySelector('.jm-nav-tab[data-page="wishlist"] span');
+    if (tab) tab.textContent = count > 0 ? `Wishlist (${count})` : 'Wishlist';
+}
+window._jmUpdateWishlistBadge = _updateWishlistBadge;
+
+// ── Page navigation ────────────────────────────────────────────────────────
+// Page ID map — handles both camelCase and kebab-case page names
+const _PAGE_ID_MAP = {
+    'home':           'jmPageHome',
+    'categories':     'jmPageCategories',
+    'cart':           'jmPageCart',
+    'wishlist':       'jmPageWishlist',
+    'account':        'jmPageAccount',
+    'orders':         'jmPageOrders',
+    'recent':         'jmPageRecent',
+    'products':       'jmPageProducts',
+    'notifprefs':     'jmPageNotifPrefs',
+    'addresses':      'jmPageAddresses',
+    'vouchers':       'jmPageVouchers',
+    'inbox':          'jmPageInbox',
+    'follow-sellers': 'jmPageFollowSellers',
+    'reviews-page':   'jmPageReviews',
+};
+
+function _nav(page, subpage) {
+    _state.page = page;
+
+    // Hide all pages
+    document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
+
+    // Show target page
+    const pageId = _PAGE_ID_MAP[page] || ('jmPage' + page.charAt(0).toUpperCase() + page.slice(1));
+    const pageEl = document.getElementById(pageId);
+    if (pageEl) {
+        pageEl.classList.add('active');
+    } else {
+        // Page element not found — fallback to home
+        const homeEl = document.getElementById('jmPageHome');
+        if (homeEl) homeEl.classList.add('active');
+        page = 'home';
+    }
+
+    // Back button visibility
+    const backBtn = document.getElementById('jmBackBtn');
+    if (backBtn) backBtn.style.display = page === 'home' ? 'none' : 'flex';
+
+    // Notify parent for header nav sync
+    try { window.parent.postMessage({ type: 'JM_PAGE_CHANGE', payload: { page } }, '*'); } catch(_) {}
+
+    // Render page content
+    switch(page) {
+        case 'home':           _renderHome(); break;
+        case 'categories':     _renderCategories(); break;
+        case 'cart':           _renderCart(); break;
+        case 'wishlist':       _renderWishlist(); break;
+        case 'account':        _renderAccount(); break;
+        case 'orders':         _renderOrders(); break;
+        case 'recent':         _renderRecent(); break;
+        case 'products':       _renderProductsPage(subpage); break;
+        case 'notifprefs':     /* static HTML — already rendered */ break;
+        case 'addresses':      _renderAddresses(); break;
+        case 'vouchers':       _renderVouchers(); break;
+        case 'inbox':          _renderInbox(); break;
+        case 'follow-sellers': _renderFollowSellers(); break;
+        case 'reviews-page':   _renderReviewsPage(); break;
+    }
+}
+window._jmNav = _nav;
+
+// ── More sheet ─────────────────────────────────────────────────────────────
+function _showMore() {
+    const overlay = document.getElementById('jmMoreOverlay');
+    const sheet   = document.getElementById('jmMoreSheet');
+    if (overlay) overlay.style.display = 'block';
+    if (sheet)   sheet.style.display   = 'block';
+}
+function _hideMore() {
+    const overlay = document.getElementById('jmMoreOverlay');
+    const sheet   = document.getElementById('jmMoreSheet');
+    if (overlay) overlay.style.display = 'none';
+    if (sheet)   sheet.style.display   = 'none';
+}
+function _navMore(page) {
+    _hideMore();
+    _nav(page);
+}
+window._jmShowMore = _showMore;
+window._jmHideMore = _hideMore;
+window._jmNavMore  = _navMore;
+
+// ── Recently Viewed ────────────────────────────────────────────────────────
+function _addRecent(listing) {
+    if (!listing?.id) return;
+    _state.recent = _state.recent.filter(r => r.id !== listing.id);
+    _state.recent.unshift({ ...listing, _recentTs: Date.now() });
+    if (_state.recent.length > MAX_RECENT) _state.recent.pop();
+    _ls.save(_LS.RECENT, _state.recent.map(r => ({ id:r.id, title:r.title, images:r.images, price:r.price, original_price:r.original_price, rating:r.rating, discount:r.discount, _recentTs:r._recentTs })));
+}
+function _clearRecent() {
+    _state.recent = [];
+    _ls.save(_LS.RECENT, []);
+    _renderRecent();
+    _toast('Cleared recently viewed', 'info', '🗑️');
+}
+window._jmAddRecent  = _addRecent;
+window._jmClearRecent = _clearRecent;
+
+// ── HOME PAGE render ───────────────────────────────────────────────────────
+function _renderHome() {
+    // Featured row
+    const ecom = window.EcomMarketplace;
+    if (ecom) {
+        const featured = ecom.ProductEngine.getFeatured();
+        _renderHScroll('jmFeaturedRow', featured, 'jmFeaturedSection');
+        const flash = ecom.ProductEngine.getFlashSales();
+        const flashBanner = document.getElementById('jmFlashBanner');
+        if (flashBanner) flashBanner.style.display = flash.length ? 'flex' : 'none';
+    }
+    // Product count
+    const grid = document.getElementById('marketplaceListContent');
+    const countEl = document.getElementById('jmProductCount');
+    if (grid && countEl) countEl.textContent = `(${grid.querySelectorAll('.jm-card').length})`;
+}
+
+// ── HORIZONTAL SCROLL render ───────────────────────────────────────────────
+function _renderHScroll(containerId, listings, sectionId) {
+    const el = document.getElementById(containerId);
+    const sec = sectionId ? document.getElementById(sectionId) : null;
+    if (!el) return;
+    if (!listings?.length) { if(sec) sec.style.display='none'; return; }
+    if (sec) sec.style.display = '';
+
+    el.innerHTML = listings.slice(0,10).map(p => {
+        const pr = _price(p), op = _origPrice(p), disc = _discount(p);
+        const img = _img(p);
+        return `<div class="jm-hcard" data-id="${p.id}">
+            ${img ? `<img class="jm-hcard-img" src="${_esc(img)}" loading="lazy" onerror="this.style.display='none'">` : `<div class="jm-hcard-img-placeholder">${p.type==='digital'?'💾':'🛒'}</div>`}
+            <div class="jm-hcard-body">
+                <div class="jm-hcard-title">${_esc(p.title||'')}</div>
+                <div><span class="jm-hcard-price">${pr>0?_fmt(pr):'Free'}</span>${op>pr?`<span class="jm-hcard-oldprice">${_fmt(op)}</span>`:''}</div>
+                ${disc>0?`<div class="jm-hcard-discount">-${disc}%</div>`:''}
+                ${p.rating>0?`<div class="jm-hcard-rating">★ ${p.rating.toFixed(1)}</div>`:''}
+            </div></div>`;
+    }).join('');
+
+    el.querySelectorAll('.jm-hcard').forEach(card => {
+        card.addEventListener('click', () => {
+            const ecom = window.EcomMarketplace;
+            const p = ecom?.ProductEngine.getStore().products.get(card.dataset.id);
+            if (p && typeof renderers !== 'undefined') renderers.viewListingDetail(p);
+        });
+    });
+}
+
+// ── CATEGORIES PAGE ────────────────────────────────────────────────────────
+const _JM_CATS = [
+    { id:'electronics',   name:'TVs & Audio',        icon:'📺',
+      subs:[ {name:'Televisions',emoji:'📺'}, {name:'Audio',emoji:'🔊'}, {name:'Cameras',emoji:'📷'}, {name:'Phones',emoji:'📱'} ] },
+    { id:'appliances',    name:'Appliances',          icon:'🏠',
+      subs:[ {name:'Fridges',emoji:'❄️'}, {name:'Washing Machines',emoji:'🫧'}, {name:'Cookers',emoji:'🔥'}, {name:'Microwaves',emoji:'📦'} ] },
+    { id:'health',        name:'Health & Beauty',     icon:'💄',
+      subs:[ {name:'Skincare',emoji:'🧴'}, {name:'Haircare',emoji:'💇'}, {name:'Vitamins',emoji:'💊'}, {name:'Fragrances',emoji:'🌸'} ] },
+    { id:'home',          name:'Home & Office',       icon:'🏡',
+      subs:[ {name:'Furniture',emoji:'🛋️'}, {name:'Bedding',emoji:'🛏️'}, {name:'Lighting',emoji:'💡'}, {name:'Office',emoji:'🖥️'} ] },
+    { id:'fashion',       name:'Fashion',             icon:'👗',
+      subs:[ {name:"Women's",emoji:'👗'}, {name:"Men's",emoji:'👔'}, {name:'Shoes',emoji:'👠'}, {name:'Bags',emoji:'👜'} ] },
+    { id:'computing',     name:'Computing',           icon:'💻',
+      subs:[ {name:'Laptops',emoji:'💻'}, {name:'Desktops',emoji:'🖥️'}, {name:'Accessories',emoji:'⌨️'}, {name:'Networking',emoji:'📡'} ] },
+    { id:'gaming',        name:'Gaming',              icon:'🎮',
+      subs:[ {name:'PlayStation',emoji:'🎮'}, {name:'Nintendo',emoji:'🕹️'}, {name:'Xbox',emoji:'🟩'}, {name:'PC Gaming',emoji:'🖥️'} ] },
+    { id:'baby',          name:'Baby Products',       icon:'🍼',
+      subs:[ {name:'Clothing',emoji:'👶'}, {name:'Toys',emoji:'🧸'}, {name:'Feeding',emoji:'🍼'}, {name:'Diapers',emoji:'🧷'} ] },
+    { id:'sports',        name:'Sporting Goods',      icon:'⚽',
+      subs:[ {name:'Exercise',emoji:'🏋️'}, {name:'Team Sports',emoji:'⚽'}, {name:'Nutrition',emoji:'💪'}, {name:'Outdoor',emoji:'⛺'} ] },
+    { id:'supermarket',   name:'Supermarket',         icon:'🛒',
+      subs:[ {name:'Food',emoji:'🥦'}, {name:'Beverages',emoji:'🥤'}, {name:'Snacks',emoji:'🍿'}, {name:'Household',emoji:'🧹'} ] },
+    { id:'garden',        name:'Garden & Outdoors',   icon:'🌿',
+      subs:[ {name:'Gardening',emoji:'🌱'}, {name:'Watering',emoji:'💧'}, {name:'Grills',emoji:'🔥'}, {name:'Lighting',emoji:'💡'} ] },
+    { id:'digital',       name:'Digital',             icon:'💾',
+      subs:[ {name:'Software',emoji:'💾'}, {name:'E-Books',emoji:'📚'}, {name:'Music',emoji:'🎵'}, {name:'Games',emoji:'🎮'} ] },
+    { id:'services',      name:'Services',            icon:'🔧',
+      subs:[ {name:'Repairs',emoji:'🔧'}, {name:'Cleaning',emoji:'🧹'}, {name:'Tutoring',emoji:'📚'}, {name:'Design',emoji:'🎨'} ] },
+];
+
+function _renderCategories() {
+    const sidebar  = document.getElementById('jmCatSidebar');
+    const content  = document.getElementById('jmCatContent');
+    if (!sidebar || !content) return;
+
+    sidebar.innerHTML = _JM_CATS.map((c,i) =>
+        `<div class="jm-cat-item${i===0?' active':''}" data-cat="${c.id}">${c.icon}<br>${_esc(c.name)}</div>`
+    ).join('');
+
+    sidebar.querySelectorAll('.jm-cat-item').forEach(item => {
+        item.addEventListener('click', () => {
+            sidebar.querySelectorAll('.jm-cat-item').forEach(x=>x.classList.remove('active'));
+            item.classList.add('active');
+            const cat = _JM_CATS.find(c=>c.id===item.dataset.cat);
+            if (cat) _renderCatContent(cat, content);
+        });
+    });
+
+    // Render first by default
+    _renderCatContent(_JM_CATS[0], content);
+}
+
+function _renderCatContent(cat, container) {
+    // Group subs into groups of 3–4 (like Jumia)
+    const groupSize = 3;
+    const groups = [];
+    for (let i=0; i<cat.subs.length; i+=groupSize) groups.push(cat.subs.slice(i,i+groupSize));
+
+    // Build a "All Products" row + subcategory groups
+    const ecom = window.EcomMarketplace;
+    const products = ecom ? ecom.ProductEngine.search('', { category: cat.id, sort:'newest' }) : [];
+
+    container.innerHTML = `
+        <div class="jm-cat-group">
+            <div class="jm-cat-group-header">
+                <span>All Products</span>
+                <button class="jm-cat-see-all" onclick="window._jmNav('products','${cat.id}')">›</button>
+            </div>
+        </div>
+        ${groups.map(group => `
+        <div class="jm-cat-group">
+            <div class="jm-cat-group-header">
+                <span>${_esc(group[0]?.name||'')}</span>
+                <button class="jm-cat-see-all" onclick="window._jmNav('products','${cat.id}')">See All</button>
+            </div>
+            <div class="jm-cat-group-divider"></div>
+            <div class="jm-subcat-grid">
+                ${group.map(sub => `
+                <div class="jm-subcat-item" onclick="window._jmNav('products','${cat.id}:${sub.name}')">
+                    <div class="jm-subcat-img-placeholder">${sub.emoji}</div>
+                    <div class="jm-subcat-name">${_esc(sub.name)}</div>
+                </div>`).join('')}
+            </div>
+        </div>`).join('')}
+    `;
+}
+
+// ── PRODUCTS LIST PAGE ─────────────────────────────────────────────────────
+function _renderProductsPage(subpage) {
+    const container = document.getElementById('jmProductsContent');
+    const title     = document.getElementById('jmProductsTitle');
+    if (!container) return;
+
+    const [catId, subcat] = (subpage||'').split(':');
+    const titleText = subcat || catId || 'Products';
+    if (title) {
+        title.innerHTML = '';
+        const backSpan = document.createElement('span');
+        backSpan.style.cssText = 'cursor:pointer;color:var(--jm-orange,#f57224);margin-right:8px;';
+        backSpan.innerHTML = '← ';
+        backSpan.onclick = () => _nav('categories');
+        title.appendChild(backSpan);
+        title.appendChild(document.createTextNode(titleText));
+    }
+
+    // Show skeleton first
+    container.innerHTML = Array(4).fill(0).map(() =>
+        '<div class="jm-skeleton-card" style="height:240px;border-radius:8px"><div class="jm-skeleton" style="width:100%;height:140px"></div><div style="padding:8px"><div class="jm-skeleton" style="height:12px;width:80%;margin-bottom:6px;border-radius:4px"></div><div class="jm-skeleton" style="height:14px;width:50%;border-radius:4px"></div></div></div>'
+    ).join('');
+
+    setTimeout(() => {
+        const ecom = window.EcomMarketplace;
+        let products = [];
+
+        if (ecom) {
+            products = ecom.ProductEngine.search(_state.search || '', {
+                category: catId || '',
+                sort: _state.sort || 'newest'
+            });
+        }
+
+        // Also pull from existing allListings
+        if (!products.length && window.allListings) {
+            products = window.allListings.filter(l =>
+                !catId || l.category === catId || l.type === catId
+            );
+        }
+
+        _renderGrid(container, products);
+        if (title) {
+            const cnt = container.querySelectorAll('.jm-card').length;
+            // append count
+            const existing = title.querySelector('.prod-count');
+            if (!existing) {
+                const span = document.createElement('span');
+                span.className = 'prod-count';
+                span.style.cssText = 'font-size:12px;font-weight:400;color:#6b7280;margin-left:8px;';
+                span.textContent = cnt + ' products';
+                title.appendChild(span);
+            }
+        }
+    }, 100);
+}
+
+// ── CART PAGE ──────────────────────────────────────────────────────────────
+function _renderCart() {
+    const container = document.getElementById('jmCartContent');
+    if (!container) return;
+
+    const ecom = window.EcomMarketplace;
+    const cart = ecom ? ecom.CartEngine.getCart() : _buildLocalCart();
+
+    const recentHTML = _state.recent.length ? `
+        <div class="jm-cart-recently">
+            <div class="jm-section-header" style="padding:10px 12px 6px">
+                <span style="font-size:13px;font-weight:700">Recently Viewed</span>
+                <button class="jm-see-all" onclick="window._jmNav('recent')">See All</button>
+            </div>
+            <div class="jm-hscroll" id="jmCartRecentRow"></div>
+        </div>` : '';
+
+    if (!cart.items.length) {
+        container.innerHTML = `
+            <div class="jm-cart-summary-bar">
+                <div><div class="jm-cart-label">CART SUMMARY</div><div class="jm-cart-label">Subtotal</div></div>
+                <div class="jm-cart-total">${_fmt(0)}</div>
+            </div>
+            <div class="jm-empty-state" style="flex:1">
+                <div class="jm-empty-icon">🛒</div>
+                <div class="jm-empty-title">Your cart is empty</div>
+                <div class="jm-empty-desc">Add items to get started</div>
+                <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
+            </div>
+            ${recentHTML}`;
+    } else {
+        container.innerHTML = `
+            <div class="jm-cart-summary-bar">
+                <div><div class="jm-cart-label">CART SUMMARY</div><div class="jm-cart-label">Subtotal</div></div>
+                <div class="jm-cart-total">${_fmt(cart.subtotal)}</div>
+            </div>
+            <div style="padding:8px 12px;font-size:12px;color:#6b7280;background:#f9fafb">Cart (${cart.count})</div>
+            <div class="jm-cart-items" id="jmCartItems">
+                ${cart.items.map(item => {
+                    const p = item.product || item;
+                    const pr = parseFloat(p.price||0);
+                    const op = parseFloat(p.original_price||0);
+                    const disc = op>pr&&op>0 ? Math.round((1-pr/op)*100) : 0;
+                    const img = p.images?.[0]||p.image||'';
+                    const inStock = (p.stock_quantity??999) > 0;
+                    return `<div class="jm-cart-item" data-pid="${p.id}">
+                        ${img ? `<img class="jm-cart-item-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-cart-item-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:28px">🛒</div>`}
+                        <div class="jm-cart-item-body">
+                            <div class="jm-cart-item-title">${_esc(p.title||'')}</div>
+                            <div>
+                                <span class="jm-cart-item-price">${_fmt(pr)}</span>
+                                ${op>pr?`<span class="jm-cart-item-oldprice">${_fmt(op)}</span><span class="jm-cart-item-discount">-${disc}%</span>`:''}
+                            </div>
+                            <div class="jm-cart-qty-row" style="margin-top:8px">
+                                <button class="jm-qty-btn" onclick="window._jmCartQty('${p.id}',-1)">−</button>
+                                <span class="jm-qty-val">${item.quantity||1}</span>
+                                <button class="jm-qty-btn" onclick="window._jmCartQty('${p.id}',1)">+</button>
+                                ${inStock
+                                    ? '<span></span>'
+                                    : '<button class="jm-cart-out-btn">Out Of Stock</button>'}
+                            </div>
+                            <div style="display:flex;justify-content:flex-end;margin-top:6px">
+                                <button class="jm-cart-remove" onclick="window._jmCartRemove('${p.id}')">Remove</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="jm-cart-footer">
+                <button class="jm-call-btn" title="Call support"><i class="fas fa-phone"></i></button>
+                <button class="jm-checkout-btn" onclick="window._jmCheckout()" ${cart.items.some(i=>(i.product?.stock_quantity??999)<=0)?'disabled':''}>
+                    Checkout — ${_fmt(cart.total)}
+                </button>
+            </div>
+            ${recentHTML}`;
+    }
+
+    // Render recently viewed row
+    setTimeout(() => {
+        const row = document.getElementById('jmCartRecentRow');
+        if (row) _renderHScroll('jmCartRecentRow', _state.recent.map(r=>r));
+    }, 50);
+}
+
+window._jmCartQty = function(pid, delta) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) {
+        const item = ecom.CartEngine.getItem(pid);
+        if (item) ecom.CartEngine.updateQuantity(pid, item.quantity+delta);
+        _updateCartBadge();
+    } else {
+        const item = _state.cart.get(pid);
+        if (item) { item.qty = Math.max(1, item.qty+delta); _ls.save(_LS.CART, [..._state.cart.values()]); }
+    }
+    _renderCart();
+};
+
+window._jmCartRemove = function(pid) {
+    const ecom = window.EcomMarketplace;
+    if (ecom) ecom.CartEngine.remove(pid);
+    else { _state.cart.delete(pid); _ls.save(_LS.CART, [..._state.cart.values()]); }
+    _updateCartBadge();
+    _renderCart();
+};
+
+window._jmCheckout = function() {
+    // Trigger checkout panel if available, else show payment flow
+    if (typeof openCheckoutPanel === 'function') { openCheckoutPanel(); return; }
+    if (typeof window._ecomProceedToCheckout === 'function') { window._ecomProceedToCheckout(); return; }
+    _toast('Checkout coming soon', 'info', '🛒');
+};
+
+// ── WISHLIST PAGE ──────────────────────────────────────────────────────────
+function _renderWishlist() {
+    const container = document.getElementById('jmWishlistContent');
+    if (!container) return;
+
+    const ecom = window.EcomMarketplace;
+    const items = ecom ? ecom.WishlistEngine.getWishlist() : [];
+
+    const recentRow = _state.recent.length ? `
+        <div class="jm-section" style="margin-top:8px">
+            <div class="jm-section-header"><span>Recently Viewed</span><button class="jm-see-all" onclick="window._jmNav('recent')">See All</button></div>
+            <div class="jm-hscroll" id="jmWishRecentRow"></div>
+        </div>` : '';
+
+    if (!items.length) {
+        container.innerHTML = `
+            <div class="jm-empty-state">
+                <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">❤️</div>
+                <div class="jm-empty-title">You haven't saved an item yet!</div>
+                <div class="jm-empty-desc">Found something you like? Tap on the heart shaped icon next to the item to add it to your wishlist! All your saved items will appear here.</div>
+                <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
+            </div>
+            ${recentRow}`;
+    } else {
+        container.innerHTML = `<div class="jm-product-grid" id="jmWishGrid"></div>${recentRow}`;
+        _renderGrid(document.getElementById('jmWishGrid'), items);
+    }
+
+    setTimeout(() => { const r=document.getElementById('jmWishRecentRow'); if(r) _renderHScroll('jmWishRecentRow', _state.recent); }, 50);
+}
+
+// ── ACCOUNT PAGE ──────────────────────────────────────────────────────────
+function _renderAccount() {
+    const container = document.getElementById('jmAccountContent');
+    if (!container) return;
+
+    const user = window.currentUser || window.__kynUser || { displayName:'User', email:'', wallet:0 };
+    const name = user.displayName || user.username || 'User';
+    const email = user.email || '';
+    const wallet = user.walletBalance || 0;
+
+    container.innerHTML = `
+        <div class="jm-account-hero">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+                <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#f57224,#ff9a00);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:800;flex-shrink:0">
+                    ${_esc(name[0]?.toUpperCase()||'U')}
+                </div>
+                <div>
+                    <div class="jm-account-welcome">Welcome ${_esc(name)}!</div>
+                    <div class="jm-account-email">${_esc(email)}</div>
+                </div>
+            </div>
+            <div class="jm-account-balance">
+                <i class="fas fa-wallet" style="font-size:20px"></i>
+                Knecta balance: ${_fmt(wallet)}
+            </div>
+            <div class="jm-account-support-row">
+                <button class="jm-live-chat-btn" onclick="window._jmOpenSupport()">
+                    <i class="fas fa-comment"></i> Live Chat
+                </button>
+                <button class="jm-wa-btn" onclick="window._jmOpenWhatsApp()">
+                    <i class="fab fa-whatsapp"></i> WhatsApp
+                </button>
+            </div>
+        </div>
+
+        <div class="jm-account-section-label">Need Assistance?</div>
+        <div class="jm-account-menu-group">
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('inbox')">
+                <i class="fas fa-circle-info"></i><span>Help &amp; Support</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+        </div>
+
+        <div class="jm-account-section-label">My Knecta Account</div>
+        <div class="jm-account-menu-group">
+            <button class="jm-account-menu-item" onclick="window._jmNav('orders')">
+                <i class="fas fa-box"></i><span>Orders</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('inbox')">
+                <i class="fas fa-envelope"></i><span>Inbox</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('reviews-page')">
+                <i class="fas fa-star"></i><span>Ratings &amp; Reviews</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('vouchers')">
+                <i class="fas fa-ticket-alt"></i><span>Vouchers</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNav('wishlist')">
+                <i class="fas fa-heart"></i><span>Wishlist</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('follow-sellers')">
+                <i class="fas fa-store"></i><span>Follow Seller</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNav('recent')">
+                <i class="fas fa-history"></i><span>Recently Viewed</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+        </div>
+
+        <div class="jm-account-section-label">My Settings</div>
+        <div class="jm-account-menu-group">
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('addresses')">
+                <i class="fas fa-map-marker-alt"></i><span>Address Book</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('notifprefs')">
+                <i class="fas fa-bell"></i><span>Notification Preferences</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('analytics')">
+                <i class="fas fa-chart-bar"></i><span>Analytics</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('trust')">
+                <i class="fas fa-shield-alt"></i><span>Trust Stats</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+            <button class="jm-account-menu-item" onclick="window._jmNavMore('team')">
+                <i class="fas fa-users"></i><span>Team Management</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+            </button>
+        </div>
+
+        <button class="jm-account-logout" onclick="window._jmLogout()">
+            <i class="fas fa-sign-out-alt"></i><span>Log Out</span>
+        </button>`;
+}
+
+// ── ORDERS PAGE ────────────────────────────────────────────────────────────
+function _renderOrders() {
+    const container = document.getElementById('jmOrdersContent');
+    if (!container) return;
+
+    const ecom = window.EcomMarketplace;
+    let orders = ecom ? ecom.OrderEngine.getLocalOrders() : _state.orders;
+
+    // Tab switching
+    document.querySelectorAll('.jm-orders-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.jm-orders-tab').forEach(t=>t.classList.remove('active'));
+            tab.classList.add('active');
+            const filter = tab.dataset.tab;
+            const filtered = filter==='ongoing'
+                ? orders.filter(o=>!['cancelled','refunded'].includes(o.status))
+                : orders.filter(o=>['cancelled','refunded'].includes(o.status));
+            _renderOrderList(container, filtered);
+        });
+    });
+
+    // Notification promo row
+    const ongoingOrders = orders.filter(o=>!['cancelled','refunded'].includes(o.status));
+    _renderOrderList(container, ongoingOrders);
+}
+
+function _renderOrderList(container, orders) {
+    if (!orders.length) {
+        container.innerHTML = `<div class="jm-empty-state"><div class="jm-empty-icon">📦</div><div class="jm-empty-title">No orders found</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button></div>`;
+        return;
+    }
+
+    const notifBar = `<div class="jm-cat-group" style="margin:8px;border-radius:10px;cursor:pointer" onclick="window._jmNavMore('notifprefs')">
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px">
+            <div style="flex:1"><div style="font-weight:700;font-size:14px">Turn on system notifications</div><div style="font-size:12px;color:#6b7280;margin-top:4px">Stay up to date with order updates, shipment status and exclusive offers</div></div>
+            <div style="width:32px;height:32px;border-radius:50%;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-chevron-right"></i></div>
+        </div>
+    </div>`;
+
+    container.innerHTML = notifBar + orders.map(o => {
+        const items = o.items || [];
+        const firstItem = items[0] || {};
+        const img = firstItem.image || o.product?.images?.[0] || '';
+        const title = firstItem.title || o.product?.title || 'Order';
+        const ordNum = o.id?.slice(-9) || '';
+        const date = o.delivered_at || o.deliveredAt || o.created_at || o.createdAt;
+        const dateStr = date ? new Date(date).toLocaleDateString('en-KE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+        const statusClass = {delivered:'delivered',paid:'delivered',shipped:'shipped',pending:'pending',processing:'pending',cancelled:'cancelled',refunded:'cancelled'}[o.status] || 'pending';
+
+        return `<div class="jm-order-item" onclick="window._jmViewOrder('${o.id}')">
+            ${img ? `<img class="jm-order-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-order-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
+            <div class="jm-order-body">
+                <div class="jm-order-title">${_esc(title)}</div>
+                <div class="jm-order-num">Order #${_esc(ordNum)}</div>
+                <span class="jm-order-status ${statusClass}">${(o.status||'pending').toUpperCase()}</span>
+                ${dateStr?`<div class="jm-order-date">On ${dateStr}</div>`:''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+window._jmViewOrder = function(orderId) {
+    _toast('Order tracking coming soon', 'info', '📦');
+};
+
+// ── RECENTLY VIEWED PAGE ───────────────────────────────────────────────────
+function _renderRecent() {
+    const container = document.getElementById('jmRecentContent');
+    if (!container) return;
+    if (!_state.recent.length) {
+        container.innerHTML = `<div class="jm-empty-state" style="grid-column:1/-1"><div class="jm-empty-icon">🕐</div><div class="jm-empty-title">No recently viewed items</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button></div>`;
+        return;
+    }
+    _renderGrid(container, _state.recent);
+}
+
+// ── REVIEWS PAGE ───────────────────────────────────────────────────────────
+function _renderReviewsPage() {
+    const container = document.getElementById('jmReviewsContent');
+    if (!container) return;
+    const ecom = window.EcomMarketplace;
+    const orders = ecom ? ecom.OrderEngine.getLocalOrders().filter(o=>o.status==='delivered') : [];
+    if (!orders.length) {
+        container.innerHTML = `<div class="jm-empty-state"><div class="jm-empty-icon">⭐</div><div class="jm-empty-title">No orders to review yet</div><div class="jm-empty-desc">Complete orders to rate &amp; review products</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button></div>`;
+        return;
+    }
+    container.innerHTML = orders.map(o => {
+        const items = o.items||[];
+        return items.map(item => {
+            const img = item.image||'';
+            const date = o.delivered_at || o.deliveredAt || '';
+            const dateStr = date ? new Date(date).toLocaleDateString('en-KE') : '';
+            return `<div class="jm-review-item">
+                ${img ? `<img class="jm-review-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-review-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:500;margin-bottom:4px;line-height:1.3">${_esc(item.title||'')}</div>
+                    <div style="font-size:12px;color:#6b7280">Order No: ${o.id?.slice(-9)||''}</div>
+                    ${dateStr?`<div style="font-size:12px;font-weight:700;color:#22c55e;margin-top:4px">DELIVERED ON ${dateStr}</div>`:''}
+                </div>
+                <button class="jm-review-rate-btn" onclick="window._jmRateProduct('${item.product_id||''}','${o.id}')">Rate This Product</button>
+            </div>`;
+        }).join('');
+    }).join('');
+}
+
+window._jmRateProduct = function(productId, orderId) {
+    if (!productId) return;
+    if (typeof openWriteReviewPanel === 'function') { openWriteReviewPanel(productId); return; }
+    const rating = prompt('Rate this product (1-5):');
+    const r = parseInt(rating);
+    if (!r||r<1||r>5) return;
+    const text = prompt('Leave a comment (optional):') || '';
+    const ecom = window.EcomMarketplace;
+    if (ecom) ecom.ReviewEngine.submitReview({ productId, rating:r, text, order_id:orderId }).then(res => {
+        _toast(res.success ? 'Review submitted! Thank you.' : (res.message||'Failed'), res.success?'success':'error', res.success?'⭐':'❌');
+    });
+};
+
+// ── VOUCHERS PAGE ──────────────────────────────────────────────────────────
+function _renderVouchers() {
+    const container = document.getElementById('jmVouchersContent');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="jm-empty-state">
+            <div class="jm-empty-icon" style="background:none;box-shadow:none;font-size:52px">🎟️</div>
+            <div class="jm-empty-title">You currently have no available Vouchers</div>
+            <div class="jm-empty-desc">All your available Knecta Vouchers will be displayed here</div>
+            <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
+        </div>
+        <div class="jm-section">
+            <div class="jm-section-header"><span>Recommended for you</span><button class="jm-see-all" onclick="window._jmNav('home')">See All</button></div>
+            <div class="jm-hscroll" id="jmVoucherRecRow"></div>
+        </div>
+        <div class="jm-section">
+            <div class="jm-section-header"><span>Recently Viewed</span><button class="jm-see-all" onclick="window._jmNav('recent')">See All</button></div>
+            <div class="jm-hscroll" id="jmVoucherRecentRow"></div>
+        </div>`;
+    setTimeout(() => {
+        const ecom = window.EcomMarketplace;
+        const recs = ecom ? ecom.ProductEngine.getTrending().slice(0,6) : [];
+        _renderHScroll('jmVoucherRecRow', recs);
+        _renderHScroll('jmVoucherRecentRow', _state.recent);
+    }, 50);
+}
+
+// ── INBOX PAGE ─────────────────────────────────────────────────────────────
+function _renderInbox() {
+    const container = document.getElementById('jmInboxContent');
+    if (!container) return;
+    container.innerHTML = `<div class="jm-empty-state">
+        <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">✉️</div>
+        <div class="jm-empty-title">You don't have any messages</div>
+        <div class="jm-empty-desc">Here you will be able to see all the messages that we send you. Stay tuned</div>
+    </div>`;
+}
+
+// ── FOLLOW SELLERS PAGE ────────────────────────────────────────────────────
+function _renderFollowSellers() {
+    const container = document.getElementById('jmFollowSellersContent');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="jm-empty-state">
+            <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">🏪</div>
+            <div class="jm-empty-title">You don't follow any seller!</div>
+            <div class="jm-empty-desc">All your followed sellers will be displayed here</div>
+            <button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button>
+        </div>
+        <div style="background:#f3f4f6;padding:10px 16px;font-size:12px;color:#6b7280;font-weight:600">Suggested sellers for you</div>
+        <div id="jmSuggestedSellers"></div>`;
+
+    // Load suggested sellers from listings
+    const ecom = window.EcomMarketplace;
+    const listings = ecom ? ecom.ProductEngine.getAllProducts().slice(0,6) : (window.currentListings||[]).slice(0,6);
+    const sellers = {};
+    listings.forEach(l => {
+        const sid = l.seller_id||l.sellerId||l.userId;
+        if (sid && !sellers[sid]) sellers[sid] = { id:sid, name:l.seller?.name||l.user?.displayName||'Seller', products:[l], followers:Math.floor(Math.random()*2000)+100, score:Math.floor(Math.random()*30)+70 };
+        else if (sid) sellers[sid].products.push(l);
+    });
+    const suggestEl = document.getElementById('jmSuggestedSellers');
+    if (suggestEl) {
+        suggestEl.innerHTML = Object.values(sellers).slice(0,3).map(s => `
+            <div class="jm-seller-item">
+                <div class="jm-seller-header">
+                    <div class="jm-seller-icon">🏪</div>
+                    <div><div class="jm-seller-name">${_esc(s.name)}</div><div class="jm-seller-score">${s.score}% Seller Score &bull; ${s.followers.toLocaleString()} Followers</div></div>
+                    <i class="fas fa-chevron-right jm-seller-chevron"></i>
+                </div>
+                <button class="jm-follow-btn" onclick="window._jmFollowSeller('${s.id}',this)">Follow</button>
+                <div class="jm-seller-products">
+                    ${s.products.slice(0,2).map(p=>_img(p)?`<img class="jm-seller-product-thumb" src="${_esc(_img(p))}" loading="lazy">`:`<div class="jm-seller-product-thumb" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:22px">🛒</div>`).join('')}
+                    ${s.products.length>2?`<div class="jm-seller-see-all">SEE ALL</div>`:''}
+                </div>
+            </div>`).join('');
+    }
+}
+
+window._jmFollowSeller = function(sellerId, btn) {
+    const following = btn.classList.toggle('following');
+    btn.textContent = following ? 'Following' : 'Follow';
+    _toast(following ? 'Following seller' : 'Unfollowed', 'success', following?'🏪':'👋');
+};
+
+// ── ADDRESSES PAGE ─────────────────────────────────────────────────────────
+function _renderAddresses() {
+    const container = document.getElementById('jmAddressContent');
+    if (!container) return;
+    const addrs = _state.addresses.length ? _state.addresses : _ls.load(_LS.ADDRS, []);
+    _state.addresses = addrs;
+    if (!addrs.length) {
+        container.innerHTML = `<div style="padding:24px;text-align:center;color:#6b7280">No saved addresses.<br>Add one below.</div>`;
+        return;
+    }
+    container.innerHTML = `<div style="font-size:16px;font-weight:700;padding:14px 16px">Address book (${addrs.length})</div>` +
+        addrs.map((a,i) => `<div class="jm-address-item">
+            <div class="jm-address-name">${_esc(a.name)}</div>
+            <div class="jm-address-detail">${_esc(a.type||'pick up')}</div>
+            <div class="jm-address-detail">${_esc(a.city||'')}</div>
+            <div class="jm-address-detail">${_esc(a.area||'')}</div>
+            <div class="jm-address-phone">${_esc(a.phone||'')}</div>
+            ${i===0?`<div class="jm-address-default"><i class="fas fa-check-circle"></i> Default Address</div>`:''}
+            <div class="jm-address-actions">
+                <button class="jm-address-set-default" onclick="window._jmSetDefaultAddr(${i})">Set As Default</button>
+                <button class="jm-address-edit" onclick="window._jmEditAddr(${i})"><i class="fas fa-pencil-alt"></i></button>
+            </div>
+        </div>`).join('');
+}
+
+window._jmAddAddress = function() {
+    const name  = prompt('Full name:');
+    if (!name?.trim()) return;
+    const phone = prompt('Phone (07XXXXXXXX):') || '';
+    const city  = prompt('City:') || '';
+    const area  = prompt('Area/Street:') || '';
+    const type  = prompt('Type (pick up/delivery):') || 'pick up';
+    const addr  = { name:name.trim(), phone, city, area, type };
+    _state.addresses.push(addr);
+    _ls.save(_LS.ADDRS, _state.addresses);
+    _renderAddresses();
+    _toast('Address saved', 'success', '📍');
+};
+
+window._jmSetDefaultAddr = function(idx) {
+    const addr = _state.addresses.splice(idx,1)[0];
+    _state.addresses.unshift(addr);
+    _ls.save(_LS.ADDRS, _state.addresses);
+    _renderAddresses();
+};
+
+window._jmEditAddr = function(idx) {
+    const a = _state.addresses[idx];
+    const name = prompt('Full name:', a.name) || a.name;
+    const phone = prompt('Phone:', a.phone) || a.phone;
+    const city  = prompt('City:', a.city) || a.city;
+    const area  = prompt('Area:', a.area) || a.area;
+    _state.addresses[idx] = { ...a, name, phone, city, area };
+    _ls.save(_LS.ADDRS, _state.addresses);
+    _renderAddresses();
+};
+
+// ── PRODUCT GRID (shared) ──────────────────────────────────────────────────
+function _renderGrid(container, listings) {
+    if (!container) return;
+    if (!listings?.length) {
+        container.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:#9ca3af"><div style="font-size:40px;margin-bottom:12px">🔍</div><div>No products found</div></div>`;
+        return;
+    }
+    container.innerHTML = '';
+    listings.forEach((listing, idx) => {
+        setTimeout(() => {
+            if (typeof renderers !== 'undefined' && renderers.addListingItem) {
+                // Temporarily override DOM reference if needed
+                const orig = DOM.marketplaceListContent;
+                DOM.marketplaceListContent = container;
+                if (renderers && renderers.addListingItem) renderers.addListingItem(listing);
+                DOM.marketplaceListContent = orig;
+            }
+        }, idx * 15);
+    });
+}
+
+// ── LOCAL CART FALLBACK ────────────────────────────────────────────────────
+function _buildLocalCart() {
+    const items = [..._state.cart.values()].map(i => ({ product: i.listing, quantity: i.qty||1 }));
+    const subtotal = items.reduce((s,i) => s + (_price(i.product)*i.quantity), 0);
+    return { items, count: items.reduce((s,i)=>s+i.quantity,0), subtotal, total: subtotal, delivery: 0, discount: 0 };
+}
+
+// ── SEARCH ──────────────────────────────────────────────────────────────────
+function _initSearch() {
+    const input   = document.getElementById('jmSearchInput');
+    const clear   = document.getElementById('jmSearchClear');
+    const sugEl   = document.getElementById('jmSuggestions');
+    if (!input) return;
+
+    let _timer;
+    const _recentSearches = _ls.load('jm_recent_searches', []);
+
+    input.addEventListener('focus', () => {
+        if (!input.value && _recentSearches.length) {
+            sugEl.innerHTML = '<div style="padding:8px 14px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase">Recent Searches</div>' +
+                _recentSearches.slice(0,5).map(q=>`<div class="jm-suggestion-item" data-q="${_esc(q)}"><i class="fas fa-history"></i>${_esc(q)}</div>`).join('');
+            sugEl.style.display = 'block';
+        }
+    });
+
+    input.addEventListener('input', () => {
+        const q = input.value.trim();
+        clear.style.display = q ? 'flex' : 'none';
+        clearTimeout(_timer);
+        if (!q) { sugEl.style.display='none'; return; }
+        _timer = setTimeout(() => {
+            const ecom = window.EcomMarketplace;
+            const results = ecom ? ecom.ProductEngine.search(q).slice(0,8) : (window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase())).slice(0,8);
+            // Trending searches
+            const trendingTerms = ['phones','laptops','fashion','electronics','supermarket','beauty'];
+            const trending = trendingTerms.filter(t=>t.includes(q.toLowerCase())||q.toLowerCase().includes(t));
+            sugEl.innerHTML = (trending.length ? `<div style="padding:8px 14px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase">Trending</div>` + trending.slice(0,3).map(t=>`<div class="jm-suggestion-item" data-q="${_esc(t)}"><i class="fas fa-fire" style="color:#f57224"></i>${_esc(t)}</div>`).join('') : '') +
+                (results.length ? `<div style="padding:8px 14px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase">Products</div>` + results.map(r=>`<div class="jm-suggestion-item" data-id="${r.id}"><i class="fas fa-search"></i>${_esc(r.title||'')}</div>`).join('') : '');
+            sugEl.style.display = sugEl.innerHTML ? 'block' : 'none';
+        }, 200);
+    });
+
+    sugEl.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-q],[data-id]');
+        if (!item) return;
+        if (item.dataset.id) {
+            const ecom = window.EcomMarketplace;
+            const p = ecom?.ProductEngine.getStore().products.get(item.dataset.id);
+            if (p) renderers.viewListingDetail(p);
+        } else if (item.dataset.q) {
+            input.value = item.dataset.q;
+            _doSearch(item.dataset.q);
+        }
+        sugEl.style.display = 'none';
+    });
+
+    clear.addEventListener('click', () => { input.value=''; clear.style.display='none'; sugEl.style.display='none'; _doSearch(''); });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { _doSearch(input.value.trim()); sugEl.style.display='none'; }
+        if (e.key === 'Escape') sugEl.style.display='none';
+    });
+
+    document.addEventListener('click', (e) => { if (!e.target.closest('#jmSearchWrap,#jmSuggestions')) sugEl.style.display='none'; });
+}
+
+function _doSearch(q) {
+    _state.search = q;
+    if (!q) { _nav('home'); return; }
+    // Save recent search
+    const searches = _ls.load('jm_recent_searches', []);
+    if (!searches.includes(q)) { searches.unshift(q); _ls.save('jm_recent_searches', searches.slice(0,10)); }
+
+    // Navigate to products page with search
+    const productsPage = document.getElementById('jmPageProducts');
+    if (productsPage) {
+        document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
+        document.querySelectorAll('.jm-nav-tab').forEach(t=>t.classList.remove('active'));
+        productsPage.classList.add('active');
+        const title = document.getElementById('jmProductsTitle');
+        if (title) title.textContent = `← Results: "${q}"`;
+        const ecom = window.EcomMarketplace;
+        const results = ecom ? ecom.ProductEngine.search(q) : (window.currentListings||[]).filter(l=>l.title?.toLowerCase().includes(q.toLowerCase()));
+        _renderGrid(document.getElementById('jmProductsContent'), results);
+        const backBtn = document.getElementById('jmBackBtn');
+        if (backBtn) backBtn.style.display='flex';
+    }
+}
+
+// ── SORT CHIPS ─────────────────────────────────────────────────────────────
+function _initSortChips() {
+    document.getElementById('jmFilterChips')?.addEventListener('click', (e) => {
+        const chip = e.target.closest('.jm-chip');
+        if (!chip) return;
+        document.querySelectorAll('.jm-chip').forEach(c=>c.classList.remove('active'));
+        chip.classList.add('active');
+        _state.sort = chip.dataset.sort;
+        const ecom = window.EcomMarketplace;
+        if (ecom) {
+            const sorted = ecom.ProductEngine.search(_state.search, { sort:_state.sort });
+            const grid = document.getElementById('marketplaceListContent');
+            if (grid) { grid.innerHTML=''; sorted.forEach((p,i)=>setTimeout(()=>renderers.addListingItem(p),i*15)); }
+            const countEl = document.getElementById('jmProductCount');
+            if (countEl) countEl.textContent = `(${sorted.length})`;
+        }
+    });
+}
+
+// ── SUPPORT ACTIONS ────────────────────────────────────────────────────────
+window._jmOpenSupport = function() {
+    if (typeof openChat === 'function') { openChat('support','Support'); return; }
+    _toast('Opening support chat…', 'info', '💬');
+};
+window._jmOpenWhatsApp = function() {
+    window.open('https://wa.me/254700000000?text=Hi%2C%20I%20need%20help%20with%20my%20order', '_blank');
+};
+window._jmLogout = function() {
+    if (confirm('Are you sure you want to log out?')) {
+        try { window.parent.postMessage({ type:'LOGOUT' }, '*'); } catch(_) {}
+        _toast('Logging out…', 'info', '👋');
+    }
+};
+window._jmRequestNotifPermission = function() {
+    if ('Notification' in window) {
+        Notification.requestPermission().then(perm => {
+            _toast(perm==='granted' ? 'Notifications enabled!' : 'Notifications blocked', perm==='granted'?'success':'error', perm==='granted'?'🔔':'🔕');
+        });
+    }
+};
+
+// ── REALTIME SYNC ──────────────────────────────────────────────────────────
+function _initRealtimeBridge() {
+    // Cart updates from EcomMarketplace
+    window.addEventListener('ecom:cart-updated', () => {
+        _updateCartBadge();
+        if (_state.page === 'cart') _renderCart();
+    });
+
+    // Wishlist updates
+    window.addEventListener('ecom:wishlist-updated', () => {
+        _updateWishlistBadge();
+        if (_state.page === 'wishlist') _renderWishlist();
+    });
+
+    // Order status
+    window.addEventListener('ecom:order-status-changed', () => {
+        if (_state.page === 'orders') _renderOrders();
+    });
+
+    // Stock changes — update card buttons
+    window.addEventListener('ecom:stock-updated', (e) => {
+        const { productId, quantity } = e.detail || {};
+        document.querySelectorAll(`.jm-card[data-listing-id="${productId}"] .jm-add-cart-btn`).forEach(btn => {
+            if (quantity <= 0) { btn.textContent='Out of Stock'; btn.disabled=true; btn.classList.remove('in-cart'); }
+        });
+    });
+
+    // Products loaded — update count
+    window.addEventListener('ecom:products-loaded', () => {
+        const grid = document.getElementById('marketplaceListContent');
+        const countEl = document.getElementById('jmProductCount');
+        if (grid && countEl) countEl.textContent = `(${grid.querySelectorAll('.jm-card').length})`;
+    });
+
+    // Notification push — show toast
+    window.addEventListener('ecom:notification-push', (e) => {
+        const n = e.detail?.notification;
+        if (!n) return;
+        const icons = { order_placed:'🎉', new_order:'🛍', delivery_update:'🚚', new_message:'💬', payment:'✅', order_status:'📦' };
+        _toast(n.message, 'info', icons[n.type]||'ℹ️');
+        // Notify parent for nav dot
+        try { window.parent.postMessage({ type:'ECOM_NOTIFICATION_PUSH', payload:n }, '*'); } catch(_) {}
+    });
+}
+
+// ── BACK BUTTON ───────────────────────────────────────────────────────────
+function _initBackButton() {
+    document.getElementById('jmBackBtn')?.addEventListener('click', () => _nav('home'));
+}
+
+// ── INITIALISE ─────────────────────────────────────────────────────────────
+function _init() {
+    if (_state.initialized) return;
+    _state.initialized = true;
+
+    // Restore from localStorage
+    _state.recent = _ls.load(_LS.RECENT, []);
+
+    _initSearch();
+    _initSortChips();
+    _initBackButton();
+    _initRealtimeBridge();
+
+    // Render home sections if ecom is ready
+    if (window.EcomMarketplace) {
+        _renderHome();
+    } else {
+        window.addEventListener('ecom:ready', _renderHome, { once:true });
+    }
+
+    // Update badges
+    _updateCartBadge();
+    _updateWishlistBadge();
+}
+
+// Boot when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _init);
+} else {
+    setTimeout(_init, 200);
+}
+
+// Also re-init when marketplace tab becomes active (iframe message)
+window.addEventListener('message', (e) => {
+    if (e.data?.type === 'tools:active' || e.data?.type === 'PARENT_READY') {
+        if (!_state.initialized) _init();
+        else { _updateCartBadge(); _updateWishlistBadge(); _renderHome(); }
+    }
+});
+
+})(); // end _JumiaMPEngine
+
+// ═══════════════════════════════════════════════════════════════════════════
+// JUMIA ENGINE FIXES v2.1
+// - Back button works on every page (notifies parent for header nav sync)
+// - Page changes notify parent (chat.html header nav active state)
+// - Create listing FAB (basket icon) opens modal
+// - _jmNav patched to notify parent of page change
+// - Products from existing listings fed into Jumia home grid
+// ═══════════════════════════════════════════════════════════════════════════
+(function _JumiaFixes() {
+    'use strict';
+
+    // ── Wait for Jumia engine to be ready ──────────────────────────────────
+    function _onReady(fn) {
+        if (typeof window._jmNav === 'function') { fn(); return; }
+        var t = setInterval(function() {
+            if (typeof window._jmNav === 'function') { clearInterval(t); fn(); }
+        }, 100);
+    }
+
+    // ── 1. Notify parent (chat.html) of Jumia page changes ────────────────
+    function _notifyParentPage(page) {
+        try {
+            window.parent.postMessage({ type: 'JM_PAGE_CHANGE', payload: { page: page } }, '*');
+        } catch(_) {}
+    }
+
+    // ── 2. Patch _jmNav to notify parent + update back button visibility ──
+    _onReady(function() {
+        var _origNav = window._jmNav;
+        window._jmNav = function(page, subpage) {
+            _origNav(page, subpage);
+            _notifyParentPage(page);
+            // Show back button on non-home pages inside iframe header
+            var backBtn = document.getElementById('jmBackBtn');
+            if (backBtn) backBtn.style.display = page === 'home' ? 'none' : 'flex';
+        };
+    });
+
+    // ── 3. Back button handler ─────────────────────────────────────────────
+    window._jmBackPressed = function() {
+        var currentPage = window._jmState?.page || 'home';
+        if (currentPage === 'home') {
+            // Already on home — notify parent to go back to previous app page
+            try { window.parent.postMessage({ type: 'JM_BACK', payload: {} }, '*'); } catch(_) {}
+        } else {
+            // Go back to home within marketplace
+            window._jmNav && window._jmNav('home');
+        }
+    };
+
+    // ── 4. Create listing FAB / basket icon ───────────────────────────────
+    window._jmOpenCreateListing = function() {
+        // Hide more sheet if open
+        window._jmHideMore && window._jmHideMore();
+        // Try the existing showCreateListingModal from Tool-ui.js
+        if (typeof showCreateListingModal === 'function') {
+            showCreateListingModal();
+            return;
+        }
+        // Fallback: click the hidden createListingBtn or createListingQuickBtn
+        var btn = document.getElementById('createListingBtn') || document.getElementById('createListingQuickBtn');
+        if (btn) { btn.click(); return; }
+        // Last resort: postMessage to parent
+        try { window.parent.postMessage({ type: 'JM_CREATE_LISTING', payload: {} }, '*'); } catch(_) {}
+    };
+
+    // ── 5. Listen for JM_NAV messages from parent (header nav clicks) ─────
+    window.addEventListener('message', function(e) {
+        if (!e.data || typeof e.data !== 'object') return;
+        if (e.data.type === 'JM_NAV' && e.data.payload?.page) {
+            window._jmNav && window._jmNav(e.data.payload.page);
+        }
+    });
+
+    // ── 6. Feed existing listings into Jumia home grid when data arrives ──
+    window.addEventListener('marketplace:data-updated', function(e) {
+        var listings = e.detail?.listings || [];
+        if (!listings.length) return;
+
+        // Only render if we're on the home page
+        var grid = document.getElementById('marketplaceListContent');
+        if (!grid) return;
+
+        // Count existing cards
+        var existingCount = grid.querySelectorAll('.jm-card').length;
+        if (existingCount >= listings.length) return; // already rendered
+
+        // Stagger render to avoid blocking
+        var toAdd = listings.filter(function(l) {
+            return !grid.querySelector('[data-listing-id="' + l.id + '"]');
+        });
+
+        toAdd.forEach(function(listing, idx) {
+            setTimeout(function() {
+                if (renderers && renderers.addListingItem) renderers.addListingItem(listing);
+            }, idx * 25);
+        });
+
+        // Update count after render
+        setTimeout(function() {
+            var countEl = document.getElementById('jmProductCount');
+            if (countEl) countEl.textContent = '(' + grid.querySelectorAll('.jm-card').length + ')';
+        }, toAdd.length * 25 + 200);
+    });
+
+    // ── 7. Wire filter chips to existing UIPipeline filter ────────────────
+    _onReady(function() {
+        // Already wired in _JumiaMPEngine; also hook into UIPipeline tab system
+        document.getElementById('allTab')     && document.getElementById('allTab').addEventListener('click', function() {
+            if (typeof UIPipeline !== 'undefined') UIPipeline.liveUpdate();
+        });
+    });
+
+    // ── 8. Expose _jmState reference so back button can read current page ─
+    _onReady(function() {
+        // The _JumiaMPEngine uses _state internally; expose a getter
+        window._jmState = new Proxy({}, {
+            get: function(_, prop) {
+                // Try to infer page from active jm-page element
+                if (prop === 'page') {
+                    var active = document.querySelector('.jm-page.active');
+                    if (!active) return 'home';
+                    var id = active.id || '';
+                    return id.replace('jmPage', '').toLowerCase() || 'home';
+                }
+                return undefined;
+            }
+        });
+    });
+
+    // ── 9. Fix "Not implemented" pages — show proper empty states ─────────
+    _onReady(function() {
+        // Analytics → open existing analytics panel (viewAnalyticsBtn)
+        var origNavMore = window._jmNavMore;
+        window._jmNavMore = function(page) {
+            if (page === 'analytics') {
+                window._jmHideMore && window._jmHideMore();
+                var btn = document.getElementById('viewAnalyticsBtn');
+                if (btn) { btn.click(); return; }
+            }
+            if (page === 'notes') {
+                window._jmHideMore && window._jmHideMore();
+                var btn2 = document.getElementById('viewNotesBtn');
+                if (btn2) { btn2.click(); return; }
+            }
+            if (page === 'trust') {
+                window._jmHideMore && window._jmHideMore();
+                var btn3 = document.getElementById('viewTrustStatsBtn');
+                if (btn3) { btn3.click(); return; }
+            }
+            if (page === 'team') {
+                window._jmHideMore && window._jmHideMore();
+                var btn4 = document.getElementById('viewTeamBtn');
+                if (btn4) { btn4.click(); return; }
+            }
+            if (page === 'leaderboard') {
+                window._jmHideMore && window._jmHideMore();
+                var btn5 = document.getElementById('viewLeaderboardBtn');
+                if (btn5) { btn5.click(); return; }
+            }
+            if (origNavMore) origNavMore(page);
+        };
+    });
+
+    // ── 10. Fix back button on category content panel ─────────────────────
+    // When user is in a subcategory, clicking back should go to categories page
+    document.addEventListener('click', function(e) {
+        var backBtn = e.target.closest('#jmBackBtn');
+        if (!backBtn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        window._jmBackPressed && window._jmBackPressed();
+    }, true);
+
+    // ── 11. On first load, show Sell FAB only on home page ────────────────
+    _onReady(function() {
+        var sellFab = document.getElementById('jmSellFab');
+        if (!sellFab) return;
+        // Show/hide FAB based on current page
+        document.addEventListener('click', function() {
+            setTimeout(function() {
+                var currentPage = window._jmState?.page || 'home';
+                if (sellFab) sellFab.style.display = currentPage === 'home' ? 'flex' : 'none';
+            }, 50);
+        });
+    });
+
+})(); // end _JumiaFixes

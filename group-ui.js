@@ -1612,7 +1612,7 @@ export function setupLiveUpdates() {
         if (typeof updateGroupCounts === 'function') updateGroupCounts();
     });
 
-    // Live member count update when someone joins
+    // Live member count badge update
     window.addEventListener('kyn:memberJoined', (e) => {
         const { groupId, newCount } = e.detail || {};
         if (!groupId) return;
@@ -2057,14 +2057,11 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         const description = sanitizeInput(groupData.description || groupData.subtitle || '');
         const avatar = validateURL(groupData.avatar) || groupData.avatar || null;
         const memberCount = Math.max(
-            // creator is always inside the group — minimum 1
             (typeof groupData.createdBy !== 'undefined' ? 1 : 0),
             parseInt(groupData.memberCount) ||
             parseInt(groupData.member_count) ||
             parseInt(groupData.stats && groupData.stats.totalMembers) ||
-            parseInt(groupData.stats && groupData.stats.memberCount) ||
-            parseInt(groupData._count && groupData._count.members) ||
-            parseInt(groupData.membersCount) || 0
+            parseInt(groupData._count && groupData._count.members) || 0
         );
         const privacy = sanitizeInput(groupData.privacy || groupData.type || 'private');
         const purpose = sanitizeInput(groupData.purpose || 'social');
@@ -2133,13 +2130,13 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
                 </button>
             `;
         } else {
-            /* Open button on EVERY group card */
             html += `
                 <button class="group-action-btn chat" data-action="open-chat" title="Open Group Chat" aria-label="Open Chat"
-                    style="background:var(--primary-color,#0084ff);color:#fff;border-radius:8px;padding:6px 12px;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;border:none;cursor:pointer;">
+                    style="background:var(--primary-color,#0084ff);color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;border:none;cursor:pointer;display:flex;align-items:center;gap:5px;">
                     <i class="fas fa-door-open"></i> Open
                 </button>
             `;
+            
             if (safeType === 'my_group' || safeType === 'admin') {
                 html += `
                     <button class="group-action-btn" data-action="manage" title="Manage Group" aria-label="Manage Group">
@@ -2147,6 +2144,7 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
                     </button>
                 `;
             }
+            
             if (safeType === 'joined') {
                 html += `
                     <button class="group-action-btn danger" data-action="leave" title="Leave Group" aria-label="Leave Group">
@@ -2160,16 +2158,11 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         
         groupItem.innerHTML = html;
         
-        /* Clicking the card body opens the group chat panel directly */
         registerUIEventListener(groupItem, 'click', (e) => {
             if (e.target.closest('.group-actions')) return;
-            // Open the group panel (runtime patch's openPanel or core's openGroupChat)
             const openFn = window.__gcOpenPanel || window.openGroupChat;
-            if (typeof openFn === 'function') {
-                openFn(groupData);
-            } else if (typeof showGroupDetails === 'function') {
-                showGroupDetails(groupData, safeType);
-            }
+            if (typeof openFn === 'function') openFn(groupData);
+            else if (typeof showGroupDetails === 'function') showGroupDetails(groupData, safeType);
         });
         registerUIEventListener(groupItem, 'keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -2186,7 +2179,6 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
                 e.stopPropagation();
                 const action = btn.dataset.action;
                 if (action === 'open-chat') {
-                    // Prefer the runtime patch openPanel over core's openGroupChat
                     const openFn = window.__gcOpenPanel || window.openGroupChat;
                     if (typeof openFn === 'function') { openFn(groupData); return; }
                 }
@@ -2599,7 +2591,6 @@ function _hydrateFromStore() {
         const storeAdmin  = store.get('groups.adminGroups') || [];
         const storeInvites= store.get('groups.invites')     || [];
 
-        // Always overwrite GroupCore when store has fresher data
         if (GroupCore && storeGroups.length > 0) {
             GroupCore.groups       = storeGroups;
             GroupCore.myGroups     = storeMy.length   > 0 ? storeMy    : GroupCore.myGroups;
@@ -2685,9 +2676,6 @@ function _hideOfflineBanner() {
  * Re-render the active section from current GroupCore state (called after
  * KynectaStore pushes updated data into GroupCore arrays).
  */
-/**
- * _fetchTabData — fetch fresh server data per tab and re-render
- */
 async function _fetchTabData(section) {
     if (!navigator.onLine) return;
     const GC = window.GroupCore;
@@ -2705,13 +2693,10 @@ async function _fetchTabData(section) {
     } catch(e) {}
 }
 
-/**
- * _fetchInvites — fetch pending invitations and render cards
- */
 async function _fetchInvites() {
     const listEl = document.getElementById('invitesList') || document.getElementById('inviteBody');
     if (!listEl) return;
-    listEl.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading invites…</p></div>';
+    listEl.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading invites...</p></div>';
     try {
         const tok = (window.KynectaStore && window.KynectaStore.get && window.KynectaStore.get('auth.token')) ||
                     localStorage.getItem('token') || localStorage.getItem('authToken') || '';
@@ -2731,7 +2716,7 @@ async function _fetchInvites() {
         if (badge) badge.textContent = invites.length;
         invites.forEach(inv => {
             const gname   = (inv.group && inv.group.name) || inv.groupName || 'Group';
-            const gavatar = (gname).split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+            const gavatar = gname.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
             const inviter = (inv.inviter && (inv.inviter.displayName || inv.inviter.firstName || inv.inviter.username)) || inv.inviterName || 'Someone';
             const card = document.createElement('div');
             card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:12px;margin-bottom:10px;';
@@ -2746,7 +2731,7 @@ async function _fetchInvites() {
                   '<button class="inv-reject" data-id="' + inv.id + '" style="padding:7px 14px;border-radius:20px;background:rgba(128,128,128,.15);color:var(--text-secondary);border:none;cursor:pointer;font-size:13px;">Decline</button>' +
                 '</div>';
             card.querySelector('.inv-accept').addEventListener('click', async function() {
-                const btn = this; btn.disabled = true; btn.textContent = '…';
+                const btn = this; btn.disabled = true; btn.textContent = '...';
                 try {
                     const r2 = await fetch(BASE + '/group-members/invitations/' + btn.dataset.id + '/accept', {
                         method: 'POST', headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
@@ -2757,11 +2742,11 @@ async function _fetchInvites() {
                         if (typeof showNotification === 'function') showNotification('Invitation accepted!', 'success');
                         const GC2 = window.GroupCore;
                         if (GC2 && typeof GC2.requestGroupList === 'function') GC2.requestGroupList().catch(() => {});
-                    } else { btn.disabled = false; btn.textContent = 'Accept'; if (typeof showNotification === 'function') showNotification(d2.message || 'Failed', 'error'); }
+                    } else { btn.disabled = false; btn.textContent = 'Accept'; }
                 } catch(e) { btn.disabled = false; btn.textContent = 'Accept'; }
             });
             card.querySelector('.inv-reject').addEventListener('click', async function() {
-                const btn = this; btn.disabled = true; btn.textContent = '…';
+                const btn = this; btn.disabled = true; btn.textContent = '...';
                 try {
                     await fetch(BASE + '/group-members/invitations/' + btn.dataset.id + '/reject', {
                         method: 'POST', headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }

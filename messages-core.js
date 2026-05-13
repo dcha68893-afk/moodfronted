@@ -2625,22 +2625,23 @@ try {
                 return;
             }
 
-            // FIXED: Capture any realtime messages already stored for this chat
-            // before setMessages clears them. After server fetch we merge them back.
-            const _sid_str = String(conversationId || '');
-            const _preFetchedRealtime = (this._messages || []).filter(function(m) {
-                return String(m.chatId || m.conversationId || '') === _sid_str && !m.isLocalOnly;
-            });
-
             const fetchKey = String(conversationId);
             const now = Date.now();
             const forceFetch = options.force === true;
-            const minFetchGap = typeof options.minFetchGap === 'number' ? options.minFetchGap : 8000;
+            // FIXED: first open (lastFetchAt=0) always fetches immediately.
+            // Subsequent calls throttled to 5s (down from 8s) for responsiveness.
+            const minFetchGap = typeof options.minFetchGap === 'number' ? options.minFetchGap : 5000;
             const lastFetchAt = this._lastMessagesFetchAt.get(fetchKey) || 0;
-            if (!forceFetch && now - lastFetchAt < minFetchGap) {
+            if (!forceFetch && lastFetchAt > 0 && now - lastFetchAt < minFetchGap) {
                 return;
             }
             this._lastMessagesFetchAt.set(fetchKey, now);
+
+            // FIXED: Preserve realtime messages that arrived before this chat was opened.
+            // fetchMessages → setMessages clears _messages, losing them.
+            const _rtPreserve = (this._messages || []).filter(function(m) {
+                return String(m.chatId || m.conversationId || '') === String(conversationId) && !m.isLocalOnly;
+            });
 
             if (window.KynectaLocalStore) {
                 try {
@@ -2699,20 +2700,20 @@ try {
                     });
 
                     this.setMessages(hydratedMessages, conversationId);
-
-                    // FIXED: Merge realtime messages that arrived before chat was opened
-                    if (_preFetchedRealtime && _preFetchedRealtime.length > 0) {
-                        const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
-                        for (const _pm of _preFetchedRealtime) {
-                            const _pmId = String(_pm.id || _pm.serverId || '');
+                    // FIXED: Merge back realtime messages that arrived before chat open
+                    if (_rtPreserve && _rtPreserve.length > 0) {
+                        const _tsF2 = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        for (const _pm of _rtPreserve) {
+                            const _pmId = String(_pm.serverId || _pm.id || '');
                             if (_pmId && !this._messagesMap.has(_pmId)) {
                                 this._messages.push(_pm);
                                 this._messagesMap.set(_pmId, _pm);
+                                // Also save to IDB so it persists
+                                if (window.KynectaLocalStore) window.KynectaLocalStore.saveMessage(_pm).catch(()=>{});
                             }
                         }
-                        this._messages.sort(function(a, b) { return _tsF(a) - _tsF(b); });
+                        this._messages.sort(function(a, b) { return _tsF2(a) - _tsF2(b); });
                     }
-
                     this._notifySuccess('Messages loaded');
                     return;
                 }
@@ -2735,7 +2736,6 @@ try {
                     messagesArray = response.data;
                 }
 
-                // FIXED: Note _preFetchedRealtime for merge after API load
                 if (messagesArray.length > 0) {
                     const normalizedMessages = messagesArray.map(msg => ({
                         id: msg.id,
@@ -2867,8 +2867,6 @@ try {
             ensureSafeArray(conversations).forEach(chat => {
                 if (!chat || !chat.id) return;
                 if (_deleted.has(String(chat.id))) return;
-                // FIX: Also check numeric id variants
-                if (_deleted.has(String(parseInt(chat.id, 10)))) return;
                 
                 let friendId = getConversationPeerId(chat, currentUserId);
                 
@@ -5930,34 +5928,17 @@ try {
                 // ✅ FIX: data may be the raw payload (from wsService.on) or a wrapper
                 // { payload:{...}, source:'ws-bridge' } (from postMessage bridge).
                 // Unwrap one level if needed, then fall back to data itself.
-                // FIXED: Multi-level unwrap handles every wrapping convention the bridge uses.
-                // chat.html ws-bridge wraps as { type, payload:{...}, source }
-                // KynectaRealtime fires raw payload directly
-                // Backend may send { data:{...} } or flat object
-                let message = data;
-                if (data && data.payload && typeof data.payload === 'object' &&
-                    (data.payload.chatId || data.payload.conversationId || data.payload.id || data.payload.content)) {
-                    message = data.payload;
-                } else if (data && data.data && typeof data.data === 'object' &&
-                    (data.data.chatId || data.data.conversationId || data.data.id || data.data.content)) {
-                    message = data.data;
-                } else if (data && data.message && typeof data.message === 'object') {
-                    message = data.message;
-                }
-
-                // Resolve chatId — try every known field name, coerce to String
-                const _rawChatId = message.chatId || message.conversationId || message.chat_id ||
-                    message.room || data.chatId || data.conversationId || '';
-                const chatId = _rawChatId ? String(_rawChatId) : '';
-
-                // Only drop if truly no chatId AND no content (not just missing id)
-                if (!message || (!chatId && !message.content)) return;
-                // If still no chatId, try to recover from active chat
-                const _resolvedChatId = chatId || (function() {
-                    const _ac = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-                    return _ac ? String(_ac.id || '') : '';
-                })();
-                if (!_resolvedChatId) return;
+                const message = (data && data.payload && (data.payload.id || data.payload.chatId))
+                    ? data.payload
+                    : (data && data.data && (data.data.id || data.data.chatId))
+                        ? data.data
+                        : data;
+                const chatId = String(
+                    (message && (message.chatId || message.conversationId)) || ''
+                );
+                // ✅ FIX: Don't gate on message.id — server might not echo id back immediately.
+                // Gate only on chatId so we never silently drop a valid incoming message.
+                if (!message || !chatId) return;
 
                 // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
@@ -5965,32 +5946,62 @@ try {
                 // Reject messages with no usable id to prevent corrupt dedup state
                 if (!_safeId && !_safeLocalId && !message.content) return;
 
-                // FIXED DEDUP: Use chatId+id as key — never bare serverId alone.
-                // Using serverId alone caused cross-user dedup collisions on shared devices.
-                // Using localId alone causes misses when server echoes without localId.
-                const _dedupKey = (_resolvedChatId + ':' + (_safeId || _safeLocalId || '')) ||
-                    (_resolvedChatId + ':' + (message.content || '') + ':' + (message.createdAt || message.timestamp || ''));
+                // FIX: Dedup — chat.html posts 'message:new' AND 'new_message' for the same payload,
+                // and multiple event listeners can fire. Use a Set to process each message only once.
+                // FIXED DEDUP: prefix with chatId so sender+receiver never collide on same serverId.
+                // Sender processes serverId "214", adds "7:214". Receiver also gets "7:214" —
+                // BUT sender and receiver are different browsers/users so they have separate
+                // window.__realtimeProcessedIds Sets. Within one browser (same user), this
+                // prevents the 12-listener-firing duplicates without blocking cross-user delivery.
+                const _dedupKey = (_safeId ? (chatId + ':' + _safeId) : null) ||
+                    (_safeLocalId ? (chatId + ':' + _safeLocalId) : null) ||
+                    (chatId + ':' + (message.content || '') + ':' + (message.createdAt || message.timestamp || ''));
                 if (_realtimeProcessedIds.has(_dedupKey)) return;
                 _realtimeProcessedIds.add(_dedupKey);
                 setTimeout(function() { _realtimeProcessedIds.delete(_dedupKey); }, 8000);
 
-                // ECHO PREVENTION: WebSocket echoes our own sent messages back.
-                // The optimistic message is already in the UI — only update its status.
-                const _realtimeCurrentUserId = SessionManager && SessionManager.getUserId ? SessionManager.getUserId() : null;
+                // FIXED ECHO PREVENTION:
+                // Only suppress if senderId === myId AND we have proof this is OUR sent copy:
+                //   a) _safeLocalId present (optimistic message echoed back with localId), OR
+                //   b) serverId is tracked in kynecta_sent_ids_v8 (set when message:sent fires).
+                // Without this guard, User A's messages to User B were suppressed on User B's
+                // side whenever B happened to be user 3 and A was also user 3 (same test account),
+                // or when SessionManager.getUserId() returned null and the comparison was skipped.
+                const _realtimeCurrentUserId = (SessionManager && SessionManager.getUserId && SessionManager.getUserId()) ||
+                    (window.__PARENT_SESSION__ && (window.__PARENT_SESSION__.userId || (window.__PARENT_SESSION__.user && window.__PARENT_SESSION__.user.id))) ||
+                    null;
                 const _realtimeSenderId = message.senderId || (message.sender && message.sender.id);
                 if (_realtimeSenderId && _realtimeCurrentUserId &&
                     String(_realtimeSenderId) === String(_realtimeCurrentUserId)) {
-                    // This is our own message echoed back — update status and return
-                    const _echoLocalId = _safeLocalId || message.localId || null;
-                    const _echoServerId = _safeId || null;
-                    if (ChatManager && ChatManager.updateMessageStatus) {
-                        ChatManager.updateMessageStatus(
-                            _echoLocalId || _echoServerId,
-                            message.status || 'sent',
-                            { serverId: _echoServerId, localId: _echoLocalId }
-                        );
+                    // Confirm it's our echo — not just any message from us
+                    const _hasLocalMarker = !!(_safeLocalId || message.localId || message.requestId);
+                    const _inSentLog = (function() {
+                        if (!_safeId) return false;
+                        try { return JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]').includes(_safeId); }
+                        catch(_) { return false; }
+                    })();
+                    if (_hasLocalMarker || _inSentLog) {
+                        // Definitely our own echo — update status only
+                        const _echoLocalId = _safeLocalId || message.localId || null;
+                        const _echoServerId = _safeId || null;
+                        if (ChatManager && ChatManager.updateMessageStatus) {
+                            ChatManager.updateMessageStatus(
+                                _echoLocalId || _echoServerId,
+                                message.status || 'sent',
+                                { serverId: _echoServerId, localId: _echoLocalId }
+                            );
+                        }
+                        // Also track serverId for future echo prevention
+                        if (_echoServerId) {
+                            try {
+                                const _sl = JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]');
+                                if (!_sl.includes(_echoServerId)) { _sl.push(_echoServerId); if (_sl.length > 200) _sl.splice(0, _sl.length - 200); localStorage.setItem('kynecta_sent_ids_v8', JSON.stringify(_sl)); }
+                            } catch(_) {}
+                        }
+                        return;
                     }
-                    return;
+                    // No proof it's our echo — fall through and render normally.
+                    // This handles the case where server strips localId from the echo.
                 }
 
                 // FIX: always numeric ms — ISO strings compare as NaN in sort
@@ -6005,30 +6016,30 @@ try {
                     content: message.content || message.text || '',
                     type: message.type || 'text',
                     senderId: message.senderId || (message.sender && message.sender.id),
-                    sender: message.sender || { id: message.senderId },
+                    sender: message.sender || null,
                     replyToId: message.replyToId || null,
                     replyTo:   message.replyTo   || null,
                     reactions: message.reactions || {},
                     timestamp: _sca,
                     createdAt: _sca,
                     status: message.status || 'delivered',
-                    conversationId: _resolvedChatId,
-                    chatId: _resolvedChatId,
+                    conversationId: chatId,
+                    chatId: chatId,
                     isLocalOnly: false
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {
-                    const saved = await window.KynectaSyncEngine.ingestIncomingMessage(message, _resolvedChatId).catch(() => null);
+                    const saved = await window.KynectaSyncEngine.ingestIncomingMessage(message, chatId).catch(() => null);
                     if (saved) {
                         normalizedMessage = {
                             ...saved,
-                            conversationId: saved.chatId || saved.conversationId || _resolvedChatId,
-                            chatId: saved.chatId || _resolvedChatId
+                            conversationId: saved.chatId || saved.conversationId || chatId,
+                            chatId: saved.chatId || chatId
                         };
                     }
                 }
 
-                renderRealtimeUpdate(_resolvedChatId, normalizedMessage);
+                renderRealtimeUpdate(chatId, normalizedMessage);
                 ackMessageDelivered(normalizedMessage).catch(() => {});
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
@@ -6042,17 +6053,13 @@ try {
                 if (_sk !== ':' && _realtimeSentIds.has(_sk)) return;
                 if (_sk !== ':') { _realtimeSentIds.add(_sk); setTimeout(()=>_realtimeSentIds.delete(_sk), 15000); }
                 console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
-                // FIXED: Track serverId so echo prevention in chat.html can detect our own echoes
-                const _sentServerId = d.serverId || d.messageId || d.id;
-                if (_sentServerId) {
+                // Track serverId so echo prevention knows this was our own sent message
+                const _confirmServerId = d.serverId || d.messageId || d.id;
+                if (_confirmServerId) {
                     try {
                         const _sl = JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]');
-                        const _sid = String(_sentServerId);
-                        if (!_sl.includes(_sid)) {
-                            _sl.push(_sid);
-                            if (_sl.length > 200) _sl.splice(0, _sl.length - 200);
-                            localStorage.setItem('kynecta_sent_ids_v8', JSON.stringify(_sl));
-                        }
+                        const _sid = String(_confirmServerId);
+                        if (!_sl.includes(_sid)) { _sl.push(_sid); if (_sl.length > 200) _sl.splice(0, _sl.length - 200); localStorage.setItem('kynecta_sent_ids_v8', JSON.stringify(_sl)); }
                     } catch(_) {}
                 }
                 if (messageId && ChatManager.updateMessageStatus) {
@@ -6510,47 +6517,23 @@ try {
         
         getSecurityReport: () => SECURITY.getSecurityReport(),
 
-        deleteConversation: async function(chatId) {
+        deleteConversation: function(chatId) {
             if (!chatId) return;
             const sid = String(chatId);
-            // Mark deleted in localStorage so server-sync can't resurrect it
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8') || [];
                 if (!_d.includes(sid)) { _d.push(sid); SafeStorage.setJSON('kynecta_deleted_chats_v8', _d); }
             } catch(_) {}
-            // Remove from in-memory state
             ChatManager._conversations = (ChatManager._conversations || []).filter(c => String(c.id) !== sid);
             if (ChatManager._conversationsMap) { ChatManager._conversationsMap.delete(chatId); ChatManager._conversationsMap.delete(sid); }
             if (ChatManager._activeConversation && String(ChatManager._activeConversation.id) === sid) {
                 ChatManager._activeConversation = null; ChatManager._messages = [];
             }
             ChatManager._saveToCache();
-            // Remove messages from localStorage
             try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`); } catch(_) {}
             try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
             ChatManager._notifySubscribers();
-            // Purge IndexedDB — prevents resurrection after refresh
-            try {
-                if (window.AppCache) {
-                    const _allMsgs = await window.AppCache.getAll('messages').catch(() => []);
-                    const _chatMsgs = (_allMsgs || []).filter(m => String(m.chatId || m.conversationId || '') === sid);
-                    for (const _m of _chatMsgs) {
-                        try { await window.AppCache.remove('messages', _m.id); } catch (_) {}
-                    }
-                    try { await window.AppCache.remove('chats', sid); } catch(_) {}
-                    // Also try numeric id
-                    const _numSid = parseInt(sid, 10);
-                    if (!isNaN(_numSid)) {
-                        try { await window.AppCache.remove('chats', _numSid); } catch(_) {}
-                    }
-                }
-                if (window.KynectaLocalStore && typeof window.KynectaLocalStore.clearAll !== 'undefined') {
-                    // selective: only remove this chat's messages from IDB
-                }
-            } catch(_idbErr) { console.warn('[deleteConversation] IDB purge error', _idbErr); }
-            // Notify backend (fire-and-forget)
             makeApiRequest(`/chats/${sid}`, 'DELETE').catch(() => {});
-            console.log('[MessagesCore] deleteConversation: permanently removed chatId=' + sid);
         },
 
         multiSendSelectedChats: new Set(),
@@ -6582,8 +6565,6 @@ try {
         getTypingUsers: (conversationId) => TypingManager.getTypingUsersForConversation(conversationId),
         
         openChatWithUser: (userId, userName, userAvatar) => openChatWithUser(userId, userName, userAvatar),
-        getSession: () => _storedSession || null,
-        getCurrentUserId: () => getCurrentUserId(),
         setCurrentCategory: (category) => ChatManager.setCurrentCategory(category),
         renderChatsList: () => ChatManager.renderChatsList(),
         

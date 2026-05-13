@@ -3685,53 +3685,74 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
         var icon    = document.getElementById('emojiTriggerIcon');
         if (!trigger || !pop) return;
 
+        // ── Capture statusId at OPEN time (not click time) ──
+        // This ensures reaction goes to the status that was showing
+        // when the picker was opened, even if user swipes during selection.
+        var _pickerOpenedForStatusId = null;
+
         trigger.addEventListener('click', function(e) {
             e.stopPropagation();
-            pop.style.display = pop.style.display === 'none' ? 'flex' : 'none';
-        });
-        document.addEventListener('click', function() {
-            if (pop) pop.style.display = 'none';
+            var isOpen = pop.style.display !== 'none';
+            if (!isOpen) {
+                // Capture the currently-viewed status ID right now
+                _pickerOpenedForStatusId = window.__currentViewingStatusId || null;
+            }
+            pop.style.display = isOpen ? 'none' : 'flex';
         });
 
-        // React on emoji click
+        // Close picker on outside click (but not on slot-change — keep picker open)
+        document.addEventListener('click', function(e) {
+            if (!trigger.contains(e.target) && !pop.contains(e.target)) {
+                pop.style.display = 'none';
+            }
+        });
+
+        // ── Send reaction to the status that was open when picker opened ──
         pop.querySelectorAll('.ep-btn').forEach(function(btn) {
             btn.addEventListener('click', function(e) {
                 e.stopPropagation();
-                var emoji = btn.dataset.emoji;
-                // Update trigger icon to chosen emoji
+                var emoji    = btn.dataset.emoji;
+                var statusId = _pickerOpenedForStatusId || window.__currentViewingStatusId;
+
+                if (!statusId) {
+                    console.warn('[emoji-react] No statusId captured — cannot react');
+                    pop.style.display = 'none';
+                    return;
+                }
+
+                // Update trigger icon
                 if (icon) icon.textContent = emoji;
                 pop.style.display = 'none';
+                _pickerOpenedForStatusId = null; // reset
+
                 // Mark selected
                 pop.querySelectorAll('.ep-btn').forEach(function(b) { b.classList.remove('selected'); });
                 btn.classList.add('selected');
-                // Send reaction to backend — try all known method names
-                var statusId = window.__currentViewingStatusId;
-                if (statusId) {
-                    var api = window.StatusAPI;
-                    if (api) {
-                        // Try every possible method name the API may expose
-                        var fn = api.addReaction || api.reactToStatus || api.react || api.sendReaction;
-                        if (fn) {
-                            fn.call(api, statusId, emoji).catch(function(e) {
-                                console.warn('[emoji-react] API call failed:', e);
-                            });
-                        }
+
+                // Send to backend
+                var api = window.StatusAPI;
+                if (api) {
+                    var fn = api.addReaction || api.reactToStatus || api.react || api.sendReaction;
+                    if (fn) {
+                        fn.call(api, statusId, emoji).then(function(result) {
+                            console.log('[emoji-react] ✅ Reaction', emoji, 'sent for status', statusId, 
+                                '| count:', result && result.count);
+                        }).catch(function(err) {
+                            console.warn('[emoji-react] API call failed:', err);
+                        });
                     }
-                    // Dispatch DOM events so status-ui.js + status-websocket.js handlers fire
-                    try {
-                        document.dispatchEvent(new CustomEvent('status:react', {
-                            detail: { statusId: statusId, emoji: emoji }
-                        }));
-                        document.dispatchEvent(new CustomEvent('reactionUpdate', {
-                            detail: {
-                                statusId: statusId,
-                                emoji:    emoji,
-                                count:    1,
-                                userId:   window.currentUser && (window.currentUser.id || window.currentUser.userId)
-                            }
-                        }));
-                    } catch(_) {}
                 }
+
+                // Dispatch DOM events for local update + socket broadcast
+                var uid = window.currentUser && (window.currentUser.id || window.currentUser.userId);
+                try {
+                    document.dispatchEvent(new CustomEvent('status:react', {
+                        detail: { statusId: statusId, emoji: emoji, userId: uid }
+                    }));
+                    document.dispatchEvent(new CustomEvent('reactionUpdate', {
+                        detail: { statusId: statusId, emoji: emoji, count: 1, userId: uid }
+                    }));
+                } catch(_) {}
             });
         });
     }

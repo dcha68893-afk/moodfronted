@@ -10229,24 +10229,16 @@ Type: ${message.type || 'text'}`;
                 setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
             }
 
-            // Persist + remove via core (survives refresh) — uses patched async deleteConversation
+            // Persist + remove via core (survives refresh)
             var core = window.messagesCore;
             if (core && core.deleteConversation) {
-                core.deleteConversation(chatId); // async — clears IDB + LS + backend
+                core.deleteConversation(chatId);
             } else {
-                // Fallback
                 try {
                     var _d = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
-                    if (!_d.includes(String(chatId))) _d.push(String(chatId));
+                    if (!_d.includes(chatId)) _d.push(chatId);
                     localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(_d));
-                    localStorage.removeItem('kynecta_messages_v8_' + chatId);
                 } catch(_) {}
-                if (window.AppCache) {
-                    try { window.AppCache.remove('chats', String(chatId)).catch(()=>{}); } catch(_) {}
-                }
-                if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteMessagesByChat === 'function') {
-                    window.KynectaLocalStore.deleteMessagesByChat(chatId).catch(()=>{});
-                }
             }
 
             // Hide panel if deleted chat was active
@@ -11613,7 +11605,8 @@ Type: ${message.type || 'text'}`;
 
         openChat: (chat) => {
 
-            // FIXED: Always show the panel INSTANTLY — no waiting for async work
+            // FIXED: Always show the panel — pass full chat object so header renders correctly
+
             const chatPanel = document.getElementById('chatPanel');
 
             const sidebar = document.getElementById('sidebar');
@@ -11630,11 +11623,6 @@ Type: ${message.type || 'text'}`;
 
                 sidebar.classList.remove('active');
 
-            }
-
-            // FIX: Notify parent immediately so mobile nav hides
-            if (window.innerWidth <= 768) {
-                try { window.parent.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*'); } catch(_) {}
             }
 
             const core = getMessagesCore();
@@ -12572,8 +12560,7 @@ Type: ${message.type || 'text'}`;
     window.messagesUI.loadMultiSendHistory = async function() {
         const listEl = window.UIFailsafe?.safeGetElement('multiSendHistoryList');
         if (!listEl) return;
-        // FIXED: window.messagesCore is inside the IIFE and not reachable here.
-        // Use window.messagesCore directly which is the same reference.
+        // FIXED: (window.messagesCore || null) is inside the IIFE — not accessible here. Use window.messagesCore.
         const core = window.messagesCore || null;
         let token = null;
         try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
@@ -12593,7 +12580,7 @@ Type: ${message.type || 'text'}`;
         if (!batchId) return;
         console.log('[MultiSend] Opening history detail:', batchId);
         window.messagesUI?.showMultiSendHistoryPanel?.({ detailOnly: true });
-        const core = window.messagesCore;
+        const core = (window.messagesCore || null);
         let token = null;
         try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
         try {
@@ -12639,7 +12626,7 @@ Type: ${message.type || 'text'}`;
         const settings = options || {};
         const input = document.getElementById('multiSendInput');
         const msgContent = (input && input.value && input.value.trim()) || '';
-        const core = window.messagesCore;
+        const core = (window.messagesCore || null);
         const replyVisibility = document.getElementById('multiSendReplyVisibility')?.value || 'public';
         const selectedChats = core && core.multiSendSelectedChats;
 
@@ -12971,42 +12958,28 @@ Type: ${message.type || 'text'}`;
                     break;
 
                 case 'delete':
-                    _showConfirm('Delete this chat permanently?', function(ok) {
+                    _showConfirm('Delete this chat?', function(ok) {
                         if (!ok) return;
-                        // Use full deleteConversation which clears IDB + LS + backend
-                        const _delCore = window.messagesCore;
-                        if (_delCore && typeof _delCore.deleteConversation === 'function') {
-                            _delCore.deleteConversation(chatId);
-                        } else {
-                            // Fallback: manual cleanup
-                            if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteMessagesByChat === 'function') {
-                                window.KynectaLocalStore.deleteMessagesByChat(chatId).catch(()=>{});
-                            }
-                            if (window.AppCache) {
-                                try { window.AppCache.remove('chats', String(chatId)).catch(()=>{}); } catch(_){}
-                            }
-                            if (window.ChatManager && window.ChatManager._conversations) {
-                                window.ChatManager._conversations = window.ChatManager._conversations.filter(
-                                    function(c) { return String(c.id) !== String(chatId); }
-                                );
-                                if (window.ChatManager._conversationsMap) window.ChatManager._conversationsMap.delete(String(chatId));
-                                if (window.ChatManager._saveToCache) window.ChatManager._saveToCache();
-                            }
-                            // Mark as deleted in LS so server-sync won't resurrect it
-                            try {
-                                const _dl = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
-                                if (!_dl.includes(String(chatId))) { _dl.push(String(chatId)); localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(_dl)); }
-                            } catch(_) {}
-                            // Backend delete (best-effort)
-                            try {
-                                const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-                                fetch('/api/chats/' + chatId, {
-                                    method:'DELETE',
-                                    headers:{ Authorization:'Bearer ' + tok }
-                                }).catch(function(){});
-                            } catch(_) {}
-                            try { localStorage.removeItem('kynecta_messages_v8_' + chatId); } catch(_) {}
+                        // Remove from local store
+                        if (window.KynectaLocalStore) {
+                            window.KynectaLocalStore.deleteMessage?.(chatId).catch(()=>{});
                         }
+                        // Remove from ChatManager
+                        if (window.ChatManager && window.ChatManager._conversations) {
+                            window.ChatManager._conversations = window.ChatManager._conversations.filter(
+                                function(c) { return String(c.id) !== String(chatId); }
+                            );
+                            if (window.ChatManager._conversationsMap) window.ChatManager._conversationsMap.delete(String(chatId));
+                            if (window.ChatManager._saveToCache) window.ChatManager._saveToCache();
+                        }
+                        // Backend delete (best-effort)
+                        try {
+                            const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                            fetch('/api/chats/' + chatId, {
+                                method:'DELETE',
+                                headers:{ Authorization:'Bearer ' + tok }
+                            }).catch(function(){});
+                        } catch(_) {}
                         _showToast('Chat deleted');
                         window.messagesUI?.refreshChatsList?.();
                     });
