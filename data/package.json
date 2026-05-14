@@ -1,0 +1,47 @@
+{
+  "name": "uniconnectsphere",
+  "version": "1.0.5",
+  "description": "UniConnectSphere — social media and chat app built with Node.js, Express, Firebase, and Cloudinary.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "prod": "NODE_ENV=production node server.js",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@fortawesome/fontawesome-free": "^7.1.0",
+    "cloudinary": "^2.8.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.22",
+    "nodemon": "^3.0.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.17"
+  },
+  "engines": {
+    "node": ">=18.x"
+  },
+  "keywords": [
+    "social-media",
+    "chat",
+    "firebase",
+    "cloudinary",
+    "express",
+    "nodejs",
+    "pwa"
+  ],
+  "author": "UniConnectSphere Team",
+  "license": "MIT"
+}

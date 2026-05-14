@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Not Found - Kynecta</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            padding: 20px;
+        }
+
+        .container {
+            text-align: center;
+            max-width: 800px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .error-code {
+            font-size: 120px;
+            font-weight: 800;
+            line-height: 1;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 36px;
+            margin-bottom: 20px;
+            color: white;
+        }
+
+        .description {
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+            opacity: 0.9;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 40px;
+        }
+
+        .btn {
+            padding: 14px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: white;
+            color: #667eea;
+        }
+
+        .btn-primary:hover {
+            background: #f8f9fa;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        /* Personalized Suggestions Section */
+        .personalized-section {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 15px;
+            padding: 25px;
+            margin-top: 30px;
+            text-align: left;
+            border-left: 4px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .personalized-section h3 {
+            font-size: 22px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .personalized-section h3::before {
+            content: "✨";
+        }
+
+        .user-mood {
+            font-size: 16px;
+            margin-bottom: 20px;
+            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            display: inline-block;
+        }
+
+        .mood-tag, .interest-tag {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 20px;
+            margin: 3px;
+            font-size: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .suggestions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .suggestion-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            transition: transform 0.3s ease;
+        }
+
+        .suggestion-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .suggestion-card h4 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: white;
+        }
+
+        .suggestion-card p {
+            font-size: 14px;
+            opacity: 0.9;
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+
+        .suggestion-link {
+            color: #a3bffa;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .suggestion-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 30px 20px;
+            }
+            
+            .error-code {
+                font-size: 80px;
+            }
+            
+            h1 {
+                font-size: 28px;
+            }
+            
+            .suggestions-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .buttons {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="error-code">404</div>
+        <h1>Oops! Page Not Found</h1>
+        <p class="description">
+            The page you're looking for doesn't exist or has been moved.
+            Don't worry though - while you're here, check out these personalized suggestions based on your mood and interests!
+        </p>
+        
+        <div class="buttons">
+            <a href="/" class="btn btn-primary">Go to Homepage</a>
+            <a href="#" onclick="history.back()" class="btn btn-secondary">Go Back</a>
+        </div>
+
+        <!-- Personalized Suggestions Section -->
+        <div id="personalizedSuggestions" class="personalized-section">
+            <!-- Dynamic content will be inserted here by JavaScript -->
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const suggestionsContainer = document.getElementById('personalizedSuggestions');
+            
+            // Try to get selections from localStorage first
+            let selections = null;
+            try {
+                const storedSelections = localStorage.getItem('kynecta-selections');
+                if (storedSelections) {
+                    selections = JSON.parse(storedSelections);
+                }
+            } catch (e) {
+                console.error('Error reading selections from localStorage:', e);
+            }
+            
+            // Alternatively, try to get from window.kynectaApp if available
+            if (!selections && window.kynectaApp && typeof window.kynectaApp.getUserSelections === 'function') {
+                try {
+                    selections = window.kynectaApp.getUserSelections();
+                } catch (e) {
+                    console.error('Error getting selections from kynectaApp:', e);
+                }
+            }
+            
+            // Generate personalized content based on selections
+            if (selections && (selections.moods?.length > 0 || selections.interests?.length > 0)) {
+                generatePersonalizedContent(selections);
+            } else {
+                showDefaultSuggestions();
+            }
+
+            function generatePersonalizedContent(selections) {
+                const moods = selections.moods || [];
+                const interests = selections.interests || [];
+                
+                let html = '<h3>Personalized Suggestions For You</h3>';
+                
+                // Show user's current mood and interests
+                if (moods.length > 0) {
+                    html += '<div class="user-mood">';
+                    html += '<strong>Your Mood:</strong> ';
+                    html += moods.map(mood => `<span class="mood-tag">${escapeHtml(mood)}</span>`).join('');
+                    html += '</div>';
+                }
+                
+                if (interests.length > 0) {
+                    html += '<div class="user-mood" style="margin-top: 10px;">';
+                    html += '<strong>Your Interests:</strong> ';
+                    html += interests.map(interest => `<span class="interest-tag">${escapeHtml(interest)}</span>`).join('');
+                    html += '</div>';
+                }
+                
+                // Generate suggestions based on moods and interests
+                const suggestions = getPersonalizedSuggestions(moods, interests);
+                
+                if (suggestions.length > 0) {
+                    html += '<div class="suggestions-grid">';
+                    suggestions.forEach(suggestion => {
+                        html += `
+                            <div class="suggestion-card">
+                                <h4>${escapeHtml(suggestion.title)}</h4>
+                                <p>${escapeHtml(suggestion.description)}</p>
+                                <a href="${escapeHtml(suggestion.link)}" class="suggestion-link">Explore →</a>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                } else {
+                    html += '<p style="margin-top: 15px; font-style: italic;">No specific suggestions available, but we recommend checking out our homepage for more content!</p>';
+                }
+                
+                suggestionsContainer.innerHTML = html;
+            }
+
+            function getPersonalizedSuggestions(moods, interests) {
+                const allSuggestions = {
+                    // Mood-based suggestions
+                    'Calm': [
+                        {
+                            title: 'Guided Meditation',
+                            description: 'Relax with our calming meditation sessions designed to reduce stress and anxiety.',
+                            link: '/meditation'
+                        },
+                        {
+                            title: 'Peaceful Music',
+                            description: 'Listen to curated relaxing music tracks to soothe your mind.',
+                            link: '/music/relaxing'
+                        }
+                    ],
+                    'Happy': [
+                        {
+                            title: 'Fun Games',
+                            description: 'Enjoy lighthearted games to keep your positive energy flowing.',
+                            link: '/games/fun'
+                        },
+                        {
+                            title: 'Comedy Corner',
+                            description: 'Watch funny videos and comedy sketches to keep smiling.',
+                            link: '/entertainment/comedy'
+                        }
+                    ],
+                    'Energetic': [
+                        {
+                            title: 'Workout Sessions',
+                            description: 'High-energy exercise routines to match your vibrant mood.',
+                            link: '/fitness/workouts'
+                        },
+                        {
+                            title: 'Dance Tutorials',
+                            description: 'Learn new dance moves with our energetic instructors.',
+                            link: '/dance/tutorials'
+                        }
+                    ],
+                    'Creative': [
+                        {
+                            title: 'Art Tutorials',
+                            description: 'Unleash your creativity with step-by-step art and craft guides.',
+                            link: '/creative/art'
+                        },
+                        {
+                            title: 'Writing Prompts',
+                            description: 'Spark your imagination with creative writing exercises.',
+                            link: '/writing/prompts'
+                        }
+                    ],
+                    
+                    // Interest-based suggestions
+                    'Music': [
+                        {
+                            title: 'Music Discovery',
+                            description: 'Explore new artists and genres based on your listening history.',
+                            link: '/music/discovery'
+                        },
+                        {
+                            title: 'Instrument Lessons',
+                            description: 'Learn to play your favorite instruments with our tutorials.',
+                            link: '/music/lessons'
+                        }
+                    ],
+                    'Gaming': [
+                        {
+                            title: 'Latest Game Reviews',
+                            description: 'Check out reviews and gameplay of trending games.',
+                            link: '/gaming/reviews'
+                        },
+                        {
+                            title: 'Gaming Community',
+                            description: 'Connect with other gamers and join discussions.',
+                            link: '/gaming/community'
+                        }
+                    ],
+                    'Fitness': [
+                        {
+                            title: 'Workout Plans',
+                            description: 'Personalized fitness routines based on your goals.',
+                            link: '/fitness/plans'
+                        },
+                        {
+                            title: 'Nutrition Guide',
+                            description: 'Learn about healthy eating habits and meal planning.',
+                            link: '/fitness/nutrition'
+                        }
+                    ],
+                    'Technology': [
+                        {
+                            title: 'Tech News',
+                            description: 'Stay updated with the latest in technology and innovation.',
+                            link: '/tech/news'
+                        },
+                        {
+                            title: 'Coding Tutorials',
+                            description: 'Learn programming with our beginner-friendly guides.',
+                            link: '/tech/tutorials'
+                        }
+                    ],
+                    'Art': [
+                        {
+                            title: 'Digital Art Gallery',
+                            description: 'Browse amazing digital artwork from talented artists.',
+                            link: '/art/gallery'
+                        },
+                        {
+                            title: 'Art Challenges',
+                            description: 'Participate in daily art challenges to improve your skills.',
+                            link: '/art/challenges'
+                        }
+                    ]
+                };
+                
+                // Collect suggestions based on moods
+                const moodSuggestions = [];
+                moods.forEach(mood => {
+                    if (allSuggestions[mood]) {
+                        moodSuggestions.push(...allSuggestions[mood]);
+                    }
+                });
+                
+                // Collect suggestions based on interests
+                const interestSuggestions = [];
+                interests.forEach(interest => {
+                    if (allSuggestions[interest]) {
+                        interestSuggestions.push(...allSuggestions[interest]);
+                    }
+                });
+                
+                // Combine and deduplicate suggestions
+                const combinedSuggestions = [...moodSuggestions, ...interestSuggestions];
+                const uniqueSuggestions = [];
+                const seenTitles = new Set();
+                
+                for (const suggestion of combinedSuggestions) {
+                    if (!seenTitles.has(suggestion.title)) {
+                        seenTitles.add(suggestion.title);
+                        uniqueSuggestions.push(suggestion);
+                    }
+                }
+                
+                // If no specific suggestions, provide default ones
+                if (uniqueSuggestions.length === 0) {
+                    return [
+                        {
+                            title: 'Explore All Content',
+                            description: 'Browse our entire collection of activities and resources.',
+                            link: '/explore'
+                        },
+                        {
+                            title: 'Popular Right Now',
+                            description: 'See what other users are enjoying at the moment.',
+                            link: '/trending'
+                        }
+                    ];
+                }
+                
+                // Return up to 4 suggestions
+                return uniqueSuggestions.slice(0, 4);
+            }
+
+            function showDefaultSuggestions() {
+                suggestionsContainer.innerHTML = `
+                    <h3>Discover Something New</h3>
+                    <p style="margin-bottom: 15px;">Sign in to get personalized suggestions based on your mood and interests!</p>
+                    <div class="suggestions-grid">
+                        <div class="suggestion-card">
+                            <h4>Featured Content</h4>
+                            <p>Explore our handpicked selection of the best activities and resources.</p>
+                            <a href="/featured" class="suggestion-link">Explore →</a>
+                        </div>
+                        <div class="suggestion-card">
+                            <h4>Try Something New</h4>
+                            <p>Discover activities outside your usual preferences.</p>
+                            <a href="/discover" class="suggestion-link">Discover →</a>
+                        </div>
+                        <div class="suggestion-card">
+                            <h4>Community Favorites</h4>
+                            <p>See what other users are enjoying right now.</p>
+                            <a href="/community" class="suggestion-link">Join →</a>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        });
+    </script>
+</body>
+</html>

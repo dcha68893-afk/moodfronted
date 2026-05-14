@@ -1,0 +1,2150 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+// ✅ CRITICAL SW UPDATE CHECK — runs FIRST, before any other JS loads.
+(function() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.getRegistration('/').then(function(reg) {
+        if (!reg) return;
+        var sw = reg.waiting || reg.installing;
+        if (sw) {
+            console.log('[SW-BOOT] New SW waiting/installing — forcing activation');
+            sw.postMessage({ type: 'SKIP_WAITING' });
+            navigator.serviceWorker.addEventListener('controllerchange', function() {
+                window.location.reload();
+            });
+        }
+    }).catch(function() {});
+})();
+</script>
+<script>
+// Suppress iframe sandbox warnings and raw WebSocket error Events
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    // ✅ FIX: Raw WebSocket onerror fires a DOM Event (isTrusted:true, type:'error'),
+    // NOT a JS Error. The UIFailsafe in messages-ui.js calls console.error() with it,
+    // producing "UI Error caught Event {isTrusted: true, type: 'error', target: WebSocket...}"
+    // We suppress this noise here while still logging a clean string instead.
+    function isRawWebSocketEvent(arg) {
+        return arg && typeof arg === 'object' &&
+               arg.isTrusted === true &&
+               arg.type === 'error' &&
+               arg.target instanceof WebSocket;
+    }
+
+    console.error = function(msg) {
+        // Suppress sandbox warnings
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) return;
+        // Suppress raw WebSocket DOM Events — log clean string instead
+        if (isRawWebSocketEvent(msg)) {
+            originalWarn.call(console, '[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+            return;
+        }
+        // Check all args for raw Event (UIFailsafe passes it as any argument)
+        for (let i = 0; i < arguments.length; i++) {
+            if (isRawWebSocketEvent(arguments[i])) {
+                originalWarn.call(console, '[Realtime] WebSocket connection failed, messages module will work without real-time updates');
+                return;
+            }
+        }
+        originalError.apply(console, arguments);
+    };
+
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox') ||
+            // Expected during startup: parent sends a preliminary session frame
+            // before the auth token is ready.  Not an error — suppress the noise.
+            msg.includes('Ignored invalid session data from parent')
+        )) return;
+        originalWarn.apply(console, arguments);
+    };
+
+    // ✅ FIX: Listen for SW_ACTIVATED so fresh JS is picked up after deploy
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', function(evt) {
+            if (!evt.data) return;
+            if (evt.data.type === 'SW_ACTIVATED' || evt.data.type === 'SW_UPDATE_AVAILABLE') {
+                // Iframe reload: ask parent to reload, or reload self
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'SW_UPDATE_AVAILABLE', version: evt.data.version }, '*');
+                    } else {
+                        setTimeout(function() { window.location.reload(); }, 500);
+                    }
+                } catch (_) {}
+            }
+        });
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'SW_CONTROLLER_CHANGED' }, '*');
+                } else {
+                    window.location.reload();
+                }
+            } catch (_) {}
+        });
+    }
+})();
+
+// Add lifecycle state listener for UI feedback - DETERMINISTIC: WAIT_PARENT = NO VISIBLE LOADING
+(function() {
+    window.addEventListener('messagesLifecycleChange', function(e) {
+        const tokenStatus = document.getElementById('tokenStatus');
+        if (tokenStatus) {
+            // FIX: always hidden — connection happens in background, never shown to user
+            tokenStatus.style.display = 'none';
+        }
+        
+        // Update any loading indicators based on state
+        const chatsList = document.getElementById('chatsList');
+        if (chatsList && e.detail.state !== 'ACTIVE' && e.detail.state !== 'WAIT_PARENT') {
+            if (chatsList.children.length === 0 || chatsList.querySelector('.empty-state.subtle')) {
+                if (e.detail.state === 'WAIT_PARENT') {
+                    // WAIT_PARENT: Show nothing - background only
+                    // Keep existing content or empty
+                } else if (e.detail.state === 'READY') {
+                    chatsList.innerHTML = `
+                        <div class="empty-state subtle">
+                            <i class="fas fa-comments empty-icon" style="opacity: 0.3;"></i>
+                            <div class="empty-title" style="font-size: 14px;">Ready...</div>
+                        </div>
+                    `;
+                } else {
+                    chatsList.innerHTML = `
+                        <div class="empty-state subtle">
+                            <i class="fas fa-comments empty-icon" style="opacity: 0.3;"></i>
+                            <div class="empty-title" style="font-size: 14px;">Loading chats...</div>
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        // Remove any visible WAIT_PARENT elements if present
+        if (e.detail.state === 'WAIT_PARENT') {
+            const waitParentElements = document.querySelectorAll('.wait-parent-state, .connecting-overlay, .connection-waiting');
+            waitParentElements.forEach(el => {
+                if (el && el.remove) el.remove();
+            });
+        }
+    });
+})();
+</script>
+    <!-- FIX-021: safety layer loaded once at end of body (line ~1611) not here -->
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#0084ff">
+    <link rel="icon" href="../icons/moodchat-192.png">
+    <link rel="icon" href="../icons/moodchat-512.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chat | Knecta Chat</title>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+<link rel="stylesheet" href="/css/vendor/viewer.min.css">
+<link rel="stylesheet" href="/css/vendor/spectrum.min.css">
+<link rel="stylesheet" href="/css/vendor/video-js.min.css">
+    
+    <!-- Load CSS -->
+    <link rel="stylesheet" href="messages.css">
+
+    <style>
+        /* =============================================
+           ENHANCED UI STYLES - v4.0.0
+           SILENT BACKGROUND - NO VISIBLE LOADING FOR WAIT_PARENT
+           REAL DATA ONLY - NO PLACEHOLDERS
+        ============================================= */
+        
+        /* Message status indicators */
+        .message-sending .message-bubble {
+            opacity: 0.7;
+        }
+        
+        .message-sending .message-status i {
+            color: #999;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .message-failed .message-bubble {
+            border: 1px solid #f44336;
+            background-color: rgba(244, 67, 54, 0.05);
+        }
+        
+        .message-failed .message-status i {
+            color: #f44336;
+        }
+        
+        .deleted-message .message-content {
+            font-style: italic;
+            color: #999;
+        }
+        
+        .deleted-message .message-bubble {
+            background-color: #f5f5f5;
+        }
+        
+        /* Message reactions */
+        .message-reactions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 4px;
+            padding-top: 4px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        
+        .reaction {
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 12px;
+            padding: 2px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .reaction:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Search highlighting */
+        .message-searching {
+            background-color: rgba(0, 132, 255, 0.1) !important;
+            border-left: 3px solid #0084ff;
+        }
+        
+        .search-highlight {
+            background-color: #ffeb3b;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        
+        .search-results {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 10px;
+            z-index: 100;
+            display: none;
+            min-width: 200px;
+        }
+        
+        .search-results.active {
+            display: block;
+        }
+        
+        .search-results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .search-navigation {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        
+        .search-nav-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 5px;
+            color: #0084ff;
+        }
+        
+        .search-nav-btn:hover {
+            background: rgba(0, 132, 255, 0.1);
+            border-radius: 4px;
+        }
+        
+        /* Multi-send UI */
+        .multi-send-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            margin-left: auto;
+        }
+        
+        .chat-item.selected {
+            background-color: rgba(0, 132, 255, 0.1);
+        }
+        
+        .draft-badge {
+            background-color: #ff9800;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 8px;
+        }
+        
+        /* Note messages */
+        .note-message {
+            border-left: 3px solid #4caf50;
+        }
+        
+        .note-message .note-icon {
+            color: #4caf50;
+            margin-right: 8px;
+        }
+        
+        /* View once / expiring messages */
+        .view-once-message .message-bubble {
+            background-color: rgba(255, 152, 0, 0.1);
+            border: 1px dashed #ff9800;
+        }
+        
+        .expired-message .message-bubble {
+            opacity: 0.6;
+            filter: blur(0.5px);
+        }
+        
+        /* Scheduled badge */
+        .scheduled-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ff9800;
+            color: white;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Send options overlay */
+        .send-options-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            z-index: 998;
+            display: none;
+        }
+        
+        .send-options-overlay.active {
+            display: block;
+        }
+        
+        /* Recording UI */
+        .recording-cancel-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            display: none;
+        }
+        
+        .recording-cancel-overlay.active {
+            display: flex;
+        }
+        
+        .cancel-recording-btn {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: #ff3b30;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        .recording-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #ff3b30;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            margin-bottom: 8px;
+        }
+        
+        .recording-wave {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        
+        .recording-bar {
+            width: 4px;
+            height: 20px;
+            background: white;
+            animation: wave 1s infinite ease-in-out;
+        }
+        
+        .recording-bar:nth-child(1) { animation-delay: 0s; }
+        .recording-bar:nth-child(2) { animation-delay: 0.2s; }
+        .recording-bar:nth-child(3) { animation-delay: 0.4s; }
+        .recording-bar:nth-child(4) { animation-delay: 0.6s; }
+        .recording-bar:nth-child(5) { animation-delay: 0.8s; }
+        
+        @keyframes wave {
+            0%, 100% { height: 20px; }
+            50% { height: 35px; }
+        }
+        
+        .recording-timer {
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        /* Auth status indicator - hidden, runs in background only */
+        .auth-status-indicator {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 132, 255, 0.1);
+            color: #0084ff;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            display: none !important;
+            align-items: center;
+            gap: 6px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 132, 255, 0.2);
+        }
+        
+        .auth-status-indicator.authenticated {
+            background: rgba(76, 175, 80, 0.1);
+            color: #4caf50;
+            border-color: rgba(76, 175, 80, 0.2);
+        }
+        
+        .auth-status-indicator.authenticating {
+            background: rgba(255, 152, 0, 0.1);
+            color: #ff9800;
+            border-color: rgba(255, 152, 0, 0.2);
+        }
+        
+        .auth-status-indicator.error {
+            background: rgba(244, 67, 54, 0.1);
+            color: #f44336;
+            border-color: rgba(244, 67, 54, 0.2);
+        }
+        
+        /* Connection status indicators - subtle */
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 8px;
+            z-index: 1000;
+        }
+        
+        .handshake-status, .session-status, .recovery-indicator {
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .handshake-status i, .session-status i {
+            font-size: 12px;
+        }
+        
+        .recovery-indicator {
+            background: #ff9800;
+            color: white;
+        }
+        
+        /* Background fetch indicator - subtle */
+        .background-fetch-indicator {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 132, 255, 0.9);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            z-index: 1000;
+            display: none;
+        }
+        
+        .background-fetch-indicator.active {
+            display: flex;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        .background-fetch-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Token status indicator - hidden, runs in background only */
+        .token-status {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            display: none !important;
+        }
+        
+        .token-status.ready {
+            background: rgba(76, 175, 80, 0.7);
+        }
+        
+        .token-status.pending {
+            background: rgba(255, 152, 0, 0.7);
+        }
+        
+        .token-status.error {
+            background: rgba(244, 67, 54, 0.7);
+        }
+        
+        .token-status.poor {
+            background: rgba(255, 152, 0, 0.7);
+        }
+        
+        .token-status.dead {
+            background: rgba(244, 67, 54, 0.7);
+        }
+        
+        /* Reconnect overlay - non-blocking */
+        .reconnect-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            display: none;
+            backdrop-filter: blur(5px);
+        }
+        
+        .reconnect-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            max-width: 300px;
+        }
+        
+        .reconnect-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0084ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        .reconnect-message {
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .reconnect-btn {
+            background: #0084ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        .reconnect-btn:hover {
+            background: #0066cc;
+        }
+        
+        /* Offline overlay - non-blocking */
+        .offline-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            display: none;
+            backdrop-filter: blur(5px);
+        }
+        
+        .offline-overlay.active {
+            display: flex;
+        }
+        
+        .offline-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            max-width: 300px;
+        }
+        
+        .offline-icon {
+            font-size: 48px;
+            color: #ff9800;
+            margin-bottom: 20px;
+        }
+        
+        .offline-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .offline-message {
+            color: #666;
+            margin-bottom: 20px;
+        }
+        
+        .offline-dismiss-btn {
+            background: #0084ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        /* Empty states - subtle */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .empty-state.subtle {
+            opacity: 0.7;
+            padding: 20px;
+        }
+        
+        .empty-state.error {
+            color: #f44336;
+        }
+        
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        
+        .empty-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .empty-message {
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .retry-btn {
+            background: #0084ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        .retry-btn.subtle {
+            background: transparent;
+            color: #0084ff;
+            border: 1px solid #0084ff;
+        }
+        
+        /* Loading state - subtle, non-blocking */
+        .loading-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+        
+        .loading-spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #0084ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        
+        /* Typing indicator */
+        .message-typing {
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+        
+        .typing-dots {
+            display: flex;
+            gap: 3px;
+        }
+        
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: #999;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+        
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-5px); }
+        }
+        
+        .typing-text {
+            font-size: 12px;
+            color: #666;
+        }
+        
+        /* Jump to latest button */
+        .jump-to-latest {
+            position: absolute;
+            bottom: 80px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #0084ff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px rgba(0, 132, 255, 0.3);
+            z-index: 100;
+        }
+        
+        .jump-to-latest:hover {
+            background: #0066cc;
+        }
+        
+        /* Drag and drop */
+        .message-input.drag-over {
+            border: 2px dashed #0084ff;
+            background: rgba(0, 132, 255, 0.05);
+        }
+        
+        /* Syncing indicator */
+        .syncing-indicator {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 132, 255, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .auth-status-indicator {
+                font-size: 10px;
+                padding: 4px 8px;
+            }
+            
+            .handshake-status, .session-status, .recovery-indicator {
+                font-size: 10px;
+                padding: 3px 8px;
+            }
+            
+            .token-status {
+                bottom: 5px;
+                right: 5px;
+                font-size: 9px;
+            }
+            
+            .syncing-indicator {
+                bottom: 5px;
+                left: 5px;
+                font-size: 9px;
+            }
+        }
+        
+        /* Dark theme support */
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+            --border-color: #404040;
+        }
+        
+        [data-theme="dark"] .message-bubble {
+            background: #2d2d2d;
+            color: #fff;
+        }
+        
+        [data-theme="dark"] .chat-item:hover {
+            background: #333;
+        }
+        
+        [data-theme="dark"] .search-results {
+            background: #2d2d2d;
+            color: #fff;
+        }
+        
+        [data-theme="dark"] .reconnect-content,
+        [data-theme="dark"] .offline-content {
+            background: #2d2d2d;
+            color: #fff;
+        }
+        
+        [data-theme="dark"] .empty-state {
+            color: #b0b0b0;
+        }
+        
+        /* Animation keyframes */
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        /* Remove any full-screen loading overlays */
+        .initial-loading, .splash-screen, .loading-overlay {
+            display: none !important;
+        }
+        
+        /* WAIT_PARENT state - completely hidden */
+        .wait-parent-state, .connecting-overlay, .connection-waiting {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+        
+        /* Reply indicator */
+        .reply-indicator {
+            background: rgba(0, 132, 255, 0.1);
+            border-left: 3px solid #0084ff;
+            padding: 4px 8px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #0084ff;
+            border-radius: 4px;
+        }
+        
+        .reply-indicator i {
+            margin-right: 4px;
+        }
+        
+        /* Edited indicator */
+        .edited-indicator {
+            font-size: 10px;
+            color: #999;
+            margin-left: 4px;
+        }
+        
+        /* Message status icons */
+        .message-status i {
+            font-size: 12px;
+            margin-left: 4px;
+        }
+        
+        /* Message info modal */
+        .chat-info-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color, #eee);
+        }
+        
+        .chat-info-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .chat-info-btn.primary {
+            background: #0084ff;
+            color: white;
+        }
+        
+        .chat-info-btn.primary:hover {
+            background: #0066cc;
+        }
+        
+        /* Report modal textarea */
+        .report-textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin: 15px 0;
+            font-family: inherit;
+            resize: vertical;
+        }
+        
+        .report-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        /* Chat categories */
+        .chat-categories {
+            display: flex;
+            overflow-x: auto;
+            padding: 10px;
+            gap: 8px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        
+        .category-tab {
+            padding: 6px 12px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.05);
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        
+        .category-tab.active {
+            background: #0084ff;
+            color: white;
+        }
+        
+        .category-tab .badge {
+            margin-left: 4px;
+            background: rgba(0, 0, 0, 0.1);
+            padding: 0 4px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+        
+        .category-tab.active .badge {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* UI disabled state (when not ACTIVE) */
+        .ui-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        .loading-chat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 300px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.loading-chat .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #e9ecef;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-chat p {
+    font-size: 14px;
+    margin: 0;
+}
+        body[data-parent-shell="true"] #sidebar > .sidebar-header {
+            display: none !important;
+        }
+
+        body[data-parent-shell="true"] #sidebar {
+            padding-top: 0 !important;
+        }
+    </style>
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
+</head>
+<body>
+    <!-- =============================================
+         STATUS INDICATORS - SUBTLE
+    ============================================= -->
+    
+    <!-- Auth Status Indicator -->
+    <div class="auth-status-indicator" id="authStatusIndicator">
+        <div class="background-fetch-spinner"></div>
+        <span id="authStatusText">Checking authentication...</span>
+    </div>
+    
+    <!-- Connection Status Row -->
+    <div class="connection-status">
+        <div class="handshake-status" id="handshakeStatus" style="display: none;">
+            <i class="fas fa-handshake"></i>
+            <span>Handshake pending</span>
+        </div>
+        <div class="session-status" id="sessionStatus" style="display: none;">
+            <i class="fas fa-user-circle"></i>
+            <span>Session pending</span>
+        </div>
+        <div class="recovery-indicator" id="recoveryIndicator" style="display: none;">
+            <div class="background-fetch-spinner"></div>
+            <span>Recovering...</span>
+        </div>
+    </div>
+    
+    <!-- Background Fetch Indicator -->
+    <div class="background-fetch-indicator" id="backgroundFetchIndicator">
+        <div class="background-fetch-spinner"></div>
+        <span>Syncing...</span>
+    </div>
+    
+    <!-- Token Status Indicator -->
+    <div class="token-status" id="tokenStatus">🔴 Connecting...</div>
+    
+    <!-- =============================================
+         OVERLAYS
+    ============================================= -->
+    
+    <!-- Reconnect Overlay -->
+    <div class="reconnect-overlay" id="reconnectOverlay">
+        <div class="reconnect-content">
+            <div class="reconnect-spinner"></div>
+            <div class="reconnect-message" id="reconnectMessage">Reconnecting...</div>
+            <button class="reconnect-btn" id="retryConnectionBtn">Retry Now</button>
+        </div>
+    </div>
+    
+    <!-- Offline Overlay -->
+    <div class="offline-overlay" id="offlineOverlay" style="display: none !important;">
+        <div class="offline-content">
+            <i class="fas fa-wifi-slash offline-icon"></i>
+            <div class="offline-title">You're offline</div>
+            <div class="offline-message">
+                Your messages will be sent when you reconnect. You can still view your existing messages.
+            </div>
+            <button class="offline-dismiss-btn" id="dismissOfflineBtn">Continue offline</button>
+        </div>
+    </div>
+    
+    <!-- Syncing Indicator -->
+    <div class="syncing-indicator" id="syncingIndicator" style="display: none;">
+        <div class="loading-spinner" style="width: 16px; height: 16px; margin: 0;"></div>
+        <span>Syncing...</span>
+    </div>
+    
+    <!-- Notification -->
+    <div class="notification" id="notification">
+        <i class="fas fa-check-circle"></i>
+        <span id="notificationText">Message sent</span>
+    </div>
+    
+    <!-- Media Viewer -->
+    <div class="media-viewer" id="mediaViewer">
+        <div class="media-header">
+            <div id="mediaFileName"></div>
+            <button class="media-close" id="closeMediaViewer">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="media-content">
+            <img id="mediaViewerImage" class="media-image" alt="Media">
+        </div>
+    </div>
+    
+    <!-- Thread Panel -->
+    <div class="thread-panel" id="threadPanel">
+        <div class="chat-header">
+            <button class="chat-action-btn back-btn" id="closeThreadBtn">
+                <i class="fas fa-times"></i>
+            </button>
+            <div class="chat-details">
+                <div class="chat-name">Thread</div>
+                <div class="chat-status-text" id="threadCount">0 replies</div>
+            </div>
+        </div>
+        <div class="messages-container" id="threadMessages">
+            <!-- Thread messages will be loaded here -->
+        </div>
+        <div class="input-area">
+            <textarea class="message-input" id="threadInput" placeholder="Reply in thread..."></textarea>
+            <button class="send-button" id="threadSendBtn">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Chat Info Modal -->
+    <div class="chat-info-modal" id="chatInfoModal">
+        <div class="chat-info-content">
+            <div class="chat-info-header">
+                <div class="chat-name" id="chatInfoName">Chat Info</div>
+                <button class="chat-info-close" id="closeChatInfoBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="chat-info-body" id="chatInfoBody">
+                <!-- Chat info will be loaded here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Report Modal -->
+    <div class="report-modal" id="reportModal">
+        <div class="report-content">
+            <div class="chat-name">Report Message</div>
+            <input type="hidden" id="reportMessageId" value="">
+            <select id="reportReason" class="report-textarea" style="height: auto;">
+                <option value="">Select a reason...</option>
+                <option value="spam">Spam or promotional content</option>
+                <option value="harassment">Harassment or bullying</option>
+                <option value="hate">Hate speech</option>
+                <option value="violence">Violent content</option>
+                <option value="nudity">Inappropriate content</option>
+                <option value="other">Other</option>
+            </select>
+            <textarea id="reportDetails" class="report-textarea" placeholder="Additional details (optional)..."></textarea>
+            <div class="report-actions">
+                <button class="edit-btn cancel" id="cancelReportBtn">Cancel</button>
+                <button class="edit-btn save" id="submitReportBtn">Submit Report</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Multi-Send Panel -->
+    <div class="multi-send-panel" id="multiSendPanel">
+        <div class="chat-header">
+            <div class="chat-name">Send to Multiple Chats</div>
+            <button class="chat-info-close" id="closeMultiSendBtn">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="chat-info-body">
+            <div class="multi-send-header">
+                <div class="search-container">
+                    <div class="search-box">
+                        <input type="text" class="search-input" id="multiSendSearch" placeholder="Search chats...">
+                        <i class="fas fa-search search-icon"></i>
+                    </div>
+                </div>
+                <div class="selected-count" id="selectedCount">0 selected</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;padding:0 16px 12px;">
+                <select id="multiSendReplyVisibility" style="flex:1;padding:10px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:12px;background:#fff;">
+                    <option value="public">Replies visible to everyone</option>
+                    <option value="creator_only">Replies visible only to creator</option>
+                </select>
+                <button type="button" id="multiSendHistoryBtn" style="padding:10px 14px;border:none;border-radius:12px;background:#eef2ff;color:#4338ca;font-weight:600;cursor:pointer;">
+                    History
+                </button>
+            </div>
+            <div id="multiSendHistoryList" style="display:none;padding:0 16px 12px;max-height:180px;overflow:auto;"></div>
+            <div id="multiSendHistoryDetail" style="display:none;margin:0 16px 12px;padding:12px;border-radius:14px;background:#f8fafc;border:1px solid rgba(15,23,42,0.08);"></div>
+            <div class="chats-list" id="multiSendChatsList">
+                <!-- Chats for multi-send will be loaded here -->
+            </div>
+            <div class="attachment-preview" id="multiSendAttachmentPreview" style="display: none;">
+                <!-- Attachment preview for multi-send -->
+            </div>
+            <input type="hidden" id="forwardMessageId" value="">
+            <div class="input-area" style="border-top: 1px solid var(--border-color, #eee);">
+                <textarea class="message-input" id="multiSendInput" placeholder="Type message to send..."></textarea>
+                <button class="send-button" id="multiSendBtn">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+            <button class="multi-send-cancel-btn" id="multiSendCancelBtn">
+    <i class="fas fa-times-circle"></i> Cancel
+</button>
+        </div>
+    </div>
+    
+    <!-- Schedule Modal -->
+    <div class="chat-info-modal" id="scheduleModal">
+        <div class="chat-info-content">
+            <div class="chat-info-header">
+                <div class="chat-name">Schedule Message</div>
+                <button class="chat-info-close" id="closeScheduleBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="chat-info-body">
+                <div class="chat-info-section">
+                    <div class="chat-info-title">When to send?</div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Date</div>
+                        <input type="date" id="scheduleDate" class="chat-info-value" style="border: none; background: transparent; text-align: right;">
+                    </div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Time</div>
+                        <input type="time" id="scheduleTime" class="chat-info-value" style="border: none; background: transparent; text-align: right;">
+                    </div>
+                    <div class="chat-info-item">
+                        <div class="chat-info-label">Send now</div>
+                        <input type="checkbox" id="sendNow" class="chat-info-value">
+                    </div>
+                </div>
+                <div class="chat-info-section">
+                    <div class="chat-info-title">Message</div>
+                    <textarea id="scheduleMessage" class="message-input" style="width: 100%; min-height: 100px;"></textarea>
+                    <div class="attachment-preview" id="scheduleAttachmentPreview" style="display: none;"></div>
+                </div>
+                <div class="chat-info-actions">
+                    <button class="edit-btn cancel" id="cancelScheduleBtn">Cancel</button>
+                    <button class="chat-info-btn primary" id="confirmScheduleBtn">
+                        <i class="fas fa-clock"></i>
+                        Schedule
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Send Options Overlay -->
+    <div class="send-options-overlay" id="sendOptionsOverlay"></div>
+    
+    <!-- Recording Cancel Overlay -->
+    <div class="recording-cancel-overlay" id="recordingCancelOverlay">
+        <div style="text-align: center;">
+            <i class="fas fa-microphone-slash" style="font-size: 48px; margin-bottom: 20px;"></i>
+            <div style="font-size: 18px; font-weight: 500; margin-bottom: 10px;">Recording in progress</div>
+            <div style="font-size: 14px; opacity: 0.8;">Drag up to cancel</div>
+        </div>
+        <button class="cancel-recording-btn" id="cancelRecordingOverlayBtn">Cancel Recording</button>
+    </div>
+    
+    <!-- =============================================
+         MAIN APP CONTAINER
+    ============================================= -->
+    <div class="app-container">
+        <!-- Sidebar with chat list -->
+        <div class="sidebar active" id="sidebar">
+            <div class="sidebar-header">
+                <h2>Chats</h2>
+                <div style="display: flex; gap: 10px;">
+                    <!-- Multi-send button -->
+                    <button class="new-chat-btn" id="multiSendToggleBtn" title="Send to multiple chats (Ctrl+Shift+M)">
+                        <i class="fas fa-broadcast-tower"></i>
+                    </button>
+                    <button class="new-chat-btn" id="newChatBtn" title="New chat (Ctrl+N)">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Chat Categories -->
+            <div class="chat-categories" id="chatCategories">
+                <button class="category-tab active" data-category="all">All <span class="badge" id="allBadge">0</span></button>
+                <button class="category-tab" data-category="unread">Unread <span class="badge" id="unreadBadge">0</span></button>
+                <button class="category-tab" data-category="archived">Archived <span class="badge" id="archivedBadge">0</span></button>
+                <button class="category-tab" data-category="blocked">Blocked <span class="badge" id="blockedBadge">0</span></button>
+                <button class="category-tab" data-category="notes">Notes <span class="badge" id="notesBadge">0</span></button>
+            </div>
+            
+            <div class="search-container">
+                <div class="search-box">
+                    <input type="text" class="search-input" id="chatSearch" placeholder="Search chats... (Ctrl+K)">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
+            
+            <div class="chats-list" id="chatsList">
+                <!-- Chats will be loaded here - subtle loading state -->
+                <div class="empty-state subtle">
+                    <i class="fas fa-comments empty-icon" style="opacity: 0.3;"></i>
+                    <div class="empty-title" style="font-size: 14px;">Loading chats...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Chat Panel -->
+        <div class="chat-panel hidden" id="chatPanel">
+            <div class="chat-header">
+                <!-- Back button: visible only on mobile via CSS (.back-to-sidebar-btn) -->
+                <button class="chat-action-btn back-to-sidebar-btn" id="backToChatsBtn" title="Back to chats" aria-label="Back to chats"><i class="fas fa-arrow-left"></i></button>
+                <!-- Floating scroll-date badge: fades in/out during scroll -->
+                <div class="scroll-date-badge" id="scrollDateBadge"></div>
+                <div class="chat-info" style="cursor:pointer;" onclick="window.messagesUI?.viewReceiverProfile()">
+                    <div class="chat-avatar" id="chatFriendAvatar">
+                        <i class="fas fa-user"></i>
+                        <div class="chat-status offline" id="chatStatusIndicator"></div>
+                    </div>
+                    <div class="chat-details">
+                        <div class="chat-name" id="chatFriendName">Select a chat</div>
+                        <div class="chat-status-text" id="chatStatusText">Tap on a chat to start messaging</div>
+                    </div>
+                </div>
+                <div class="chat-actions">
+                    <button class="chat-action-btn" id="voiceCallBtn" title="Voice Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="chat-action-btn" id="videoCallBtn" title="Video Call">
+                        <i class="fas fa-video"></i>
+                    </button>
+                    <button class="chat-action-btn" id="chatOptionsBtn" title="Options">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- In-chat search bar -->
+            <div class="chat-search-bar" id="chatSearchBar">
+                <input type="text" class="search-input" id="inChatSearch" placeholder="Search in this chat...">
+                <button class="chat-action-btn" id="closeChatSearchBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- Search results -->
+            <div class="search-results" id="searchResults"></div>
+            
+            <!-- Jump to latest button -->
+            <button class="jump-to-latest" id="jumpToLatestBtn" title="Jump to latest messages">
+                <i class="fas fa-arrow-down"></i>
+            </button>
+            
+            <!-- Typing indicator -->
+            <div class="message-typing" id="typingIndicator" style="display: none;">
+                <div class="typing-indicator">
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+                <div class="typing-text" id="typingText">is typing...</div>
+            </div>
+            
+            <div class="messages-container" id="messagesContainer">
+                <!-- Messages will be loaded here -->
+                <div class="empty-chat">
+                    <i class="fas fa-comments empty-chat-icon"></i>
+                    <div class="empty-chat-title">No chat selected</div>
+                    <div class="empty-chat-message">Select a chat from the sidebar to start messaging</div>
+                </div>
+            </div>
+            
+            <div class="input-area">
+                <!-- Attachment Options -->
+                <div class="attachment-options" id="attachmentOptions">
+                    <button class="attachment-option" data-type="image">
+                        <i class="fas fa-image attachment-icon"></i>
+                        <span class="attachment-label">Photo</span>
+                    </button>
+                    <button class="attachment-option" data-type="video">
+                        <i class="fas fa-video attachment-icon"></i>
+                        <span class="attachment-label">Video</span>
+                    </button>
+                    <button class="attachment-option" data-type="audio">
+                        <i class="fas fa-microphone attachment-icon"></i>
+                        <span class="attachment-label">Audio</span>
+                    </button>
+                    <button class="attachment-option" data-type="file">
+                        <i class="fas fa-file attachment-icon"></i>
+                        <span class="attachment-label">File</span>
+                    </button>
+                    <button class="attachment-option" data-type="location">
+                        <i class="fas fa-map-marker-alt attachment-icon"></i>
+                        <span class="attachment-label">Location</span>
+                    </button>
+                    <button class="attachment-option" data-type="poll">
+                        <i class="fas fa-poll attachment-icon"></i>
+                        <span class="attachment-label">Poll</span>
+                    </button>
+                    <button class="attachment-option" data-type="note">
+                        <i class="fas fa-sticky-note attachment-icon"></i>
+                        <span class="attachment-label">Note</span>
+                    </button>
+                </div>
+                
+                <div class="message-input-container">
+                    <!-- Left icon: emoji -->
+                    <button class="input-icon-left" id="emojiBtn" title="Emoji">
+                        <i class="far fa-smile"></i>
+                    </button>
+                    
+                    <!-- Reply indicator -->
+                    <div class="reply-indicator" id="replyIndicator" style="display: none;">
+                        <i class="fas fa-reply"></i>
+                        <span id="replyToText">Replying to message</span>
+                        <button class="input-action-btn" id="cancelReplyBtn" style="margin-left: auto;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Attachment preview -->
+                    <div class="attachment-preview" id="attachmentPreview" style="display: none;"></div>
+                    
+                    <textarea class="message-input" id="messageInput" placeholder="Type a message..." rows="1"></textarea>
+                    
+                    <!-- Right icon: attach/upload -->
+                    <button class="input-icon-right" id="attachBtn" title="Attach file">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    
+                    <!-- Recording Indicator -->
+                    <div class="recording-indicator" id="recordingIndicator" style="display: none;">
+                        <div class="recording-wave">
+                            <div class="recording-bar"></div>
+                            <div class="recording-bar"></div>
+                            <div class="recording-bar"></div>
+                            <div class="recording-bar"></div>
+                            <div class="recording-bar"></div>
+                        </div>
+                        <div class="recording-timer" id="recordingTimer">0:00</div>
+                        <button class="input-action-btn" id="cancelRecordingBtn" title="Cancel">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Send button with send-mode popup -->
+                <div style="position:relative;">
+                    <!-- Send mode popup: appears on long-press or right-click of send button -->
+                    <div class="send-mode-popup" id="sendModePopup">
+                        <button id="sendNowBtn">
+                            <i class="fas fa-paper-plane"></i>
+                            Send now
+                        </button>
+                        <button id="scheduleFromSendBtn">
+                            <i class="fas fa-clock"></i>
+                            Schedule
+                        </button>
+                    </div>
+                    <button class="send-button" id="sendButton">
+                        <i class="fas fa-paper-plane"></i>
+                        <div class="scheduled-badge" id="scheduleBadge" style="display: none;">⏰</div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Emoji Picker Container -->
+    <div class="emoji-picker-container" id="emojiPickerContainer">
+        <emoji-picker></emoji-picker>
+    </div>
+    
+    <!-- Message Actions Menu -->
+    <div class="message-actions" id="messageActions">
+        <button class="action-item" data-action="reply">
+            <i class="fas fa-reply"></i>
+            Reply
+        </button>
+        <button class="action-item" data-action="edit">
+            <i class="fas fa-edit"></i>
+            Edit
+        </button>
+        <button class="action-item" data-action="forward">
+            <i class="fas fa-share"></i>
+            Forward
+        </button>
+        <button class="action-item" data-action="copy">
+            <i class="fas fa-copy"></i>
+            Copy
+        </button>
+        <button class="action-item starred" data-action="star">
+            <i class="far fa-star"></i>
+            Star
+        </button>
+        <button class="action-item warning" data-action="report">
+            <i class="fas fa-flag"></i>
+            Report
+        </button>
+        <!-- Silent reaction options -->
+        <button class="action-item" data-action="react-like">
+            <i class="fas fa-thumbs-up"></i>
+            👍 React
+        </button>
+        <button class="action-item" data-action="react-love">
+            <i class="fas fa-heart"></i>
+            ❤️ React
+        </button>
+        <button class="action-item" data-action="react-laugh">
+            <i class="fas fa-laugh"></i>
+            😂 React
+        </button>
+        <button class="action-item danger" data-action="delete">
+            <i class="fas fa-trash"></i>
+            Delete
+        </button>
+        <button class="action-item" data-action="info">
+            <i class="fas fa-info-circle"></i>
+            Info
+        </button>
+    </div>
+    
+    <!-- Contact List (Friends Panel for New Chat) -->
+    <div class="sidebar" id="contactsSidebar" style="display:flex;flex-direction:column;">
+        <div class="sidebar-header" style="display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--border-color);">
+            <button class="chat-action-btn" id="backToChatsFromContactsBtn" title="Back" style="flex-shrink:0;">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <h2 style="flex:1;font-size:18px;font-weight:700;color:var(--text-primary);">Start Chat</h2>
+        </div>
+        <div class="search-container" style="padding:10px 16px;">
+            <div class="search-box">
+                <input type="text" class="search-input" id="contactSearch" placeholder="Search friends...">
+                <i class="fas fa-search search-icon"></i>
+            </div>
+        </div>
+        <div class="contacts-list" id="contactsList" style="flex:1;overflow-y:auto;">
+            <!-- Friends will be loaded here -->
+            <div class="empty-state subtle">
+                <i class="fas fa-address-book empty-icon" style="opacity: 0.3;"></i>
+                <div class="empty-title" style="font-size: 14px;">Loading friends...</div>
+            </div>
+        </div>
+    </div>
+
+    
+    <!-- Core scripts - loaded as modules -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <!-- All vendor libraries (regular scripts, not modules) -->
+    <script src="/js/vendor/qrcode.min.js"></script>
+    <script src="/js/vendor/RecordRTC.min.js"></script>
+    <script src="/js/vendor/viewer.min.js"></script>
+    <script src="/js/vendor/wavesurfer.min.js"></script>
+    <script src="/js/vendor/jsQR.min.js"></script>
+    <script src="/js/vendor/peerjs.min.js"></script>
+    <script src="/js/vendor/spectrum.min.js"></script>
+    <script src="/js/vendor/video.min.js"></script>
+    <script type="module" src="/js/vendor/emoji-picker.js"></script>
+    <script src="/js/vendor/chart.min.js"></script>
+    <script src="/js/vendor/pickr.min.js"></script>
+    <script src="/js/vendor/marked.min.js"></script>
+    <!-- GLOBAL SAFETY LAYER -->
+    <script src="/js/kynecta.safety.layer.js"></script>
+    <script>
+        (function() {
+            waitForParentReady(8000).then(function() {
+                try {
+                    if (window.parent && window.parent.AppStorage) {
+                        window.AppStorage = window.parent.AppStorage;
+                    }
+                } catch (e) {
+                    console.warn('[message.html] AppStorage bridge failed:', e.message);
+                }
+
+                try {
+                    if (window.parent && typeof window.parent.__getStableSessionData === 'function') {
+                        window.__PARENT_SESSION__ = window.parent.__getStableSessionData();
+                    }
+                } catch (e) {
+                    console.warn('[message.html] Session bridge failed:', e.message);
+                }
+            });
+        })();
+    </script>
+    <script>
+        console.log('[INIT MODULE]', 'messages-iframe');
+    </script>
+    <!-- OFFLINE-FIRST LAYER (load order matters) -->
+    <script src="/js/AppSettings.js"></script>
+    <script src="/js/settings-global-propagation.js"></script>
+    <script src="/js/settings-module-subscriptions.js"></script>
+    <script src="/js/app.cache.js"></script>
+    <script src="/js/app.realtime.socket.js"></script>
+    <script src="/js/localStore.messages.js"></script>
+    <script src="/js/messageQueue.manager.js"></script>
+    <script src="/js/messageSync.engine.js"></script>
+    <script src="/js/services.message.js"></script>
+    <script type="module" src="messages-core.js"></script>
+    <script type="module" src="messages-ui.js?v=3"></script>
+
+    
+    <!-- Inline script for initialization and fallback - SILENT -->
+    <script>
+        (function() {
+            // Enable debug mode if hash is present
+            if (window.location.hash === '#debug') {
+                window.__IFRAME_DEBUG__ = true;
+            }
+            
+            // DETERMINISTIC: Check if core is ready and initialize UI
+            // NO RETRY LOOPS - just passive waiting
+            let coreCheckCount = 0;
+            const checkCoreInterval = setInterval(() => {
+                coreCheckCount++;
+                
+                // FIX: Check both isReady() AND raw state — isReady() requires ACTIVE+authenticated
+                // but state==ACTIVE is enough for UI to become interactive
+                const coreState = window.messagesCore?.getState?.()?.state;
+                const isActive = (window.messagesCore?.isReady?.()) || coreState === 'ACTIVE';
+                
+                if (isActive) {
+                    clearInterval(checkCoreInterval);
+                    // token status hidden — connection is background-only
+                    const tokenStatus = document.getElementById('tokenStatus');
+                    if (tokenStatus) { tokenStatus.style.display = 'none'; }
+                } else if (coreCheckCount > 30) {
+                    // After 30 seconds, stop polling silently
+                    clearInterval(checkCoreInterval);
+                    const tokenStatus = document.getElementById('tokenStatus');
+                    if (tokenStatus) { tokenStatus.style.display = 'none'; }
+                }
+            }, 1000);
+            
+            // Silent background initialization - no console noise
+            setTimeout(() => {
+                const lifecycleState = window.messagesCore?.getState?.()?.state || 'UNKNOWN';
+                
+                if (lifecycleState !== 'ACTIVE' && lifecycleState !== 'WAIT_PARENT') {
+                    const chatsList = document.getElementById('chatsList');
+                    if (chatsList && chatsList.children.length === 0) {
+                        chatsList.innerHTML = `
+                            <div class="empty-state subtle">
+                                <i class="fas fa-sync-alt fa-spin empty-icon" style="opacity: 0.3;"></i>
+                                <div class="empty-title" style="font-size: 14px;">Connecting...</div>
+                            </div>
+                        `;
+                    }
+                }
+            }, 5000);
+            
+            // 15 second timeout - show minimal message (still subtle)
+            setTimeout(() => {
+                const lifecycleState = window.messagesCore?.getState?.()?.state || 'UNKNOWN';
+                
+                if (lifecycleState !== 'ACTIVE' && lifecycleState !== 'WAIT_PARENT') {
+                    const chatsList = document.getElementById('chatsList');
+                    if (chatsList && chatsList.children.length === 0) {
+                        chatsList.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-exclamation-triangle empty-icon"></i>
+                                <div class="empty-title">Connection in progress</div>
+                                <div class="empty-message">This will resolve automatically</div>
+                            </div>
+                        `;
+                    }
+                }
+            }, 15000);
+            
+            // Add retry connection function for the reconnect button
+            window.retryConnection = function() {
+                if (window.messagesCore && window.messagesCore.retryConnection) {
+                    window.messagesCore.retryConnection();
+                } else if (window.messagesCore && window.messagesCore.reset) {
+                    window.messagesCore.reset();
+                } else {
+                    location.reload();
+                }
+            };
+            
+            // =============================================
+            // SEND MODE POPUP — Send now / Schedule
+            // =============================================
+            (function() {
+                const sendBtn = document.getElementById('sendButton');
+                const popup   = document.getElementById('sendModePopup');
+                const sendNowBtn = document.getElementById('sendNowBtn');
+                const scheduleFromSendBtn = document.getElementById('scheduleFromSendBtn');
+                if (!sendBtn || !popup) return;
+
+                let holdTimer = null;
+
+                // Long-press to open popup
+                sendBtn.addEventListener('mousedown', function(e) {
+                    holdTimer = setTimeout(() => {
+                        popup.classList.add('active');
+                    }, 500);
+                });
+                sendBtn.addEventListener('touchstart', function(e) {
+                    holdTimer = setTimeout(() => {
+                        popup.classList.add('active');
+                    }, 500);
+                }, { passive: true });
+                sendBtn.addEventListener('mouseup', function() { clearTimeout(holdTimer); });
+                sendBtn.addEventListener('touchend', function() { clearTimeout(holdTimer); });
+
+                // Right-click also opens popup
+                sendBtn.addEventListener('contextmenu', function(e) {
+                    e.preventDefault();
+                    popup.classList.add('active');
+                });
+
+                // Click outside to close
+                document.addEventListener('click', function(e) {
+                    if (!popup.contains(e.target) && e.target !== sendBtn) {
+                        popup.classList.remove('active');
+                    }
+                });
+
+                // Send now — just fires normal send
+                if (sendNowBtn) {
+                    sendNowBtn.addEventListener('click', function() {
+                        popup.classList.remove('active');
+                        // Trigger the normal send
+                        const core = window.messagesCore;
+                        if (core && core.sendMessage) core.sendMessage();
+                        else if (window.messagesUI) {
+                            // fire via sendButton click without reopening popup
+                            sendBtn._skipPopup = true;
+                            sendBtn.click();
+                            sendBtn._skipPopup = false;
+                        }
+                    });
+                }
+
+                // Schedule — open schedule modal
+                if (scheduleFromSendBtn) {
+                    scheduleFromSendBtn.addEventListener('click', function() {
+                        popup.classList.remove('active');
+                        const scheduleModal = document.getElementById('scheduleModal');
+                        if (scheduleModal) {
+                            scheduleModal.classList.add('active');
+                            // populate defaults
+                            const now = new Date();
+                            now.setMinutes(now.getMinutes() + 10);
+                            const dateEl = document.getElementById('scheduleDate');
+                            const timeEl = document.getElementById('scheduleTime');
+                            if (dateEl) dateEl.value = now.toISOString().slice(0, 10);
+                            if (timeEl) timeEl.value = now.toTimeString().slice(0, 5);
+                            // copy current message text to schedule modal
+                            const msgInput = document.getElementById('messageInput');
+                            const schedMsg = document.getElementById('scheduleMessage');
+                            if (msgInput && schedMsg) schedMsg.value = msgInput.value;
+                        }
+                    });
+                }
+            })();
+
+            // =============================================
+            // CONTACTS SEARCH FILTER
+            // =============================================
+            (function() {
+                const searchEl = document.getElementById('contactSearch');
+                if (!searchEl) return;
+                searchEl.addEventListener('input', function() {
+                    const q = this.value.toLowerCase().trim();
+                    const items = document.querySelectorAll('#contactsList .contact-item');
+                    items.forEach(item => {
+                        const name = (item.dataset.contactName || '').toLowerCase();
+                        item.style.display = (!q || name.includes(q)) ? '' : 'none';
+                    });
+                    // Also hide group headers if all children hidden
+                    document.querySelectorAll('#contactsList .contact-group').forEach(grp => {
+                        const visible = grp.querySelectorAll('.contact-item:not([style*="none"])').length;
+                        grp.style.display = visible ? '' : 'none';
+                    });
+                });
+            })();
+
+            // =============================================
+            // CONTACTS PANEL: hide by default, shown on new-chat click
+            // =============================================
+            (function() {
+                const cs = document.getElementById('contactsSidebar');
+                if (cs) { cs.classList.add('hidden'); cs.style.pointerEvents = 'none'; }
+            })();
+            
+            // Add helper for report submission
+            window.submitReport = function() {
+                const messageId = document.getElementById('reportMessageId')?.value;
+                const reason = document.getElementById('reportReason')?.value;
+                const details = document.getElementById('reportDetails')?.value;
+                
+                if (!messageId) {
+                    console.warn('No message ID for report');
+                    return false;
+                }
+                
+                if (window.messagesCore && window.messagesCore.reportMessage) {
+                    window.messagesCore.reportMessage(messageId, { reason, details });
+                    return true;
+                }
+                return false;
+            };
+            
+            // Add helper to open chat
+            window.openChat = function(chat) {
+                if (window.messagesCore && window.messagesCore.openConversation) {
+                    window.messagesCore.openConversation(chat.id, chat);
+                }
+            };
+            
+            // Add helper to load chat by friend ID
+            window.loadChatByFriendId = function(friendId) {
+                if (window.messagesCore && window.messagesCore.createConversation) {
+                    window.messagesCore.createConversation([friendId]);
+                }
+            };
+        })();
+    </script>
+
+    <!-- =============================================
+         PARENT COMMUNICATION HANDLERS
+         Auto-detects development vs production environment
+    ============================================= -->
+    <script>
+    (function() {
+        'use strict';
+        
+        // Detect environment: development (localhost/127.0.0.1) vs production (Render/other domains)
+        const hostname = window.location.hostname;
+        const isDevelopment = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.includes('.local');
+        const isRender = hostname.includes('onrender.com') || hostname.includes('render');
+        
+        const environment = isDevelopment ? 'development' : (isRender ? 'render' : 'production');
+        console.log(`[Message HTML] Environment detected: ${environment} (${hostname})`);
+        
+        // Allowed origins based on environment
+        const getAllowedOrigins = () => {
+            const origins = [window.location.origin];
+            
+            if (isDevelopment) {
+                origins.push('http://127.0.0.1:5500', 'http://localhost:5500', 'http://localhost:3000');
+            }
+            
+            if (isRender) {
+                origins.push('https://*.onrender.com');
+            }
+            
+            // Production parent origins (add your production parent domain here)
+            // origins.push('https://your-production-domain.com');
+            
+            return origins;
+        };
+        
+        // Check if origin is allowed (supports wildcard for render)
+        const isOriginAllowed = (origin) => {
+            const allowedOrigins = getAllowedOrigins();
+            
+            for (const allowed of allowedOrigins) {
+                if (allowed.includes('*')) {
+                    const pattern = allowed.replace('*', '.*');
+                    const regex = new RegExp(pattern);
+                    if (regex.test(origin)) return true;
+                } else if (allowed === origin) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        // Listen for messages from parent frame
+        window.addEventListener('message', function(event) {
+            // Security: Only accept messages from trusted origins
+            if (!isOriginAllowed(event.origin)) {
+                console.warn('[Message HTML] Ignoring message from untrusted origin:', event.origin, 'Environment:', environment);
+                return;
+            }
+            
+            const data = event.data;
+            if (!data || typeof data !== 'object') return;
+            
+            if (window.__MESSAGES_DEBUG__ === true) {
+                console.log('[Message HTML] Received message:', data.type, data, 'Environment:', environment);
+            }
+            
+            // Handle opening chat with specific user
+            // FIX: Only open chat panel on explicit user-triggered OPEN_CHAT_WITH_USER.
+            // Never auto-open on page load or sessionStorage read.
+            // ✅ FIX 7a: Forward ws-bridge message events into messages-core document events.
+            // chat.html sends these via postMessage — without this block they were silently dropped.
+            //
+            // ✅ FIX 8 (RECEIVER BUG): app_realtime_socket.js wildcard bridge sends events as
+            // REALTIME_EVENT:{socketEventName} — e.g. REALTIME_EVENT:message:new. These were
+            // NOT in WS_BRIDGE_MESSAGE_TYPES so they were completely silently dropped here,
+            // which is why receivers never saw incoming messages even though delivery showed success.
+            // We now normalize REALTIME_EVENT:* types before the whitelist check.
+            let normalizedData = data;
+            if (typeof data.type === 'string' && data.type.startsWith('REALTIME_EVENT:')) {
+                const subType = data.type.slice('REALTIME_EVENT:'.length);
+                // Map to the canonical type that the rest of the pipeline understands
+                if (subType === 'message:new' || subType === 'new_message' ||
+                    subType === 'newMessage' || subType === 'chat:message' ||
+                    subType === 'MESSAGE_RECEIVED') {
+                    normalizedData = { ...data, type: 'message:new', payload: data.payload || data };
+                } else if (subType === 'message:delivered' || subType === 'message_delivered') {
+                    normalizedData = { ...data, type: 'message:delivered' };
+                } else if (subType === 'message:read' || subType === 'message_read') {
+                    normalizedData = { ...data, type: 'message:read' };
+                } else if (subType === 'message:sent' || subType === 'message_sent') {
+                    normalizedData = { ...data, type: 'message:sent' };
+                }
+                // For any other REALTIME_EVENT:* (presence, calls, etc.) fall through unchanged
+            }
+
+            // FIX: Route each ws-bridge type correctly — NO more all-as-message:new
+            const _nt = normalizedData.type;
+            const _p  = normalizedData.payload || normalizedData;
+
+            if (_nt === 'message:new' || _nt === 'new_message' || _nt === 'newMessage' || _nt === 'chat:message') {
+                // FIXED: Enrich _p with chatId before dispatching.
+                // messages-core drops messages with no chatId — backend may use conversationId instead.
+                const _ep = { ..._p };
+                if (!_ep.chatId && _ep.conversationId) _ep.chatId = _ep.conversationId;
+                if (!_ep.chatId && _ep.chat_id)        _ep.chatId = _ep.chat_id;
+                if (!_ep.chatId && _ep.roomId)         _ep.chatId = _ep.roomId;
+                if (!_ep.chatId && data && data.chatId) _ep.chatId = data.chatId;
+                if (!_ep.chatId && data && data.conversationId) _ep.chatId = data.conversationId;
+                try { document.dispatchEvent(new CustomEvent('message:new', { detail: _ep })); } catch(_) {}
+                console.log('[Message HTML] FIX new message:', _nt, 'chatId:', _ep.chatId);
+            } else if (_nt === 'message:sent' || _nt === 'message_sent') {
+                try { document.dispatchEvent(new CustomEvent('message:sent',          { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.localId || _p.messageId, status: 'sent', serverId: _p.serverId || _p.id } })); } catch(_) {}
+            } else if (_nt === 'message:delivered' || _nt === 'message_delivered') {
+                try { document.dispatchEvent(new CustomEvent('message:delivered',     { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.messageId || _p.localId, status: 'delivered' } })); } catch(_) {}
+            } else if (_nt === 'message:read' || _nt === 'message_read') {
+                try { document.dispatchEvent(new CustomEvent('message:read',          { detail: _p })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('messageStatusUpdated',    { detail: { messageId: _p.messageId || _p.localId, status: 'read' } })); } catch(_) {}
+            } else if (_nt === 'message:reaction' || _nt === 'message_reaction') {
+                try { document.dispatchEvent(new CustomEvent('message:reaction',      { detail: _p })); } catch(_) {}
+            } else if (_nt === 'CONVERSATION_UPDATED' || _nt === 'REACTION_UPDATED') {
+                try { window.dispatchEvent(new CustomEvent('conversationUpdated',     { detail: _p })); } catch(_) {}
+            }
+
+            // ✅ FIX 7b: Forward INCOMING_CALL so messages-ui.js modal fires.
+            if (data.type === 'INCOMING_CALL' || data.type === 'CALL_INCOMING') {
+                const callPayload = data.payload || data;
+                console.log('[Message HTML] 📞 FIX7 INCOMING_CALL received', callPayload);
+                try { window.dispatchEvent(new CustomEvent('incomingCall', { detail: callPayload })); } catch(_) {}
+                try { window.dispatchEvent(new CustomEvent('kyn:call:incoming', { detail: callPayload })); } catch(_) {}
+                try { document.dispatchEvent(new CustomEvent('call:incoming', { detail: callPayload })); } catch(_) {}
+            }
+
+            if (data.type === 'OPEN_CHAT_WITH_USER') {
+                console.log('[Message HTML] Opening chat with user:', data.payload);
+
+                const { userId, userName, recipientId, recipientName } = data.payload || {};
+                const targetUserId = userId || recipientId;
+                const targetUserName = userName || recipientName || 'User';
+
+                if (!targetUserId) { console.error('[Message HTML] No userId provided'); return; }
+
+                // DEDUP: ignore duplicate OPEN_CHAT_WITH_USER for same user within 2s
+                const _dk = 'open_chat_' + targetUserId;
+                const _nt = Date.now();
+                if (window.__openChatDedup && window.__openChatDedup[_dk] && (_nt - window.__openChatDedup[_dk]) < 2000) {
+                    try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nt }, '*'); } catch(_) {}
+                    return;
+                }
+                if (!window.__openChatDedup) window.__openChatDedup = {};
+                window.__openChatDedup[_dk] = _nt;
+                setTimeout(() => { if (window.__openChatDedup) delete window.__openChatDedup[_dk]; }, 2000);
+
+                // ACK parent so retry loop stops
+                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nt }, '*'); } catch(_) {}
+                sessionStorage.removeItem('open_chat_on_load');
+                sessionStorage.removeItem('pending_chat');
+
+                const eventDetail = {
+                    userId: targetUserId,
+                    userName: targetUserName,
+                    recipientId: targetUserId,
+                    recipientName: targetUserName
+                };
+
+                let _fired = false;
+                const tryOpen = (attempts) => {
+                    if (_fired) return;
+                    const _c = window.messagesCore;
+                    let _ok = false;
+                    if (_c && typeof _c.getState === 'function') {
+                        try { const _st = _c.getState(); _ok = _st === 'ACTIVE' || !!(_st && _st.state === 'ACTIVE'); } catch(_) {}
+                    } else if (_c) { _ok = !!_c.isActive; }
+                    if (_ok || attempts >= 15) {
+                        if (_fired) return;
+                        _fired = true;
+                        window.dispatchEvent(new CustomEvent('messages:openChat', { detail: eventDetail }));
+                    } else {
+                        setTimeout(() => tryOpen(attempts + 1), 200);
+                    }
+                };
+                tryOpen(0);
+            }
+        });
+        
+        // Check URL for pending chat parameters (deep link support)
+        function checkUrlForPendingChat() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const chatId = urlParams.get('chatId') || urlParams.get('openChat') || urlParams.get('userId');
+            const userName = urlParams.get('userName') || urlParams.get('name') || '';
+            const type = urlParams.get('type') || 'direct';
+            
+            if (chatId) {
+                console.log('[Message HTML] Found chat in URL params:', { chatId, userName, type, environment });
+                const _urlDetail = { userId: parseInt(chatId), userName: userName || 'User', recipientId: parseInt(chatId), recipientName: userName || 'User' };
+                let _urlFired = false;
+                const tryOpenUrl = (attempts) => {
+                    if (_urlFired) return;
+                    const _c = window.messagesCore;
+                    let _ok = false;
+                    if (_c && typeof _c.getState === 'function') {
+                        try { const _st = _c.getState(); _ok = _st === 'ACTIVE' || !!(_st && _st.state === 'ACTIVE'); } catch(_) {}
+                    } else if (_c) { _ok = !!_c.isActive; }
+                    if (_ok || attempts >= 20) {
+                        if (_urlFired) return;
+                        _urlFired = true;
+                        window.dispatchEvent(new CustomEvent('messages:openChat', { detail: _urlDetail }));
+                    } else { setTimeout(() => tryOpenUrl(attempts + 1), 200); }
+                };
+                setTimeout(() => tryOpenUrl(0), 200);
+                sessionStorage.setItem('open_chat_on_load', JSON.stringify({ userId: parseInt(chatId), userName: userName || 'User', type, timestamp: Date.now(), source: 'url-params', environment }));
+                const newUrl = window.location.pathname + (window.location.hash || '');
+                window.history.replaceState({}, document.title, newUrl);
+            }
+        }
+        
+        // FIX: checkSessionStorageForPendingChat is intentionally a NO-OP.
+        // Chat panel must only open via explicit OPEN_CHAT_WITH_USER postMessage from parent
+        // (triggered by user clicking "Message" in friends/calls modules, or clicking a chat row).
+        // Auto-opening on page load causes the chat panel to appear before the user does anything.
+        function checkSessionStorageForPendingChat() {
+            // Always clear stale session storage to prevent ghost reopens
+            sessionStorage.removeItem('open_chat_on_load');
+            sessionStorage.removeItem('pending_chat');
+        }
+        
+        // Expose helper for parent to open chat programmatically
+        window.openChatWithUser = function(userId, userName) {
+            console.log('[Message HTML] openChatWithUser called:', userId, userName, 'Environment:', environment);
+            
+            if (!userId) {
+                console.error('[Message HTML] openChatWithUser requires userId');
+                return false;
+            }
+            
+            sessionStorage.setItem('open_chat_on_load', JSON.stringify({
+                userId: userId,
+                userName: userName || 'User',
+                timestamp: Date.now(),
+                source: 'direct-call',
+                environment: environment
+            }));
+            
+            window.dispatchEvent(new CustomEvent('messages:openChat', {
+                detail: {
+                    userId: userId,
+                    userName: userName || 'User',
+                    recipientId: userId,
+                    recipientName: userName || 'User'
+                }
+            }));
+            
+            if (window.messagesCore && window.messagesCore.createConversation) {
+                window.messagesCore.createConversation([userId]);
+            }
+            
+            return true;
+        };
+        
+        // Run on load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                checkUrlForPendingChat();
+                checkSessionStorageForPendingChat();
+            });
+        } else {
+            checkUrlForPendingChat();
+            checkSessionStorageForPendingChat();
+        }
+        
+        // Also listen for core ready event to process any pending chat
+        window.addEventListener('messagesCoreReady', function() {
+            console.log('[Message HTML] Core ready, checking for pending chat again');
+            checkSessionStorageForPendingChat();
+        });
+        
+        console.log(`[Message HTML] Parent communication initialized. Environment: ${environment}, Host: ${hostname}`);
+    })();
+    </script>
+    
+</body>
+</html>

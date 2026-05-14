@@ -1,0 +1,1142 @@
+/* responsive.css - Enhanced Universal Kynecta Responsive Design */
+/* Mobile First Approach - Works for ALL pages */
+
+/* ===== VIEWPORT META TAG (IMPORTANT - MUST BE IN HTML HEAD) ===== */
+/*
+  Add this to ALL HTML files in the <head> section:
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+*/
+
+/* ===== RESET & BASE STYLES ===== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: #0F172A;
+  color: white;
+  line-height: 1.5;
+}
+
+/* ===== MOOD & INTEREST SYSTEM - UNIVERSAL STYLES ===== */
+.mood-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    margin: 2px;
+    border: none;
+    cursor: default;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+/* All 10 mood colors */
+.mood-calm { 
+    background: linear-gradient(135deg, #3B82F6, #8B5CF6); 
+    color: white; 
+}
+
+.mood-energetic { 
+    background: linear-gradient(135deg, #DC2626, #EA580C); 
+    color: white; 
+}
+
+.mood-focus { 
+    background: linear-gradient(135deg, #059669, #10B981); 
+    color: white; 
+}
+
+.mood-creative { 
+    background: linear-gradient(135deg, #7C3AED, #A78BFA); 
+    color: white; 
+}
+
+.mood-relaxed { 
+    background: linear-gradient(135deg, #0891B2, #06B6D4); 
+    color: white; 
+}
+
+.mood-social { 
+    background: linear-gradient(135deg, #DB2777, #EC4899); 
+    color: white; 
+}
+
+.mood-learning { 
+    background: linear-gradient(135deg, #9333EA, #A855F7); 
+    color: white; 
+}
+
+.mood-work { 
+    background: linear-gradient(135deg, #1E40AF, #3B82F6); 
+    color: white; 
+}
+
+.mood-play { 
+    background: linear-gradient(135deg, #F59E0B, #FBBF24); 
+    color: white; 
+}
+
+.mood-chill { 
+    background: linear-gradient(135deg, #0F766E, #14B8A6); 
+    color: white; 
+}
+
+.interest-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+    margin: 2px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.interest-chip:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.interest-chip.selected {
+    background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+    color: white;
+    border-color: transparent;
+}
+
+.mood-filter-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+/* Tablet-optimized filters */
+.tablet-mood-filters {
+    display: none;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    .tablet-mood-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        margin-bottom: 16px;
+    }
+    
+    .tablet-mood-filter-chip {
+        padding: 8px 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+    }
+    
+    .tablet-mood-filter-chip:hover {
+        background: rgba(59, 130, 246, 0.2);
+        border-color: rgba(59, 130, 246, 0.5);
+    }
+    
+    .tablet-mood-filter-chip.active {
+        background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+        color: white;
+        border-color: transparent;
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+    }
+}
+
+.content-matched {
+    border-left: 3px solid #10B981;
+    background: rgba(16, 185, 129, 0.05);
+    padding-left: 12px;
+}
+
+/* Mobile mood selector overlay */
+.mood-selector-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+}
+
+.mood-selector-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.mood-selector-modal {
+    background: white;
+    border-radius: 24px;
+    width: 100%;
+    max-width: 400px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+/* Mood selector grid */
+.mood-selector-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.mood-selector-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px 8px;
+    border-radius: 16px;
+    border: 2px solid transparent;
+    background: #f8fafc;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.mood-selector-option:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.mood-selector-option.selected {
+    border-color: currentColor;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+}
+
+.mood-emoji-large {
+    font-size: 2rem;
+    margin-bottom: 8px;
+}
+
+.mood-name-large {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: #334155;
+}
+
+/* Interest selector */
+.interest-selector-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 20px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Profile mood display */
+.profile-mood-display {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    margin: 16px 0;
+}
+
+.current-mood-indicator {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+}
+
+.mood-info {
+    flex: 1;
+}
+
+.mood-status {
+    font-size: 14px;
+    color: #94a3b8;
+    margin-top: 4px;
+}
+
+/* Mood timeline (for feed/posts) */
+.mood-timeline-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mood-timeline-time {
+    font-size: 12px;
+    color: #94a3b8;
+    min-width: 60px;
+}
+
+.mood-timeline-content {
+    flex: 1;
+}
+
+/* ===== RESPONSIVE CONTAINER SYSTEM ===== */
+.responsive-container {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .responsive-container {
+    max-width: 640px;
+  }
+}
+
+@media (min-width: 768px) {
+  .responsive-container {
+    max-width: 768px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .responsive-container {
+    max-width: 1024px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .responsive-container {
+    max-width: 1280px;
+  }
+}
+
+@media (min-width: 1536px) {
+  .responsive-container {
+    max-width: 1536px;
+  }
+}
+
+/* ===== UNIVERSAL UTILITY CLASSES ===== */
+.mobile-only { display: none !important; }
+.desktop-only { display: block !important; }
+.tablet-only { display: none !important; }
+.hidden-mobile { display: none !important; }
+.visible-mobile { display: block !important; }
+
+.prevent-overflow { 
+  max-width: 100vw !important; 
+  overflow-x: hidden !important; 
+}
+.flex-mobile { 
+  display: flex !important; 
+  flex-direction: column !important; 
+}
+.full-width { width: 100% !important; }
+.full-height { height: 100% !important; }
+.text-center-mobile { text-align: center !important; }
+
+/* ===== RESPONSIVE SPACING UTILITIES ===== */
+.p-4 { padding: 1rem !important; }
+.p-8 { padding: 2rem !important; }
+
+@media (min-width: 768px) {
+  .md\:p-4 { padding: 1rem !important; }
+  .md\:p-8 { padding: 2rem !important; }
+}
+
+/* ===== RESPONSIVE TYPOGRAPHY ===== */
+.text-base { font-size: 1rem !important; }
+.text-lg { font-size: 1.125rem !important; }
+.text-xl { font-size: 1.25rem !important; }
+.text-2xl { font-size: 1.5rem !important; }
+
+@media (min-width: 768px) {
+  .md\:text-base { font-size: 1rem !important; }
+  .md\:text-lg { font-size: 1.125rem !important; }
+  .md\:text-xl { font-size: 1.25rem !important; }
+  .md\:text-2xl { font-size: 1.5rem !important; }
+}
+
+/* ===== UNIVERSAL LAYOUT CONTAINERS ===== */
+.app-container, .page-container, .main-container {
+  width: 100vw !important;
+  min-height: 100vh !important;
+  position: relative !important;
+  overflow-x: hidden !important;
+}
+
+/* ===== RESPONSIVE SIDEBAR SYSTEM ===== */
+.sidebar, .desktop-sidebar {
+  display: none !important;
+  width: 250px !important;
+  height: 100vh !important;
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  background: rgba(30, 30, 60, 0.95) !important;
+  backdrop-filter: blur(20px) !important;
+  border-right: 1px solid rgba(59, 130, 246, 0.3) !important;
+  z-index: 90 !important;
+  padding: 1rem !important;
+  overflow-y: auto !important;
+}
+
+@media (min-width: 1024px) {
+  .sidebar, .desktop-sidebar {
+    display: block !important;
+  }
+  
+  .sidebar-hidden {
+    display: none !important;
+  }
+}
+
+/* ===== RESPONSIVE NAVIGATION ===== */
+/* Mobile Hamburger Menu */
+.hamburger-menu {
+  display: block !important;
+  position: fixed !important;
+  top: 1rem !important;
+  left: 1rem !important;
+  z-index: 1001 !important;
+  background: rgba(30, 30, 60, 0.9) !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+  border-radius: 8px !important;
+  width: 44px !important;
+  height: 44px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  cursor: pointer !important;
+}
+
+.hamburger-line {
+  width: 20px !important;
+  height: 2px !important;
+  background: white !important;
+  margin: 2px 0 !important;
+  transition: all 0.3s ease !important;
+}
+
+.hamburger-menu.active .hamburger-line:nth-child(1) {
+  transform: rotate(45deg) translate(5px, 5px) !important;
+}
+
+.hamburger-menu.active .hamburger-line:nth-child(2) {
+  opacity: 0 !important;
+}
+
+.hamburger-menu.active .hamburger-line:nth-child(3) {
+  transform: rotate(-45deg) translate(7px, -6px) !important;
+}
+
+/* Mobile Sidebar Menu */
+.mobile-sidebar {
+  position: fixed !important;
+  top: 0 !important;
+  left: -100% !important;
+  width: 80% !important;
+  max-width: 300px !important;
+  height: 100vh !important;
+  background: rgba(30, 30, 60, 0.98) !important;
+  backdrop-filter: blur(30px) !important;
+  border-right: 1px solid rgba(59, 130, 246, 0.3) !important;
+  z-index: 1000 !important;
+  padding: 1rem !important;
+  transition: left 0.3s ease !important;
+  overflow-y: auto !important;
+}
+
+.mobile-sidebar.active {
+  left: 0 !important;
+}
+
+.mobile-sidebar-overlay {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(5px) !important;
+  z-index: 999 !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  transition: all 0.3s ease !important;
+}
+
+.mobile-sidebar-overlay.active {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* ===== UNIVERSAL HEADER ===== */
+header, .page-header, .app-header {
+  padding: 1rem !important;
+  min-height: 70px !important;
+  background: rgba(30, 30, 60, 0.95) !important;
+  backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.3) !important;
+  position: relative !important;
+  z-index: 100 !important;
+}
+
+.header-title, .page-title {
+  font-size: 1.2rem !important;
+  font-weight: 600 !important;
+  text-align: center !important;
+}
+
+/* ===== UNIVERSAL NAVIGATION ===== */
+.main-nav, .bottom-nav, .mobile-nav {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  background: rgba(30, 30, 60, 0.98) !important;
+  backdrop-filter: blur(30px) !important;
+  border-top: 1px solid rgba(59, 130, 246, 0.3) !important;
+  padding: 0.5rem !important;
+  z-index: 1000 !important;
+  display: flex !important;
+  justify-content: space-around !important;
+}
+
+.nav-item, .nav-btn {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  padding: 0.5rem !important;
+  border-radius: 12px !important;
+  color: #94A3B8 !important;
+  font-size: 0.75rem !important;
+  min-height: 60px !important;
+  min-width: 60px !important;
+  justify-content: center !important;
+  text-decoration: none !important;
+  transition: all 0.3s ease !important;
+}
+
+.nav-item.active, .nav-btn.active {
+  color: #3B82F6 !important;
+  background: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* ===== MAIN CONTENT AREA (All Pages) ===== */
+.main-content, .content-area, .page-content {
+  width: 100% !important;
+  min-height: calc(100vh - 140px) !important;
+  padding: 1rem !important;
+  padding-bottom: 80px !important; /* Space for bottom nav */
+  overflow-y: auto !important;
+}
+
+/* ===== RESPONSIVE FLEX & GRID LAYOUTS ===== */
+.flex-responsive {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.grid-responsive {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 1rem !important;
+  width: 100% !important;
+}
+
+@media (min-width: 768px) {
+  .md\:flex-row {
+    flex-direction: row !important;
+  }
+  
+  .md\:grid-cols-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  
+  .md\:grid-cols-3 {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+  
+  /* Tablet-optimized mood selector */
+  .mood-selector-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  
+  .mood-selector-option {
+    padding: 20px 12px;
+  }
+  
+  .mood-emoji-large {
+    font-size: 2.5rem;
+  }
+  
+  .mood-name-large {
+    font-size: 14px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .lg\:grid-cols-4 {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+  
+  /* Desktop-optimized mood selector */
+  .mood-selector-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* ===== RESPONSIVE IMAGES & MEDIA ===== */
+.responsive-img, .card-image, .game-image, .product-image {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  object-fit: cover !important;
+  border-radius: 12px !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Special case for card images that need fixed height on larger screens */
+@media (min-width: 768px) {
+  .card-image, .game-image, .product-image {
+    height: 200px !important;
+  }
+}
+
+.responsive-video {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+/* ===== CARD COMPONENTS (Marketplace, Feed, Games) ===== */
+.card, .game-card, .product-card, .feed-card {
+  width: 100% !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-radius: 16px !important;
+  padding: 1rem !important;
+  margin-bottom: 1rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.card-title, .game-title, .product-title {
+  font-size: 1.1rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.card-description, .game-description {
+  font-size: 0.9rem !important;
+  opacity: 0.8 !important;
+  margin-bottom: 1rem !important;
+  line-height: 1.4 !important;
+}
+
+/* ===== BUTTONS (All Pages) ===== */
+.btn, .action-btn, .primary-btn {
+  width: 100% !important;
+  padding: 1rem !important;
+  background: linear-gradient(135deg, #3B82F6, #8B5CF6) !important;
+  border: none !important;
+  border-radius: 12px !important;
+  color: white !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  min-height: 50px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+@media (min-width: 768px) {
+  .btn, .action-btn, .primary-btn {
+    width: auto !important;
+    min-width: 120px !important;
+  }
+}
+
+/* ===== FORM ELEMENTS (Payment, Settings, Auth) ===== */
+.form-group, .input-group {
+  width: 100% !important;
+  margin-bottom: 1rem !important;
+}
+
+.form-label {
+  display: block !important;
+  margin-bottom: 0.5rem !important;
+  font-weight: 600 !important;
+  font-size: 0.9rem !important;
+}
+
+.form-input, .text-input, .payment-input {
+  width: 100% !important;
+  padding: 1rem !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 12px !important;
+  color: white !important;
+  font-size: 1rem !important;
+}
+
+.form-input::placeholder {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* ===== GRID LAYOUTS (Marketplace, Games, Feed) ===== */
+.grid, .cards-grid, .games-grid {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 1rem !important;
+  width: 100% !important;
+}
+
+/* ===== CHAT SPECIFIC (Backward Compatible) ===== */
+#mainContainer {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+}
+
+.w-80 {
+  width: 100% !important;
+  height: 40vh !important;
+  border-right: none !important;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.3) !important;
+}
+
+.flex-1 {
+  width: 100% !important;
+  height: 60vh !important;
+}
+
+#messagesContainer {
+  height: calc(60vh - 140px) !important;
+}
+
+/* ===== PAYMENT SPECIFIC ===== */
+.payment-methods, .payment-options {
+  width: 100% !important;
+}
+
+.payment-method {
+  width: 100% !important;
+  padding: 1rem !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-radius: 12px !important;
+  margin-bottom: 0.5rem !important;
+}
+
+/* ===== GAMES SPECIFIC ===== */
+.game-container {
+  width: 100% !important;
+  height: 60vh !important;
+}
+
+.game-controls {
+  position: fixed !important;
+  bottom: 80px !important;
+  left: 0 !important;
+  right: 0 !important;
+  padding: 1rem !important;
+  background: rgba(30, 30, 60, 0.9) !important;
+  backdrop-filter: blur(20px) !important;
+}
+
+/* ===== FEED SPECIFIC ===== */
+.feed-container {
+  width: 100% !important;
+}
+
+.post-card {
+  width: 100% !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.post-actions {
+  display: flex !important;
+  justify-content: space-around !important;
+  padding: 1rem 0 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ===== MARKETPLACE SPECIFIC ===== */
+.marketplace-filters {
+  position: sticky !important;
+  top: 0 !important;
+  background: rgba(30, 30, 60, 0.95) !important;
+  backdrop-filter: blur(20px) !important;
+  padding: 1rem !important;
+  z-index: 50 !important;
+}
+
+.filter-options {
+  display: flex !important;
+  gap: 0.5rem !important;
+  overflow-x: auto !important;
+  padding-bottom: 0.5rem !important;
+}
+
+.filter-chip {
+  padding: 0.5rem 1rem !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-radius: 20px !important;
+  font-size: 0.8rem !important;
+  white-space: nowrap !important;
+}
+
+/* ===== MODALS & OVERLAYS (All Pages) ===== */
+.modal, .overlay, .dialog {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: rgba(0, 0, 0, 0.8) !important;
+  backdrop-filter: blur(10px) !important;
+  z-index: 2000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 1rem !important;
+}
+
+.modal-content {
+  width: 100% !important;
+  max-width: 400px !important;
+  background: rgba(30, 30, 60, 0.95) !important;
+  border-radius: 20px !important;
+  padding: 1.5rem !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+}
+
+/* ===== CONNECTION STATUS (All Pages) ===== */
+.connection-status {
+  position: fixed !important;
+  top: 10px !important;
+  right: 10px !important;
+  padding: 8px 16px !important;
+  background: rgba(30, 30, 60, 0.95) !important;
+  backdrop-filter: blur(20px) !important;
+  border-radius: 20px !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+  font-size: 0.75rem !important;
+  z-index: 1001 !important;
+}
+
+/* ===== MOBILE FIRST STYLES (Default - up to 767px) ===== */
+@media (max-width: 767px) {
+  .mobile-only { display: block !important; }
+  .desktop-only { display: none !important; }
+  .hidden-mobile { display: none !important; }
+  .visible-mobile { display: block !important; }
+
+  /* Universal mobile adjustments */
+  .sidebar, .desktop-sidebar {
+    display: none !important;
+  }
+
+  .main-content {
+    padding-bottom: 100px !important;
+  }
+
+  /* Typography scaling */
+  h1 { font-size: 1.5rem !important; }
+  h2 { font-size: 1.3rem !important; }
+  h3 { font-size: 1.1rem !important; }
+  
+  /* Card adjustments */
+  .card { padding: 0.875rem !important; }
+  
+  /* Mood selector adjustments for mobile */
+  .mood-selector-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  
+  .mood-selector-option {
+    padding: 12px 8px;
+  }
+  
+  .mood-emoji-large {
+    font-size: 1.5rem;
+  }
+  
+  .mood-name-large {
+    font-size: 11px;
+  }
+}
+
+/* ===== LANDSCAPE MOBILE ===== */
+@media (max-width: 767px) and (orientation: landscape) {
+  .main-content {
+    padding-bottom: 70px !important;
+  }
+
+  .mobile-nav {
+    padding: 0.25rem !important;
+  }
+
+  .nav-item {
+    min-height: 50px !important;
+    min-width: 50px !important;
+    font-size: 0.65rem !important;
+  }
+
+  /* Chat specific landscape */
+  .w-80 {
+    height: 35vh !important;
+  }
+
+  .flex-1 {
+    height: 65vh !important;
+  }
+  
+  /* Mood selector for landscape */
+  .mood-selector-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  .mood-selector-modal {
+    max-height: 90vh;
+  }
+}
+
+/* ===== TABLET STYLES (768px - 1023px) ===== */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .mobile-only { display: none !important; }
+  .tablet-only { display: block !important; }
+  .desktop-only { display: block !important; }
+
+  .main-nav {
+    position: relative !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    border-top: none !important;
+    padding: 1rem !important;
+  }
+
+  .grid, .cards-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Chat tablet layout */
+  #mainContainer {
+    flex-direction: row !important;
+  }
+
+  .w-80 {
+    width: 300px !important;
+    height: 100vh !important;
+    border-right: 1px solid rgba(59, 130, 246, 0.3) !important;
+    border-bottom: none !important;
+  }
+
+  .flex-1 {
+    width: calc(100vw - 300px) !important;
+    height: 100vh !important;
+  }
+  
+  /* Tablet mood selector */
+  .mood-selector-modal {
+    max-width: 600px;
+  }
+}
+
+/* ===== DESKTOP STYLES (1024px and above) ===== */
+@media (min-width: 1024px) {
+  .mobile-only { display: none !important; }
+  .desktop-only { display: block !important; }
+  .tablet-only { display: none !important; }
+
+  .main-nav {
+    display: none !important;
+  }
+
+  .grid, .cards-grid, .games-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  .app-container {
+    display: flex !important;
+  }
+
+  .sidebar {
+    display: block !important;
+    width: 250px !important;
+    height: 100vh !important;
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+  }
+
+  .main-content {
+    margin-left: 250px !important;
+    width: calc(100vw - 250px) !important;
+    padding-bottom: 2rem !important;
+  }
+
+  /* Chat desktop layout */
+  #mainContainer {
+    flex-direction: row !important;
+  }
+
+  .w-80 {
+    width: 320px !important;
+    height: 100vh !important;
+  }
+
+  .flex-1 {
+    width: calc(100vw - 320px) !important;
+    height: 100vh !important;
+  }
+}
+
+/* ===== LARGE DESKTOP (1440px and above) ===== */
+@media (min-width: 1440px) {
+  .grid, .cards-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+
+  .sidebar {
+    width: 280px !important;
+  }
+
+  .main-content {
+    margin-left: 280px !important;
+    width: calc(100vw - 280px) !important;
+  }
+  
+  /* Large desktop mood selector */
+  .mood-selector-modal {
+    max-width: 800px;
+  }
+  
+  .mood-selector-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 20px;
+  }
+}
+
+/* ===== ACCESSIBILITY & TOUCH OPTIMIZATIONS ===== */
+@media (hover: none) and (pointer: coarse) {
+  button, .btn, .nav-item {
+    min-height: 44px !important;
+    min-width: 44px !important;
+  }
+
+  .card, .game-card {
+    padding: 1rem !important;
+  }
+  
+  /* Larger touch targets for mood chips */
+  .mood-badge,
+  .interest-chip,
+  .mood-filter-chip {
+    min-height: 36px !important;
+    min-width: 60px !important;
+  }
+  
+  .mood-selector-option {
+    min-height: 100px !important;
+  }
+}
+
+/* Focus styles */
+button:focus, input:focus, textarea:focus {
+  outline: 2px solid #3B82F6 !important;
+  outline-offset: 2px !important;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== LOADING STATES ===== */
+.loading-skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.1) 25%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+  border-radius: 8px !important;
+}
+
+@keyframes loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ===== CUSTOM SCROLLBAR ===== */
+@media (min-width: 768px) {
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(59, 130, 246, 0.5);
+    border-radius: 3px;
+  }
+}
+
+/* ===== PRINT STYLES ===== */
+@media print {
+  .main-nav, .mobile-nav, .connection-status {
+    display: none !important;
+  }
+}
