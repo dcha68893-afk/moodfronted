@@ -670,9 +670,17 @@
             localStorage.setItem(storageKeyForUser(_activeUserId), JSON.stringify(payload));
             localStorage.setItem(LAST_USER_KEY, String(_activeUserId));
             localStorage.setItem(LEGACY_CACHE_KEY, JSON.stringify(payload));
+            // FIX-009: Write canonical key so all iframes can read settings on init
+            // without waiting for postMessage/BroadcastChannel delivery
+            localStorage.setItem('kyn_app_settings', JSON.stringify(_data));
         } catch (error) {
             console.warn('[AppSettings] Failed to persist cache:', error.message);
         }
+
+        // FIX-009: Dispatch CustomEvent for same-tab iframes (BroadcastChannel covers other tabs)
+        try {
+            global.dispatchEvent(new CustomEvent('kyn:settings:changed', { detail: _data }));
+        } catch (_) {}
 
         try {
             if (global.LocalStoreSettings && typeof global.LocalStoreSettings.merge === 'function') {
@@ -1223,4 +1231,33 @@
     }
 
     debugLog('[AppSettings] Module registered');
+
+    // FIX-009: KynSettings — uniform API for all modules/iframes to read settings
+    // Usage: const s = window.KynSettings.load(); window.KynSettings.onChange(cb);
+    global.KynSettings = {
+        load: function() {
+            try { return JSON.parse(localStorage.getItem('kyn_app_settings') || '{}'); } catch(_) { return {}; }
+        },
+        onChange: function(cb) {
+            if (typeof cb !== 'function') return function(){};
+            function onCustom(e) { cb(e.detail || global.KynSettings.load()); }
+            function onStorage(e) {
+                if (e.key === 'kyn_app_settings') {
+                    try { cb(JSON.parse(e.newValue || '{}')); } catch(_) { cb(global.KynSettings.load()); }
+                }
+            }
+            global.addEventListener('kyn:settings:changed', onCustom);
+            global.addEventListener('storage', onStorage);
+            return function() {
+                global.removeEventListener('kyn:settings:changed', onCustom);
+                global.removeEventListener('storage', onStorage);
+            };
+        },
+        apply: function(partial) {
+            if (global.AppSettings && typeof global.AppSettings.merge === 'function') {
+                global.AppSettings.merge(partial);
+            }
+        }
+    };
+
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -7717,3 +7717,52 @@ window.__getAuthState = () => ({
 // =============================================
 // END OF FILE
 // =============================================
+
+// FIX: Bridge kyn: CustomEvents from app.realtime.socket.js _routeMessage
+// so status-core.js receives realtime status:new and status:viewed events
+// without needing a direct socket connection inside the iframe.
+(function _installStatusRealtimeBridge() {
+    'use strict';
+
+    function _handleNewStatus(detail) {
+        try {
+            const status = detail.status || detail;
+            if (!status || !status.id) return;
+            // Fire the same CustomEvent that the status UI listens on
+            window.dispatchEvent(new CustomEvent('statusReceived', { detail: status }));
+            window.dispatchEvent(new CustomEvent('statusFeedUpdated', { detail: { type: 'new', status } }));
+        } catch(_) {}
+    }
+
+    function _handleStatusViewed(detail) {
+        try {
+            window.dispatchEvent(new CustomEvent('statusViewedUpdate', { detail }));
+        } catch(_) {}
+    }
+
+    function _handleStatusDeleted(detail) {
+        try {
+            window.dispatchEvent(new CustomEvent('statusDeleted', { detail }));
+        } catch(_) {}
+    }
+
+    window.addEventListener('kyn:status:new',     function(e) { _handleNewStatus(e.detail || {}); });
+    window.addEventListener('kyn:status:created', function(e) { _handleNewStatus(e.detail || {}); });
+    window.addEventListener('kyn:status:viewed',  function(e) { _handleStatusViewed(e.detail || {}); });
+    window.addEventListener('kyn:status:deleted', function(e) { _handleStatusDeleted(e.detail || {}); });
+
+    // Also handle REALTIME_EVENT:status:new forwarded via postMessage from parent
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        const { type, payload } = evt.data;
+        if (type === 'REALTIME_EVENT:status:new' || type === 'REALTIME_EVENT:status:created') {
+            _handleNewStatus(payload || {});
+        } else if (type === 'REALTIME_EVENT:status:viewed') {
+            _handleStatusViewed(payload || {});
+        } else if (type === 'REALTIME_EVENT:status:deleted') {
+            _handleStatusDeleted(payload || {});
+        }
+    });
+
+    console.log('[status-core] realtime kyn: bridge installed ✅');
+})();

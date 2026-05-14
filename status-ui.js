@@ -2943,6 +2943,23 @@ renderMoodChart() {
         if (mutedUsers && mutedUsers.size > 0) {
             filtered = filtered.filter(s => !mutedUsers.has(s.userId));
         }
+        // FIX-022: Filter out expired statuses client-side using UTC timestamps.
+        // The previous code never filtered expired items here — it relied entirely on the
+        // server, which meant cached/stale statuses appeared until next API refresh.
+        const nowUtc = Date.now();
+        filtered = filtered.filter(s => {
+            // If server already set expiresAt, trust it
+            if (s.expiresAt) {
+                return new Date(s.expiresAt).getTime() > nowUtc;
+            }
+            // Otherwise compute from createdAt + 24h
+            if (s.createdAt) {
+                const createdUtc = new Date(s.createdAt).getTime();
+                return (createdUtc + 86400000) > nowUtc;
+            }
+            return true; // no timestamps — keep it
+        });
+
         return filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     },
 

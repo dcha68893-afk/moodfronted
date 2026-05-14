@@ -5324,15 +5324,27 @@
 
 
 
-        scrollToBottom(container) {
+        scrollToBottom(container, force) {
 
             if (!container) return;
 
-            setTimeout(() => {
+            // FIX-074: Only auto-scroll if user is already near the bottom (within 150px)
 
-                container.scrollTop = container.scrollHeight;
+            // so we don't hijack their scroll position while reading history.
 
-            }, 100);
+            // Pass force=true when a new message is sent by current user.
+
+            const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+
+            if (force || distFromBottom < 150) {
+
+                requestAnimationFrame(function() {
+
+                    container.scrollTop = container.scrollHeight;
+
+                });
+
+            }
 
         },
 

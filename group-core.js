@@ -3127,12 +3127,38 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
         }
         
         // Bind to KynectaRealtime singleton if available
+        // FIX: Use a module-level Set to prevent duplicate listener registration on reconnect
+        if (!window.__groupCoreListenersRegistered) {
+            window.__groupCoreListenersRegistered = new Set();
+        }
         if (window.KynectaRealtime?.on) {
             ['group:member_added', 'group:member_removed', 'group:member_role_changed',
              'group:member_joined', 'group:member_left'].forEach(eventName => {
+                if (window.__groupCoreListenersRegistered.has(eventName)) return;
+                window.__groupCoreListenersRegistered.add(eventName);
                 window.KynectaRealtime.on(eventName, (payload) => {
                     handleGroupMemberEvent(eventName, payload);
                 });
+            });
+        }
+
+        // FIX: Listen for kyn:group:message CustomEvents dispatched by app.realtime.socket.js
+        // This ensures group messages arrive even if the postMessage relay is slow
+        if (!window.__groupCoreListenersRegistered.has('kyn:group:message')) {
+            window.__groupCoreListenersRegistered.add('kyn:group:message');
+            window.addEventListener('kyn:group:message', function(evt) {
+                try {
+                    const msg = evt.detail;
+                    if (!msg || !msg.groupId) return;
+                    // Only handle if this group is currently open
+                    const activeGid = window._activeGroupId || (GroupCore && GroupCore._state && GroupCore._state.activeGroupId);
+                    if (String(msg.groupId) !== String(activeGid)) return;
+                    if (GroupCore && typeof GroupCore.handleGroupMessage === 'function') {
+                        GroupCore.handleGroupMessage(msg);
+                    } else if (GroupCore && typeof GroupCore.addGroupMessage === 'function') {
+                        GroupCore.addGroupMessage(msg.groupId, msg);
+                    }
+                } catch(_) {}
             });
         }
         
@@ -3155,8 +3181,14 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
             if (typeof syncGroupsFromServer === 'function') syncGroupsFromServer().catch(() => {});
             if (typeof syncGroupInvitesFromServer === 'function') syncGroupInvitesFromServer().catch(() => {});
         };
-        if (window.wsService && window.wsService.on) window.wsService.on('group:refresh_needed', _handleRefreshNeeded);
-        if (window.KynectaRealtime && window.KynectaRealtime.on) window.KynectaRealtime.on('group:refresh_needed', _handleRefreshNeeded);
+        if (window.wsService && window.wsService.on && !window.__groupCoreListenersRegistered.has('wsService:group:refresh_needed')) {
+            window.__groupCoreListenersRegistered.add('wsService:group:refresh_needed');
+            window.wsService.on('group:refresh_needed', _handleRefreshNeeded);
+        }
+        if (window.KynectaRealtime && window.KynectaRealtime.on && !window.__groupCoreListenersRegistered.has('rt:group:refresh_needed')) {
+            window.__groupCoreListenersRegistered.add('rt:group:refresh_needed');
+            window.KynectaRealtime.on('group:refresh_needed', _handleRefreshNeeded);
+        }
 
         // FIX: Listen for GROUP_MEMBER_ADDED socket event
         const _handleMemberAddedSocket = (payload) => {
@@ -3175,12 +3207,20 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
             }});
         };
         if (window.wsService && window.wsService.on) {
-            window.wsService.on('GROUP_MEMBER_ADDED', _handleMemberAddedSocket);
-            window.wsService.on('group:member:joined', _handleMemberAddedSocket);
+            ['GROUP_MEMBER_ADDED', 'group:member:joined'].forEach(ev => {
+                if (!window.__groupCoreListenersRegistered.has('ws:' + ev)) {
+                    window.__groupCoreListenersRegistered.add('ws:' + ev);
+                    window.wsService.on(ev, _handleMemberAddedSocket);
+                }
+            });
         }
         if (window.KynectaRealtime && window.KynectaRealtime.on) {
-            window.KynectaRealtime.on('GROUP_MEMBER_ADDED', _handleMemberAddedSocket);
-            window.KynectaRealtime.on('group:member:joined', _handleMemberAddedSocket);
+            ['GROUP_MEMBER_ADDED', 'group:member:joined'].forEach(ev => {
+                if (!window.__groupCoreListenersRegistered.has('rt:' + ev)) {
+                    window.__groupCoreListenersRegistered.add('rt:' + ev);
+                    window.KynectaRealtime.on(ev, _handleMemberAddedSocket);
+                }
+            });
         }
     }
     
@@ -5036,6 +5076,20 @@ const openGroupChat = async function(groupData) {
             updateGroupChatHeader(resolvedGroup, membersPayload);
         } catch (headerError) {}
         
+        // FIX-024: Join the socket room BEFORE fetching message history.
+        // Without this, messages that arrive during the ~500ms API load window are missed forever.
+        // The room join is idempotent on the server — safe to call every time.
+        try {
+            const rt = window.KynectaRealtime;
+            if (rt && typeof rt.emit === 'function') {
+                rt.emit('join', { room: `group:${groupData.id}` });
+                rt.emit('join', { room: `group_${groupData.id}` });
+            } else if (rt && rt._socket && typeof rt._socket.emit === 'function') {
+                rt._socket.emit('join', { room: `group:${groupData.id}` });
+                rt._socket.emit('join', { room: `group_${groupData.id}` });
+            }
+        } catch (_) {}
+
         await loadGroupChatMessages(groupData.id);
         setupTypingListener(groupData.id);
         loadUniqueFeaturesPanels(groupData.id);

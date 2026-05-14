@@ -772,6 +772,8 @@ const SettingsState = {
                 version: MODULE_VERSION
             };
             localStorage.setItem('knecta_settings_cache', JSON.stringify(cacheData));
+            // FIX-009: Keep canonical kyn_app_settings key in sync for other modules
+            try { localStorage.setItem('kyn_app_settings', JSON.stringify(data)); } catch(_) {}
         } catch (error) {}
     },
     
@@ -7623,6 +7625,20 @@ document.addEventListener('DOMContentLoaded', function() {
     domContentLoadedFired = true;
     
     // === CACHE-FIRST: Load settings from localStorage immediately so UI renders fast ===
+    // FIX-009: Also check canonical 'kyn_app_settings' key written by AppSettings.js
+    try {
+        const canonicalRaw = localStorage.getItem('kyn_app_settings');
+        if (canonicalRaw) {
+            const canonicalData = JSON.parse(canonicalRaw);
+            if (canonicalData && typeof canonicalData === 'object' && Object.keys(canonicalData).length > 0) {
+                // Merge canonical settings into SettingsState so all modules see them
+                if (!SettingsState.data || Object.keys(SettingsState.data).length === 0) {
+                    SettingsState.data = canonicalData;
+                    SettingsState.loaded = true;
+                }
+            }
+        }
+    } catch(_) {}
     try {
         const cached = localStorage.getItem('knecta_settings_cache');
         if (cached) {

@@ -10796,6 +10796,50 @@ function applySettingToFriendModule(section, key, value) {
         try {
             window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'friends', source: 'friends', timestamp: Date.now() }, '*');
         } catch(e) {}
+
+        // FIX: Bridge kyn: CustomEvents (dispatched by app.realtime.socket.js _routeMessage)
+        // to the FriendCacheManager so online presence updates work without postMessage relay
+        (function _bridgeKynEvents() {
+            function _handlePresence(evt, isOnline) {
+                const uid = evt.detail && (evt.detail.userId || evt.detail.id);
+                if (!uid) return;
+                try {
+                    const fc = window.FriendCacheManager;
+                    if (!fc) return;
+                    const f = fc.getFriend(String(uid));
+                    if (!f) return;
+                    fc.setFriend({ ...f, online: isOnline, status: isOnline ? 'online' : 'offline' });
+                    if (typeof fc.syncToGlobals === 'function') fc.syncToGlobals();
+                    window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                        detail: { presenceUpdate: true, userId: uid, online: isOnline }
+                    }));
+                } catch(_) {}
+            }
+
+            window.addEventListener('kyn:user:online',   function(e) { _handlePresence(e, true);  });
+            window.addEventListener('kyn:user:offline',  function(e) { _handlePresence(e, false); });
+            window.addEventListener('kyn:friend:online', function(e) { _handlePresence(e, true);  });
+            window.addEventListener('kyn:friend:offline',function(e) { _handlePresence(e, false); });
+
+            // Bridge kyn:friend:request → friend request notification
+            window.addEventListener('kyn:friend:request', function(e) {
+                try {
+                    const detail = e.detail || {};
+                    window.dispatchEvent(new CustomEvent('friendRequestReceived', { detail }));
+                } catch(_) {}
+            });
+
+            // Bridge kyn:friend:accepted → friend acceptance notification
+            window.addEventListener('kyn:friend:accepted', function(e) {
+                try {
+                    const detail = e.detail || {};
+                    window.dispatchEvent(new CustomEvent('friendRequestAccepted', { detail }));
+                } catch(_) {}
+            });
+
+            console.log('[friend-core] kyn: CustomEvent bridge active ✅');
+        })();
+
     });
 })();
 

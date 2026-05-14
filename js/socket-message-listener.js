@@ -29,6 +29,11 @@
 (function () {
     'use strict';
 
+    // FIX-005: Permanently disable fallback socket.
+    // The fallback was opening a 2nd Socket.IO connection causing every event to arrive TWICE.
+    // Primary KynectaRealtime in app.realtime.socket.js is the sole connection.
+    window.__KYNECTA_NO_FALLBACK_SOCKET = true;
+
     const FALLBACK_WAIT_MS    = 4000;   // wait this long for KynectaRealtime before fallback
     const FALLBACK_RETRY_MAX  = 8;
     const BACKEND_URL = (function () {
@@ -70,6 +75,10 @@
     let _fallbackConnected = false;
 
     function startFallback() {
+        // FIX-005: Fallback permanently disabled. window.__KYNECTA_NO_FALLBACK_SOCKET = true.
+        // Duplicate socket was root cause of duplicate messages and duplicate call events.
+        return;
+        // DEAD CODE BELOW — kept for reference only, never executes
         if (window.__KYNECTA_NO_FALLBACK_SOCKET) return;
         if (_fallbackSocket || _fallbackConnected) return;
 

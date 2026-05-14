@@ -172,8 +172,38 @@
     let stateHistory = [];
     const maxHistorySize = 50;
     const stateListeners = new Set();
-    const processedMessageIds = new Set();
-    const sentMessageIds = new Set();
+    // FIX-007: Persist dedup sets in sessionStorage so they survive iframe navigation.
+    // Without this, navigating away and back resets the Set, causing already-rendered
+    // messages to appear again when the socket re-delivers or re-fetches them.
+    function _makePersistentSet(storageKey, maxSize) {
+        const _s = new Set();
+        try {
+            const arr = JSON.parse(sessionStorage.getItem(storageKey) || '[]');
+            if (Array.isArray(arr)) arr.forEach(id => _s.add(String(id)));
+        } catch(_) {}
+        function _persist() {
+            try {
+                sessionStorage.setItem(storageKey, JSON.stringify(Array.from(_s).slice(-maxSize)));
+            } catch(_) {}
+        }
+        return {
+            has(id)    { return _s.has(String(id)); },
+            add(id)    {
+                const k = String(id);
+                if (_s.has(k)) return this;
+                _s.add(k);
+                if (_s.size > maxSize) _s.delete(_s.values().next().value);
+                _persist();
+                return this;
+            },
+            delete(id) { const ok = _s.delete(String(id)); if (ok) _persist(); return ok; },
+            clear()    { _s.clear(); try { sessionStorage.removeItem(storageKey); } catch(_) {} },
+            get size() { return _s.size; },
+            [Symbol.iterator]() { return _s[Symbol.iterator](); }
+        };
+    }
+    const processedMessageIds = _makePersistentSet('kyn_processed_msg_ids', 500);
+    const sentMessageIds      = _makePersistentSet('kyn_sent_msg_ids', 200);
     
     let _lastSessionId = null;
     let _validSessionSet = false;
@@ -285,22 +315,14 @@
     function isDuplicateMessage(messageId) {
         if (!messageId) return false;
         if (processedMessageIds.has(messageId)) return true;
-        processedMessageIds.add(messageId);
-        
-        if (processedMessageIds.size > 1000) {
-            processedMessageIds.clear();
-        }
+        processedMessageIds.add(messageId); // add() handles maxSize + sessionStorage persistence
         return false;
     }
-    
+
     function isDuplicateSentMessage(messageId) {
         if (!messageId) return false;
         if (sentMessageIds.has(messageId)) return true;
         sentMessageIds.add(messageId);
-        
-        if (sentMessageIds.size > 1000) {
-            sentMessageIds.clear();
-        }
         return false;
     }
 
@@ -6627,8 +6649,28 @@ try {
     window.openChatWithUser = openChatWithUser;
     window.__MODULE_NAME__ = MODULE_NAME;
     window.__MODULE_VERSION__ = MODULE_VERSION;
-    
+
     initialize();
+
+    // FIX-014: Mark messages as read when the user returns to this tab.
+    // Without this, messages received while the tab was hidden are never marked seen.
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState !== 'visible') return;
+        try {
+            const cm = window.MessagesCore && window.MessagesCore.ConversationManager;
+            const chatMgr = window.MessagesCore && window.MessagesCore.ChatManager;
+            if (!cm || !chatMgr) return;
+            const active = chatMgr.getActiveChat && chatMgr.getActiveChat();
+            if (!active) return;
+            const convId = active.id || active.chatId;
+            if (!convId) return;
+            if (typeof cm.markConversationRead === 'function') {
+                cm.markConversationRead(convId);
+            } else if (typeof cm.markRead === 'function') {
+                cm.markRead(convId);
+            }
+        } catch (_) {}
+    });
 
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = MessagesCore;

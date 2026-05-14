@@ -782,6 +782,34 @@
                     try { handler(message.payload, message); } catch (e) { console.error('[Realtime] Wildcard listener error:', e); }
                 });
             }
+
+            // FIX: Dispatch kyn: CustomEvents so calls-core.js, group-core.js, friend-core.js
+            // etc. can listen via window.addEventListener('kyn:call:incoming', ...) without
+            // needing a direct Socket.IO connection inside the iframe.
+            // Normalize event type: both colon-style and underscore-style produce the canonical kyn: event.
+            if (message.type) {
+                const evType = message.type;
+                const payload = message.payload || {};
+
+                // Always dispatch kyn:<original> form
+                try { window.dispatchEvent(new CustomEvent('kyn:' + evType, { detail: payload })); } catch (_) {}
+
+                // For call events: also normalize underscore→colon so 'call_ended' fires 'kyn:call:ended'
+                if (evType.startsWith('call') || evType.startsWith('webrtc')) {
+                    const colonForm = evType.replace(/_/g, ':').replace(/^call:/, 'call:');
+                    if (colonForm !== evType) {
+                        try { window.dispatchEvent(new CustomEvent('kyn:' + colonForm, { detail: payload })); } catch (_) {}
+                    }
+                }
+
+                // For message events: fire kyn:message:new, kyn:message:read etc.
+                if (evType.startsWith('message') || evType === 'new_message' || evType === 'receive_message') {
+                    const colonMsg = evType.replace(/_/g, ':');
+                    if (colonMsg !== evType) {
+                        try { window.dispatchEvent(new CustomEvent('kyn:' + colonMsg, { detail: payload })); } catch (_) {}
+                    }
+                }
+            }
         }
 
         _handleAck(message) {
@@ -810,12 +838,41 @@
             });
 
             document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible' &&
-                    this._state !== CONNECTION_STATE.AUTHENTICATED &&
-                    !this._manualDisconnect &&
-                    navigator.onLine) {
+                if (document.visibilityState === 'hidden') {
+                    this._hiddenAt = Date.now();
+                    return;
+                }
+                // Tab became visible
+                const hiddenMs = this._hiddenAt ? Date.now() - this._hiddenAt : 0;
+                this._hiddenAt = null;
+
+                if (!navigator.onLine || this._manualDisconnect) return;
+
+                if (this._state !== CONNECTION_STATE.AUTHENTICATED) {
+                    // Clearly disconnected — reconnect immediately
                     this._reconnectAttempts = 0;
-                    this.handleReconnect({ reason: 'visibility' });
+                    this.handleReconnect({ reason: 'visibility-not-auth' });
+                    return;
+                }
+
+                // FIX-020: Even if state says AUTHENTICATED, verify with a ping after
+                // long background periods (browser may have throttled/killed the WS).
+                if (hiddenMs > 10000 && this._socket && this._socket.connected) {
+                    let pongReceived = false;
+                    const pingTimeout = setTimeout(() => {
+                        if (!pongReceived) {
+                            console.warn('[Realtime] Ping timeout after background — forcing reconnect');
+                            this._reconnectAttempts = 0;
+                            this.handleReconnect({ reason: 'ping-timeout-visibility' });
+                        }
+                    }, 5000);
+                    try {
+                        this._socket.once('pong', () => { pongReceived = true; clearTimeout(pingTimeout); });
+                        this._socket.emit('ping');
+                    } catch(_) {
+                        clearTimeout(pingTimeout);
+                        this.handleReconnect({ reason: 'ping-emit-failed' });
+                    }
                 }
             });
         }
@@ -1404,6 +1461,13 @@
                 iframes.forEach(function (frame) {
                     try { frame.contentWindow.postMessage(eventMsg, '*'); } catch (_) {}
                 });
+
+                // FIX: For group and status events, also dispatch kyn: CustomEvent
+                // so modules listening via window.addEventListener('kyn:group:message') get it too
+                if (eventType.startsWith('group:') || eventType.startsWith('status:')) {
+                    try { window.dispatchEvent(new CustomEvent('kyn:' + eventType, { detail: payload || {} })); } catch (_) {}
+                }
+
             } catch (_) {}
         });
     }

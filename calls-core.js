@@ -13662,10 +13662,6 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            
-
-
-
             try {
 
 
@@ -13675,6 +13671,38 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
                 logInfo(MODULE, 'Remote description set');
+
+
+
+                // FIX-ICE: Drain queued ICE candidates now that remoteDescription is set
+
+
+
+                const queued = this._iceCandidates && this._iceCandidates.splice(0);
+
+
+
+                if (queued && queued.length > 0) {
+
+
+
+                    logInfo(MODULE, `Draining ${queued.length} queued ICE candidates`);
+
+
+
+                    for (const c of queued) {
+
+
+
+                        try { await this._peerConnection.addIceCandidate(c); } catch(_) {}
+
+
+
+                    }
+
+
+
+                }
 
 
 
@@ -13710,7 +13738,39 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            
+            // FIX-ICE: Only add ICE candidates AFTER remoteDescription is set.
+
+
+
+            // Adding before causes "InvalidStateError: cannot add ICE candidate" which
+
+
+
+            // silently breaks the connection. Queue instead and drain after setRemoteDescription.
+
+
+
+            if (!this._peerConnection.remoteDescription || !this._peerConnection.remoteDescription.type) {
+
+
+
+                if (!this._iceCandidates) this._iceCandidates = [];
+
+
+
+                this._iceCandidates.push(candidate);
+
+
+
+                logInfo(MODULE, 'ICE candidate queued (waiting for remoteDescription)');
+
+
+
+                return;
+
+
+
+            }
 
 
 
@@ -13878,6 +13938,23 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
             if (remAudio) { remAudio.srcObject = null; remAudio.load(); }
             var remVideo = document.getElementById('remoteVideo');
             if (remVideo) { remVideo.srcObject = null; remVideo.style.display = 'none'; }
+
+            // FIX-008: Also clear local video element — missing in original, caused black screen on 2nd call
+            var locVideo = document.getElementById('localVideo') || document.getElementById('local-video') || document.querySelector('[data-local-video]');
+            if (locVideo && (locVideo.tagName === 'VIDEO' || locVideo.tagName === 'AUDIO')) {
+                locVideo.srcObject = null;
+                try { locVideo.load(); } catch(_) {}
+            }
+            // Stop local stream tracks if not already done by MediaManager
+            if (callsState && callsState.localStream) {
+                try { callsState.localStream.getTracks().forEach(function(t){ try{t.stop();}catch(_){} }); } catch(_) {}
+                callsState.localStream = null;
+            }
+            // Stop remote stream tracks
+            if (callsState && callsState.remoteStream) {
+                try { callsState.remoteStream.getTracks().forEach(function(t){ try{t.stop();}catch(_){} }); } catch(_) {}
+                callsState.remoteStream = null;
+            }
 
             this._iceCandidates = [];
             this._iceRestartCount = 0;
@@ -28804,15 +28881,36 @@ _escapeHtml: function(text) {
 
 
     function handleCallEnded(callData) {
+            // FIX-020: Guaranteed ringtone stop — must run BEFORE anything else
+            // to prevent ringtone looping when UI reset path fails
+            try {
+                if (window._incomingRingtone) {
+                    window._incomingRingtone.pause();
+                    window._incomingRingtone.currentTime = 0;
+                    window._incomingRingtone = null;
+                }
+                if (window._callerRingtone) {
+                    window._callerRingtone.pause();
+                    window._callerRingtone.currentTime = 0;
+                    window._callerRingtone = null;
+                }
+                if (window._callRingTimer)    { clearInterval(window._callRingTimer);    window._callRingTimer    = null; }
+                if (window._outgoingRingTimer) { clearInterval(window._outgoingRingTimer); window._outgoingRingTimer = null; }
+                // Also stop any HTMLAudioElement playing call tones
+                document.querySelectorAll('audio[data-call-tone]').forEach(function(a) {
+                    try { a.pause(); a.currentTime = 0; } catch(_) {}
+                });
+            } catch(_) {}
+
             // SCREEN MANAGER: call ended — go idle then navigate back
             if (typeof window.showScreen === "function") { window.showScreen("idle"); }
             var __ov2 = document.getElementById("callOverlay"); if (__ov2) __ov2.setAttribute("data-state", "idle");
-            // ✅ FIX: Stop all media tracks immediately on call end
+            // Stop all media tracks immediately on call end
             if (window.UIState && window.UIState.localStream) {
                 try { window.UIState.localStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
                 window.UIState.localStream = null;
             }
-            // ✅ FIX: Clear caller flag on call end
+            // Clear caller flag on call end
             if (window.callsState) window.callsState._isCaller = false;
             window.__callerCallId = null;
 
