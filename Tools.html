@@ -1013,7 +1013,7 @@
 
             <!-- ── TOP HEADER (Jumia style) ──────────────────────────────── -->
             <div class="jm-header" id="jmHeader">
-                <button class="jm-back-btn" id="jmBackBtn" style="display:none" onclick="window._jmBackPressed()">
+                <button class="jm-back-btn" id="jmBackBtn" onclick="window._jmNav('home')" style="display:none">
                     <i class="fas fa-arrow-left"></i>
                 </button>
                 <div class="jm-search-wrap" id="jmSearchWrap">
@@ -1052,43 +1052,56 @@
                     <div class="jm-hscroll" id="jmFeaturedRow"></div>
                 </div>
 
-                <!-- Hidden tab buttons (kept for JS compatibility, not shown) -->
-                <div style="display:none">
-                    <button id="allTab"></button>
-                    <button id="servicesTab"></button>
-                    <button id="digitalTab"></button>
-                    <button id="friendsTab"></button>
-                    <button id="groupsTab"></button>
-                    <button id="myTab"></button>
-                    <button id="premiumTab"></button>
-                    <button id="spotlightTab"></button>
-                    <button id="viewTeamBtn"></button>
-                    <button id="viewLeaderboardBtn"></button>
+                <!-- Original marketplace tabs (preserved unique features) -->
+                <div class="jm-tabs-wrap">
+                    <div class="marketplace-categories" id="jmTabsOuter">
+                        <button class="marketplace-category-btn active" id="allTab">All</button>
+                        <button class="marketplace-category-btn" id="servicesTab">Services <span class="listing-price" id="servicesCount">0</span></button>
+                        <button class="marketplace-category-btn" id="digitalTab">Digital</button>
+                        <button class="marketplace-category-btn" id="friendsTab">Friends</button>
+                        <button class="marketplace-category-btn" id="groupsTab">Groups</button>
+                        <button class="marketplace-category-btn" id="myTab">Mine</button>
+                        <button class="marketplace-category-btn" id="premiumTab">Premium <span class="premium-badge" style="font-size:8px;padding:1px 4px">PRO</span></button>
+                        <button class="marketplace-category-btn" id="spotlightTab">Spotlight <span class="featured-badge" style="font-size:8px;padding:1px 4px">TOP</span></button>
+                        <button class="marketplace-category-btn" id="viewTeamBtn"><i class="fas fa-users"></i> Team</button>
+                        <button class="marketplace-category-btn" id="viewLeaderboardBtn"><i class="fas fa-trophy"></i> Board</button>
+                    </div>
                 </div>
 
-                <!-- Spotlight/mood hidden stubs -->
-                <div style="display:none">
-                    <div id="spotlightSection"><div id="spotlightListings"></div></div>
-                    <div id="moodFilterIndicator"><span id="currentMoodFilter">Browsing</span></div>
+                <!-- Spotlight section (preserved) -->
+                <div class="spotlight-section" id="spotlightSection" style="display:none">
+                    <div class="spotlight-header"><i class="fas fa-star"></i><span>Featured Listings</span></div>
+                    <div class="spotlight-listings" id="spotlightListings"></div>
                 </div>
 
-                <!-- Hidden stubs for JS compatibility -->
-                <div style="display:none">
-                    <div id="myListingsAvatar"></div>
-                    <div id="myListingsName"></div>
-                    <div id="myListingsText"></div>
-                    <div id="listingStreak"><span id="streakCount">0</span></div>
-                    <button id="sellServiceBtn"></button>
-                    <button id="sellDigitalBtn"></button>
-                    <button id="premiumOptionsBtn"></button>
-                    <button id="createListingQuickBtn"></button>
+                <!-- Mood filter (preserved) -->
+                <div class="mood-filter-indicator" id="moodFilterIndicator" style="display:none">
+                    <i class="fas fa-filter"></i>
+                    <span id="currentMoodFilter">Browsing</span>
+                    <i class="fas fa-times" style="margin-left:auto"></i>
                 </div>
 
-                <!-- Jumia-style sell FAB (basket icon, bottom-right) -->
-                <button id="jmSellFab" class="jm-sell-fab" title="Create Listing" onclick="window._jmOpenCreateListing()">
-                    <i class="fas fa-shopping-basket"></i>
-                    <span>Sell</span>
-                </button>
+                <!-- My listings quick actions (preserved) -->
+                <div class="my-listings-section">
+                    <div class="my-listings-header">
+                        <div class="my-listings-avatar" id="myListingsAvatar"><i class="fas fa-user"></i></div>
+                        <div class="my-listings-info">
+                            <div class="my-listings-name" id="myListingsName">
+                                My Marketplace
+                                <span class="streak-indicator" id="listingStreak" style="display:none">
+                                    <i class="fas fa-fire"></i> <span id="streakCount">0</span>
+                                </span>
+                            </div>
+                            <div class="my-listings-text" id="myListingsText">Tap to create your first listing</div>
+                        </div>
+                    </div>
+                    <div class="my-listings-actions">
+                        <button class="my-listing-action-btn" id="sellServiceBtn"><i class="fas fa-tools"></i> Service</button>
+                        <button class="my-listing-action-btn" id="sellDigitalBtn"><i class="fas fa-file-alt"></i> Digital</button>
+                        <button class="my-listing-action-btn premium" id="premiumOptionsBtn"><i class="fas fa-crown"></i> Premium</button>
+                        <button class="my-listing-action-btn primary" id="createListingQuickBtn"><i class="fas fa-plus"></i> Create</button>
+                    </div>
+                </div>
 
                 <!-- Sort/filter chips -->
                 <div class="jm-filter-chips" id="jmFilterChips">
@@ -1248,17 +1261,29 @@
                     <button class="jm-more-item" onclick="window._jmNavMore('inbox')"><i class="fas fa-envelope"></i><span>Inbox</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('follow-sellers')"><i class="fas fa-store"></i><span>Follow Sellers</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('reviews-page')"><i class="fas fa-star"></i><span>My Reviews</span></button>
-                    <button class="jm-more-item" onclick="window._jmHideMore();window._jmOpenCreateListing()"><i class="fas fa-shopping-basket"></i><span>Create Listing</span></button>
+                    <button class="jm-more-item" id="createListingBtn" onclick="window._jmHideMore()"><i class="fas fa-plus-circle"></i><span>Create Listing</span></button>
                 </div>
             </div>
 
-            <!-- Bottom nav now lives in chat.html header — hidden stubs for JS compat -->
-            <div style="display:none" id="jmBottomNav">
-                <button class="jm-nav-tab active" data-page="home"></button>
-                <button class="jm-nav-tab" data-page="categories"></button>
-                <button class="jm-nav-tab" data-page="cart"><span id="jmNavCartBadge"></span></button>
-                <button class="jm-nav-tab" data-page="wishlist"></button>
-                <button class="jm-nav-tab" data-page="account"></button>
+            <!-- BOTTOM NAVIGATION (Jumia 5-tab style) -->
+            <div class="jm-bottom-nav" id="jmBottomNav">
+                <button class="jm-nav-tab active" data-page="home" onclick="window._jmNav('home')">
+                    <i class="fas fa-home"></i><span>Home</span>
+                </button>
+                <button class="jm-nav-tab" data-page="categories" onclick="window._jmNav('categories')">
+                    <i class="fas fa-th-list"></i><span>Categories</span>
+                </button>
+                <button class="jm-nav-tab" data-page="cart" onclick="window._jmNav('cart')">
+                    <i class="fas fa-shopping-cart"></i>
+                    <span class="jm-cart-badge" id="jmNavCartBadge" style="display:none">0</span>
+                    <span>Cart</span>
+                </button>
+                <button class="jm-nav-tab" data-page="wishlist" onclick="window._jmNav('wishlist')">
+                    <i class="fas fa-heart"></i><span>Wishlist</span>
+                </button>
+                <button class="jm-nav-tab" data-page="account" onclick="window._jmNav('account')">
+                    <i class="fas fa-user-circle"></i><span>Account</span>
+                </button>
             </div>
 
         </div>

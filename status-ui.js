@@ -3613,11 +3613,7 @@ function _applyViewerMode(isOwner, status) {
     if (pauseBtn) pauseBtn.style.display = 'none';
 }
 
-function _loadViewersForOwner(status) {
-    // No-op here — bottom sheet handles viewer loading on demand
-    const seenEl = document.getElementById('seenCountNum');
-    if (seenEl) seenEl.textContent = status.viewCount || status.views || 0;
-}
+// _loadViewersForOwner defined below
 
 function _loadReactionsForFriend(status) {
     // Reactions are now handled by the inline emoji picker
@@ -3691,10 +3687,7 @@ function _loadViewersForOwner(status) {
     }).catch(() => { viewersList.innerHTML = ''; });
 }
 
-function _loadReactionsForFriend(status) {
-    // Reactions container is shown via CSS (friend-mode)
-    // Nothing extra needed here — reactions are loaded in setupEventListeners
-}
+// _loadReactionsForFriend defined below (duplicate removed)
 
 function _bindOwnerButtons(status) {
     // Always use direct onclick assignment (no _bound flag) so each new status slot gets fresh handler

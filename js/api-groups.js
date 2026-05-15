@@ -2475,7 +2475,7 @@ export const getGroupMoods = (groupId, limit = 50) => apiGroupManager.getGroupMo
 export const getGroupNotes = (groupId, limit = 50) => apiGroupManager.getGroupNotes(groupId, limit);
 export const getGroupPurposes = (groupId, limit = 50) => apiGroupManager.getGroupPurposes(groupId, limit);
 export const getGroupTransparency = (groupId) => apiGroupManager.getGroupTransparency(groupId);
-export const updateGroupMemberRole = (groupId, userId, role) => apiGroupManager.updateGroupMemberRole(groupId, userId, role);
+// updateGroupMemberRole already defined above as function — export below is removed to prevent duplicate declaration
 export const getGroupInvites = (groupId) => apiGroupManager.getGroupInvites(groupId);
 export const createGroupInvite = (groupId, expiresIn = '7d') => apiGroupManager.createGroupInvite(groupId, expiresIn);
 export const acceptGroupInvite = (inviteCode) => apiGroupManager.acceptGroupInvite(inviteCode);
