@@ -8018,11 +8018,11 @@ refreshCallHistoryAfterCall: function() {
         },
         
         acceptIncomingCall: function() {
-    this.acceptIncomingCallGeneric(false);
+    UIEventHandlers.acceptIncomingCallGeneric(false);
 },
 
 acceptIncomingCallAsVideo: function() {
-    this.acceptIncomingCallGeneric(true);
+    UIEventHandlers.acceptIncomingCallGeneric(true);
 },
 
 acceptIncomingCallGeneric: async function(asVideo) {

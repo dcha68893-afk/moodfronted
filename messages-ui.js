@@ -5961,9 +5961,21 @@
 
             if (data.type === 'INCOMING_CALL') {
 
-                console.log('[CallHandler] 📞 Incoming call postMessage', data.payload);
+                // FIXED: Only show mini modal if calls iframe is NOT visible
+                // (i.e. user is in messages module and calls screen isn't shown)
+                const callsContent = window.parent?.document?.getElementById?.('callsContent');
+                const callsVisible = callsContent && !callsContent.classList.contains('hidden');
+                const callScreenActive = window.parent?.document?.body?.classList?.contains?.('call-screen-active');
+                if (!callsVisible && !callScreenActive) {
+                    console.log('[CallHandler] 📞 Incoming call postMessage (mini modal)', data.payload);
 
-                _showIncomingCallModal(data.payload || {});
+                    _showIncomingCallModal(data.payload || {});
+
+                } else {
+
+                    console.log('[CallHandler] 📞 Incoming call — calls screen already handling');
+
+                }
 
             }
 
@@ -5981,15 +5993,11 @@
 
 
 
-        // Also handle kyn: prefixed call events from app_realtime_socket.js
-
-        window.addEventListener('kyn:call:incoming', (e) => _showIncomingCallModal(e.detail || {}));
-
-        window.addEventListener('kyn:incoming_call',  (e) => _showIncomingCallModal(e.detail || {}));
-
-        document.addEventListener('call:incoming',    (e) => _showIncomingCallModal(e.detail || {}));
-
-        document.addEventListener('incoming_call',    (e) => _showIncomingCallModal(e.detail || {}));
+        // FIXED: kyn:call:* events are handled exclusively by chat.html (parent frame)
+        // which routes to the calls iframe. Listening here causes DOUBLE call notification.
+        // Only show the mini CallModal overlay for INCOMING_CALL postMessage from parent
+        // when the current module is NOT already showing the calls screen.
+        // DO NOT add kyn:call:incoming listeners here - chat.html handles them.
 
     }
 
@@ -13468,4 +13476,144 @@ Type: ${message.type || 'text'}`;
     });
 
     console.log('[KynPatch v3.0] ✅ All runtime patches installed');
+})();
+
+
+// ============================================================
+// KYNECTA MESSAGE VISIBILITY PATCH v4.0
+// Fixes: receiver not seeing messages in chat panel
+// Root cause: renderRealtimeUpdate's isThisChat check fails when
+//   _activeConversation is cleared or chatId doesn't match exactly.
+// Fix: intercept renderMessages event and also directly append new
+//   message bubbles to the DOM when the chat panel is open.
+// ============================================================
+(function _kynMessageVisibilityPatch() {
+    'use strict';
+
+    // Track rendered message IDs to prevent duplicates
+    const _renderedMsgIds = new Set();
+
+    // Direct DOM append — bypasses all ChatManager state issues
+    function _appendMessageBubbleDirect(msg) {
+        const container = document.getElementById('messagesContainer');
+        if (!container) return;
+        // Don't append if panel is hidden
+        const panel = document.getElementById('chatPanel');
+        if (panel && (panel.classList.contains('hidden') || panel.style.display === 'none')) return;
+
+        const msgId = String(msg.id || msg.localId || msg.serverId || '');
+        if (msgId && _renderedMsgIds.has(msgId)) return;
+        if (msgId) _renderedMsgIds.add(msgId);
+        // Clean up after 30s
+        if (msgId) setTimeout(function() { _renderedMsgIds.delete(msgId); }, 30000);
+
+        // Get current user
+        const myId = String(
+            window.__PARENT_SESSION__?.userId ||
+            window.__kynCurrentUserId ||
+            (function(){ try { return JSON.parse(localStorage.getItem('kynecta_user_cache_v8')||'{}').id; } catch(_){ return null; } })() ||
+            ''
+        );
+
+        const senderId    = String(msg.senderId || msg.sender?.id || '');
+        const isOwn       = myId && senderId && senderId === myId;
+        const content     = msg.content || msg.text || '';
+        const timestamp   = msg.createdAt || msg.timestamp || Date.now();
+        const timeStr     = new Date(typeof timestamp === 'string' ? timestamp : Number(timestamp)).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+        const senderName  = msg.sender?.displayName || msg.sender?.username || msg.senderName || '';
+
+        // Check if this message is already in DOM
+        if (msgId && document.querySelector('[data-message-id="' + msgId + '"],[data-id="' + msgId + '"]')) return;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'message-wrapper ' + (isOwn ? 'own' : 'other');
+        bubble.dataset.messageId = msgId || 'tmp_' + Date.now();
+        bubble.style.cssText = 'display:flex;flex-direction:column;align-items:' + (isOwn ? 'flex-end' : 'flex-start') + ';padding:2px 12px;animation:fadeIn .15s ease;';
+
+        const bubbleInner = document.createElement('div');
+        bubbleInner.className = 'message-bubble';
+        bubbleInner.style.cssText = [
+            'max-width:72%',
+            'padding:9px 13px',
+            'border-radius:' + (isOwn ? '18px 18px 4px 18px' : '18px 18px 18px 4px'),
+            'background:' + (isOwn ? 'linear-gradient(135deg,#667eea,#764ba2)' : '#fff'),
+            'color:' + (isOwn ? '#fff' : '#111827'),
+            'font-size:14px',
+            'line-height:1.5',
+            'box-shadow:0 1px 4px rgba(0,0,0,0.1)',
+            'word-break:break-word',
+            'position:relative',
+        ].join(';');
+        bubbleInner.textContent = content;
+
+        const meta = document.createElement('div');
+        meta.style.cssText = 'font-size:11px;color:#9ca3af;margin-top:2px;padding:0 2px;display:flex;align-items:center;gap:4px;';
+        meta.innerHTML = (!isOwn && senderName ? '<span style="font-weight:600;color:#667eea">' + _esc(senderName) + '</span>' : '') +
+                         '<span>' + timeStr + '</span>' +
+                         (isOwn ? '<span class="delivery-indicator" style="color:#a78bfa" data-message-id="' + msgId + '">✓✓</span>' : '');
+
+        bubble.appendChild(bubbleInner);
+        bubble.appendChild(meta);
+        container.appendChild(bubble);
+
+        // Scroll to bottom
+        requestAnimationFrame(function() {
+            container.scrollTop = container.scrollHeight;
+        });
+    }
+
+    function _esc(str) {
+        return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // Intercept the renderMessages CustomEvent for direct message append
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        const type = evt.data.type;
+        if (type !== 'message:new' && type !== 'new_message' && type !== 'MESSAGE_RECEIVED') return;
+
+        const payload = evt.data.payload || evt.data;
+        if (!payload || !payload.content) return;
+
+        // Check if a chat panel is open
+        const panel = document.getElementById('chatPanel');
+        if (!panel || panel.classList.contains('hidden')) return;
+
+        // Get active chat ID from various sources
+        const activeChatId = String(
+            window.ChatManager?._activeConversation?.id ||
+            window.__activeChatId ||
+            panel.dataset.chatId ||
+            ''
+        );
+        const msgChatId = String(payload.chatId || payload.conversationId || '');
+
+        // Only append if this message belongs to the open chat
+        if (activeChatId && msgChatId && activeChatId !== msgChatId) return;
+
+        // Use a small delay to let the normal render pipeline try first
+        setTimeout(function() {
+            const msgId = String(payload.id || payload.localId || '');
+            // If already rendered by normal pipeline, skip
+            if (msgId && document.querySelector('[data-message-id="' + msgId + '"]')) return;
+            // If the container has content from normal render, skip
+            const container = document.getElementById('messagesContainer');
+            if (!container) return;
+            _appendMessageBubbleDirect(payload);
+        }, 120);
+    });
+
+    // Also hook into the renderMessages CustomEvent to track rendered IDs
+    window.addEventListener('renderMessages', function(evt) {
+        const msgs = evt.detail?.messages || [];
+        msgs.forEach(function(m) {
+            const id = String(m.id || m.localId || '');
+            if (id) _renderedMsgIds.add(id);
+        });
+    });
+
+    // Expose for external use
+    window._kynAppendMessage = _appendMessageBubbleDirect;
+
+    console.log('[KynPatch v4.0] ✅ Message visibility patch installed');
 })();
