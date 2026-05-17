@@ -7741,9 +7741,53 @@ window.__getAuthState = () => ({
     }
 
     function _handleStatusDeleted(detail) {
-        try {
-            window.dispatchEvent(new CustomEvent('statusDeleted', { detail }));
-        } catch(_) {}
+        if (!detail) return;
+        // Collect all affected status IDs
+        const ids = [];
+        if (Array.isArray(detail.statusIds)) detail.statusIds.forEach(function(id) { ids.push(String(id)); });
+        if (detail.statusId)  ids.push(String(detail.statusId));
+        if (detail.id)        ids.push(String(detail.id));
+        // Deduplicate
+        const uniqueIds = [...new Set(ids)];
+
+        // 1. Remove from DOM immediately
+        uniqueIds.forEach(function(sid) {
+            document.querySelectorAll(
+                '[data-status-id="' + sid + '"], [data-id="' + sid + '"]'
+            ).forEach(function(el) {
+                el.style.transition = 'opacity 0.25s';
+                el.style.opacity = '0';
+                setTimeout(function() { try { el.remove(); } catch(_) {} }, 250);
+            });
+        });
+
+        // 2. Clear from localStorage status cache
+        if (uniqueIds.length > 0) {
+            try {
+                ['kyn_status_cache_v1', 'kyn_status_list_v1'].forEach(function(SKEY) {
+                    const cached = JSON.parse(localStorage.getItem(SKEY) || 'null');
+                    if (cached && Array.isArray(cached.statuses)) {
+                        cached.statuses = cached.statuses.filter(function(s) {
+                            return !uniqueIds.includes(String(s.id));
+                        });
+                        localStorage.setItem(SKEY, JSON.stringify(cached));
+                    }
+                });
+            } catch(_) {}
+            // 3. Track in permanent deleted set so expired statuses never restore
+            try {
+                const DKEY = 'kyn_deleted_statuses_v1';
+                const existing = JSON.parse(localStorage.getItem(DKEY) || '[]');
+                uniqueIds.forEach(function(sid) {
+                    if (!existing.includes(sid)) existing.push(sid);
+                });
+                if (existing.length > 5000) existing.splice(0, existing.length - 5000);
+                localStorage.setItem(DKEY, JSON.stringify(existing));
+            } catch(_) {}
+        }
+
+        // 4. Dispatch event for other listeners
+        try { window.dispatchEvent(new CustomEvent('statusDeleted', { detail: { ...detail, ids: uniqueIds } })); } catch(_) {}
     }
 
     window.addEventListener('kyn:status:new',     function(e) { _handleNewStatus(e.detail || {}); });
@@ -7751,16 +7795,42 @@ window.__getAuthState = () => ({
     window.addEventListener('kyn:status:viewed',  function(e) { _handleStatusViewed(e.detail || {}); });
     window.addEventListener('kyn:status:deleted', function(e) { _handleStatusDeleted(e.detail || {}); });
 
-    // Also handle REALTIME_EVENT:status:new forwarded via postMessage from parent
+    // Handle ALL status postMessage types (from ws-status-bridge and REALTIME_EVENT)
     window.addEventListener('message', function(evt) {
         if (!evt.data || typeof evt.data !== 'object') return;
         const { type, payload } = evt.data;
-        if (type === 'REALTIME_EVENT:status:new' || type === 'REALTIME_EVENT:status:created') {
+        if (!type) return;
+
+        // Handle canonical types from ws-status-bridge
+        if (type === 'status:created' || type === 'status:new') {
+            _handleNewStatus(payload || {});
+        } else if (type === 'status:deleted') {
+            _handleStatusDeleted(payload || {});
+        } else if (type === 'status:viewed' || type === 'status:viewer_update') {
+            _handleStatusViewed(payload || {});
+        } else if (type === 'status:reaction') {
+            window.dispatchEvent(new CustomEvent('statusReaction', { detail: payload || {} }));
+        } else if (type === 'status:reply') {
+            window.dispatchEvent(new CustomEvent('statusReply', { detail: payload || {} }));
+        } else if (type === 'status:expired') {
+            _handleStatusDeleted(payload || {}); // treat expired same as deleted
+        } else if (type === 'STATUS_UPDATE') {
+            // Generic wrapper — check sub-type
+            const subType = (payload && payload.type) || '';
+            if (subType === 'new' || subType === 'created') _handleNewStatus(payload);
+            else if (subType === 'deleted' || subType === 'expired') _handleStatusDeleted(payload);
+            else if (subType === 'viewed') _handleStatusViewed(payload);
+        }
+        // Legacy REALTIME_EVENT: prefixed types
+        else if (type === 'REALTIME_EVENT:status:new' || type === 'REALTIME_EVENT:status:created') {
             _handleNewStatus(payload || {});
         } else if (type === 'REALTIME_EVENT:status:viewed') {
             _handleStatusViewed(payload || {});
         } else if (type === 'REALTIME_EVENT:status:deleted') {
             _handleStatusDeleted(payload || {});
+        } else if (type === 'KYN_REALTIME_READY') {
+            // Socket reconnected — reload statuses from server
+            try { window.dispatchEvent(new CustomEvent('statusReconnect', { detail: {} })); } catch(_) {}
         }
     });
 

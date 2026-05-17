@@ -11647,38 +11647,34 @@ Type: ${message.type || 'text'}`;
                 const _chatId = (chat && chat.id) ? chat.id : chat;
                 const _chatOpts = (chat && typeof chat === 'object') ? { friendName: chat.friendName || chat.name, friendAvatar: chat.friendAvatar || chat.avatar, userName: chat.friendName || chat.name } : {};
 
+                // FIXED: Use a per-chatId dedup flag to prevent double-open
+                // when waitAndOpen fires concurrently with a second click
+                const _openKey = 'opening_chat_' + String(_chatId);
+                if (window[_openKey]) return; // already opening this chat
+                window[_openKey] = true;
+                const _clearOpenKey = () => { try { delete window[_openKey]; } catch(_){} };
+
                 if (coreState?.state === 'ACTIVE') {
-
-                    core.openConversation(_chatId, _chatOpts).catch?.(() => {});
-
+                    core.openConversation(_chatId, _chatOpts).catch?.(() => {}).finally?.(_clearOpenKey) || setTimeout(_clearOpenKey, 2000);
                 } else {
-
-                    // Core not ready yet — poll until it is, then open
-
+                    // Core not ready yet — poll until it is, then open ONCE
                     let attempts = 0;
-
+                    let _opened = false;
                     const waitAndOpen = () => {
-
+                        if (_opened) return;
                         attempts++;
-
                         const c = getMessagesCore();
-
                         const s = c?.getState?.();
-
                         if (s?.state === 'ACTIVE') {
-
-                            c.openConversation(_chatId, _chatOpts).catch?.(() => {});
-
+                            _opened = true;
+                            c.openConversation(_chatId, _chatOpts).catch?.(() => {}).finally?.(_clearOpenKey) || setTimeout(_clearOpenKey, 2000);
                         } else if (attempts < 20) {
-
                             setTimeout(waitAndOpen, 250);
-
+                        } else {
+                            _clearOpenKey();
                         }
-
                     };
-
-                    setTimeout(waitAndOpen, 250);
-
+                    setTimeout(waitAndOpen, 100);
                 }
 
             }
@@ -12972,27 +12968,77 @@ Type: ${message.type || 'text'}`;
                 case 'delete':
                     _showConfirm('Delete this chat?', function(ok) {
                         if (!ok) return;
-                        // Remove from local store
-                        if (window.KynectaLocalStore) {
-                            window.KynectaLocalStore.deleteMessage?.(chatId).catch(()=>{});
-                        }
-                        // Remove from ChatManager
-                        if (window.ChatManager && window.ChatManager._conversations) {
-                            window.ChatManager._conversations = window.ChatManager._conversations.filter(
-                                function(c) { return String(c.id) !== String(chatId); }
-                            );
-                            if (window.ChatManager._conversationsMap) window.ChatManager._conversationsMap.delete(String(chatId));
+                        const _cid = String(chatId);
+
+                        // 1. Remove from ChatManager in-memory state
+                        if (window.ChatManager) {
+                            if (window.ChatManager._conversations) {
+                                window.ChatManager._conversations = window.ChatManager._conversations.filter(
+                                    function(c) { return String(c.id) !== _cid; }
+                                );
+                            }
+                            if (window.ChatManager._conversationsMap) window.ChatManager._conversationsMap.delete(_cid);
+                            if (window.ChatManager._messages) {
+                                window.ChatManager._messages = window.ChatManager._messages.filter(
+                                    function(m) { return String(m.chatId || m.conversationId || '') !== _cid; }
+                                );
+                            }
                             if (window.ChatManager._saveToCache) window.ChatManager._saveToCache();
                         }
-                        // Backend delete (best-effort)
+
+                        // 2. Remove from ALL localStorage/sessionStorage caches
+                        try {
+                            const keysToDelete = [];
+                            for (let i = 0; i < localStorage.length; i++) {
+                                const k = localStorage.key(i);
+                                if (k && (k.includes(_cid) || k.includes('chat_' + _cid) || k.includes('conv_' + _cid) || k.includes('messages_' + _cid))) {
+                                    keysToDelete.push(k);
+                                }
+                            }
+                            keysToDelete.forEach(function(k) { try { localStorage.removeItem(k); } catch(_){} });
+                        } catch(_) {}
+                        try {
+                            const ssKeys = [];
+                            for (let i = 0; i < sessionStorage.length; i++) {
+                                const k = sessionStorage.key(i);
+                                if (k && (k.includes(_cid) || k.includes('chat_' + _cid) || k.includes('conv_' + _cid))) ssKeys.push(k);
+                            }
+                            ssKeys.forEach(function(k) { try { sessionStorage.removeItem(k); } catch(_){} });
+                        } catch(_) {}
+
+                        // 3. Remove from IndexedDB (KynectaLocalStore)
+                        try {
+                            if (window.KynectaLocalStore) {
+                                if (window.KynectaLocalStore.deleteConversation) window.KynectaLocalStore.deleteConversation(_cid).catch(function(){});
+                                if (window.KynectaLocalStore.deleteMessagesByChatId) window.KynectaLocalStore.deleteMessagesByChatId(_cid).catch(function(){});
+                            }
+                            // Also try KynectaSyncEngine
+                            if (window.KynectaSyncEngine && window.KynectaSyncEngine.deleteChatFromCache) {
+                                window.KynectaSyncEngine.deleteChatFromCache(_cid).catch(function(){});
+                            }
+                        } catch(_) {}
+
+                        // 4. Add to permanent deleted-chats set so it never restores from cache
+                        try {
+                            const deleted = (function(){try{return JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8')||'[]');}catch(_){return[];}})();
+                            if (!deleted.includes(_cid)) { deleted.push(_cid); localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(deleted)); }
+                        } catch(_) {}
+
+                        // 5. Backend delete (authoritative)
                         try {
                             const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-                            fetch('/api/chats/' + chatId, {
-                                method:'DELETE',
-                                headers:{ Authorization:'Bearer ' + tok }
+                            fetch('/api/chats/' + _cid, {
+                                method: 'DELETE',
+                                headers: { Authorization: 'Bearer ' + tok }
                             }).catch(function(){});
                         } catch(_) {}
+
                         _showToast('Chat deleted');
+                        // Close panel if this was the open chat
+                        if (window.ChatManager && window.ChatManager.getActiveChat && String((window.ChatManager.getActiveChat() || {}).id) === _cid) {
+                            const panel = document.getElementById('chatPanel');
+                            if (panel) panel.classList.add('hidden');
+                        }
                         window.messagesUI?.refreshChatsList?.();
                     });
                     break;
@@ -13168,3 +13214,258 @@ Type: ${message.type || 'text'}`;
     })(); // end installChatContextMenu
 
 })(); // end main IIFE
+
+// ============================================================
+// KYNECTA COMPREHENSIVE RUNTIME PATCH v3.0
+// Fixes: message:deleted DOM removal, multi-send recipient UI,
+//        call history delete persistence, friend deletion tracking,
+//        status expiry scheduler, group message delete DOM,
+//        presence ghost cleanup, reconnect socket re-bind
+// ============================================================
+(function _kynComprehensivePatch() {
+    'use strict';
+
+    // ── 1. message:deleted → instantly remove from DOM ──────────────────
+    // messages-core fires EventBus.emit('message:deleted') but messages-ui.js
+    // never listened for it — deleted messages stayed visible until refresh.
+    function _handleMessageDeletedDOM(e) {
+        const detail = e.detail || e;
+        const ids = (Array.isArray(detail.messageIds) ? detail.messageIds : [detail.messageId || detail.id])
+            .filter(Boolean).map(String);
+        ids.forEach(function(mid) {
+            // Remove by data-message-id attribute
+            document.querySelectorAll('[data-message-id="' + mid + '"]').forEach(function(el) {
+                el.style.transition = 'opacity 0.2s';
+                el.style.opacity = '0';
+                setTimeout(function() { try { el.remove(); } catch(_){} }, 200);
+            });
+            // Also mark as deleted if element has data-id
+            document.querySelectorAll('[data-id="' + mid + '"]').forEach(function(el) {
+                el.style.transition = 'opacity 0.2s';
+                el.style.opacity = '0';
+                setTimeout(function() { try { el.remove(); } catch(_){} }, 200);
+            });
+        });
+        // Also update unread badge
+        try {
+            const core = window.messagesCore || window.getMessagesCore?.();
+            if (core && typeof core.refreshUnreadCounts === 'function') core.refreshUnreadCounts();
+        } catch(_) {}
+    }
+    document.addEventListener('message:deleted', _handleMessageDeletedDOM);
+    window.addEventListener('message:deleted', function(e) { _handleMessageDeletedDOM(e); });
+    // Also catch postMessage from parent bridge
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        if (evt.data.type === 'message:deleted' || evt.data.type === 'MESSAGE_DELETED') {
+            _handleMessageDeletedDOM(evt.data.payload || evt.data);
+        }
+    });
+
+    // ── 2. Multi-send: normalise conversation display names ──────────────
+    // getConversations() may return chat objects where `name` is a last-message
+    // preview. We normalise so the selector shows the friend's real name.
+    const _origRenderMultiSendChats = window.messagesUI && window.messagesUI.renderMultiSendChats;
+    function _normaliseChatsForMultiSend(rawChats) {
+        if (!Array.isArray(rawChats)) return [];
+        return rawChats.map(function(chat) {
+            const name = chat.friendName || chat.displayName || chat.participantName
+                || chat.otherUser?.username || chat.otherUser?.displayName
+                || (chat.participants && chat.participants[0] && (chat.participants[0].displayName || chat.participants[0].username))
+                || chat.name || 'Chat';
+            return Object.assign({}, chat, { friendName: name, name: name });
+        }).filter(function(c) { return c && c.id; });
+    }
+    // Hook into the multi-send open button to normalise chats
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('#multiSendBtn, [data-action="multi-send"], .multi-send-btn');
+        if (!btn) return;
+        setTimeout(function() {
+            try {
+                const core = window.messagesCore || (window.getMessagesCore && window.getMessagesCore());
+                if (!core) return;
+                const raw = core.getConversations ? core.getConversations() : [];
+                const normalised = _normaliseChatsForMultiSend(raw);
+                if (window.messagesUI && typeof window.messagesUI.renderMultiSendChats === 'function') {
+                    window.messagesUI.renderMultiSendChats(normalised);
+                } else if (window.UIRenderer && typeof window.UIRenderer.renderMultiSendChats === 'function') {
+                    window.UIRenderer.renderMultiSendChats(normalised);
+                }
+            } catch(_) {}
+        }, 50);
+    }, true);
+
+    // ── 3. Call history delete — track deleted IDs permanently ──────────
+    // When user deletes a call history item, track it so cached_call_history
+    // never restores it. Also call the backend DELETE endpoint.
+    function _deleteCallHistoryItem(callId) {
+        if (!callId) return;
+        const cid = String(callId);
+        // Track permanently
+        try {
+            const DKEY = 'kyn_deleted_calls_v1';
+            const existing = JSON.parse(localStorage.getItem(DKEY) || '[]');
+            if (!existing.includes(cid)) {
+                existing.push(cid);
+                if (existing.length > 500) existing.splice(0, existing.length - 500);
+                localStorage.setItem(DKEY, JSON.stringify(existing));
+            }
+        } catch(_) {}
+        // Remove from cached_call_history
+        try {
+            const cached = JSON.parse(localStorage.getItem('cached_call_history') || 'null');
+            if (cached && Array.isArray(cached.calls)) {
+                cached.calls = cached.calls.filter(function(c) { return c && String(c.id) !== cid; });
+                localStorage.setItem('cached_call_history', JSON.stringify(cached));
+            }
+        } catch(_) {}
+        // Backend delete
+        try {
+            const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+            fetch('/api/calls/history', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+                body: JSON.stringify({ callIds: [cid] })
+            }).catch(function(){});
+        } catch(_) {}
+    }
+    window._deleteCallHistoryItem = _deleteCallHistoryItem;
+    // Hook delete button clicks on call history items
+    document.addEventListener('click', function(e) {
+        const delBtn = e.target.closest('[data-action="delete-call"], .call-delete-btn, .delete-call-btn, [data-call-delete]');
+        if (!delBtn) return;
+        e.stopPropagation();
+        const callId = delBtn.dataset.callId || delBtn.dataset.id || delBtn.closest('[data-call-id]')?.dataset.callId;
+        if (callId) {
+            _deleteCallHistoryItem(callId);
+            const item = delBtn.closest('.call-history-item, [data-call-id]');
+            if (item) { item.style.opacity = '0'; item.style.transition = 'opacity .2s'; setTimeout(function(){ try{item.remove();}catch(_){} }, 200); }
+        }
+    }, true);
+
+    // ── 4. Friend deletion — track permanently so removed friends don't restore ─
+    function _trackFriendDeleted(userId) {
+        if (!userId) return;
+        try {
+            const DKEY = 'kyn_deleted_friends_v1';
+            const existing = JSON.parse(localStorage.getItem(DKEY) || '[]');
+            const uid = String(userId);
+            if (!existing.includes(uid)) {
+                existing.push(uid);
+                if (existing.length > 1000) existing.splice(0, existing.length - 1000);
+                localStorage.setItem(DKEY, JSON.stringify(existing));
+            }
+        } catch(_) {}
+    }
+    window._trackFriendDeleted = _trackFriendDeleted;
+    // Listen for friend:removed events
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        const t = evt.data.type;
+        if (t === 'friend:removed' || t === 'FRIEND_REMOVED' || t === 'friend_removed') {
+            const uid = (evt.data.payload || {}).userId || (evt.data.payload || {}).friendId || (evt.data.payload || {}).id;
+            if (uid) _trackFriendDeleted(uid);
+        }
+    });
+    document.addEventListener('friend:removed', function(e) {
+        const uid = (e.detail || {}).userId || (e.detail || {}).friendId;
+        if (uid) _trackFriendDeleted(uid);
+    });
+
+    // ── 5. Status expiry scheduler ────────────────────────────────────────
+    // Checks every 60s for statuses that have passed 24h and removes them from DOM
+    (function _installStatusExpiryScheduler() {
+        function _pruneExpiredStatuses() {
+            const now = Date.now();
+            const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+            // Remove expired status rings from DOM
+            document.querySelectorAll('[data-status-created-at]').forEach(function(el) {
+                try {
+                    const createdAt = new Date(el.dataset.statusCreatedAt).getTime();
+                    if (!isNaN(createdAt) && (now - createdAt) >= EXPIRY_MS) {
+                        el.style.opacity = '0';
+                        el.style.transition = 'opacity .3s';
+                        setTimeout(function() { try { el.remove(); } catch(_){} }, 300);
+                    }
+                } catch(_) {}
+            });
+            // Also prune from localStorage
+            try {
+                const SKEY = 'kyn_status_cache_v1';
+                const cached = JSON.parse(localStorage.getItem(SKEY) || 'null');
+                if (cached && Array.isArray(cached.statuses)) {
+                    const filtered = cached.statuses.filter(function(s) {
+                        try {
+                            const t = new Date(s.createdAt || s.created_at || 0).getTime();
+                            return (now - t) < EXPIRY_MS;
+                        } catch(_) { return true; }
+                    });
+                    if (filtered.length !== cached.statuses.length) {
+                        cached.statuses = filtered;
+                        localStorage.setItem(SKEY, JSON.stringify(cached));
+                    }
+                }
+            } catch(_) {}
+        }
+        // Run once on load, then every 60s
+        setTimeout(_pruneExpiredStatuses, 3000);
+        setInterval(_pruneExpiredStatuses, 60000);
+        window._pruneExpiredStatuses = _pruneExpiredStatuses;
+    })();
+
+    // ── 6. Group message delete → remove from DOM instantly ─────────────
+    function _handleGroupMessageDeletedDOM(detail) {
+        const d = detail || {};
+        const mid = String(d.messageId || d.id || '');
+        if (!mid) return;
+        document.querySelectorAll('[data-message-id="' + mid + '"], [data-id="' + mid + '"]').forEach(function(el) {
+            el.style.transition = 'opacity 0.2s';
+            el.style.opacity = '0';
+            setTimeout(function() { try { el.remove(); } catch(_){} }, 200);
+        });
+    }
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        if (evt.data.type === 'group:message:deleted' || evt.data.type === 'GROUP_MESSAGE_DELETED') {
+            _handleGroupMessageDeletedDOM(evt.data.payload || evt.data);
+        }
+    });
+    document.addEventListener('group:message:deleted', function(e) { _handleGroupMessageDeletedDOM(e.detail || {}); });
+
+    // ── 7. Presence ghost cleanup ────────────────────────────────────────
+    // After socket reconnect, stale "online" indicators for users who went
+    // offline during disconnection are cleaned up by forcing a presence refresh.
+    window.addEventListener('kyn:realtimeReady', function() {
+        setTimeout(function() {
+            // Dispatch presence-refresh so friend/messages modules re-query
+            try { window.dispatchEvent(new CustomEvent('kyn:presenceRefresh', { detail: { reason: 'reconnect' } })); } catch(_) {}
+            // Clear all "online" indicators and let the server re-populate
+            document.querySelectorAll('.presence-dot.online, .status-dot.online, [data-online="true"]').forEach(function(el) {
+                // Don't remove — just mark as uncertain until confirmed
+                el.classList.add('presence-uncertain');
+                el.style.opacity = '0.4';
+            });
+        }, 1500);
+    });
+
+    // ── 8. Socket re-bind on reconnect for messages module ───────────────
+    // Ensure the messages iframe re-registers its socket listeners after reconnect
+    window.addEventListener('kyn:realtimeReady', function() {
+        try {
+            const core = window.messagesCore || (window.getMessagesCore && window.getMessagesCore());
+            if (core && typeof core._setupSocketListeners === 'function') {
+                core._setupSocketListeners();
+            }
+        } catch(_) {}
+        // Re-request conversations after reconnect to fill any missed events
+        setTimeout(function() {
+            try {
+                const core2 = window.messagesCore || (window.getMessagesCore && window.getMessagesCore());
+                if (core2 && typeof core2.loadConversations === 'function') core2.loadConversations();
+                else if (core2 && typeof core2.requestConversations === 'function') core2.requestConversations();
+            } catch(_) {}
+        }, 2000);
+    });
+
+    console.log('[KynPatch v3.0] ✅ All runtime patches installed');
+})();

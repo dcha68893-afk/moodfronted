@@ -318,6 +318,40 @@ export const CartEngine = {
     has(productId) { return _store.cart.has(productId); },
     getItem(productId) { return _store.cart.get(productId) || null; },
     size() { return _store.cart.size; },
+
+    // CRITICAL FIX: Sync cart from server — ensures deleted items don't restore from localStorage
+    async syncFromServer(serverData) {
+        if (serverData && Array.isArray(serverData.items)) {
+            // Server sent us cart data directly (via socket event)
+            _store.cart.clear();
+            serverData.items.forEach(item => {
+                if (item && item.product && item.product.id) {
+                    _store.cart.set(item.product.id, item);
+                }
+            });
+            this._save();
+            return;
+        }
+        // Fetch from server
+        try {
+            const resp = await _api('GET', '/api/tools/marketplace/cart');
+            const items = resp?.data?.items || resp?.items || [];
+            if (items.length >= 0) {
+                // Server truth: replace local cart entirely
+                _store.cart.clear();
+                items.forEach(item => {
+                    if (item && item.product_id) {
+                        _store.cart.set(item.product_id, {
+                            product: item.product || { id: item.product_id },
+                            quantity: item.quantity || 1,
+                            addedAt: item.added_at || new Date().toISOString(),
+                        });
+                    }
+                });
+                this._save();
+            }
+        } catch(_) {}
+    },
 };
 
 // ══════════════════════════════════════════════════════════════════════

@@ -849,6 +849,78 @@ const MessageRouter = {
                 case 'GROUP_MESSAGE':
                     this.handleGroupMessage(message);
                     return true;
+
+                // CRITICAL FIX: Group message deletion was completely unhandled
+                case 'group:message:deleted':
+                case 'GROUP_MESSAGE_DELETED':
+                case 'message:deleted':
+                case 'message_deleted': {
+                    const dp = message.payload || message;
+                    const mid = dp.messageId || dp.id;
+                    const gid = dp.groupId || dp.chatId;
+                    if (mid && gid) {
+                        // Remove from in-memory store
+                        if (GroupCore && GroupCore.groupMessages && GroupCore.groupMessages[gid]) {
+                            GroupCore.groupMessages[gid] = GroupCore.groupMessages[gid].filter(
+                                m => String(m.id) !== String(mid)
+                            );
+                        }
+                        // Track permanently deleted message IDs
+                        try {
+                            const KEY = 'kyn_deleted_msgs_v1';
+                            const del = JSON.parse(localStorage.getItem(KEY) || '{}');
+                            if (!del[gid]) del[gid] = [];
+                            if (!del[gid].includes(String(mid))) del[gid].push(String(mid));
+                            localStorage.setItem(KEY, JSON.stringify(del));
+                        } catch(_) {}
+                        // CRITICAL FIX: Remove from IndexedDB (LocalGroupStore)
+                        try {
+                            if (window.LocalGroupStore && typeof window.LocalGroupStore.deleteMessage === 'function') {
+                                window.LocalGroupStore.deleteMessage(mid).catch(function(){});
+                            }
+                        } catch(_) {}
+                        // Also clear from localStorage group messages cache
+                        try {
+                            ['kyn_group_msgs_' + gid, 'group_messages_' + gid].forEach(function(k) {
+                                const cached = JSON.parse(localStorage.getItem(k) || 'null');
+                                if (cached && Array.isArray(cached.messages)) {
+                                    cached.messages = cached.messages.filter(function(m) { return String(m.id) !== String(mid); });
+                                    localStorage.setItem(k, JSON.stringify(cached));
+                                }
+                            });
+                        } catch(_) {}
+                        // Dispatch UI removal event (triggers DOM removal in messages-ui.js patch)
+                        window.dispatchEvent(new CustomEvent('groupMessageDeleted', {
+                            detail: { messageId: mid, groupId: gid }
+                        }));
+                        GroupCore.emit('group:message:deleted', { messageId: mid, groupId: gid });
+                    }
+                    return true;
+                }
+
+                case 'group:message:edited':
+                case 'GROUP_MESSAGE_EDITED':
+                case 'message_edited': {
+                    const ep = message.payload || message;
+                    const emid = ep.messageId || ep.id;
+                    const egid = ep.groupId || ep.chatId;
+                    if (emid && egid && GroupCore?.groupMessages?.[egid]) {
+                        const idx = GroupCore.groupMessages[egid].findIndex(m => String(m.id) === String(emid));
+                        if (idx >= 0) {
+                            GroupCore.groupMessages[egid][idx] = { ...GroupCore.groupMessages[egid][idx], content: ep.content, isEdited: true, editedAt: ep.editedAt || new Date().toISOString() };
+                            GroupCore.emit('group:message:edited', { messageId: emid, groupId: egid, content: ep.content });
+                        }
+                    }
+                    return true;
+                }
+
+                case 'group:reaction':
+                case 'GROUP_REACTION': {
+                    const rp = message.payload || message;
+                    GroupCore?.emit('group:reaction', rp);
+                    window.dispatchEvent(new CustomEvent('groupReaction', { detail: rp }));
+                    return true;
+                }
                     
                 case 'UNREAD_COUNT_UPDATED':
                     this.handleUnreadCountUpdated(message);
@@ -1292,11 +1364,32 @@ handleSettingsChange(message) {
                 delete groupUnreadCounts[groupId];
             }
             
-            // Clean up storage
+            // CRITICAL FIX: Full cache cleanup for deleted group
             try {
                 SafeStorage?.removeItem(`group_messages_${groupId}`);
                 SafeStorage?.removeItem(`group_unread_${groupId}`);
+                SafeStorage?.removeItem(`group_data_${groupId}`);
+                SafeStorage?.removeItem(`group_members_${groupId}`);
             } catch (e) {}
+
+            // Track in permanent deleted-groups list so it never restores from cache
+            try {
+                const DELETED_KEY = 'kyn_deleted_groups_v1';
+                const existing = JSON.parse(localStorage.getItem(DELETED_KEY) || '[]');
+                const gid = String(groupId);
+                if (!existing.includes(gid)) {
+                    existing.push(gid);
+                    if (existing.length > 200) existing.splice(0, existing.length - 200);
+                    localStorage.setItem(DELETED_KEY, JSON.stringify(existing));
+                }
+            } catch (_) {}
+
+            // Clean IndexedDB via LocalGroupStore
+            try {
+                if (window.LocalGroupStore && typeof window.LocalGroupStore.remove === 'function') {
+                    window.LocalGroupStore.remove(groupId).catch(() => {});
+                }
+            } catch (_) {}
             
             // Close chat if open (only if ACTIVE)
             if (LifecycleState.isActive()) {
@@ -2222,9 +2315,19 @@ const GroupCore = {
             if (window.LocalGroupStore && typeof window.LocalGroupStore.getAll === 'function') {
                 const cachedGroups = await window.LocalGroupStore.getAll();
                 
+                // CRITICAL FIX: Filter out permanently deleted groups
+                let deletedGroupIds = new Set();
+                try {
+                    const deleted = JSON.parse(localStorage.getItem('kyn_deleted_groups_v1') || '[]');
+                    deletedGroupIds = new Set(deleted.map(String));
+                } catch (_) {}
+
                 if (cachedGroups && cachedGroups.length > 0) {
-                    // Process cached groups into arrays
-                    this.groups = cachedGroups;
+                    // Process cached groups into arrays - exclude deleted
+                    const filteredGroups = cachedGroups.filter(g => g && g.id && !deletedGroupIds.has(String(g.id)));
+                    this.groups = filteredGroups;
+                    // Reassign so old code below works
+                    const _cachedGroups_orig = filteredGroups;
                     const _cuid=this.currentUser?.uid||this.currentUser?.id;
                     this.myGroups=cachedGroups.filter(g=>g.isCreator===true||g.role==='owner'||(_cuid&&String(g.createdBy)===String(_cuid)));
                     this.joinedGroups=cachedGroups.filter(g=>!g.isCreator&&g.role!=='owner'&&!(_cuid&&String(g.createdBy)===String(_cuid)));
@@ -2291,8 +2394,11 @@ const GroupCore = {
             }
             
             // Remove groups that no longer exist on server (unless local-only)
-            this.groups = this.groups.filter(g => 
-                g.isLocalOnly || serverMap.has(g.id)
+            // CRITICAL FIX: Also never restore permanently deleted groups
+            let _deletedGIDs = new Set();
+            try { _deletedGIDs = new Set(JSON.parse(localStorage.getItem('kyn_deleted_groups_v1') || '[]').map(String)); } catch(_) {}
+            this.groups = this.groups.filter(g =>
+                !_deletedGIDs.has(String(g.id)) && (g.isLocalOnly || serverMap.has(g.id))
             );
             
             const _uid=this.currentUser?.uid||this.currentUser?.id;

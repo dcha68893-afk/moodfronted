@@ -1785,10 +1785,33 @@
             try {
                 const parsed = JSON.parse(localStorage.getItem('cached_call_history') || 'null');
                 if (parsed && Array.isArray(parsed.calls)) {
-                    return parsed.calls;
+                    // CRITICAL FIX: Filter out permanently deleted calls
+                    const deletedIds = new Set();
+                    try {
+                        const dl = JSON.parse(localStorage.getItem('kyn_deleted_calls_v1') || '[]');
+                        dl.forEach(id => deletedIds.add(String(id)));
+                    } catch(_) {}
+                    return deletedIds.size > 0
+                        ? parsed.calls.filter(c => c && c.id && !deletedIds.has(String(c.id)))
+                        : parsed.calls;
                 }
             } catch (_) {}
             return [];
+        }
+
+        function saveCachedCallHistoryToStorage(calls) {
+            try {
+                // Filter deleted before saving
+                const deletedIds = new Set();
+                try {
+                    const dl = JSON.parse(localStorage.getItem('kyn_deleted_calls_v1') || '[]');
+                    dl.forEach(id => deletedIds.add(String(id)));
+                } catch(_) {}
+                const filtered = Array.isArray(calls)
+                    ? calls.filter(c => c && c.id && !deletedIds.has(String(c.id)))
+                    : [];
+                localStorage.setItem('cached_call_history', JSON.stringify({ calls: filtered, savedAt: Date.now() }));
+            } catch(_) {}
         }
 
         function loadUserProfileFromStorage() {
@@ -5842,6 +5865,52 @@
                 window.wsService.on('group:invitation:received', function(d) { _fwdToGroupIframe('GROUP_INVITE_RECEIVED', d); });
                 window.wsService.on('group:typing',              function(d) { _fwdToGroupIframe('GROUP_TYPING',          d); });
 
+                // ── SMART GROUP OS REAL-TIME BRIDGE ──────────────────────────
+                // Forward group:task:*, group:poll:*, etc. to group iframe
+                const _GOS_EVENTS = [
+                    'group:task:created','group:task:updated','group:task:deleted',
+                    'group:poll:created','group:poll:voted','group:poll:closed',
+                    'group:note:created','group:note:updated','group:note:deleted',
+                    'group:file:uploaded','group:file:deleted',
+                    'group:event:created','group:attendance:updated',
+                    'group:finance:created','group:finance:approved',
+                    'group:ai:summary_ready','group:modules:updated',
+                ];
+                _GOS_EVENTS.forEach(function(evtName) {
+                    window.wsService.on(evtName, function(d) { _fwdToGroupIframe('REALTIME_EVENT:' + evtName, d); });
+                });
+
+                // ── MARKETPLACE / TOOLS REAL-TIME BRIDGE ─────────────────────
+                // CRITICAL FIX: marketplace socket events were NEVER registered on wsService.
+                // Without this, product updates, order status changes, inventory updates,
+                // and payment confirmations never reach the Tools.html iframe in real-time.
+                function _fwdToToolsIframe(type, payload) {
+                    const tf = document.getElementById('toolsIframe');
+                    if (tf && tf.contentWindow) {
+                        tf.contentWindow.postMessage({
+                            type: 'REALTIME_EVENT:' + type,
+                            payload: payload || {},
+                            source: 'parent-mp-bridge',
+                            timestamp: Date.now()
+                        }, '*');
+                    }
+                    // Also dispatch as window CustomEvent so any listeners in parent scope catch it
+                    try { window.dispatchEvent(new CustomEvent('realtime:' + type, { detail: payload || {} })); } catch(_) {}
+                }
+                const _MP_SOCKET_EVENTS = [
+                    'product:created', 'product:updated', 'product:deleted', 'product:stock_updated',
+                    'order:created', 'order:status_changed', 'order:cancelled',
+                    'payment:confirmed', 'payment:failed',
+                    'review:new', 'delivery:updated',
+                    'cart:updated', 'wishlist:updated',
+                    'seller:notification', 'inventory:low',
+                    'flash_sale:started', 'flash_sale:ended',
+                    'coupon:activated', 'promo:updated',
+                ];
+                _MP_SOCKET_EVENTS.forEach(function(evtName) {
+                    window.wsService.on(evtName, function(d) { _fwdToToolsIframe(evtName, d); });
+                });
+
                 // ── FRIEND REAL-TIME BRIDGE ───────────────────────────────────
                 // FIX: Friend socket events (friend:request, friend:accepted, etc.)
                 // were NEVER forwarded from wsService to the friendsIframe.
@@ -5915,6 +5984,49 @@
                 window.wsService.on('friend:removed',          _fwdFriendRemoved);
                 window.wsService.on('friend_removed',          _fwdFriendRemoved);
                 window.wsService.on('friend:unfriended',       _fwdFriendRemoved);
+
+                // ── STATUS REAL-TIME BRIDGE ──────────────────────────────────
+                // CRITICAL FIX: status:new, status:deleted etc were NEVER registered
+                // on wsService — they were dispatched as kyn: CustomEvents but nobody
+                // actually called wsService.on() for them. Without this bridge,
+                // friends NEVER see a new status until they refresh the page.
+                function _fwdToStatusIframe(type, payload) {
+                    const sf = document.getElementById('statusIframe');
+                    if (sf && sf.contentWindow) {
+                        sf.contentWindow.postMessage({
+                            type, payload: payload || {}, source: 'ws-status-bridge', timestamp: Date.now()
+                        }, '*');
+                    }
+                    // Also dispatch as kyn: CustomEvent for any parent-level listeners
+                    try { window.dispatchEvent(new CustomEvent('kyn:' + type, { detail: payload || {} })); } catch(_) {}
+                }
+                // All status socket event aliases the backend might use
+                const _STATUS_EVENTS = [
+                    ['status:new',      'status:created'],
+                    ['status_new',      'status:created'],
+                    ['new_status',      'status:created'],
+                    ['status:created',  'status:created'],
+                    ['status:updated',  'status:updated'],
+                    ['status_updated',  'status:updated'],
+                    ['status:deleted',  'status:deleted'],
+                    ['status_deleted',  'status:deleted'],
+                    ['status:expired',  'status:expired'],
+                    ['status:viewed',   'status:viewed'],
+                    ['status:reaction', 'status:reaction'],
+                    ['status:reply',    'status:reply'],
+                    ['status:viewer_update', 'status:viewer_update'],
+                ];
+                _STATUS_EVENTS.forEach(function([evt, canonical]) {
+                    window.wsService.on(evt, function(d) { _fwdToStatusIframe(canonical, d); });
+                });
+
+                // ── FRIEND PRESENCE REAL-TIME BRIDGE ─────────────────────────
+                // Forward friend online/offline events to friendsIframe too
+                window.wsService.on('friend:online',  function(d) { _fwdToFriendIframe('friend:online',  d); });
+                window.wsService.on('friend:offline', function(d) { _fwdToFriendIframe('friend:offline', d); });
+                window.wsService.on('friend:typing',  function(d) { _fwdToFriendIframe('friend:typing',  d); });
+                window.wsService.on('friend:block',   function(d) { _fwdToFriendIframe('friend:block',   d); _fwdToFriendIframe('FRIEND_BLOCKED', d); });
+                window.wsService.on('friend:mute',    function(d) { _fwdToFriendIframe('friend:mute',    d); });
             }
 
             // Bind now if wsService is already real

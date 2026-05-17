@@ -7968,6 +7968,77 @@ window.addEventListener('message', function(evt) {
             window.__accessToken = token;
         }
     }
+
+    // CRITICAL FIX: Handle REALTIME_EVENT:* messages forwarded from chat.html
+    // chat.html forwards socket events as 'REALTIME_EVENT:product:created' etc.
+    // Without this handler, realtime product/order/inventory updates never reach
+    // the EcomMarketplace engines running in Tools.html.
+    if (t && t.startsWith('REALTIME_EVENT:')) {
+        const evtName = t.replace('REALTIME_EVENT:', '');
+        const payload = evt.data.payload || {};
+        const ecom = window.EcomMarketplace;
+
+        // Dispatch as a CustomEvent so the existing listeners in _ecomIntegration catch it
+        try { window.dispatchEvent(new CustomEvent('realtime:' + evtName, { detail: payload })); } catch(_) {}
+
+        if (!ecom) return;
+
+        // Inline handlers for the most critical realtime events
+        if (evtName === 'product:stock_updated') {
+            try { ecom.InventoryEngine.handleStockUpdate(payload); } catch(_) {}
+            // Update product card in DOM immediately
+            const pid = payload.product_id;
+            const qty = payload.quantity;
+            if (pid != null) {
+                document.querySelectorAll('[data-product-id="' + pid + '"] .stock-count, [data-id="' + pid + '"] .stock-count').forEach(function(el) {
+                    el.textContent = qty <= 0 ? 'Out of Stock' : ('Stock: ' + qty);
+                    el.classList.toggle('out-of-stock', qty <= 0);
+                });
+                // Update in-memory store
+                try {
+                    const store = ecom.ProductEngine.getStore();
+                    const prod = store.products.get(String(pid)) || store.products.get(Number(pid));
+                    if (prod) { prod.stock_quantity = qty; prod.available = qty > 0; }
+                } catch(_) {}
+            }
+        } else if (evtName === 'product:deleted') {
+            try {
+                const pid = payload.product_id;
+                if (pid) {
+                    const store = ecom.ProductEngine.getStore();
+                    store.products.delete(String(pid));
+                    store.products.delete(Number(pid));
+                    // Remove from DOM
+                    document.querySelectorAll('[data-product-id="' + pid + '"], [data-id="' + pid + '"]').forEach(function(el) { el.remove(); });
+                }
+            } catch(_) {}
+        } else if (evtName === 'product:created' || evtName === 'product:updated') {
+            // Trigger a products refresh after a short delay
+            clearTimeout(window.__productsRefreshTimer);
+            window.__productsRefreshTimer = setTimeout(function() {
+                window.dispatchEvent(new CustomEvent('ecom:refresh-products'));
+            }, 500);
+        } else if (evtName === 'order:created') {
+            try { ecom.NotificationEngine.push({ type:'order_created', message:'New order received!', order_id: payload.order_id, timestamp: new Date().toISOString() }); } catch(_) {}
+        } else if (evtName === 'order:status_changed') {
+            try {
+                const order = ecom.OrderEngine.getOrder(payload.order_id);
+                if (order) order.status = payload.status;
+                ecom.NotificationEngine.push({ type:'order_status', message:'Order ' + String(payload.order_id || '').slice(-6) + ': ' + payload.status, order_id: payload.order_id, timestamp: new Date().toISOString() });
+            } catch(_) {}
+            // Update order status in DOM
+            document.querySelectorAll('[data-order-id="' + payload.order_id + '"] .order-status').forEach(function(el) {
+                el.textContent = payload.status;
+                el.className = 'order-status status-' + payload.status;
+            });
+        } else if (evtName === 'payment:confirmed') {
+            try { ecom.NotificationEngine.push({ type:'payment', message:'Payment confirmed!', order_id: payload.order_id, timestamp: new Date().toISOString() }); } catch(_) {}
+            // Show payment success toast
+            try { if (typeof window._showToast === 'function') window._showToast('✅ Payment confirmed!'); } catch(_) {}
+        } else if (evtName === 'cart:updated') {
+            try { ecom.CartEngine.syncFromServer(payload); } catch(_) {}
+        }
+    }
 });
 
 })(); // end _ecomIntegration

@@ -484,9 +484,27 @@ async function _fetchFriendStatusesDirect() {
             statResult = await api.getTimeline({ limit: 100 });
         }
 
-        const fetched = (statResult && (statResult.statuses || statResult.data || []));
+        let fetched = (statResult && (statResult.statuses || statResult.data || []));
+        if (Array.isArray(fetched)) {
+            // CRITICAL FIX: Filter out permanently deleted and expired statuses
+            const deletedIds = new Set();
+            try {
+                const dl = JSON.parse(localStorage.getItem('kyn_deleted_statuses_v1') || '[]');
+                dl.forEach(function(id) { deletedIds.add(String(id)); });
+            } catch(_) {}
+            const EXPIRY_MS = 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            fetched = fetched.filter(function(s) {
+                if (!s || !s.id) return false;
+                if (deletedIds.has(String(s.id))) return false;
+                if (s.isDeleted) return false;
+                const created = new Date(s.createdAt || s.created_at || 0).getTime();
+                if (created > 0 && (now - created) >= EXPIRY_MS) return false;
+                return true;
+            });
+        }
         if (Array.isArray(fetched) && fetched.length > 0) {
-            console.log('[status-ui] ✅ Loaded', fetched.length, 'friend statuses');
+            console.log('[status-ui] ✅ Loaded', fetched.length, 'friend statuses (filtered)');
             const uid = String((currentUser && (currentUser.id || currentUser.userId))
                 || (window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
             // Separate own vs friend statuses
