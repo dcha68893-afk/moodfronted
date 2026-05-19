@@ -6059,6 +6059,21 @@ try {
                             chatId: saved.chatId || chatId
                         };
                     }
+                } else if (window.KynectaLocalStore?.saveMessage) {
+                    // CRITICAL FIX: Save to IDB directly even without SyncEngine
+                    // This ensures fetchMessages picks it up after user sends reply
+                    window.KynectaLocalStore.saveMessage({
+                        serverId:    String(normalizedMessage.id || normalizedMessage.serverId || ''),
+                        chatId:      String(chatId),
+                        conversationId: String(chatId),
+                        senderId:    normalizedMessage.senderId,
+                        content:     normalizedMessage.content || '',
+                        type:        normalizedMessage.type || 'text',
+                        sender:      normalizedMessage.sender || null,
+                        status:      'delivered',
+                        createdAt:   normalizedMessage.createdAt || Date.now(),
+                        isLocalOnly: false,
+                    }).catch(function(){});
                 }
 
                 renderRealtimeUpdate(chatId, normalizedMessage);

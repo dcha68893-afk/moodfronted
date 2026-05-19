@@ -2343,13 +2343,7 @@
             settings: [
                 { btnId: 'backToAppBtn', icon: 'fa-arrow-left', title: 'Back to app' }
             ],
-            tools: [
-                { btnId: 'viewAnalyticsBtn', icon: 'fa-chart-bar', title: 'Analytics' },
-                { btnId: 'viewSavedBtn', icon: 'fa-bookmark', title: 'Saved' },
-                { btnId: 'viewNotesBtn', icon: 'fa-sticky-note', title: 'Notes' },
-                { btnId: 'viewTrustStatsBtn', icon: 'fa-shield-alt', title: 'Trust Stats' },
-                { btnId: 'createListingBtn', icon: 'fa-plus', title: 'Create listing' }
-            ]
+            tools: []
         };
 
         function triggerIframeHeaderAction(page, btnId) {
@@ -5864,6 +5858,49 @@
                 window.wsService.on('group_joined',              _fwdGroupCreated);
                 window.wsService.on('group:invitation:received', function(d) { _fwdToGroupIframe('GROUP_INVITE_RECEIVED', d); });
                 window.wsService.on('group:typing',              function(d) { _fwdToGroupIframe('GROUP_TYPING',          d); });
+
+                // ── UNIVERSAL BACK NAVIGATION ─────────────────────────────────
+                // Handles NAVIGATE_BACK postMessages from child iframes
+                // so device back button and back arrows work everywhere
+                (function() {
+                    var _pageHistory = [];
+                    var _curPage     = 'messages';
+
+                    // Override navigateToPage to track history
+                    var _origNav = window.navigateToPage || window._kynNavigate;
+                    function _trackedNav(page, opts) {
+                        if (page && page !== _curPage) {
+                            _pageHistory.push(_curPage);
+                            _curPage = page;
+                        }
+                        if (_origNav) _origNav(page, opts);
+                        else if (typeof navigateToPage === 'function') navigateToPage(page, opts);
+                    }
+                    window._kynTrackedNav = _trackedNav;
+
+                    window.addEventListener('message', function(evt) {
+                        if (!evt.data || typeof evt.data !== 'object') return;
+                        if (evt.data.type === 'NAVIGATE_BACK') {
+                            if (_pageHistory.length > 0) {
+                                var prev = _pageHistory.pop();
+                                _curPage = prev;
+                                if (typeof navigateToPage === 'function') navigateToPage(prev, {});
+                            }
+                        }
+                    });
+
+                    // Also handle device back on parent
+                    window.addEventListener('popstate', function() {
+                        if (_pageHistory.length > 0) {
+                            var prev = _pageHistory.pop();
+                            _curPage = prev;
+                            if (typeof navigateToPage === 'function') navigateToPage(prev, {});
+                        }
+                    });
+                    try { history.pushState({ kyn: true }, '', window.location.href); } catch(_) {}
+
+                    console.log('[BackNav] ✅ Parent back navigation installed');
+                })();
 
                 // ── SMART GROUP OS REAL-TIME BRIDGE ──────────────────────────
                 // Forward group:task:*, group:poll:*, etc. to group iframe

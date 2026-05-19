@@ -3359,10 +3359,23 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
                     break;
                     
                 case 'group:member_removed':
-                case 'group:member_left':
+                case 'group:member_left': {
+                    // CRITICAL FIX: Only remove from members list, NOT from myGroups
+                    // unless the event explicitly says the current user left (leaveGroup action)
                     group.members = group.members.filter(m => m.id !== memberId);
-                    // member removed
+                    // Check if this is the current user being removed by someone else
+                    const _myId = session && (session.userId || (session.user && session.user.id));
+                    if (_myId && String(memberId) === String(_myId) && !data._selfLeave) {
+                        // Current user was removed by admin — update myGroups
+                        if (typeof myGroups !== 'undefined') {
+                            myGroups = myGroups.filter(g => g.id !== groupId);
+                        }
+                        if (GroupCore && GroupCore.myGroups) {
+                            GroupCore.myGroups = GroupCore.myGroups.filter(g => g.id !== groupId);
+                        }
+                    }
                     break;
+                }
                     
                 case 'group:member_role_changed':
                     const memberToUpdate = group.members.find(m => m.id === memberId);
@@ -8176,32 +8189,61 @@ export async function initGroupPage() {
  */
 export async function loadUserDataInBackground() {
     try {
-        if (!sessionReceived) {
+        if (!sessionReceived) return;
+        
+        // CRITICAL FIX: Use session data we already have from PARENT_READY
+        // instead of calling /auth/me which causes timeout errors
+        if (session && session.user && session.user.id) {
+            GroupCore.currentUser = session.user;
+            GroupCore.userData = {
+                displayName: session.user.displayName || session.user.username || session.user.name || 'User',
+                username: session.user.username || null,
+                email: session.user.email || null,
+                photoURL: session.user.avatar || session.user.photoURL || null
+            };
+            if (LifecycleState.isActive()) updateUserUI();
+            authReady = true;
+            __SESSION_READY__ = true;
             return;
         }
         
-        const response = await secureApiCall('/auth/me', { silent: true });
-        
-        if (response && response.success && response.data) {
-            // Update session memory
-            session.user = response.data;
-            session.token = session.token; // Keep existing token
-            
-            GroupCore.currentUser = response.data;
-            GroupCore.userData = {
-                displayName: session.user.displayName || session.user.name || 'User',
-                username: session.user.username || null,
-                email: session.user.email || null,
-                photoURL: session.user.photoURL || session.user.avatar || null
-            };
-            
-            // DO NOT save to localStorage
-            
-            if (LifecycleState.isActive()) {
-                updateUserUI();
+        // Fallback: try from localStorage session cache
+        try {
+            const cached = JSON.parse(localStorage.getItem('kynecta_user_cache_v8') || '{}');
+            if (cached && (cached.id || cached.userId)) {
+                session.user = cached;
+                GroupCore.currentUser = cached;
+                GroupCore.userData = {
+                    displayName: cached.displayName || cached.username || 'User',
+                    username: cached.username || null,
+                    email: cached.email || null,
+                    photoURL: cached.avatar || null
+                };
+                if (LifecycleState.isActive()) updateUserUI();
+                authReady = true;
+                __SESSION_READY__ = true;
+                return;
             }
-            authReady = true;
-            __SESSION_READY__ = true;
+        } catch(_) {}
+        
+        // Last resort: call /auth/me with a short timeout to avoid hanging
+        try {
+            const response = await secureApiCall('/auth/me', { silent: true, timeout: 8000 });
+            if (response && response.success && response.data) {
+                session.user = response.data;
+                GroupCore.currentUser = response.data;
+                GroupCore.userData = {
+                    displayName: response.data.displayName || response.data.username || 'User',
+                    username: response.data.username || null,
+                    email: response.data.email || null,
+                    photoURL: response.data.avatar || response.data.photoURL || null
+                };
+                if (LifecycleState.isActive()) updateUserUI();
+                authReady = true;
+                __SESSION_READY__ = true;
+            }
+        } catch(e) {
+            debugLog('loadUserDataInBackground /auth/me failed (non-fatal):', e.message);
         }
     } catch (error) {
         debugLog('Error loading user data:', error);

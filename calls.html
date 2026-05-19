@@ -4702,6 +4702,14 @@ window.__CALLS_IFRAME__ = {
             window.__incomingCallerName    = data.callerName || data.userName || data.name || 'Unknown';
             window.__incomingCallerAvatar  = data.callerAvatar || data.callerPhoto || null;
             window.__incomingCallType      = data.callType || 'voice';
+            // CRITICAL FIX: Persist callId so accept works even after state resets
+            if (callId) {
+                try { sessionStorage.setItem('kyn_incoming_call_id', callId); } catch(_) {}
+                try { sessionStorage.setItem('kyn_incoming_caller', JSON.stringify({ name: window.__incomingCallerName, avatar: window.__incomingCallerAvatar, type: window.__incomingCallType })); } catch(_) {}
+            }
+            // Also set on UIState directly
+            if (window.UIState) { window.UIState.activeCallId = callId; }
+            if (window.callsState) { window.callsState.activeCallId = callId; }
 
             // Populate incoming modal
             var modal   = _el('incomingCallModal');
@@ -4759,6 +4767,7 @@ window.__CALLS_IFRAME__ = {
             try { if (window.UIState && window.UIState.localStream) { window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} }); window.UIState.localStream = null; } } catch(e) {}
             window.__callActive = false;
             window._currentIncomingCallId = null;
+            try { sessionStorage.removeItem('kyn_incoming_call_id'); sessionStorage.removeItem('kyn_incoming_caller'); } catch(_) {}
             if (window.callsState) { window.callsState.callActive = false; window.callsState.callState = 'idle'; }
             if (window.UIState) { window.UIState.callActive = false; window.UIState.callState = 'idle'; }
             if (typeof window.endCallScreens === 'function') window.endCallScreens();
@@ -5286,5 +5295,6 @@ window.__CALLS_IFRAME__ = {
 
     })();
     </script>
+<script src="back-nav.js"></script>
 </body>
 </html>
