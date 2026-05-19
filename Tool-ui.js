@@ -569,7 +569,7 @@ function createEnhancedUIElements() {
             position: fixed;
             bottom: 10px;
             right: 10px;
-            display: flex;
+            display: none;
             gap: 8px;
             z-index: 10000;
             font-size: 11px;
@@ -635,7 +635,7 @@ function createEnhancedUIElements() {
     if (!document.getElementById('handshakeStageText')) {
         const stageText = document.createElement('span');
         stageText.id = 'handshakeStageText';
-        stageText.style.cssText = 'margin-left: 8px; font-size: 10px; color: #888;';
+        stageText.style.cssText = 'display:none;margin-left: 8px; font-size: 10px; color: #888;';
         if (DOM.connectionStatusBar) {
             DOM.connectionStatusBar.appendChild(stageText);
         }

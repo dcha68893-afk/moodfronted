@@ -4020,7 +4020,8 @@ try {
 
                 // Update the optimistic message in ChatManager in-place
                 if (serverId) {
-                    // Remove optimistic, add confirmed — addMessage handles dedup
+                    // Snapshot the current message list AFTER the await so any realtime
+                    // messages that arrived while the HTTP POST was in-flight are included.
                     const msgs = ChatManager.getMessages();
                     const idx = msgs.findIndex(m => m.id === localId || m.localId === localId);
                     if (idx !== -1) {
@@ -4038,6 +4039,20 @@ try {
                             timestamp:   realMessage.createdAt || msgs[idx].timestamp || Date.now(),
                             createdAt:   realMessage.createdAt || msgs[idx].createdAt || Date.now()
                         };
+                        // FIX Bug 1: Merge any realtime messages that arrived during the
+                        // sendMessage await and are already in ChatManager._messages but
+                        // absent from our local `msgs` snapshot.
+                        const _liveMessages = ChatManager.getMessages();
+                        const _msgsById = new Map(msgs.map(m => [String(m.serverId || m.id || m.localId || ''), m]));
+                        for (const _lm of _liveMessages) {
+                            const _lmKey = String(_lm.serverId || _lm.id || _lm.localId || '');
+                            if (_lmKey && !_msgsById.has(_lmKey)) {
+                                msgs.push(_lm);
+                                _msgsById.set(_lmKey, _lm);
+                            }
+                        }
+                        const _tsSort = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        msgs.sort((a, b) => _tsSort(a) - _tsSort(b));
                         ChatManager.setMessages(msgs, String(conversationId));
                     }
                     // Confirm in local store

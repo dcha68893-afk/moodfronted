@@ -730,6 +730,16 @@ function showIdleScreen() {
 function transitionToInCall(callInfo) {
     console.log('[UI] transitionToInCall → showing in-call screen for BOTH sides', callInfo);
 
+    // FIX Bug 4: Suppress idle screen immediately — before any other work —
+    // so there is zero chance of a visible flash between screens.
+    (function _suppressIdleInstantly() {
+        const _is = document.getElementById('idleScreen');
+        if (_is) { _is.classList.remove('active'); _is.style.setProperty('display', 'none', 'important'); }
+        // Also make sure callContainer is not hidden (it's the parent of all screens)
+        const _cc = document.getElementById('callContainer');
+        if (_cc) { _cc.classList.add('active'); _cc.style.setProperty('display', 'flex', 'important'); }
+    })();
+
     if (window._callRingTimer) { clearInterval(window._callRingTimer); window._callRingTimer = null; }
     if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
 
@@ -4599,6 +4609,19 @@ handleContactItemClick: function(e) {
                     }).catch(() => {});
                 });
                 playVideo();
+
+                // FIX Bug 5: Mark inCallScreen as video-active so CSS reveals the video grid
+                const _inCallScreen = document.getElementById('inCallScreen');
+                if (_inCallScreen) _inCallScreen.classList.add('video-active');
+
+                // FIX Bug 5: Re-attach srcObject when a new video track arrives after
+                // initial setup — covers the case where User A enables camera after connect
+                stream.onaddtrack = function() {
+                    if (video.srcObject !== stream) video.srcObject = stream;
+                    playVideo();
+                    const _ics = document.getElementById('inCallScreen');
+                    if (_ics) _ics.classList.add('video-active');
+                };
 
             } else {
                 // ── AUDIO-ONLY CALL ───────────────────────────────────────────
