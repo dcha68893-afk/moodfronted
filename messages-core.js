@@ -3031,21 +3031,30 @@ try {
                 }
                 // No matching cache — allow the empty set so the UI shows "no messages"
             }
-            // Deduplicate: for each message, a serverId-confirmed copy wins over
-            // an optimistic copy with the same localId.
+            // MERGE FIX: Combine existing in-memory messages with incoming server messages
+            // so that when user B replies and triggers a fetchMessages, User A's already-rendered
+            // messages are NEVER lost. Server messages are authoritative (win on conflict).
             const byId = new Map();
+            // First: seed the map with existing in-memory messages for this chat
+            for (const existingMsg of this._messages) {
+                const existingChatId = String(existingMsg.chatId || existingMsg.conversationId || '');
+                if (!_targetId || !existingChatId || existingChatId === String(_targetId)) {
+                    if (existingMsg.id) byId.set(String(existingMsg.id), { ...existingMsg });
+                }
+            }
+            // Then: apply server messages on top (server data wins)
             for (const msg of incomingMessages) {
                 if (!msg.id) continue;
-                const existing = byId.get(msg.id);
+                const existing = byId.get(String(msg.id));
                 if (!existing) {
-                    byId.set(msg.id, { ...msg });
+                    byId.set(String(msg.id), { ...msg });
                 } else {
-                    // Merge: server data wins
-                    byId.set(msg.id, { ...existing, ...msg });
+                    // Server data wins — merge but keep local-only fields
+                    byId.set(String(msg.id), { ...existing, ...msg });
                 }
                 // Remove any optimistic copy keyed by localId
-                if (msg.localId && msg.localId !== msg.id) {
-                    byId.delete(msg.localId);
+                if (msg.localId && String(msg.localId) !== String(msg.id)) {
+                    byId.delete(String(msg.localId));
                 }
             }
 
@@ -3344,13 +3353,39 @@ try {
             
             try {
                 const stored = SafeStorage.getJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`);
-                if (stored && Array.isArray(stored)) {
+                if (stored && Array.isArray(stored) && stored.length > 0) {
+                    // Also merge in any background-cached messages (arrived while on different tab)
+                    let result = stored;
+                    try {
+                        const _bgKey = 'kynecta_msgs_' + String(conversationId);
+                        const _bgMsgs = JSON.parse(localStorage.getItem(_bgKey) || '[]');
+                        if (Array.isArray(_bgMsgs) && _bgMsgs.length > 0) {
+                            const _byId = new Map();
+                            for (const m of result) { if (m.id) _byId.set(String(m.id), m); }
+                            for (const m of _bgMsgs) { if (m.id && !_byId.has(String(m.id))) _byId.set(String(m.id), m); }
+                            result = Array.from(_byId.values()).sort(function(a,b){ return (a.createdAt||a.timestamp||0)-(b.createdAt||b.timestamp||0); });
+                            // Flush merged result back to primary cache and clear background cache
+                            try { SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`, result); } catch(_) {}
+                            try { localStorage.removeItem(_bgKey); } catch(_) {}
+                        }
+                    } catch(_) {}
                     this._historyCache.set(conversationId, {
-                        messages: stored,
+                        messages: result,
                         timestamp: Date.now()
                     });
-                    return stored;
+                    return result;
                 }
+                // No primary cache — check background cache only
+                try {
+                    const _bgKey2 = 'kynecta_msgs_' + String(conversationId);
+                    const _bgMsgs2 = JSON.parse(localStorage.getItem(_bgKey2) || '[]');
+                    if (Array.isArray(_bgMsgs2) && _bgMsgs2.length > 0) {
+                        const sorted2 = _bgMsgs2.sort(function(a,b){ return (a.createdAt||a.timestamp||0)-(b.createdAt||b.timestamp||0); });
+                        this._historyCache.set(conversationId, { messages: sorted2, timestamp: Date.now() });
+                        try { localStorage.removeItem(_bgKey2); } catch(_) {}
+                        return sorted2;
+                    }
+                } catch(_) {}
             } catch (e) {}
             
             return null;
@@ -5910,10 +5945,29 @@ try {
                     }
                 } catch (_e) {}
             } else if (normalizedMessage) {
+                // FIX: Message arrived for a chat the user is NOT currently viewing.
+                // Persist it to localStorage so it shows when the user opens that chat.
+                // This prevents messages being "lost" when user B sends while user A is on a different tab.
                 try {
-                    const _sid = normalizedMessage.senderId;
-                    const _mid = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
-                    if (!_sid || String(_sid) !== String(_mid)) {
+                    if (_rcId && normalizedMessage) {
+                        const _bgCacheKey = 'kynecta_msgs_' + _rcId;
+                        let _bgMsgs = [];
+                        try { _bgMsgs = JSON.parse(localStorage.getItem(_bgCacheKey) || '[]'); } catch(_) {}
+                        if (!Array.isArray(_bgMsgs)) _bgMsgs = [];
+                        const _alreadyHas = _bgMsgs.some(function(m) { return m.id && String(m.id) === String(normalizedMessage.id); });
+                        if (!_alreadyHas) {
+                            _bgMsgs.push(normalizedMessage);
+                            // Keep last 200 messages per chat in background cache
+                            if (_bgMsgs.length > 200) _bgMsgs = _bgMsgs.slice(-200);
+                            try { localStorage.setItem(_bgCacheKey, JSON.stringify(_bgMsgs)); } catch(_) {}
+                        }
+                    }
+                } catch (_bgE) {}
+                // Also show notification sound
+                try {
+                    const _sid2 = normalizedMessage.senderId;
+                    const _mid2 = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
+                    if (!_sid2 || String(_sid2) !== String(_mid2)) {
                         if (UIFeatures && typeof UIFeatures.playNotificationSound === 'function') UIFeatures.playNotificationSound();
                         window.dispatchEvent(new CustomEvent('kyn:incomingMessage', { detail: { message: normalizedMessage, chatId: chatId } }));
                     }

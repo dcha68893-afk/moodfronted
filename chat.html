@@ -1336,6 +1336,46 @@
         .iframe-container {
             background: #0f172a !important;
         }
+
+        /* ── TOOLS MODULE NAV TABS (in parent header) ──────────────────── */
+        .jm-parent-nav-tab {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            padding: 4px 8px;
+            border: none;
+            background: rgba(255,255,255,0.07);
+            border-radius: 10px;
+            color: #9ca3af;
+            cursor: pointer;
+            transition: background 0.18s, color 0.18s;
+            min-height: 44px;
+            min-width: 44px;
+        }
+        .jm-parent-nav-tab:hover {
+            background: rgba(255,255,255,0.14);
+            color: #e5e7eb;
+        }
+        .jm-parent-nav-tab.active {
+            background: rgba(37,99,235,0.25);
+            color: #60a5fa;
+        }
+        /* Back arrow that appears when user is in a sub-page of Tools */
+        #toolsBackBtn {
+            width: 36px; height: 36px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.08);
+            color: #e5e7eb;
+            display: none;
+            align-items: center; justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 4px;
+        }
+        #toolsBackBtn.visible { display: inline-flex; }
     </style>
 </head>
 <body>
@@ -1397,6 +1437,31 @@
         </div>
 
         <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
+
+        <!-- TOOLS MODULE NAV TABS (shown only when tools page is active) -->
+        <div id="toolsHeaderNav" class="header-actions hidden" aria-label="Tools navigation" style="gap:4px;">
+            <button id="toolsBackBtn" title="Back to home" onclick="toolsNavTo('home')">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="categories" title="Categories" onclick="toolsNavTo('categories')">
+                <i class="fas fa-th-list" style="font-size:15px"></i>
+                <span style="font-size:10px;display:block;line-height:1">Categories</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="cart" title="Cart" onclick="toolsNavTo('cart')" style="position:relative">
+                <i class="fas fa-shopping-cart" style="font-size:15px"></i>
+                <span id="parentCartBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#f97316;color:#fff;font-size:8px;font-weight:800;border-radius:10px;padding:1px 4px;min-width:14px;text-align:center;">0</span>
+                <span style="font-size:10px;display:block;line-height:1">Cart</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="wishlist" title="Wishlist" onclick="toolsNavTo('wishlist')">
+                <i class="fas fa-heart" style="font-size:15px"></i>
+                <span style="font-size:10px;display:block;line-height:1">Wishlist</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="account" title="Account" onclick="toolsNavTo('account')">
+                <i class="fas fa-user-circle" style="font-size:15px"></i>
+                <span style="font-size:10px;display:block;line-height:1">Account</span>
+            </button>
+        </div>
+
         <div id="profileTrigger" class="profile-trigger" title="Profile & Settings" aria-label="Profile">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
         </div>
@@ -2362,7 +2427,20 @@
 
         function updateHeaderActions(page) {
             const headerActionsEl = document.getElementById('headerActions');
+            const toolsNavEl = document.getElementById('toolsHeaderNav');
             if (!headerActionsEl) return;
+
+            // Show/hide tools nav tabs
+            if (toolsNavEl) {
+                if (page === 'tools') {
+                    toolsNavEl.classList.remove('hidden');
+                    headerActionsEl.classList.add('hidden');
+                    headerActionsEl.innerHTML = '';
+                    return;
+                } else {
+                    toolsNavEl.classList.add('hidden');
+                }
+            }
 
             const normalizedPage = (page === 'groups') ? 'group' : page;
             const actions = headerActionConfigByPage[normalizedPage] || headerActionConfigByPage[page] || [];
@@ -2655,6 +2733,10 @@
             }
             const fromHistory = !!options.fromHistory;
             if (window.__currentPage !== page) {
+                // Notify tools navigation on page change
+                if (typeof window.__onNavigateAway === 'function') {
+                    try { window.__onNavigateAway(window.__currentPage, page); } catch(_) {}
+                }
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
                 console.log('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
@@ -2741,7 +2823,66 @@
         }
 
         // Wait for DOM to be ready before attaching event listeners
-        function attachNavigationListeners() {
+        // ======================================================================
+        // TOOLS MODULE NAVIGATION (parent → iframe)
+        // ======================================================================
+        window.__toolsCurrentPage = 'home';
+
+        function toolsNavTo(page) {
+            const iframe = document.getElementById('toolsIframe');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({ type: 'TOOLS_NAV', payload: { page: page }, source: 'parent-shell' }, '*');
+            }
+            window.__toolsCurrentPage = page;
+            // Show/hide back button based on page
+            const backBtn = document.getElementById('toolsBackBtn');
+            if (backBtn) {
+                backBtn.classList.toggle('visible', page !== 'home');
+            }
+            // Update active tab
+            document.querySelectorAll('#toolsHeaderNav .jm-parent-nav-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-tools-page') === page);
+            });
+        }
+
+        // Listen for page-change messages FROM tools iframe
+        window.addEventListener('message', function(e) {
+            const d = e.data;
+            if (!d || typeof d !== 'object' || d.source !== 'tools-iframe') return;
+
+            if (d.type === 'TOOLS_PAGE_CHANGED') {
+                const page = d.payload && d.payload.page;
+                if (page) {
+                    window.__toolsCurrentPage = page;
+                    const backBtn = document.getElementById('toolsBackBtn');
+                    if (backBtn) backBtn.classList.toggle('visible', page !== 'home');
+                    document.querySelectorAll('#toolsHeaderNav .jm-parent-nav-tab').forEach(btn => {
+                        btn.classList.toggle('active', btn.getAttribute('data-tools-page') === page);
+                    });
+                }
+                return;
+            }
+
+            if (d.type === 'TOOLS_CART_COUNT') {
+                const badge = document.getElementById('parentCartBadge');
+                if (badge && d.payload) {
+                    badge.textContent = d.payload.count || '0';
+                    badge.style.display = d.payload.visible && parseInt(d.payload.count) > 0 ? 'block' : 'none';
+                }
+                return;
+            }
+        }, true);
+
+        // When navigating away from tools, reset tools page to home
+        const _origNavigateToPage = navigateToPage;
+        // Override navigation to reset tools page when leaving tools
+        window.__onNavigateAway = function(fromPage, toPage) {
+            if (fromPage === 'tools' && toPage !== 'tools') {
+                window.__toolsCurrentPage = 'home';
+                const backBtn = document.getElementById('toolsBackBtn');
+                if (backBtn) backBtn.classList.remove('visible');
+            }
+        };
             console.log('[Navigation] Attaching navigation listeners...');
             
             // Navigation click handlers
@@ -2773,7 +2914,7 @@
                     handleAppBackNavigation();
                 });
             }
-        }
+        
 
         // Attach listeners immediately if DOM is ready, otherwise wait
         if (document.readyState === 'loading') {
