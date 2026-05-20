@@ -1,7 +1,0 @@
-﻿/* suppress-webgl.css */
-canvas {
-    -webkit-text-size-adjust: 100%;
-}
-div[style*="warning"], div[role="alert"] {
-    display: none !important;
-}

@@ -40,16 +40,10 @@
 
     // ── Inject Smart Group OS tab into group header ────────────────────────
     function _injectTab() {
-        // FIX Bug 6: Broadened selector — group.html uses .chat-header-actions for its
-        // header buttons, not a dedicated tab-bar element.
-        const tabBar = document.querySelector(
-            '.group-tabs, .group-header-tabs, [data-group-tabs], #groupTabBar, .chat-header-actions'
-        );
+        // Find the group tab bar
+        const tabBar = document.querySelector('.group-tabs, .group-header-tabs, [data-group-tabs], #groupTabBar');
         if (!tabBar || tabBar.dataset.gosInjected) return;
         tabBar.dataset.gosInjected = 'true';
-
-        // Prefer the existing #groupOSTabBtn wired in group.html if present
-        if (document.getElementById('gosTabBtn') || document.getElementById('groupOSTabBtn')) return;
 
         const btn = document.createElement('button');
         btn.id = 'gosTabBtn';
@@ -60,19 +54,6 @@
         btn.onclick = _openGroupOS;
         tabBar.appendChild(btn);
     }
-
-    // FIX Bug 6: Retry injection every 500 ms until the tab bar appears in the DOM
-    let _injectRetries = 0;
-    const _injectInterval = setInterval(function() {
-        _injectTab();
-        _injectRetries++;
-        const target = document.querySelector(
-            '.group-tabs, .group-header-tabs, [data-group-tabs], #groupTabBar, .chat-header-actions'
-        );
-        if ((target && target.dataset.gosInjected) || _injectRetries >= 20) {
-            clearInterval(_injectInterval);
-        }
-    }, 500);
 
     // ── Open / show the GroupOS panel ─────────────────────────────────────
     function _openGroupOS() {
@@ -173,7 +154,7 @@
 
     // ── Auto-inject on DOM ready ──────────────────────────────────────────
     function _tryInject() {
-        // _injectTab is handled by the retry interval above; just wire the socket relay
+        _injectTab();
         _wireSocketRelay();
     }
 

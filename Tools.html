@@ -1001,101 +1001,7 @@
         }
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
-    <style>
-    /* ── DARK THEME OVERRIDES for Tools module ─────────────────────────── */
-    /* Ensures text visibility and removes white screens that block content */
-    :root {
-        --background-color: #0f172a;
-        --surface-color: #1e293b;
-        --text-primary: #e5e7eb;
-        --text-secondary: #9ca3af;
-        --border-color: #374151;
-        --hover-bg: rgba(255,255,255,0.05);
-    }
-    html, body, .app-container, .sidebar {
-        background: var(--background-color) !important;
-        color: var(--text-primary) !important;
-    }
-    /* jm-header dark */
-    .jm-header {
-        background: #1e293b !important;
-        border-bottom: 1px solid #374151 !important;
-    }
-    .jm-search-wrap {
-        background: #0f172a !important;
-        border: 1px solid #374151 !important;
-    }
-    .jm-search-input {
-        background: transparent !important;
-        color: #e5e7eb !important;
-    }
-    .jm-search-input::placeholder { color: #9ca3af !important; }
-    /* page title (back arrows) */
-    .jm-page-title {
-        color: #e5e7eb !important;
-        background: #1e293b !important;
-    }
-    /* Products grid */
-    .marketplace-list, .jm-product-grid {
-        background: #0f172a !important;
-    }
-    /* section headers */
-    .jm-section-header span {
-        color: #e5e7eb !important;
-    }
-    /* filter chips */
-    .jm-chip {
-        background: #1e293b !important;
-        color: #9ca3af !important;
-        border: 1px solid #374151 !important;
-    }
-    .jm-chip.active {
-        background: #2563eb !important;
-        color: #fff !important;
-    }
-    /* listing cards */
-    .listing-item, .jm-product-card {
-        background: #1e293b !important;
-        border-color: #374151 !important;
-        color: #e5e7eb !important;
-    }
-    /* more sheet */
-    .jm-more-sheet {
-        background: #1e293b !important;
-        color: #e5e7eb !important;
-    }
-    .jm-more-title { color: #e5e7eb !important; }
-    .jm-more-item { color: #e5e7eb !important; background: transparent !important; }
-    .jm-more-item:hover { background: rgba(255,255,255,0.07) !important; }
-    /* flash banner */
-    .jm-flash-banner { background: #1e293b !important; color: #e5e7eb !important; }
-    /* categories */
-    .jm-cat-sidebar { background: #1e293b !important; }
-    .jm-cat-content { background: #0f172a !important; }
-    /* empty state */
-    .empty-state { color: #9ca3af !important; }
-    /* cart/wishlist/account pages */
-    .jm-cart-wrap, .jm-wishlist-wrap, .jm-account-wrap {
-        background: #0f172a !important;
-        color: #e5e7eb !important;
-    }
-    /* more overlay */
-    .jm-more-overlay { background: rgba(0,0,0,0.6) !important; }
-    /* marketplace detail panel */
-    .marketplace-detail-panel {
-        background: #1e293b !important;
-        color: #e5e7eb !important;
-    }
-    .marketplace-detail-header {
-        background: #0f172a !important;
-        border-bottom: 1px solid #374151 !important;
-    }
-    .marketplace-detail-name, .marketplace-detail-time { color: #e5e7eb !important; }
-    /* price text */
-    .listing-price { color: #60a5fa !important; }
-    /* All products count */
-    #jmProductCount { color: #9ca3af !important; }
-    </style>
+</head>
 <body>
     <div class="app-container">
         <!-- ═══════════════════════════════════════════════════════════════
@@ -1106,10 +1012,6 @@
         <div class="sidebar active" id="sidebar">
 
             <!-- ── TOP HEADER (Jumia style) ──────────────────────────────── -->
-            <!-- NOTE: Navigation tabs (Categories, Cart, Wishlist, Account) are now
-                 rendered by the parent shell (chat.html) via #toolsHeaderActions
-                 and communicated to this iframe via postMessage (_jmNav). -->
-
             <div class="jm-header" id="jmHeader">
                 <button class="jm-back-btn" id="jmBackBtn" onclick="window._jmNav('home')" style="display:none">
                     <i class="fas fa-arrow-left"></i>
@@ -1150,31 +1052,58 @@
                     <div class="jm-hscroll" id="jmFeaturedRow"></div>
                 </div>
 
-                <!-- Sort/filter chips -->
-                <!-- Hidden stubs for JS compatibility (elements removed from UI but referenced by scripts) -->
-                <div style="display:none" aria-hidden="true">
-                    <div id="jmTabsOuter"></div>
-                    <button id="allTab"></button>
-                    <button id="servicesTab"><span id="servicesCount">0</span></button>
-                    <button id="digitalTab"></button>
-                    <button id="friendsTab"></button>
-                    <button id="groupsTab"></button>
-                    <button id="myTab"></button>
-                    <button id="premiumTab"></button>
-                    <button id="spotlightTab"></button>
-                    <button id="viewTeamBtn"></button>
-                    <button id="viewLeaderboardBtn"></button>
-                    <div id="spotlightSection"><div id="spotlightListings"></div></div>
-                    <div id="moodFilterIndicator"><span id="currentMoodFilter"></span></div>
-                    <div id="myListingsAvatar"></div>
-                    <div id="myListingsName"><span id="listingStreak"><span id="streakCount">0</span></span></div>
-                    <div id="myListingsText"></div>
-                    <button id="sellServiceBtn"></button>
-                    <button id="sellDigitalBtn"></button>
-                    <button id="premiumOptionsBtn"></button>
-                    <button id="createListingQuickBtn"></button>
-                    <span id="jmNavCartBadge"></span>
+                <!-- Original marketplace tabs (preserved unique features) -->
+                <div class="jm-tabs-wrap">
+                    <div class="marketplace-categories" id="jmTabsOuter">
+                        <button class="marketplace-category-btn active" id="allTab">All</button>
+                        <button class="marketplace-category-btn" id="servicesTab">Services <span class="listing-price" id="servicesCount">0</span></button>
+                        <button class="marketplace-category-btn" id="digitalTab">Digital</button>
+                        <button class="marketplace-category-btn" id="friendsTab">Friends</button>
+                        <button class="marketplace-category-btn" id="groupsTab">Groups</button>
+                        <button class="marketplace-category-btn" id="myTab">Mine</button>
+                        <button class="marketplace-category-btn" id="premiumTab">Premium <span class="premium-badge" style="font-size:8px;padding:1px 4px">PRO</span></button>
+                        <button class="marketplace-category-btn" id="spotlightTab">Spotlight <span class="featured-badge" style="font-size:8px;padding:1px 4px">TOP</span></button>
+                        <button class="marketplace-category-btn" id="viewTeamBtn"><i class="fas fa-users"></i> Team</button>
+                        <button class="marketplace-category-btn" id="viewLeaderboardBtn"><i class="fas fa-trophy"></i> Board</button>
+                    </div>
                 </div>
+
+                <!-- Spotlight section (preserved) -->
+                <div class="spotlight-section" id="spotlightSection" style="display:none">
+                    <div class="spotlight-header"><i class="fas fa-star"></i><span>Featured Listings</span></div>
+                    <div class="spotlight-listings" id="spotlightListings"></div>
+                </div>
+
+                <!-- Mood filter (preserved) -->
+                <div class="mood-filter-indicator" id="moodFilterIndicator" style="display:none">
+                    <i class="fas fa-filter"></i>
+                    <span id="currentMoodFilter">Browsing</span>
+                    <i class="fas fa-times" style="margin-left:auto"></i>
+                </div>
+
+                <!-- My listings quick actions (preserved) -->
+                <div class="my-listings-section">
+                    <div class="my-listings-header">
+                        <div class="my-listings-avatar" id="myListingsAvatar"><i class="fas fa-user"></i></div>
+                        <div class="my-listings-info">
+                            <div class="my-listings-name" id="myListingsName">
+                                My Marketplace
+                                <span class="streak-indicator" id="listingStreak" style="display:none">
+                                    <i class="fas fa-fire"></i> <span id="streakCount">0</span>
+                                </span>
+                            </div>
+                            <div class="my-listings-text" id="myListingsText">Tap to create your first listing</div>
+                        </div>
+                    </div>
+                    <div class="my-listings-actions">
+                        <button class="my-listing-action-btn" id="sellServiceBtn"><i class="fas fa-tools"></i> Service</button>
+                        <button class="my-listing-action-btn" id="sellDigitalBtn"><i class="fas fa-file-alt"></i> Digital</button>
+                        <button class="my-listing-action-btn premium" id="premiumOptionsBtn"><i class="fas fa-crown"></i> Premium</button>
+                        <button class="my-listing-action-btn primary" id="createListingQuickBtn"><i class="fas fa-plus"></i> Create</button>
+                    </div>
+                </div>
+
+                <!-- Sort/filter chips -->
                 <div class="jm-filter-chips" id="jmFilterChips">
                     <button class="jm-chip active" data-sort="newest">Newest</button>
                     <button class="jm-chip" data-sort="popular">Popular</button>
@@ -1336,7 +1265,26 @@
                 </div>
             </div>
 
-            <!-- BOTTOM NAVIGATION moved to top — see jmBottomNav above jm-header -->
+            <!-- BOTTOM NAVIGATION (Jumia 5-tab style) -->
+            <div class="jm-bottom-nav" id="jmBottomNav">
+                <button class="jm-nav-tab active" data-page="home" onclick="window._jmNav('home')">
+                    <i class="fas fa-home"></i><span>Home</span>
+                </button>
+                <button class="jm-nav-tab" data-page="categories" onclick="window._jmNav('categories')">
+                    <i class="fas fa-th-list"></i><span>Categories</span>
+                </button>
+                <button class="jm-nav-tab" data-page="cart" onclick="window._jmNav('cart')">
+                    <i class="fas fa-shopping-cart"></i>
+                    <span class="jm-cart-badge" id="jmNavCartBadge" style="display:none">0</span>
+                    <span>Cart</span>
+                </button>
+                <button class="jm-nav-tab" data-page="wishlist" onclick="window._jmNav('wishlist')">
+                    <i class="fas fa-heart"></i><span>Wishlist</span>
+                </button>
+                <button class="jm-nav-tab" data-page="account" onclick="window._jmNav('account')">
+                    <i class="fas fa-user-circle"></i><span>Account</span>
+                </button>
+            </div>
 
         </div>
         
@@ -2694,101 +2642,5 @@
     </script>
 
 <script src="back-nav.js"></script>
-
-<script>
-// ═══════════════════════════════════════════════════════════════════
-// PARENT SHELL INTEGRATION: receive nav-tab commands from chat.html
-// ═══════════════════════════════════════════════════════════════════
-(function() {
-    'use strict';
-
-    // Make jm-page-title elements (e.g. "← Cart") act as back buttons
-    function wirePageTitleBackBtns() {
-        document.querySelectorAll('.jm-page-title').forEach(function(el) {
-            if (el._backWired) return;
-            el._backWired = true;
-            el.style.cursor = 'pointer';
-            el.addEventListener('click', function() {
-                if (typeof window._jmNav === 'function') window._jmNav('home');
-            });
-        });
-    }
-
-    // Listen for parent shell commands
-    window.addEventListener('message', function(e) {
-        var d = e.data;
-        if (!d || typeof d !== 'object') return;
-
-        // Parent tells us to navigate to a specific tools sub-page
-        if (d.type === 'TOOLS_NAV') {
-            var page = d.payload && d.payload.page;
-            if (page && typeof window._jmNav === 'function') {
-                window._jmNav(page);
-                setTimeout(wirePageTitleBackBtns, 100);
-            }
-            return;
-        }
-
-        // Parent tells us to go back (← arrow in header)
-        if (d.type === 'TOOLS_BACK') {
-            if (typeof window._jmNav === 'function') {
-                window._jmNav('home');
-            }
-            return;
-        }
-    });
-
-    // Notify parent when sub-page changes so parent can show/hide back arrow
-    // and update cart badge in the parent header
-    var _origJmNav = null;
-    function patchJmNav() {
-        if (typeof window._jmNav !== 'function') {
-            setTimeout(patchJmNav, 200);
-            return;
-        }
-        if (window._jmNav.__patched) return;
-        _origJmNav = window._jmNav;
-        window._jmNav = function(page) {
-            _origJmNav(page);
-            // Wire back buttons on new page
-            setTimeout(wirePageTitleBackBtns, 150);
-            // Tell parent what page we're on
-            try {
-                window.parent.postMessage({ type: 'TOOLS_PAGE_CHANGED', payload: { page: page }, source: 'tools-iframe' }, '*');
-            } catch(_) {}
-        };
-        window._jmNav.__patched = true;
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() { patchJmNav(); wirePageTitleBackBtns(); });
-    } else {
-        patchJmNav();
-        wirePageTitleBackBtns();
-    }
-
-    // Also update parent cart badge whenever our local badge changes
-    var _cartObserver = null;
-    function observeCartBadge() {
-        var badge = document.getElementById('jmCartBadge');
-        if (!badge) { setTimeout(observeCartBadge, 500); return; }
-        if (_cartObserver) _cartObserver.disconnect();
-        _cartObserver = new MutationObserver(function() {
-            try {
-                window.parent.postMessage({
-                    type: 'TOOLS_CART_COUNT',
-                    payload: { count: badge.textContent || '0', visible: badge.style.display !== 'none' },
-                    source: 'tools-iframe'
-                }, '*');
-            } catch(_) {}
-        });
-        _cartObserver.observe(badge, { childList: true, characterData: true, subtree: true, attributes: true });
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', observeCartBadge);
-    } else {
-        observeCartBadge();
-    }
-})();
-</script>
 </body>
 </html>
