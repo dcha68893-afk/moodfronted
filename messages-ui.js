@@ -3130,18 +3130,39 @@
                     if (!e.detail || !e.detail.message) return;
                     const core = getMessagesCore();
                     const currentChat = core && core.getCurrentConversation && core.getCurrentConversation();
-                    if (!currentChat) return;
 
                     const msg = e.detail.message;
                     const incomingChatId = String(msg.chatId || msg.conversationId || '');
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
-                    let shouldRender = !!(incomingChatId && String(currentChat.id) === incomingChatId);
-                    if (!shouldRender && msg.senderId) {
+                    // FIX: Even when no chat is open (or a different chat is open), ensure the
+                    // conversation list re-renders so the unread badge appears immediately.
+                    const chatPanel = document.getElementById('chatPanel');
+                    const panelIsHidden = !chatPanel || chatPanel.classList.contains('hidden');
+
+                    let shouldRender = !panelIsHidden && !!(incomingChatId && currentChat && String(currentChat.id) === incomingChatId);
+                    if (!shouldRender && !panelIsHidden && currentChat && msg.senderId) {
                         const _afid = String(currentChat.friendId || currentChat.otherUserId ||
                             (currentChat.otherParticipant && currentChat.otherParticipant.id) || '');
                         if (_afid && _afid === String(msg.senderId)) shouldRender = true;
                     }
+
+                    // Always re-render the sidebar so unread counts are updated,
+                    // even when the user is outside the chat panel.
+                    try {
+                        const _cm = core && core.ChatManager;
+                        if (_cm) {
+                            window.dispatchEvent(new CustomEvent('renderChatsList', {
+                                detail: {
+                                    conversations: (_cm._conversations || []),
+                                    currentChat: _cm._activeConversation,
+                                    currentCategory: _cm.getCurrentCategory ? _cm.getCurrentCategory() : 'all',
+                                    messageDrafts: {}
+                                }
+                            }));
+                        }
+                    } catch (_e) {}
+
                     if (!shouldRender) return;
 
                     let currentUser = core && core.getCurrentUser && core.getCurrentUser();
@@ -3151,7 +3172,7 @@
                     }
 
                     const allMsgs = (core && core.getMessages && core.getMessages()) || [];
-                    const cid = String(currentChat.id);
+                    const cid = currentChat ? String(currentChat.id) : '';
                     let chatMsgs = allMsgs.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
                         return mid === cid || mid === incomingChatId || mid === '';
@@ -13497,7 +13518,8 @@ Type: ${message.type || 'text'}`;
     function _appendMessageBubbleDirect(msg) {
         const container = document.getElementById('messagesContainer');
         if (!container) return;
-        // Don't append if panel is hidden
+        // Only skip the DOM append (not storage) if panel is hidden — messages are
+        // already stored in ChatManager by addMessage; we just don't render them here.
         const panel = document.getElementById('chatPanel');
         if (panel && (panel.classList.contains('hidden') || panel.style.display === 'none')) return;
 

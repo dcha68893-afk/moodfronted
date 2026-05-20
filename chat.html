@@ -1336,6 +1336,31 @@
         .iframe-container {
             background: #0f172a !important;
         }
+
+        /* ── TOOLS MODULE NAV TABS (in parent header) ────────────────── */
+        #toolsHeaderNav {
+            display: flex; align-items: center; gap: 4px;
+        }
+        #toolsHeaderNav.hidden { display: none !important; }
+        .jm-parent-nav-tab {
+            display: inline-flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            gap: 2px; padding: 4px 8px;
+            border: none; background: rgba(255,255,255,0.07);
+            border-radius: 10px; color: #9ca3af;
+            cursor: pointer; transition: background .18s, color .18s;
+            min-height: 44px; min-width: 44px;
+        }
+        .jm-parent-nav-tab:hover { background: rgba(255,255,255,0.14); color: #e5e7eb; }
+        .jm-parent-nav-tab.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
+        #toolsBackBtn {
+            width: 36px; height: 36px; border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.08); color: #e5e7eb;
+            display: none; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 16px; margin-right: 2px;
+        }
+        #toolsBackBtn.visible { display: inline-flex; }
     </style>
 </head>
 <body>
@@ -1397,6 +1422,31 @@
         </div>
 
         <div id="headerActions" class="header-actions hidden" aria-label="Module actions"></div>
+
+        <!-- TOOLS NAV TABS — shown only when tools page is active -->
+        <div id="toolsHeaderNav" class="hidden" aria-label="Tools navigation">
+            <button id="toolsBackBtn" title="Back to marketplace home" onclick="toolsNavTo('home')">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="categories" title="Categories" onclick="toolsNavTo('categories')">
+                <i class="fas fa-th-list" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Categories</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="cart" title="Cart" onclick="toolsNavTo('cart')" style="position:relative">
+                <i class="fas fa-shopping-cart" style="font-size:15px"></i>
+                <span id="parentCartBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#f97316;color:#fff;font-size:8px;font-weight:800;border-radius:10px;padding:1px 5px;min-width:14px;text-align:center;line-height:1.4">0</span>
+                <span style="font-size:10px;line-height:1">Cart</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="wishlist" title="Wishlist" onclick="toolsNavTo('wishlist')">
+                <i class="fas fa-heart" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Wishlist</span>
+            </button>
+            <button class="jm-parent-nav-tab" data-tools-page="account" title="Account" onclick="toolsNavTo('account')">
+                <i class="fas fa-user-circle" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Account</span>
+            </button>
+        </div>
+
         <div id="profileTrigger" class="profile-trigger" title="Profile & Settings" aria-label="Profile">
             <img id="headerAvatar" class="profile-avatar-sm" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%237c3aed'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="avatar">
         </div>
@@ -2362,7 +2412,18 @@
 
         function updateHeaderActions(page) {
             const headerActionsEl = document.getElementById('headerActions');
+            const toolsNavEl      = document.getElementById('toolsHeaderNav');
             if (!headerActionsEl) return;
+
+            if (page === 'tools') {
+                // Show tools tabs, hide generic actions
+                if (toolsNavEl) toolsNavEl.classList.remove('hidden');
+                headerActionsEl.innerHTML = '';
+                headerActionsEl.classList.add('hidden');
+                return;
+            }
+            // Hide tools nav for every other page
+            if (toolsNavEl) toolsNavEl.classList.add('hidden');
 
             const normalizedPage = (page === 'groups') ? 'group' : page;
             const actions = headerActionConfigByPage[normalizedPage] || headerActionConfigByPage[page] || [];
@@ -2739,6 +2800,52 @@
                 syncBrowserHistoryState(page, false);
             }
         }
+
+        // ======================================================================
+        // TOOLS MODULE NAVIGATION (parent shell → tools iframe)
+        // ======================================================================
+        window.__toolsCurrentPage = 'home';
+
+        function toolsNavTo(page) {
+            const iframe = document.getElementById('toolsIframe');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage(
+                    { type: 'TOOLS_NAV', payload: { page: page }, source: 'parent-shell' }, '*'
+                );
+            }
+            window.__toolsCurrentPage = page;
+            // Show/hide back button
+            const backBtn = document.getElementById('toolsBackBtn');
+            if (backBtn) backBtn.classList.toggle('visible', page !== 'home');
+            // Update active tab highlight
+            document.querySelectorAll('#toolsHeaderNav .jm-parent-nav-tab').forEach(function(btn) {
+                btn.classList.toggle('active', btn.getAttribute('data-tools-page') === page);
+            });
+        }
+
+        // Listen for page-change + cart-count messages FROM the tools iframe
+        window.addEventListener('message', function(e) {
+            const d = e.data;
+            if (!d || typeof d !== 'object' || d.source !== 'tools-iframe') return;
+            if (d.type === 'TOOLS_PAGE_CHANGED' && d.payload) {
+                const pg = d.payload.page;
+                if (pg) {
+                    window.__toolsCurrentPage = pg;
+                    const backBtn = document.getElementById('toolsBackBtn');
+                    if (backBtn) backBtn.classList.toggle('visible', pg !== 'home');
+                    document.querySelectorAll('#toolsHeaderNav .jm-parent-nav-tab').forEach(function(btn) {
+                        btn.classList.toggle('active', btn.getAttribute('data-tools-page') === pg);
+                    });
+                }
+            }
+            if (d.type === 'TOOLS_CART_COUNT' && d.payload) {
+                const badge = document.getElementById('parentCartBadge');
+                if (badge) {
+                    badge.textContent = d.payload.count || '0';
+                    badge.style.display = (d.payload.visible && parseInt(d.payload.count || '0') > 0) ? 'block' : 'none';
+                }
+            }
+        }, true);
 
         // Wait for DOM to be ready before attaching event listeners
         function attachNavigationListeners() {
