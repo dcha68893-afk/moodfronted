@@ -3135,20 +3135,12 @@
                     const incomingChatId = String(msg.chatId || msg.conversationId || '');
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
 
-                    // FIX: Even when no chat is open (or a different chat is open), ensure the
-                    // conversation list re-renders so the unread badge appears immediately.
+                    // ROOT-FIX: Always re-render the sidebar so unread badges update even when
+                    // the user is NOT inside the chat panel. The old code bailed with
+                    // `if (!currentChat) return` which meant the badge never appeared.
                     const chatPanel = document.getElementById('chatPanel');
                     const panelIsHidden = !chatPanel || chatPanel.classList.contains('hidden');
 
-                    let shouldRender = !panelIsHidden && !!(incomingChatId && currentChat && String(currentChat.id) === incomingChatId);
-                    if (!shouldRender && !panelIsHidden && currentChat && msg.senderId) {
-                        const _afid = String(currentChat.friendId || currentChat.otherUserId ||
-                            (currentChat.otherParticipant && currentChat.otherParticipant.id) || '');
-                        if (_afid && _afid === String(msg.senderId)) shouldRender = true;
-                    }
-
-                    // Always re-render the sidebar so unread counts are updated,
-                    // even when the user is outside the chat panel.
                     try {
                         const _cm = core && core.ChatManager;
                         if (_cm) {
@@ -3163,6 +3155,13 @@
                         }
                     } catch (_e) {}
 
+                    // Only render message bubbles when the correct chat panel is open
+                    let shouldRender = !panelIsHidden && !!(incomingChatId && currentChat && String(currentChat.id) === incomingChatId);
+                    if (!shouldRender && !panelIsHidden && currentChat && msg.senderId) {
+                        const _afid = String(currentChat.friendId || currentChat.otherUserId ||
+                            (currentChat.otherParticipant && currentChat.otherParticipant.id) || '');
+                        if (_afid && _afid === String(msg.senderId)) shouldRender = true;
+                    }
                     if (!shouldRender) return;
 
                     let currentUser = core && core.getCurrentUser && core.getCurrentUser();
@@ -7226,6 +7225,9 @@ Type: ${message.type || 'text'}`;
 
                         if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
 
+                        // Remove CSS safeguard class so sidebar slides back in
+                        document.body.classList.remove('chat-active');
+
                         UIStateManager.setState('chatVisible', false);
 
                         // FIX: Clear lastChatId so navigating away and back doesn't
@@ -10451,7 +10453,11 @@ Type: ${message.type || 'text'}`;
 
         if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
 
-        if (sidebar) sidebar.classList.add('active');
+        // FIX: On mobile, HIDE the sidebar when opening a chat (remove 'active').
+        // On desktop, sidebar is always visible so leave it alone.
+        if (sidebar && window.innerWidth <= 768) {
+            sidebar.classList.remove('active');
+        }
 
         if (chatPanel) {
 
@@ -10926,6 +10932,9 @@ Type: ${message.type || 'text'}`;
             if (chatPanel) chatPanel.classList.add('hidden');
 
             if (sidebar) sidebar.classList.add('active');
+
+            // Remove CSS safeguard class so sidebar slides back in
+            document.body.classList.remove('chat-active');
 
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
 
@@ -11785,7 +11794,8 @@ Type: ${message.type || 'text'}`;
 
             if (contactsSidebar) { contactsSidebar.classList.add('hidden'); contactsSidebar.style.pointerEvents = 'none'; }
 
-            if (sidebar) sidebar.classList.add('active');
+            // FIX: On mobile, HIDE sidebar when opening chat
+            if (sidebar && window.innerWidth <= 768) { sidebar.classList.remove('active'); }
 
             
 
@@ -13518,8 +13528,7 @@ Type: ${message.type || 'text'}`;
     function _appendMessageBubbleDirect(msg) {
         const container = document.getElementById('messagesContainer');
         if (!container) return;
-        // Only skip the DOM append (not storage) if panel is hidden — messages are
-        // already stored in ChatManager by addMessage; we just don't render them here.
+        // Don't append if panel is hidden
         const panel = document.getElementById('chatPanel');
         if (panel && (panel.classList.contains('hidden') || panel.style.display === 'none')) return;
 

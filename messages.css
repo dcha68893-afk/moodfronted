@@ -4115,3 +4115,18 @@ input:focus + .toggle-slider,
 
 /* ── Context menu touch ripple prevention ────────────────────── */
 #chatContextMenu * { user-select: none; -webkit-user-select: none; }
+
+
+
+/* ── MOBILE: Smooth sidebar transition ─────────────────────────── */
+@media (max-width: 768px) {
+    /* Smooth slide animation for sidebar show/hide */
+    #sidebar {
+        transition: transform 0.25s ease !important;
+    }
+    /* When body has chat-active class (applied by JS when opening chat),     */
+    /* force sidebar off-screen — prevents the brief two-panel flash.        */
+    body.chat-active #sidebar {
+        transform: translateX(-100%) !important;
+    }
+}

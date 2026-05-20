@@ -2558,7 +2558,7 @@ try {
                 const realMessagesKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${newConversation.id}`;
                 const existingMessages = SafeStorage.getJSON(realMessagesKey, []);
                 const _realCid = String(newConversation.id);
-                // FIX-7: re-stamp ALL merged messages with the real chatId before writing.
+                // Re-stamp ALL merged messages with the real chatId before writing
                 const mergedMessages = [...pendingMessages, ...existingMessages]
                     .map(function(m) { return m ? { ...m, chatId: _realCid, conversationId: _realCid } : m; });
                 mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -2778,10 +2778,9 @@ try {
                         isLocalOnly: false
                     }));
                     this.setMessages(normalizedMessages, conversationId);
-                    // FIX-8: Merge back realtime messages that arrived before this chat was opened
-                    // (same _rtPreserve logic used by the KynectaLocalStore path above).
+                    // Merge back realtime messages that arrived before this fetch completed
                     if (_rtPreserve && _rtPreserve.length > 0) {
-                        const _tsF8 = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        const _tsRt = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
                         for (const _pm of _rtPreserve) {
                             const _pmId = String(_pm.serverId || _pm.id || '');
                             if (_pmId && !this._messagesMap.has(_pmId)) {
@@ -2790,7 +2789,7 @@ try {
                                 if (window.KynectaLocalStore) window.KynectaLocalStore.saveMessage(_pm).catch(()=>{});
                             }
                         }
-                        this._messages.sort(function(a, b) { return _tsF8(a) - _tsF8(b); });
+                        this._messages.sort(function(a, b) { return _tsRt(a) - _tsRt(b); });
                     }
                     this._notifySuccess('Messages loaded');
                 } else {
@@ -3018,47 +3017,58 @@ try {
         },
         
         setMessages: function(messages, conversationId) {
-            // FIX-1/2: pending→real wipe guard — treat `pending_<id>` and `<id>` as the SAME chat.
+            // ROOT-FIX-D: Wipe guard — determine what chat the current _messages belong to.
+            // Don't rely on _messages[0].chatId because:
+            //   (a) received messages with no chatId have chatId='' → always looks different
+            //   (b) optimistic sent messages may be first, with a different chatId format
+            // Instead, scan the FIRST message that actually has a chatId field populated.
             const _targetId = conversationId || this._activeConversation?.id;
             const _targetIdStr = String(_targetId || '');
-            const _currentFirstChatId = this._messages.length > 0
-                ? String(this._messages[0].chatId || this._messages[0].conversationId || '')
-                : null;
-            // Helper: strip the 'pending_' prefix for comparison
             const _stripPending = function(id) {
                 const s = String(id || '');
                 return s.startsWith('pending_') ? s.slice(8) : s;
             };
-            if (_targetId && _currentFirstChatId) {
-                // Only wipe when switching to a genuinely different chat.
-                // pending_7 → 7 is the SAME chat — do NOT wipe.
-                if (_currentFirstChatId !== _targetIdStr &&
-                    _stripPending(_currentFirstChatId) !== _stripPending(_targetIdStr)) {
+
+            let _currentChatId = null;
+            for (let _i = 0; _i < this._messages.length; _i++) {
+                const _mc = String(this._messages[_i].chatId || this._messages[_i].conversationId || '');
+                if (_mc && _mc !== 'undefined') { _currentChatId = _mc; break; }
+            }
+
+            if (_targetIdStr && _currentChatId) {
+                // Wipe only when switching to a genuinely DIFFERENT chat.
+                // pending_7 → 7 is the SAME chat — never wipe on that transition.
+                const _sameChat = _currentChatId === _targetIdStr ||
+                    _stripPending(_currentChatId) === _stripPending(_targetIdStr);
+                if (!_sameChat) {
                     this._messages = [];
                     this._messagesMap.clear();
                 }
             }
 
-            // FIX-2: normalize incoming message chatIds before dedup — re-stamp any message
-            // whose chatId is blank or is the pending variant of _targetId.
+            // ROOT-FIX-D cont: Normalize ALL incoming messages so none have a blank chatId.
+            // Without this, messages returned from the server with only `conversationId` get
+            // chatId='' in the dedup map, so the wipe-guard and cache reads never find them.
             const _realId = _targetIdStr.startsWith('pending_') ? _targetIdStr.slice(8) : _targetIdStr;
             const incomingRaw = ensureSafeArray(messages).map(function(m) {
                 if (!m) return m;
                 const mChatId = String(m.chatId || m.conversationId || '');
-                const needsRestamp = !mChatId || mChatId.startsWith('pending_');
+                const needsRestamp = !mChatId || mChatId === 'undefined' ||
+                    (mChatId.startsWith('pending_') && _realId);
                 if (needsRestamp && _realId) {
                     return { ...m, chatId: _realId, conversationId: _realId };
                 }
                 return m;
             });
+            const incomingMessages = incomingRaw;
 
             // CACHE-PROTECTION: Never overwrite a populated cache with an empty array.
-            const incomingMessages = incomingRaw;
             if (incomingMessages.length === 0) {
                 const existingCache = this.loadPreviousMessages(_targetId);
                 if (existingCache && existingCache.length > 0) {
                     const _cacheFirstId = String(existingCache[0]?.chatId || existingCache[0]?.conversationId || '');
-                    if (!_targetId || !_cacheFirstId || _cacheFirstId === _targetIdStr ||
+                    if (!_targetIdStr || !_cacheFirstId ||
+                        _cacheFirstId === _targetIdStr ||
                         _stripPending(_cacheFirstId) === _stripPending(_targetIdStr)) {
                         this._messages = existingCache;
                         this._rebuildMessagesMap();
@@ -3068,27 +3078,24 @@ try {
                 }
             }
 
-            // FIX-1: MERGE-FIRST dedup — seed from whatever is already in _messages so
-            // nothing already in memory is dropped during a pending→real transition.
+            // MERGE-FIRST dedup: seed from existing in-memory messages for this chat,
+            // then layer server messages on top. Nothing already in memory is dropped.
             const byId = new Map();
-            // Seed from existing in-memory messages first (they may have correct IDs already)
             for (const msg of this._messages) {
                 if (!msg || !msg.id) continue;
+                // Only carry forward messages that belong to THIS chat
+                const _mc = String(msg.chatId || msg.conversationId || '');
+                if (_mc && _mc !== _targetIdStr && _mc !== _realId &&
+                    _stripPending(_mc) !== _stripPending(_targetIdStr)) continue;
                 byId.set(String(msg.id), { ...msg });
                 if (msg.localId && msg.localId !== msg.id) byId.delete(String(msg.localId));
             }
-            // Layer server/incoming messages on top — server data wins on conflict
+            // Layer server/incoming on top — server data wins
             for (const msg of incomingMessages) {
                 if (!msg.id) continue;
                 const existing = byId.get(String(msg.id));
-                if (!existing) {
-                    byId.set(String(msg.id), { ...msg });
-                } else {
-                    byId.set(String(msg.id), { ...existing, ...msg });
-                }
-                if (msg.localId && msg.localId !== msg.id) {
-                    byId.delete(String(msg.localId));
-                }
+                byId.set(String(msg.id), existing ? { ...existing, ...msg } : { ...msg });
+                if (msg.localId && msg.localId !== msg.id) byId.delete(String(msg.localId));
             }
 
             const uniqueMessages = Array.from(byId.values());
@@ -3151,26 +3158,44 @@ try {
         addMessage: function(message) {
             if (!message || !message.id) return;
 
-            // FIX-3: normalize chatId — if it's the pending variant of the active chat's real ID,
-            // re-stamp it with the real ID so every storage path uses a consistent key.
-            const _activeChatId = this._activeConversation && this._activeConversation.id;
-            if (_activeChatId && !String(_activeChatId).startsWith('pending_')) {
-                const _msgCid = String(message.chatId || message.conversationId || '');
-                if (_msgCid && _msgCid === `pending_${_activeChatId}`) {
-                    message = { ...message, chatId: String(_activeChatId), conversationId: String(_activeChatId) };
+            // ROOT-FIX-A: Normalize chatId/conversationId to a single consistent string
+            // before ANY storage path runs.  Received messages from the server often arrive
+            // with ONLY `conversationId` (no `chatId`), which means:
+            //   • _saveMessagesToCache() falls back to _activeConversation.id → wrong key
+            //   • setMessages wipe guard reads _messages[0].chatId === '' → always triggers
+            //   • dedup map loses received messages on every send-confirm cycle
+            // Fix: derive a single _chatId and stamp BOTH fields so every path agrees.
+            const _activeChatIdRaw = this._activeConversation ? String(this._activeConversation.id || '') : '';
+            let _chatId = String(message.chatId || message.conversationId || '');
+
+            // If message has no chat identifier, inherit from the active conversation
+            if (!_chatId && _activeChatIdRaw) {
+                _chatId = _activeChatIdRaw;
+            }
+            // Restamp pending_ to real ID when the active chat has already been resolved
+            if (_chatId && _activeChatIdRaw && !_activeChatIdRaw.startsWith('pending_')) {
+                if (_chatId === `pending_${_activeChatIdRaw}`) {
+                    _chatId = _activeChatIdRaw;
                 }
+            }
+            // Produce a consistent message object so all paths below use the same key
+            if (_chatId) {
+                message = { ...message, chatId: _chatId, conversationId: _chatId };
             }
 
             const msgId      = String(message.id);
             const msgLocalId = message.localId ? String(message.localId) : null;
 
-            // ── OFFLINE-FIRST deduplication ──────────────────────────────────
+            // ROOT-FIX-B: Always pass the message's chatId to _saveMessagesToCache.
+            // Calling it with no argument falls back to _activeConversation.id, which may
+            // be a DIFFERENT chat if the received message arrived while the user had another
+            // chat open — writing all messages to the wrong localStorage key.
             const existingById = this._messagesMap.get(msgId);
             if (existingById) {
                 // Merge server data into existing (status, id, etc.)
                 Object.assign(existingById, message);
                 this._rebuildMessagesMap();
-                this._saveMessagesToCache();
+                this._saveMessagesToCache(_chatId || undefined);
                 this._notifySubscribers();
                 if (window.KynectaLocalStore) {
                     window.KynectaLocalStore.saveMessage({
@@ -3189,7 +3214,7 @@ try {
                     if (idx !== -1) this._messages[idx] = merged;
                     this._messagesMap.delete(msgLocalId);
                     this._messagesMap.set(msgId, merged);
-                    this._saveMessagesToCache();
+                    this._saveMessagesToCache(_chatId || undefined);
                     this._notifySubscribers();
                     if (window.KynectaLocalStore) {
                         window.KynectaLocalStore.saveMessage({
@@ -3232,9 +3257,12 @@ try {
             }
             
             const _activeChatNow = this._activeConversation;
-            // FIX: use String() comparison — chatId may be number on one side and string on the other
-            const _msgChatIdForSave = String(message.chatId || message.conversationId || '');
-            if (_activeChatNow && _msgChatIdForSave && String(_activeChatNow.id) === _msgChatIdForSave) {
+            // ROOT-FIX-B cont: always pass the message's normalized chatId so received messages
+            // that arrive while a different chat is open still get saved to their own slot.
+            const _msgChatIdForSave = _chatId || String(message.chatId || message.conversationId || '');
+            if (_msgChatIdForSave) {
+                this._saveMessagesToCache(_msgChatIdForSave);
+            } else if (_activeChatNow) {
                 this._saveMessagesToCache();
             }
             
@@ -3398,26 +3426,20 @@ try {
             try {
                 const stored = SafeStorage.getJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`);
                 if (stored && Array.isArray(stored)) {
-                    this._historyCache.set(conversationId, {
-                        messages: stored,
-                        timestamp: Date.now()
-                    });
+                    this._historyCache.set(conversationId, { messages: stored, timestamp: Date.now() });
                     return stored;
                 }
             } catch (e) {}
 
-            // FIX-6: If nothing found under the real key, also check the pending variant.
-            // This recovers messages saved before the pending→real transition happened.
+            // Fallback: check if messages were saved under pending_<id> and migrate them
             try {
                 const _idStr = String(conversationId || '');
                 if (_idStr && !_idStr.startsWith('pending_')) {
                     const pendingKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}pending_${_idStr}`;
                     const pendingStored = SafeStorage.getJSON(pendingKey);
                     if (pendingStored && Array.isArray(pendingStored) && pendingStored.length > 0) {
-                        // Migrate: re-stamp chatId to real ID and move to real key
                         const migrated = pendingStored.map(function(m) {
-                            if (!m) return m;
-                            return { ...m, chatId: _idStr, conversationId: _idStr };
+                            return m ? { ...m, chatId: _idStr, conversationId: _idStr } : m;
                         });
                         try { SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_idStr}`, migrated); } catch(_) {}
                         try { SafeStorage.remove(pendingKey); } catch(_) {}
@@ -3440,13 +3462,20 @@ try {
         },
         
         _saveMessagesToCache: function(chatId) {
-            // FIX: Prefer the explicitly-passed chatId. Falling back to
-            // _activeConversation.id is unsafe when called from an async fetch
-            // that completed after the user has already switched to a different chat.
+            // ROOT-FIX-C: Never write the entire _messages array (which may contain messages
+            // from multiple chats) to a single chat key.  Filter to only the messages that
+            // belong to this chatId before writing.
             const targetId = chatId || this._activeConversation?.id;
             if (targetId) {
                 try {
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${targetId}`, this._messages);
+                    const _tid = String(targetId);
+                    // Filter: keep messages whose chatId matches, OR messages with no chatId
+                    // (legacy) only when this is the active conversation.
+                    const _toSave = this._messages.filter(function(m) {
+                        const mcid = String(m.chatId || m.conversationId || '');
+                        return mcid === _tid || mcid === '' || mcid === 'undefined';
+                    });
+                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_tid}`, _toSave);
                 } catch (e) {}
             }
         },
@@ -4097,13 +4126,13 @@ try {
                     // Remove optimistic, add confirmed — addMessage handles dedup
                     const msgs = ChatManager.getMessages();
                     const idx = msgs.findIndex(m => m.id === localId || m.localId === localId);
-                    // FIX-4: re-stamp every message in the array with the real chatId before setMessages
-                    // so the pending-→real wipe guard in setMessages doesn't falsely clear them.
-                    const realChatId = realMessage.chatId || realMessage.conversationId || conversationId;
+                    // Re-stamp every message with the real chatId before setMessages so the
+                    // wipe guard never sees a chatId mismatch and clears received messages.
+                    const realChatId = String(realMessage.chatId || realMessage.conversationId || conversationId);
                     const reStampedMsgs = msgs.map(function(m) {
                         const mCid = String(m.chatId || m.conversationId || '');
-                        if (!mCid || mCid.startsWith('pending_')) {
-                            return { ...m, chatId: String(realChatId), conversationId: String(realChatId) };
+                        if (!mCid || mCid === 'undefined' || mCid.startsWith('pending_')) {
+                            return { ...m, chatId: realChatId, conversationId: realChatId };
                         }
                         return m;
                     });
@@ -4122,7 +4151,7 @@ try {
                             timestamp:   realMessage.createdAt || reStampedMsgs[idx].timestamp || Date.now(),
                             createdAt:   realMessage.createdAt || reStampedMsgs[idx].createdAt || Date.now()
                         };
-                        ChatManager.setMessages(reStampedMsgs, String(realChatId));
+                        ChatManager.setMessages(reStampedMsgs, realChatId);
                     }
                     // Confirm in local store
                     if (window.KynectaLocalStore) {
@@ -4451,8 +4480,8 @@ try {
             }
             this._lastOpenRequest = { id: openKey, timestamp: now };
 
-            // FIX-5: Only wipe when switching to a DIFFERENT chat.
-            // pending_<id> → <id> is the SAME chat — do NOT wipe.
+            // ROOT-FIX: Only wipe when switching to a DIFFERENT chat.
+            // pending_<id> → <id> is the SAME chat — never wipe on that transition.
             const _prevActive = ChatManager._activeConversation;
             const _stripP = function(id) { const s = String(id||''); return s.startsWith('pending_') ? s.slice(8) : s; };
             const _switchingChat = _prevActive &&
@@ -4545,6 +4574,11 @@ try {
             }
             if (sidebar && window.innerWidth <= 768) {
                 sidebar.classList.remove('active');
+            }
+            // CSS safeguard: body.chat-active hides sidebar on mobile via CSS
+            // so there's no flash even if JS timing is imperfect
+            if (window.innerWidth <= 768) {
+                document.body.classList.add('chat-active');
             }
             // FIX: Let CSS control back button visibility (display:flex on mobile via media query).
             // Clear any inline style that might override CSS rules.
@@ -5742,6 +5776,37 @@ try {
         _uiInitialized = true;
     }
     
+    // ONE-TIME: Clear duplicate conversations from IDB and reset the deleted-chats blocklist.
+    // This runs once per install (keyed by version flag in localStorage) so fresh
+    // server data always wins and stale/duplicate cached chat entries are gone.
+    (function _runOnceConversationCleanup() {
+        const CLEANUP_VERSION = 'kynecta_conv_cleanup_v1';
+        try {
+            if (localStorage.getItem(CLEANUP_VERSION)) return; // already ran
+            localStorage.setItem(CLEANUP_VERSION, '1');
+        } catch (_) { return; }
+
+        console.log('[CLEANUP] Running one-time conversation de-dupe & IDB reset…');
+
+        // 1. Clear the deleted-chats blocklist so nothing is permanently hidden.
+        try { localStorage.removeItem('kynecta_deleted_chats_v8'); } catch (_) {}
+
+        // 2. Clear the chats cache so stale/duplicate entries are dropped.
+        try {
+            const _cacheKey = 'kynecta_chats_cache_v8';
+            localStorage.removeItem(_cacheKey);
+        } catch (_) {}
+
+        // 3. Wipe all IDB messages & chats so we start fresh from the server.
+        if (window.KynectaLocalStore && typeof window.KynectaLocalStore.clearAll === 'function') {
+            window.KynectaLocalStore.clearAll().then(function() {
+                console.log('[CLEANUP] IDB cleared — server data will repopulate on next fetch.');
+            }).catch(function(e) {
+                console.warn('[CLEANUP] IDB clear error:', e);
+            });
+        }
+    })();
+
     function startDataFlow() {
         if (currentState !== LIFECYCLE_STATES.ACTIVE) {
             Logger.info('DataFlow', 'Delaying data flow until ACTIVE');
