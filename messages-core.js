@@ -2793,7 +2793,17 @@ try {
                     }
                     this._notifySuccess('Messages loaded');
                 } else {
-                    this.setMessages([], conversationId);
+                    // FIX Bug2: server returned 0 messages — before blanking the panel,
+                    // check IDB. This covers back→reopen where the API is throttled/races
+                    // and returns [] while IDB still has the full history.
+                    if (window.KynectaLocalStore) {
+                        const _idbFallback = await window.KynectaLocalStore.getMessagesByChat(conversationId, {
+                            limit: options.limit || 100
+                        }).catch(() => []);
+                        this.setMessages(_idbFallback && _idbFallback.length > 0 ? _idbFallback : [], conversationId);
+                    } else {
+                        this.setMessages([], conversationId);
+                    }
                 }
             } catch (error) {
                 console.error('[ChatManager] Failed to fetch messages:', error);
@@ -2907,6 +2917,33 @@ try {
                 if (_deleted.has(String(chat.id))) return;
                 
                 let friendId = getConversationPeerId(chat, currentUserId);
+
+                // FIX Bug3: getConversationPeerId returns '' when the conversation object
+                // only has `chatParticipants:[{userId}]` (server shape) or `chatCreator`
+                // rather than the full `participants`/`participantIds` arrays it checks.
+                // Without a valid friendId, seenFriendIds never deduplicates and every
+                // copy of the same conversation passes through → duplicate sidebar entries.
+                if (!friendId) {
+                    const _myId = String(currentUserId || '');
+                    // chatParticipants: [{userId, joinedAt}, …]
+                    if (Array.isArray(chat.chatParticipants) && chat.chatParticipants.length) {
+                        const _peer = chat.chatParticipants.find(function(p) {
+                            const pid = String(p.userId || p.id || '');
+                            return pid && pid !== _myId;
+                        });
+                        if (_peer) friendId = String(_peer.userId || _peer.id);
+                    }
+                    // chatCreator field
+                    if (!friendId && chat.chatCreator) {
+                        const _cid = String(chat.chatCreator.id || chat.chatCreator.userId || '');
+                        if (_cid && _cid !== _myId) friendId = _cid;
+                    }
+                    // createdBy scalar
+                    if (!friendId && chat.createdBy) {
+                        const _cid = String(chat.createdBy);
+                        if (_cid && _cid !== _myId) friendId = _cid;
+                    }
+                }
                 
                 if (friendId && seenFriendIds.has(friendId)) {
                     console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
@@ -3038,8 +3075,12 @@ try {
             if (_targetIdStr && _currentChatId) {
                 // Wipe only when switching to a genuinely DIFFERENT chat.
                 // pending_7 → 7 is the SAME chat — never wipe on that transition.
+                // FIX Bug1: also treat numeric vs string version of same id as equal
+                // e.g. _currentChatId="11" and _targetIdStr="11" must match even if
+                // one was stored as a number and coerced. stripPending handles both.
                 const _sameChat = _currentChatId === _targetIdStr ||
-                    _stripPending(_currentChatId) === _stripPending(_targetIdStr);
+                    _stripPending(_currentChatId) === _stripPending(_targetIdStr) ||
+                    Number(_stripPending(_currentChatId)) === Number(_stripPending(_targetIdStr));
                 if (!_sameChat) {
                     this._messages = [];
                     this._messagesMap.clear();
@@ -3053,8 +3094,12 @@ try {
             const incomingRaw = ensureSafeArray(messages).map(function(m) {
                 if (!m) return m;
                 const mChatId = String(m.chatId || m.conversationId || '');
+                // FIX Bug1: restamp when chatId is blank, undefined, a pending_ id,
+                // OR a numeric version of the same real id (server returns integer chatId
+                // but local store has string — they must unify to one canonical string key).
                 const needsRestamp = !mChatId || mChatId === 'undefined' ||
-                    (mChatId.startsWith('pending_') && _realId);
+                    (mChatId.startsWith('pending_') && _realId) ||
+                    (mChatId !== _realId && _realId && _stripPending(mChatId) === _stripPending(_realId));
                 if (needsRestamp && _realId) {
                     return { ...m, chatId: _realId, conversationId: _realId };
                 }
@@ -3063,6 +3108,8 @@ try {
             const incomingMessages = incomingRaw;
 
             // CACHE-PROTECTION: Never overwrite a populated cache with an empty array.
+            // FIX Bug2: also check IndexedDB (KynectaLocalStore) not just localStorage,
+            // because localStorage may be empty while IDB has the real message history.
             if (incomingMessages.length === 0) {
                 const existingCache = this.loadPreviousMessages(_targetId);
                 if (existingCache && existingCache.length > 0) {
@@ -3076,6 +3123,25 @@ try {
                         return;
                     }
                 }
+                // FIX Bug2: localStorage empty but IDB may still have messages —
+                // load asynchronously and render if found, so back→reopen never blanks.
+                if (_targetIdStr && window.KynectaLocalStore) {
+                    const _self = this;
+                    window.KynectaLocalStore.getMessagesByChat(_targetIdStr, { limit: 100 })
+                        .then(function(idbMsgs) {
+                            if (idbMsgs && idbMsgs.length > 0) {
+                                // Only apply if memory is still empty for this chat
+                                const _stillEmpty = !_self._messages || _self._messages.filter(function(m) {
+                                    const mc = String(m.chatId || m.conversationId || '');
+                                    return mc === _targetIdStr || _stripPending(mc) === _stripPending(_targetIdStr);
+                                }).length === 0;
+                                if (_stillEmpty) {
+                                    _self.setMessages(idbMsgs, _targetIdStr);
+                                }
+                            }
+                        }).catch(function() {});
+                }
+                return;
             }
 
             // MERGE-FIRST dedup: seed from existing in-memory messages for this chat,
@@ -3175,6 +3241,16 @@ try {
             // Restamp pending_ to real ID when the active chat has already been resolved
             if (_chatId && _activeChatIdRaw && !_activeChatIdRaw.startsWith('pending_')) {
                 if (_chatId === `pending_${_activeChatIdRaw}`) {
+                    _chatId = _activeChatIdRaw;
+                }
+            }
+            // FIX Bug1: if _chatId is numeric version of _activeChatIdRaw (server sends
+            // integer chatId but active conversation stores string), unify to the string
+            // form so the wipe guard and dedup map always see the same canonical key.
+            if (_chatId && _activeChatIdRaw && _chatId !== _activeChatIdRaw) {
+                const _stripP = function(s) { return s.startsWith('pending_') ? s.slice(8) : s; };
+                if (_stripP(_chatId) === _stripP(_activeChatIdRaw) ||
+                    Number(_stripP(_chatId)) === Number(_stripP(_activeChatIdRaw))) {
                     _chatId = _activeChatIdRaw;
                 }
             }
@@ -4539,12 +4615,30 @@ try {
             }
             
             // FIX: force:true bypasses 8s minFetchGap so messages always refresh
+            // FIX Bug2: take an IDB snapshot before the fetch so we can restore messages
+            // if fetchMessages races and calls setMessages([]) over what we just showed.
+            let _idbSnapshot = [];
+            if (!isPending && window.KynectaLocalStore) {
+                _idbSnapshot = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(function() { return []; });
+            }
             if (!isPending) {
                 if (navigator.onLine && SessionManager.isAuthenticated() && currentState === LIFECYCLE_STATES.ACTIVE) {
                     await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(function() {});
                 }
             } else {
                 console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
+            }
+            // FIX Bug2: if after fetchMessages the panel is empty but IDB had data, restore it.
+            if (_idbSnapshot.length > 0 && ChatManager._messages) {
+                const _inMemory = ChatManager._messages.filter(function(m) {
+                    const mc = String(m.chatId || m.conversationId || '');
+                    const _sp = function(s) { return s.startsWith('pending_') ? s.slice(8) : s; };
+                    return mc === String(actualId) || _sp(mc) === _sp(String(actualId));
+                });
+                if (_inMemory.length === 0) {
+                    console.log('[ConversationManager] FIX Bug2: restoring', _idbSnapshot.length, 'msgs from IDB snapshot for', actualId);
+                    ChatManager.setMessages(_idbSnapshot, actualId);
+                }
             }
             
             const draft = UIStateManager.getDraft(actualId);
