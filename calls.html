@@ -4913,8 +4913,8 @@ window.__CALLS_IFRAME__ = {
                         '<div style="font-size:11px;color:#9ca3af;margin-top:1px;">' + tsStr + '</div>' +
                         '</div>' +
                         '<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">' +
-                        '<button onclick="event.stopPropagation();_callBackUser('' + cid + '','' + name.replace(/'/g,'') + '','' + type + '')" style="background:none;border:none;color:#667eea;cursor:pointer;font-size:18px;padding:4px;"><i class="fas ' + (type==='video'?'fa-video':'fa-phone') + '"></i></button>' +
-                        '<button class="call-delete-btn" data-action="delete-call" data-call-id="' + cid + '" onclick="event.stopPropagation();_deleteCallItem('' + cid + '',this)" style="background:none;border:none;color:#d63031;cursor:pointer;font-size:16px;padding:4px;"><i class="fas fa-trash"></i></button>' +
+                        '<button onclick="event.stopPropagation();_callBackUser(\'' + cid + '\',\'' + name.replace(/[^\']/g, function(c){return c;}) + '\',\'' + type + '\')" style="background:none;border:none;color:#667eea;cursor:pointer;font-size:18px;padding:4px;"><i class="fas ' + (type==='video'?'fa-video':'fa-phone') + '"></i></button>' +
+                        '<button class="call-delete-btn" data-action="delete-call" data-call-id="' + cid + '" onclick="event.stopPropagation();_deleteCallItem(\'' + cid + '\',this)" style="background:none;border:none;color:#d63031;cursor:pointer;font-size:16px;padding:4px;"><i class="fas fa-trash"></i></button>' +
                         '</div>' +
                         '</div>';
                 }).join('');
@@ -5002,8 +5002,8 @@ window.__CALLS_IFRAME__ = {
                     '<div style="font-weight:600;font-size:13px;color:#111827;">' + (s.title || 'Scheduled Call') + '</div>' +
                     '<div style="font-size:11px;color:#667eea;margin-top:3px;">' + dt.toLocaleString() + ' · ' + countdown + '</div>' +
                     '<div style="display:flex;gap:8px;margin-top:8px;">' +
-                    '<button onclick="_joinScheduledCall('' + s.id + '')" style="flex:1;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:8px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;">Join</button>' +
-                    '<button onclick="_cancelScheduledCall('' + s.id + '')" style="background:rgba(239,68,68,0.1);color:#ef4444;border:none;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;">Cancel</button>' +
+                    '<button onclick="_joinScheduledCall(\'' + s.id + '\')" style="flex:1;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:8px;padding:7px;font-size:12px;font-weight:600;cursor:pointer;">Join</button>' +
+                    '<button onclick="_cancelScheduledCall(\'' + s.id + '\')" style="background:rgba(239,68,68,0.1);color:#ef4444;border:none;border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;">Cancel</button>' +
                     '</div></div>';
             }).join('');
         }
@@ -5016,7 +5016,7 @@ window.__CALLS_IFRAME__ = {
                     // Show notification when scheduled call starts
                     var toast = document.createElement('div');
                     toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#667eea;color:#fff;padding:14px 20px;border-radius:14px;font-size:14px;font-weight:600;box-shadow:0 4px 20px rgba(102,126,234,0.4);display:flex;align-items:center;gap:10px;';
-                    toast.innerHTML = '<i class="fas fa-phone"></i><span>' + (sched.title||'Scheduled Call') + ' is starting!</span><button onclick="this.closest('div').remove();_joinScheduledCall(''+sched.id+'')" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;font-weight:600;">Join</button>';
+                    toast.innerHTML = '<i class="fas fa-phone"></i><span>' + (sched.title||'Scheduled Call') + ' is starting!</span><button onclick="this.closest(\'div\').remove();_joinScheduledCall(\'' + sched.id + '\')" style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:6px 12px;border-radius:8px;cursor:pointer;font-weight:600;">Join</button>';
                     document.body.appendChild(toast);
                     setTimeout(function(){ if(toast.parentNode) toast.remove(); }, 30000);
                     _renderScheduledCalls();
@@ -5296,5 +5296,10 @@ window.__CALLS_IFRAME__ = {
     })();
     </script>
 <script src="back-nav.js"></script>
+<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/js/core/phase2.bootstrap.js"></script>
 </body>
 </html>

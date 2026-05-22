@@ -116,7 +116,7 @@
             position: fixed;
             bottom: 10px;
             right: 10px;
-            display: flex;
+            display: none;
             gap: 8px;
             z-index: 10000;
             font-size: 11px;
@@ -1002,40 +1002,290 @@
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
     <style>
-    /* ── DARK THEME OVERRIDES ─────────────────────────────────────────── */
+    /* ═══════════════════════════════════════════════════════════
+       UNIFIED WHITE THEME — Matches Jumia's clean light UI
+       One theme, one color scheme, fully readable text everywhere
+       ═══════════════════════════════════════════════════════════ */
     :root {
-        --background-color: #0f172a; --surface-color: #1e293b;
-        --text-primary: #e5e7eb;     --text-secondary: #9ca3af;
-        --border-color: #374151;     --hover-bg: rgba(255,255,255,0.05);
+        --background-color: #f5f5f5;
+        --surface-color: #ffffff;
+        --text-primary: #111111;
+        --text-secondary: #6b7280;
+        --border-color: #e5e7eb;
+        --hover-bg: #f9fafb;
     }
-    html, body, .app-container, .sidebar { background: var(--background-color) !important; color: var(--text-primary) !important; }
-    .jm-header { background: #1e293b !important; border-bottom: 1px solid #374151 !important; }
-    .jm-search-wrap { background: #0f172a !important; border: 1px solid #374151 !important; }
-    .jm-search-input { background: transparent !important; color: #e5e7eb !important; }
+
+    /* Full app white background */
+    html, body, .app-container, .sidebar, .sidebar.active {
+        background: #f5f5f5 !important;
+        color: #111111 !important;
+    }
+
+    /* Header — white bar */
+    .jm-header {
+        background: #ffffff !important;
+        border-bottom: 1px solid #e5e7eb !important;
+    }
+
+    /* Search bar */
+    .jm-search-wrap {
+        background: #f3f4f6 !important;
+        border: 1px solid #e5e7eb !important;
+    }
+    .jm-search-input {
+        background: transparent !important;
+        color: #111111 !important;
+    }
     .jm-search-input::placeholder { color: #9ca3af !important; }
-    .jm-page-title { color: #e5e7eb !important; background: #1e293b !important; cursor: pointer; }
-    .marketplace-list, .jm-product-grid { background: #0f172a !important; }
-    .jm-section-header span { color: #e5e7eb !important; }
-    .jm-chip { background: #1e293b !important; color: #9ca3af !important; border: 1px solid #374151 !important; }
-    .jm-chip.active { background: #2563eb !important; color: #fff !important; }
-    .listing-item, .jm-product-card { background: #1e293b !important; border-color: #374151 !important; color: #e5e7eb !important; }
-    .jm-more-sheet { background: #1e293b !important; color: #e5e7eb !important; }
-    .jm-more-title { color: #e5e7eb !important; }
-    .jm-more-item { color: #e5e7eb !important; background: transparent !important; }
-    .jm-more-item:hover { background: rgba(255,255,255,0.07) !important; }
-    .jm-flash-banner { background: #1e293b !important; color: #e5e7eb !important; }
-    .jm-cat-sidebar { background: #1e293b !important; }
-    .jm-cat-content { background: #0f172a !important; }
-    .empty-state { color: #9ca3af !important; }
-    .jm-cart-wrap, .jm-wishlist-wrap, .jm-account-wrap { background: #0f172a !important; color: #e5e7eb !important; }
-    .jm-more-overlay { background: rgba(0,0,0,0.6) !important; }
-    .marketplace-detail-panel { background: #1e293b !important; color: #e5e7eb !important; }
-    .marketplace-detail-header { background: #0f172a !important; border-bottom: 1px solid #374151 !important; }
-    .marketplace-detail-name, .marketplace-detail-time { color: #e5e7eb !important; }
-    .listing-price { color: #60a5fa !important; }
-    #jmProductCount { color: #9ca3af !important; }
-    /* Hide the native jm-bottom-nav bottom bar if it leaked through */
+
+    /* Page title bars */
+    .jm-page-title {
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        padding: 14px 16px !important;
+        color: #111111 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        border-bottom: 1px solid #e5e7eb !important;
+        background: #ffffff !important;
+        cursor: pointer;
+    }
+
+    /* Product grid background */
+    .marketplace-list, .jm-product-grid,
+    .marketplace-list-content.jm-product-grid {
+        background: #f5f5f5 !important;
+    }
+
+    /* Section header text */
+    .jm-section-header span { color: #111111 !important; font-weight: 700 !important; }
+
+    /* Filter chips */
+    .jm-chip {
+        background: #f3f4f6 !important;
+        color: #444444 !important;
+        border: 1px solid #e5e7eb !important;
+    }
+    .jm-chip.active {
+        background: #f57224 !important;
+        color: #ffffff !important;
+        border-color: #f57224 !important;
+    }
+
+    /* Product & listing cards */
+    .listing-item, .jm-product-card, .jm-card {
+        background: #ffffff !important;
+        border-color: #e8e8e8 !important;
+        color: #111111 !important;
+    }
+
+    /* Card text */
+    .jm-card-title { color: #111111 !important; font-weight: 500 !important; }
+    .jm-card-price { color: #f57224 !important; font-weight: 800 !important; }
+    .jm-card-oldprice { color: #9ca3af !important; }
+
+    /* CRITICAL: Product images — contain so they never bleed/overlap */
+    .jm-card-img {
+        object-fit: contain !important;
+        padding: 6px !important;
+        background: #ffffff !important;
+    }
+
+    .jm-card-img-wrap {
+        background: #ffffff !important;
+        border-bottom: 1px solid #f0f0f0 !important;
+    }
+
+    /* More sheet */
+    .jm-more-sheet { background: #ffffff !important; color: #111111 !important; }
+    .jm-more-title { color: #111111 !important; font-weight: 700 !important; }
+    .jm-more-item { color: #111111 !important; background: #f9fafb !important; }
+    .jm-more-item:hover { background: #f0fdf4 !important; }
+    .jm-more-item i { color: #f57224 !important; }
+    .jm-more-overlay { background: rgba(0,0,0,0.4) !important; }
+
+    /* Flash banner */
+    .jm-flash-banner { background: #fff3ec !important; color: #111111 !important; }
+
+    /* Category sidebar */
+    .jm-cat-sidebar {
+        background: #f5f5f5 !important;
+        border-right: 1px solid #e5e7eb !important;
+    }
+
+    /* Category items in sidebar */
+    .jm-cat-item {
+        color: #444444 !important;
+        border-bottom: 1px solid #e5e7eb !important;
+        background: transparent !important;
+        font-weight: 500 !important;
+    }
+    .jm-cat-item.active {
+        background: #ffffff !important;
+        color: #f57224 !important;
+        font-weight: 700 !important;
+        border-left-color: #f57224 !important;
+    }
+
+    /* Category content */
+    .jm-cat-content { background: #f5f5f5 !important; }
+    .jm-cat-group { background: #ffffff !important; border: 1px solid #f0f0f0 !important; }
+    .jm-cat-group-header { color: #111111 !important; font-weight: 700 !important; }
+
+    /* CRITICAL: subcategory images — contain, isolated, no bleed */
+    .jm-subcat-item { background: transparent !important; }
+
+    .jm-subcat-img,
+    .jm-subcat-img-placeholder {
+        object-fit: contain !important;
+        background: #f8f8f8 !important;
+        padding: 4px !important;
+        border: 1px solid #eeeeee !important;
+        border-radius: 8px !important;
+        display: block !important;
+        width: 70px !important;
+        height: 70px !important;
+        /* Complete isolation so previous image never bleeds through */
+        isolation: isolate !important;
+        position: static !important;
+    }
+
+    .jm-subcat-name {
+        color: #111111 !important;
+        font-weight: 500 !important;
+        font-size: 11px !important;
+    }
+
+    /* Also patch any injected background-image style on category cards */
+    [class*="jm-cat-card"],
+    [class*="jm-cat-tile"],
+    [class*="jm-cat-block"] {
+        background-color: #f8f8f8 !important;
+        position: relative !important;
+        overflow: hidden !important;
+    }
+
+    /* Category image injector images — contain, no bleed */
+    [class*="jm-cat-card"] img,
+    [class*="jm-cat-tile"] img,
+    [class*="jm-cat-block"] img,
+    .jm-cat-thumb {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: contain !important;
+        padding: 4px !important;
+        background: #f8f8f8 !important;
+        border-radius: 8px !important;
+        position: static !important;
+    }
+
+    /* Cart & wishlist */
+    .jm-cart-wrap, .jm-wishlist-wrap { background: #f5f5f5 !important; }
+    .jm-cart-item {
+        background: #ffffff !important;
+        border-color: #e5e7eb !important;
+    }
+    .jm-cart-item-title { color: #111111 !important; }
+    .jm-cart-item-price { color: #f57224 !important; font-weight: 700 !important; }
+
+    /* Account */
+    .jm-account-wrap { background: #f5f5f5 !important; color: #111111 !important; }
+    .jm-account-hero, .jm-account-menu-group {
+        background: #ffffff !important;
+        border-color: #e5e7eb !important;
+    }
+    .jm-account-welcome { color: #111111 !important; font-weight: 700 !important; font-size: 20px !important; }
+    .jm-account-email { color: #f57224 !important; }
+    .jm-account-balance { background: #eff6ff !important; color: #1d4ed8 !important; }
+    .jm-account-section-label { color: #444444 !important; font-weight: 700 !important; font-size: 11px !important; text-transform: uppercase !important; }
+    .jm-account-menu-item { color: #111111 !important; background: #ffffff !important; border-bottom: 1px solid #f3f4f6 !important; }
+    .jm-account-menu-item i:first-child { color: #6b7280 !important; }
+    .jm-account-menu-item .jm-menu-chevron { color: #d1d5db !important; }
+
+    /* Account rows (acct-row / account-row) */
+    .jm-account-wrap .jm-acct-section,
+    .jm-account-wrap .acct-section,
+    .jm-account-wrap .account-section {
+        background: #ffffff !important;
+        border-radius: 12px !important;
+        margin: 8px 12px !important;
+        border: 1px solid #e5e7eb !important;
+    }
+    .jm-account-wrap .jm-acct-row,
+    .jm-account-wrap .acct-row,
+    .jm-account-wrap .account-row {
+        border-bottom: 1px solid #f3f4f6 !important;
+        color: #111111 !important;
+    }
+    .jm-account-wrap .jm-acct-header,
+    .jm-account-wrap .acct-header,
+    .jm-account-wrap .account-header {
+        background: linear-gradient(135deg, #f57224, #e8470a) !important;
+        padding: 24px 16px !important;
+        text-align: center !important;
+    }
+    .jm-account-wrap .jm-acct-name,
+    .jm-account-wrap .acct-name,
+    .jm-account-wrap .account-name,
+    .jm-account-wrap .user-name {
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        color: #ffffff !important;
+    }
+    .jm-account-wrap .jm-acct-email,
+    .jm-account-wrap .acct-email,
+    .jm-account-wrap .user-email {
+        font-size: 13px !important;
+        color: rgba(255,255,255,0.85) !important;
+        margin-top: 4px !important;
+    }
+    .jm-account-wrap .jm-acct-avatar,
+    .jm-account-wrap .acct-avatar,
+    .jm-account-wrap .account-avatar {
+        width: 72px !important;
+        height: 72px !important;
+        border-radius: 50% !important;
+        border: 3px solid rgba(255,255,255,0.8) !important;
+        margin: 0 auto 12px !important;
+        overflow: hidden !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background: rgba(255,255,255,0.2) !important;
+    }
+
+    /* Detail panel */
+    .marketplace-detail-panel { background: #ffffff !important; color: #111111 !important; }
+    .marketplace-detail-header { background: #ffffff !important; border-bottom: 1px solid #e5e7eb !important; }
+    .marketplace-detail-name, .marketplace-detail-time { color: #111111 !important; }
+    .listing-price { color: #f57224 !important; }
+
+    /* Misc text */
+    #jmProductCount { color: #6b7280 !important; }
+    .empty-state { color: #6b7280 !important; background: transparent !important; }
+
+    /* Bottom nav — hidden (parent shell controls navigation) */
     .jm-bottom-nav { display: none !important; }
+
+    /* Horizontal card */
+    .jm-hcard { background: #ffffff !important; border-color: #e8e8e8 !important; }
+    .jm-hcard-title { color: #111111 !important; font-weight: 600 !important; }
+    .jm-hcard-price { color: #f57224 !important; }
+    .jm-hcard-img {
+        object-fit: contain !important;
+        background: #ffffff !important;
+        padding: 4px !important;
+    }
+
+    /* Notification groups */
+    .jm-notif-system-row, .jm-notif-group,
+    .jm-address-item, .jm-review-item,
+    .jm-seller-item, .jm-order-item {
+        background: #ffffff !important;
+        color: #111111 !important;
+        border-color: #e5e7eb !important;
+    }
     </style>
 </head>
 <body>
@@ -1049,7 +1299,7 @@
 
             <!-- ── TOP HEADER (Jumia style) ──────────────────────────────── -->
             <div class="jm-header" id="jmHeader">
-                <button class="jm-back-btn" id="jmBackBtn" onclick="window._jmNav('home')" style="display:none">
+                <button class="jm-back-btn" id="jmBackBtn" onclick="window._jmBack ? window._jmBack() : window._jmNav('home')" style="display:none">
                     <i class="fas fa-arrow-left"></i>
                 </button>
                 <div class="jm-search-wrap" id="jmSearchWrap">
@@ -1147,7 +1397,7 @@
 
             <!-- CART PAGE -->
             <div class="jm-page" id="jmPageCart">
-                <div class="jm-page-title">← Cart</div>
+                <div class="jm-page-title">Cart</div>
                 <div id="jmCartContent" class="jm-cart-wrap"></div>
             </div>
 
@@ -1164,7 +1414,7 @@
 
             <!-- ORDERS PAGE -->
             <div class="jm-page" id="jmPageOrders">
-                <div class="jm-page-title">← Orders</div>
+                <div class="jm-page-title">Orders</div>
                 <div class="jm-orders-tabs">
                     <button class="jm-orders-tab active" data-tab="ongoing">ONGOING/DELIVERED</button>
                     <button class="jm-orders-tab" data-tab="cancelled">CANCELLED/RETURNED</button>
@@ -1174,7 +1424,7 @@
 
             <!-- RECENTLY VIEWED PAGE -->
             <div class="jm-page" id="jmPageRecent">
-                <div class="jm-page-title">← Recently Viewed
+                <div class="jm-page-title">Recently Viewed
                     <button class="jm-clear-recent" id="jmClearRecent" onclick="window._jmClearRecent()">Clear All</button>
                 </div>
                 <div class="jm-product-grid" id="jmRecentContent"></div>
@@ -1182,13 +1432,13 @@
 
             <!-- PRODUCTS LIST PAGE (search/category results) -->
             <div class="jm-page" id="jmPageProducts">
-                <div class="jm-page-title" id="jmProductsTitle">← Products</div>
+                <div class="jm-page-title" id="jmProductsTitle">Products</div>
                 <div class="jm-product-grid" id="jmProductsContent"></div>
             </div>
 
             <!-- NOTIFICATION PREFS PAGE -->
             <div class="jm-page" id="jmPageNotifPrefs">
-                <div class="jm-page-title">← Notification Preferences</div>
+                <div class="jm-page-title">Notification Preferences</div>
                 <div class="jm-notif-prefs">
                     <div class="jm-notif-system-row" onclick="window._jmRequestNotifPermission()">
                         <div>
@@ -1222,20 +1472,20 @@
 
             <!-- ADDRESS BOOK PAGE -->
             <div class="jm-page" id="jmPageAddresses">
-                <div class="jm-page-title">← Address Book</div>
+                <div class="jm-page-title">Address Book</div>
                 <div id="jmAddressContent"></div>
                 <button class="jm-orange-btn" style="margin:16px" onclick="window._jmAddAddress()">+ Add New Address</button>
             </div>
 
             <!-- RATINGS & REVIEWS PAGE -->
             <div class="jm-page" id="jmPageReviews">
-                <div class="jm-page-title">← Ratings &amp; Reviews</div>
+                <div class="jm-page-title">Ratings &amp; Reviews</div>
                 <div id="jmReviewsContent"></div>
             </div>
 
             <!-- VOUCHERS PAGE -->
             <div class="jm-page" id="jmPageVouchers">
-                <div class="jm-page-title">← Vouchers</div>
+                <div class="jm-page-title">Vouchers</div>
                 <div class="jm-voucher-tabs">
                     <button class="jm-vtab active" data-tab="active">Active</button>
                     <button class="jm-vtab" data-tab="inactive">Inactive</button>
@@ -1245,13 +1495,13 @@
 
             <!-- INBOX PAGE -->
             <div class="jm-page" id="jmPageInbox">
-                <div class="jm-page-title">← Inbox</div>
+                <div class="jm-page-title">Inbox</div>
                 <div id="jmInboxContent"></div>
             </div>
 
             <!-- SELLER FOLLOWS PAGE -->
             <div class="jm-page" id="jmPageFollowSellers">
-                <div class="jm-page-title">← Followed Sellers</div>
+                <div class="jm-page-title">Followed Sellers</div>
                 <div id="jmFollowSellersContent"></div>
             </div>
 
@@ -2644,6 +2894,282 @@
 <script src="back-nav.js"></script>
 
 <script>
+/* USER DATA INJECTION — Replace "User" placeholder with real user name */
+(function() {
+    'use strict';
+    function getRealUser() {
+        var u = window.currentUser || window.userData || {};
+        return {
+            name: u.displayName || u.name || u.username || (u.email ? u.email.split('@')[0] : null),
+            email: u.email || null,
+            avatar: u.photoURL || u.avatar || null
+        };
+    }
+    function patchAccountPage() {
+        var wrap = document.getElementById('jmAccountContent');
+        if (!wrap) return;
+        var u = getRealUser();
+        if (!u.name && !u.email) return;
+        // Patch text nodes showing raw "User"
+        var walker = document.createTreeWalker(wrap, NodeFilter.SHOW_TEXT, null, false);
+        var node;
+        while ((node = walker.nextNode())) {
+            if (u.name && /^\s*User\s*$/.test(node.textContent)) {
+                node.textContent = node.textContent.replace('User', u.name);
+            }
+        }
+        // Patch named elements
+        if (u.name) {
+            wrap.querySelectorAll('.jm-acct-name,.acct-username,[data-user-name]').forEach(function(el) {
+                if (!el.textContent.trim() || el.textContent.trim() === 'User') el.textContent = u.name;
+            });
+        }
+        if (u.email) {
+            wrap.querySelectorAll('.jm-acct-email,.acct-email,[data-user-email]').forEach(function(el) {
+                if (!el.textContent.trim()) el.textContent = u.email;
+            });
+        }
+    }
+    function observe() {
+        var t = document.getElementById('jmAccountContent');
+        if (!t) { setTimeout(observe, 600); return; }
+        new MutationObserver(function() { setTimeout(patchAccountPage, 60); }).observe(t, { childList: true, subtree: true });
+        patchAccountPage();
+    }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', observe); }
+    else { observe(); }
+    // Re-run when currentUser is set
+    var _cu = window.currentUser;
+    try {
+        Object.defineProperty(window, 'currentUser', {
+            get: function() { return _cu; },
+            set: function(v) { _cu = v; setTimeout(patchAccountPage, 120); },
+            configurable: true
+        });
+    } catch(e) {}
+})();
+</script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   CATEGORY IMAGE INJECTOR
+   Replaces broken/empty category images with high-quality CDN images
+   matching each category name. Runs on DOM mutation.
+   ═══════════════════════════════════════════════════════════════════════ */
+(function() {
+    'use strict';
+
+    // Map category keywords → high-quality Unsplash images (landscape, product-style)
+    var CAT_IMAGES = {
+        // Electronics & Tech
+        'phone':       'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&q=80&fit=crop',
+        'smartphone':  'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=400&q=80&fit=crop',
+        'mobile':      'https://images.unsplash.com/photo-1523206489230-c012c64b2b48?w=400&q=80&fit=crop',
+        'laptop':      'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=400&q=80&fit=crop',
+        'computer':    'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=400&q=80&fit=crop',
+        'tablet':      'https://images.unsplash.com/photo-1585790050230-5dd28404ccb9?w=400&q=80&fit=crop',
+        'tv':          'https://images.unsplash.com/photo-1593784991095-a205069470b6?w=400&q=80&fit=crop',
+        'television':  'https://images.unsplash.com/photo-1593784991095-a205069470b6?w=400&q=80&fit=crop',
+        'camera':      'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&q=80&fit=crop',
+        'headphone':   'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&q=80&fit=crop',
+        'audio':       'https://images.unsplash.com/photo-1545454675-3531b543be5d?w=400&q=80&fit=crop',
+        'speaker':     'https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=400&q=80&fit=crop',
+        'electronic':  'https://images.unsplash.com/photo-1518770660439-4636190af475?w=400&q=80&fit=crop',
+        'watch':       'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&q=80&fit=crop',
+        'smartwatch':  'https://images.unsplash.com/photo-1579586337278-3befd40fd17a?w=400&q=80&fit=crop',
+        'gaming':      'https://images.unsplash.com/photo-1612287230202-1ff1d85d1bdf?w=400&q=80&fit=crop',
+        'accessori':   'https://images.unsplash.com/photo-1572635196237-14b3f281503f?w=400&q=80&fit=crop',
+        'charger':     'https://images.unsplash.com/photo-1625895197185-efcec01cffe0?w=400&q=80&fit=crop',
+        'cable':       'https://images.unsplash.com/photo-1574944985070-8f3ebc6b79d2?w=400&q=80&fit=crop',
+        'powerbank':   'https://images.unsplash.com/photo-1593941707882-a56bbc8df44e?w=400&q=80&fit=crop',
+        'earphone':    'https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=400&q=80&fit=crop',
+        'earbud':      'https://images.unsplash.com/photo-1606741965326-cb990ae01bb2?w=400&q=80&fit=crop',
+
+        // Fashion & Clothing
+        'fashion':     'https://images.unsplash.com/photo-1445205170230-053b83016050?w=400&q=80&fit=crop',
+        'cloth':       'https://images.unsplash.com/photo-1489987707025-afc232f7ea0f?w=400&q=80&fit=crop',
+        'shirt':       'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=400&q=80&fit=crop',
+        'dress':       'https://images.unsplash.com/photo-1595777457583-95e059d581b8?w=400&q=80&fit=crop',
+        'shoe':        'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80&fit=crop',
+        'sneaker':     'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80&fit=crop',
+        'bag':         'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=400&q=80&fit=crop',
+        'handbag':     'https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=400&q=80&fit=crop',
+        'jean':        'https://images.unsplash.com/photo-1541099649105-f69ad21f3246?w=400&q=80&fit=crop',
+
+        // Home & Living
+        'home':        'https://images.unsplash.com/photo-1484101403633-562f891dc89a?w=400&q=80&fit=crop',
+        'furniture':   'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&q=80&fit=crop',
+        'kitchen':     'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=400&q=80&fit=crop',
+        'applian':     'https://images.unsplash.com/photo-1584568694244-14fbdf83bd30?w=400&q=80&fit=crop',
+        'bedding':     'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=400&q=80&fit=crop',
+        'sofa':        'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&q=80&fit=crop',
+        'decor':       'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=400&q=80&fit=crop',
+        'lighting':    'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=400&q=80&fit=crop',
+
+        // Food & Grocery
+        'food':        'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80&fit=crop',
+        'grocery':     'https://images.unsplash.com/photo-1542838132-92c53300491e?w=400&q=80&fit=crop',
+        'fruit':       'https://images.unsplash.com/photo-1610832958506-aa56368176cf?w=400&q=80&fit=crop',
+        'vegetable':   'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400&q=80&fit=crop',
+        'drink':       'https://images.unsplash.com/photo-1544145945-f90425340c7e?w=400&q=80&fit=crop',
+        'beverage':    'https://images.unsplash.com/photo-1543158181-e6f9f6712055?w=400&q=80&fit=crop',
+
+        // Health & Beauty
+        'health':      'https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=400&q=80&fit=crop',
+        'beauty':      'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=400&q=80&fit=crop',
+        'skincare':    'https://images.unsplash.com/photo-1556228720-195a672e8a03?w=400&q=80&fit=crop',
+        'makeup':      'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=400&q=80&fit=crop',
+        'perfume':     'https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400&q=80&fit=crop',
+        'cosmetic':    'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=400&q=80&fit=crop',
+
+        // Sports & Fitness
+        'sport':       'https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=400&q=80&fit=crop',
+        'fitness':     'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400&q=80&fit=crop',
+        'gym':         'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400&q=80&fit=crop',
+        'outdoor':     'https://images.unsplash.com/photo-1467621591776-4c9b9ae6e9e6?w=400&q=80&fit=crop',
+        'bicycle':     'https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=400&q=80&fit=crop',
+
+        // Books & Education
+        'book':        'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=400&q=80&fit=crop',
+        'education':   'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&q=80&fit=crop',
+        'school':      'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400&q=80&fit=crop',
+        'stationer':   'https://images.unsplash.com/photo-1568205612837-017257d2310a?w=400&q=80&fit=crop',
+
+        // Automotive
+        'auto':        'https://images.unsplash.com/photo-1494976388531-d1058494cdd8?w=400&q=80&fit=crop',
+        'car':         'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&q=80&fit=crop',
+        'vehicle':     'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=400&q=80&fit=crop',
+        'motorbike':   'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=400&q=80&fit=crop',
+        'motorcycle':  'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=400&q=80&fit=crop',
+
+        // Services & Digital
+        'service':     'https://images.unsplash.com/photo-1521737852567-6949f3f9f2b5?w=400&q=80&fit=crop',
+        'digital':     'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400&q=80&fit=crop',
+        'design':      'https://images.unsplash.com/photo-1561070791-2526d30994b5?w=400&q=80&fit=crop',
+        'tutor':       'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&q=80&fit=crop',
+        'repair':      'https://images.unsplash.com/photo-1581092162773-c6ef4f27f50a?w=400&q=80&fit=crop',
+        'cleaning':    'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=400&q=80&fit=crop',
+
+        // Baby & Kids
+        'baby':        'https://images.unsplash.com/photo-1519689680058-324335c77eba?w=400&q=80&fit=crop',
+        'kid':         'https://images.unsplash.com/photo-1526816877985-8ee3f4f61c87?w=400&q=80&fit=crop',
+        'toy':         'https://images.unsplash.com/photo-1594736797933-d0501ba2fe65?w=400&q=80&fit=crop',
+
+        // Pets
+        'pet':         'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400&q=80&fit=crop',
+        'dog':         'https://images.unsplash.com/photo-1587300003388-59208cc962cb?w=400&q=80&fit=crop',
+        'cat':         'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=400&q=80&fit=crop',
+
+        // Default fallback
+        'default':     'https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=400&q=80&fit=crop'
+    };
+
+    function getBestImage(text) {
+        if (!text) return CAT_IMAGES['default'];
+        var lower = text.toLowerCase();
+        for (var key in CAT_IMAGES) {
+            if (key !== 'default' && lower.indexOf(key) !== -1) {
+                return CAT_IMAGES[key];
+            }
+        }
+        return CAT_IMAGES['default'];
+    }
+
+    function fixCategoryImages(root) {
+        root = root || document;
+        // Target all common category card image containers
+        var selectors = [
+            '.jm-cat-card', '.jm-subcat-card', '.jm-cat-item',
+            '.jm-cat-thumb', '.jm-cat-tile', '.jm-cat-block',
+            '.jm-product-card', '.jm-cat-sidebar-item',
+            '[class*="cat-card"]', '[class*="cat-item"]', '[class*="cat-tile"]'
+        ];
+        selectors.forEach(function(sel) {
+            try {
+                root.querySelectorAll(sel).forEach(function(card) {
+                    if (card._imgFixed) return;
+                    // Get category name from text content or data attributes
+                    var name = card.dataset.category
+                        || card.dataset.name
+                        || card.getAttribute('data-cat')
+                        || card.querySelector('.jm-cat-name, .cat-name, .category-name, span, p')?.textContent
+                        || card.textContent;
+
+                    var img = card.querySelector('img');
+                    if (img) {
+                        var src = img.getAttribute('src') || '';
+                        var needsFix = !src
+                            || src === ''
+                            || src.indexOf('placeholder') !== -1
+                            || src.indexOf('via.placeholder') !== -1
+                            || src.indexOf('dummyimage') !== -1
+                            || src.indexOf('lorempixel') !== -1
+                            || src.indexOf('picsum') !== -1;
+
+                        if (needsFix) {
+                            img.src = getBestImage(name);
+                        }
+                        /* Always enforce contain so images never bleed into each other */
+                        img.style.objectFit = 'contain';
+                        img.style.width = '100%';
+                        img.style.height = '100%';
+                        img.style.padding = '4px';
+                        img.style.background = '#f8f8f8';
+                        img.style.borderRadius = '8px';
+                        img.style.display = 'block';
+                        img.style.position = 'static';
+                        img.loading = 'lazy';
+                        card._imgFixed = true;
+                    } else {
+                        /* No img tag — use background-image but always reset it cleanly */
+                        var style = card.style.backgroundImage || '';
+                        var imgUrl = getBestImage(name);
+                        /* Clear any previous background first to prevent bleed */
+                        card.style.backgroundImage = 'none';
+                        card.style.background = '#f8f8f8';
+                        /* Insert a real <img> instead of background-image */
+                        var newImg = document.createElement('img');
+                        newImg.src = imgUrl;
+                        newImg.alt = name || 'category';
+                        newImg.style.cssText = 'width:100%;height:100%;object-fit:contain;padding:4px;background:#f8f8f8;border-radius:8px;display:block;position:static;';
+                        newImg.loading = 'lazy';
+                        card.insertBefore(newImg, card.firstChild);
+                        card._imgFixed = true;
+                    }
+                });
+            } catch(e) {}
+        });
+    }
+
+    // Watch for category page to render
+    function observeCategories() {
+        var catContent = document.getElementById('jmCatContent') || document.getElementById('jmCatSidebar') || document.body;
+        if (!catContent) { setTimeout(observeCategories, 600); return; }
+
+        var obs = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                if (m.addedNodes.length) {
+                    m.addedNodes.forEach(function(n) {
+                        if (n.nodeType === 1) {
+                            setTimeout(function() { fixCategoryImages(n); }, 30);
+                        }
+                    });
+                }
+            });
+        });
+        obs.observe(document.body, { childList: true, subtree: true });
+        fixCategoryImages();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', observeCategories);
+    } else {
+        observeCategories();
+    }
+})();
+</script>
+
+<script>
 /* ═══════════════════════════════════════════════════════════════════════
    TOOLS PARENT-SHELL INTEGRATION
    • Receives TOOLS_NAV / TOOLS_BACK postMessages from chat.html
@@ -2677,7 +3203,8 @@
             }
         }
         if (d.type === 'TOOLS_BACK') {
-            if (typeof window._jmNav === 'function') window._jmNav('home');
+            if (typeof window._jmBack === 'function') window._jmBack();
+            else if (typeof window._jmNav === 'function') window._jmNav('home');
         }
     });
 
@@ -2727,5 +3254,10 @@
     }
 })();
 </script>
+<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/js/core/phase2.bootstrap.js"></script>
 </body>
 </html>

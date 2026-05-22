@@ -1353,14 +1353,7 @@
         }
         .jm-parent-nav-tab:hover { background: rgba(255,255,255,0.14); color: #e5e7eb; }
         .jm-parent-nav-tab.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
-        #toolsBackBtn {
-            width: 36px; height: 36px; border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.12);
-            background: rgba(255,255,255,0.08); color: #e5e7eb;
-            display: none; align-items: center; justify-content: center;
-            cursor: pointer; font-size: 16px; margin-right: 2px;
-        }
-        #toolsBackBtn.visible { display: inline-flex; }
+        /* toolsBackBtn removed — back navigation handled inside the tools iframe */
     </style>
 </head>
 <body>
@@ -1425,9 +1418,6 @@
 
         <!-- TOOLS NAV TABS — shown only when tools page is active -->
         <div id="toolsHeaderNav" class="hidden" aria-label="Tools navigation">
-            <button id="toolsBackBtn" title="Back to marketplace home" onclick="toolsNavTo('home')">
-                <i class="fas fa-arrow-left"></i>
-            </button>
             <button class="jm-parent-nav-tab" data-tools-page="categories" title="Categories" onclick="toolsNavTo('categories')">
                 <i class="fas fa-th-list" style="font-size:15px"></i>
                 <span style="font-size:10px;line-height:1">Categories</span>
@@ -2814,9 +2804,6 @@
                 );
             }
             window.__toolsCurrentPage = page;
-            // Show/hide back button
-            const backBtn = document.getElementById('toolsBackBtn');
-            if (backBtn) backBtn.classList.toggle('visible', page !== 'home');
             // Update active tab highlight
             document.querySelectorAll('#toolsHeaderNav .jm-parent-nav-tab').forEach(function(btn) {
                 btn.classList.toggle('active', btn.getAttribute('data-tools-page') === page);
@@ -2831,8 +2818,6 @@
                 const pg = d.payload.page;
                 if (pg) {
                     window.__toolsCurrentPage = pg;
-                    const backBtn = document.getElementById('toolsBackBtn');
-                    if (backBtn) backBtn.classList.toggle('visible', pg !== 'home');
                     document.querySelectorAll('#toolsHeaderNav .jm-parent-nav-tab').forEach(function(btn) {
                         btn.classList.toggle('active', btn.getAttribute('data-tools-page') === pg);
                     });
@@ -6653,5 +6638,10 @@ window.__groupHdrHide = hideGroupHeader;
         <button class="gcr-action" id="gcRecordSend"><i class="fas fa-paper-plane"></i> Send</button>
     </div>
 
+<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/js/core/phase2.bootstrap.js"></script>
 </body>
 </html>

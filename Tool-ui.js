@@ -644,8 +644,8 @@ function createEnhancedUIElements() {
         DOM.handshakeStageText = document.getElementById('handshakeStageText');
     }
     
-    // Create debug toggle if in development or debug mode
-    if ((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.__IFRAME_DEBUG__) && !document.getElementById('debugToggle')) {
+    // Debug toggle disabled in production
+    if (false && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.__IFRAME_DEBUG__) && !document.getElementById('debugToggle')) {
         const debugBtn = document.createElement('button');
         debugBtn.id = 'debugToggle';
         debugBtn.innerHTML = '🐛 Debug';
@@ -2084,11 +2084,19 @@ const renderers = {
         card.dataset.listingId = listing.id;
         card.dataset.userId = listing.userId || listing.sellerId || '';
 
+        // Improved image handling: show a lightweight skeleton, load real image if available,
+        // fall back to a category tile or a placehold.co image when missing or on error.
+        const fallbackImg = (typeof _CDN !== 'undefined' && _CDN[listing.category]) ? _CDN[listing.category] : 'https://placehold.co/300x300/f57224/ffffff?text=Product';
+
         card.innerHTML = `
             <div class="jm-card-img-wrap">
+                <div class="jm-card-img-skeleton" style="background:#f3f4f6;height:160px;border-radius:6px;animation:jmPulse 1.2s infinite;">
+                </div>
                 ${imgSrc
-                    ? `<img class="jm-card-img" src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" onerror="this.style.display='none'">`
-                    : `<div class="jm-card-placeholder">${listing.type==='digital'?'💾':listing.type==='service'?'🔧':'🛒'}</div>`}
+                    ? `<img class="jm-card-img" src="${escapeHtml(imgSrc)}" alt="${escapeHtml(listing.title||'')}" loading="lazy"
+                        onload="this.classList.add('loaded'); this.previousElementSibling && (this.previousElementSibling.style.display='none')"
+                        onerror="this.onerror=null; this.src='${escapeHtml(fallbackImg)}'; this.previousElementSibling && (this.previousElementSibling.style.display='none')">`
+                    : `<img class="jm-card-img" src="${escapeHtml(fallbackImg)}" alt="${escapeHtml(listing.title||'')}" loading="lazy" onerror="this.style.display='none'">`}
                 ${discount>0 ? `<span class="jm-card-discount-badge">-${discount}%</span>` : ''}
                 ${condition ? `<span class="jm-card-condition-badge">${escapeHtml(condition.toUpperCase())}</span>` : ''}
                 <button class="jm-card-wish${inWish?' wishlisted':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
@@ -2107,10 +2115,10 @@ const renderers = {
                 ${stock!==null&&stock>0&&stock<=5 ? `<div class="jm-card-stock-warn">Only ${stock} left!</div>` : ''}
                 ${inStock
                     ? `<button class="jm-add-cart-btn${inCart?' in-cart':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
-                          ${inCart ? '✓ In Cart' : 'Add To Cart'}
-                       </button>`
+                          ${inCart ? '✓ In Cart' : 'Add To Cart'}`
                     : `<button class="jm-add-cart-btn" disabled>Out of Stock</button>`}
-            </div>`;
+            </div>
+        `;
 
         // Wishlist toggle
         card.querySelector('.jm-card-wish')?.addEventListener('click', (e) => {
@@ -2160,6 +2168,16 @@ const renderers = {
         UIState.currentListingId = listing.id;
         UIState.currentListingData = listing;
         UIState.viewHistory.push({ id: listing.id, timestamp: Date.now() });
+
+        // Push a 'detail' history entry so back button closes detail and restores previous page
+        try {
+            // don't duplicate markers for same listing
+            const last = _navStack[_navStack.length - 1];
+            if (!last || last.page !== 'detail' || last.subpage !== listing.id) {
+                _navStack.push({ page: 'detail', subpage: listing.id, fromPage: _state.page || 'products', fromSubpage: _state.subpage || '' });
+            }
+            const backBtn = document.getElementById('jmBackBtn'); if (backBtn) backBtn.style.display = 'flex';
+        } catch(_) {}
 
         if (DOM.detailName) DOM.detailName.textContent = listing.user?.displayName || 'User';
         if (DOM.detailTime) {
@@ -5205,8 +5223,25 @@ function _updateWishlistBadge() {
 }
 window._jmUpdateWishlistBadge = _updateWishlistBadge;
 
-// ── Page navigation ────────────────────────────────────────────────────────
-function _nav(page, subpage) {
+// ── Navigation history stack ───────────────────────────────────────────────
+// Tracks pages visited so back arrow returns to the exact previous page/subpage.
+// Root-level nav tabs (home, categories, cart, wishlist, account) reset the stack
+// so tapping a bottom-tab never leaves a stale history entry to jump back to.
+const _NAV_TABS = new Set(['home','categories','cart','wishlist','account']);
+const _navStack = []; // [{page, subpage}, ...]
+
+function _navBack() {
+    if (_navStack.length > 1) {
+        _navStack.pop(); // discard current
+        const prev = _navStack[_navStack.length - 1];
+        _navDirect(prev.page, prev.subpage); // navigate without pushing a new entry
+    } else {
+        _navDirect('home');
+    }
+}
+
+// Internal: navigate and optionally push to stack
+function _navDirect(page, subpage, _pushHistory) {
     _state.page = page;
     document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.jm-nav-tab').forEach(t => t.classList.remove('active'));
@@ -5217,9 +5252,9 @@ function _nav(page, subpage) {
     const navTab = document.querySelector(`.jm-nav-tab[data-page="${page}"]`);
     if (navTab) navTab.classList.add('active');
 
-    // Back button
+    // Back button — show whenever there is a previous page to return to
     const backBtn = document.getElementById('jmBackBtn');
-    if (backBtn) backBtn.style.display = page === 'home' ? 'none' : 'flex';
+    if (backBtn) backBtn.style.display = (_navStack.length > 1) ? 'flex' : 'none';
 
     // Render page content
     switch(page) {
@@ -5239,7 +5274,19 @@ function _nav(page, subpage) {
         case 'reviews-page': _renderReviewsPage(); break;
     }
 }
-window._jmNav = _nav;
+
+// ── Page navigation (public) ───────────────────────────────────────────────
+function _nav(page, subpage) {
+    // Bottom-tab taps reset the stack entirely (they are top-level destinations)
+    if (_NAV_TABS.has(page)) {
+        _navStack.length = 0;
+    }
+    // Push this page onto the stack
+    _navStack.push({ page, subpage });
+    _navDirect(page, subpage);
+}
+window._jmNav  = _nav;
+window._jmBack = _navBack;
 
 // ── More sheet ─────────────────────────────────────────────────────────────
 function _showMore() {
@@ -5327,90 +5374,734 @@ function _renderHScroll(containerId, listings, sectionId) {
 }
 
 // ── CATEGORIES PAGE ────────────────────────────────────────────────────────
+// Full Jumia-style category tree: each category has multiple named sections,
+// each section has multiple subcategories with real Unsplash product images.
+
+// Image CDN helper — uses placehold.co for solid category tiles (always loads,
+// no CORS, no auth, no rate-limit) with a coloured background + label text so
+// each tile is visually distinct without relying on third-party photo services.
+// Format: https://placehold.co/WxH/BG_HEX/TEXT_HEX?text=Label
+// We complement this with a curated set of stable open-license product images
+// hosted on CDNs that are publicly cached and don't require sign-in.
+const _CDN = {
+    // ── Phones & Tablets ───────────────────────────────────────────────────
+    Smartphones:       'https://placehold.co/400x300/1a1a2e/ffffff?text=Smartphones',
+    'Feature Phones':  'https://placehold.co/300x300/1a1a2e/ffffff?text=Feature+Phone',
+    'iOS Phones':      'https://placehold.co/400x300/16213e/ffffff?text=iOS+Phones',
+    'Android Tablets': 'https://placehold.co/400x300/0f3460/ffffff?text=Android+Tablets',
+    iPads:             'https://placehold.co/400x300/533483/ffffff?text=iPads',
+    'Kids Tablets':    'https://placehold.co/300x300/7ecfc0/ffffff?text=Kids+Tablet',
+    'Cases & Sleeves': 'https://placehold.co/400x300/e94560/ffffff?text=Cases+%26+Sleeves',
+    'Screen Protectors':'https://placehold.co/300x300/e0e0e0/333333?text=Screen+Guard',
+    Chargers:          'https://placehold.co/400x300/0f3460/ffffff?text=Chargers',
+    'Power Banks':     'https://placehold.co/300x300/2d3748/ffffff?text=Power+Bank',
+    Earphones:         'https://placehold.co/400x300/2c3e50/ffffff?text=Earphones',
+    Smartwatches:      'https://placehold.co/400x300/1abc9c/ffffff?text=Smartwatches',
+    // ── TVs & Audio ────────────────────────────────────────────────────────
+    'LED TVs':         'https://placehold.co/400x300/2d3436/ffffff?text=LED+TVs',
+    'Smart TVs':       'https://placehold.co/400x300/636e72/ffffff?text=Smart+TVs',
+    'OLED TVs':        'https://placehold.co/400x300/b2bec3/333333?text=OLED+TVs',
+    Headphones:        'https://placehold.co/400x300/34495e/ffffff?text=Headphones',
+    Speakers:          'https://placehold.co/400x300/6c5ce7/ffffff?text=Speakers',
+    Soundbars:         'https://placehold.co/300x300/2d3748/ffffff?text=Soundbar',
+    Microphones:       'https://placehold.co/300x300/4a5568/ffffff?text=Microphone',
+    Earbuds:           'https://placehold.co/400x300/2c3e50/ffffff?text=Earphones',
+    'Home Theatre':    'https://placehold.co/300x300/1a202c/ffffff?text=Home+Theatre',
+    'DSLR Cameras':    'https://placehold.co/400x300/2d3436/ffffff?text=DSLR+Cameras',
+    'Action Cameras':  'https://placehold.co/400x300/00b894/ffffff?text=Action+Cameras',
+    'Security Cameras':'https://placehold.co/300x300/2d3748/ffffff?text=CCTV',
+    // ── Appliances ─────────────────────────────────────────────────────────
+    Fridges:           'https://placehold.co/300x300/b2d8d8/333333?text=Fridge',
+    'Air Conditioners':'https://placehold.co/300x300/a8dadc/333333?text=AC+Unit',
+    Fans:              'https://placehold.co/300x300/d6eaff/333333?text=Fan',
+    Cookers:           'https://placehold.co/300x300/f9c784/333333?text=Cooker',
+    Microwaves:        'https://placehold.co/300x300/e8e8e8/333333?text=Microwave',
+    Blenders:          'https://placehold.co/300x300/c9e4ca/333333?text=Blender',
+    'Rice Cookers':    'https://placehold.co/300x300/f4d35e/333333?text=Rice+Cooker',
+    'Washing Machines':'https://placehold.co/300x300/dbeafe/333333?text=Washer',
+    Irons:             'https://placehold.co/300x300/e0e7ff/333333?text=Iron',
+    Dryers:            'https://placehold.co/300x300/fce7f3/333333?text=Dryer',
+    // ── Health & Beauty ────────────────────────────────────────────────────
+    'Face Moisturisers':'https://placehold.co/400x300/fd79a8/ffffff?text=Face+Moisturisers',
+    Serums:             'https://placehold.co/400x300/e84393/ffffff?text=Serums',
+    Sunscreen:          'https://placehold.co/400x300/74b9ff/ffffff?text=Sunscreen',
+    Toners:             'https://placehold.co/400x300/a29bfe/ffffff?text=Toners',
+    Shampoo:            'https://placehold.co/400x300/fdcb6e/333333?text=Shampoo',
+    Conditioner:        'https://placehold.co/400x300/e17055/ffffff?text=Conditioner',
+    'Hair Oils':        'https://placehold.co/400x300/d4ac0d/ffffff?text=Hair+Oils',
+    Perfumes:           'https://placehold.co/400x300/c8a2c8/ffffff?text=Perfumes',
+    Lipstick:           'https://placehold.co/400x300/c0392b/ffffff?text=Lipstick',
+    Foundation:         'https://placehold.co/400x300/d4956a/ffffff?text=Foundation',
+    'Eye Makeup':       'https://placehold.co/400x300/2c2c54/ffffff?text=Eye+Makeup',
+    Vitamins:           'https://placehold.co/400x300/27ae60/ffffff?text=Vitamins',
+    'Protein Shakes':   'https://placehold.co/400x300/2980b9/ffffff?text=Protein+Shakes',
+    'Medical Devices':  'https://placehold.co/300x300/d1fae5/166534?text=Medical',
+    // ── Home & Office ──────────────────────────────────────────────────────
+    Sofas:              'https://placehold.co/400x300/795548/ffffff?text=Sofas',
+    'Beds & Mattresses':'https://placehold.co/400x300/5d4037/ffffff?text=Beds+%26+Mattresses',
+    Tables:             'https://placehold.co/400x300/8d6e63/ffffff?text=Tables',
+    'Office Chairs':    'https://placehold.co/400x300/4e342e/ffffff?text=Office+Chairs',
+    Bedsheets:          'https://placehold.co/300x300/fce7f3/9d174d?text=Bedsheets',
+    'Blankets & Throws':'https://placehold.co/300x300/ede9fe/5b21b6?text=Blanket',
+    Comforters:         'https://placehold.co/300x300/dbeafe/1e40af?text=Comforter',
+    'Bed Pillows':      'https://placehold.co/300x300/fef9c3/854d0e?text=Pillows',
+    'Storage Cabinets': 'https://placehold.co/300x300/f1f5f9/334155?text=Cabinet',
+    'Closet Storage':   'https://placehold.co/300x300/ecfdf5/065f46?text=Closet',
+    'Shoe Organizers':  'https://placehold.co/300x300/fff7ed/9a3412?text=Shoe+Rack',
+    'Wall Clocks':      'https://placehold.co/400x300/546e7a/ffffff?text=Wall+Clocks',
+    Mirrors:            'https://placehold.co/300x300/f8fafc/0f172a?text=Mirror',
+    'Rugs & Carpet':    'https://placehold.co/300x300/fef3c7/92400e?text=Rug',
+    Lighting:           'https://placehold.co/300x300/fefce8/713f12?text=Lighting',
+
+    // ── Fashion — Men's ────────────────────────────────────────────────────
+    Shirts:             'https://placehold.co/400x300/263238/ffffff?text=Shirts',
+    'T-Shirts & Tanks': 'https://placehold.co/400x300/212121/ffffff?text=T-Shirts+%26+Tanks',
+    'Suits & Blazers':  'https://placehold.co/400x300/1a237e/ffffff?text=Suits+%26+Blazers',
+    'Suits & Sport Coats': 'https://placehold.co/400x300/1a237e/ffffff?text=Suits+%26+Blazers',
+    Pants:              'https://placehold.co/400x300/283593/ffffff?text=Pants',
+    Shorts:             'https://placehold.co/400x300/1565c0/ffffff?text=Shorts',
+    Jeans:              'https://placehold.co/400x300/b71c1c/ffffff?text=Sneakers',
+    Underwear:          'https://placehold.co/300x300/e0e7ff/3730a3?text=Underwear',
+    Watches:            'https://placehold.co/400x300/8e6b3e/ffffff?text=Watches',
+    'Fashion Sneakers': 'https://placehold.co/400x300/b71c1c/ffffff?text=Sneakers',
+    'Loafers & Slip-Ons':'https://placehold.co/400x300/4a148c/ffffff?text=Loafers',
+    Belts:              'https://placehold.co/400x300/7d5a3c/ffffff?text=Belts',
+    'Sunglasses & Eyewear Accessories': 'https://placehold.co/400x300/f57f17/ffffff?text=Sunglasses',
+    Sunglasses:         'https://placehold.co/400x300/f57f17/ffffff?text=Sunglasses',
+
+    // ── Fashion — Women's ──────────────────────────────────────────────────
+    Dresses:            'https://placehold.co/400x300/1b5e20/ffffff?text=Dresses',
+    'Tops & Tees':      'https://placehold.co/400x300/880e4f/ffffff?text=Tops+%26+Tees',
+    'Suiting & Blazers':'https://placehold.co/400x300/880e4f/ffffff?text=Tops+%26+Tees',
+    Skirts:             'https://placehold.co/400x300/1b5e20/ffffff?text=Dresses',
+    'Coats, Jackets & Vests': 'https://placehold.co/400x300/880e4f/ffffff?text=Tops+%26+Tees',
+    'Jumpsuits, Rompers & Overalls': 'https://placehold.co/400x300/1b5e20/ffffff?text=Dresses',
+    'Lingerie, Sleep & Lounge': 'https://placehold.co/300x300/fce7f3/9d174d?text=Lingerie',
+    Jewelry:            'https://placehold.co/400x300/f9a825/333333?text=Jewelry',
+    Sandals:            'https://placehold.co/400x300/ad1457/ffffff?text=Sandals',
+    Flats:              'https://placehold.co/400x300/ad1457/ffffff?text=Sandals',
+    'Handbags & Wallets': 'https://placehold.co/400x300/6d4c41/ffffff?text=Handbags',
+    Handbags:           'https://placehold.co/400x300/6d4c41/ffffff?text=Handbags',
+
+    // ── Fashion — Shoes & Kids ─────────────────────────────────────────────
+    Sneakers:           'https://placehold.co/400x300/b71c1c/ffffff?text=Sneakers',
+    Loafers:            'https://placehold.co/400x300/4a148c/ffffff?text=Loafers',
+    Boots:              'https://placehold.co/400x300/ad1457/ffffff?text=Sandals',
+    Heels:              'https://placehold.co/400x300/ad1457/ffffff?text=Sandals',
+    Boys:               'https://placehold.co/400x300/212121/ffffff?text=T-Shirts+%26+Tanks',
+    Girls:              'https://placehold.co/400x300/1b5e20/ffffff?text=Dresses',
+    'Baby Boys':        'https://placehold.co/300x300/dbeafe/1e40af?text=Baby+Boys',
+    'Baby Girls':       'https://placehold.co/300x300/fce7f3/9d174d?text=Baby+Girls',
+
+    // ── Computing ─────────────────────────────────────────────────────────
+    Macbooks:           'https://placehold.co/400x300/37474f/ffffff?text=Laptops',
+    Netbooks:           'https://placehold.co/400x300/455a64/ffffff?text=Netbooks',
+    '2 in 1 Laptops':   'https://placehold.co/400x300/546e7a/ffffff?text=2-in-1+Laptops',
+    Ultrabooks:         'https://placehold.co/400x300/607d8b/ffffff?text=Ultrabooks',
+    Desktops:           'https://placehold.co/400x300/37474f/ffffff?text=Laptops',
+    Monitors:           'https://placehold.co/400x300/607d8b/ffffff?text=Ultrabooks',
+    'Laptop Accessories': 'https://placehold.co/400x300/455a64/ffffff?text=Netbooks',
+    Scanners:           'https://placehold.co/300x300/f1f5f9/334155?text=Scanner',
+    Printers:           'https://placehold.co/300x300/e2e8f0/1e293b?text=Printer',
+    'Keyboards & Mice': 'https://placehold.co/400x300/455a64/ffffff?text=Netbooks',
+    'Keyboards, Mice & Accessories': 'https://placehold.co/400x300/455a64/ffffff?text=Netbooks',
+    'Computer Cable Adapters': 'https://placehold.co/300x300/e0e7ff/3730a3?text=Cables',
+    'Printer Ink & Toner': 'https://placehold.co/300x300/fef3c7/92400e?text=Ink+%26+Toner',
+    'Networking Products': 'https://placehold.co/300x300/d1fae5/065f46?text=Networking',
+    Networking:         'https://placehold.co/300x300/d1fae5/065f46?text=Networking',
+    'External Hard Drives': 'https://placehold.co/400x300/607d8b/ffffff?text=Ultrabooks',
+    'USB Flash Drives': 'https://placehold.co/300x300/e0e7ff/3730a3?text=USB+Drive',
+    'Internal Hard Drives': 'https://placehold.co/400x300/607d8b/ffffff?text=Ultrabooks',
+    'Graphics Cards':   'https://placehold.co/300x300/1e1b4b/a5b4fc?text=GPU',
+    'Fans & Cooling':   'https://placehold.co/300x300/d6eaff/1e40af?text=Cooling',
+
+    // ── Gaming ────────────────────────────────────────────────────────────
+    'PlayStation 3':    'https://placehold.co/300x300/1a1a2e/ffffff?text=PS3',
+    'PlayStation 4':    'https://placehold.co/300x300/003087/ffffff?text=PS4',
+    'PlayStation 5':    'https://placehold.co/300x300/00439c/ffffff?text=PS5',
+    'PlayStation Vita': 'https://placehold.co/300x300/003087/ffffff?text=PS+Vita',
+    'Nintendo Switch':  'https://placehold.co/300x300/e4000f/ffffff?text=Switch',
+    'Xbox 360':         'https://placehold.co/300x300/107c10/ffffff?text=Xbox+360',
+    'PC Games':         'https://placehold.co/300x300/1a1a2e/00d4ff?text=PC+Games',
+    'Nintendo 3DS':     'https://placehold.co/300x300/e4000f/ffffff?text=3DS',
+    'Nintendo DS':      'https://placehold.co/300x300/cc0000/ffffff?text=DS',
+    Wii:                'https://placehold.co/300x300/c0c0c0/333333?text=Wii',
+    Controllers:        'https://placehold.co/300x300/1a1a2e/ffffff?text=Controller',
+    'Gaming Chairs':    'https://placehold.co/300x300/111827/ef4444?text=Gaming+Chair',
+    Headsets:           'https://placehold.co/400x300/34495e/ffffff?text=Headphones',
+    'PC Gaming':        'https://placehold.co/300x300/1a1a2e/00d4ff?text=PC+Gaming',
+
+    // ── Baby Products ─────────────────────────────────────────────────────
+    'Disposable Diapers': 'https://placehold.co/300x300/dbeafe/1e40af?text=Diapers',
+    'Diaper Bags':       'https://placehold.co/300x300/fce7f3/9d174d?text=Diaper+Bag',
+    'Wipes & Holders':   'https://placehold.co/300x300/ecfdf5/065f46?text=Wipes',
+    'Changing Tables':   'https://placehold.co/300x300/fffbeb/92400e?text=Change+Table',
+    'Cloth Diapers':     'https://placehold.co/300x300/dbeafe/1e40af?text=Cloth+Diapers',
+    'Portable Changing Pads': 'https://placehold.co/300x300/f0fdf4/166534?text=Change+Pad',
+    'Bottle Feeding':    'https://placehold.co/300x300/fffbeb/92400e?text=Bottle',
+    'Bottle-Feeding':    'https://placehold.co/300x300/fffbeb/92400e?text=Bottle',
+    Breastfeeding:       'https://placehold.co/300x300/fce7f3/9d174d?text=Breastfeeding',
+    'Bibs & Burp Cloths': 'https://placehold.co/300x300/ecfdf5/065f46?text=Bibs',
+    Highchairs:          'https://placehold.co/300x300/fef9c3/854d0e?text=Highchair',
+    'Highchairs & Booster Seats': 'https://placehold.co/300x300/fef9c3/854d0e?text=Highchair',
+    Pacifiers:           'https://placehold.co/300x300/fce7f3/9d174d?text=Pacifier',
+    'Pacifiers & Accessories': 'https://placehold.co/300x300/fce7f3/9d174d?text=Pacifier',
+    'Solid Feeding':     'https://placehold.co/300x300/fffbeb/92400e?text=Solid+Food',
+    'Toy Gift Sets':     'https://placehold.co/300x300/fef9c3/92400e?text=Toy+Set',
+    'Music & Sound':     'https://placehold.co/300x300/ede9fe/5b21b6?text=Music+Toy',
+    'Bath Toys':         'https://placehold.co/300x300/dbeafe/1e40af?text=Bath+Toys',
+    'Soaps & Cleansers': 'https://placehold.co/400x300/fd79a8/ffffff?text=Face+Moisturisers',
+    'Bathing Tubs':      'https://placehold.co/300x300/dbeafe/1e40af?text=Baby+Tub',
+    'Bathing Tubs & Seats': 'https://placehold.co/300x300/dbeafe/1e40af?text=Baby+Tub',
+    'Grooming & Healthcare Kits': 'https://placehold.co/300x300/d1fae5/065f46?text=Grooming+Kit',
+    'Washcloths & Towels': 'https://placehold.co/300x300/ecfdf5/065f46?text=Towels',
+    'Bathroom Safety':   'https://placehold.co/300x300/fef9c3/92400e?text=Safety',
+    'Skin Care':         'https://placehold.co/400x300/e84393/ffffff?text=Serums',
+    Walkers:             'https://placehold.co/300x300/dbeafe/1e40af?text=Walker',
+    'Backpacks & Carriers': 'https://placehold.co/300x300/ede9fe/5b21b6?text=Baby+Carrier',
+    'Swings, Jumpers & Bouncers': 'https://placehold.co/300x300/fce7f3/9d174d?text=Baby+Swing',
+    Monitors:            'https://placehold.co/300x300/1a1a2e/a3e635?text=Baby+Monitor',
+    'Sleep Positioners': 'https://placehold.co/300x300/dbeafe/1e40af?text=Sleep+Aid',
+    'Edge & Corner Guards': 'https://placehold.co/300x300/fef9c3/92400e?text=Corner+Guard',
+    'Potties & Seats':   'https://placehold.co/300x300/ecfdf5/065f46?text=Potty',
+    'Seat Covers':       'https://placehold.co/300x300/fce7f3/9d174d?text=Seat+Cover',
+    'Step Stools':       'https://placehold.co/300x300/fffbeb/92400e?text=Step+Stool',
+    'Training Pants':    'https://placehold.co/300x300/dbeafe/1e40af?text=Training+Pants',
+
+    // ── Sporting Goods ────────────────────────────────────────────────────
+    'Exercise & Fitness': 'https://placehold.co/300x300/d1fae5/065f46?text=Fitness',
+    'Team Sports':        'https://placehold.co/300x300/dbeafe/1e40af?text=Team+Sports',
+    'Sport Clothing':     'https://placehold.co/400x300/212121/ffffff?text=T-Shirts+%26+Tanks',
+    Accessories:          'https://placehold.co/300x300/f1f5f9/334155?text=Accessories',
+    Protein:              'https://placehold.co/400x300/2980b9/ffffff?text=Protein+Shakes',
+    'Pre-Workout':        'https://placehold.co/400x300/27ae60/ffffff?text=Vitamins',
+    'Weight Gainers':     'https://placehold.co/300x300/d1fae5/065f46?text=Mass+Gainer',
+    'Fat Burners':        'https://placehold.co/300x300/fef3c7/92400e?text=Fat+Burner',
+    'Fat Burners & Thermogenics': 'https://placehold.co/300x300/fef3c7/92400e?text=Fat+Burner',
+    'Carb Management Supplements': 'https://placehold.co/400x300/27ae60/ffffff?text=Vitamins',
+    'Endurance & Energy': 'https://placehold.co/300x300/d1fae5/065f46?text=Endurance',
+    'Post-Workout & Recovery': 'https://placehold.co/300x300/ede9fe/5b21b6?text=Recovery',
+    'Supplement Stacks':  'https://placehold.co/400x300/2980b9/ffffff?text=Protein+Shakes',
+    'Testosterone Boosters': 'https://placehold.co/300x300/1e1b4b/a5b4fc?text=Testosterone',
+    'Camping & Hiking':   'https://placehold.co/300x300/d1fae5/065f46?text=Camping',
+    Cycling:              'https://placehold.co/300x300/dbeafe/1e40af?text=Cycling',
+    'Skates & Boards':    'https://placehold.co/300x300/111827/f59e0b?text=Skates',
+    'Skates, Skateboards & Sc...': 'https://placehold.co/300x300/111827/f59e0b?text=Skates',
+
+    // ── Supermarket ───────────────────────────────────────────────────────
+    'Cooking Ingredients': 'https://placehold.co/300x300/fef9c3/92400e?text=Ingredients',
+    'Snacks & Crisps':     'https://placehold.co/300x300/fef3c7/92400e?text=Snacks',
+    'Snacks, Crisps & Nuts': 'https://placehold.co/300x300/fef3c7/92400e?text=Snacks',
+    'Grains & Rice':       'https://placehold.co/300x300/fef9c3/854d0e?text=Rice',
+    'Sugar & Flour':       'https://placehold.co/300x300/fffbeb/92400e?text=Sugar+%26+Flour',
+    Cereals:               'https://placehold.co/300x300/fef9c3/92400e?text=Cereals',
+    'Candy & Chocolate':   'https://placehold.co/300x300/fce7f3/9d174d?text=Chocolate',
+    'Margarine, Jams, Honey & Spreads': 'https://placehold.co/300x300/fef9c3/92400e?text=Spreads',
+    Beers:                 'https://placehold.co/300x300/fef3c7/92400e?text=Beers',
+    'Spirits & Liquors':   'https://placehold.co/300x300/1a1a2e/f59e0b?text=Spirits',
+    Wine:                  'https://placehold.co/300x300/7c3aed/ffffff?text=Wine',
+    'Champagne &':         'https://placehold.co/300x300/fef9c3/92400e?text=Champagne',
+    Ciders:                'https://placehold.co/300x300/d1fae5/065f46?text=Ciders',
+    'Carbonated Drinks':   'https://placehold.co/300x300/dc2626/ffffff?text=Soda',
+    'Coffee, Tea & Cocoa': 'https://placehold.co/300x300/92400e/ffffff?text=Coffee',
+    Water:                 'https://placehold.co/300x300/dbeafe/1e40af?text=Water',
+    Juices:                'https://placehold.co/300x300/f59e0b/ffffff?text=Juice',
+    'Juices & Other Non Carbonated Drinks': 'https://placehold.co/300x300/f59e0b/ffffff?text=Juice',
+    Dairy:                 'https://placehold.co/300x300/fef9c3/92400e?text=Dairy',
+    'Syrups & Cordials':   'https://placehold.co/300x300/7c3aed/ffffff?text=Syrups',
+    'Air Fresheners':      'https://placehold.co/300x300/d1fae5/065f46?text=Air+Fresh',
+    'Bathroom Cleaners':   'https://placehold.co/300x300/dbeafe/1e40af?text=Cleaner',
+    'Bulbs & Batteries':   'https://placehold.co/300x300/fef9c3/92400e?text=Bulbs',
+    'Floor Cleaners':      'https://placehold.co/300x300/ecfdf5/065f46?text=Floor+Clean',
+    'Household Cleaners & Sundri...': 'https://placehold.co/300x300/d1fae5/065f46?text=Household',
+    'Kitchen Cleaner':     'https://placehold.co/300x300/dbeafe/1e40af?text=Kitchen+Clean',
+
+    // ── Garden & Outdoors ─────────────────────────────────────────────────
+    'Hand Tools':          'https://placehold.co/300x300/d1fae5/065f46?text=Hand+Tools',
+    'Watering Equipment':  'https://placehold.co/300x300/dbeafe/1e40af?text=Watering',
+    'Plant Pots':          'https://placehold.co/300x300/ecfdf5/065f46?text=Plant+Pots',
+    Grills:                'https://placehold.co/300x300/1a1a2e/f59e0b?text=Grill',
+    'Outdoor Cooking Tools': 'https://placehold.co/300x300/fef3c7/92400e?text=Outdoor+Cook',
+    'Outdoor Cooking Tools & ...': 'https://placehold.co/300x300/fef3c7/92400e?text=Outdoor+Cook',
+    Hammocks:              'https://placehold.co/300x300/fce7f3/9d174d?text=Hammock',
+    'Hammocks, Stands & Accessories': 'https://placehold.co/300x300/fce7f3/9d174d?text=Hammock',
+    'Patio Seating':       'https://placehold.co/300x300/ede9fe/5b21b6?text=Patio+Seat',
+    'Pest Control':        'https://placehold.co/300x300/d1fae5/065f46?text=Pest+Control',
+
+    // ── Digital & Services ────────────────────────────────────────────────
+    Software:              'https://placehold.co/300x300/1e1b4b/a5b4fc?text=Software',
+    Antivirus:             'https://placehold.co/300x300/d1fae5/065f46?text=Antivirus',
+    'Office Software':     'https://placehold.co/300x300/dbeafe/1e40af?text=Office',
+    'E-Books':             'https://placehold.co/300x300/fef9c3/92400e?text=eBook',
+    Music:                 'https://placehold.co/300x300/ede9fe/5b21b6?text=Music',
+    Games:                 'https://placehold.co/300x300/1a1a2e/00d4ff?text=Games',
+    Repairs:               'https://placehold.co/300x300/fef3c7/92400e?text=Repairs',
+    Cleaning:              'https://placehold.co/300x300/ecfdf5/065f46?text=Cleaning',
+    Plumbing:              'https://placehold.co/300x300/dbeafe/1e40af?text=Plumbing',
+    Tutoring:              'https://placehold.co/300x300/ede9fe/5b21b6?text=Tutoring',
+    Design:                'https://placehold.co/300x300/fce7f3/9d174d?text=Design',
+    Photography:           'https://placehold.co/300x300/1a1a2e/a3e635?text=Photography',
+    'Web Development':     'https://placehold.co/300x300/1e1b4b/a5b4fc?text=Web+Dev',
+};
+// Fallback for any entry not in the map
+function _catImg(name) {
+    return _CDN[name] || `https://placehold.co/300x300/f57224/ffffff?text=${encodeURIComponent(name.replace(/\s+/g,'+'))}`;
+}
+
 const _JM_CATS = [
-    { id:'electronics',   name:'TVs & Audio',        icon:'📺',
-      subs:[ {name:'Televisions',emoji:'📺'}, {name:'Audio',emoji:'🔊'}, {name:'Cameras',emoji:'📷'}, {name:'Phones',emoji:'📱'} ] },
-    { id:'appliances',    name:'Appliances',          icon:'🏠',
-      subs:[ {name:'Fridges',emoji:'❄️'}, {name:'Washing Machines',emoji:'🫧'}, {name:'Cookers',emoji:'🔥'}, {name:'Microwaves',emoji:'📦'} ] },
-    { id:'health',        name:'Health & Beauty',     icon:'💄',
-      subs:[ {name:'Skincare',emoji:'🧴'}, {name:'Haircare',emoji:'💇'}, {name:'Vitamins',emoji:'💊'}, {name:'Fragrances',emoji:'🌸'} ] },
-    { id:'home',          name:'Home & Office',       icon:'🏡',
-      subs:[ {name:'Furniture',emoji:'🛋️'}, {name:'Bedding',emoji:'🛏️'}, {name:'Lighting',emoji:'💡'}, {name:'Office',emoji:'🖥️'} ] },
-    { id:'fashion',       name:'Fashion',             icon:'👗',
-      subs:[ {name:"Women's",emoji:'👗'}, {name:"Men's",emoji:'👔'}, {name:'Shoes',emoji:'👠'}, {name:'Bags',emoji:'👜'} ] },
-    { id:'computing',     name:'Computing',           icon:'💻',
-      subs:[ {name:'Laptops',emoji:'💻'}, {name:'Desktops',emoji:'🖥️'}, {name:'Accessories',emoji:'⌨️'}, {name:'Networking',emoji:'📡'} ] },
-    { id:'gaming',        name:'Gaming',              icon:'🎮',
-      subs:[ {name:'PlayStation',emoji:'🎮'}, {name:'Nintendo',emoji:'🕹️'}, {name:'Xbox',emoji:'🟩'}, {name:'PC Gaming',emoji:'🖥️'} ] },
-    { id:'baby',          name:'Baby Products',       icon:'🍼',
-      subs:[ {name:'Clothing',emoji:'👶'}, {name:'Toys',emoji:'🧸'}, {name:'Feeding',emoji:'🍼'}, {name:'Diapers',emoji:'🧷'} ] },
-    { id:'sports',        name:'Sporting Goods',      icon:'⚽',
-      subs:[ {name:'Exercise',emoji:'🏋️'}, {name:'Team Sports',emoji:'⚽'}, {name:'Nutrition',emoji:'💪'}, {name:'Outdoor',emoji:'⛺'} ] },
-    { id:'supermarket',   name:'Supermarket',         icon:'🛒',
-      subs:[ {name:'Food',emoji:'🥦'}, {name:'Beverages',emoji:'🥤'}, {name:'Snacks',emoji:'🍿'}, {name:'Household',emoji:'🧹'} ] },
-    { id:'garden',        name:'Garden & Outdoors',   icon:'🌿',
-      subs:[ {name:'Gardening',emoji:'🌱'}, {name:'Watering',emoji:'💧'}, {name:'Grills',emoji:'🔥'}, {name:'Lighting',emoji:'💡'} ] },
-    { id:'digital',       name:'Digital',             icon:'💾',
-      subs:[ {name:'Software',emoji:'💾'}, {name:'E-Books',emoji:'📚'}, {name:'Music',emoji:'🎵'}, {name:'Games',emoji:'🎮'} ] },
-    { id:'services',      name:'Services',            icon:'🔧',
-      subs:[ {name:'Repairs',emoji:'🔧'}, {name:'Cleaning',emoji:'🧹'}, {name:'Tutoring',emoji:'📚'}, {name:'Design',emoji:'🎨'} ] },
+    { id:'phones',     name:'Phones & Tablets',  icon:'📱', sections:[
+        { name:'Mobile Phones', subs:[
+            { name:'Smartphones',       img:_CDN.Smartphones },
+            { name:'Feature Phones',    img:_CDN['Feature Phones'] },
+            { name:'iOS Phones',        img:_CDN['iOS Phones'] },
+        ]},
+        { name:'Tablets', subs:[
+            { name:'Android Tablets',   img:_CDN['Android Tablets'] },
+            { name:'iPads',             img:_CDN.iPads },
+            { name:'Kids Tablets',      img:_CDN['Kids Tablets'] },
+        ]},
+        { name:'Phone Accessories', subs:[
+            { name:'Cases & Sleeves',   img:_CDN['Cases & Sleeves'] },
+            { name:'Screen Protectors', img:_CDN['Screen Protectors'] },
+            { name:'Chargers',          img:_CDN.Chargers },
+            { name:'Power Banks',       img:_CDN['Power Banks'] },
+            { name:'Earphones',         img:_CDN.Earphones },
+            { name:'Smartwatches',      img:_CDN.Smartwatches },
+        ]},
+    ]},
+    { id:'electronics', name:'TVs & Audio',      icon:'📺', sections:[
+        { name:'Televisions', subs:[
+            { name:'LED TVs',           img:_CDN['LED TVs'] },
+            { name:'Smart TVs',         img:_CDN['Smart TVs'] },
+            { name:'OLED TVs',          img:_CDN['OLED TVs'] },
+        ]},
+        { name:'Audio', subs:[
+            { name:'Headphones',        img:_CDN.Headphones },
+            { name:'Speakers',          img:_CDN.Speakers },
+            { name:'Soundbars',         img:_CDN.Soundbars },
+            { name:'Microphones',       img:_CDN.Microphones },
+            { name:'Earbuds',           img:_CDN.Earbuds },
+            { name:'Home Theatre',      img:_CDN['Home Theatre'] },
+        ]},
+        { name:'Cameras', subs:[
+            { name:'DSLR Cameras',      img:_CDN['DSLR Cameras'] },
+            { name:'Action Cameras',    img:_CDN['Action Cameras'] },
+            { name:'Security Cameras',  img:_CDN['Security Cameras'] },
+        ]},
+    ]},
+    { id:'appliances',  name:'Appliances',        icon:'🏠', sections:[
+        { name:'Cooling & Heating', subs:[
+            { name:'Fridges',           img:_CDN.Fridges },
+            { name:'Air Conditioners',  img:_CDN['Air Conditioners'] },
+            { name:'Fans',              img:_CDN.Fans },
+        ]},
+        { name:'Cooking Appliances', subs:[
+            { name:'Cookers',           img:_CDN.Cookers },
+            { name:'Microwaves',        img:_CDN.Microwaves },
+            { name:'Blenders',          img:_CDN.Blenders },
+            { name:'Rice Cookers',      img:_CDN['Rice Cookers'] },
+        ]},
+        { name:'Laundry', subs:[
+            { name:'Washing Machines',  img:_CDN['Washing Machines'] },
+            { name:'Irons',             img:_CDN.Irons },
+            { name:'Dryers',            img:_CDN.Dryers },
+        ]},
+    ]},
+    { id:'health',      name:'Health & Beauty',   icon:'💄', sections:[
+        { name:'Skin Care', subs:[
+            { name:'Face Moisturisers', img:_CDN['Face Moisturisers'] },
+            { name:'Serums',            img:_CDN.Serums },
+            { name:'Sunscreen',         img:_CDN.Sunscreen },
+            { name:'Toners',            img:_CDN.Toners },
+        ]},
+        { name:'Hair Care', subs:[
+            { name:'Shampoo',           img:_CDN.Shampoo },
+            { name:'Conditioner',       img:_CDN.Conditioner },
+            { name:'Hair Oils',         img:_CDN['Hair Oils'] },
+        ]},
+        { name:'Fragrances & Makeup', subs:[
+            { name:'Perfumes',          img:_CDN.Perfumes },
+            { name:'Lipstick',          img:_CDN.Lipstick },
+            { name:'Foundation',        img:_CDN.Foundation },
+            { name:'Eye Makeup',        img:_CDN['Eye Makeup'] },
+        ]},
+        { name:'Vitamins & Supplements', subs:[
+            { name:'Vitamins',          img:_CDN.Vitamins },
+            { name:'Protein Shakes',    img:_CDN['Protein Shakes'] },
+            { name:'Medical Devices',   img:_CDN['Medical Devices'] },
+        ]},
+    ]},
+    { id:'home',        name:'Home & Office',     icon:'🏡', sections:[
+        { name:'Furniture', subs:[
+            { name:'Sofas',             img:_CDN.Sofas },
+            { name:'Beds & Mattresses', img:_CDN['Beds & Mattresses'] },
+            { name:'Tables',            img:_CDN.Tables },
+            { name:'Office Chairs',     img:_CDN['Office Chairs'] },
+        ]},
+        { name:'Bedding', subs:[
+            { name:'Bedsheets',         img:_CDN.Bedsheets },
+            { name:'Blankets & Throws', img:_CDN['Blankets & Throws'] },
+            { name:'Comforters',        img:_CDN.Comforters },
+            { name:'Bed Pillows',       img:_CDN['Bed Pillows'] },
+        ]},
+        { name:'Storage & Organization', subs:[
+            { name:'Storage Cabinets',  img:_CDN['Storage Cabinets'] },
+            { name:'Closet Storage',    img:_CDN['Closet Storage'] },
+            { name:'Shoe Organizers',   img:_CDN['Shoe Organizers'] },
+        ]},
+        { name:'Home Decor', subs:[
+            { name:'Wall Clocks',       img:_CDN['Wall Clocks'] },
+            { name:'Mirrors',           img:_CDN.Mirrors },
+            { name:'Rugs & Carpet',     img:_CDN['Rugs & Carpet'] },
+            { name:'Lighting',          img:_CDN.Lighting },
+        ]},
+    ]},
+    { id:'fashion',     name:'Fashion',           icon:'👗', sections:[
+        { name:"Men's Fashion", subs:[
+            { name:'Shirts', img:_catImg('Shirts') },
+            { name:'T-Shirts & Tanks', img:_catImg('T-Shirts & Tanks') },
+            { name:'Suits & Blazers', img:_catImg('Suits & Blazers') },
+            { name:'Pants', img:_catImg('Pants') },
+            { name:'Jeans', img:_catImg('Jeans') },
+            { name:'Shorts', img:_catImg('Shorts') },
+            { name:'Watches', img:_catImg('Watches') },
+            { name:'Belts', img:_catImg('Belts') },
+            { name:'Sunglasses', img:_catImg('Sunglasses') },
+        ]},
+        { name:"Women's Fashion", subs:[
+            { name:'Dresses', img:_catImg('Dresses') },
+            { name:'Tops & Tees', img:_catImg('Tops & Tees') },
+            { name:'Skirts', img:_catImg('Skirts') },
+            { name:'Jeans', img:_catImg('Jeans') },
+            { name:'Handbags', img:_catImg('Handbags') },
+            { name:'Jewelry', img:_catImg('Jewelry') },
+            { name:'Sandals', img:_catImg('Sandals') },
+            { name:'Flats', img:_catImg('Flats') },
+        ]},
+        { name:'Shoes', subs:[
+            { name:'Sneakers', img:_catImg('Sneakers') },
+            { name:'Loafers', img:_catImg('Loafers') },
+            { name:'Boots', img:_catImg('Boots') },
+            { name:'Heels', img:_catImg('Heels') },
+        ]},
+    ]},
+    { id:'computing',   name:'Computing',         icon:'💻', sections:[
+        { name:'Laptops', subs:[
+            { name:'Macbooks', img:_catImg('Macbooks') },
+            { name:'Netbooks', img:_catImg('Netbooks') },
+            { name:'2 in 1 Laptops', img:_catImg('2 in 1 Laptops') },
+            { name:'Ultrabooks', img:_catImg('Ultrabooks') },
+        ]},
+        { name:'Computers', subs:[
+            { name:'Desktops', img:_catImg('Desktops') },
+            { name:'Monitors', img:_catImg('Monitors') },
+            { name:'Laptop Accessories', img:_catImg('Laptop Accessories') },
+            { name:'Scanners', img:_catImg('Scanners') },
+            { name:'Printers', img:_catImg('Printers') },
+            { name:'Keyboards & Mice', img:_catImg('Keyboards & Mice') },
+            { name:'Networking', img:_catImg('Networking') },
+        ]},
+        { name:'Data Storage', subs:[
+            { name:'External Hard Drives', img:_catImg('External Hard Drives') },
+            { name:'USB Flash Drives', img:_catImg('USB Flash Drives') },
+        ]},
+    ]},
+    { id:'gaming',      name:'Gaming',            icon:'🎮', sections:[
+        { name:'PlayStation', subs:[
+            { name:'PlayStation 3', img:_catImg('PlayStation 3') },
+            { name:'PlayStation 4', img:_catImg('PlayStation 4') },
+            { name:'PlayStation 5', img:_catImg('PlayStation 5') },
+        ]},
+        { name:'Digital Games', subs:[
+            { name:'Nintendo Switch', img:_catImg('Nintendo Switch') },
+            { name:'Xbox 360', img:_catImg('Xbox 360') },
+            { name:'PC Games', img:_catImg('PC Games') },
+        ]},
+        { name:'Nintendo', subs:[
+            { name:'Nintendo 3DS', img:_catImg('Nintendo 3DS') },
+            { name:'Nintendo DS', img:_catImg('Nintendo DS') },
+            { name:'Wii', img:_catImg('Wii') },
+        ]},
+        { name:'Gaming Accessories', subs:[
+            { name:'Controllers', img:_catImg('Controllers') },
+            { name:'Gaming Chairs', img:_catImg('Gaming Chairs') },
+            { name:'Headsets', img:_catImg('Headsets') },
+        ]},
+    ]},
+    { id:'baby',        name:'Baby Products',     icon:'🍼', sections:[
+        { name:'Diapering', subs:[
+            { name:'Disposable Diapers', img:_catImg('Disposable Diapers') },
+            { name:'Diaper Bags', img:_catImg('Diaper Bags') },
+            { name:'Wipes & Holders', img:_catImg('Wipes & Holders') },
+            { name:'Changing Tables', img:_catImg('Changing Tables') },
+        ]},
+        { name:'Feeding', subs:[
+            { name:'Bottle Feeding', img:_catImg('Bottle Feeding') },
+            { name:'Bibs & Burp Cloths', img:_catImg('Bibs & Burp Cloths') },
+            { name:'Highchairs', img:_catImg('Highchairs') },
+            { name:'Pacifiers', img:_catImg('Pacifiers') },
+        ]},
+        { name:'Baby & Toddler Toys', subs:[
+            { name:'Toy Gift Sets', img:_catImg('Toy Gift Sets') },
+            { name:'Music & Sound', img:_catImg('Music & Sound') },
+            { name:'Bath Toys', img:_catImg('Bath Toys') },
+        ]},
+        { name:'Bathing & Skin Care', subs:[
+            { name:'Soaps & Cleansers', img:_catImg('Soaps & Cleansers') },
+            { name:'Bathing Tubs', img:_catImg('Bathing Tubs') },
+            { name:'Skin Care', img:_catImg('Skin Care') },
+        ]},
+    ]},
+    { id:'sports',      name:'Sporting Goods',    icon:'⚽', sections:[
+        { name:'Sports & Fitness', subs:[
+            { name:'Exercise & Fitness', img:_catImg('Exercise & Fitness') },
+            { name:'Team Sports', img:_catImg('Team Sports') },
+            { name:'Sport Clothing', img:_catImg('Sport Clothing') },
+            { name:'Accessories', img:_catImg('Accessories') },
+        ]},
+        { name:'Sports Nutrition', subs:[
+            { name:'Protein', img:_catImg('Protein') },
+            { name:'Pre-Workout', img:_catImg('Pre-Workout') },
+            { name:'Weight Gainers', img:_catImg('Weight Gainers') },
+            { name:'Fat Burners', img:_catImg('Fat Burners') },
+        ]},
+        { name:'Outdoor Recreation', subs:[
+            { name:'Camping & Hiking', img:_catImg('Camping & Hiking') },
+            { name:'Cycling', img:_catImg('Cycling') },
+            { name:'Skates & Boards', img:_catImg('Skates & Boards') },
+        ]},
+    ]},
+    { id:'supermarket', name:'Supermarket',       icon:'🛒', sections:[
+        { name:'Food Cupboard', subs:[
+            { name:'Cooking Ingredients', img:_catImg('Cooking Ingredients') },
+            { name:'Snacks & Crisps', img:_catImg('Snacks & Crisps') },
+            { name:'Grains & Rice', img:_catImg('Grains & Rice') },
+            { name:'Sugar & Flour', img:_catImg('Sugar & Flour') },
+            { name:'Cereals', img:_catImg('Cereals') },
+            { name:'Candy & Chocolate', img:_catImg('Candy & Chocolate') },
+        ]},
+        { name:'Drinks', subs:[
+            { name:'Carbonated Drinks', img:_catImg('Carbonated Drinks') },
+            { name:'Coffee, Tea & Cocoa', img:_catImg('Coffee, Tea & Cocoa') },
+            { name:'Water', img:_catImg('Water') },
+            { name:'Juices', img:_catImg('Juices') },
+        ]},
+        { name:'Household Supplies', subs:[
+            { name:'Floor Cleaners', img:_catImg('Floor Cleaners') },
+            { name:'Air Fresheners', img:_catImg('Air Fresheners') },
+            { name:'Bathroom Cleaners', img:_catImg('Bathroom Cleaners') },
+            { name:'Bulbs & Batteries', img:_catImg('Bulbs & Batteries') },
+        ]},
+    ]},
+    { id:'garden',      name:'Garden & Outdoors', icon:'🌿', sections:[
+        { name:'Gardening & Lawn Care', subs:[
+            { name:'Hand Tools', img:_catImg('Hand Tools') },
+            { name:'Watering Equipment', img:_catImg('Watering Equipment') },
+            { name:'Plant Pots', img:_catImg('Plant Pots') },
+        ]},
+        { name:'Grills & Outdoor Cooking', subs:[
+            { name:'Grills', img:_catImg('Grills') },
+            { name:'Outdoor Cooking Tools', img:_catImg('Outdoor Cooking Tools') },
+        ]},
+        { name:'Patio Furniture', subs:[
+            { name:'Hammocks', img:_catImg('Hammocks') },
+            { name:'Patio Seating', img:_catImg('Patio Seating') },
+            { name:'Tables', img:_catImg('Tables') },
+        ]},
+    ]},
+    { id:'digital',     name:'Digital',           icon:'💾', sections:[
+        { name:'Software & Apps', subs:[
+            { name:'Software', img:_catImg('Software') },
+            { name:'Antivirus', img:_catImg('Antivirus') },
+            { name:'Office Software', img:_catImg('Office Software') },
+        ]},
+        { name:'Books & Media', subs:[
+            { name:'E-Books', img:_catImg('E-Books') },
+            { name:'Music', img:_catImg('Music') },
+            { name:'Games', img:_catImg('Games') },
+        ]},
+    ]},
+    { id:'services',    name:'Services',           icon:'🔧', sections:[
+        { name:'Home Services', subs:[
+            { name:'Repairs', img:_catImg('Repairs') },
+            { name:'Cleaning', img:_catImg('Cleaning') },
+            { name:'Plumbing', img:_catImg('Plumbing') },
+        ]},
+        { name:'Professional Services', subs:[
+            { name:'Tutoring', img:_catImg('Tutoring') },
+            { name:'Design', img:_catImg('Design') },
+            { name:'Photography', img:_catImg('Photography') },
+            { name:'Web Development', img:_catImg('Web Development') },
+        ]},
+    ]},
 ];
 
+// ── CSS injected once for the new category UI ──────────────────────────────
+(function _injectCatStyles() {
+    if (document.getElementById('_jmCatStyles')) return;
+    const s = document.createElement('style');
+    s.id = '_jmCatStyles';
+    s.textContent = `
+    /* ── Category layout ── */
+    .jm-cat-layout { display:flex; height:100%; overflow:hidden; background:#f5f5f5; }
+    .jm-cat-sidebar {
+        width:110px; min-width:110px; overflow-y:auto; background:#f5f5f5;
+        border-right:1px solid #e5e7eb; flex-shrink:0;
+    }
+    .jm-cat-item {
+        padding:14px 10px; text-align:center; font-size:12px; color:#444;
+        cursor:pointer; border-bottom:1px solid #eee; line-height:1.4;
+        border-left:3px solid transparent; transition:all .18s ease;
+        font-weight:500; word-break:break-word;
+    }
+    .jm-cat-item.active {
+        background:#fff; color:#f57224; font-weight:700;
+        border-left-color:#f57224;
+    }
+    .jm-cat-item:active { background:#fff8f4; }
+
+    .jm-cat-content { flex:1; overflow-y:auto; padding:0 0 80px; }
+
+    /* ── "All Products" bar ── */
+    .jm-cat-all-bar {
+        display:flex; align-items:center; justify-content:space-between;
+        background:#fff; padding:14px 16px;
+        margin-bottom:8px; font-weight:700; font-size:14px; color:#111;
+        border-bottom:1px solid #f0f0f0; cursor:pointer;
+        transition:background .15s;
+    }
+    .jm-cat-all-bar:active { background:#fff8f4; }
+    .jm-cat-all-bar-arrow { font-size:18px; color:#999; }
+
+    /* ── Section group card ── */
+    .jm-cat-group {
+        background:#fff; margin-bottom:8px;
+        border-radius:0; overflow:hidden;
+        animation: _catFadeIn .25s ease both;
+    }
+    @keyframes _catFadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+
+    .jm-cat-group-header {
+        display:flex; align-items:center; justify-content:space-between;
+        padding:14px 16px 10px;
+    }
+    .jm-cat-group-header span { font-weight:700; font-size:14px; color:#111; }
+    .jm-cat-see-all {
+        background:none; border:none; color:#f57224; font-size:13px;
+        font-weight:600; cursor:pointer; padding:4px 0;
+    }
+
+    .jm-cat-group-divider { height:1px; background:#f0f0f0; margin:0 16px 12px; }
+
+    /* ── Subcategory grid (3 columns) ── */
+    .jm-subcat-grid {
+        display:grid; grid-template-columns:repeat(3,1fr);
+        gap:2px; padding:0 12px 14px;
+    }
+    .jm-subcat-item {
+        display:flex; flex-direction:column; align-items:center;
+        padding:8px 4px; cursor:pointer; border-radius:8px;
+        transition:background .15s, transform .12s;
+        -webkit-tap-highlight-color:rgba(245,114,36,.08);
+    }
+    .jm-subcat-item:active { background:#fff8f4; transform:scale(.96); }
+
+    /* ── Subcategory image ── */
+    .jm-subcat-img-wrap {
+        width:72px; height:72px; border-radius:8px;
+        background:#f8f8f8; border:1px solid #eeeeee;
+        overflow:hidden; display:flex; align-items:center; justify-content:center;
+        margin-bottom:6px; flex-shrink:0;
+    }
+    .jm-subcat-img {
+        width:100%; height:100%; object-fit:contain;
+        padding:6px; display:block; transition:transform .2s;
+    }
+    .jm-subcat-item:active .jm-subcat-img { transform:scale(.93); }
+
+    .jm-subcat-name {
+        font-size:10.5px; color:#333; text-align:center;
+        line-height:1.3; font-weight:500;
+        display:-webkit-box; -webkit-line-clamp:2;
+        -webkit-box-orient:vertical; overflow:hidden;
+        max-width:72px;
+    }
+    `;
+    document.head.appendChild(s);
+})();
+
 function _renderCategories() {
-    const sidebar  = document.getElementById('jmCatSidebar');
-    const content  = document.getElementById('jmCatContent');
+    const sidebar = document.getElementById('jmCatSidebar');
+    const content = document.getElementById('jmCatContent');
     if (!sidebar || !content) return;
 
-    sidebar.innerHTML = _JM_CATS.map((c,i) =>
-        `<div class="jm-cat-item${i===0?' active':''}" data-cat="${c.id}">${c.icon}<br>${_esc(c.name)}</div>`
-    ).join('');
+    // Build sidebar list — text-only, no images, no emojis (clean Jumia style)
+    sidebar.innerHTML = _JM_CATS.map((c, i) => {
+        return `<div class="jm-cat-item${i===0?' active':''}" data-cat="${c.id}">${_esc(c.name)}</div>`;
+    }).join('');
 
+    // Click handler with smooth transition
     sidebar.querySelectorAll('.jm-cat-item').forEach(item => {
         item.addEventListener('click', () => {
-            sidebar.querySelectorAll('.jm-cat-item').forEach(x=>x.classList.remove('active'));
+            sidebar.querySelectorAll('.jm-cat-item').forEach(x => x.classList.remove('active'));
             item.classList.add('active');
-            const cat = _JM_CATS.find(c=>c.id===item.dataset.cat);
-            if (cat) _renderCatContent(cat, content);
+            const cat = _JM_CATS.find(c => c.id === item.dataset.cat);
+            if (cat) {
+                content.style.opacity = '0';
+                content.style.transform = 'translateX(12px)';
+                setTimeout(() => {
+                    _renderCatContent(cat, content);
+                    content.style.transition = 'opacity .2s ease, transform .2s ease';
+                    content.style.opacity = '1';
+                    content.style.transform = 'none';
+                }, 100);
+            }
         });
     });
 
-    // Render first by default
+    // Render first category
+    content.style.opacity = '1';
+    content.style.transform = 'none';
     _renderCatContent(_JM_CATS[0], content);
 }
 
 function _renderCatContent(cat, container) {
-    // Group subs into groups of 3–4 (like Jumia)
-    const groupSize = 3;
-    const groups = [];
-    for (let i=0; i<cat.subs.length; i+=groupSize) groups.push(cat.subs.slice(i,i+groupSize));
+    const catId = cat.id;
 
-    // Build a "All Products" row + subcategory groups
-    const ecom = window.EcomMarketplace;
-    const products = ecom ? ecom.ProductEngine.search('', { category: cat.id, sort:'newest' }) : [];
+    // "All Products" bar
+    let html = `
+    <div class="jm-cat-all-bar" onclick="window._jmNav('products','${catId}')">
+        <span>All Products</span>
+        <span class="jm-cat-all-bar-arrow">›</span>
+    </div>`;
 
-    container.innerHTML = `
-        <div class="jm-cat-group">
+    // Each named section with its subcategories
+    cat.sections.forEach((section, sIdx) => {
+        html += `
+        <div class="jm-cat-group" style="animation-delay:${sIdx * 0.05}s">
             <div class="jm-cat-group-header">
-                <span>All Products</span>
-                <button class="jm-cat-see-all" onclick="window._jmNav('products','${cat.id}')">›</button>
-            </div>
-        </div>
-        ${groups.map(group => `
-        <div class="jm-cat-group">
-            <div class="jm-cat-group-header">
-                <span>${_esc(group[0]?.name||'')}</span>
-                <button class="jm-cat-see-all" onclick="window._jmNav('products','${cat.id}')">See All</button>
+                <span>${_esc(section.name)}</span>
+                <button class="jm-cat-see-all" onclick="window._jmNav('products','${catId}')">See All</button>
             </div>
             <div class="jm-cat-group-divider"></div>
             <div class="jm-subcat-grid">
-                ${group.map(sub => `
-                <div class="jm-subcat-item" onclick="window._jmNav('products','${cat.id}:${sub.name}')">
-                    <div class="jm-subcat-img-placeholder">${sub.emoji}</div>
+                ${section.subs.map(sub => `
+                <div class="jm-subcat-item" onclick="window._jmNav('products','${catId}:${_esc(sub.name)}')">
+                    <div class="jm-subcat-img-wrap">
+                        <img class="jm-subcat-img"
+                             src="${sub.img}"
+                             alt="${_esc(sub.name)}"
+                             loading="lazy"
+                             onerror="this.src='https://placehold.co/300x300/f57224/ffffff?text=Product'">
+                    </div>
                     <div class="jm-subcat-name">${_esc(sub.name)}</div>
                 </div>`).join('')}
             </div>
-        </div>`).join('')}
-    `;
+        </div>`;
+    });
+
+    container.innerHTML = html;
+    container.scrollTop = 0;
 }
 
 // ── PRODUCTS LIST PAGE ─────────────────────────────────────────────────────

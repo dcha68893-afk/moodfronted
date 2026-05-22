@@ -2685,7 +2685,7 @@ else setTimeout(init,500);
         // Header
         var header = document.createElement('div');
         header.style.cssText = 'display:flex;align-items:center;padding:12px 16px;background:#fff;border-bottom:1px solid rgba(0,0,0,.08);flex-shrink:0;';
-        header.innerHTML = '<button onclick="document.getElementById('groupOSOverlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#374151;padding:4px;margin-right:10px;line-height:1;">←</button>' +
+        header.innerHTML = '<button onclick=\"document.getElementById(\'groupOSOverlay\').remove()\" style=\"background:none;border:none;font-size:22px;cursor:pointer;color:#374151;padding:4px;margin-right:10px;line-height:1;\">\u2190</button>' +
             '<span style="font-weight:700;font-size:16px;color:#111827;flex:1">Group Tools</span>' +
             '<span id="gosOnlineBadge" style="font-size:11px;color:' + (navigator.onLine ? '#34d399' : '#f59e0b') + '">● ' + (navigator.onLine ? 'Online' : 'Offline') + '</span>';
 
@@ -2759,5 +2759,10 @@ else setTimeout(init,500);
 </script>
 
 <script src="back-nav.js"></script>
+<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/js/core/phase2.bootstrap.js"></script>
 </body>
 </html>

@@ -3132,7 +3132,7 @@ input:focus + .toggle-slider,
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 8px !important;
     padding: 8px !important;
-    background: var(--jm-gray-bg) !important;
+    background: #f5f5f5 !important;
 }
 
 @media (min-width: 600px) {
@@ -3144,14 +3144,14 @@ input:focus + .toggle-slider,
 
 /* ── PRODUCT CARD ─────────────────────────────────────────────────────────── */
 .jm-card {
-    background: var(--jm-white);
+    background: #ffffff;
     border-radius: 8px;
     overflow: hidden;
     cursor: pointer;
     display: flex;
     flex-direction: column;
     position: relative;
-    border: 1px solid #f0f0f0;
+    border: 1px solid #e8e8e8;
     transition: box-shadow 0.2s, transform 0.15s;
     animation: jmCardIn 0.25s ease both;
 }
@@ -3171,7 +3171,8 @@ input:focus + .toggle-slider,
     width: 100%;
     padding-top: 100%;
     overflow: hidden;
-    background: #f9fafb;
+    background: #ffffff;
+    border-bottom: 1px solid #f0f0f0;
 }
 
 .jm-card-img {
@@ -3179,8 +3180,10 @@ input:focus + .toggle-slider,
     inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    padding: 6px;
     transition: transform 0.3s;
+    background: #ffffff;
 }
 
 .jm-card:hover .jm-card-img { transform: scale(1.04); }
@@ -3268,12 +3271,13 @@ input:focus + .toggle-slider,
 
 .jm-card-title {
     font-size: 12px;
-    color: var(--jm-text);
+    color: #111111;
     line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    font-weight: 500;
 }
 
 .jm-card-stars {
@@ -3301,7 +3305,7 @@ input:focus + .toggle-slider,
 .jm-card-price {
     font-size: 14px;
     font-weight: 800;
-    color: var(--jm-orange);
+    color: #f57224;
 }
 
 .jm-card-oldprice {
@@ -3358,7 +3362,7 @@ input:focus + .toggle-slider,
     flex-shrink: 0;
     overflow-y: auto;
     background: #f9fafb;
-    border-right: 1px solid var(--jm-border);
+    border-right: 1px solid #e5e7eb;
     scrollbar-width: none;
 }
 
@@ -3368,19 +3372,20 @@ input:focus + .toggle-slider,
     padding: 14px 8px;
     text-align: center;
     font-size: 12px;
-    color: var(--jm-text2);
+    color: #444444;
     cursor: pointer;
-    border-bottom: 1px solid var(--jm-border);
+    border-bottom: 1px solid #e5e7eb;
     line-height: 1.3;
     border-left: 3px solid transparent;
     transition: all 0.15s;
+    font-weight: 500;
 }
 
 .jm-cat-item.active {
-    background: var(--jm-white);
-    color: var(--jm-orange);
+    background: #ffffff;
+    color: #f57224;
     font-weight: 700;
-    border-left-color: var(--jm-orange);
+    border-left-color: #f57224;
 }
 
 .jm-cat-content {
@@ -3391,10 +3396,11 @@ input:focus + .toggle-slider,
 }
 
 .jm-cat-group {
-    background: var(--jm-white);
+    background: #ffffff;
     border-radius: 8px;
     margin-bottom: 8px;
     overflow: hidden;
+    border: 1px solid #f0f0f0;
 }
 
 .jm-cat-group-header {
@@ -3404,7 +3410,7 @@ input:focus + .toggle-slider,
     padding: 12px 12px 6px;
     font-size: 14px;
     font-weight: 700;
-    color: var(--jm-text);
+    color: #111111;
 }
 
 .jm-cat-see-all {
@@ -3440,14 +3446,17 @@ input:focus + .toggle-slider,
     transition: background 0.15s;
 }
 
-.jm-subcat-item:hover { background: #f9fafb; }
+.jm-subcat-item:hover { background: #f0f7ff; }
 
 .jm-subcat-img {
     width: 70px;
     height: 70px;
-    object-fit: cover;
+    object-fit: contain;
     border-radius: 8px;
-    background: #f3f4f6;
+    background: #f8f8f8;
+    padding: 4px;
+    border: 1px solid #f0f0f0;
+    display: block;
 }
 
 .jm-subcat-img-placeholder {
@@ -3464,8 +3473,9 @@ input:focus + .toggle-slider,
 .jm-subcat-name {
     font-size: 11px;
     text-align: center;
-    color: var(--jm-text);
+    color: #111111;
     line-height: 1.3;
+    font-weight: 500;
 }
 
 /* ── CART PAGE ────────────────────────────────────────────────────────────── */
@@ -4351,3 +4361,412 @@ input:focus + .toggle-slider,
 [data-theme="dark"] .jm-more-item { background: #374151; color: #f9fafb; }
 [data-theme="dark"] .jm-filter-chips,
 [data-theme="dark"] .jm-tabs-wrap { background: #1f2937; }
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRODUCTION THEME UNIFICATION v2.0
+   Enforces a clean, consistent WHITE theme throughout the marketplace.
+   All text is hardcoded to be fully visible. No mixed dark/light screens.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 1. Force the whole sidebar/app to white — no mixed backgrounds */
+html, body,
+.app-container,
+.sidebar,
+.sidebar.active,
+.jm-page,
+.jm-page.active {
+    background: #ffffff !important;
+    color: #111111 !important;
+}
+
+/* 2. Override every dark-mode rule so the screen is unified white */
+[data-theme="dark"] html,
+[data-theme="dark"] body,
+[data-theme="dark"] .app-container,
+[data-theme="dark"] .sidebar,
+[data-theme="dark"] .sidebar.active {
+    background: #ffffff !important;
+    color: #111111 !important;
+}
+
+/* 3. Marketplace container stays white */
+.jm-product-grid,
+.marketplace-list,
+.marketplace-list-content,
+.marketplace-list-content.jm-product-grid,
+.jm-cat-layout,
+.jm-cat-content,
+.jm-cart-wrap,
+.jm-wishlist-wrap,
+.jm-account-wrap {
+    background: #f5f5f5 !important;
+}
+
+/* 4. Header — white bar, black icons */
+.jm-header {
+    background: #ffffff !important;
+    border-bottom: 1px solid #e8e8e8 !important;
+}
+
+.jm-back-btn,
+.jm-icon-btn {
+    color: #111111 !important;
+}
+
+.jm-search-wrap {
+    background: #f3f4f6 !important;
+    border: 1px solid #e5e7eb !important;
+}
+
+.jm-search-input {
+    color: #111111 !important;
+    background: transparent !important;
+}
+
+.jm-search-input::placeholder {
+    color: #9ca3af !important;
+}
+
+/* 5. Product cards — pure white, dark readable text */
+.jm-card {
+    background: #ffffff !important;
+    border: 1px solid #e8e8e8 !important;
+}
+
+.jm-card-img-wrap {
+    background: #ffffff !important;
+    border-bottom: 1px solid #f0f0f0 !important;
+}
+
+/* CRITICAL: product images use contain so they never bleed/overlap */
+.jm-card-img {
+    object-fit: contain !important;
+    padding: 6px !important;
+    background: #ffffff !important;
+    width: 100% !important;
+    height: 100% !important;
+    position: absolute !important;
+    inset: 0 !important;
+}
+
+.jm-card-body {
+    background: #ffffff !important;
+    padding: 8px 10px 12px !important;
+}
+
+.jm-card-title {
+    color: #111111 !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+}
+
+.jm-card-price {
+    color: #f57224 !important;
+    font-weight: 800 !important;
+    font-size: 14px !important;
+}
+
+.jm-card-oldprice {
+    color: #9ca3af !important;
+}
+
+.jm-card-stars { color: #f5a623 !important; }
+.jm-card-reviews { color: #6b7280 !important; }
+.jm-card-delivery { color: #22c55e !important; }
+
+/* 6. Horizontal card (featured row) */
+.jm-hcard {
+    background: #ffffff !important;
+    border: 1px solid #e8e8e8 !important;
+}
+
+.jm-hcard-img {
+    object-fit: contain !important;
+    background: #ffffff !important;
+    padding: 4px !important;
+}
+
+.jm-hcard-title {
+    color: #111111 !important;
+    font-weight: 600 !important;
+}
+
+.jm-hcard-price { color: #f57224 !important; }
+.jm-hcard-oldprice { color: #9ca3af !important; }
+
+/* 7. Section headers */
+.jm-section-header span,
+.jm-page-title,
+.jm-flash-banner {
+    color: #111111 !important;
+}
+
+.jm-page-title {
+    background: #ffffff !important;
+    border-bottom: 1px solid #e8e8e8 !important;
+}
+
+/* 8. Category sidebar */
+.jm-cat-sidebar {
+    background: #f5f5f5 !important;
+    border-right: 1px solid #e5e7eb !important;
+}
+
+.jm-cat-item {
+    color: #444444 !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    border-left: 3px solid transparent !important;
+    background: transparent !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+}
+
+.jm-cat-item.active {
+    background: #ffffff !important;
+    color: #f57224 !important;
+    font-weight: 700 !important;
+    border-left-color: #f57224 !important;
+}
+
+/* 9. Category content area */
+.jm-cat-content {
+    background: #f5f5f5 !important;
+}
+
+.jm-cat-group {
+    background: #ffffff !important;
+    border: 1px solid #f0f0f0 !important;
+    border-radius: 8px !important;
+    margin-bottom: 8px !important;
+    overflow: hidden !important;
+}
+
+.jm-cat-group-header {
+    color: #111111 !important;
+    font-weight: 700 !important;
+}
+
+/* CRITICAL FIX: subcategory images — contain, no bleed, isolated on white */
+.jm-subcat-item {
+    background: transparent !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 8px 4px !important;
+    border-radius: 8px !important;
+}
+
+.jm-subcat-img,
+.jm-subcat-img-placeholder {
+    width: 70px !important;
+    height: 70px !important;
+    object-fit: contain !important;
+    border-radius: 8px !important;
+    background: #f8f8f8 !important;
+    padding: 4px !important;
+    border: 1px solid #eeeeee !important;
+    display: block !important;
+    /* Prevent any bleed from adjacent images */
+    position: static !important;
+    isolation: isolate !important;
+}
+
+.jm-subcat-name {
+    color: #111111 !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    text-align: center !important;
+    /* Hard white text bg strip so label is always readable */
+    background: transparent !important;
+}
+
+/* 10. Account section — white bg, all text visible */
+.jm-account-wrap,
+.jm-account-wrap * {
+    background: transparent;
+}
+
+.jm-account-wrap {
+    background: #f5f5f5 !important;
+}
+
+.jm-account-hero,
+.jm-account-menu-group {
+    background: #ffffff !important;
+    border-color: #e5e7eb !important;
+}
+
+.jm-account-welcome {
+    color: #111111 !important;
+    font-size: 20px !important;
+    font-weight: 700 !important;
+}
+
+.jm-account-email {
+    color: #f57224 !important;
+}
+
+.jm-account-section-label {
+    color: #444444 !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+}
+
+.jm-account-menu-item {
+    color: #111111 !important;
+    border-bottom: 1px solid #f3f4f6 !important;
+    background: #ffffff !important;
+}
+
+.jm-account-menu-item i:first-child {
+    color: #6b7280 !important;
+}
+
+.jm-account-menu-item .jm-menu-chevron {
+    color: #d1d5db !important;
+}
+
+.jm-account-balance {
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+}
+
+/* 11. More sheet — white */
+.jm-more-sheet {
+    background: #ffffff !important;
+}
+
+.jm-more-title { color: #111111 !important; }
+.jm-more-item { color: #111111 !important; background: #f9fafb !important; }
+.jm-more-item i { color: #f57224 !important; }
+
+/* 12. Bottom nav — white */
+.jm-bottom-nav {
+    background: #ffffff !important;
+    border-top: 1px solid #e5e7eb !important;
+}
+
+.jm-nav-tab { color: #6b7280 !important; }
+.jm-nav-tab.active { color: #f57224 !important; }
+
+/* 13. Filter chips — white surface */
+.jm-filter-chips,
+.jm-tabs-wrap {
+    background: #ffffff !important;
+    border-bottom: 1px solid #e5e7eb !important;
+}
+
+.jm-chip {
+    background: #f3f4f6 !important;
+    color: #444444 !important;
+    border: 1px solid #e5e7eb !important;
+}
+
+.jm-chip.active {
+    background: #f57224 !important;
+    color: #ffffff !important;
+    border-color: #f57224 !important;
+}
+
+/* 14. Notification prefs + misc pages */
+.jm-notif-system-row,
+.jm-notif-group,
+.jm-address-item,
+.jm-review-item,
+.jm-seller-item,
+.jm-order-item {
+    background: #ffffff !important;
+    border-color: #e5e7eb !important;
+    color: #111111 !important;
+}
+
+/* 15. Cart / wishlist */
+.jm-cart-item {
+    background: #ffffff !important;
+    border-color: #e5e7eb !important;
+}
+
+.jm-cart-item-title { color: #111111 !important; }
+.jm-cart-item-price { color: #f57224 !important; font-weight: 700 !important; }
+
+/* 16. Empty states */
+.jm-empty-state, .empty-state {
+    color: #6b7280 !important;
+    background: transparent !important;
+}
+
+/* 17. Section header text */
+.jm-section-header span {
+    color: #111111 !important;
+    font-weight: 700 !important;
+}
+
+/* 18. Flash banner */
+.jm-flash-banner {
+    background: #fff3ec !important;
+    color: #111111 !important;
+    border-bottom: 1px solid #ffe4cc !important;
+}
+
+/* 19. Products title row */
+#jmProductCount { color: #6b7280 !important; }
+
+/* 20. Product title bar in product list page */
+#jmProductsTitle { color: #111111 !important; background: #ffffff !important; }
+
+/* 21. Suggestions dropdown */
+.jm-suggestions {
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+}
+
+.jm-suggestion-item {
+    color: #111111 !important;
+}
+
+.jm-suggestion-item:hover { background: #f9fafb !important; }
+
+/* 22. Remove any lingering dark overrides from previous builds */
+[data-theme="dark"] .jm-card,
+[data-theme="dark"] .jm-hcard,
+[data-theme="dark"] .jm-cat-content,
+[data-theme="dark"] .jm-cat-sidebar,
+[data-theme="dark"] .jm-cat-item,
+[data-theme="dark"] .jm-cat-item.active,
+[data-theme="dark"] .jm-search-wrap,
+[data-theme="dark"] .jm-search-input,
+[data-theme="dark"] .jm-page,
+[data-theme="dark"] .jm-more-item,
+[data-theme="dark"] .jm-filter-chips,
+[data-theme="dark"] .jm-tabs-wrap,
+[data-theme="dark"] .jm-header,
+[data-theme="dark"] .jm-white,
+[data-theme="dark"] .jm-cart-item,
+[data-theme="dark"] .jm-order-item,
+[data-theme="dark"] .jm-account-hero,
+[data-theme="dark"] .jm-account-menu-group,
+[data-theme="dark"] .jm-notif-system-row,
+[data-theme="dark"] .jm-notif-group,
+[data-theme="dark"] .jm-more-sheet,
+[data-theme="dark"] .jm-bottom-nav,
+[data-theme="dark"] .jm-address-item,
+[data-theme="dark"] .jm-review-item,
+[data-theme="dark"] .jm-seller-item,
+[data-theme="dark"] .jm-card-title,
+[data-theme="dark"] .jm-hcard-title,
+[data-theme="dark"] .jm-order-title,
+[data-theme="dark"] .jm-account-welcome,
+[data-theme="dark"] .marketplace-detail-panel,
+[data-theme="dark"] .marketplace-detail-header {
+    background: #ffffff !important;
+    color: #111111 !important;
+    border-color: #e5e7eb !important;
+}
+
+[data-theme="dark"] .jm-card-price,
+[data-theme="dark"] .hcard-price,
+[data-theme="dark"] .listing-price {
+    color: #f57224 !important;
+}
