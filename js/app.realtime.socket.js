@@ -809,6 +809,20 @@
                         try { window.dispatchEvent(new CustomEvent('kyn:' + colonMsg, { detail: payload })); } catch (_) {}
                     }
                 }
+
+                // ── Phase 4+6: Group events fan-out to sibling iframes ───────────────────
+                if (evType.startsWith('group:') || evType.startsWith('status:') ||
+                    evType.startsWith('device:') || evType.startsWith('session:')) {
+                    // Fan-out to all iframes using REALTIME_EVENT pattern
+                    var _iframesP4 = document.querySelectorAll('iframe');
+                    _iframesP4.forEach(function(f) {
+                        try { f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + evType, payload: payload }, '*'); } catch (_) {}
+                    });
+                    // Also emit on KynectaEventBus for same-frame Phase 4 modules
+                    if (window.KynectaEventBus) {
+                        window.KynectaEventBus.emit('REALTIME_' + evType, payload, { async: true });
+                    }
+                }
             }
         }
 
@@ -1066,7 +1080,30 @@
                 'order:created', 'order:status_changed', 'payment:confirmed',
                 'review:new', 'delivery:updated',
             ];
-            const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents];
+            // ── Phase 4+6 INTEGRATION: Group + Status events added to socket listener registration ──
+            const groupEvents = [
+                'group:message', 'group:reaction', 'group:reply', 'group:edit',
+                'group:delete', 'group:deleted', 'group:typing', 'group:join',
+                'group:leave', 'group:kick', 'group:ban', 'group:unban',
+                'group:mute', 'group:unmute', 'group:presence', 'group:update',
+                'group:updated', 'group:role_update', 'group:pin', 'group:announcement',
+                'group:membership_change', 'group:slow_mode', 'group:read_receipt',
+                'group:member_joined', 'group:member_left', 'group:rejoin_ack',
+            ];
+
+            const statusEvents = [
+                'status:new', 'status:created', 'status:viewed', 'status:view',
+                'status:reaction', 'status:reply', 'status:deleted', 'status:expired',
+                'status:privacy_updated', 'status:highlight_added',
+            ];
+
+            const phase5Events = [
+                'device:registered', 'device:trust_updated', 'session:revoked',
+                'session:restored', 'reconnect:required', 'turn:config',
+                'security:replay_rejected',
+            ];
+
+            const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events];
 
             if (this._socket && typeof this._socket.on === 'function') {
                 allEvents.forEach(eventType => {
