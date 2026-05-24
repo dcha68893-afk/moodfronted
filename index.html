@@ -289,9 +289,11 @@
             flex: 1;
             margin-left: var(--sidebar-width);
             min-height: 100vh;
+            height: 100vh;
             display: flex;
             flex-direction: column;
             background: var(--bg-color);
+            overflow-y: auto;
         }
         
         .mobile-header {
@@ -650,10 +652,12 @@
         .auth-content {
             flex: 1;
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
             padding: 20px;
             padding-top: calc(var(--header-height) + 20px);
+            overflow-y: auto;
+            min-height: 0;
         }
         
         .auth-container {
@@ -662,7 +666,7 @@
             background: var(--panel-bg);
             border-radius: var(--border-radius);
             box-shadow: 0 10px 40px var(--shadow-color);
-            overflow: hidden;
+            overflow: visible;
         }
         
         .auth-header {
@@ -1274,7 +1278,7 @@
             .sidebar { display: none; }
             .sidebar.mobile { display: block; }
             .auth-panel { margin-left: 0; padding-top: var(--header-height); }
-            .auth-content { padding: 15px; padding-top: calc(var(--header-height) + 15px); }
+            .auth-content { padding: 15px; padding-top: calc(var(--header-height) + 15px); align-items: flex-start; }
             .auth-container { box-shadow: none; border-radius: 0; }
             .auth-body { padding: 20px; }
             .auth-footer { padding: 15px 20px; }
@@ -1652,12 +1656,12 @@
                             <div class="form-group">
                                 <label class="form-label" for="registerPassword">Password</label>
                                 <div class="form-input-group">
-                                    <input type="password" class="form-input" id="registerPassword" name="password" placeholder="Create a password (min 6 characters)" autocomplete="new-password" required>
+                                    <input type="password" class="form-input" id="registerPassword" name="password" placeholder="Create a password (min 8 characters)" autocomplete="new-password" required>
                                     <button type="button" class="password-toggle" id="toggleRegisterPassword" data-toggle-password data-target="registerPassword" aria-label="Show password"><i class="fas fa-eye"></i></button>
                                     <i class="fas fa-lock input-icon"></i>
                                 </div>
                                 <div class="password-warning"><i class="fas fa-exclamation-triangle"></i><small>Warning: Use a strong password with at least 6 characters. Avoid common passwords.</small></div>
-                                <div class="error-message" id="registerPasswordError"><i class="fas fa-exclamation-circle"></i><span id="registerPasswordErrorText">Minimum 6 characters</span></div>
+                                <div class="error-message" id="registerPasswordError"><i class="fas fa-exclamation-circle"></i><span id="registerPasswordErrorText">Minimum 8 characters</span></div>
                             </div>
                             
                             <div class="form-group">
@@ -1672,7 +1676,7 @@
                             
                             <div class="checkbox-group">
                                 <input type="checkbox" class="checkbox-input" id="acceptTerms" name="acceptTerms" required>
-                                <label class="checkbox-label" for="acceptTerms">I agree to <a href="#" class="footer-link">Terms</a> and <a href="#" class="footer-link">Privacy Policy</a></label>
+                                <label class="checkbox-label" for="acceptTerms">I agree to <a href="#" class="footer-link" data-modal="terms">Terms</a> and <a href="#" class="footer-link" data-modal="privacy">Privacy Policy</a></label>
                             </div>
                             
                             <div class="form-group mb-30">
@@ -1757,10 +1761,10 @@
                 <div class="auth-footer">
                     <p>© 2024 MoodChat. All rights reserved.</p>
                     <div class="auth-footer-links">
-                        <a href="#" class="footer-link">Privacy</a>
-                        <a href="#" class="footer-link">Terms</a>
-                        <a href="#" class="footer-link">Contact</a>
-                        <a href="#" class="footer-link">Help</a>
+                        <a href="#" class="footer-link" data-modal="privacy">Privacy</a>
+                        <a href="#" class="footer-link" data-modal="terms">Terms</a>
+                        <a href="#" class="footer-link" data-modal="contact">Contact</a>
+                        <a href="#" class="footer-link" data-modal="help">Help</a>
                     </div>
                 </div>
             </div>
@@ -2195,14 +2199,14 @@
                         let response;
                         if (window.api?.auth?.register) {
                             // FIX: Increased timeout from 30s to 65s for Render.com cold starts
-                            const regPromise = window.api.auth.register({ email: email, username: username, password: password, displayName: displayName || username });
+                            const regPromise = window.api.auth.register({ email: email, username: username, password: password, displayName: displayName || username, name: displayName || username });
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out. The server may be starting up — please try again in a moment.')), 65000));
                             response = await Promise.race([regPromise, timeout]);
                         } else {
                             const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/register`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ email: email, username: username, password: password, displayName: displayName || username })
+                                body: JSON.stringify({ email: email, username: username, password: password, displayName: displayName || username, name: displayName || username })
                             });
                             const data = await res.json();
                             response = { success: res.ok, data: data };
@@ -2452,8 +2456,8 @@
             if (!password) { 
                 showError('registerPassword', 'Password is required'); 
                 valid = false; 
-            } else if (password.length < 6) { 
-                showError('registerPassword', 'Password must be at least 6 characters'); 
+            } else if (password.length < 8) { 
+                showError('registerPassword', 'Password must be at least 8 characters'); 
                 valid = false; 
             }
             if (password !== confirm) { 
@@ -2511,7 +2515,459 @@
     </script>
     
     <!-- ====================================================================== -->
-    <!-- SERVICE WORKER REGISTRATION - TEMPORARILY DISABLED FOR DEBUGGING -->
+    <!-- INFO MODALS: Privacy, Terms, Contact, Help                            -->
+    <!-- ====================================================================== -->
+    <style>
+        /* ---- Info Modal Overlay ---- */
+        .info-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 99999;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 0;
+            animation: overlayFadeIn 0.2s ease;
+        }
+        .info-modal-overlay.open {
+            display: flex;
+            align-items: flex-end;
+        }
+        @keyframes overlayFadeIn {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+
+        .info-modal-sheet {
+            background: var(--panel-bg, #fff);
+            width: 100%;
+            max-width: 520px;
+            max-height: 80vh;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -8px 40px rgba(0,0,0,0.18);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: sheetSlideUp 0.28s cubic-bezier(.32,1.15,.58,1);
+        }
+        @keyframes sheetSlideUp {
+            from { transform: translateY(100%); opacity: 0.5; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+
+        /* On wider screens, show as centred card */
+        @media (min-width: 540px) {
+            .info-modal-overlay.open { align-items: center; }
+            .info-modal-sheet {
+                border-radius: 20px;
+                max-height: 85vh;
+                margin: 20px;
+            }
+        }
+
+        .info-modal-header {
+            background: var(--gradient-primary, linear-gradient(135deg,#667eea,#764ba2));
+            color: #fff;
+            padding: 18px 20px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .info-modal-header h3 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .info-modal-close {
+            background: rgba(255,255,255,.2);
+            border: none;
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .2s;
+            flex-shrink: 0;
+        }
+        .info-modal-close:hover { background: rgba(255,255,255,.35); }
+
+        /* Drag handle for mobile */
+        .info-modal-handle {
+            width: 40px;
+            height: 4px;
+            background: var(--border-color, #ddd);
+            border-radius: 2px;
+            margin: 10px auto 0;
+            flex-shrink: 0;
+        }
+        @media (min-width: 540px) { .info-modal-handle { display: none; } }
+
+        .info-modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .info-modal-body h4 {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary, #2c3e50);
+            margin: 18px 0 6px;
+        }
+        .info-modal-body h4:first-child { margin-top: 0; }
+        .info-modal-body p, .info-modal-body li {
+            font-size: 14px;
+            line-height: 1.65;
+            color: var(--text-secondary, #7f8c8d);
+            margin: 0 0 8px;
+        }
+        .info-modal-body ul { padding-left: 18px; margin: 0 0 8px; }
+        .info-modal-body a { color: var(--primary-color, #667eea); }
+
+        /* Opt-in / opt-out toggle rows */
+        .pref-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color, #ecf0f1);
+            gap: 10px;
+        }
+        .pref-row:last-child { border-bottom: none; }
+        .pref-label { font-size: 14px; color: var(--text-primary, #2c3e50); flex: 1; }
+        .pref-label small { display: block; font-size: 12px; color: var(--text-secondary, #7f8c8d); margin-top: 2px; }
+
+        /* Toggle switch */
+        .pref-toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+        .pref-toggle input { opacity: 0; width: 0; height: 0; }
+        .pref-toggle-track {
+            position: absolute;
+            inset: 0;
+            background: var(--border-color, #ccc);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .pref-toggle input:checked + .pref-toggle-track { background: var(--primary-color, #667eea); }
+        .pref-toggle-track::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 20px; height: 20px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform .2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,.25);
+        }
+        .pref-toggle input:checked + .pref-toggle-track::after { transform: translateX(20px); }
+
+        /* Contact form inside modal */
+        .contact-field { margin-bottom: 14px; }
+        .contact-field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary, #2c3e50);
+            margin-bottom: 5px;
+        }
+        .contact-field input, .contact-field textarea, .contact-field select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px 12px;
+            border: 1.5px solid var(--border-color, #ddd);
+            border-radius: 8px;
+            font-size: 14px;
+            background: var(--bg-color, #fff);
+            color: var(--text-primary, #2c3e50);
+            transition: border-color .2s;
+            font-family: inherit;
+        }
+        .contact-field input:focus, .contact-field textarea:focus, .contact-field select:focus {
+            outline: none;
+            border-color: var(--primary-color, #667eea);
+        }
+        .contact-field textarea { resize: vertical; min-height: 90px; }
+        .contact-submit {
+            width: 100%;
+            padding: 12px;
+            background: var(--gradient-primary, linear-gradient(135deg,#667eea,#764ba2));
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity .2s;
+            margin-top: 4px;
+        }
+        .contact-submit:hover { opacity: .9; }
+
+        /* Help accordion */
+        .help-item { border-bottom: 1px solid var(--border-color, #ecf0f1); }
+        .help-item:last-child { border-bottom: none; }
+        .help-question {
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            padding: 13px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary, #2c3e50);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .help-question i { font-size: 12px; transition: transform .2s; flex-shrink: 0; color: var(--text-secondary,#7f8c8d); }
+        .help-item.open .help-question i { transform: rotate(180deg); }
+        .help-answer {
+            display: none;
+            padding: 0 0 12px;
+            font-size: 13.5px;
+            line-height: 1.65;
+            color: var(--text-secondary, #7f8c8d);
+        }
+        .help-item.open .help-answer { display: block; }
+    </style>
+
+    <!-- Modal overlay container -->
+    <div class="info-modal-overlay" id="infoModalOverlay" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">
+        <div class="info-modal-sheet" id="infoModalSheet">
+            <div class="info-modal-handle"></div>
+            <div class="info-modal-header">
+                <h3 id="infoModalTitle"><i class="fas fa-shield-alt" id="infoModalIcon"></i> <span id="infoModalTitleText">Privacy Policy</span></h3>
+                <button class="info-modal-close" id="infoModalClose" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="info-modal-body" id="infoModalBody">
+                <!-- Content injected by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        /* ======================================================
+           INFO MODAL ENGINE — Privacy / Terms / Contact / Help
+           ====================================================== */
+
+        var MODAL_CONTENT = {
+
+            privacy: {
+                icon: 'fa-shield-alt',
+                title: 'Privacy Policy',
+                html: function() {
+                    var analytics = _getPref('pref_analytics', true);
+                    var marketing = _getPref('pref_marketing', false);
+                    var thirdParty = _getPref('pref_thirdparty', false);
+                    return '<p>Last updated: May 2026. MoodChat ("we", "us") is committed to protecting your personal data.</p>' +
+                        '<h4>What we collect</h4>' +
+                        '<ul><li>Account info: name, email, username, and password (hashed).</li>' +
+                        '<li>Usage data: messages (end-to-end encrypted), calls, and interactions.</li>' +
+                        '<li>Device info: browser type, OS, and IP address for security.</li></ul>' +
+                        '<h4>How we use your data</h4>' +
+                        '<p>We use your data to provide and improve the service, send security alerts, and — with your consent — personalise your experience.</p>' +
+                        '<h4>Your preferences</h4>' +
+                        '<div class="pref-row"><span class="pref-label">Analytics cookies<small>Help us improve MoodChat (anonymous)</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_analytics"' + (analytics ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<div class="pref-row"><span class="pref-label">Marketing emails<small>Product updates and offers from MoodChat</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_marketing"' + (marketing ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<div class="pref-row"><span class="pref-label">Third-party integrations<small>Share anonymised data with analytics partners</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_thirdparty"' + (thirdParty ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<h4>Data retention</h4>' +
+                        '<p>You may delete your account at any time from Settings. We retain your data for 30 days after deletion to support dispute resolution, then permanently erase it.</p>' +
+                        '<h4>Contact DPO</h4>' +
+                        '<p>Data Protection Officer: <a href="mailto:privacy@moodchat.app">privacy@moodchat.app</a></p>';
+                }
+            },
+
+            terms: {
+                icon: 'fa-file-contract',
+                title: 'Terms of Service',
+                html: function() {
+                    var updates = _getPref('pref_terms_updates', true);
+                    var promos  = _getPref('pref_terms_promos', false);
+                    return '<p>Effective: January 2026. By using MoodChat you agree to these terms.</p>' +
+                        '<h4>Eligibility</h4><p>You must be 13 years or older. Users under 18 require parental consent.</p>' +
+                        '<h4>Account responsibilities</h4>' +
+                        '<ul><li>Keep your credentials secure. You are responsible for all activity on your account.</li>' +
+                        '<li>Do not share account access with others.</li>' +
+                        '<li>Report any unauthorised access immediately.</li></ul>' +
+                        '<h4>Prohibited conduct</h4>' +
+                        '<ul><li>Harassment, hate speech, or threats of violence.</li>' +
+                        '<li>Distributing spam, malware, or illegal content.</li>' +
+                        '<li>Attempting to reverse-engineer or scrape the platform.</li></ul>' +
+                        '<h4>Intellectual property</h4>' +
+                        '<p>MoodChat grants you a limited, non-exclusive licence to use the service. You retain ownership of content you post.</p>' +
+                        '<h4>Notifications preferences</h4>' +
+                        '<div class="pref-row"><span class="pref-label">Terms update notifications<small>Email me when terms change materially</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_terms_updates"' + (updates ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<div class="pref-row"><span class="pref-label">Promotional offers<small>Receive offers and feature announcements</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_terms_promos"' + (promos ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<h4>Termination</h4>' +
+                        '<p>We reserve the right to suspend accounts that violate these terms. You may delete your account at any time in Settings.</p>';
+                }
+            },
+
+            contact: {
+                icon: 'fa-envelope',
+                title: 'Contact Us',
+                html: function() {
+                    return '<p>We typically respond within 24 hours on business days.</p>' +
+                        '<div class="contact-field"><label for="ct_name">Your Name</label>' +
+                        '<input type="text" id="ct_name" placeholder="Enter your name" autocomplete="name"></div>' +
+                        '<div class="contact-field"><label for="ct_email">Email Address</label>' +
+                        '<input type="email" id="ct_email" placeholder="your@email.com" autocomplete="email"></div>' +
+                        '<div class="contact-field"><label for="ct_subject">Subject</label>' +
+                        '<select id="ct_subject"><option value="">Select a topic…</option>' +
+                        '<option value="account">Account issue</option>' +
+                        '<option value="bug">Bug report</option>' +
+                        '<option value="privacy">Privacy concern</option>' +
+                        '<option value="billing">Billing</option>' +
+                        '<option value="feature">Feature request</option>' +
+                        '<option value="other">Other</option></select></div>' +
+                        '<div class="contact-field"><label for="ct_message">Message</label>' +
+                        '<textarea id="ct_message" placeholder="Describe your issue or question…"></textarea></div>' +
+                        '<button class="contact-submit" id="contactSendBtn"><i class="fas fa-paper-plane"></i> Send Message</button>' +
+                        '<p style="font-size:12px;color:var(--text-light);margin-top:10px;text-align:center">Or email us directly: <a href="mailto:support@moodchat.app">support@moodchat.app</a></p>';
+                }
+            },
+
+            help: {
+                icon: 'fa-question-circle',
+                title: 'Help Center',
+                html: function() {
+                    var faqs = [
+                        { q: 'How do I reset my password?', a: 'On the login screen click "Forgot password?", enter your email, and follow the link we send you.' },
+                        { q: 'Why can\'t I log in?', a: 'Ensure your email and password are correct. If the server is starting from sleep mode (free tier), wait 30 seconds and try again. Check CAPS LOCK.' },
+                        { q: 'How do I start a video call?', a: 'Open a chat conversation and tap the camera icon in the top-right. Both users must allow camera/microphone access.' },
+                        { q: 'Can I use MoodChat on multiple devices?', a: 'Yes. You can be signed in on up to 2 devices per account simultaneously.' },
+                        { q: 'How do I delete my account?', a: 'Go to Settings → Account → Delete Account. This is permanent after 30 days.' },
+                        { q: 'Why are my messages disappearing?', a: 'This can happen if you have Auto-Delete enabled, or if the app was refreshed during a sync. Check Settings → Privacy → Auto-Delete Messages.' },
+                        { q: 'How do I report someone?', a: 'Open the conversation, tap the ⋮ menu, then choose "Report User". Our moderation team reviews reports within 48 hours.' },
+                        { q: 'Why does the app show a loading spinner for a long time?', a: 'MoodChat is hosted on a free cloud tier that sleeps after inactivity. The first request after sleep takes ~30 seconds to wake the server. This is normal.' }
+                    ];
+                    var html = '<p>Find answers to common questions below.</p>';
+                    faqs.forEach(function(f, i) {
+                        html += '<div class="help-item" data-help-idx="' + i + '">' +
+                            '<button class="help-question"><span>' + f.q + '</span><i class="fas fa-chevron-down"></i></button>' +
+                            '<div class="help-answer">' + f.a + '</div></div>';
+                    });
+                    return html;
+                }
+            }
+        };
+
+        /* Preference persistence */
+        function _getPref(key, def) {
+            try { var v = localStorage.getItem(key); return v === null ? def : v === 'true'; }
+            catch(e) { return def; }
+        }
+        function _setPref(key, val) {
+            try { localStorage.setItem(key, val ? 'true' : 'false'); } catch(e) {}
+        }
+
+        /* Open modal */
+        function openInfoModal(type) {
+            var cfg = MODAL_CONTENT[type];
+            if (!cfg) return;
+            var overlay = document.getElementById('infoModalOverlay');
+            var body    = document.getElementById('infoModalBody');
+            var icon    = document.getElementById('infoModalIcon');
+            var title   = document.getElementById('infoModalTitleText');
+            if (!overlay || !body) return;
+
+            icon.className  = 'fas ' + cfg.icon;
+            title.textContent = cfg.title;
+            body.innerHTML  = cfg.html();
+            overlay.classList.add('open');
+            document.body.style.overflow = 'hidden';
+
+            /* Wire up toggles */
+            body.querySelectorAll('.pref-toggle input[type=checkbox]').forEach(function(cb) {
+                cb.addEventListener('change', function() {
+                    _setPref(cb.id, cb.checked);
+                    if (window.CoreUtils) window.CoreUtils.showNotification('Preference saved', (cb.checked ? 'Enabled' : 'Disabled') + ': ' + (cb.closest('.pref-row')?.querySelector('.pref-label')?.firstChild?.textContent?.trim() || cb.id), 'success');
+                });
+            });
+
+            /* Wire help accordion */
+            body.querySelectorAll('.help-item').forEach(function(item) {
+                item.querySelector('.help-question')?.addEventListener('click', function() {
+                    item.classList.toggle('open');
+                });
+            });
+
+            /* Wire contact send */
+            var sendBtn = body.querySelector('#contactSendBtn');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', function() {
+                    var name    = body.querySelector('#ct_name')?.value.trim();
+                    var email   = body.querySelector('#ct_email')?.value.trim();
+                    var subject = body.querySelector('#ct_subject')?.value;
+                    var message = body.querySelector('#ct_message')?.value.trim();
+                    if (!name || !email || !subject || !message) {
+                        if (window.CoreUtils) window.CoreUtils.showNotification('Error', 'Please fill in all fields', 'error');
+                        return;
+                    }
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                        if (window.CoreUtils) window.CoreUtils.showNotification('Error', 'Please enter a valid email', 'error');
+                        return;
+                    }
+                    /* In production this would POST to /api/contact */
+                    sendBtn.disabled = true;
+                    sendBtn.innerHTML = '<i class="fas fa-check"></i> Message sent!';
+                    if (window.CoreUtils) window.CoreUtils.showNotification('Success', 'Your message has been sent. We\'ll reply within 24 hours.', 'success');
+                    setTimeout(function() { closeInfoModal(); }, 1800);
+                });
+            }
+        }
+
+        /* Close modal */
+        function closeInfoModal() {
+            var overlay = document.getElementById('infoModalOverlay');
+            if (overlay) overlay.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+
+        /* Delegate all [data-modal] clicks */
+        document.addEventListener('click', function(e) {
+            var el = e.target.closest('[data-modal]');
+            if (el) {
+                e.preventDefault();
+                openInfoModal(el.getAttribute('data-modal'));
+                return;
+            }
+            /* Close on backdrop click */
+            if (e.target.id === 'infoModalOverlay') closeInfoModal();
+        });
+
+        /* Close button */
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('#infoModalClose')) closeInfoModal();
+        });
+
+        /* Close on Escape */
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeInfoModal();
+        });
+
+        /* Expose for external use */
+        window.InfoModal = { open: openInfoModal, close: closeInfoModal };
+    })();
+    </script>
+
+
     <!-- ====================================================================== -->
     <script>
     console.log('[SW-REG] Service Worker temporarily disabled to test redirect loop issue');
