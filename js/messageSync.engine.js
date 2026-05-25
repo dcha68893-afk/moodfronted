@@ -175,12 +175,18 @@
             this._emitSyncEvent('MESSAGE_STATUS_UPDATED', { localId, serverId, status });
         }
 
-        /** Reconcile conversations list from server */
+        /** Reconcile conversations list from server -- FIX #2: tombstones block resurrection */
         async syncConversations(serverConversations) {
             const localStore = window.KynectaLocalStore;
             if (!localStore || !Array.isArray(serverConversations)) return;
 
+            // FIX #2: Never restore tombstoned conversations from server
+            var tombstones = {};
+            try { tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}'); } catch (_) {}
+
             for (const conv of serverConversations) {
+                const id = String(conv.id || conv.chatId || conv.conversationId || '');
+                if (id && tombstones[id]) continue;
                 await localStore.saveConversation(conv);
             }
         }

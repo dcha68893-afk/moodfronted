@@ -244,9 +244,24 @@
 
       try {
         await this._restore.restore();
+
+        // FIX #17 — After room rejoin, fetch missed events from server
+        const socket = window.KynectaRealtime?._socket;
+        if (socket?.connected) {
+          const myId = this._restore._getMyUserId();
+          // Request any events we missed while disconnected
+          socket.emit('sync:missed_events', {
+            since: this._lastDisconnectedAt || (Date.now() - 5 * 60 * 1000),
+            userId: myId
+          });
+          // Trigger full message sync
+          if (window.KynectaSyncEngine?.scheduleSyncAll) {
+            window.KynectaSyncEngine.scheduleSyncAll(800);
+          }
+        }
+
         this._setState(RECOVERY_STATE.RECOVERED);
 
-        // After brief delay, settle to CONNECTED
         setTimeout(() => {
           if (this._state === RECOVERY_STATE.RECOVERED) {
             this._setState(RECOVERY_STATE.CONNECTED);
@@ -258,6 +273,7 @@
     }
 
     _onDisconnected(reason) {
+      this._lastDisconnectedAt = Date.now(); // FIX #17 — track disconnect time for missed-event window
       this._setState(RECOVERY_STATE.DISCONNECTED);
 
       if (reason === 'io server disconnect' || reason === 'transport close') {

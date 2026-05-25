@@ -157,16 +157,53 @@
         return;
       }
       if (this._timers.has(story.id)) clearTimeout(this._timers.get(story.id));
+
+      // FIX #9 — Only schedule if timers are not paused
+      if (this._paused) {
+        // Store remaining time for when we resume
+        this._pausedRemaining = this._pausedRemaining || new Map();
+        this._pausedRemaining.set(story.id, { story, remaining });
+        return;
+      }
+
       const tid = setTimeout(() => {
         this._timers.delete(story.id);
         this._onExpired(story.id, story.userId);
-      }, Math.min(remaining, 2147483647)); // clamp to max setTimeout
+      }, Math.min(remaining, 2147483647));
       this._timers.set(story.id, tid);
+    }
+
+    // FIX #9 — Pause all auto-dismiss/progress timers during user interaction
+    pauseAll(reason) {
+      this._paused = true;
+      this._pauseReason = reason || 'unknown';
+      this._pausedRemaining = this._pausedRemaining || new Map();
+      for (const [storyId, tid] of this._timers) {
+        clearTimeout(tid);
+        this._pausedRemaining.set(storyId, {
+          remaining: 0,  // will be rescheduled on resume with full remaining
+          pausedAt: Date.now()
+        });
+      }
+      this._timers.clear();
+    }
+
+    // FIX #9 — Resume all timers after interaction closes
+    resumeAll() {
+      this._paused = false;
+      // Re-schedule any paused timers
+      if (this._pausedRemaining) {
+        for (const [storyId, meta] of this._pausedRemaining) {
+          if (meta.story) this.scheduleExpiry(meta.story);
+        }
+        this._pausedRemaining.clear();
+      }
     }
 
     cancelExpiry(storyId) {
       const tid = this._timers.get(storyId);
       if (tid) { clearTimeout(tid); this._timers.delete(storyId); }
+      if (this._pausedRemaining) this._pausedRemaining.delete(storyId);
     }
 
     async pruneAndSchedule(stories) {
@@ -186,9 +223,28 @@
 
     async recordView(storyId, viewerId, ownerId) {
       const alreadySeen = await this._store.hasViewed(storyId, viewerId);
+
+      // FIX #10 — Always persist to IDB so view history survives refresh
+      await this._store.recordView(storyId, viewerId);
+
+      // FIX #10 — Also persist to localStorage as fallback
+      try {
+        const viewKey = 'moodchat_status_views_v1';
+        const views = JSON.parse(localStorage.getItem(viewKey) || '{}');
+        views[String(storyId) + ':' + String(viewerId)] = {
+          storyId: String(storyId), viewerId: String(viewerId),
+          viewedAt: Date.now(), ownerId: String(ownerId || '')
+        };
+        const keys = Object.keys(views);
+        if (keys.length > 500) {
+          keys.sort((a, b) => (views[a].viewedAt || 0) - (views[b].viewedAt || 0));
+          keys.slice(0, keys.length - 500).forEach(k => delete views[k]);
+        }
+        localStorage.setItem(viewKey, JSON.stringify(views));
+      } catch (_) {}
+
       if (alreadySeen) return false;
 
-      await this._store.recordView(storyId, viewerId);
       this._counts.set(storyId, (this._counts.get(storyId) || 0) + 1);
 
       // Notify server (uses existing wsService.notifyStatusViewed route)
@@ -396,6 +452,30 @@
 
     async start() {
       this._realtime.attachSocketListeners();
+
+      // FIX #9 — Wire timer pause/resume for status reply, viewers, and share interactions.
+      // When the user opens any of these panels the auto-dismiss timers must freeze.
+      const pauseExp = (reason) => this._expiration.pauseAll(reason);
+      const resumeExp = () => this._expiration.resumeAll();
+
+      window.addEventListener('kyn:status:replyOpen',   () => pauseExp('reply'));
+      window.addEventListener('kyn:status:replyClose',  resumeExp);
+      window.addEventListener('kyn:status:viewersOpen', () => pauseExp('viewers'));
+      window.addEventListener('kyn:status:viewersClose', resumeExp);
+      window.addEventListener('kyn:status:shareOpen',   () => pauseExp('share'));
+      window.addEventListener('kyn:status:shareClose',  resumeExp);
+
+      // Also intercept focus on reply input elements
+      document.addEventListener('focusin', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.status-reply-input, [data-status-reply], .story-reply-box')) {
+          pauseExp('input');
+        }
+      });
+      document.addEventListener('focusout', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.status-reply-input, [data-status-reply], .story-reply-box')) {
+          setTimeout(resumeExp, 400);
+        }
+      });
 
       // Hydrate from IDB
       try {

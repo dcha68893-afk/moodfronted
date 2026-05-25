@@ -53,8 +53,43 @@
         return;
       }
 
+      // FIX #6 — Pre-warm: create dedicated remote audio element immediately so
+      // it is ready before any call arrives (no creation delay on incoming call).
+      this._ensureRemoteAudioElement();
+
+      // FIX #6 — Pre-gather ICE candidates on first user gesture
+      const prewarm = () => {
+        try {
+          const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          pc.createOffer({ offerToReceiveAudio: true })
+            .then(o => pc.setLocalDescription(o))
+            .then(() => setTimeout(() => { try { pc.close(); } catch(_){} }, 4000))
+            .catch(() => { try { pc.close(); } catch(_){} });
+        } catch(_) {}
+      };
+      ['click','touchstart','keydown'].forEach(e => document.addEventListener(e, function once() {
+        prewarm(); document.removeEventListener(e, once);
+      }, { once: true, passive: true }));
+
       this._attachExistingCallListeners();
       console.log('[CallOrchestrator] ✅ Started');
+    }
+
+    // FIX #8 — Ensure a dedicated hidden audio element exists for remote audio
+    _ensureRemoteAudioElement() {
+      if (this._remoteAudioEl) return this._remoteAudioEl;
+      let el = document.getElementById('__callorch_remote_audio');
+      if (!el) {
+        el = document.createElement('audio');
+        el.id = '__callorch_remote_audio';
+        el.autoplay = true;
+        el.setAttribute('playsinline', '');
+        el.muted = false;
+        el.style.display = 'none';
+        document.body.appendChild(el);
+      }
+      this._remoteAudioEl = el;
+      return el;
     }
 
     // ── OUTBOUND CALL ──────────────────────────────────────────────────────
@@ -340,7 +375,28 @@
       const remoteStream = peerSession.getRemoteStream();
       if (!remoteStream || remoteStream.getTracks().length === 0) return;
 
-      // Wire to existing remote video element in calls.html
+      // FIX #7 — STRICT STREAM SEPARATION: get local stream to ensure we never bind it as remote
+      const localStream = peerSession.getLocalStream();
+
+      // FIX #8 — Wire audio tracks to dedicated hidden audio element (avoids autoplay block on video)
+      const audioTracks = remoteStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const audioEl = this._ensureRemoteAudioElement();
+        if (audioEl.srcObject !== remoteStream) {
+          audioEl.srcObject = remoteStream;
+          audioEl.muted = false;
+        }
+        // Autoplay recovery
+        audioEl.play().catch(err => {
+          if (err.name === 'NotAllowedError') {
+            const recover = () => audioEl.play().catch(() => {});
+            document.addEventListener('click', recover, { once: true });
+            document.addEventListener('touchstart', recover, { once: true, passive: true });
+          }
+        });
+      }
+
+      // Wire to existing remote video element — FIX #7: NEVER bind if element has local stream
       const remoteVideo = document.getElementById('remote-video')
         || document.getElementById('remoteVideo')
         || document.querySelector(`[data-remote-video="${peerId}"]`)
@@ -348,11 +404,17 @@
         || document.querySelector('.remote-video');
 
       if (remoteVideo && remoteVideo.tagName === 'VIDEO') {
-        remoteVideo.srcObject = remoteStream;  // remote stream — NOT local
-        remoteVideo.autoplay  = true;
-        remoteVideo.playsInline = true;
-        remoteVideo.muted     = false;
-        console.log(`[CallOrchestrator] Remote media attached for peer ${peerId}`);
+        // Safety check: if this element currently has local stream, do NOT overwrite it
+        if (localStream && remoteVideo.srcObject === localStream) {
+          console.warn('[CallOrchestrator] FIX#7 — Refused to overwrite local video with remote stream');
+        } else {
+          remoteVideo.srcObject = remoteStream; // remote stream — NOT local
+          remoteVideo.autoplay = true;
+          remoteVideo.playsInline = true;
+          remoteVideo.muted = false;
+          remoteVideo.play().catch(() => {});
+          console.log(`[CallOrchestrator] Remote video attached for peer ${peerId}`);
+        }
       }
 
       // Dispatch custom event so calls.html can wire its own UI

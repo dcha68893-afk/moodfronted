@@ -369,6 +369,11 @@
         'group:call', 'group:announcement', 'group:media',
         'group:membership_change', 'group:updated',
         'group:read_receipt', 'group:member_joined', 'group:member_left',
+        // FIX #11 — group creation event so creator is auto-inserted as owner
+        'group:created', 'group_created',
+        // FIX #12 — invite lifecycle events
+        'group:invite', 'group:invite_created', 'group:invite_received',
+        'group:invite_accepted', 'group:invite_declined',
       ];
 
       for (const evt of groupEvents) {
@@ -433,6 +438,41 @@
           this._sync.onGroupUpdate(groupId, payload);
           break;
         default:
+          // FIX #11 — group:created: ensure creator is owner+member immediately
+          if (eventType === 'group:created' || eventType === 'group_created') {
+            const gId = groupId;
+            const creatorId = payload.creatorId || payload.userId ||
+              (() => { try { const s = window.__PARENT_SESSION__ || {}; return s.userId || (s.user && s.user.id); } catch(_){return null;} })();
+            if (gId && creatorId) {
+              this._registry.addMember(String(gId), String(creatorId), {
+                userId: String(creatorId), role: 'owner', joinedAt: Date.now(), isCreator: true
+              });
+              if (!window.__groupMembershipCache) window.__groupMembershipCache = {};
+              window.__groupMembershipCache[String(gId)] = { groupId: String(gId), userId: String(creatorId), role: 'owner', joinedAt: Date.now() };
+              this._dispatcher.dispatch('group:membership_change', { groupId: gId, userId: creatorId, role: 'owner', action: 'joined' });
+              console.log('[GroupOrchestrator] FIX#11 — Creator', creatorId, 'added as owner of group', gId);
+            }
+            break;
+          }
+
+          // FIX #12 — group invites: persist and dispatch
+          if (eventType === 'group:invite' || eventType === 'group:invite_created') {
+            const inviteId = payload.inviteId || ('inv_' + Date.now());
+            const invite = { ...payload, inviteId, receivedAt: Date.now() };
+            try {
+              const stored = JSON.parse(localStorage.getItem('moodchat_group_invites_v1') || '{}');
+              stored[inviteId] = invite;
+              localStorage.setItem('moodchat_group_invites_v1', JSON.stringify(stored));
+            } catch (_) {}
+            this._dispatcher.dispatch('group:invite_received', invite);
+            break;
+          }
+
+          if (eventType === 'group:invite_accepted') {
+            this._sync.onMemberJoin(groupId, payload.member || { userId: payload.userId, role: 'member' });
+            break;
+          }
+
           // Fan out any other group event
           this._dispatcher.dispatch(eventType, payload);
       }

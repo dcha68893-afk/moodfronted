@@ -331,22 +331,37 @@
       const storeName = this._normalizeCollection(collection);
       await this.ready();
 
+      let records;
       if (!this._db) {
-        const items = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
-        this._logCacheOp("Loaded", storeName);
-        return items;
+        records = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
+      } else {
+        try {
+          const tx = this._db.transaction([storeName], "readonly");
+          const raw = await this._requestToPromise(tx.objectStore(storeName).getAll());
+          records = Array.isArray(raw) ? raw : [];
+        } catch (_error) {
+          records = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
+        }
       }
 
-      try {
-        const tx = this._db.transaction([storeName], "readonly");
-        const records = await this._requestToPromise(tx.objectStore(storeName).getAll());
-        this._logCacheOp("Loaded", storeName);
-        return Array.isArray(records) ? records : [];
-      } catch (_error) {
-        const items = Array.from(this._memoryStore(storeName).values()).map((item) => clone(item));
-        this._logCacheOp("Loaded", storeName);
-        return items;
+      // FIX #2 — TOMBSTONE AUTHORITY: filter deleted entities before returning.
+      // Deleted chats/groups must never resurrect from IDB on hydration.
+      if (storeName === 'chats' || storeName === 'groups') {
+        const tombstones = (() => {
+          try { return JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}'); } catch (_) { return {}; }
+        })();
+        if (Object.keys(tombstones).length > 0) {
+          records = records.filter((r) => {
+            const id = r.id || r.chatId || r.conversationId || r.groupId;
+            return id ? !tombstones[String(id)] : true;
+          });
+        }
+        // Also filter records that carry their own deletedAt flag
+        records = records.filter((r) => !r.deletedAt && !r._tombstone);
       }
+
+      this._logCacheOp("Loaded", storeName);
+      return records;
     }
 
     _queryCollection(items, query, firstOnly) {
@@ -394,6 +409,41 @@
           resolve(false);
         }
       });
+    }
+
+    // FIX #2 — TOMBSTONE: permanent deletion so entities never resurrect.
+    // Writes a tombstone to localStorage AND removes entity from IDB.
+    async deleteConversation(chatId) {
+      const id = String(chatId);
+      // 1. Write tombstone
+      try {
+        const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+        tombstones[id] = { deletedAt: nowTs(), entityType: 'chat', syncRevision: 1 };
+        localStorage.setItem('moodchat_tombstones_v1', JSON.stringify(tombstones));
+      } catch (_) {}
+      // 2. Remove from IDB
+      await this.remove('chats', id).catch(() => {});
+      // 3. Remove all messages for this chat
+      try {
+        const msgs = await this.getAll('messages');
+        const toDelete = msgs.filter((m) => String(m.chatId || m.conversationId || '') === id);
+        await Promise.all(toDelete.map((m) => this.remove('messages', m.id).catch(() => {})));
+      } catch (_) {}
+      // 4. Broadcast
+      try { window.dispatchEvent(new CustomEvent('kyn:chat:deleted', { detail: { chatId: id } })); } catch (_) {}
+      return true;
+    }
+
+    async deleteGroup(groupId) {
+      const id = String(groupId);
+      try {
+        const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+        tombstones[id] = { deletedAt: nowTs(), entityType: 'group', syncRevision: 1 };
+        localStorage.setItem('moodchat_tombstones_v1', JSON.stringify(tombstones));
+      } catch (_) {}
+      await this.remove('groups', id).catch(() => {});
+      try { window.dispatchEvent(new CustomEvent('kyn:group:deleted', { detail: { groupId: id } })); } catch (_) {}
+      return true;
     }
 
     async clear(collection) {

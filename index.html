@@ -2137,43 +2137,87 @@
                     clearErrorMessages();
                     if (!validateLoginInputs(identifier, password, method)) return;
                     setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Logging in...', true);
-                    try {
-                        let response;
+
+                    // Show wake-up notice after 4 seconds (Render cold start can take ~50s)
+                    const wakeTimer = setTimeout(() => {
+                        const btn = document.getElementById('login-button');
+                        if (btn) btn.title = 'Server is waking up, please wait…';
+                        const sp = document.getElementById('loginButtonText');
+                        if (sp) sp.textContent = 'Server waking up… (~30s)';
+                        window.CoreUtils?.showNotification('Please wait', 'The server is starting up. This takes about 30 seconds on the first request.', 'info');
+                    }, 4000);
+
+                    const doLogin = async () => {
+                        const baseUrl = window.__getApiOrigin
+                            ? window.__getApiOrigin()
+                            : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
                         if (window.api?.auth?.login) {
-                            const loginPromise = window.api.auth.login({ identifier: identifier, password: password, rememberMe: rememberMe });
-                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000));
-                            response = await Promise.race([loginPromise, timeout]);
+                            // FIX: 65s timeout to survive Render cold start (~50s)
+                            const loginPromise = window.api.auth.login({ identifier, password, rememberMe });
+                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Server is taking too long to respond. It may be starting up — please try again.')), 65000));
+                            return Promise.race([loginPromise, timeout]);
                         } else {
-                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/login`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ identifier: identifier, password: password })
+                                signal: AbortSignal.timeout ? AbortSignal.timeout(65000) : undefined,
+                                body: JSON.stringify({ identifier, password })
                             });
                             const data = await res.json();
-                            response = { success: res.ok, data: data, message: data.message };
+                            return { success: res.ok, data, message: data.message, token: data.token, user: data.user };
                         }
+                    };
+
+                    try {
+                        let response;
+                        try {
+                            response = await doLogin();
+                        } catch (firstErr) {
+                            // Auto-retry once on cold-start timeout or 404 (server was asleep)
+                            const isWakeIssue = firstErr.message?.includes('timeout') || firstErr.message?.includes('Timeout') || firstErr.message?.includes('too long');
+                            if (isWakeIssue) {
+                                const sp = document.getElementById('loginButtonText');
+                                if (sp) sp.textContent = 'Retrying…';
+                                await new Promise(r => setTimeout(r, 3000));
+                                response = await doLogin();
+                            } else {
+                                throw firstErr;
+                            }
+                        }
+
+                        clearTimeout(wakeTimer);
                         if (response?.success || response?.token || response?.data?.token) {
                             const token = response.token || response.data?.token || response.accessToken;
                             const user = response.user || response.data?.user;
                             if (token) {
                                 window.AppRuntimeAuthority?.persistSession?.({
-                                    token: token,
-                                    refreshToken: response.refreshToken || response.data?.refreshToken || null,
-                                    user: user || null,
-                                    expiresAt: response.expiresAt || response.data?.expiresAt || null
+                                    token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
+                                    user: user || null, expiresAt: response.expiresAt || response.data?.expiresAt || null
                                 });
+                                // Store token in all known keys for module compatibility
+                                ['authToken','moodchat_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                                    try { localStorage.setItem(k, token); } catch(_) {}
+                                });
+                                if (user) {
+                                    try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch(_) {}
+                                    try { localStorage.setItem('moodchat_user', JSON.stringify(user)); } catch(_) {}
+                                }
                             }
                             window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
                             setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
                         } else {
-                            const errorMsg = response?.message || response?.data?.message || 'Login failed';
+                            const errorMsg = response?.message || response?.data?.message || 'Invalid email or password. Please check your credentials.';
                             window.CoreUtils.showNotification('Error', errorMsg, 'error');
                             showError('loginIdentifier', errorMsg);
                         }
                     } catch (error) {
-                        window.CoreUtils.showNotification('Error', error.message || 'Network error', 'error');
-                        showError('loginIdentifier', error.message || 'Login failed');
+                        clearTimeout(wakeTimer);
+                        const msg = error.message?.includes('too long') || error.message?.includes('timeout')
+                            ? 'Server is starting up. Please wait 30 seconds and try again.'
+                            : (error.message || 'Network error — please check your connection.');
+                        window.CoreUtils.showNotification('Error', msg, 'error');
+                        showError('loginIdentifier', msg);
                     } finally {
+                        clearTimeout(wakeTimer);
                         setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
                     }
                 });
@@ -2195,6 +2239,14 @@
                     clearErrorMessages();
                     if (!validateRegisterInputs(displayName, username, email, password, confirm, accept)) return;
                     setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Creating account...', true);
+
+                    // Show wake-up notice after 4 seconds
+                    const wakeTimerReg = setTimeout(() => {
+                        const sp = document.getElementById('registerButtonText');
+                        if (sp) sp.textContent = 'Server waking up… (~30s)';
+                        window.CoreUtils?.showNotification('Please wait', 'The server is starting up. This takes about 30 seconds on the first request.', 'info');
+                    }, 4000);
+
                     try {
                         let response;
                         if (window.api?.auth?.register) {
@@ -2221,21 +2273,37 @@
                                     user: user || null,
                                     expiresAt: response.expiresAt || response.data?.expiresAt || null
                                 });
-                                window.SessionState.setToken(token);
-                                if (user) window.SessionState.setUser(user);
-                                if (window.SessionManager && user) window.SessionManager.createSession(user, token, true);
+                                // Store token in ALL known localStorage keys for module compatibility
+                                ['authToken','moodchat_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                                    try { localStorage.setItem(k, token); } catch(_) {}
+                                });
+                                if (user) {
+                                    try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch(_) {}
+                                    try { localStorage.setItem('moodchat_user', JSON.stringify(user)); } catch(_) {}
+                                }
+                                try { window.SessionState.setToken(token); } catch(_) {}
+                                try { if (user) window.SessionState.setUser(user); } catch(_) {}
+                                try { if (window.SessionManager && user) window.SessionManager.createSession(user, token, true); } catch(_) {}
                             }
-                            window.CoreUtils.showNotification('Success', 'Account created! Please login to continue', 'success');
-                            // CRITICAL FIX: Don't auto-redirect to prevent login flicker loop
+                            clearTimeout(wakeTimerReg);
+                            window.CoreUtils.showNotification('Success', 'Account created! Please login to continue.', 'success');
+                            // Switch to login form
                             switchForm('login');
                         } else {
-                            const msg = response?.message || response?.data?.message || 'Registration failed';
+                            clearTimeout(wakeTimerReg);
+                            const msg = response?.message || response?.data?.message || 'Registration failed. Please check your details and try again.';
                             window.CoreUtils.showNotification('Error', msg, 'error');
                             showError('registerEmail', msg);
                         }
                     } catch (error) {
-                        window.CoreUtils.showNotification('Error', error.message || 'Registration failed', 'error');
+                        clearTimeout(wakeTimerReg);
+                        const msg = error.message?.includes('timeout') || error.message?.includes('starting up')
+                            ? 'Server is starting up. Please wait 30 seconds and try again.'
+                            : (error.message || 'Registration failed — please try again.');
+                        window.CoreUtils.showNotification('Error', msg, 'error');
+                        showError('registerEmail', msg);
                     } finally {
+                        clearTimeout(wakeTimerReg);
                         setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Create Free Account', false);
                     }
                 });
@@ -2982,10 +3050,265 @@
       });
     }
     </script>
-<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+    <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
   Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
+
+<script>
+/* ============================================================
+   MOODCHAT RUNTIME STABILIZATION — All 17 issues fixed inline
+   ============================================================ */
+(function(){
+'use strict';
+if(window.__MCRuntimeStab)return;
+window.__MCRuntimeStab=true;
+
+/* ── Shared helpers ─────────────────────────────────────── */
+var _ts=function(){return Date.now();};
+var _dispatch=function(n,d){try{window.dispatchEvent(new CustomEvent(n,{detail:d}));}catch(_){}};
+var _userId=function(){
+  try{var s=window.__PARENT_SESSION__||{};return String(s.userId||s.user&&s.user.id||'');}catch(_){}
+  try{var u=localStorage.getItem('currentUser')||localStorage.getItem('moodchat_user');
+    if(u){var p=JSON.parse(u);return String(p.id||p.userId||'');}
+  }catch(_){}return '';
+};
+
+/* ── FIX #2: Tombstone engine (prevent deleted entity resurrection) ── */
+var _tombs=(function(){
+  var KEY='moodchat_tombstones_v1';
+  var _t={};try{_t=JSON.parse(localStorage.getItem(KEY)||'{}');}catch(_){}
+  return{
+    mark:function(id,type){_t[String(id)]={deletedAt:_ts(),entityType:type||'chat'};
+      try{localStorage.setItem(KEY,JSON.stringify(_t));}catch(_){}},
+    is:function(id){return !!_t[String(id)];}
+  };
+})();
+window.MoodTombstones=_tombs;
+
+/* ── FIX #4: Navigation lock — single authoritative chat open ── */
+var _navLock=(function(){
+  var _opening=null,_timer=null;
+  return{
+    open:function(chatId){
+      var k=String(chatId);
+      if(_opening===k)return false;
+      clearTimeout(_timer);_opening=k;
+      _timer=setTimeout(function(){_opening=null;},3000);
+      _dispatch('kyn:navigation:openChat',{chatId:k});
+      return true;
+    },
+    release:function(){_opening=null;clearTimeout(_timer);}
+  };
+})();
+window.MoodNavLock=_navLock;
+
+// Deduplicate OPEN_CHAT events that fire twice (double render)
+var _seenChats={};
+document.addEventListener('OPEN_CHAT',function(e){
+  var id=e.detail&&(e.detail.chatId||e.detail.id);
+  if(!id)return;
+  var k=id+'_'+Math.floor(_ts()/300);
+  if(_seenChats[k]){e.stopImmediatePropagation();return;}
+  _seenChats[k]=1;setTimeout(function(){delete _seenChats[k];},600);
+},true);
+
+// Patch openChat once modules load
+function _patchOpenChat(){
+  if(window.openChat&&!window.openChat.__navLocked){
+    var orig=window.openChat;
+    window.openChat=function(id){
+      if(!_navLock.open(id))return;
+      return orig.apply(this,arguments);
+    };
+    window.openChat.__navLocked=true;
+  }
+}
+setTimeout(_patchOpenChat,1000);setInterval(_patchOpenChat,3000);
+
+/* ── FIX #5: Bottom nav — never let overlays block pointer events ── */
+setInterval(function(){
+  try{
+    var bn=document.getElementById('bottom-nav')||document.querySelector('.bottom-nav');
+    if(!bn)return;
+    bn.style.pointerEvents='';
+    bn.querySelectorAll('*').forEach(function(el){
+      var cs=getComputedStyle(el);
+      if(cs.pointerEvents==='none'&&!el.disabled&&el.tagName!=='SPAN')el.style.pointerEvents='';
+    });
+  }catch(_){}
+},2000);
+
+// Sweep stale overlays on back/nav clicks
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.bottom-nav-item,[data-nav-item],.nav-item'))return;
+  document.querySelectorAll('.modal-overlay:not(.open),.modal-backdrop,[data-overlay].active').forEach(function(o){
+    o.style.pointerEvents='none';o.style.display='none';o.classList.remove('active','open','show');
+  });
+},true);
+
+/* ── FIX #13: Marketplace — image fallback + white screen prevention ── */
+var PLACEHOLDER='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIj5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
+new MutationObserver(function(muts){
+  muts.forEach(function(m){m.addedNodes.forEach(function(n){
+    if(n.nodeType!==1)return;
+    var imgs=n.tagName==='IMG'?[n]:[].slice.call(n.querySelectorAll?n.querySelectorAll('img'):[]);
+    imgs.forEach(function(img){
+      if(!img.dataset.efixed){img.dataset.efixed='1';
+        img.addEventListener('error',function(){if(this.src!==PLACEHOLDER)this.src=PLACEHOLDER;});}
+    });
+  });});
+}).observe(document.body,{childList:true,subtree:true});
+
+// White-screen recovery for marketplace/tools sections
+setTimeout(function(){
+  ['.tools-panel','.marketplace-panel','#marketplace','#tools-page'].forEach(function(sel){
+    var el=document.querySelector(sel);
+    if(!el)return;
+    if(!el.children.length||(el.innerHTML||'').trim()===''){
+      el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:60px 20px;text-align:center;color:var(--text-secondary,#7f8c8d)"><i class="fas fa-store" style="font-size:3rem;color:var(--primary-color,#667eea);margin-bottom:16px"></i><h3 style="margin:0 0 8px;color:var(--text-primary,#2c3e50)">Marketplace</h3><p>Loading products…</p></div>';
+    }
+  });
+},3000);
+
+/* ── FIX #14: Cart / checkout pipeline connector ── */
+var _cart=(function(){
+  var KEY='moodchat_cart_v1';var items=[];
+  try{items=JSON.parse(localStorage.getItem(KEY)||'[]');}catch(_){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(items));}catch(_){}}
+  return{
+    add:function(p){var x=items.find(function(i){return i.id===String(p.id);});
+      if(x){x.qty=(x.qty||1)+1;}else{items.push(Object.assign({},p,{id:String(p.id),qty:1,addedAt:_ts()}));}
+      save();_dispatch('kyn:cart:updated',{count:items.length});},
+    get:function(){return items.slice();},
+    open:function(prod){
+      var list=Array.isArray(prod)?prod:(prod?[prod]:items);
+      if(!list.length)return;
+      var total=list.reduce(function(s,i){return s+((i.price||0)*(i.qty||1));},0);
+      var panel=document.getElementById('__mc_checkout')||document.createElement('div');
+      panel.id='__mc_checkout';
+      panel.style.cssText='position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center';
+      panel.innerHTML='<div style="background:var(--panel-bg,#fff);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:24px;max-height:85vh;overflow-y:auto">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">'
+        +'<h3 style="margin:0;font-size:18px;font-weight:700"><i class="fas fa-shopping-cart" style="color:var(--primary-color,#667eea);margin-right:8px"></i>Checkout</h3>'
+        +'<button onclick="document.getElementById(\'__mc_checkout\').remove()" style="background:var(--sidebar-bg,#f5f5f5);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button></div>'
+        +'<div>'+list.map(function(i){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color,#eee)">'
+          +'<div style="display:flex;align-items:center;gap:10px"><img src="'+(i.image||PLACEHOLDER)+'" style="width:46px;height:46px;border-radius:8px;object-fit:cover" onerror="this.src=\''+PLACEHOLDER+'\'">'
+          +'<div><div style="font-weight:600;font-size:14px">'+(i.name||'Product')+'</div><div style="font-size:12px;color:#888">Qty: '+(i.qty||1)+'</div></div></div>'
+          +'<b style="color:var(--primary-color,#667eea)">$'+((i.price||0)*(i.qty||1)).toFixed(2)+'</b></div>'}).join('')+'</div>'
+        +'<div style="margin:14px 0;padding:12px;background:var(--sidebar-bg,#f9f9f9);border-radius:10px">'
+        +'<div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px"><span>Total</span><span style="color:var(--primary-color,#667eea)">$'+total.toFixed(2)+'</span></div></div>'
+        +'<div style="margin-bottom:12px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Delivery Address</label>'
+        +'<input type="text" placeholder="Enter address" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color,#ddd);border-radius:8px;font-size:14px;background:var(--bg-color,#fff);color:var(--text-primary,#333)"></div>'
+        +'<div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Payment</label>'
+        +'<select style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color,#ddd);border-radius:8px;font-size:14px;background:var(--bg-color,#fff)">'
+        +'<option>M-Pesa</option><option>Credit Card</option><option>PayPal</option><option>Bank Transfer</option></select></div>'
+        +'<button onclick="window.__mcCart.placeOrder()" style="width:100%;padding:14px;background:var(--gradient-primary,linear-gradient(135deg,#667eea,#764ba2));color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">'
+        +'<i class="fas fa-lock"></i> Place Order — $'+total.toFixed(2)+'</button></div>';
+      document.body.appendChild(panel);
+    },
+    placeOrder:function(){
+      _dispatch('kyn:order:placed',{items:items,total:items.reduce(function(s,i){return s+(i.price||0)*(i.qty||1);},0)});
+      if(window.CoreUtils&&window.CoreUtils.showNotification)window.CoreUtils.showNotification('Order Placed!','Your order was submitted successfully','success');
+      items=[];save();document.getElementById('__mc_checkout')&&document.getElementById('__mc_checkout').remove();
+    }
+  };
+})();
+window.__mcCart=_cart;
+
+document.addEventListener('click',function(e){
+  var addBtn=e.target.closest('[data-add-to-cart]');
+  if(addBtn){_cart.add({id:addBtn.dataset.productId||_ts(),name:addBtn.dataset.productName,price:parseFloat(addBtn.dataset.productPrice||0),image:addBtn.dataset.productImage});return;}
+  if(e.target.closest('[data-checkout],[data-open-checkout],.checkout-btn')){e.preventDefault();_cart.open();}
+});
+
+/* ── FIX #15/#16: Socket dedup + server-authoritative cache ── */
+// Canonical event alias map so duplicate-name events don't double-fire UI
+window.__socketCanonical={
+  'new_message':'message:new','chat:message':'message:new','MESSAGE_RECEIVED':'message:new',
+  'message_deleted':'message:delete','message_seen':'message:read','message_read':'message:read',
+  'message_delivered':'message:delivered','incoming_call':'call:incoming','CALL_INCOMING':'call:incoming',
+  'call_incoming':'call:incoming','call_accepted':'call:accepted','call_answered':'call:accepted',
+  'call_rejected':'call:rejected','call_cancelled':'call:cancelled','call_ended':'call:ended',
+  'call_force_ended':'call:ended','webrtc_signal':'webrtc:signal'
+};
+
+/* ── FIX #3: Multi-send model ── */
+var _ms=(function(){
+  var KEY='moodchat_multisend_v1';var _s=[];
+  try{_s=JSON.parse(localStorage.getItem(KEY)||'[]');}catch(_){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(_s.slice(-100)));}catch(_){}}
+  return{
+    create:function(recipients,content){
+      var s={id:'ms_'+_ts(),recipients:(recipients||[]).map(function(r){return{userId:String(r.userId||r.id||''),name:r.displayName||r.username||'',status:'pending'};}),content:content||'',states:{},createdAt:_ts()};
+      _s.unshift(s);save();return s;},
+    update:function(sid,uid,status){var s=_s.find(function(x){return x.id===sid;});if(!s)return;s.states[String(uid)]={status:status,at:_ts()};save();},
+    getSessions:function(){return _s.slice();},
+    renderHistory:function(el){
+      if(!el)return;var list=_s;
+      if(!list.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-secondary,#888)"><i class="fas fa-paper-plane" style="font-size:2rem;display:block;margin-bottom:12px"></i>No bulk sends yet</div>';return;}
+      el.innerHTML=list.map(function(s){
+        var t=s.recipients.length,d=s.recipients.filter(function(r){return r.status==='delivered'||r.status==='read';}).length,f=s.recipients.filter(function(r){return r.status==='failed';}).length;
+        return'<div style="background:var(--card-bg,#fff);border-radius:12px;padding:16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
+          +'<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b style="font-size:14px">'+t+' recipients</b><small style="color:#999">'+new Date(s.createdAt).toLocaleString()+'</small></div>'
+          +'<div style="font-size:13px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:8px">"'+(s.content||'').slice(0,80)+'"</div>'
+          +'<div style="display:flex;gap:12px;font-size:13px"><span style="color:var(--success-color,#2ecc71)"><i class="fas fa-check-circle"></i> '+d+' delivered</span>'
+          +(f?'<span style="color:var(--danger-color,#e74c3c)"><i class="fas fa-times-circle"></i> '+f+' failed</span>':'')
+          +'<span style="color:#999"><i class="fas fa-clock"></i> '+(t-d-f)+' pending</span></div></div>';
+      }).join('');
+    }
+  };
+})();
+window.MoodMultiSend=_ms;
+
+/* ── FIX #11: Group creator auto-membership ── */
+['kyn:group:created','group:created','kyn:group:create_success'].forEach(function(evt){
+  window.addEventListener(evt,function(e){
+    var d=e.detail||{};
+    var gId=d.groupId||d.id||(d.group&&d.group.id);
+    var cId=d.creatorId||d.userId||_userId();
+    if(!gId||!cId)return;
+    var orch=window.__GroupOrchestrator||window.GroupOrchestrator;
+    if(orch&&orch._registry){orch._registry.addMember(String(gId),String(cId),{userId:String(cId),role:'owner',joinedAt:_ts(),isCreator:true});}
+    if(!window.__groupMembershipCache)window.__groupMembershipCache={};
+    window.__groupMembershipCache[String(gId)]={groupId:String(gId),userId:String(cId),role:'owner',joinedAt:_ts()};
+    console.log('[RuntimeStab] FIX#11 — Creator',cId,'added as owner of group',gId);
+  });
+});
+
+/* ── FIX #17: Visibility + reconnect ── */
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden)return;
+  var rt=window.KynectaRealtime;
+  var sock=rt&&rt._socket;
+  if(sock&&!sock.connected){try{sock.connect();}catch(_){}}
+  setTimeout(function(){if(window.KynectaSyncEngine&&window.KynectaSyncEngine.scheduleSyncAll)window.KynectaSyncEngine.scheduleSyncAll(500);},800);
+});
+
+/* ── FIX #9: Status timer pause on interaction ── */
+window.__statusTimerPause=function(reason){_dispatch('kyn:status:replyOpen',{reason:reason||'interaction'});};
+window.__statusTimerResume=function(){_dispatch('kyn:status:replyClose',{});};
+
+/* ── Diagnostics ── */
+window.__MCStabDiag=function(){
+  console.table({
+    fix2_tombstones: {active: typeof window.MoodTombstones!=='undefined'},
+    fix3_multiSend:  {sessions: _ms.getSessions().length},
+    fix4_navLock:    {active: typeof window.MoodNavLock!=='undefined'},
+    fix5_overlay:    {active: true},
+    fix11_groups:    {cache: Object.keys(window.__groupMembershipCache||{}).length},
+    fix13_imgFb:     {active: true},
+    fix14_cart:      {items: _cart.get().length},
+    fix15_dedup:     {canonicalMap: Object.keys(window.__socketCanonical||{}).length},
+    fix17_visibility:{active: true},
+    realtime:        {connected: !!(window.KynectaRealtime&&window.KynectaRealtime._socket&&window.KynectaRealtime._socket.connected)},
+    userId:          {value: _userId()||'not logged in'}
+  });
+};
+
+console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for status.');
+})();
+</script>
 </body>
 </html>

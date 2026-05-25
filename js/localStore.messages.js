@@ -176,15 +176,35 @@
         }
 
         async mergeServerMessages(chatId, serverMessages) {
+            // FIX #1 — MERGE NOT REPLACE: upsert each server message individually.
+            // Existing messages are NEVER removed; only updated if server has newer version.
             const normalized = [];
             for (const item of (serverMessages || [])) {
-                normalized.push(await this.saveMessage({
-                    ...item,
-                    serverId: item.id ? String(item.id) : (item.serverId ? String(item.serverId) : null),
-                    chatId: String(chatId),
-                    isLocalOnly: false,
-                    status: item.status || 'delivered'
-                }));
+                const serverId = item.id ? String(item.id) : (item.serverId ? String(item.serverId) : null);
+                if (!serverId) continue;
+
+                // Check if we already have this message — if so, only update metadata
+                const existing = await this._findExistingMessage({ serverId, id: serverId });
+                if (existing) {
+                    // Server wins on metadata, local wins on content if not yet confirmed
+                    const merged = {
+                        ...existing,
+                        status:       item.status || existing.status,
+                        updatedAt:    item.updatedAt || item.createdAt || existing.updatedAt,
+                        isLocalOnly:  false,
+                        syncVersion:  (existing.syncVersion || 0) + 1
+                    };
+                    normalized.push(await this.saveMessage(merged));
+                } else {
+                    // New message from server — insert fresh
+                    normalized.push(await this.saveMessage({
+                        ...item,
+                        serverId,
+                        chatId:      String(chatId),
+                        isLocalOnly: false,
+                        status:      item.status || 'delivered'
+                    }));
+                }
             }
             return normalized;
         }
@@ -237,7 +257,39 @@
 
         async saveConversation(conv) {
             await this.ready();
+            // FIX #2 — Never resurrect tombstoned conversations
+            if (conv) {
+                const id = String(conv.id || conv.chatId || conv.conversationId || '');
+                if (id) {
+                    try {
+                        const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+                        if (tombstones[id]) {
+                            console.log('[LocalStore] FIX#2 — Blocked tombstoned conversation from resurrection:', id);
+                            return null;
+                        }
+                    } catch (_) {}
+                }
+            }
             return window.AppCache.save('chats', normalizeConversation(conv));
+        }
+
+        async deleteConversation(chatId) {
+            // FIX #2 — Full tombstone deletion so entity never comes back
+            await this.ready();
+            const id = String(chatId);
+            // Write tombstone to localStorage
+            try {
+                const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+                tombstones[id] = { deletedAt: Date.now(), entityType: 'chat', syncRevision: 1 };
+                localStorage.setItem('moodchat_tombstones_v1', JSON.stringify(tombstones));
+            } catch (_) {}
+            // Remove from IDB
+            try { await window.AppCache.remove('chats', id); } catch (_) {}
+            // Remove all messages for this chat
+            await this.deleteMessagesByChat(id);
+            // Broadcast
+            try { window.dispatchEvent(new CustomEvent('kyn:chat:deleted', { detail: { chatId: id } })); } catch (_) {}
+            return true;
         }
 
         async getConversation(id) {

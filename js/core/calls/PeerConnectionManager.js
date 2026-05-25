@@ -327,13 +327,32 @@
       };
 
       pc.ontrack = ({ track, streams }) => {
-        // CRITICAL: Add to isolated remote stream ONLY
+        // FIX #7 — CRITICAL: Add to isolated remote stream ONLY.
+        // Remove any stale track of same kind first to prevent accumulation.
+        this._remoteStream.getTracks()
+          .filter(t => t.kind === track.kind && t.id !== track.id)
+          .forEach(t => {
+            this._remoteStream.removeTrack(t);
+            try { t.stop(); } catch (_) {}
+          });
+
         this._remoteStream.addTrack(track);
 
         track.onended = () => {
           this._remoteStream.removeTrack(track);
           this._notify('remote:track_ended', { kind: track.kind });
         };
+
+        // FIX #7 — Verify we never accidentally have local tracks in remote stream
+        if (this._localStream) {
+          const localTrackIds = new Set(this._localStream.getTracks().map(t => t.id));
+          this._remoteStream.getTracks().forEach(rt => {
+            if (localTrackIds.has(rt.id)) {
+              this._remoteStream.removeTrack(rt);
+              console.warn('[PeerConn] FIX#7 — Removed local track accidentally added to remote stream');
+            }
+          });
+        }
 
         this._notify('remote:track_added', { track, stream: this._remoteStream });
       };

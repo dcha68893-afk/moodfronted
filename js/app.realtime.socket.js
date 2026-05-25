@@ -760,6 +760,46 @@
                 return;
             }
 
+            // FIX #15 — CANONICAL EVENT NORMALIZATION: alias events map to one canonical type.
+            // This prevents duplicate UI updates when both 'new_message' and 'message:new' fire.
+            const EVENT_CANONICAL = {
+                'new_message':       'message:new',
+                'chat:message':      'message:new',
+                'MESSAGE_RECEIVED':  'message:new',
+                'message_deleted':   'message:delete',
+                'message_seen':      'message:read',
+                'message_read':      'message:read',
+                'message_delivered': 'message:delivered',
+                'incoming_call':     'call:incoming',
+                'CALL_INCOMING':     'call:incoming',
+                'call_incoming':     'call:incoming',
+                'call_accepted':     'call:accepted',
+                'call_answered':     'call:accepted',
+                'call_rejected':     'call:rejected',
+                'call_cancelled':    'call:cancelled',
+                'call_ended':        'call:ended',
+                'call_force_ended':  'call:ended',
+                'webrtc_signal':     'webrtc:signal',
+            };
+            const canonicalType = EVENT_CANONICAL[message.type] || message.type;
+            if (canonicalType !== message.type) {
+                message = { ...message, type: canonicalType };
+            }
+
+            // FIX #15 — DEDUP: drop identical payloads arriving within 800ms (aliases fire twice)
+            if (!this._recentRouted) this._recentRouted = new Map();
+            if (message.payload?.id || message.payload?.messageId) {
+                const dedupKey = canonicalType + ':' + (message.payload.id || message.payload.messageId);
+                const lastSeen = this._recentRouted.get(dedupKey) || 0;
+                if (Date.now() - lastSeen < 800) return; // duplicate — drop
+                this._recentRouted.set(dedupKey, Date.now());
+                // Prune map periodically
+                if (this._recentRouted.size > 200) {
+                    const cutoff = Date.now() - 5000;
+                    for (const [k, v] of this._recentRouted) { if (v < cutoff) this._recentRouted.delete(k); }
+                }
+            }
+
             if (['PRESENCE_UPDATE', 'presence:update', 'user:online', 'user:offline'].includes(message.type)) {
                 let uid, online;
                 if (message.type === 'user:online') { uid = message.payload?.userId || message.userId; online = true; }
