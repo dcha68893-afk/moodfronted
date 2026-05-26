@@ -587,6 +587,8 @@
     function _startSyncCycle() {
         if (_syncTimer) return;
         const fn = _getFetchFn();
+        let _failCount = 0;
+        const MAX_FAILS = 3; // Stop cycling after 3 consecutive failures (avoids console spam)
 
         const run = async () => {
             // Flush queued actions
@@ -594,7 +596,18 @@
 
             // Refresh manifest in background (non-blocking)
             if (navigator.onLine) {
-                loadToolManifest(fn).catch(() => {});
+                try {
+                    await loadToolManifest(fn);
+                    _failCount = 0; // reset on success
+                } catch (e) {
+                    _failCount++;
+                    if (_failCount >= MAX_FAILS) {
+                        // Stop the interval — server doesn't have this endpoint yet
+                        clearInterval(_syncTimer);
+                        _syncTimer = null;
+                        return;
+                    }
+                }
             }
         };
 
@@ -636,13 +649,23 @@
             || _safeFetch;
     }
 
-    /** Plain fetch wrapper that always returns a JSON-decoded value */
+    /** Plain fetch wrapper that always returns a JSON-decoded value.
+     *  404 on /api/tools means the endpoint is not yet implemented on the server —
+     *  return an empty result silently instead of throwing (stops console spam). */
     async function _safeFetch(url, options = {}) {
         const token = _getToken();
         const headers = { 'Content-Type': 'application/json', ...(options.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-        const resp   = await fetch(url, { ...options, headers, credentials: 'include' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
-        return resp.json();
+        try {
+            const resp = await fetch(url, { ...options, headers, credentials: 'include' });
+            // Silently return empty result for 404 — endpoint not implemented yet
+            if (resp.status === 404) return { tools: [], data: { tools: [] } };
+            if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}`);
+            return resp.json();
+        } catch (err) {
+            // Network errors — return empty result silently
+            if (err.message && err.message.startsWith('HTTP')) throw err;
+            return { tools: [], data: { tools: [] } };
+        }
     }
 
     function _getToken() {

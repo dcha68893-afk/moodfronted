@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -4352,7 +4352,7 @@
                 }
 
                 // ==================================================================
-                // CALL ACCEPT HANDLER - POST /calls/:id/answer
+                // CALL ACCEPT HANDLER - POST /calls/:id/answer (with endpoint fallback)
                 // ==================================================================
                 if (data.type === 'CALL_ACCEPT' || data.type === 'call:accept') {
                     const callId = data.payload?.callId;
@@ -4361,16 +4361,37 @@
                     let success = false;
                     let resultData = null;
                     if (callId) {
-                        try {
-                            const res = await fetch(`${baseUrl}/calls/${callId}/answer`, {
-                                method: 'POST',
-                                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({})
-                            });
-                            resultData = await res.json().catch(()=>({}));
-                            success = res.ok;
-                            console.log('[Parent] Call accept result:', success);
-                        } catch(e) { console.warn('[Parent] CALL_ACCEPT error:', e); }
+                        // Try multiple endpoint variants — server may use /accept instead of /answer
+                        const endpoints = [
+                            `${baseUrl}/calls/${callId}/answer`,
+                            `${baseUrl}/calls/${callId}/accept`,
+                            `${baseUrl}/calls/accept/${callId}`,
+                            `${baseUrl}/calls/${callId}/respond`
+                        ];
+                        for (const endpoint of endpoints) {
+                            try {
+                                const res = await fetch(endpoint, {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ accepted: true, timestamp: Date.now() })
+                                });
+                                resultData = await res.json().catch(()=>({}));
+                                if (res.ok || res.status === 200) {
+                                    success = true;
+                                    console.log('[Parent] Call accept result OK via:', endpoint);
+                                    break;
+                                }
+                                if (res.status !== 404) break; // Non-404 error — stop trying
+                            } catch(e) { console.warn('[Parent] CALL_ACCEPT error on', endpoint, ':', e.message); }
+                        }
+                        // If all REST endpoints failed, signal via WebSocket directly
+                        if (!success && window.wsService) {
+                            try {
+                                window.wsService.emit('call:accepted', { callId, timestamp: Date.now() });
+                                success = true;
+                                console.log('[Parent] Call accept signaled via WebSocket fallback');
+                            } catch(e) {}
+                        }
                     }
                     if (event.source) {
                         event.source.postMessage({

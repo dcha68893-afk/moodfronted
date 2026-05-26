@@ -4,6 +4,30 @@
 // Dependencies: calls-core.js v9.0.1
 // =======================================================================================
 
+// ── UIEventHandlers forward-reference guard ──────────────────────────────────
+// UIEventHandlers is defined later in this file (line ~6774) but referenced
+// earlier (line ~889). This proxy ensures early usages never throw ReferenceError.
+// Once the real UIEventHandlers is defined it takes over via window assignment.
+if (typeof UIEventHandlers === 'undefined') {
+    var UIEventHandlers = new Proxy({}, {
+        get: function(target, prop) {
+            // Return a no-op function for any method not yet defined
+            if (typeof target[prop] !== 'undefined') return target[prop];
+            return function() {
+                // Once the real object is ready, delegate to it
+                var real = window.__UIEventHandlersReal;
+                if (real && typeof real[prop] === 'function') {
+                    return real[prop].apply(real, arguments);
+                }
+            };
+        },
+        set: function(target, prop, value) {
+            target[prop] = value;
+            return true;
+        }
+    });
+}
+
 // ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
 // Set up immediately when script loads, before any initialization
 
@@ -652,8 +676,9 @@ window.startCallWithUser = startCallWithUser;
 function showIdleScreen() {
     if (window.__callActive ||
         window.__callEndedNavigating ||
-        (window.UIState && (window.UIState.callActive || window.UIState.callState === 'calling' || window.UIState.callState === 'ringing')) ||
+        (window.UIState && (window.UIState.callActive || window.UIState.callState === 'calling' || window.UIState.callState === 'ringing' || window.UIState.callState === 'connecting' || window.UIState.callState === 'connected')) ||
         (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active')) ||
+        (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
         (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active'))) {
         console.log('[UI] showIdleScreen suppressed -- call active');
         return;
@@ -7595,7 +7620,16 @@ handleContactItemClick: function(e) {
                 window.parent.postMessage({ type: 'CALL_ENDED_RETURN', timestamp: Date.now() }, '*');
             }
             
-            setTimeout(() => this.showPrivateNotesModal(), 500);
+            setTimeout(() => {
+                try {
+                    // Use UIEventHandlers directly to avoid 'this' context loss
+                    if (typeof UIEventHandlers !== 'undefined' && typeof UIEventHandlers.showPrivateNotesModal === 'function') {
+                        UIEventHandlers.showPrivateNotesModal();
+                    } else if (typeof this.showPrivateNotesModal === 'function') {
+                        this.showPrivateNotesModal();
+                    }
+                } catch (_e) { /* silently skip if modal not available */ }
+            }, 500);
             
             const mins = Math.floor(duration / 60);
             const secs = duration % 60;

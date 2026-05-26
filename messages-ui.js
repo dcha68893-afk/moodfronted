@@ -3341,9 +3341,41 @@
 
             }
 
+            // Smart render: only clear container when switching conversations
+            // When adding new messages to same conversation, append only new ones
+            const prevChatId = container.dataset.renderedChatId || '';
+            const isSameConversation = prevChatId && prevChatId === currentChatId;
 
+            if (isSameConversation && normalizedMessages.length > 0) {
+                // Find which messages are already rendered
+                const renderedIds = new Set(
+                    Array.from(container.querySelectorAll('[data-message-id]'))
+                        .map(el => el.dataset.messageId)
+                );
+                const newMessages = normalizedMessages.filter(m =>
+                    m.id && !renderedIds.has(String(m.id))
+                );
+                // Only do full re-render if message order changed or messages were deleted
+                const containerMsgCount = container.querySelectorAll('[data-message-id]').length;
+                const fullReRenderNeeded = containerMsgCount > normalizedMessages.length;
+
+                if (!fullReRenderNeeded && newMessages.length > 0) {
+                    // Append only new messages
+                    const grouped = this._groupMessagesByDate(newMessages);
+                    this._renderMessageBatches(container, grouped, currentUser);
+                    this._lastRenderedMessagesSignature = renderSignature;
+                    this.scrollToBottom(container);
+                    return;
+                } else if (!fullReRenderNeeded && newMessages.length === 0) {
+                    // No new messages, just update signatures and statuses
+                    this._lastRenderedMessagesSignature = renderSignature;
+                    return;
+                }
+                // Fall through to full re-render only when needed
+            }
 
             container.innerHTML = '';
+            container.dataset.renderedChatId = currentChatId;
 
             const groupedMessages = this._groupMessagesByDate(normalizedMessages);
 

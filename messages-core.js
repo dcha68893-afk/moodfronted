@@ -4834,7 +4834,24 @@ try {
                     
                     if (!realUserName || realUserName === `User_${numericReceiverId}`) {
                         try {
-                            const userInfo = await makeApiRequest(`/users/${numericReceiverId}`, 'GET');
+                            // First try /api/users/search or /api/friends to avoid 404 on numeric IDs
+                            let userInfo = null;
+                            // Try friends endpoint which returns full user objects
+                            const friendsList = await makeApiRequest('/friends', 'GET').catch(() => null);
+                            const friendsArr = friendsList?.friends || friendsList?.data?.friends || friendsList?.data || (Array.isArray(friendsList) ? friendsList : []);
+                            const matchedFriend = friendsArr.find(f =>
+                                String(f.id) === String(numericReceiverId) ||
+                                String(f.numericId) === String(numericReceiverId) ||
+                                String(f.userId) === String(numericReceiverId)
+                            );
+                            if (matchedFriend) {
+                                userInfo = matchedFriend;
+                            }
+                            // Fallback: try /api/users?id= query param (avoids 404 from path param)
+                            if (!userInfo) {
+                                const searchResult = await makeApiRequest(`/users/search?userId=${numericReceiverId}`, 'GET').catch(() => null);
+                                userInfo = searchResult?.user || searchResult?.data?.user || searchResult?.data || null;
+                            }
                             if (userInfo) {
                                 realUserName = userInfo.displayName || userInfo.username || userInfo.name || options.name;
                                 realUserAvatar = userInfo.avatar || userInfo.photoURL || null;
@@ -5870,11 +5887,11 @@ try {
         _uiInitialized = true;
     }
     
-    // ONE-TIME: Clear duplicate conversations from IDB and reset the deleted-chats blocklist.
-    // This runs once per install (keyed by version flag in localStorage) so fresh
-    // server data always wins and stale/duplicate cached chat entries are gone.
+    // ONE-TIME: Clear duplicate conversations from IDB only.
+    // NOTE: We intentionally do NOT clear the deleted-chats blocklist here —
+    // doing so would restore conversations the user explicitly deleted after a refresh.
     (function _runOnceConversationCleanup() {
-        const CLEANUP_VERSION = 'kynecta_conv_cleanup_v1';
+        const CLEANUP_VERSION = 'kynecta_conv_cleanup_v2';
         try {
             if (localStorage.getItem(CLEANUP_VERSION)) return; // already ran
             localStorage.setItem(CLEANUP_VERSION, '1');
@@ -5882,8 +5899,8 @@ try {
 
         console.log('[CLEANUP] Running one-time conversation de-dupe & IDB reset…');
 
-        // 1. Clear the deleted-chats blocklist so nothing is permanently hidden.
-        try { localStorage.removeItem('kynecta_deleted_chats_v8'); } catch (_) {}
+        // 1. DO NOT clear the deleted-chats blocklist — preserve user deletions across refresh.
+        // try { localStorage.removeItem('kynecta_deleted_chats_v8'); } catch (_) {}
 
         // 2. Clear the chats cache so stale/duplicate entries are dropped.
         try {

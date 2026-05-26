@@ -59,9 +59,22 @@
 
     /** Get auth token from every known location */
     function getToken() {
-        try { return window.__PARENT_SESSION__?.token || window.AUTH_SESSION?.token ||
-            localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') ||
-            window.KynectaStore?.get?.('auth.token') || null; } catch (_) { return null; }
+        try {
+            return window.__PARENT_SESSION__?.token ||
+                window.AUTH_SESSION?.token ||
+                window._authToken ||
+                localStorage.getItem('authToken') ||
+                localStorage.getItem('auth_token') ||
+                localStorage.getItem('token') ||
+                localStorage.getItem('accessToken') ||
+                localStorage.getItem('USER_TOKEN') ||
+                localStorage.getItem('moodchat_token') ||
+                sessionStorage.getItem('authToken') ||
+                sessionStorage.getItem('auth_token') ||
+                sessionStorage.getItem('token') ||
+                window.KynectaStore?.get?.('auth.token') ||
+                null;
+        } catch (_) { return null; }
     }
 
     /** Minimal authenticated fetch wrapper — mirrors secureApiCall but works standalone */
