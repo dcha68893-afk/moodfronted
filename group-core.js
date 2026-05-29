@@ -407,7 +407,7 @@ function safeSend(type, payload = {}) {
 // =============================================
 // API REQUEST FUNCTION - STRICT PARENT PIPELINE
 // =============================================
-function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 30000) {
+function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 12000, _retryCount = 0) {
     return new Promise((resolve, reject) => {
         // STRICT: Only allow in ACTIVE state
         if (!LifecycleState.ensureActive()) {
@@ -429,12 +429,19 @@ function apiRequest(endpoint, method = 'GET', body = null, timeoutMs = 30000) {
         
         const requestId = generateRequestId();
         
-        // Set up timeout
+        // Set up timeout with retry on first failure
         const timeoutId = setTimeout(() => {
             if (pendingRequests.has(requestId)) {
-                console.warn(`[${MODULE_NAME}] API request timeout: ${method} ${normalizedEndpoint} (ID: ${requestId})`);
                 pendingRequests.delete(requestId);
-                reject(new Error(`Request timeout: ${method} ${normalizedEndpoint}`));
+                // Retry once with shorter timeout before giving up
+                if (_retryCount === 0 && method === 'GET') {
+                    apiRequest(endpoint, method, body, 8000, 1)
+                        .then(resolve)
+                        .catch(() => reject(new Error(`API request timeout: ${method} ${normalizedEndpoint}`)));
+                } else {
+                    console.warn(`[${MODULE_NAME}] API request timeout: ${method} ${normalizedEndpoint} (ID: ${requestId})`);
+                    reject(new Error(`Request timeout: ${method} ${normalizedEndpoint}`));
+                }
             }
         }, timeoutMs);
         

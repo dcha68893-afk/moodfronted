@@ -445,6 +445,12 @@
         const { callId, callerId, callType } = data;
         if (!callId || !callerId) return;
 
+        // Deduplicate: ignore if already RINGING for this callId
+        if (this._lastIncomingCallId === callId) return;
+        this._lastIncomingCallId = callId;
+        // Clear dedup after 30s
+        setTimeout(() => { if (this._lastIncomingCallId === callId) this._lastIncomingCallId = null; }, 30000);
+
         const session = this._state.createSession(callId, callType || 'audio', callerId, false);
         this._state.transition(callId, window.CALL_STATE.RINGING);
 

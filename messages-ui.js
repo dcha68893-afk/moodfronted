@@ -3374,10 +3374,31 @@
                 // Fall through to full re-render only when needed
             }
 
+            // CRITICAL: Before clearing, collect any DOM messages NOT in normalizedMessages
+            // (added directly by _appendMessageBubbleDirect visibility patch)
+            // so we merge them into the render list and don't lose them
+            const existingDomIds = new Set(normalizedMessages.map(m => String(m.id || '')));
+            const domOnlyMessages = [];
+            container.querySelectorAll('[data-message-id]').forEach(el => {
+                const domId = el.dataset.messageId;
+                if (domId && !existingDomIds.has(domId) && !domId.startsWith('tmp_')) {
+                    // Try to recover message from ChatManager store
+                    const stored = ChatManager && ChatManager._messagesMap && ChatManager._messagesMap.get(domId);
+                    if (stored) domOnlyMessages.push(stored);
+                }
+            });
+            // Merge dom-only messages into normalizedMessages before rendering
+            const allMessages = domOnlyMessages.length > 0
+                ? [...normalizedMessages, ...domOnlyMessages].sort((a, b) => {
+                    const ts = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    return ts(a) - ts(b);
+                })
+                : normalizedMessages;
+
             container.innerHTML = '';
             container.dataset.renderedChatId = currentChatId;
 
-            const groupedMessages = this._groupMessagesByDate(normalizedMessages);
+            const groupedMessages = this._groupMessagesByDate(allMessages);
 
             this._renderMessageBatches(container, groupedMessages, currentUser);
 

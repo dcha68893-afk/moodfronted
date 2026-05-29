@@ -36880,6 +36880,13 @@ clearActiveCall: function() {
 
     ModuleCoreController.start();
 
+    // ── Expose WebRTC signal entry points that calls.html calls directly ──
+    // These MUST exist on window.callCore or video signals are silently dropped
+    window.callCore.handleRemoteOffer  = function(payload) { handleSignalOffer(payload);  };
+    window.callCore.handleRemoteAnswer = function(payload) { handleSignalAnswer(payload); };
+    window.callCore.handleIceCandidate = window.callCore.handleIceCandidate ||
+                                         function(payload) { handleIceCandidate(payload); };
+
 
 
     

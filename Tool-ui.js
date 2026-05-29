@@ -2085,8 +2085,13 @@ const renderers = {
         card.dataset.userId = listing.userId || listing.sellerId || '';
 
         // Improved image handling: show a lightweight skeleton, load real image if available,
-        // fall back to a category tile or a placehold.co image when missing or on error.
-        const fallbackImg = (typeof _CDN !== 'undefined' && _CDN[listing.category]) ? _CDN[listing.category] : 'https://placehold.co/300x300/f57224/ffffff?text=Product';
+        // fall back to a category tile or a real product image when missing or on error.
+        const _catKey = listing.category || listing.subcategory || listing.type || '';
+        const _fallbackBase = (typeof _CDN !== 'undefined' && _CDN[_catKey])
+            ? _CDN[_catKey]
+            : (typeof _catImg === 'function' ? _catImg(_catKey) : null);
+        const fallbackImg = _fallbackBase
+            || `https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop&q=70`;
 
         card.innerHTML = `
             <div class="jm-card-img-wrap">
@@ -6081,7 +6086,7 @@ function _renderCatContent(cat, container) {
                              src="${sub.img}"
                              alt="${_esc(sub.name)}"
                              loading="lazy"
-                             onerror="this.src='https://placehold.co/300x300/f57224/ffffff?text=Product'">
+                             onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&h=300&fit=crop&q=70'">
                     </div>
                     <div class="jm-subcat-name">${_esc(sub.name)}</div>
                 </div>`).join('')}

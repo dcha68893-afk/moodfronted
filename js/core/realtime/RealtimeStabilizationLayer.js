@@ -291,6 +291,8 @@
     // ── Socket observation ─────────────────────────────────────────────────────
 
     _waitForSocket() {
+      // In iframe context, socket is bridged via postMessage — no direct socket expected
+      const isIframe = window.self !== window.top;
       let attempts = 0;
       const check = () => {
         const socket = this._findSocket();
@@ -299,7 +301,8 @@
           return;
         }
         if (++attempts < 60) setTimeout(check, 500);
-        else console.warn('[RealtimeStab] Could not find socket after 30s');
+        else if (!isIframe) console.warn('[RealtimeStab] Could not find socket after 30s');
+        // Silently stop in iframes — socket bridge handles realtime
       };
       check();
     }

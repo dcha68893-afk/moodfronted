@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <link rel="manifest" href="../manifest.json">
@@ -3454,6 +3454,18 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
     document.addEventListener('DOMContentLoaded', init);
     // Also run immediately if DOM is already ready
     if (document.readyState !== 'loading') init();
+
+    // SAFETY: If allStatusList still shows loading spinner after 8s, clear it
+    setTimeout(function() {
+        var list = document.getElementById('allStatusList');
+        if (list && list.querySelector('.enhanced-loading')) {
+            if (typeof renderStatusListInstantlyUI === 'function') {
+                renderStatusListInstantlyUI();
+            } else {
+                list.innerHTML = '<div class="empty-state" style="padding:24px 16px;text-align:center;color:var(--text-secondary,#8696a0);"><i class="fas fa-comment-dots" style="font-size:32px;margin-bottom:10px;opacity:0.4;display:block;"></i><p style="margin:0 0 4px;font-size:14px;">No recent updates</p><p style="margin:0;font-size:12px;opacity:0.7;">Status updates from your contacts appear here</p></div>';
+            }
+        }
+    }, 8000);
 
     function init() {
         setupMoreMenu();
