@@ -113,20 +113,58 @@
     if (!q) return;
     q.setSendHandler(async msg => {
       const transport = window.__HybridTransportEngine?.getBestTransport() || 'INTERNET';
+
+      // 1. Try LAN transport first if peers available
       if (transport === 'LAN' && window.__LANCommunicationEngine?.hasPeers?.()) {
-        if (window.__LANCommunicationEngine.send(msg)) return;
+        if (window.__LANCommunicationEngine.send(msg)) {
+          console.log('[OfflineQueue] ✅ Sent via LAN transport');
+          return;
+        }
       }
-      const socket = window.KynectaRealtime?._socket;
-      if (!socket?.connected) throw new Error('Socket not connected');
-      await new Promise((resolve, reject) => {
-        const isGroup = msg.chatId?.startsWith('group_') || msg.groupId;
-        const ev = isGroup ? 'groupMessage' : 'sendMessage';
-        socket.emit(ev, msg, ack => {
-          if (ack?.error) reject(new Error(ack.error));
-          else resolve(ack);
-        });
-        setTimeout(() => reject(new Error('Send timeout')), 12000);
+
+      // 2. Try mesh relay if available
+      if (transport === 'MESH' && window.__MeshMessagesTransport?.send) {
+        try {
+          await window.__MeshMessagesTransport.send(msg);
+          console.log('[OfflineQueue] ✅ Sent via Mesh transport');
+          return;
+        } catch(_) {}
+      }
+
+      // 3. Fall back to REST API (same as normal send) — most reliable
+      const apiBase = window.__getApiBase?.() || 'https://moodchat-fy56.onrender.com/api';
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+      const endpoint = msg.groupId ? `${apiBase}/groups/${msg.groupId}/messages` : `${apiBase}/messages`;
+
+      const resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          chatId:     msg.chatId,
+          content:    msg.content,
+          type:       msg.type || 'text',
+          localId:    msg.localId || msg.id,
+          attachment: msg.attachment || null,
+          replyToId:  msg.replyToId || null,
+          _offlineReplay: true,
+        }),
       });
+
+      if (!resp.ok) throw new Error(`Send failed: ${resp.status}`);
+      console.log('[OfflineQueue] ✅ Queued message delivered via REST');
+
+      // Notify message iframe that queued message was delivered
+      const messagesIframe = document.getElementById('messagesIframe');
+      if (messagesIframe?.contentWindow && msg.localId) {
+        messagesIframe.contentWindow.postMessage({
+          type: 'queue:delivered',
+          localId: msg.localId,
+          chatId: msg.chatId,
+        }, '*');
+      }
     });
     console.log('[Phase6Bootstrap] OfflineQueue send handler wired');
   }

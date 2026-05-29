@@ -6385,6 +6385,55 @@
                     });
                 });
 
+                // ── LAN transport bridging ──────────────────────────────────
+                // Bridge LAN peer events and incoming LAN messages to all iframes
+                const _wsService = window.wsService || window.KynectaRealtime;
+                if (_wsService && _wsService.on) {
+                    // Server relays a LAN message on behalf of an AP-isolated peer
+                    _wsService.on('lan:message', (payload) => {
+                        const msg = payload?.message || payload;
+                        if (!msg) return;
+                        // Inject into messages iframe as a normal message:new
+                        const messagesIframe = document.getElementById('messagesIframe');
+                        if (messagesIframe?.contentWindow) {
+                            messagesIframe.contentWindow.postMessage({
+                                type: 'message:new',
+                                payload: { ...msg, transport: 'LAN' },
+                                message: { ...msg, transport: 'LAN' },
+                            }, '*');
+                        }
+                    });
+
+                    // LAN peer list update — push to all iframes so they can use LAN send
+                    _wsService.on('lan:peer_list', (data) => {
+                        window.__lanPeerList = data?.peers || [];
+                        document.querySelectorAll('iframe').forEach(f => {
+                            try { f.contentWindow.postMessage({ type: 'lan:peer_list', payload: data }, '*'); } catch(_) {}
+                        });
+                    });
+
+                    // LAN peer joined — notify iframes
+                    _wsService.on('lan:peer_joined', (data) => {
+                        document.querySelectorAll('iframe').forEach(f => {
+                            try { f.contentWindow.postMessage({ type: 'lan:peer_joined', payload: data }, '*'); } catch(_) {}
+                        });
+                    });
+
+                    // AP isolation fallback — notify client to use server relay
+                    _wsService.on('lan:ap_isolated', (data) => {
+                        console.warn('[Parent] AP isolation detected on subnet:', data?.subnetKey);
+                        window.__lanAPisolated = true;
+                    });
+                }
+
+                // ── Offline queue flush on reconnect ────────────────────────
+                window.addEventListener('online', () => {
+                    setTimeout(() => window.__OfflineMessageQueue?.flushAll?.(), 2000);
+                });
+                document.addEventListener('kyn:socket:connected', () => {
+                    setTimeout(() => window.__OfflineMessageQueue?.flushAll?.(), 2000);
+                });
+
                 console.log('[Parent] ✅ Global kyn:* realtime bridge installed');
             })();
             

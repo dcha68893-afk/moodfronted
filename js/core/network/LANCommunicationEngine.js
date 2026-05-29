@@ -240,15 +240,36 @@
     isEnabled()       { return this._enabled; }
     hasPeers()        { return this._discovery.getConnected().length > 0; }
     getBestPeer()     { return this._discovery.getBestPeer(); }
+    getPeers()        { return this._discovery.getConnected(); }
+
+    getDiagnostics() {
+      const peers = this._discovery.getConnected();
+      return {
+        enabled:    this._enabled,
+        peerCount:  peers.length,
+        peers:      peers.map(p => ({ id: p.id, latency: p.latency, connected: p.connected })),
+        subnetKey:  this._subnetKey,
+      };
+    }
 
     /**
      * Send a message via LAN.
+     * Tries direct WebSocket first; falls back to server relay for AP-isolated peers.
      * Returns false if no LAN peers available.
      */
     send(payload) {
       const peer = this._discovery.getBestPeer();
       if (!peer) return false;
-      return peer.send({ type: 'relay:message', payload });
+      // Try direct WS
+      const sent = peer.send({ type: 'relay:message', payload });
+      if (sent) return true;
+      // Fallback: relay via server for AP-isolated networks
+      const socket = window.KynectaRealtime?._socket;
+      if (socket?.connected && peer.socketId) {
+        socket.emit('lan:relay_message', { targetSocketId: peer.socketId, payload });
+        return true;
+      }
+      return false;
     }
 
     onPeerChange(fn) { return this._discovery.onPeerEvent(fn); }
@@ -280,9 +301,15 @@
       if (!socket || !socket.connected) return;
 
       const identity = window.__IdentityFoundationLayer?.getIdentity();
+      const userId = localStorage.getItem('currentUserId') ||
+                     window._currentUserId ||
+                     identity?.userId || null;
       socket.emit('lan:announce', {
         deviceId:  identity?.deviceId || null,
+        userId:    userId,
         localIP:   this._localIP,
+        subnetKey: this._subnetKey,
+        socketId:  socket.id,
         wsPort:    null, // future: local WS server port
         timestamp: Date.now(),
       });

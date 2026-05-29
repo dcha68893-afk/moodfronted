@@ -225,6 +225,14 @@
         recentLogs:  this._logger.getAll(50),
         // Phase 1 monitoring
         phase1:      window.__MonitoringFoundation?.getMetrics?.(),
+        // Phase 8/9 transport diagnostics
+        lan:         window.__LANCommunicationEngine?.getDiagnostics?.() || { enabled: false },
+        mesh:        window.__MeshMessagesTransport?.getDiagnostics?.() || { enabled: false },
+        offlineQueue: window.__OfflineMessageQueue?.getDiagnostics?.() || { total: 0, queued: 0 },
+        tombstones:  (() => { try { const t = JSON.parse(localStorage.getItem('kynecta_tombstones_v1') || '{}'); return { count: Object.keys(t).length, ids: Object.keys(t) }; } catch(_) { return { count: 0 }; } })(),
+        activeTransport: window.__HybridTransportEngine?.getBestTransport?.() || 'INTERNET',
+        lanPeers:    window.__lanPeerList?.length || 0,
+        socketState: window.KynectaRealtime?._socket?.connected ? 'CONNECTED' : 'DISCONNECTED',
       };
     }
 
@@ -242,6 +250,12 @@
       console.log('⏱ Latency:', snap.latency);
       console.log('📊 Counters:', snap.counters);
       console.log('📈 Reliability:', snap.reliability);
+      console.log('🌐 Active Transport:', snap.activeTransport);
+      console.log('🏠 LAN:', snap.lan, '| Peers:', snap.lanPeers);
+      console.log('🕸 Mesh:', snap.mesh);
+      console.log('📤 Offline Queue:', snap.offlineQueue);
+      console.log('🪦 Tombstones:', snap.tombstones);
+      console.log('🔌 Socket:', snap.socketState);
       console.groupEnd();
       return snap;
     }

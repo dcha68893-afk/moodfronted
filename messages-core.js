@@ -2444,6 +2444,11 @@ try {
                         const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8');
                         if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
                     } catch(_) {}
+                    // Also check tombstone registry
+                    try {
+                        const _tombstones = SafeStorage.getJSON('kynecta_tombstones_v1') || {};
+                        Object.keys(_tombstones).forEach(id => _deleted.add(String(id)));
+                    } catch(_) {}
                     this._conversations = ensureSafeArray(cached.conversations)
                         .filter(c => c && c.id && !_deleted.has(String(c.id)));
                     this._rebuildMap();
@@ -2871,8 +2876,69 @@ try {
                     mentions: options.mentions
                 };
             }
-            
-            const result = await makeApiRequest('/messages', 'POST', requestBody);
+
+            // ── Transport-aware send with offline fallback ───────────────────
+            let result;
+            const hybridEngine = window.__HybridTransportEngine;
+            const offlineQueue = window.__OfflineMessageQueue;
+            const bestTransport = hybridEngine?.getBestTransport?.() || 'INTERNET';
+            const isOnline = navigator.onLine && (window.KynectaRealtime?._socket?.connected !== false);
+
+            if (!isOnline && offlineQueue) {
+                // Offline — enqueue for later delivery
+                console.log('[ChatManager] 📦 Offline — queuing message for later delivery');
+                const queueEntry = await offlineQueue.enqueue({
+                    ...requestBody,
+                    localId: requestBody.localId || options.localId,
+                    type: 'message',
+                });
+                // Return optimistic result so UI updates immediately
+                result = {
+                    message: {
+                        id: queueEntry.id,
+                        localId: queueEntry.id,
+                        chatId: conversationId,
+                        content,
+                        status: 'queued',
+                        senderId: options.senderId,
+                        createdAt: new Date().toISOString(),
+                    },
+                    chatId: conversationId,
+                    queued: true,
+                };
+            } else {
+                // Online — try primary send, fall back to offline queue on failure
+                try {
+                    result = await makeApiRequest('/messages', 'POST', requestBody);
+                    // Record success in hybrid engine
+                    hybridEngine?.recordSuccess?.('INTERNET', 0);
+                } catch (sendErr) {
+                    console.warn('[ChatManager] Send failed, trying offline queue:', sendErr.message);
+                    hybridEngine?.recordFailure?.('INTERNET');
+                    if (offlineQueue) {
+                        const queueEntry = await offlineQueue.enqueue({
+                            ...requestBody,
+                            localId: requestBody.localId || options.localId,
+                            type: 'message',
+                        });
+                        result = {
+                            message: {
+                                id: queueEntry.id,
+                                localId: queueEntry.id,
+                                chatId: conversationId,
+                                content,
+                                status: 'queued',
+                                senderId: options.senderId,
+                                createdAt: new Date().toISOString(),
+                            },
+                            chatId: conversationId,
+                            queued: true,
+                        };
+                    } else {
+                        throw sendErr;
+                    }
+                }
+            }
             
             console.log(`[ChatManager] 📥 Message sent successfully:`, result);
             
@@ -2910,6 +2976,11 @@ try {
             try {
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8');
                 if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
+            } catch(_) {}
+            // Also check tombstone registry - prevents server response from resurrecting deleted chats
+            try {
+                const _tombstones = SafeStorage.getJSON('kynecta_tombstones_v1') || {};
+                Object.keys(_tombstones).forEach(id => _deleted.add(String(id)));
             } catch(_) {}
 
             ensureSafeArray(conversations).forEach(chat => {
@@ -5966,6 +6037,56 @@ try {
         });
         
         Logger.success('DataFlow', 'Data flow started');
+
+        // ── Wire RealtimeSyncEngine delta sync on reconnect ─────────────────
+        // When socket reconnects, do a delta sync instead of full reload
+        const _bus = window.KynectaEventBus;
+        if (_bus && typeof _bus.on === 'function') {
+            _bus.on('SYNC_STARTED', async ({ reason } = {}) => {
+                console.log('[DataFlow] Delta sync triggered, reason:', reason);
+                try {
+                    // 1. Re-fetch conversations (soft merge, tombstones prevent resurrection)
+                    await ChatManager.fetchConversations();
+
+                    // 2. Re-fetch messages for active conversation (delta since last sync)
+                    const active = ChatManager._activeConversation;
+                    if (active?.id) {
+                        const syncEngine = window.__RealtimeSyncEngine;
+                        if (syncEngine?.requestDeltaSync) {
+                            await syncEngine.requestDeltaSync(active.id, async (chatId, since) => {
+                                const result = await makeApiRequest(
+                                    `/messages?chatId=${chatId}&since=${since}&limit=50`, 'GET'
+                                );
+                                return result?.messages || result?.data?.messages || [];
+                            });
+                        } else {
+                            // Fallback: just re-fetch last 50 messages
+                            await ChatManager.fetchMessages(active.id, { limit: 50, merge: true });
+                        }
+                    }
+
+                    // 3. Flush any queued offline messages now that we're connected
+                    if (window.__OfflineMessageQueue?.size?.() > 0) {
+                        setTimeout(() => window.__OfflineMessageQueue.flushAll(), 1500);
+                    }
+                } catch(e) {
+                    console.warn('[DataFlow] Delta sync error:', e.message);
+                }
+            });
+
+            // Also listen for BroadcastChannel tombstone sync from other tabs
+            try {
+                const _syncBc = new BroadcastChannel('kynecta_sync');
+                _syncBc.addEventListener('message', (e) => {
+                    if (e.data?.type === 'tombstone' && e.data?.entity === 'conversation') {
+                        const sid = String(e.data.id);
+                        ChatManager._conversations = (ChatManager._conversations || [])
+                            .filter(c => String(c.id) !== sid);
+                        ChatManager._notifySubscribers();
+                    }
+                });
+            } catch(_) {}
+        }
     }
 
     // =============================================
@@ -6475,6 +6596,23 @@ try {
                 handleRealtimePayload('message:reaction', data);
             }
 
+            // ── LAN message received (same subnet peer sent directly) ─────────
+            if (data.type === 'lan:message' || data.type === 'LAN_MESSAGE') {
+                const lanMsg = data.payload || data;
+                if (lanMsg && lanMsg.content) {
+                    handleRealtimePayload('message:new', {
+                        type: 'message:new',
+                        payload: { ...lanMsg, transport: 'LAN' },
+                        message: { ...lanMsg, transport: 'LAN' },
+                    });
+                }
+            }
+
+            // ── Offline queue delivery confirmation ──────────────────────────
+            if (data.type === 'queue:delivered' && data.localId) {
+                window.__OfflineMessageQueue?.markDelivered?.(data.localId).catch(() => {});
+            }
+
             if (data && (data.type === 'FRIEND_ONLINE' || data.type === 'FRIEND_OFFLINE' || data.type === 'STATUS_UPDATE')) {
                 const p = data.payload || data;
                 const uid = p.userId || p.id || p.friendId;
@@ -6821,19 +6959,67 @@ try {
         deleteConversation: function(chatId) {
             if (!chatId) return;
             const sid = String(chatId);
+
+            // ── TOMBSTONE: persist deletion across all storage layers ────────
+            const tombstone = {
+                id: sid,
+                entityType: 'conversation',
+                deletedAt: Date.now(),
+                syncVersion: Date.now(),
+                origin: 'user_delete',
+            };
             try {
+                // 1. Legacy deleted list (backward compat)
                 const _d = SafeStorage.getJSON('kynecta_deleted_chats_v8') || [];
                 if (!_d.includes(sid)) { _d.push(sid); SafeStorage.setJSON('kynecta_deleted_chats_v8', _d); }
+
+                // 2. Tombstone registry — version-aware, survives service worker
+                const _tombstones = SafeStorage.getJSON('kynecta_tombstones_v1') || {};
+                _tombstones[sid] = tombstone;
+                SafeStorage.setJSON('kynecta_tombstones_v1', _tombstones);
+
+                // 3. Clear all message caches for this conversation
+                SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`);
+                try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
+                try { localStorage.removeItem(`kynecta_conv_${sid}`); } catch(_) {}
+
+                // 4. Invalidate any service worker cache for this conversation
+                if ('caches' in window) {
+                    caches.keys().then(names => {
+                        names.forEach(name => {
+                            caches.open(name).then(cache => {
+                                cache.delete(`/api/chats/${sid}`);
+                                cache.delete(`/api/messages?chatId=${sid}`);
+                            });
+                        });
+                    }).catch(() => {});
+                }
+
+                // 5. Clear from IndexedDB offline queue
+                window.__OfflineMessageQueue?.getPending?.()?.forEach(entry => {
+                    if (String(entry.chatId) === sid) {
+                        window.__OfflineMessageQueue.markDelivered(entry.id).catch(() => {});
+                    }
+                });
+
+                // 6. Broadcast tombstone to other tabs
+                try {
+                    const bc = new BroadcastChannel('kynecta_sync');
+                    bc.postMessage({ type: 'tombstone', entity: 'conversation', id: sid, ts: Date.now() });
+                    bc.close();
+                } catch(_) {}
             } catch(_) {}
+
+            // ── Remove from memory ───────────────────────────────────────────
             ChatManager._conversations = (ChatManager._conversations || []).filter(c => String(c.id) !== sid);
             if (ChatManager._conversationsMap) { ChatManager._conversationsMap.delete(chatId); ChatManager._conversationsMap.delete(sid); }
             if (ChatManager._activeConversation && String(ChatManager._activeConversation.id) === sid) {
                 ChatManager._activeConversation = null; ChatManager._messages = [];
             }
             ChatManager._saveToCache();
-            try { SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`); } catch(_) {}
-            try { localStorage.removeItem(`kynecta_messages_v8_${sid}`); } catch(_) {}
             ChatManager._notifySubscribers();
+
+            // ── Tell backend to delete ────────────────────────────────────────
             makeApiRequest(`/chats/${sid}`, 'DELETE').catch(() => {});
         },
 

@@ -1146,11 +1146,24 @@
             const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events];
 
             if (this._socket && typeof this._socket.on === 'function') {
+                // Use RealtimeStabilizationLayer.safeOn if available to prevent duplicate listeners
+                const _stabLayer = window.__RealtimeStabilizationLayer;
+                const _safeOn = (evt, fn) => {
+                    if (_stabLayer?.safeOn) {
+                        return _stabLayer.safeOn(this._socket, evt, fn);
+                    }
+                    // Fallback: manual dedup guard
+                    if (this._registeredSocketListeners.has(evt)) return () => {};
+                    this._registeredSocketListeners.add(evt);
+                    this._socket.on(evt, fn);
+                    return () => this._socket.off(evt, fn);
+                };
+
                 allEvents.forEach(eventType => {
                     if (this._registeredSocketListeners.has(eventType)) return;
                     this._registeredSocketListeners.add(eventType);
 
-                    this._socket.on(eventType, (payload) => {
+                    _safeOn(eventType, (payload) => {
                         // FIX: Always use eventType (e.g. 'message:new') as the routing key.
                         // The old code used payload.type when present — but for chat messages
                         // payload.type is the CONTENT type ('text', 'audio', 'image'), NOT

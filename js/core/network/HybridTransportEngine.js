@@ -265,6 +265,46 @@
   const engine = new HybridTransportEngine();
   engine.start();
 
+  // ── Wire LAN peer availability into transport health ──────────────────
+  // When LAN engine reports peers, mark LAN as available in health monitor
+  const _watchLANPeers = () => {
+    const lan = window.__LANCommunicationEngine;
+    if (lan) {
+      const hasPeers = lan.hasPeers?.() || false;
+      engine._health.setAvailable(TRANSPORT.LAN, hasPeers);
+    }
+    // Check mesh relay health
+    const mesh = window.__MeshMessagesTransport || window.__MeshEngine;
+    if (mesh) {
+      const meshReady = mesh.isConnected?.() || mesh.peers?.size > 0 || false;
+      engine._health.setAvailable(TRANSPORT.MESH, meshReady);
+    }
+  };
+  setInterval(_watchLANPeers, 5000);
+  window.addEventListener('lan:peer_joined',  () => engine._health.setAvailable(TRANSPORT.LAN, true));
+  window.addEventListener('lan:peer_left',    () => _watchLANPeers());
+  window.addEventListener('lan:peer_list',    () => _watchLANPeers());
+
+  // ── Expose recordSuccess / recordFailure for messages-core ────────────
+  engine.recordSuccess = function(transport, latencyMs) {
+    try { this._health.recordSuccess?.(transport, latencyMs); } catch(_) {}
+  };
+  engine.recordFailure = function(transport) {
+    try { this._health.recordFailure?.(transport); } catch(_) {}
+  };
+
+  // ── Expose getDiagnostics for ProductionMonitoringLayer ───────────────
+  engine.getDiagnostics = function() {
+    return {
+      best:       this.getBestTransport(),
+      current:    this.getCurrentTransport(),
+      available:  this.getAvailableTransports(),
+      lanPeers:   window.__LANCommunicationEngine?.getPeers?.()?.length || 0,
+      meshPeers:  window.__MeshMessagesTransport?.peers?.size || 0,
+      online:     navigator.onLine,
+    };
+  };
+
   window.__HybridTransportEngine = engine;
   window.HybridTransport = engine;
   window.TRANSPORT = TRANSPORT;
