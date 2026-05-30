@@ -1473,8 +1473,7 @@
             <!-- ADDRESS BOOK PAGE -->
             <div class="jm-page" id="jmPageAddresses">
                 <div class="jm-page-title">Address Book</div>
-                <div id="jmAddressContent"></div>
-                <button class="jm-orange-btn" style="margin:16px" onclick="window._jmAddAddress()">+ Add New Address</button>
+                <div id="jmAddressesContent"></div>
             </div>
 
             <!-- RATINGS & REVIEWS PAGE -->
@@ -1511,10 +1510,19 @@
                 <div class="jm-more-handle"></div>
                 <div class="jm-more-title">More Options</div>
                 <div class="jm-more-grid">
+                    <!-- ── Seller Tools ───────────────────────────────────────────── -->
+                    <button class="jm-more-item" onclick="window._jmNavMore('seller-dashboard')"><i class="fas fa-store"></i><span>Seller Dashboard</span></button>
+                    <button class="jm-more-item" onclick="window._jmNavMore('my-listings')"><i class="fas fa-box-open"></i><span>My Listings</span></button>
+                    <button class="jm-more-item" onclick="window._jmNavMore('seller-inventory')"><i class="fas fa-warehouse"></i><span>Inventory</span></button>
+                    <button class="jm-more-item" onclick="window._jmNavMore('seller-analytics')"><i class="fas fa-chart-line"></i><span>Analytics</span></button>
+                    <button class="jm-more-item" onclick="window._jmNavMore('seller-payouts')"><i class="fas fa-money-bill-wave"></i><span>Payouts</span></button>
+                    <button class="jm-more-item" onclick="window._jmNavMore('seller-shipping')"><i class="fas fa-shipping-fast"></i><span>Shipping</span></button>
+                    <button class="jm-more-item" onclick="window._jmNavMore('seller-returns')"><i class="fas fa-undo-alt"></i><span>Returns</span></button>
+                    <button class="jm-more-item" id="createListingBtn" onclick="window._jmHideMore()"><i class="fas fa-plus-circle"></i><span>Create Listing</span></button>
+                    <!-- ── Buyer Tools ────────────────────────────────────────────── -->
                     <button class="jm-more-item" onclick="window._jmNavMore('analytics')"><i class="fas fa-chart-bar"></i><span>Analytics</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('notes')"><i class="fas fa-sticky-note"></i><span>My Notes</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('trust')"><i class="fas fa-shield-alt"></i><span>Trust Stats</span></button>
-                    <button class="jm-more-item" onclick="window._jmNavMore('team')"><i class="fas fa-users"></i><span>Team</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('leaderboard')"><i class="fas fa-trophy"></i><span>Leaderboard</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('vouchers')"><i class="fas fa-ticket-alt"></i><span>Vouchers</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('notifprefs')"><i class="fas fa-bell"></i><span>Notifications</span></button>
@@ -1522,7 +1530,6 @@
                     <button class="jm-more-item" onclick="window._jmNavMore('inbox')"><i class="fas fa-envelope"></i><span>Inbox</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('follow-sellers')"><i class="fas fa-store"></i><span>Follow Sellers</span></button>
                     <button class="jm-more-item" onclick="window._jmNavMore('reviews-page')"><i class="fas fa-star"></i><span>My Reviews</span></button>
-                    <button class="jm-more-item" id="createListingBtn" onclick="window._jmHideMore()"><i class="fas fa-plus-circle"></i><span>Create Listing</span></button>
                 </div>
             </div>
 
@@ -1611,6 +1618,7 @@
             
             <div class="create-listing-tabs">
                 <button class="create-listing-tab active" data-tab="service">Service</button>
+                <button class="create-listing-tab" data-tab="physical">📦 Physical</button>
                 <button class="create-listing-tab" data-tab="digital">Digital Item</button>
                 <button class="create-listing-tab" data-tab="premium">Premium <span class="premium-feature-tag">PRO</span></button>
                 <button class="create-listing-tab" data-tab="templates">Templates</button>
@@ -1661,6 +1669,123 @@
                     </div>
                 </div>
                 
+                <!-- Physical Product Tab — Full e-commerce listing with approval workflow -->
+                <div class="create-listing-tab-content" id="physicalTab">
+                    <div style="padding:0 4px">
+                        <!-- Status notice -->
+                        <div id="physApprovalNotice" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px">
+                            <span>⏳</span><span>New products are reviewed by admin before going live to buyers.</span>
+                        </div>
+
+                        <!-- Basic Info -->
+                        <div class="input-group">
+                            <label for="physTitle">Product Name *</label>
+                            <input type="text" class="text-input" id="physTitle" placeholder="e.g., Leather Office Chair – Adjustable Height" maxlength="120">
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            <div class="input-group">
+                                <label for="physBrand">Brand</label>
+                                <input type="text" class="text-input" id="physBrand" placeholder="e.g., Samsung, Nike">
+                            </div>
+                            <div class="input-group">
+                                <label for="physSku">SKU / Product Code</label>
+                                <input type="text" class="text-input" id="physSku" placeholder="e.g., CH-001-BLK">
+                            </div>
+                        </div>
+
+                        <!-- Category & Subcategory -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            <div class="input-group">
+                                <label for="physCategory">Category *</label>
+                                <select class="text-input" id="physCategory" onchange="window._physCategoryChanged(this.value)">
+                                    <option value="">Select category…</option>
+                                    <option value="electronics">Electronics</option>
+                                    <option value="fashion">Fashion & Clothing</option>
+                                    <option value="furniture">Furniture & Home</option>
+                                    <option value="food">Food & Grocery</option>
+                                    <option value="beauty">Beauty & Health</option>
+                                    <option value="sports">Sports & Outdoors</option>
+                                    <option value="toys">Toys & Baby</option>
+                                    <option value="automotive">Automotive</option>
+                                    <option value="books">Books & Stationery</option>
+                                    <option value="construction">Building & Construction</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label for="physSubcategory">Subcategory</label>
+                                <input type="text" class="text-input" id="physSubcategory" placeholder="e.g., Smartphones, Sofas">
+                            </div>
+                        </div>
+
+                        <!-- Material Selection (dynamic by category) -->
+                        <div class="input-group" id="physMaterialGroup" style="display:none">
+                            <label>Material / Composition</label>
+                            <div id="physMaterialOptions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="input-group">
+                            <label for="physDescription">Description *</label>
+                            <textarea class="textarea-input" id="physDescription" placeholder="Describe your product in detail — features, dimensions, what's included…" style="min-height:90px"></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label for="physShortDesc">Short Description</label>
+                            <input type="text" class="text-input" id="physShortDesc" placeholder="One line summary shown in search results" maxlength="160">
+                        </div>
+
+                        <!-- Images -->
+                        <div class="input-group">
+                            <label>Product Images * <span style="font-size:11px;color:#9ca3af">(up to 8 images)</span></label>
+                            <div id="physImageGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px"></div>
+                            <button type="button" onclick="document.getElementById('physImageInput').click()" style="margin-top:8px;width:100%;border:1.5px dashed #d1d5db;border-radius:10px;padding:10px;background:none;cursor:pointer;font-size:13px;color:#6b7280">+ Add Images</button>
+                            <input type="file" id="physImageInput" accept="image/*" multiple style="display:none" onchange="window._physAddImages(this.files)">
+                        </div>
+
+                        <!-- Pricing -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            <div class="input-group">
+                                <label for="physPrice">Selling Price (KES) *</label>
+                                <input type="number" class="text-input" id="physPrice" placeholder="0" min="0" step="1" oninput="window._physCalcDiscount()">
+                            </div>
+                            <div class="input-group">
+                                <label for="physOriginalPrice">Original Price (KES)</label>
+                                <input type="number" class="text-input" id="physOriginalPrice" placeholder="0 (optional)" min="0" oninput="window._physCalcDiscount()">
+                            </div>
+                        </div>
+                        <div id="physDiscountLabel" style="font-size:12px;color:#22c55e;font-weight:600;margin:-8px 0 10px;display:none"></div>
+
+                        <!-- Inventory -->
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            <div class="input-group">
+                                <label for="physStock">Stock Quantity *</label>
+                                <input type="number" class="text-input" id="physStock" placeholder="0" min="0" value="1">
+                            </div>
+                            <div class="input-group">
+                                <label for="physWeight">Weight (kg)</label>
+                                <input type="number" class="text-input" id="physWeight" placeholder="0.5" min="0" step="0.1">
+                            </div>
+                        </div>
+
+                        <!-- Variants -->
+                        <div class="input-group">
+                            <label>Variants <span style="font-size:11px;color:#9ca3af">(colors, sizes, etc.)</span></label>
+                            <div id="physVariantsContainer"></div>
+                            <button type="button" onclick="window._physAddVariant()" style="margin-top:6px;background:#f3f4f6;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;color:#374151">+ Add Variant</button>
+                        </div>
+
+                        <!-- Specifications -->
+                        <div class="input-group">
+                            <label>Specifications <span style="font-size:11px;color:#9ca3af">(key: value pairs)</span></label>
+                            <div id="physSpecsContainer"></div>
+                            <button type="button" onclick="window._physAddSpec()" style="margin-top:6px;background:#f3f4f6;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;color:#374151">+ Add Spec</button>
+                        </div>
+
+                        <!-- Preview toggle -->
+                        <button type="button" onclick="window._physPreview()" style="width:100%;background:#1e3a5f;color:#fff;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:13px;cursor:pointer;margin-top:8px">👁️ Preview as Customer</button>
+                    </div>
+                </div>
+
                 <!-- Digital Items Tab - Fixed duplicate ID: changed to digitalItemTab -->
                 <div class="create-listing-tab-content" id="digitalItemTab">
                     <div class="digital-items-container">
@@ -3259,5 +3384,23 @@
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
+<!-- ═══ Marketplace Checkout Flow ════════════════════════════════════════════════════
+  Complete buyer checkout: Address → Delivery → Payment → Success + Order Tracking
+  Must load AFTER Tool-ui.js. Overrides _jmCheckout and _jmViewOrder.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/marketplace-checkout.js"></script>
+<!-- ═══ Enterprise Marketplace Features ═══════════════════════════════════════════════
+  Flash Sales · Wallet · Loyalty · Referral · AI Recs · Compare · Invoice · QR
+  Voice Search · Smart Delivery · PWA · Behavior Tracking · Multi-Currency
+  Must load AFTER marketplace-checkout.js.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/marketplace-advanced.js"></script>
+<!-- ═══ Seller Module ═════════════════════════════════════════════════════════════════
+  Seller Dashboard · My Listings · Physical Product Tab · Inventory · Analytics
+  Payouts · Shipping · Returns · KYC Verification · Subscriptions · Admin Approval
+  Product Approval Workflow (pending_review → approved/rejected)
+  Must load AFTER marketplace-advanced.js.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/marketplace-seller.js"></script>
 </body>
 </html>

@@ -3094,11 +3094,19 @@ async function publishListingFromModal() {
 
             if (listing) {
                 console.log('[PUBLISH] ✅ Listing created:', listing.id);
-                showNotification('Listing published! 🎉', 'success');
+                // Show pending review message — product is NOT live until admin approves
+                const isPending = listing.status === 'pending_review' || listing.approval_status === 'pending' || listing.approvalStatus === 'pending';
+                if (isPending) {
+                    showNotification('Listing submitted for review! 🎉 It will go live after admin approval.', 'success');
+                } else {
+                    showNotification('Listing published! 🎉', 'success');
+                }
                 hideCreateListingModal();
                 resetCreateListingForm();
                 UIPipeline.syncFromCoreGlobals();
                 UIPipeline.liveUpdate();
+                // Refresh seller dashboard if open
+                if (typeof window._sellerDash?.reload === 'function') window._sellerDash.reload();
             } else {
                 console.warn('[PUBLISH] createServiceListing returned null/undefined');
                 showNotification('Could not publish listing. Check console for details.', 'error');
@@ -5272,7 +5280,7 @@ function _navDirect(page, subpage, _pushHistory) {
         case 'recent':      _renderRecent(); break;
         case 'products':    _renderProductsPage(subpage); break;
         case 'notifprefs':  break; // static HTML
-        case 'addresses':   _renderAddresses(); break;
+        case 'addresses':   (window._renderAddresses || _renderAddresses)(); break;
         case 'vouchers':    _renderVouchers(); break;
         case 'inbox':       _renderInbox(); break;
         case 'follow-sellers': _renderFollowSellers(); break;
@@ -6224,10 +6232,11 @@ window._jmCartRemove = function(pid) {
 };
 
 window._jmCheckout = function() {
-    // Trigger checkout panel if available, else show payment flow
-    if (typeof openCheckoutPanel === 'function') { openCheckoutPanel(); return; }
-    if (typeof window._ecomProceedToCheckout === 'function') { window._ecomProceedToCheckout(); return; }
-    _toast('Checkout coming soon', 'info', '🛒');
+    // marketplace-checkout.js sets window._jmCheckoutImpl after loading.
+    // openCheckoutPanel and _ecomProceedToCheckout are also aliases.
+    const fn = window._jmCheckoutImpl || window.openCheckoutPanel || window._ecomProceedToCheckout;
+    if (typeof fn === 'function') { fn(); return; }
+    _toast('Loading checkout…', 'info', '🛒');
 };
 
 // ── WISHLIST PAGE ──────────────────────────────────────────────────────────
@@ -6414,7 +6423,10 @@ function _renderOrderList(container, orders) {
 }
 
 window._jmViewOrder = function(orderId) {
-    _toast('Order tracking coming soon', 'info', '📦');
+    // marketplace-checkout.js overrides this with full tracking UI
+    const fn = window._jmViewOrderImpl || window.openOrderTracking;
+    if (typeof fn === 'function') { fn(orderId); return; }
+    _toast('Loading order details…', 'info', '📦');
 };
 
 // ── RECENTLY VIEWED PAGE ───────────────────────────────────────────────────
@@ -6557,7 +6569,7 @@ window._jmFollowSeller = function(sellerId, btn) {
 
 // ── ADDRESSES PAGE ─────────────────────────────────────────────────────────
 function _renderAddresses() {
-    const container = document.getElementById('jmAddressContent');
+    const container = document.getElementById('jmAddressesContent') || document.getElementById('jmAddressContent');
     if (!container) return;
     const addrs = _state.addresses.length ? _state.addresses : _ls.load(_LS.ADDRS, []);
     _state.addresses = addrs;
