@@ -5272,7 +5272,7 @@ function _navDirect(page, subpage, _pushHistory) {
         case 'recent':      _renderRecent(); break;
         case 'products':    _renderProductsPage(subpage); break;
         case 'notifprefs':  break; // static HTML
-        case 'addresses':   (window._renderAddresses || _renderAddresses)(); break;
+        case 'addresses':   _renderAddresses(); break;
         case 'vouchers':    _renderVouchers(); break;
         case 'inbox':       _renderInbox(); break;
         case 'follow-sellers': _renderFollowSellers(); break;
@@ -6224,11 +6224,10 @@ window._jmCartRemove = function(pid) {
 };
 
 window._jmCheckout = function() {
-    // marketplace-checkout.js sets window._jmCheckoutImpl after loading.
-    // openCheckoutPanel and _ecomProceedToCheckout are also aliases.
-    const fn = window._jmCheckoutImpl || window.openCheckoutPanel || window._ecomProceedToCheckout;
-    if (typeof fn === 'function') { fn(); return; }
-    _toast('Loading checkout…', 'info', '🛒');
+    // Trigger checkout panel if available, else show payment flow
+    if (typeof openCheckoutPanel === 'function') { openCheckoutPanel(); return; }
+    if (typeof window._ecomProceedToCheckout === 'function') { window._ecomProceedToCheckout(); return; }
+    _toast('Checkout coming soon', 'info', '🛒');
 };
 
 // ── WISHLIST PAGE ──────────────────────────────────────────────────────────
@@ -6415,10 +6414,7 @@ function _renderOrderList(container, orders) {
 }
 
 window._jmViewOrder = function(orderId) {
-    // marketplace-checkout.js overrides this with full tracking UI
-    const fn = window._jmViewOrderImpl || window.openOrderTracking;
-    if (typeof fn === 'function') { fn(orderId); return; }
-    _toast('Loading order details…', 'info', '📦');
+    _toast('Order tracking coming soon', 'info', '📦');
 };
 
 // ── RECENTLY VIEWED PAGE ───────────────────────────────────────────────────
@@ -6561,7 +6557,7 @@ window._jmFollowSeller = function(sellerId, btn) {
 
 // ── ADDRESSES PAGE ─────────────────────────────────────────────────────────
 function _renderAddresses() {
-    const container = document.getElementById('jmAddressesContent') || document.getElementById('jmAddressContent');
+    const container = document.getElementById('jmAddressContent');
     if (!container) return;
     const addrs = _state.addresses.length ? _state.addresses : _ls.load(_LS.ADDRS, []);
     _state.addresses = addrs;

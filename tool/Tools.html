@@ -1473,7 +1473,8 @@
             <!-- ADDRESS BOOK PAGE -->
             <div class="jm-page" id="jmPageAddresses">
                 <div class="jm-page-title">Address Book</div>
-                <div id="jmAddressesContent"></div>
+                <div id="jmAddressContent"></div>
+                <button class="jm-orange-btn" style="margin:16px" onclick="window._jmAddAddress()">+ Add New Address</button>
             </div>
 
             <!-- RATINGS & REVIEWS PAGE -->
@@ -3258,16 +3259,5 @@
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
-<!-- ═══ Marketplace Checkout Flow ════════════════════════════════════════════════════
-  Complete buyer checkout: Address → Delivery → Payment → Success + Order Tracking
-  Must load AFTER Tool-ui.js. Overrides _jmCheckout and _jmViewOrder.
-════════════════════════════════════════════════════════════════════════ -->
-<script src="/marketplace-checkout.js"></script>
-<!-- ═══ Enterprise Marketplace Features ═══════════════════════════════════════════════
-  Flash Sales · Wallet · Loyalty · Referral · AI Recs · Compare · Invoice · QR
-  Voice Search · Smart Delivery · PWA · Behavior Tracking · Multi-Currency
-  Must load AFTER marketplace-checkout.js.
-════════════════════════════════════════════════════════════════════════ -->
-<script src="/marketplace-advanced.js"></script>
 </body>
 </html>
