@@ -2952,6 +2952,10 @@
 
         _setupEventListeners() {
 
+            // PHASE10: Guard against duplicate listener attachment (called by multiple code paths)
+            if (this._renderListenersSetup) return;
+            this._renderListenersSetup = true;
+
             window.addEventListener('renderMessages', (e) => {
 
                 UIFailsafe.queueAction(() => {

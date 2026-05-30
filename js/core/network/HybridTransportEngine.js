@@ -116,6 +116,11 @@
     rank() {
       return TRANSPORT_PRIORITY.filter(t => this._health.isAvailable(t));
     }
+
+    // PHASE10: expose getAvailable so getAvailableTransports() works
+    getAvailable() {
+      return this.rank();
+    }
   }
 
   // ─── TransportSwitchOrchestrator ─────────────────────────────────────────
@@ -188,10 +193,11 @@
 
     // ── Public API ──────────────────────────────────────────────────────────
 
-    getBestTransport()    { return this._priority.selectBest(); }
-    getCurrentTransport() { return this._orchestrator.getCurrent(); }
-    isAvailable(t)        { return this._health.isAvailable(t); }
-    getCapabilities()     { return { ...this._caps }; }
+    getBestTransport()       { return this._priority.selectBest(); }
+    getCurrentTransport()    { return this._orchestrator.getCurrent(); }
+    isAvailable(t)           { return this._health.isAvailable(t); }
+    getCapabilities()        { return { ...this._caps }; }
+    getAvailableTransports() { return this._priority.getAvailable?.() || [this._priority.selectBest()]; }
 
     onTransportSwitch(fn) { return this._orchestrator.onChange(fn); }
 
@@ -248,6 +254,8 @@
 
     _startHealthPolling() {
       setInterval(() => {
+        // PHASE10: Poll actual connectivity state of all transports
+        // Internet — check socket
         const socket = window.KynectaRealtime?._socket;
         if (socket) {
           const connected = socket.connected;
@@ -255,6 +263,28 @@
           if (!connected && this._orchestrator.getCurrent() === TRANSPORT.INTERNET) {
             this._orchestrator.switchTo(this._priority.selectBest(), 'socket_disconnected');
           }
+        } else {
+          // No socket at all
+          this._health.setAvailable(TRANSPORT.INTERNET, navigator.onLine);
+        }
+
+        // LAN — check actual peers
+        const lan = window.__LANCommunicationEngine;
+        const hasLAN = lan?.hasPeers?.() === true;
+        this._health.setAvailable(TRANSPORT.LAN, hasLAN);
+
+        // Mesh — check relay connection
+        const mesh = window.__MeshMessagesTransport || window.__MeshEngine;
+        const hasMesh = !!(mesh?.isConnected?.() || (mesh?.peers?.size > 0));
+        this._health.setAvailable(TRANSPORT.MESH, hasMesh);
+
+        // Offline queue always available
+        this._health.setAvailable(TRANSPORT.OFFLINE, true);
+
+        // Switch if better transport available
+        const best = this._priority.selectBest();
+        if (best !== this._orchestrator.getCurrent()) {
+          this._orchestrator.switchTo(best, 'health_poll');
         }
       }, 10000);
     }
@@ -286,11 +316,18 @@
   window.addEventListener('lan:peer_list',    () => _watchLANPeers());
 
   // ── Expose recordSuccess / recordFailure for messages-core ────────────
+  // PHASE10-FIX: _health uses record(t, success, latency) not recordSuccess/Failure
   engine.recordSuccess = function(transport, latencyMs) {
-    try { this._health.recordSuccess?.(transport, latencyMs); } catch(_) {}
+    try {
+      if (this._health.record) this._health.record(transport, true, latencyMs || 0);
+      else if (this._health.recordSuccess) this._health.recordSuccess(transport, latencyMs);
+    } catch(_) {}
   };
   engine.recordFailure = function(transport) {
-    try { this._health.recordFailure?.(transport); } catch(_) {}
+    try {
+      if (this._health.record) this._health.record(transport, false);
+      else if (this._health.recordFailure) this._health.recordFailure(transport);
+    } catch(_) {}
   };
 
   // ── Expose getDiagnostics for ProductionMonitoringLayer ───────────────

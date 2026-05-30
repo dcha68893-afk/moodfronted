@@ -284,6 +284,19 @@
       try {
         await this._sendHandler(entry.payload);
         await this.markDelivered(id);
+
+        // PHASE10: Update UI delivery status when queue item is sent
+        try {
+          const localId = entry.payload?.localId || entry.payload?.id || id;
+          const chatId  = entry.payload?.chatId  || entry.payload?.conversationId;
+          const ChatManager = window.ChatManager || window.KynectaChatManager;
+          if (localId && ChatManager?.updateMessageStatus) {
+            ChatManager.updateMessageStatus(localId, 'sent', {
+              localId, chatId, optimistic: false, isLocalOnly: false,
+            });
+          }
+        } catch (_) {}
+
       } catch (err) {
         entry.state    = entry.attempts >= this._maxRetries ? 'FAILED' : 'QUEUED';
         entry.lastError = err?.message || String(err);

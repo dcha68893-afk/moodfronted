@@ -12843,14 +12843,20 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
                 } else if (state === 'disconnected') {
-
-
-
-                    logWarn(MODULE, 'ICE disconnected - attempting recovery');
-
-
-
+                    logWarn(MODULE, 'ICE disconnected - attempting PHASE10 recovery');
                     this._notifyListeners('ice_disconnected', { state });
+                    // PHASE10-FIX: Attempt ICE restart on disconnect (not just on failed)
+                    // Give 5s for transient network hiccup before escalating to restart
+                    if (!this._iceDisconnectTimer) {
+                        this._iceDisconnectTimer = setTimeout(() => {
+                            this._iceDisconnectTimer = null;
+                            const currentIceState = this._peerConnection?.iceConnectionState;
+                            if (currentIceState === 'disconnected' || currentIceState === 'failed') {
+                                logWarn(MODULE, 'PHASE10: ICE still disconnected after 5s — triggering restart');
+                                this.handleIceFailure();
+                            }
+                        }, 5000);
+                    }
 
 
 
@@ -13961,7 +13967,27 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
             this._remoteStreams.clear();
             this._dataChannel = null;
             this._currentCallId = null;
-            console.log('[WebRTCManager] ✅ Full cleanup done — ready for next call');
+            // PHASE10: Clear ICE disconnect timer so second call doesn't get stale recovery
+            if (this._iceDisconnectTimer) {
+                clearTimeout(this._iceDisconnectTimer);
+                this._iceDisconnectTimer = null;
+            }
+            // PHASE10: Null out stale remote streams so second call gets fresh tracks
+            this._remoteAudioStream = null;
+            this._remoteVideoStream = null;
+            // PHASE10: Clear stale srcObject from DOM elements so second call renders correctly
+            try {
+                const remoteAudio = document.getElementById('remoteAudio');
+                if (remoteAudio) { remoteAudio.srcObject = null; remoteAudio.load(); }
+                const remoteVideo = document.getElementById('remoteVideo');
+                if (remoteVideo) { remoteVideo.srcObject = null; remoteVideo.load(); }
+                // Restore avatar visibility for next call
+                const avatarWrap = document.getElementById('incallAvatarWrap');
+                if (avatarWrap) avatarWrap.style.display = '';
+                const inCallScreen = document.getElementById('inCallScreen');
+                if (inCallScreen) inCallScreen.classList.remove('video-active');
+            } catch(_) {}
+            console.log('[WebRTCManager] ✅ PHASE10 Full cleanup done — ready for next call');
         },
 
 

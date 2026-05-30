@@ -850,6 +850,39 @@
                     }
                 }
 
+                // ── PHASE10: entity:deleted → DeletionRegistry + cache eviction ───────
+                if (evType === 'entity:deleted' || evType === 'entity_deleted') {
+                    try {
+                        const reg = window.__PHASE10_DeletionRegistry;
+                        if (reg && payload) {
+                            const eType = payload.entityType || 'unknown';
+                            const eId   = payload.entityId  || payload.id;
+                            if (eId) reg.mark(eType, String(eId), payload.reason || 'deleted');
+                        }
+                    } catch (_) {}
+                }
+
+                // ── PHASE10: message:patch → incremental entity update ────────────────
+                if (evType === 'message:patch' || evType === 'message_patch') {
+                    try {
+                        if (payload && payload.op === 'delete' && payload.id) {
+                            window.__PHASE10_DeletionRegistry?.mark('message', String(payload.id), 'deleted');
+                        }
+                    } catch (_) {}
+                    // Forward to messages-core for processing
+                    try { window.dispatchEvent(new CustomEvent('kyn:message:patch', { detail: payload })); } catch (_) {}
+                }
+
+                // ── PHASE10: lan:message → route to messages-core as normal message ──
+                if (evType === 'lan:message' || evType === 'lan_message') {
+                    try {
+                        const lanMsg = payload?.message || payload?.data || payload;
+                        if (lanMsg) {
+                            window.dispatchEvent(new CustomEvent('kyn:new_message', { detail: { ...lanMsg, _transport: 'LAN' } }));
+                        }
+                    } catch (_) {}
+                }
+
                 // ── Phase 4+6: Group events fan-out to sibling iframes ───────────────────
                 if (evType.startsWith('group:') || evType.startsWith('status:') ||
                     evType.startsWith('device:') || evType.startsWith('session:')) {
@@ -921,12 +954,25 @@
                         }
                     }, 5000);
                     try {
-                        this._socket.once('pong', () => { pongReceived = true; clearTimeout(pingTimeout); });
+                        this._socket.once('pong', () => {
+                            pongReceived = true;
+                            clearTimeout(pingTimeout);
+                            // PHASE10: Tab returned and socket is alive — flush offline queue
+                            setTimeout(() => {
+                                try { window.__OfflineMessageQueue?.flushAll?.(); } catch(_) {}
+                                try { window.__PHASE10_DeletionRegistry?.syncFromServer?.(Date.now() - 3_600_000); } catch(_) {}
+                            }, 500);
+                        });
                         this._socket.emit('ping');
                     } catch(_) {
                         clearTimeout(pingTimeout);
                         this.handleReconnect({ reason: 'ping-emit-failed' });
                     }
+                } else if (hiddenMs > 0 && hiddenMs <= 10000) {
+                    // Short background — just flush the queue in case anything queued
+                    setTimeout(() => {
+                        try { window.__OfflineMessageQueue?.flushAll?.(); } catch(_) {}
+                    }, 300);
                 }
             });
         }
@@ -1089,6 +1135,10 @@
                 'message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
                 'message:delivered', 'message:read', 'message_delivered', 'message_read',
                 'message:seen', 'message_seen', 'message:deleted', 'message_deleted',
+                // PHASE10: entity:deleted carries tombstone payloads for cache invalidation
+                'entity:deleted', 'message:patch',
+                // PHASE10: LAN delivery events
+                'lan:message',
             ];
 
             const callEvents = [

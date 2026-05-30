@@ -262,7 +262,35 @@
 
         this._setState(RECOVERY_STATE.RECOVERED);
 
+        // PHASE10: On reconnect, flush offline queue + re-announce to LAN + sync deletions
         setTimeout(() => {
+          // Flush offline queue via Phase10TransportRuntime
+          try {
+            if (window.__Phase10TransportRuntime) {
+              window.__OfflineMessageQueue?.flushAll?.();
+            }
+          } catch(_) {}
+
+          // Re-announce to LAN discovery service
+          try {
+            const lan = window.__LANCommunicationEngine;
+            if (lan?.isEnabled?.()) {
+              const socket = window.KynectaRealtime?._socket;
+              if (socket?.connected) {
+                socket.emit('lan:announce', {
+                  userId    : myId,
+                  socketId  : socket.id,
+                  timestamp : Date.now(),
+                });
+              }
+            }
+          } catch(_) {}
+
+          // Sync deletion registry from server to evict stale caches
+          try {
+            window.__PHASE10_DeletionRegistry?.syncFromServer?.(Date.now() - 24 * 60 * 60 * 1000);
+          } catch(_) {}
+
           if (this._state === RECOVERY_STATE.RECOVERED) {
             this._setState(RECOVERY_STATE.CONNECTED);
           }

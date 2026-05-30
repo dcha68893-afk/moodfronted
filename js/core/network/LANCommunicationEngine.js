@@ -258,18 +258,38 @@
      * Returns false if no LAN peers available.
      */
     send(payload) {
-      const peer = this._discovery.getBestPeer();
-      if (!peer) return false;
-      // Try direct WS
-      const sent = peer.send({ type: 'relay:message', payload });
-      if (sent) return true;
-      // Fallback: relay via server for AP-isolated networks
-      const socket = window.KynectaRealtime?._socket;
-      if (socket?.connected && peer.socketId) {
-        socket.emit('lan:relay_message', { targetSocketId: peer.socketId, payload });
-        return true;
+      const peers = this._discovery.getConnected();
+      if (!peers || peers.length === 0) return false;
+
+      // PHASE10: Send to ALL reachable LAN peers (not just best)
+      // Also attach targetUserId so backend can route to user rooms + offline queue
+      let anySent = false;
+
+      for (const peer of peers) {
+        // Try direct WebRTC/WebSocket data channel first
+        try {
+          if (peer.send) {
+            const sent = peer.send({ type: 'relay:message', payload });
+            if (sent) { anySent = true; continue; }
+          }
+        } catch(_) {}
+
+        // Fallback: relay via server socket (AP-isolated networks)
+        const socket = window.KynectaRealtime?._socket;
+        if (socket?.connected) {
+          const relayPayload = {
+            targetSocketId : peer.socketId || null,
+            targetUserId   : peer.userId   || peer.id || null,
+            payload        : { ...payload, _lanRelayed: true },
+          };
+          socket.emit('lan:relay_message', relayPayload, (ack) => {
+            if (ack?.ok) anySent = true;
+          });
+          anySent = true;
+        }
       }
-      return false;
+
+      return anySent;
     }
 
     onPeerChange(fn) { return this._discovery.onPeerEvent(fn); }

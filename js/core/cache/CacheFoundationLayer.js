@@ -309,3 +309,132 @@
 
   console.log('[CacheFoundation] ✅ Ready');
 })();
+
+// ─── PHASE10: DeletionRegistry ─────────────────────────────────────────────
+// Prevents stale cache resurrection of deleted chats/messages/groups/statuses.
+// Injected as window.__PHASE10_DeletionRegistry
+(function() {
+  'use strict';
+  if (window.__PHASE10_DeletionRegistry) return;
+
+  const DB_KEY = 'p10_deletion_registry';
+  const TTL    = 7 * 24 * 60 * 60 * 1000;
+
+  class DeletionRegistry {
+    constructor() {
+      this._entries = new Map(); // "type:id" -> { ts, reason }
+      this._load();
+    }
+
+    mark(type, id, reason = 'deleted') {
+      const key = `${type}:${String(id)}`;
+      this._entries.set(key, { ts: Date.now(), reason });
+      this._persist();
+      // Immediately remove from caches
+      this._evictFromCaches(type, id);
+    }
+
+    isDeleted(type, id) {
+      const key = `${type}:${String(id)}`;
+      const entry = this._entries.get(key);
+      if (!entry) return false;
+      if (Date.now() - entry.ts > TTL) { this._entries.delete(key); return false; }
+      return true;
+    }
+
+    unmark(type, id) {
+      this._entries.delete(`${type}:${String(id)}`);
+      this._persist();
+    }
+
+    getSince(since = 0) {
+      const out = [];
+      for (const [key, entry] of this._entries) {
+        if (entry.ts > since) {
+          const [type, ...rest] = key.split(':');
+          out.push({ type, id: rest.join(':'), ...entry });
+        }
+      }
+      return out;
+    }
+
+    _evictFromCaches(type, id) {
+      const idStr = String(id);
+      // localStorage eviction
+      try {
+        const prefixes = ['kynecta_messages_v8_', 'kynecta_chat_', 'kynecta_group_', 'kynecta_status_'];
+        if (type === 'chat' || type === 'message') {
+          prefixes.forEach(p => {
+            try { localStorage.removeItem(p + idStr); } catch(_) {}
+          });
+        }
+      } catch(_) {}
+      // sessionStorage eviction
+      try {
+        const keys = Object.keys(sessionStorage).filter(k => k.includes(idStr));
+        keys.forEach(k => { try { sessionStorage.removeItem(k); } catch(_) {} });
+      } catch(_) {}
+    }
+
+    _persist() {
+      try {
+        const arr = [];
+        for (const [key, entry] of this._entries) arr.push([key, entry]);
+        localStorage.setItem(DB_KEY, JSON.stringify(arr.slice(-1000)));
+      } catch(_) {}
+    }
+
+    _load() {
+      try {
+        const raw = localStorage.getItem(DB_KEY);
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        const now = Date.now();
+        for (const [key, entry] of arr) {
+          if (now - entry.ts < TTL) this._entries.set(key, entry);
+        }
+      } catch(_) {}
+    }
+
+    // Pull deletions from server to stay in sync
+    async syncFromServer(since = 0) {
+      try {
+        const base = window.__getApiBase?.() || '';
+        const res  = await fetch(`${base}/deletions?since=${since}`, {
+          headers: { Authorization: `Bearer ${window.__kynToken || ''}` }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        (data.deletions || []).forEach(d => this.mark(d.type, d.id, d.reason));
+      } catch(_) {}
+    }
+  }
+
+  const registry = new DeletionRegistry();
+  window.__PHASE10_DeletionRegistry = registry;
+
+  // Sync from server on load and reconnect
+  setTimeout(() => registry.syncFromServer(Date.now() - 7 * 24 * 60 * 60 * 1000), 3000);
+  window.addEventListener('kyn:connected', () => registry.syncFromServer(Date.now() - 24 * 60 * 60 * 1000));
+  window.addEventListener('online', () => registry.syncFromServer(Date.now() - 24 * 60 * 60 * 1000));
+
+  // Listen for deletion events from socket
+  window.addEventListener('message', (evt) => {
+    try {
+      const d = typeof evt.data === 'string' ? JSON.parse(evt.data) : evt.data;
+      if (!d) return;
+      const type = d.type || d.event || '';
+      if (type === 'entity:deleted' || type === 'ENTITY_DELETED') {
+        registry.mark(d.entityType || 'unknown', d.entityId || d.id, d.reason || 'deleted');
+      }
+      if (type === 'message:deleted' || type === 'MESSAGE_DELETED') {
+        registry.mark('message', d.messageId || d.id, 'deleted');
+      }
+      if (type === 'chat:deleted' || type === 'CHAT_DELETED') {
+        registry.mark('chat', d.chatId || d.id, 'deleted');
+      }
+    } catch(_) {}
+  });
+
+  console.log('[PHASE10] DeletionRegistry ✅ active');
+})();

@@ -2877,22 +2877,25 @@ try {
                 };
             }
 
-            // ── Transport-aware send with offline fallback ───────────────────
+            // ── PHASE10: HybridTransportRuntime — THE canonical transport path ──────
+            // Priority: INTERNET → LAN → MESH → OFFLINE QUEUE
+            // ALL sends go through this path. No module bypasses it.
             let result;
             const hybridEngine = window.__HybridTransportEngine;
             const offlineQueue = window.__OfflineMessageQueue;
+            const lanEngine    = window.__LANCommunicationEngine;
             const bestTransport = hybridEngine?.getBestTransport?.() || 'INTERNET';
-            const isOnline = navigator.onLine && (window.KynectaRealtime?._socket?.connected !== false);
+            const socketConnected = window.KynectaRealtime?._socket?.connected === true;
+            const isOnline = navigator.onLine && socketConnected;
 
+            // ── OFFLINE PATH: enqueue with guaranteed persistence ──────────────
             if (!isOnline && offlineQueue) {
-                // Offline — enqueue for later delivery
-                console.log('[ChatManager] 📦 Offline — queuing message for later delivery');
+                console.log('[ChatManager] 📦 PHASE10 OFFLINE — queuing with guaranteed delivery');
                 const queueEntry = await offlineQueue.enqueue({
                     ...requestBody,
                     localId: requestBody.localId || options.localId,
                     type: 'message',
                 });
-                // Return optimistic result so UI updates immediately
                 result = {
                     message: {
                         id: queueEntry.id,
@@ -2907,15 +2910,44 @@ try {
                     queued: true,
                 };
             } else {
-                // Online — try primary send, fall back to offline queue on failure
+                // ── ONLINE PATH: try transport in priority order ─────────────
+                // 1. LAN direct (same subnet, no internet needed)
+                let lanSent = false;
+                if (bestTransport === 'LAN' && lanEngine?.hasPeers?.()) {
+                    try {
+                        lanSent = lanEngine.send({ ...requestBody, _via: 'LAN' });
+                        if (lanSent) {
+                            hybridEngine?.recordSuccess?.('LAN', 0);
+                            console.log('[ChatManager] ✅ PHASE10 LAN delivery');
+                        }
+                    } catch (_lanErr) {
+                        hybridEngine?.recordFailure?.('LAN');
+                        lanSent = false;
+                    }
+                }
+
+                // 2. Internet (primary) — always attempted; LAN is additive not exclusive
                 try {
                     result = await makeApiRequest('/messages', 'POST', requestBody);
-                    // Record success in hybrid engine
                     hybridEngine?.recordSuccess?.('INTERNET', 0);
                 } catch (sendErr) {
-                    console.warn('[ChatManager] Send failed, trying offline queue:', sendErr.message);
+                    console.warn('[ChatManager] PHASE10 Internet send failed, checking fallbacks:', sendErr.message);
                     hybridEngine?.recordFailure?.('INTERNET');
-                    if (offlineQueue) {
+
+                    // 3. Mesh relay fallback
+                    const meshEngine = window.__MeshMessagesTransport || window.__MeshEngine;
+                    let meshSent = false;
+                    if (meshEngine?.isConnected?.() || meshEngine?.peers?.size > 0) {
+                        try {
+                            meshEngine.send?.({ ...requestBody, _via: 'MESH' });
+                            meshSent = true;
+                            hybridEngine?.recordSuccess?.('MESH', 0);
+                            console.log('[ChatManager] ✅ PHASE10 MESH relay delivery');
+                        } catch (_meshErr) { hybridEngine?.recordFailure?.('MESH'); }
+                    }
+
+                    // 4. Offline queue — guaranteed delivery on reconnect
+                    if (!meshSent && offlineQueue) {
                         const queueEntry = await offlineQueue.enqueue({
                             ...requestBody,
                             localId: requestBody.localId || options.localId,
@@ -3480,11 +3512,18 @@ try {
                 );
             if (!message) return false;
             
+            // PHASE10: In-place entity patch — apply all provided fields without array replacement
             message.status = status;
-            if (details.deliveredAt) message.deliveredAt = details.deliveredAt;
-            if (details.readAt) message.readAt = details.readAt;
-            if (details.serverId && !message.serverId) message.serverId = String(details.serverId);
-            if (details.localId && !message.localId) message.localId = String(details.localId);
+            if (details.deliveredAt)          message.deliveredAt    = details.deliveredAt;
+            if (details.readAt)               message.readAt         = details.readAt;
+            if (details.serverId)             message.serverId       = String(details.serverId);
+            if (details.localId)              message.localId        = String(details.localId);
+            if (details.chatId)               message.chatId         = details.chatId;
+            if (details.conversationId)       message.conversationId = details.conversationId;
+            if (details.timestamp)            message.timestamp      = details.timestamp;
+            if (details.createdAt)            message.createdAt      = details.createdAt;
+            if (details.optimistic === false) message.optimistic     = false;
+            if (details.isLocalOnly === false)message.isLocalOnly    = false;
             this._messagesMap.set(String(message.id), message);
             if (message.localId) this._messagesMap.set(String(message.localId), message);
             if (message.serverId) this._messagesMap.set(String(message.serverId), message);
@@ -3563,9 +3602,27 @@ try {
         },
         
         loadPreviousMessages: function(conversationId) {
+            // PHASE10-FIX: Stale cache rejection — never resurrect deleted entities
+            // Check the authoritative deletion registry before reading any cache
+            const _cidStr = String(conversationId || '');
+            const _deletionRegistry = window.__PHASE10_DeletionRegistry;
+            if (_deletionRegistry && _cidStr && _deletionRegistry.isDeleted('chat', _cidStr)) {
+                console.warn('[ChatManager] PHASE10: Rejecting stale cache for deleted chat:', _cidStr);
+                return null;
+            }
+
             if (this._historyCache.has(conversationId)) {
                 const cached = this._historyCache.get(conversationId);
                 if (Date.now() - cached.timestamp < 300000) {
+                    // Filter out tombstoned messages from cache
+                    if (_deletionRegistry && cached.messages) {
+                        const alive = cached.messages.filter(m =>
+                            !m || !m.id || !_deletionRegistry.isDeleted('message', String(m.id))
+                        );
+                        if (alive.length !== cached.messages.length) {
+                            cached.messages = alive;
+                        }
+                    }
                     return cached.messages;
                 }
             }
@@ -3573,8 +3630,12 @@ try {
             try {
                 const stored = SafeStorage.getJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`);
                 if (stored && Array.isArray(stored)) {
-                    this._historyCache.set(conversationId, { messages: stored, timestamp: Date.now() });
-                    return stored;
+                    // PHASE10-FIX: Filter tombstoned messages before returning from localStorage
+                    const alive = _deletionRegistry
+                        ? stored.filter(m => !m || !m.id || !_deletionRegistry.isDeleted('message', String(m.id)))
+                        : stored;
+                    this._historyCache.set(conversationId, { messages: alive, timestamp: Date.now() });
+                    return alive;
                 }
             } catch (e) {}
 
@@ -4269,36 +4330,35 @@ try {
                 const serverId = realMessage?.id;
 
                 // Update the optimistic message in ChatManager in-place
+                // PHASE10-FIX: Patch ONLY the single optimistic entity in-place.
+                // NEVER call setMessages() after send confirmation — it replaces the
+                // entire array and drops messages that arrived from the socket during
+                // the async HTTP send, causing the "reply makes messages disappear" bug.
                 if (serverId) {
-                    // Remove optimistic, add confirmed — addMessage handles dedup
-                    const msgs = ChatManager.getMessages();
-                    const idx = msgs.findIndex(m => m.id === localId || m.localId === localId);
-                    // Re-stamp every message with the real chatId before setMessages so the
-                    // wipe guard never sees a chatId mismatch and clears received messages.
                     const realChatId = String(realMessage.chatId || realMessage.conversationId || conversationId);
-                    const reStampedMsgs = msgs.map(function(m) {
-                        const mCid = String(m.chatId || m.conversationId || '');
-                        if (!mCid || mCid === 'undefined' || mCid.startsWith('pending_')) {
-                            return { ...m, chatId: realChatId, conversationId: realChatId };
-                        }
-                        return m;
+                    // In-place patch: update only the matching optimistic message
+                    ChatManager.updateMessageStatus(localId, realMessage.status || 'sent', {
+                        serverId:       String(serverId),
+                        localId:        localId,
+                        chatId:         realChatId,
+                        conversationId: realChatId,
+                        optimistic:     false,
+                        isLocalOnly:    false,
+                        timestamp:      realMessage.createdAt || Date.now(),
+                        createdAt:      realMessage.createdAt || Date.now(),
                     });
-                    if (idx !== -1) {
-                        reStampedMsgs[idx] = {
-                            ...reStampedMsgs[idx],
-                            ...realMessage,
-                            id:          localId,
-                            localId:     localId,
-                            serverId:    String(serverId),
-                            status:      realMessage.status || 'sent',
-                            optimistic:  false,
-                            isLocalOnly: false,
-                            conversationId: realChatId,
-                            chatId:      realChatId,
-                            timestamp:   realMessage.createdAt || reStampedMsgs[idx].timestamp || Date.now(),
-                            createdAt:   realMessage.createdAt || reStampedMsgs[idx].createdAt || Date.now()
-                        };
-                        ChatManager.setMessages(reStampedMsgs, realChatId);
+                    // Patch only messages that still lack a chatId (pending->real transition)
+                    // without replacing the full array
+                    if (conversationId && String(conversationId).startsWith('pending_')) {
+                        const msgs = ChatManager.getMessages();
+                        let patched = false;
+                        msgs.forEach(function(m) {
+                            const mCid = String(m.chatId || m.conversationId || '');
+                            if (!mCid || mCid === 'undefined' || mCid.startsWith('pending_')) {
+                                m.chatId = realChatId; m.conversationId = realChatId; patched = true;
+                            }
+                        });
+                        if (patched) { ChatManager._rebuildMessagesMap(); ChatManager._notifySubscribers(); }
                     }
                     // Confirm in local store
                     if (window.KynectaLocalStore) {
@@ -4661,20 +4721,40 @@ try {
                 this._showChatPanel(tempConversation);
             }
 
-            // FIX: IDB first for instant load, then force-fetch from server
+            // PHASE10: IDB first for instant load — eliminates white screen on first click
             const isPending = typeof actualId === 'string' && actualId.startsWith('pending_');
             if (!isPending) {
+                // Check deletion registry — don't load messages for deleted chats
+                const _delReg = window.__PHASE10_DeletionRegistry;
+                if (_delReg && _delReg.isDeleted('chat', String(actualId))) {
+                    console.warn('[ConversationManager] PHASE10: Skipping deleted chat:', actualId);
+                    return false;
+                }
+
+                let _instantLoaded = false;
                 if (window.KynectaLocalStore) {
                     const _idb = await window.KynectaLocalStore.getMessagesByChat(actualId, { limit: 100 }).catch(function() { return []; });
                     if (_idb && _idb.length > 0) {
-                        ChatManager.setMessages(_idb, actualId);
-                    } else {
-                        const _ls = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
-                        if (_ls && _ls.length > 0) ChatManager.setMessages(_ls, actualId);
+                        // Filter tombstoned messages before display
+                        const _alive = _delReg
+                            ? _idb.filter(m => !m.id || !_delReg.isDeleted('message', String(m.id)))
+                            : _idb;
+                        if (_alive.length > 0) {
+                            ChatManager.setMessages(_alive, actualId);
+                            _instantLoaded = true;
+                        }
                     }
-                } else {
-                    const _ls2 = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : [];
-                    if (_ls2 && _ls2.length > 0) ChatManager.setMessages(_ls2, actualId);
+                }
+                if (!_instantLoaded) {
+                    const _ls = ChatManager.loadPreviousMessages ? ChatManager.loadPreviousMessages(actualId) : null;
+                    if (_ls && _ls.length > 0) {
+                        ChatManager.setMessages(_ls, actualId);
+                        _instantLoaded = true;
+                    }
+                }
+                // PHASE10: If nothing in cache, show empty state immediately — no white screen
+                if (!_instantLoaded) {
+                    ChatManager._notifySubscribers?.();
                 }
             }
             
@@ -6532,17 +6612,50 @@ try {
                     : [d.messageId || d.id].filter(Boolean).map(String);
                 if (ids.length === 0) return;
 
-                const remaining = (ChatManager.getMessages() || []).filter((message) => {
-                    const currentId = String(message.serverId || message.id || message.localId || '');
-                    return !ids.includes(currentId);
-                });
                 const activeChatId = d.chatId || d.conversationId || ChatManager.getActiveChat()?.id || null;
-                if (activeChatId) {
-                    ChatManager.setMessages(remaining, activeChatId);
+
+                // PHASE10-FIX: Remove messages individually — NEVER call setMessages() on deletion.
+                // setMessages() replaces the entire array, potentially wiping unrelated messages.
+                // Instead: filter _messages in-place and rebuild the map.
+                ids.forEach(function(id) {
+                    // Record in deletion registry — prevents cache resurrection
+                    try { window.__PHASE10_DeletionRegistry?.mark('message', id, 'deleted'); } catch(_) {}
+
+                    // Remove from in-memory array
+                    const idx = ChatManager._messages
+                        ? ChatManager._messages.findIndex(function(m) {
+                            return String(m.id||'') === id || String(m.serverId||'') === id || String(m.localId||'') === id;
+                          })
+                        : -1;
+                    if (idx !== -1) {
+                        ChatManager._messages.splice(idx, 1);
+                        ChatManager._messagesMap?.delete(id);
+                    }
+
+                    // Remove from localStorage cache
+                    if (activeChatId) {
+                        try {
+                            const cacheKey = `kynecta_messages_v8_${activeChatId}`;
+                            const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+                            if (Array.isArray(cached)) {
+                                const filtered = cached.filter(function(m) { return String(m.id||'') !== id; });
+                                if (filtered.length !== cached.length) localStorage.setItem(cacheKey, JSON.stringify(filtered));
+                            }
+                        } catch(_) {}
+                    }
+
+                    // Remove from IndexedDB
+                    if (window.KynectaLocalStore) {
+                        window.KynectaLocalStore.deleteMessage(id).catch(() => {});
+                    }
+                });
+
+                // Rebuild map and notify subscribers once (not per-message)
+                if (ids.length > 0) {
+                    ChatManager._rebuildMessagesMap?.();
+                    ChatManager._notifySubscribers?.();
                 }
-                if (window.KynectaLocalStore) {
-                    ids.forEach((id) => window.KynectaLocalStore.deleteMessage(id).catch(() => {}));
-                }
+
                 EventBus.emit('message:deleted', { messageIds: ids, chatId: activeChatId, forEveryone: !!d.deleteForEveryone });
                 return;
             }

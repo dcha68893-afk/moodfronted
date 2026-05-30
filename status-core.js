@@ -7784,6 +7784,13 @@ window.__getAuthState = () => ({
                 if (existing.length > 5000) existing.splice(0, existing.length - 5000);
                 localStorage.setItem(DKEY, JSON.stringify(existing));
             } catch(_) {}
+
+            // PHASE10: Record in DeletionRegistry — prevents stale cache resurrection
+            try {
+                uniqueIds.forEach(function(sid) {
+                    window.__PHASE10_DeletionRegistry?.mark('status', sid, 'deleted');
+                });
+            } catch(_) {}
         }
 
         // 4. Dispatch event for other listeners

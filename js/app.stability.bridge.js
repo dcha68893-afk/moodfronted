@@ -359,11 +359,20 @@
 
     window.addEventListener('online', function () {
         scheduleRehydrate('browser-online');
+
+        // PHASE10: Flush offline queue and sync deletions when connectivity restores
+        setTimeout(function () {
+            try { window.__OfflineMessageQueue?.flushAll?.(); }  catch(_) {}
+            try { window.__PHASE10_DeletionRegistry?.syncFromServer?.(Date.now() - 24 * 60 * 60 * 1000); } catch(_) {}
+            try { window.__Phase10TransportRuntime && console.log('[Phase10Bridge] Transport best:', window.__Phase10TransportRuntime.getBestTransport()); } catch(_) {}
+        }, 1500);
     });
 
     window.addEventListener('offline', function () {
         emitDomEvent(NETWORK_OFFLINE_EVENT, { timestamp: Date.now() });
         emitBusEvent('SYSTEM_NETWORK_OFFLINE', { timestamp: Date.now() });
+        // PHASE10: Switch HybridTransportEngine to offline mode
+        try { window.__HybridTransportEngine?.recordFailure?.('INTERNET'); } catch(_) {}
     });
 
     window.addEventListener('settings-store-ready', function () {

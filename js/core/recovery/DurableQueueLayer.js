@@ -95,20 +95,40 @@
 
     async open() {
       if (this._db) return this._db;
+      // PHASE10: Fall back to localStorage when IDB unavailable (private browsing, iOS restrictions)
+      if (!window.indexedDB) {
+        this._fallback = true;
+        return null;
+      }
       return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = e => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains('ops')) {
-            const store = db.createObjectStore('ops', { keyPath: 'id' });
-            store.createIndex('priority',  'priority',  { unique: false });
-            store.createIndex('queueType', 'queueType', { unique: false });
-            store.createIndex('state',     'state',     { unique: false });
-            store.createIndex('createdAt', 'createdAt', { unique: false });
-          }
-        };
-        req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
-        req.onerror   = e => reject(e.target.error);
+        try {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = e => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('ops')) {
+              const store = db.createObjectStore('ops', { keyPath: 'id' });
+              store.createIndex('priority',  'priority',  { unique: false });
+              store.createIndex('queueType', 'queueType', { unique: false });
+              store.createIndex('state',     'state',     { unique: false });
+              store.createIndex('createdAt', 'createdAt', { unique: false });
+            }
+          };
+          req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
+          req.onerror   = e => {
+            console.warn('[DurableQueue] IDB open failed, using localStorage fallback:', e.target.error);
+            this._fallback = true;
+            resolve(null); // non-fatal
+          };
+          req.onblocked = () => {
+            console.warn('[DurableQueue] IDB blocked — resolving with null');
+            this._fallback = true;
+            resolve(null);
+          };
+        } catch (err) {
+          console.warn('[DurableQueue] IDB exception, using localStorage fallback:', err.message);
+          this._fallback = true;
+          resolve(null);
+        }
       });
     }
 

@@ -896,6 +896,10 @@ const MessageRouter = {
                                 }
                             });
                         } catch(_) {}
+                        // PHASE10: Record in DeletionRegistry to prevent stale resurrection
+                        try {
+                            window.__PHASE10_DeletionRegistry?.mark('message', String(mid), 'deleted');
+                        } catch(_) {}
                         // Dispatch UI removal event (triggers DOM removal in messages-ui.js patch)
                         window.dispatchEvent(new CustomEvent('groupMessageDeleted', {
                             detail: { messageId: mid, groupId: gid }
@@ -3107,26 +3111,49 @@ const GroupCore = {
     // Add group message
     addGroupMessage(groupId, message) {
         if (!groupId || !message) return;
-        
+
+        // PHASE10: Check deletion registry — never resurrect deleted messages
+        const _delReg = window.__PHASE10_DeletionRegistry;
+        if (_delReg && message.id && _delReg.isDeleted('message', String(message.id))) return;
+
         const messages = this.groupMessages[groupId] || [];
-        
-        // Check for duplicates
-        if (messages.some(m => m.id === message.id)) return;
-        
-        messages.push(message);
-        
-        if (messages.length > 100) {
-            messages.splice(0, messages.length - 100);
+
+        // PHASE10: Robust dedup — check id AND localId to prevent duplicates on echo
+        const msgId      = String(message.id     || '');
+        const msgLocalId = String(message.localId || '');
+        const isDup = messages.some(m => {
+            const mId = String(m.id || '');
+            const mLid = String(m.localId || '');
+            return (msgId && (mId === msgId || mLid === msgId)) ||
+                   (msgLocalId && (mId === msgLocalId || mLid === msgLocalId));
+        });
+        if (isDup) {
+            // If we have a server id now but had only localId, patch in-place
+            const existing = messages.find(m =>
+                msgLocalId && (String(m.id) === msgLocalId || String(m.localId) === msgLocalId)
+            );
+            if (existing && msgId && msgId !== msgLocalId) {
+                Object.assign(existing, { ...message, id: msgId });
+                try { SafeStorage.setItem(`group_messages_${groupId}`, messages); } catch(e) {}
+                this.emit('group:message-received', { groupId, message: existing });
+            }
+            return;
         }
-        
+
+        messages.push(message);
+
+        if (messages.length > 200) {
+            messages.splice(0, messages.length - 200);
+        }
+
         this.groupMessages[groupId] = messages;
-        
+
         try {
             SafeStorage.setItem(`group_messages_${groupId}`, messages);
         } catch (e) {}
-        
+
         this.incrementGroupUnreadCount(groupId);
-        
+
         this.emit('group:message-received', { groupId, message });
     },
     

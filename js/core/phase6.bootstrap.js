@@ -68,6 +68,14 @@
     'session/CacheRepairEngine.js',
     // ── Phase 6: Runtime Integration ─────────────────────────────────────
     'recovery/RuntimeIntegrationValidator.js',
+    // ── Phase 10: Production Hardening ───────────────────────────────────
+    // CacheFoundationLayer already loaded above (contains DeletionRegistry)
+    // Transport runtime wires HybridTransportEngine + LAN + Mesh + OfflineQueue
+  ];
+
+  // Phase 10 modules loaded from /js/transport/ (outside the core/ base path)
+  const PHASE10_MODULES = [
+    '/js/transport/HybridTransportRuntime.js',
   ];
 
   let loaded = 0;
@@ -90,6 +98,10 @@
 
     for (const m of MODULES) await loadScript(BASE + m);
 
+    // ── Phase 10: load transport runtime + deletion registry ─────────────
+    for (const src of PHASE10_MODULES) await loadScript(src);
+    console.log('[Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded');
+
     const elapsed = Date.now() - startTs;
     console.log(`[Phase6Bootstrap] ✅ ${loaded}/${MODULES.length} modules in ${elapsed}ms`);
 
@@ -97,21 +109,47 @@
     _wireTURNConfig();
     _wireGroupEventForwarding();
     _wireCrossModuleListeners();
+    _wirePhase10();  // Phase 10: connect all transport/deletion systems
 
     window.dispatchEvent(new CustomEvent('moodchat:ready', {
-      detail: { phase: 6, elapsed, loaded, modules: MODULES.length }
+      detail: { phase: 10, elapsed, loaded, modules: MODULES.length }
     }));
 
     const bus = window.KynectaEventBus;
-    if (bus) bus.emit('SYNC_STARTED', { reason: 'phase6_boot' }, { async: true });
+    if (bus) bus.emit('SYNC_STARTED', { reason: 'phase10_boot' }, { async: true });
 
-    console.log('[Phase6Bootstrap] 🎉 MoodChat fully initialized — __MoodChatDiag() for diagnostics');
+    console.log('[Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics');
   }
 
   function _wireOfflineQueue() {
     const q = window.__OfflineMessageQueue;
     if (!q) return;
     q.setSendHandler(async msg => {
+      // PHASE10: Route through TransportRuntime for proper priority + receipts
+      const p10Runtime = window.__Phase10TransportRuntime;
+      if (p10Runtime) {
+        const event  = msg._event || (msg.groupId ? 'group:message:send' : 'message:send');
+        const result = await p10Runtime.deliver(event, msg, { type: 'message', chatId: msg.chatId });
+        if (result.ok) {
+          console.log(`[OfflineQueue] ✅ Delivered via Phase10 (${result.transport})`);
+          // Notify UI of delivery
+          try {
+            const ChatManager = window.ChatManager || window.KynectaChatManager;
+            if (msg.localId && ChatManager?.updateMessageStatus) {
+              ChatManager.updateMessageStatus(msg.localId, 'sent', {
+                localId: msg.localId, chatId: msg.chatId, optimistic: false, isLocalOnly: false
+              });
+            }
+          } catch(_) {}
+          return;
+        }
+        if (result.queued) {
+          // Still offline — stays in queue, no throw needed
+          return;
+        }
+        // result.ok=false and not queued — fall through to REST
+      }
+
       const transport = window.__HybridTransportEngine?.getBestTransport() || 'INTERNET';
 
       // 1. Try LAN transport first if peers available
@@ -253,6 +291,67 @@
     }
 
     console.log('[Phase6Bootstrap] Cross-module listeners wired');
+  }
+
+  // ── Phase 10: Wire all production systems together ─────────────────────
+  function _wirePhase10() {
+    // 1. Expose Phase10TransportRuntime globally if not already done
+    if (!window.__Phase10TransportRuntime) {
+      console.warn('[Phase10] TransportRuntime not loaded — check /js/transport/HybridTransportRuntime.js');
+    } else {
+      console.log('[Phase10] TransportRuntime active — best:', window.__Phase10TransportRuntime.getBestTransport());
+    }
+
+    // 2. Wire OfflineQueue flush through TransportRuntime on reconnect
+    const q = window.__OfflineMessageQueue;
+    if (q && window.__Phase10TransportRuntime) {
+      const origFlush = q.flushAll?.bind(q);
+      q.flushAll = async function () {
+        console.log('[Phase10] Flushing offline queue via TransportRuntime');
+        const pending = q.getPending?.() || [];
+        for (const entry of pending) {
+          try {
+            const result = await window.__Phase10TransportRuntime.deliver(
+              entry._event || 'message:send',
+              entry,
+              { type: 'message', chatId: entry.chatId }
+            );
+            if (result.ok) q.markDelivered?.(entry.id).catch(() => {});
+          } catch (_) {}
+        }
+        if (origFlush) await origFlush().catch(() => {});
+      };
+    }
+
+    // 3. Start LAN announce cycle now that transport is ready
+    const lan = window.__LANCommunicationEngine;
+    if (lan?.isEnabled?.()) {
+      console.log('[Phase10] LAN engine active — peers:', lan.getPeers?.()?.length || 0);
+    }
+
+    // 4. Emit phase10 ready event for any waiting modules
+    window.dispatchEvent(new CustomEvent('phase10:ready', {
+      detail: {
+        transport   : window.__Phase10TransportRuntime?.getBestTransport() || 'INTERNET',
+        lan         : window.__LANCommunicationEngine?.hasPeers?.() || false,
+        offlineQueue: window.__OfflineMessageQueue?.size?.() || 0,
+      }
+    }));
+
+    // 5. Expose diagnostics helper
+    window.__Phase10Diag = function () {
+      return {
+        transport   : window.__Phase10TransportRuntime?.getDiagnostics?.(),
+        lan         : window.__LANCommunicationEngine?.getDiagnostics?.(),
+        deletion    : { entries: window.__PHASE10_DeletionRegistry?._entries?.size },
+        offlineQueue: {
+          size    : window.__OfflineMessageQueue?.size?.(),
+          pending : window.__OfflineMessageQueue?.getPending?.()?.length,
+        },
+      };
+    };
+
+    console.log('[Phase10] All production hardening systems wired ✅');
   }
 
   if (document.readyState === 'loading') {
