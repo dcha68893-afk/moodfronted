@@ -2956,9 +2956,10 @@ try {
                     hybridEngine?.recordFailure?.('INTERNET');
 
                     // 3. Mesh relay fallback
-                    const meshEngine = window.__MeshMessagesTransport || window.__MeshEngine;
+                    // PHASE11-FIX: Correct global name is __MeshRelayEngine (not __MeshMessagesTransport)
+                    const meshEngine = window.__MeshRelayEngine || window.__MeshMessagesTransport || window.__MeshEngine;
                     let meshSent = false;
-                    if (meshEngine?.isConnected?.() || meshEngine?.peers?.size > 0) {
+                    if (meshEngine && (meshEngine.isConnected?.() || meshEngine.peers?.size > 0 || meshEngine._routing?._routes?.size > 0)) {
                         try {
                             meshEngine.send?.({ ...requestBody, _via: 'MESH' });
                             meshSent = true;

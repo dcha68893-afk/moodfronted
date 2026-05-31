@@ -372,6 +372,28 @@
         if (window.__COR) console.log('[Phase11] COR activated (delayed) ✅');
       }, 2000);
     }
+
+    // FIX-AUDIT: Cross-flush DurableQueueLayer into OfflineMessageQueue on reconnect
+    // They are two separate queues — wire them together so nothing falls through
+    const _durableQ = window.__DurableQueueLayer;
+    const _offlineQ = window.__OfflineMessageQueue;
+    if (_durableQ && _offlineQ) {
+      window.addEventListener('kyn:connected', function() {
+        setTimeout(function() {
+          try {
+            const pending = _durableQ.getPending?.() || [];
+            pending.forEach(function(op) {
+              if (op.type === 'message' && op.payload) {
+                _offlineQ.enqueue?.(op.payload).catch?.(() => {});
+              }
+            });
+            if (pending.length > 0) {
+              console.log('[Phase11] Cross-flushed', pending.length, 'DurableQueue ops into OfflineQueue');
+            }
+          } catch(_) {}
+        }, 1500);
+      });
+    }
   }
 
   if (document.readyState === 'loading') {

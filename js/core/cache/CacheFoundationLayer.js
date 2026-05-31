@@ -400,15 +400,32 @@
     async syncFromServer(since = 0) {
       try {
         const base = window.__getApiBase?.() || '';
+
+        // FIX-AUDIT-4: Resolve auth token from multiple sources across iframes
+        // __kynToken is set in Tool-core.js but not in messages/calls/group iframes
+        const _token = window.__kynToken
+          || window.AppStorage?.get?.('authToken')
+          || window.AppStorage?.get?.('token')
+          || (() => {
+               try {
+                 const keys = ['authToken', 'token', 'kyn_token', 'accessToken'];
+                 for (const k of keys) {
+                   const v = localStorage.getItem(k);
+                   if (v && v.startsWith('eyJ')) return v;
+                 }
+               } catch(_) {}
+               return '';
+             })();
+
+        if (!_token) return; // No token = skip sync to avoid 401 spam
+
         const res  = await fetch(`${base}/deletions?since=${since}`, {
-          headers: { Authorization: `Bearer ${window.__kynToken || ''}` }
+          headers: { Authorization: `Bearer ${_token}` }
         });
         if (!res.ok) return;
         const data = await res.json();
         (data.deletions || []).forEach(d => {
-          // PHASE10-FIX: Do NOT mark statuses as deleted just because they expired
-          // or were viewed. Only mark truly deleted entities (reason = 'deleted').
-          // This prevents viewed statuses from vanishing from the UI.
+          // Do NOT mark statuses as deleted just because they expired or were viewed
           if (d.type === 'status' && d.reason !== 'deleted') return;
           this.mark(d.type, d.id, d.reason);
         });

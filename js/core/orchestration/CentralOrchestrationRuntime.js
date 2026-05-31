@@ -298,6 +298,13 @@
   class DeliveryPipeline {
     constructor() {
       this._pending = new Map(); // localId → state
+      // FIX-AUDIT: Prune entries older than 1h to prevent memory leak
+      setInterval(() => {
+        const cutoff = Date.now() - 3_600_000;
+        for (const [id, entry] of this._pending) {
+          if (entry.ts < cutoff) this._pending.delete(id);
+        }
+      }, 300_000); // every 5 minutes
     }
 
     transition(localId, state, meta = {}) {

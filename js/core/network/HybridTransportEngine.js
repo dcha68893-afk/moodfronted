@@ -240,21 +240,26 @@
     _syncWithPhase1() {
       const intel = window.__NetworkIntelligenceManager;
       if (!intel) return;
+      // FIX-AUDIT-6: Debounce transport switches to prevent flapping on weak networks
+      let _qualityDebounce = null;
       intel.onChange(state => {
-        // PHASE10-FIX: In iframes, the parent has the socket — never mark internet
-        // unavailable just because NetworkIntel thinks quality is low.
-        // Only trust OFFLINE signal if browser confirms offline AND not in iframe.
         const inIframe = window.parent !== window;
         const available = inIframe
-          ? navigator.onLine  // in iframe: trust browser online state only
+          ? navigator.onLine
           : (state.internetAvailable && state.internetQuality !== 'OFFLINE');
         this._health.setAvailable(TRANSPORT.INTERNET, available);
         this._health.record(TRANSPORT.INTERNET, available, state.estimatedLatency || 0);
         this._health.setAvailable(TRANSPORT.LAN, state.lanAvailable || false);
-        const best = this._priority.selectBest();
-        if (best !== this._orchestrator.getCurrent()) {
-          this._orchestrator.switchTo(best, 'network_quality_change');
-        }
+
+        // Debounce switch: only act if quality is consistently bad for 3s
+        if (_qualityDebounce) clearTimeout(_qualityDebounce);
+        _qualityDebounce = setTimeout(() => {
+          _qualityDebounce = null;
+          const best = this._priority.selectBest();
+          if (best !== this._orchestrator.getCurrent()) {
+            this._orchestrator.switchTo(best, 'network_quality_change');
+          }
+        }, 3000);
       });
     }
 
