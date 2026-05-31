@@ -83,8 +83,16 @@
       if (!rt) return { connected: false, reason: 'KynectaRealtime not found' };
 
       const socket    = rt._socket;
-      const connected = socket?.connected || rt.isConnected?.() || false;
-      const state     = rt.getState?.() || 'UNKNOWN';
+      // PHASE10-FIX: In iframes, socket is bridged through parent frame.
+      // Check all possible indicators of a live connection:
+      const connected =
+        socket?.connected === true ||           // direct socket
+        rt.isConnected?.() === true ||          // compat method
+        rt.state === 'authenticated' ||         // bridge state
+        rt.getState?.() === 'authenticated' ||  // state method
+        window.__kynParentReady === true;       // parent shell confirmed ready
+
+      const state     = rt.getState?.() || rt.state || 'UNKNOWN';
       const listeners = rt._listeners?.size || 0;
 
       return {
@@ -93,6 +101,8 @@
         listeners,
         socketId:    socket?.id || null,
         hasSocket:   !!socket,
+        inIframe:    window.parent !== window,
+        parentReady: window.__kynParentReady === true,
         // Check if group/status events are registered
         groupEventsRegistered: rt._registeredSocketListeners?.has?.('group:message') || false,
         statusEventsRegistered: rt._registeredSocketListeners?.has?.('status:new') || false,

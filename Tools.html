@@ -1311,6 +1311,11 @@
                     <i class="fas fa-shopping-cart"></i>
                     <span class="jm-cart-badge" id="jmCartBadge" style="display:none">0</span>
                 </button>
+                <!-- Chat / Messages button — always visible like WhatsApp icon -->
+                <button class="jm-icon-btn" id="jmChatBtn" onclick="window._jmOpenChat()" title="Messages" style="position:relative">
+                    <i class="fas fa-comment-dots" style="font-size:18px"></i>
+                    <span class="jm-cart-badge" id="jmChatBadge" style="display:none;background:#22c55e;min-width:16px;height:16px;font-size:10px">0</span>
+                </button>
                 <button class="jm-icon-btn" id="jmMoreBtn" onclick="window._jmShowMore()">
                     <i class="fas fa-ellipsis-v"></i>
                 </button>
@@ -1503,6 +1508,12 @@
                 <div class="jm-page-title">Followed Sellers</div>
                 <div id="jmFollowSellersContent"></div>
             </div>
+
+            <!-- DYNAMICALLY RENDERED PAGES — pre-declared inside sidebar so they are visible -->
+            <div class="jm-page" id="jmPageAnalytics"></div>
+            <div class="jm-page" id="jmPageNotes"></div>
+            <div class="jm-page" id="jmPageTrust"></div>
+            <div class="jm-page" id="jmPageLeaderboard"></div>
 
             <!-- ⋯ MORE MENU (slide-up sheet) -->
             <div class="jm-more-overlay" id="jmMoreOverlay" onclick="window._jmHideMore()" style="display:none"></div>
@@ -3402,5 +3413,12 @@
   Must load AFTER marketplace-advanced.js.
 ════════════════════════════════════════════════════════════════════════ -->
 <script src="/marketplace-seller.js"></script>
+<!-- ═══ Admin Command Center ══════════════════════════════════════════════════════════
+  Full marketplace administration: Products · Sellers · Buyers · Orders · Returns
+  Payouts · Coupons · Flash Sales · Reviews · Analytics · Support · Notifications
+  Settings · Audit Log. Role-gated: admin/moderator only.
+  Must load AFTER marketplace-seller.js.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/marketplace-admin.js"></script>
 </body>
 </html>

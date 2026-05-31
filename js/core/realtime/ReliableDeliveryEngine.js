@@ -257,6 +257,8 @@
       this._tracker.transition(messageId, DELIVERY.FAILED, {
         lastError: error?.message || String(error),
       });
+      // PHASE11: Mirror to COR delivery pipeline
+      try { window.__COR?.delivery?.(messageId, 'FAILED', { error: error?.message }); } catch(_) {}
     }
 
     // ── Receiver API ────────────────────────────────────────────────────────

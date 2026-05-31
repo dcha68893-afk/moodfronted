@@ -2340,8 +2340,18 @@ const GroupCore = {
                     // Reassign so old code below works
                     const _cachedGroups_orig = filteredGroups;
                     const _cuid=this.currentUser?.uid||this.currentUser?.id;
-                    this.myGroups=cachedGroups.filter(g=>g.isCreator===true||g.role==='owner'||(_cuid&&String(g.createdBy)===String(_cuid)));
-                    this.joinedGroups=cachedGroups.filter(g=>!g.isCreator&&g.role!=='owner'&&!(_cuid&&String(g.createdBy)===String(_cuid)));
+                    // PHASE10-FIX: _cuid may not be set yet — also check all role fields
+                    // to avoid creator's groups showing as empty on first load
+                    this.myGroups=cachedGroups.filter(g=>
+                        g.isCreator===true || g.role==='owner' ||
+                        (_cuid && String(g.createdBy)===String(_cuid)) ||
+                        (_cuid && String(g.creatorId)===String(_cuid)) ||
+                        g.isAdmin===true
+                    );
+                    this.joinedGroups=cachedGroups.filter(g=>
+                        !g.isCreator && g.role!=='owner' &&
+                        !(_cuid && (String(g.createdBy)===String(_cuid) || String(g.creatorId)===String(_cuid)))
+                    );
                     this.adminGroups=cachedGroups.filter(g=>g.isAdmin===true||g.isCreator===true||['owner','admin'].includes(g.role));
                     groups=this.groups; myGroups=this.myGroups; joinedGroups=this.joinedGroups; adminGroups=this.adminGroups;
                     

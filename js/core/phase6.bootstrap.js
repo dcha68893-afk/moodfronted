@@ -78,6 +78,11 @@
     '/js/transport/HybridTransportRuntime.js',
   ];
 
+  // Phase 11: Central Orchestration Runtime — wires all engines together
+  const PHASE11_MODULES = [
+    'orchestration/CentralOrchestrationRuntime.js',
+  ];
+
   let loaded = 0;
   const startTs = Date.now();
 
@@ -101,6 +106,10 @@
     // ── Phase 10: load transport runtime + deletion registry ─────────────
     for (const src of PHASE10_MODULES) await loadScript(src);
     console.log('[Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded');
+
+    // ── Phase 11: load Central Orchestration Runtime ──────────────────────
+    for (const m of PHASE11_MODULES) await loadScript(BASE + m);
+    console.log('[Phase6Bootstrap] ✅ Phase 11 Central Orchestration Runtime loaded');
 
     const elapsed = Date.now() - startTs;
     console.log(`[Phase6Bootstrap] ✅ ${loaded}/${MODULES.length} modules in ${elapsed}ms`);
@@ -352,6 +361,17 @@
     };
 
     console.log('[Phase10] All production hardening systems wired ✅');
+
+    // PHASE11: Verify COR started
+    if (window.__COR) {
+      console.log('[Phase11] CentralOrchestrationRuntime active ✅');
+      window.__Phase11Diag = function() { return window.__COR?.getDiagnostics?.(); };
+    } else {
+      console.warn('[Phase11] COR not yet started — will retry');
+      setTimeout(() => {
+        if (window.__COR) console.log('[Phase11] COR activated (delayed) ✅');
+      }, 2000);
+    }
   }
 
   if (document.readyState === 'loading') {

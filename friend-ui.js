@@ -1148,7 +1148,16 @@ export const RenderPipeline = {
 
     enableLiveUpdates: function() {
         if (!isUIActive()) {
-            logUI('enableLiveUpdates blocked - not active');
+            // PHASE10-FIX: Don't just block — schedule a retry so live updates
+            // activate as soon as the lifecycle reaches ACTIVE.
+            // Only retry once to avoid infinite loops.
+            if (!this._liveUpdateRetryScheduled) {
+                this._liveUpdateRetryScheduled = true;
+                setTimeout(() => {
+                    this._liveUpdateRetryScheduled = false;
+                    this.enableLiveUpdates();
+                }, 2000);
+            }
             return;
         }
         if (this.status.liveUpdate) return;

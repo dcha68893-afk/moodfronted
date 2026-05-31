@@ -251,7 +251,13 @@
         presence: window.__PresenceEngineFoundation?.getDiagnostics() || null,
         cache: window.__CacheFoundationLayer?.getDiagnostics() || null,
         identity: window.__IdentityFoundationLayer?.getDiagnostics() || null,
-        metrics: this._store.getAll(),
+        metrics    : this._store.getAll(),
+        // PHASE11: COR orchestration runtime diagnostics
+        cor        : window.__COR?.getDiagnostics?.() || null,
+        transport  : window.__COR?.getDiagnostics?.()?.transport || window.__HybridTransportEngine?.getBestTransport?.() || 'UNKNOWN',
+        lanPeers   : window.__LANCommunicationEngine?.getPeers?.()?.length || 0,
+        meshPeers  : window.__MeshRelayEngine?.getPeers?.()?.length || 0,
+        queueDepth : window.__OfflineMessageQueue?.size?.() || 0,
       };
     }
   }

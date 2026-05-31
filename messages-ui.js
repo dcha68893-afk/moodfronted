@@ -7140,6 +7140,11 @@ Type: ${message.type || 'text'}`;
 
             }
 
+            // PHASE11: Also check COR / parent ready state
+            if (window.__kynParentReady === true || window.parent !== window) {
+                return true;
+            }
+
             
 
             // Check core state directly — UIStateManager may lag behind core

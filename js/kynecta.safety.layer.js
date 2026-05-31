@@ -17,6 +17,31 @@
 (function (global) {
     'use strict';
 
+    // ── PHASE10: Console noise filter ─────────────────────────────────────────
+    // Suppress MetaMask/ObjectMultiplex spam and other extension noise
+    (function _installConsoleFilter() {
+        const _origWarn  = console.warn.bind(console);
+        const _origError = console.error.bind(console);
+        const _SUPPRESS_PATTERNS = [
+            'ObjectMultiplex',
+            'orphaned data for stream',
+            'malformed chunk without name',
+            'metamask-inpage',
+            'background-liveness',
+            'app-init-liveness',
+            'Invalid message format',
+        ];
+        function _shouldSuppress(args) {
+            const msg = String(args[0] || '');
+            return _SUPPRESS_PATTERNS.some(p => msg.includes(p));
+        }
+        console.warn = function(...args) {
+            if (_shouldSuppress(args)) return;
+            _origWarn(...args);
+        };
+        // Keep errors intact — only filter warnings from extensions
+    })();
+
     // Log suppression: noisy safety-layer messages printed only once (across iframes).
     function _logOnce(key, level, message) {
         try {

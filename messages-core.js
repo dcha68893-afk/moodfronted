@@ -2885,10 +2885,24 @@ try {
             const offlineQueue = window.__OfflineMessageQueue;
             const lanEngine    = window.__LANCommunicationEngine;
             const bestTransport = hybridEngine?.getBestTransport?.() || 'INTERNET';
-            const socketConnected = window.KynectaRealtime?._socket?.connected === true;
-            const isOnline = navigator.onLine && socketConnected;
+            // PHASE10-FIX: In the iframe architecture, the messages iframe uses a
+            // BRIDGED socket through the parent — _socket is null/disconnected in child frames.
+            // Must check the iframe bridge state, not the raw socket directly.
+            const socketConnected =
+                window.KynectaRealtime?._socket?.connected === true ||           // parent frame direct
+                window.KynectaRealtime?.state === 'authenticated' ||             // bridge state
+                window.KynectaRealtime?.isConnected?.() === true ||              // compat method
+                window.__kynParentReady === true ||                              // parent shell ready
+                document.querySelector('meta[name="iframe-mode"]') !== null;    // iframe marker
 
-            // ── OFFLINE PATH: enqueue with guaranteed persistence ──────────────
+            // Only go offline if browser is genuinely offline AND no bridge is active
+            const isOnline = navigator.onLine && (
+                socketConnected ||
+                window.__kynParentReady === true ||
+                window.parent !== window  // running in an iframe = parent has the socket
+            );
+
+            // ── OFFLINE PATH: only enqueue when truly offline ──────────────────
             if (!isOnline && offlineQueue) {
                 console.log('[ChatManager] 📦 PHASE10 OFFLINE — queuing with guaranteed delivery');
                 const queueEntry = await offlineQueue.enqueue({
@@ -2915,10 +2929,17 @@ try {
                 let lanSent = false;
                 if (bestTransport === 'LAN' && lanEngine?.hasPeers?.()) {
                     try {
-                        lanSent = lanEngine.send({ ...requestBody, _via: 'LAN' });
+                        // PHASE11: Prefer COR for orchestrated LAN delivery
+                        const _cor = window.__COR;
+                        if (_cor) {
+                            const _r = await _cor.send('message:send', requestBody, { transport: 'LAN' }).catch(() => null);
+                            lanSent = _r?.ok === true;
+                        } else {
+                            lanSent = lanEngine.send({ ...requestBody, _via: 'LAN' });
+                        }
                         if (lanSent) {
                             hybridEngine?.recordSuccess?.('LAN', 0);
-                            console.log('[ChatManager] ✅ PHASE10 LAN delivery');
+                            console.log('[ChatManager] ✅ PHASE11 LAN delivery');
                         }
                     } catch (_lanErr) {
                         hybridEngine?.recordFailure?.('LAN');
@@ -3788,7 +3809,14 @@ try {
             try {
                 const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE);
                 if (cached && Array.isArray(cached.friends)) {
-                    this._friends = cached.friends;
+                    // PHASE10-FIX: Deduplicate — same user can appear as id:2 and id:"2"
+                    const _seen = new Set();
+                    this._friends = cached.friends.filter(f => {
+                        if (!f) return false;
+                        const k = String(f.id || f.userId || '');
+                        if (!k || _seen.has(k)) return false;
+                        _seen.add(k); return true;
+                    });
                     this._rebuildMap();
                     this._loaded = true;
                     
@@ -4098,8 +4126,16 @@ try {
         
         _saveToCache: function() {
             try {
+                // PHASE10-FIX: Deduplicate before saving to prevent int/string id duplicates
+                const _seen3 = new Set();
+                const _deduped3 = (this._friends || []).filter(f => {
+                    if (!f) return false;
+                    const k = String(f.id || f.userId || '');
+                    if (!k || _seen3.has(k)) return false;
+                    _seen3.add(k); return true;
+                });
                 SafeStorage.setJSON(LOCAL_STORAGE_KEYS.FRIENDS_CACHE, {
-                    friends: this._friends,
+                    friends: _deduped3,
                     timestamp: Date.now()
                 });
             } catch (e) {}

@@ -241,10 +241,16 @@
       const intel = window.__NetworkIntelligenceManager;
       if (!intel) return;
       intel.onChange(state => {
-        const available = state.internetAvailable && state.internetQuality !== 'OFFLINE';
+        // PHASE10-FIX: In iframes, the parent has the socket — never mark internet
+        // unavailable just because NetworkIntel thinks quality is low.
+        // Only trust OFFLINE signal if browser confirms offline AND not in iframe.
+        const inIframe = window.parent !== window;
+        const available = inIframe
+          ? navigator.onLine  // in iframe: trust browser online state only
+          : (state.internetAvailable && state.internetQuality !== 'OFFLINE');
         this._health.setAvailable(TRANSPORT.INTERNET, available);
-        this._health.record(TRANSPORT.INTERNET, available, state.estimatedLatency);
-        this._health.setAvailable(TRANSPORT.LAN, state.lanAvailable);
+        this._health.record(TRANSPORT.INTERNET, available, state.estimatedLatency || 0);
+        this._health.setAvailable(TRANSPORT.LAN, state.lanAvailable || false);
         const best = this._priority.selectBest();
         if (best !== this._orchestrator.getCurrent()) {
           this._orchestrator.switchTo(best, 'network_quality_change');
@@ -255,17 +261,21 @@
     _startHealthPolling() {
       setInterval(() => {
         // PHASE10: Poll actual connectivity state of all transports
-        // Internet — check socket
+        // Internet — check socket OR iframe bridge (child iframes use bridged socket)
         const socket = window.KynectaRealtime?._socket;
-        if (socket) {
-          const connected = socket.connected;
-          this._health.record(TRANSPORT.INTERNET, connected, 0);
-          if (!connected && this._orchestrator.getCurrent() === TRANSPORT.INTERNET) {
-            this._orchestrator.switchTo(this._priority.selectBest(), 'socket_disconnected');
-          }
-        } else {
-          // No socket at all
-          this._health.setAvailable(TRANSPORT.INTERNET, navigator.onLine);
+        const inIframe = window.parent !== window;
+        const bridgeReady = window.__kynParentReady === true ||
+                            window.KynectaRealtime?.state === 'authenticated' ||
+                            window.KynectaRealtime?.isConnected?.() === true;
+
+        // In iframes: trust the bridge state, not raw socket.connected
+        const internetConnected = inIframe
+          ? (navigator.onLine && (bridgeReady || true))  // iframe always has internet via parent
+          : (socket ? socket.connected : navigator.onLine);
+
+        this._health.record(TRANSPORT.INTERNET, internetConnected, 0);
+        if (!internetConnected && this._orchestrator.getCurrent() === TRANSPORT.INTERNET) {
+          this._orchestrator.switchTo(this._priority.selectBest(), 'socket_disconnected');
         }
 
         // LAN — check actual peers

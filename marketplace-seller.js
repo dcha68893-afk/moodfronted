@@ -1157,10 +1157,11 @@ function _getOrCreatePage(pageId, pageTitle) {
         el = document.createElement('div');
         el.id = pageId;
         el.className = 'jm-page';
-        const wrapper = document.querySelector('.jm-pages-container') ||
-                        document.querySelector('#jmPages') ||
-                        document.querySelector('.jm-app') ||
-                        document.querySelector('.knt-app') ||
+        // CRITICAL: must be inside #sidebar (which is the scrollable viewport)
+        // Never append to body — sidebar has overflow:hidden
+        const wrapper = document.getElementById('sidebar') ||
+                        document.querySelector('.sidebar') ||
+                        document.querySelector('.app-container') ||
                         document.body;
         wrapper.appendChild(el);
     }

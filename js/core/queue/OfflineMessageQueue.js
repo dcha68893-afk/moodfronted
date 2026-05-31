@@ -282,10 +282,22 @@
       this._notify(entry);
 
       try {
-        await this._sendHandler(entry.payload);
+        // PHASE11: Route through COR if available, otherwise use setSendHandler
+        let sent = false;
+        const cor = window.__COR;
+        if (cor && !this._sendHandler) {
+          const event = entry.payload?._event || (entry.payload?.groupId ? 'group:message:send' : 'message:send');
+          const result = await cor.send(event, entry.payload, { type: 'message' }).catch(() => null);
+          sent = result?.ok === true;
+        }
+        if (!sent && this._sendHandler) {
+          await this._sendHandler(entry.payload);
+          sent = true;
+        }
+        if (!sent) throw new Error('No send handler available');
         await this.markDelivered(id);
 
-        // PHASE10: Update UI delivery status when queue item is sent
+        // Update UI delivery status when queue item is sent
         try {
           const localId = entry.payload?.localId || entry.payload?.id || id;
           const chatId  = entry.payload?.chatId  || entry.payload?.conversationId;
@@ -295,6 +307,8 @@
               localId, chatId, optimistic: false, isLocalOnly: false,
             });
           }
+          // PHASE11: Record in COR delivery pipeline
+          window.__COR?.delivery?.(localId, 'ACKED', { transport: 'OFFLINE_FLUSH' });
         } catch (_) {}
 
       } catch (err) {

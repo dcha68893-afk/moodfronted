@@ -850,6 +850,17 @@
                     }
                 }
 
+                // ── PHASE11: COR canonical event normalization ──────────────────────
+                const _corNorm = window.__COR?.normalize?.(evType);
+                if (_corNorm && _corNorm !== evType) {
+                    // Dispatch with canonical name too
+                    try {
+                        window.dispatchEvent(new CustomEvent(`kyn:${_corNorm}`, {
+                            detail: payload
+                        }));
+                    } catch (_) {}
+                }
+
                 // ── PHASE10: entity:deleted → DeletionRegistry + cache eviction ───────
                 if (evType === 'entity:deleted' || evType === 'entity_deleted') {
                     try {

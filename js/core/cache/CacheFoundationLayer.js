@@ -405,7 +405,13 @@
         });
         if (!res.ok) return;
         const data = await res.json();
-        (data.deletions || []).forEach(d => this.mark(d.type, d.id, d.reason));
+        (data.deletions || []).forEach(d => {
+          // PHASE10-FIX: Do NOT mark statuses as deleted just because they expired
+          // or were viewed. Only mark truly deleted entities (reason = 'deleted').
+          // This prevents viewed statuses from vanishing from the UI.
+          if (d.type === 'status' && d.reason !== 'deleted') return;
+          this.mark(d.type, d.id, d.reason);
+        });
       } catch(_) {}
     }
   }

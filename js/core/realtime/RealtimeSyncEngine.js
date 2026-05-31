@@ -240,7 +240,10 @@
         const type = payload?.type;
         if (!type) return;
 
-        const { event, payload: normalized } = this._normalizer.normalize(type, payload);
+        // PHASE11: Use COR canonical normalization if available, else local normalizer
+        const cor = window.__COR;
+        const canonicalType = cor ? cor.normalize(type) : type;
+        const { event, payload: normalized } = this._normalizer.normalize(canonicalType, payload);
 
         // Update Lamport clock from server timestamp
         if (payload.lamport) this._clock.update(payload.lamport);
