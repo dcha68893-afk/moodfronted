@@ -44,11 +44,11 @@ function _toast(msg, type='info', icon='ℹ️') {
 async function _api(method, endpoint, body=null) {
     try {
         const token=window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('moodchat_token')||localStorage.getItem('accessToken')||'';
-        const base=(window.__kynAPI?.baseUrl||'').replace(/\/api$/,'').replace(/\/$/,'')||(typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')||'http://localhost:4000';
+        const base=(window.__kynAPI?.baseUrl||'').replace(/\/api$/,'').replace(/\/$/,'')||(typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')||'';
         const res=await fetch(base+'/api'+endpoint,{method:method.toUpperCase(),headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{})});
         if(!res.ok){const e=await res.json().catch(()=>({message:'Error '+res.status}));return{_error:e.message||'Error',_status:res.status};}
         return await res.json();
-    } catch(e){return null;}
+    } catch(e){return {_error: e.message||'Network error', _offline: true};}
 }
 
 // ─── Admin role guard ─────────────────────────────────────────────────────────
@@ -233,7 +233,7 @@ async function renderAdminDashboard(container) {
     const d = r?.data || { revenue:{today:0,week:0,month:0,total:0,by_day:[]}, users:{total:0,sellers:0,buyers:0}, products:{total:0,pending:0}, orders:{total:0,today:0,pending:0,breakdown:{}} };
 
     const byDay = d.revenue?.by_day || [];
-    const maxR  = Math.max(...byDay.map(x=>x.revenue), 1);
+    const maxR  = byDay.length ? Math.max(...byDay.map(x=>x.revenue||0), 1) : 1;
 
     container.innerHTML = _pageShell('Command Center', `
     <!-- KPI Grid -->
@@ -798,8 +798,10 @@ window._admDelReview=async(id)=>{if(!confirm('Delete review?'))return;await _api
 async function renderAdminAnalytics(container) {
     if(!_isAdmin()){container.innerHTML=_pageShell('Analytics',_noAccess());return;}
     const r=await _api('GET','/marketplace/admin/analytics?period=30d');
+    if(r?._error){container.innerHTML=_pageShell('Analytics Center',`<div style="margin:12px;background:#fee2e2;border-radius:10px;padding:14px;font-size:13px;color:#991b1b">⚠️ ${_esc(r._error)}</div>`);return;}
     const d=r?.data||{revenue_by_day:[],top_products:[],top_categories:[],total_revenue:0,total_orders:0,new_users:0};
-    const maxR=Math.max(...(d.revenue_by_day||[]).map(x=>x.revenue),1);
+    const revDays=(d.revenue_by_day||[]);
+    const maxR=revDays.length ? Math.max(...revDays.map(x=>x.revenue||0), 1) : 1;
     container.innerHTML=_pageShell('Analytics Center',`
     <div class="adm-kpi-grid">
         <div class="adm-kpi accent"><div class="adm-kpi-label">30-Day Revenue</div><div class="adm-kpi-val">${_fmt(d.total_revenue||0)}</div></div>
@@ -809,8 +811,8 @@ async function renderAdminAnalytics(container) {
     </div>
     <div class="adm-section">
         <div class="adm-section-title">Revenue — 30 Days</div>
-        <div class="adm-chart">${(d.revenue_by_day||[]).slice(-14).map(x=>`<div class="adm-bar" style="height:${maxR>0?Math.max(3,Math.round((x.revenue/maxR)*100)):3}%" data-v="${_fmt(x.revenue)}"></div>`).join('')}</div>
-        <div class="adm-chart-labels">${(d.revenue_by_day||[]).slice(-14).map(x=>`<div class="adm-chart-label">${x.date?.slice(5)||''}</div>`).join('')}</div>
+        <div class="adm-chart">${revDays.slice(-14).map(x=>`<div class="adm-bar" style="height:${maxR>0?Math.max(3,Math.round((x.revenue/maxR)*100)):3}%" data-v="${_fmt(x.revenue)}"></div>`).join('')}</div>
+        <div class="adm-chart-labels">${revDays.slice(-14).map(x=>`<div class="adm-chart-label">${x.date?.slice(5)||''}</div>`).join('')}</div>
     </div>
     <div class="adm-section">
         <div class="adm-section-title">Top Products</div>
@@ -937,7 +939,21 @@ window._jmNavMore = function(page) {
         const pageId = 'admPage_' + page.replace(/-/g,'_');
         const el = _getOrCreateAdminPage(pageId);
         el.classList.add('active');
-        renderFn(el);
+        // Apply flex layout so inner content fills height
+        el.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden;background:#f3f4f6';
+        // Show loading immediately
+        el.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:#9ca3af"><div style="font-size:32px">⏳</div><div style="font-size:14px;font-weight:600">Loading…</div></div>`;
+        // Run render with error boundary
+        Promise.resolve(renderFn(el)).catch(err => {
+            console.error('[Admin]', page, err);
+            el.innerHTML = _pageShell(page, `
+                <div style="margin:16px;background:#fee2e2;border-radius:14px;padding:18px;text-align:center">
+                    <div style="font-size:32px;margin-bottom:10px">⚠️</div>
+                    <div style="font-weight:800;font-size:15px;color:#991b1b;margin-bottom:6px">Something went wrong</div>
+                    <div style="font-size:13px;color:#b91c1c;margin-bottom:14px">${_esc(err?.message||'Unknown error')}</div>
+                    <button class="adm-btn adm-btn-primary" onclick="window._jmNavMore('${page}')">🔄 Retry</button>
+                </div>`);
+        });
         return;
     }
     _prevNav?.call(this, page);
@@ -948,21 +964,49 @@ window._jmNavMore = function(page) {
 // ══════════════════════════════════════════════════════════════════════════════
 function _injectAdminEntry() {
     if (!_isAdmin()) return;
+    // 1. Inject into the More sheet grid
     const grid = document.querySelector('.jm-more-grid');
-    if (!grid || document.getElementById('admMenuBtn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'admMenuBtn';
-    btn.className = 'jm-more-item';
-    btn.style.cssText = 'background:linear-gradient(135deg,#111,#374151);color:#fff;border-radius:12px';
-    btn.innerHTML = '<i class="fas fa-cog" style="color:#fff"></i><span style="color:#fff">Admin Panel</span>';
-    btn.onclick = () => window._jmNavMore('admin-dashboard');
-    grid.prepend(btn);
+    if (grid && !document.getElementById('admMenuBtn')) {
+        const btn = document.createElement('button');
+        btn.id = 'admMenuBtn';
+        btn.className = 'jm-more-item';
+        btn.style.cssText = 'background:linear-gradient(135deg,#111,#374151);color:#fff;border-radius:12px;grid-column:span 1';
+        btn.innerHTML = '<i class="fas fa-shield-alt" style="color:#fff;font-size:20px"></i><span style="color:#fff;font-weight:800">Admin Panel</span>';
+        btn.onclick = () => window._jmNavMore('admin-dashboard');
+        grid.prepend(btn);
+    }
+    // 2. Also inject admin shortcut into account page
+    const acctPage = document.getElementById('jmPageAccount');
+    if (acctPage && !document.getElementById('admAcctBtn')) {
+        const wrap = acctPage.querySelector('.jm-account-menu') || acctPage;
+        const btn2 = document.createElement('button');
+        btn2.id = 'admAcctBtn';
+        btn2.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;background:linear-gradient(135deg,#111,#374151);color:#fff;border:none;cursor:pointer;margin-top:8px;border-radius:12px';
+        btn2.innerHTML = '<i class="fas fa-shield-alt"></i><span style="font-weight:700;font-size:14px">Admin Command Center</span><i class="fas fa-chevron-right" style="margin-left:auto"></i>';
+        btn2.onclick = () => window._jmNavMore('admin-dashboard');
+        wrap.appendChild(btn2);
+    }
 }
 
-// Try injecting immediately and after a delay
-setTimeout(_injectAdminEntry, 500);
-setTimeout(_injectAdminEntry, 2000);
+// Patch _showMore to always inject admin entry when sheet opens
+const _origShowMoreAdmin = window._jmShowMore;
+window._jmShowMore = function() {
+    _origShowMoreAdmin?.call(this);
+    setTimeout(_injectAdminEntry, 50); // inject after sheet renders
+};
+
+// Multiple injection attempts
+[300, 800, 1500, 3000].forEach(t => setTimeout(_injectAdminEntry, t));
 document.addEventListener('DOMContentLoaded', _injectAdminEntry);
 
-console.log('[marketplace-admin.js] ✅ Admin command center loaded');
+// Re-inject when account page opens
+const _origRenderAccount = window._renderAccount;
+if (typeof _origRenderAccount === 'function') {
+    window._renderAccount = function() {
+        _origRenderAccount.call(this);
+        setTimeout(_injectAdminEntry, 100);
+    };
+}
+
+console.log('[marketplace-admin.js] ✅ Admin command center loaded — role:', (window.currentUser||window.__kynUser||{}).role||'unknown');
 })();
