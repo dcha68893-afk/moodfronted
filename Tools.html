@@ -1265,8 +1265,9 @@
     #jmProductCount { color: #6b7280 !important; }
     .empty-state { color: #6b7280 !important; background: transparent !important; }
 
-    /* Bottom nav — hidden (parent shell controls navigation) */
+    /* Bottom nav — our new nav uses ID #jmBottomNav, override old class hide */
     .jm-bottom-nav { display: none !important; }
+    #jmBottomNav { display: flex !important; }
 
     /* Horizontal card */
     .jm-hcard { background: #ffffff !important; border-color: #e8e8e8 !important; }
@@ -1316,8 +1317,9 @@
                     <i class="fas fa-comment-dots" style="font-size:18px"></i>
                     <span class="jm-cart-badge" id="jmChatBadge" style="display:none;background:#22c55e;min-width:16px;height:16px;font-size:10px">0</span>
                 </button>
-                <button class="jm-icon-btn" id="jmMoreBtn" onclick="window._jmShowMore()">
-                    <i class="fas fa-ellipsis-v"></i>
+                <!-- More / Menu button — orange pill so always visible -->
+                <button id="jmMoreBtn" onclick="window._jmShowMore()" title="More options" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:0 12px;height:36px;display:flex;align-items:center;gap:5px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">
+                    <i class="fas fa-th" style="color:#fff;font-size:13px"></i><span style="color:#fff">Menu</span>
                 </button>
             </div>
 
@@ -3420,5 +3422,15 @@
   Must load AFTER marketplace-seller.js.
 ════════════════════════════════════════════════════════════════════════ -->
 <script src="/marketplace-admin.js"></script>
+<!-- ═══ UI Visibility Fix — MUST BE LAST ════════════════════════════════════════════
+  Fixes all iframe-context visibility issues:
+  • More sheet (⋮) rebuilt as fixed overlay with inline styles
+  • Bottom nav rebuilt as sticky footer inside sidebar
+  • More menu completely rebuilt with all sections visible
+  • Admin panel entry always visible (floating button + menu entry)
+  • Seller tools section prominent in More menu
+  LOAD ORDER: must come after all other marketplace scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/marketplace-ui-fix.js"></script>
 </body>
 </html>
