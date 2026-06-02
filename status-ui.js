@@ -4117,7 +4117,18 @@ function closeViewer() {
     try { document.dispatchEvent(new CustomEvent('statusViewerClosed')); } catch(_) {}
     // Re-render sidebar so viewed statuses move to Viewed updates section
     setTimeout(() => {
-        if (typeof renderStatusListInstantlyUI === 'function') renderStatusListInstantlyUI();
+        if (typeof renderStatusListInstantlyUI === 'function') {
+            renderStatusListInstantlyUI();
+            // FIX: Scroll viewed section into view so user can see it moved there
+            setTimeout(() => {
+                const viewedLabel = document.getElementById('viewedUpdatesLabel');
+                if (viewedLabel && viewedLabel.style.display !== 'none') {
+                    try {
+                        viewedLabel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    } catch(_) {}
+                }
+            }, 100);
+        }
     }, 200);
 }
 
@@ -4769,19 +4780,9 @@ function renderStatusesListUI(container, statusesList, allViewed) {
         });
     }
     if (filtered.length === 0) {
-        container.innerHTML = `
-            <div class="status-skeleton-list">
-                ${[1,2,3,4].map(() => `
-                    <div class="status-item skeleton-item">
-                        <div class="skeleton-avatar"></div>
-                        <div class="skeleton-content">
-                            <div class="skeleton-line short"></div>
-                            <div class="skeleton-line long"></div>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        // FIX: Don't show skeleton for the viewed section — just empty it
+        // Skeletons in viewed section make it look like content disappeared
+        container.innerHTML = '';
         return;
     }
 
@@ -7232,6 +7233,7 @@ function renderStatusListInstantlyUI() {
 
     // Deduplicate, exclude own
     const seenIds = new Set();
+    const _delReg = window.__PHASE10_DeletionRegistry;
     const allFriendStatuses = friendData
         .filter(s => {
             if (!s || s.id == null) return false;
@@ -7239,7 +7241,17 @@ function renderStatusListInstantlyUI() {
             if (seenIds.has(sid)) return false;
             seenIds.add(sid);
             const owner = String(s.userId || s.user_id || (s.user && s.user.id) || '');
-            return !currentUserId || owner !== currentUserId;
+            if (currentUserId && owner === currentUserId) return false;
+            // FIX: Only exclude statuses that were EXPLICITLY deleted (not just viewed/expired)
+            // Viewed statuses must remain visible in the "Viewed updates" section
+            if (_delReg && _delReg.isDeleted('status', sid)) {
+                // Only exclude if it's truly deleted, not just viewed
+                // A viewed status is still in viewedStatuses set — keep it
+                const isViewed = viewedStatuses?.has(sid);
+                if (!isViewed) return false; // deleted AND not viewed = exclude
+                // Deleted but viewed = still show in viewed section (user saw it)
+            }
+            return true;
         })
         .map(s => ({ ...s, id: String(s.id) }));
 

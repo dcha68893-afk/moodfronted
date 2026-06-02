@@ -2453,9 +2453,24 @@ function hookClicks(){
             var item=e.target.closest('[data-group-id]');if(!item)return;
             if(e.target.closest('.group-actions,.group-action-btn,.action-btn'))return;
             var gid=item.getAttribute('data-group-id');if(!gid)return;
-            var found=null;var all=(gco.groups||[]).concat(gco.myGroups||[]).concat(gco.joinedGroups||[]);
-            all.forEach(function(g2){if(String(g2.id)===String(gid))found=g2;});
-            if(found)openPanel(found);else{api('/groups/'+gid).then(function(d){var gr=d.data||d.group||d;if(gr&&gr.id)openPanel(gr);}).catch(function(){});}
+            var found=null;var all=(gco.groups||[]).concat(gco.myGroups||[]).concat(gco.joinedGroups||[]).concat(gco.adminGroups||[]);
+            all.forEach(function(g2){if(g2&&String(g2.id)===String(gid))found=g2;});
+            // Always fetch fresh data from API to get latest member count
+            if(found){
+                openPanel(found);
+                // Silently refresh member count in background
+                api('/groups/'+gid).then(function(d){
+                    var gr=d.data||d.group||d;
+                    if(gr&&gr.id&&window.__gcCurGroup&&String(window.__gcCurGroup.id)===String(gid)){
+                        window.__gcCurGroup=Object.assign(window.__gcCurGroup,gr);
+                        var sub=document.getElementById('chatMemberCount');
+                        var mc=parseInt(gr.memberCount)||parseInt(gr.stats&&gr.stats.totalMembers)||0;
+                        if(sub&&mc>0)sub.textContent=mc+' member'+(mc===1?'':'s');
+                    }
+                }).catch(function(){});
+            } else {
+                api('/groups/'+gid).then(function(d){var gr=d.data||d.group||d;if(gr&&gr.id)openPanel(gr);}).catch(function(){});
+            }
         });
     });
     if(!window.__gcOGCPatched){window.__gcOGCPatched=true;

@@ -85,12 +85,14 @@
       const socket    = rt._socket;
       // PHASE10-FIX: In iframes, socket is bridged through parent frame.
       // Check all possible indicators of a live connection:
+      const inIframe = window.parent !== window;
       const connected =
         socket?.connected === true ||           // direct socket
         rt.isConnected?.() === true ||          // compat method
         rt.state === 'authenticated' ||         // bridge state
         rt.getState?.() === 'authenticated' ||  // state method
-        window.__kynParentReady === true;       // parent shell confirmed ready
+        window.__kynParentReady === true ||     // parent shell confirmed ready
+        (inIframe && navigator.onLine);         // iframe always connected via parent
 
       const state     = rt.getState?.() || rt.state || 'UNKNOWN';
       const listeners = rt._listeners?.size || 0;
@@ -152,8 +154,10 @@
     async repair(healthReport) {
       const repairs = [];
 
-      // Repair 1: If group events not registered in socket, register them now
-      if (!healthReport.socket?.groupEventsRegistered) {
+      // Repair 1: Register missing socket events — ONLY in parent frame
+      // In iframes the socket bridge is managed by the parent; we must not
+      // duplicate event registration in child frames.
+      if (!healthReport.socket?.groupEventsRegistered && window.parent === window) {
         this._registerMissingSocketEvents();
         repairs.push('socket:group_events_registered');
       }
@@ -194,6 +198,16 @@
       const rt = window.KynectaRealtime;
       if (!rt) return;
 
+      // FIX: Only register in the TOP FRAME (parent shell) — never in iframes
+      // Running this in iframes creates duplicate listeners and interferes with
+      // the parent bridge. The parent frame already handles all event fan-out.
+      if (window.parent !== window) return;
+
+      // FIX: One-time registration guard — prevent duplicate listeners across
+      // repeated validator runs (validator fires every 30s)
+      if (window.__validatorEventsRegistered) return;
+      window.__validatorEventsRegistered = true;
+
       const missing = [
         'group:message', 'group:reaction', 'group:typing', 'group:join', 'group:leave',
         'group:kick', 'group:ban', 'group:presence', 'group:update', 'group:updated',
@@ -201,6 +215,8 @@
         'status:new', 'status:created', 'status:viewed', 'status:reaction', 'status:reply',
         'status:deleted', 'status:expired',
         'device:registered', 'session:restored', 'turn:config',
+        // FIX-AUDIT: Also register message events for cross-module forwarding
+        'message:new', 'new_message', 'new_group_message',
       ];
 
       for (const evt of missing) {
@@ -209,7 +225,7 @@
         rt.on(evt, payload => {
           // Dispatch kyn: CustomEvent
           try { window.dispatchEvent(new CustomEvent('kyn:' + evt, { detail: payload || {} })); } catch (_) {}
-          // Fan-out to iframes
+          // Fan-out to iframes ONLY from parent frame
           document.querySelectorAll('iframe').forEach(f => {
             try { f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + evt, payload: payload || {} }, '*'); } catch (_) {}
           });

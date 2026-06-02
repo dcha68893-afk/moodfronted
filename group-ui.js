@@ -2157,6 +2157,9 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
         html += `</div>`;
         
         groupItem.innerHTML = html;
+        // FIX: Set data-group-id so hookClicks delegation can find this element
+        groupItem.setAttribute('data-group-id', id);
+        groupItem.dataset.groupId = id;
         
         registerUIEventListener(groupItem, 'click', (e) => {
             if (e.target.closest('.group-actions')) return;
