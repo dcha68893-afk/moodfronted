@@ -3561,12 +3561,23 @@ function _loadSlot(index, isOwner, group) {
     const _sid = String(status.id);
     const _alreadyViewed = viewedStatuses?.has(_sid) || viewedStatuses?.has(status.id);
     if (!isOwner && !_alreadyViewed) {
-        if (viewedStatuses) { viewedStatuses.add(_sid); viewedStatuses.add(status.id); }
+        if (viewedStatuses) {
+            viewedStatuses.add(_sid);
+            viewedStatuses.add(status.id);
+            // Also add numeric and string forms to be safe
+            if (!isNaN(_sid)) viewedStatuses.add(Number(_sid));
+        }
         try {
-            const arr = JSON.stringify(Array.from(viewedStatuses));
+            const arr = JSON.stringify(Array.from(viewedStatuses).map(String));
             localStorage.setItem('kyn_viewed_statuses',    arr);
-            localStorage.setItem('knecta_viewed_statuses', arr); // write both keys
+            localStorage.setItem('knecta_viewed_statuses', arr);
         } catch(_) {}
+        // FIX: Re-render immediately after marking viewed so viewed section shows instantly
+        setTimeout(() => {
+            if (typeof renderStatusListInstantlyUI === 'function') {
+                renderStatusListInstantlyUI();
+            }
+        }, 50);
         // Update ring state in sidebar
         const groupItem = document.querySelector(`[data-status-ids*="${status.id}"]`);
         if (groupItem) {

@@ -276,29 +276,44 @@
     }
 
     // ─── Broadcast to iframe children ─────────────────────────────────────────
+    // FIX: Debounce + re-entry guard to prevent postMessage storm
+    // AppSettings.merge() triggers notifySubscribers → applySettings → _broadcastToFrames
+    // → iframe receives it → merge() → notifySubscribers → infinite loop
+    let _broadcastTimer = null;
+    let _broadcastPending = {};
+    let _isBroadcasting = false;
+
     function _broadcastToFrames(type, data) {
-        try {
-            const frames = document.querySelectorAll('iframe');
-            frames.forEach(f => {
-                try {
-                    f.contentWindow.postMessage({
-                        type,
-                        source: 'AppSettings',
-                        ...data,
-                        timestamp: Date.now()
-                    }, '*');
-                } catch (_) {}
-            });
-            // Also broadcast to parent if we're in an iframe
-            if (global.parent && global.parent !== global) {
-                global.parent.postMessage({
-                    type: 'SETTINGS_GLOBAL_UPDATE',
-                    source: 'AppSettings',
-                    ...data,
-                    timestamp: Date.now()
-                }, '*');
-            }
-        } catch (_) {}
+        // Re-entry guard: if we're in an iframe receiving a broadcast, don't re-broadcast
+        if (_isBroadcasting) return;
+        // Deduplicate rapid-fire broadcasts of same type within 100ms
+        _broadcastPending[type] = data;
+        if (_broadcastTimer) return;
+        _broadcastTimer = setTimeout(() => {
+            _broadcastTimer = null;
+            _isBroadcasting = true;
+            try {
+                const pending = Object.entries(_broadcastPending);
+                _broadcastPending = {};
+                // Only broadcast from parent frame — iframes must not re-broadcast
+                if (global.parent && global.parent !== global) return;
+                const frames = document.querySelectorAll('iframe');
+                pending.forEach(([t, d]) => {
+                    frames.forEach(f => {
+                        try {
+                            f.contentWindow.postMessage({
+                                type: t,
+                                source: 'AppSettings',
+                                _noRebroadcast: true,
+                                ...d,
+                                timestamp: Date.now()
+                            }, '*');
+                        } catch (_) {}
+                    });
+                });
+            } catch (_) {}
+            _isBroadcasting = false;
+        }, 100);
     }
 
     // ─── PostMessage listener — receive from parent/sibling iframes ───────────
@@ -306,14 +321,18 @@
         const d = evt.data || {};
         if (evt.source === global) return;
 
-        // Parent broadcasting a full settings update
+        // FIX: Ignore messages that were already broadcast from parent
+        if (d._noRebroadcast) return;
+
+        // Parent broadcasting a full settings update — use silent:true to suppress
+        // subscriber notifications that would cause re-broadcasts
         if (d.type === 'SETTINGS_UPDATED' && d.settings) {
-            global.AppSettings && global.AppSettings.merge(d.settings, { silent: false });
+            global.AppSettings && global.AppSettings.merge(d.settings, { silent: true });
         }
 
-        // Specific section update from parent (e.g. chat.html routing)
+        // Specific section update from parent
         if (d.type === 'SETTINGS_GLOBAL_UPDATE' && d.section && d.key !== undefined) {
-            global.AppSettings && global.AppSettings.set(d.section + '.' + d.key, d.value);
+            global.AppSettings && global.AppSettings.set(d.section + '.' + d.key, d.value, { silent: true });
         }
 
         if (d.type === 'THEME_CHANGED' && d.theme) {

@@ -1,558 +1,305 @@
 /**
- * marketplace-ui-fix.js — COMPLETE UI VISIBILITY FIX
- * ════════════════════════════════════════════════════
- * Fixes all visibility issues caused by iframe context:
- * - More sheet (⋮) completely rebuilt as full-viewport overlay
- * - Bottom nav rebuilt as sticky footer inside sidebar
- * - All seller/admin pages render INSIDE sidebar correctly
- * - Persistent bottom tabs for fast navigation
- * - Admin entry always visible in More menu and Account tab
- * ════════════════════════════════════════════════════
+ * marketplace-ui-fix.js v3 — COMPLETE UI VISIBILITY & LAYOUT FIX
+ * ═══════════════════════════════════════════════════════════════
+ * Loads LAST. Fixes everything that breaks in iframe context.
+ * ═══════════════════════════════════════════════════════════════
  */
-
 (function _UIFix() {
 'use strict';
 
-// ─── Inject comprehensive CSS ─────────────────────────────────────────────────
-(function _css() {
+// ─── Global CSS injected with !important on every rule ────────────────────────
+const CSS = `
+/* ── Iframe body fill ────────────────────────────────────────────────── */
+html,body{height:100%!important;margin:0!important;padding:0!important;overflow:hidden!important}
+.app-container{height:100vh!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}
+#sidebar{width:100%!important;height:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;position:relative!important}
+
+/* ── jm-page sizing ──────────────────────────────────────────────────── */
+.jm-page{display:none;flex:1;min-height:0;overflow-y:auto;flex-direction:column;padding-bottom:60px;-webkit-overflow-scrolling:touch}
+.jm-page.active{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow-y:auto!important}
+
+/* ── Seller/Admin dynamic pages ──────────────────────────────────────── */
+[id^="sdPage_"],[id^="admPage_"]{display:none;flex:1;min-height:0;overflow-y:auto;flex-direction:column;background:#f3f4f6;padding-bottom:60px}
+[id^="sdPage_"].active,[id^="admPage_"].active{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow-y:auto!important}
+
+/* ── sd-wrap: use flex not height:100% (flex:1 parent) ───────────────── */
+.sd-wrap{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important}
+.sd-body{flex:1!important;overflow-y:auto!important;min-height:0!important;padding-bottom:80px!important;-webkit-overflow-scrolling:touch!important}
+.sd-head{flex-shrink:0!important;background:#fff!important;padding:13px 16px!important;display:flex!important;align-items:center!important;gap:12px!important;border-bottom:1px solid #f3f4f6!important;position:sticky!important;top:0!important;z-index:10!important}
+
+/* Admin page same */
+.adm-page{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important}
+.adm-body{flex:1!important;overflow-y:auto!important;min-height:0!important;padding-bottom:80px!important;background:#f3f4f6!important}
+.adm-header{flex-shrink:0!important;position:sticky!important;top:0!important;z-index:10!important}
+
+/* ── MORE SHEET: position fixed in iframe viewport ───────────────────── */
+#jmMoreOverlay{display:none;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;background:rgba(0,0,0,.5)!important;z-index:88888!important}
+#jmMoreSheet{display:none;position:fixed!important;bottom:0!important;left:0!important;right:0!important;width:100%!important;max-height:88vh!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;background:#fff!important;border-radius:20px 20px 0 0!important;padding:12px 12px 40px!important;z-index:88889!important;box-shadow:0 -8px 32px rgba(0,0,0,.22)!important;box-sizing:border-box!important}
+
+/* ── More grid ───────────────────────────────────────────────────────── */
+.jm-more-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:8px!important;margin-bottom:4px!important}
+@media(max-width:340px){.jm-more-grid{grid-template-columns:repeat(3,1fr)!important}}
+.jm-more-item{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:5px!important;background:#f9fafb!important;border:none!important;border-radius:12px!important;padding:12px 6px!important;cursor:pointer!important;font-size:11px!important;font-weight:600!important;color:#111!important;text-align:center!important;min-height:68px!important;transition:transform .12s!important}
+.jm-more-item:active{transform:scale(.94)!important;background:#f0fdf4!important}
+.jm-more-item i{font-size:20px!important;color:#f57224!important;margin-bottom:1px!important}
+.jm-more-handle{width:40px!important;height:4px!important;background:#d1d5db!important;border-radius:2px!important;margin:0 auto 12px!important}
+.jm-more-title{font-size:14px!important;font-weight:800!important;text-align:center!important;margin-bottom:14px!important;color:#111!important}
+.jm-more-section-label{font-size:10px!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.6px!important;color:#9ca3af!important;margin:14px 0 8px!important;padding:0 2px!important}
+
+/* ── Bottom nav ──────────────────────────────────────────────────────── */
+#jmBottomNav{display:flex!important;align-items:stretch!important;flex-shrink:0!important;height:56px!important;background:#fff!important;border-top:1px solid #e5e7eb!important;box-shadow:0 -2px 12px rgba(0,0,0,.07)!important;z-index:300!important}
+.jm-nav-tab,.jm-bottom-tab{flex:1!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:2px!important;border:none!important;background:none!important;cursor:pointer!important;font-size:10px!important;font-weight:600!important;color:#9ca3af!important;padding:4px 2px!important;min-width:0!important}
+.jm-nav-tab.active,.jm-nav-tab[data-active="true"]{color:#f57224!important}
+.jm-nav-tab.active i,.jm-nav-tab[data-active="true"] i{color:#f57224!important}
+.jm-nav-tab i{font-size:18px!important;color:inherit!important}
+.jm-nav-tab span{overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;max-width:54px!important}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+#jmHeader,.jm-header{display:flex!important;align-items:center!important;gap:6px!important;padding:8px 10px!important;background:#fff!important;border-bottom:1px solid #e5e7eb!important;flex-shrink:0!important;min-height:50px!important;z-index:100!important}
+#jmMoreBtn{background:#f57224!important;color:#fff!important;border:none!important;border-radius:8px!important;padding:0 12px!important;height:36px!important;display:flex!important;align-items:center!important;gap:5px!important;font-size:13px!important;font-weight:700!important;cursor:pointer!important;flex-shrink:0!important}
+#jmMoreBtn i{color:#fff!important;font-size:13px!important}
+#jmMoreBtn span{color:#fff!important}
+
+/* ── Floating admin button ───────────────────────────────────────────── */
+#admFab{display:none;position:fixed!important;bottom:66px!important;right:14px!important;width:50px!important;height:50px!important;border-radius:50%!important;background:linear-gradient(135deg,#111,#374151)!important;color:#fff!important;border:none!important;cursor:pointer!important;font-size:22px!important;z-index:400!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;align-items:center!important;justify-content:center!important}
+
+/* ── old bottom nav class hidden ────────────────────────────────────── */
+.jm-bottom-nav{display:none!important}
+`;
+
+(function _injectCSS() {
+    document.getElementById('uiFixCSSv3')?.remove();
     const s = document.createElement('style');
-    s.id = 'uiFixCSS';
-    s.textContent = `
-    /* ── Force sidebar to fill full iframe height ─────────────────────────── */
-    html, body {
-        height: 100% !important;
-        overflow: hidden !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    .app-container {
-        height: 100vh !important;
-        overflow: hidden !important;
-    }
-    #sidebar {
-        width: 100% !important;
-        height: 100vh !important;
-        display: flex !important;
-        flex-direction: column !important;
-        overflow: hidden !important;
-        position: relative !important;
-    }
-    /* All jm-pages fill remaining height */
-    .jm-page {
-        display: none;
-        flex: 1;
-        overflow-y: auto;
-        flex-direction: column;
-        padding-bottom: 60px;
-        -webkit-overflow-scrolling: touch;
-    }
-    .jm-page.active {
-        display: flex !important;
-        flex-direction: column;
-    }
-
-    /* ── MORE SHEET — full iframe overlay ──────────────────────────────────── */
-    /* IMPORTANT: in iframe context, position:fixed = iframe viewport top/left */
-    #jmMoreOverlay {
-        display: none;
-        position: fixed !important;
-        top: 0 !important; left: 0 !important;
-        width: 100% !important; height: 100% !important;
-        background: rgba(0,0,0,0.5) !important;
-        z-index: 99990 !important;
-    }
-    #jmMoreSheet {
-        display: none;
-        position: fixed !important;
-        bottom: 0 !important; left: 0 !important; right: 0 !important;
-        background: #fff !important;
-        border-radius: 20px 20px 0 0 !important;
-        padding: 12px 14px 32px !important;
-        z-index: 99991 !important;
-        max-height: 85vh !important;
-        overflow-y: auto !important;
-        box-shadow: 0 -8px 40px rgba(0,0,0,0.25) !important;
-        -webkit-overflow-scrolling: touch !important;
-    }
-    /* ── More grid — responsive 4 cols on wide, 3 on narrow ───────────────── */
-    .jm-more-grid {
-        display: grid !important;
-        grid-template-columns: repeat(4, 1fr) !important;
-        gap: 10px !important;
-    }
-    @media (max-width: 360px) {
-        .jm-more-grid { grid-template-columns: repeat(3,1fr) !important; }
-    }
-    .jm-more-item {
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: center !important;
-        gap: 5px !important;
-        background: #f9fafb !important;
-        border: none !important;
-        border-radius: 12px !important;
-        padding: 12px 6px !important;
-        cursor: pointer !important;
-        font-size: 11px !important;
-        font-weight: 600 !important;
-        color: #111 !important;
-        text-align: center !important;
-        line-height: 1.2 !important;
-        min-height: 64px !important;
-        justify-content: center !important;
-    }
-    .jm-more-item i {
-        font-size: 20px !important;
-        color: #f57224 !important;
-        margin-bottom: 2px !important;
-    }
-    .jm-more-item:active { background: #fff8f5 !important; transform: scale(.96); }
-    .jm-more-title {
-        font-size: 14px !important;
-        font-weight: 800 !important;
-        text-align: center !important;
-        margin-bottom: 14px !important;
-        color: #111 !important;
-    }
-    .jm-more-handle {
-        width: 40px; height: 4px;
-        background: #d1d5db; border-radius: 2px;
-        margin: 0 auto 14px;
-    }
-
-    /* ── Bottom navigation ─────────────────────────────────────────────────── */
-    #jmBottomNav {
-        position: sticky !important;
-        bottom: 0 !important;
-        left: 0 !important; right: 0 !important;
-        height: 56px !important;
-        background: #fff !important;
-        border-top: 1px solid #e5e7eb !important;
-        display: flex !important;
-        align-items: stretch !important;
-        flex-shrink: 0 !important;
-        z-index: 200 !important;
-        box-shadow: 0 -2px 12px rgba(0,0,0,0.08) !important;
-    }
-    .jm-nav-tab {
-        flex: 1 !important;
-        display: flex !important;
-        flex-direction: column !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 2px !important;
-        border: none !important;
-        background: none !important;
-        cursor: pointer !important;
-        font-size: 10px !important;
-        font-weight: 600 !important;
-        color: #9ca3af !important;
-        padding: 6px 4px !important;
-        position: relative !important;
-        text-decoration: none !important;
-    }
-    .jm-nav-tab i { font-size: 18px !important; }
-    .jm-nav-tab.active { color: #f57224 !important; }
-    .jm-nav-tab.active i { color: #f57224 !important; }
-    /* More tab always orange */
-    #jmMoreTab { color: #f57224 !important; }
-    #jmMoreTab i { color: #f57224 !important; }
-
-    /* ── Header ────────────────────────────────────────────────────────────── */
-    #jmHeader {
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
-        padding: 8px 10px !important;
-        background: #fff !important;
-        border-bottom: 1px solid #e5e7eb !important;
-        flex-shrink: 0 !important;
-        position: sticky !important;
-        top: 0 !important;
-        z-index: 100 !important;
-        min-height: 50px !important;
-    }
-    .jm-icon-btn {
-        position: relative !important;
-        background: none !important;
-        border: none !important;
-        font-size: 18px !important;
-        color: #111 !important;
-        cursor: pointer !important;
-        width: 38px !important;
-        height: 38px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        border-radius: 50% !important;
-        flex-shrink: 0 !important;
-    }
-    #jmMoreBtn {
-        background: #f57224 !important;
-        color: #fff !important;
-        border-radius: 8px !important;
-        width: auto !important;
-        padding: 0 10px !important;
-        gap: 4px !important;
-        font-size: 13px !important;
-        font-weight: 700 !important;
-    }
-    #jmMoreBtn i { color: #fff !important; font-size: 14px !important; }
-
-    /* ── Seller/Admin pages rendered in sidebar ────────────────────────────── */
-    [id^="sdPage_"], [id^="admPage_"] {
-        display: none;
-        flex: 1;
-        overflow-y: auto;
-        flex-direction: column;
-        -webkit-overflow-scrolling: touch;
-        background: #f3f4f6;
-        padding-bottom: 60px;
-    }
-    [id^="sdPage_"].active, [id^="admPage_"].active {
-        display: flex !important;
-        flex-direction: column !important;
-    }
-
-    /* ── Admin floating entry button ───────────────────────────────────────── */
-    #admFloatingBtn {
-        display: none;
-        position: fixed;
-        bottom: 70px; right: 16px;
-        width: 52px; height: 52px;
-        border-radius: 50%;
-        background: linear-gradient(135deg,#111,#374151);
-        color: #fff;
-        border: none;
-        cursor: pointer;
-        font-size: 20px;
-        z-index: 500;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-        align-items: center; justify-content: center;
-    }
-    `;
-    // Remove old conflicting style if present
-    document.getElementById('uiFixCSS')?.remove();
+    s.id = 'uiFixCSSv3';
+    s.textContent = CSS;
     document.head.appendChild(s);
 })();
 
-// ─── Rebuild More Sheet show/hide completely ──────────────────────────────────
+// ─── showMore / hideMore — force inline styles ────────────────────────────────
 function showMore() {
-    const overlay = document.getElementById('jmMoreOverlay');
-    const sheet   = document.getElementById('jmMoreSheet');
-
-    if (!sheet) { console.warn('[UIFix] jmMoreSheet not found'); return; }
-
-    // Force inline styles (highest priority — override everything)
-    if (overlay) {
-        overlay.style.cssText = [
-            'display:block',
-            'position:fixed',
-            'top:0','left:0','width:100%','height:100%',
-            'background:rgba(0,0,0,0.5)',
-            'z-index:99990',
-        ].join('!important;') + '!important';
+    const ov = document.getElementById('jmMoreOverlay');
+    const sh = document.getElementById('jmMoreSheet');
+    if (!sh) { console.warn('[UIFix] jmMoreSheet not found'); return; }
+    if (ov) {
+        ov.style.cssText = 'display:block!important;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;background:rgba(0,0,0,.5)!important;z-index:88888!important';
     }
-
-    sheet.style.cssText = [
-        'display:block',
-        'position:fixed',
-        'bottom:0','left:0','right:0',
-        'background:#fff',
-        'border-radius:20px 20px 0 0',
-        'padding:12px 14px 32px',
-        'z-index:99991',
-        'max-height:85vh',
-        'overflow-y:auto',
-        'box-shadow:0 -8px 40px rgba(0,0,0,0.25)',
-        '-webkit-overflow-scrolling:touch',
-    ].join('!important;') + '!important';
-
-    // Inject admin button every time sheet opens
-    setTimeout(_ensureAdminInMenu, 50);
+    sh.style.cssText = 'display:block!important;position:fixed!important;bottom:0!important;left:0!important;right:0!important;width:100%!important;max-height:88vh!important;overflow-y:auto!important;background:#fff!important;border-radius:20px 20px 0 0!important;padding:12px 12px 40px!important;z-index:88889!important;box-shadow:0 -8px 32px rgba(0,0,0,.22)!important;box-sizing:border-box!important;-webkit-overflow-scrolling:touch!important';
+    rebuildMenu();
 }
-
 function hideMore() {
-    const overlay = document.getElementById('jmMoreOverlay');
-    const sheet   = document.getElementById('jmMoreSheet');
-    if (overlay) overlay.style.display = 'none';
-    if (sheet)   sheet.style.display   = 'none';
+    const ov = document.getElementById('jmMoreOverlay');
+    const sh = document.getElementById('jmMoreSheet');
+    if (ov) ov.style.cssText = 'display:none!important';
+    if (sh) sh.style.cssText = 'display:none!important';
 }
-
-// Override ALL show/hide functions
-window._showMore      = showMore;
-window._hideMore      = hideMore;
-window._jmShowMore    = showMore;
-window._jmHideMore    = hideMore;
-window.showMore       = showMore;
-window.hideMore       = hideMore;
+window._showMore = window._hideMore = null; // clear stale refs
+window._showMore     = showMore;
+window._hideMore     = hideMore;
+window._jmShowMore   = showMore;
+window._jmHideMore   = hideMore;
 
 // ─── Rebuild bottom nav ───────────────────────────────────────────────────────
-function _rebuildBottomNav() {
-    // Remove ALL existing bottom navs (both stub and any real ones)
-    document.querySelectorAll('.jm-bottom-nav, #jmBottomNav').forEach(el => el.remove());
-
+function rebuildBottomNav() {
+    document.querySelectorAll('.jm-bottom-nav,#jmBottomNav').forEach(e => e.remove());
     const nav = document.createElement('div');
     nav.id = 'jmBottomNav';
-    nav.style.cssText = [
-        'position:sticky', 'bottom:0', 'left:0', 'right:0',
-        'height:56px', 'background:#fff',
-        'border-top:1px solid #e5e7eb',
-        'display:flex', 'align-items:stretch',
-        'flex-shrink:0', 'z-index:200',
-        'box-shadow:0 -2px 12px rgba(0,0,0,0.08)',
-    ].join('!important;') + '!important';
-
-    const currentPage = window._state?.page || 'home';
-    const tabs = [
-        { page:'home',       icon:'fa-home',         label:'Home'    },
-        { page:'categories', icon:'fa-th-large',     label:'Browse'  },
-        { page:'wishlist',   icon:'fa-heart',        label:'Saved'   },
-        { page:'orders',     icon:'fa-shopping-bag', label:'Orders'  },
-        { page:'account',    icon:'fa-user',         label:'Account' },
+    const cur = window._state?.page || 'home';
+    const TABS = [
+        {p:'home',      i:'fa-home',         l:'Home'},
+        {p:'categories',i:'fa-th-large',     l:'Browse'},
+        {p:'wishlist',  i:'fa-heart',        l:'Saved'},
+        {p:'orders',    i:'fa-shopping-bag', l:'Orders'},
+        {p:'account',   i:'fa-user',         l:'Account'},
     ];
-
-    nav.innerHTML = tabs.map(t => `
-        <button class="jm-nav-tab${t.page===currentPage?' active':''}" data-page="${t.page}"
-            onclick="window._jmNav('${t.page}')"
-            style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;font-size:10px;font-weight:600;color:${t.page===currentPage?'#f57224':'#9ca3af'};padding:6px 2px;position:relative;min-width:0">
-            <i class="fas ${t.icon}" style="font-size:18px;color:inherit"></i>
-            <span style="color:inherit;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52px">${t.label}</span>
-        </button>
-    `).join('') + `
-        <button id="jmMoreTab" onclick="window._jmShowMore()"
-            style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;padding:6px 2px;min-width:0">
+    nav.innerHTML = TABS.map(t=>`
+        <button class="jm-nav-tab${t.p===cur?' active':''}" data-page="${t.p}" onclick="window._jmNav('${t.p}')" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;font-size:10px;font-weight:600;color:${t.p===cur?'#f57224':'#9ca3af'};padding:4px 2px;min-width:0">
+            <i class="fas ${t.i}" style="font-size:18px;color:inherit"></i>
+            <span style="color:inherit;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:54px">${t.l}</span>
+        </button>`).join('')+`
+        <button id="jmMoreTab" onclick="window._jmShowMore()" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;padding:4px 2px;min-width:0">
             <i class="fas fa-ellipsis-h" style="font-size:18px;color:#f57224"></i>
             <span style="color:#f57224;font-size:10px;font-weight:800">Menu</span>
-        </button>
-    `;
-
-    // Insert as LAST child of sidebar
+        </button>`;
     const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.appendChild(nav);
-    }
+    if (sidebar) sidebar.appendChild(nav);
+    else document.body.appendChild(nav);
 }
 
-// ─── Update More button in header ─────────────────────────────────────────────
-function _updateMoreBtn() {
-    const btn = document.getElementById('jmMoreBtn');
-    if (!btn) return;
-    btn.style.cssText = 'background:#f57224!important;color:#fff!important;border-radius:8px!important;width:auto!important;padding:0 12px!important;gap:5px!important;font-size:13px!important;font-weight:700!important;display:flex!important;align-items:center!important;justify-content:center!important;border:none!important;cursor:pointer!important;height:36px!important;flex-shrink:0!important';
-    btn.innerHTML = '<i class="fas fa-th" style="color:#fff;font-size:14px"></i><span>More</span>';
-    btn.onclick = showMore;
+// ─── Update active nav tab ────────────────────────────────────────────────────
+function setActiveTab(page) {
+    document.querySelectorAll('#jmBottomNav [data-page]').forEach(btn => {
+        const active = btn.dataset.page === page;
+        btn.style.color = active ? '#f57224' : '#9ca3af';
+        btn.querySelectorAll('i,span').forEach(el => el.style.color = active ? '#f57224' : '#9ca3af');
+        btn.dataset.active = active ? 'true' : 'false';
+    });
 }
 
-// ─── Ensure admin entry in More menu ─────────────────────────────────────────
-function _ensureAdminInMenu() {
-    const user = window.currentUser || window.__kynUser || {};
-    const isAdmin = user.role==='admin' || user.role==='moderator' || user.isAdmin || 
-                    (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
-    if (!isAdmin) return;
+// ─── Rebuild More menu content ────────────────────────────────────────────────
+function rebuildMenu() {
+    const sh = document.getElementById('jmMoreSheet');
+    if (!sh) return;
+    const isAdmin = _isAdmin();
 
-    const grid = document.querySelector('.jm-more-grid');
-    if (!grid || document.getElementById('admMenuBtn')) return;
+    sh.innerHTML = `
+    <div class="jm-more-handle"></div>
+    <div class="jm-more-title">Menu</div>
 
-    const btn = document.createElement('button');
-    btn.id = 'admMenuBtn';
-    btn.className = 'jm-more-item';
-    btn.style.cssText = 'background:linear-gradient(135deg,#111,#374151)!important;color:#fff!important;border-radius:12px!important';
-    btn.innerHTML = `
-        <i class="fas fa-shield-alt" style="color:#fff!important;font-size:20px!important"></i>
-        <span style="color:#fff!important;font-weight:800!important">Admin</span>
+    <div class="jm-more-section-label">🏪 Seller Tools</div>
+    <div class="jm-more-grid">
+        <button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('seller-dashboard')" style="background:linear-gradient(135deg,#fff8f5,#fff)!important;border:1.5px solid #f57224!important">
+            <i class="fas fa-tachometer-alt" style="color:#f57224!important"></i><span>Dashboard</span>
+        </button>
+        <button class="jm-more-item" onclick="(()=>{window._jmHideMore();setTimeout(()=>document.getElementById('createListingBtn')?.click(),100)})()" style="background:#f57224!important">
+            <i class="fas fa-plus-circle" style="color:#fff!important"></i><span style="color:#fff!important">Sell</span>
+        </button>
+        ${[
+            ['my-listings',        'fa-box-open',        '#3b82f6','Listings'],
+            ['seller-inventory',   'fa-warehouse',       '#8b5cf6','Inventory'],
+            ['seller-shipping',    'fa-shipping-fast',   '#f59e0b','Orders'],
+            ['seller-payouts',     'fa-money-bill-wave', '#22c55e','Payouts'],
+            ['seller-analytics',   'fa-chart-line',      '#ec4899','Analytics'],
+            ['seller-returns',     'fa-undo-alt',        '#ef4444','Returns'],
+        ].map(([p,ic,c,lb])=>`
+        <button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${p}')">
+            <i class="fas ${ic}" style="color:${c}!important"></i><span>${lb}</span>
+        </button>`).join('')}
+    </div>
+
+    <div class="jm-more-section-label">👤 Buyer Tools</div>
+    <div class="jm-more-grid">
+        ${[
+            ['wallet',       'fa-wallet',         '#22c55e','Wallet'],
+            ['loyalty',      'fa-trophy',         '#f59e0b','Loyalty'],
+            ['referral',     'fa-gift',           '#ec4899','Refer'],
+            ['addresses',    'fa-map-marker-alt', '#8b5cf6','Addresses'],
+            ['vouchers',     'fa-ticket-alt',     '#f97316','Vouchers'],
+            ['notifprefs',   'fa-bell',           '#6366f1','Alerts'],
+            ['notes',        'fa-sticky-note',    '#84cc16','Notes'],
+            ['trust',        'fa-shield-alt',     '#10b981','Trust'],
+            ['leaderboard',  'fa-medal',          '#f59e0b','Leaders'],
+            ['reviews-page', 'fa-star',           '#eab308','Reviews'],
+            ['follow-sellers','fa-store',         '#06b6d4','Following'],
+            ['inbox',        'fa-envelope',       '#3b82f6','Inbox'],
+        ].map(([p,ic,c,lb])=>`
+        <button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${p}')">
+            <i class="fas ${ic}" style="color:${c}!important"></i><span>${lb}</span>
+        </button>`).join('')}
+    </div>
+
+    ${isAdmin ? `
+    <div class="jm-more-section-label">⚙️ Admin</div>
+    <div class="jm-more-grid">
+        ${[
+            ['admin-dashboard',  'fa-tachometer-alt','#111',   'Dashboard'],
+            ['admin-products',   'fa-box',           '#3b82f6','Products'],
+            ['admin-sellers',    'fa-store',         '#8b5cf6','Sellers'],
+            ['admin-buyers',     'fa-users',         '#22c55e','Buyers'],
+            ['admin-orders',     'fa-receipt',       '#f59e0b','Orders'],
+            ['admin-payouts',    'fa-money-check',   '#ec4899','Payouts'],
+            ['admin-analytics',  'fa-chart-pie',     '#6366f1','Analytics'],
+            ['admin-settings',   'fa-cog',           '#6b7280','Settings'],
+        ].map(([p,ic,c,lb])=>`
+        <button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${p}')" style="background:linear-gradient(135deg,#1f2937,#374151)!important">
+            <i class="fas ${ic}" style="color:${c==='#111'?'#fff':c}!important"></i>
+            <span style="color:#d1d5db!important">${lb}</span>
+        </button>`).join('')}
+    </div>` : ''}
     `;
-    btn.onclick = () => { hideMore(); window._jmNavMore('admin-dashboard'); };
-    grid.prepend(btn);
 
-    // Also show floating admin button
-    let fab = document.getElementById('admFloatingBtn');
+    // overlay click to close
+    const ov = document.getElementById('jmMoreOverlay');
+    if (ov) ov.onclick = hideMore;
+}
+
+// ─── Admin check ──────────────────────────────────────────────────────────────
+function _isAdmin() {
+    const u = window.currentUser || window.__kynUser || {};
+    return u.role==='admin' || u.role==='moderator' || u.isAdmin === true ||
+           (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
+}
+
+// ─── Floating admin FAB ───────────────────────────────────────────────────────
+function _ensureAdminFab() {
+    if (!_isAdmin()) return;
+    let fab = document.getElementById('admFab');
     if (!fab) {
         fab = document.createElement('button');
-        fab.id = 'admFloatingBtn';
+        fab.id = 'admFab';
         fab.innerHTML = '⚙️';
         fab.title = 'Admin Panel';
         fab.onclick = () => window._jmNavMore('admin-dashboard');
         document.body.appendChild(fab);
     }
-    fab.style.display = 'flex';
+    fab.style.cssText = 'display:flex!important;position:fixed!important;bottom:66px!important;right:14px!important;width:50px!important;height:50px!important;border-radius:50%!important;background:linear-gradient(135deg,#111,#374151)!important;color:#fff!important;border:none!important;cursor:pointer!important;font-size:22px!important;z-index:400!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;align-items:center!important;justify-content:center!important';
 }
 
-// ─── Rebuild More menu items to be complete & visible ─────────────────────────
-function _rebuildMoreMenu() {
-    const sheet = document.getElementById('jmMoreSheet');
-    if (!sheet) return;
+// ─── Patch _jmNav ─────────────────────────────────────────────────────────────
+const _origJmNav = window._jmNav;
+window._jmNav = function(page, sub) {
+    _origJmNav?.call(this, page, sub);
+    setTimeout(() => setActiveTab(page), 50);
+};
 
-    const ITEMS = [
-        // Seller section
-        { page:'seller-dashboard',    icon:'fa-store',          label:'Seller Hub',    color:'#f57224', section:'seller' },
-        { page:'my-listings',         icon:'fa-box-open',       label:'My Listings',   section:'seller' },
-        { page:'seller-inventory',    icon:'fa-warehouse',      label:'Inventory',     section:'seller' },
-        { page:'seller-analytics',    icon:'fa-chart-line',     label:'Analytics',     section:'seller' },
-        { page:'seller-payouts',      icon:'fa-money-bill-wave',label:'Payouts',       section:'seller' },
-        { page:'seller-shipping',     icon:'fa-shipping-fast',  label:'Shipping',      section:'seller' },
-        { page:'seller-returns',      icon:'fa-undo-alt',       label:'Returns',       section:'seller' },
-        { page:'seller-subscription', icon:'fa-crown',          label:'Plans',         section:'seller' },
-        // Buyer section
-        { page:'addresses',           icon:'fa-map-marker-alt', label:'Addresses',     section:'buyer' },
-        { page:'vouchers',            icon:'fa-ticket-alt',     label:'Vouchers',      section:'buyer' },
-        { page:'analytics',           icon:'fa-chart-bar',      label:'My Stats',      section:'buyer' },
-        { page:'loyalty',             icon:'fa-trophy',         label:'Loyalty',       section:'buyer' },
-        { page:'wallet',              icon:'fa-wallet',         label:'Wallet',        section:'buyer' },
-        { page:'referral',            icon:'fa-gift',           label:'Referral',      section:'buyer' },
-        { page:'notes',               icon:'fa-sticky-note',    label:'Notes',         section:'buyer' },
-        { page:'trust',               icon:'fa-shield-alt',     label:'Trust',         section:'buyer' },
-        { page:'leaderboard',         icon:'fa-medal',          label:'Leaders',       section:'buyer' },
-        { page:'notifprefs',          icon:'fa-bell',           label:'Alerts',        section:'buyer' },
-        { page:'inbox',               icon:'fa-envelope',       label:'Inbox',         section:'buyer' },
-        { page:'follow-sellers',      icon:'fa-store',          label:'Following',     section:'buyer' },
-        { page:'reviews-page',        icon:'fa-star',           label:'Reviews',       section:'buyer' },
-    ];
-
-    // Create new button to open listing
-    const createBtn = `<button class="jm-more-item" id="createListingMoreBtn" onclick="window._jmHideMore?.();setTimeout(()=>{ const b=document.getElementById('createListingBtn'); if(b)b.click(); },100)" style="background:linear-gradient(135deg,#f57224,#ff4e16)!important;color:#fff!important;border-radius:12px!important"><i class="fas fa-plus-circle" style="color:#fff!important"></i><span style="color:#fff!important">Sell</span></button>`;
-
-    sheet.innerHTML = `
-        <div class="jm-more-handle"></div>
-        <div class="jm-more-title">Menu</div>
-
-        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:8px;padding:0 2px">🏪 Seller Tools</div>
-        <div class="jm-more-grid" id="jmMoreGridSeller">
-            ${createBtn}
-            ${ITEMS.filter(i=>i.section==='seller').map(i=>`
-            <button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${i.page}')" ${i.color?`style="background:${i.color}!important;color:#fff!important"`:''}">
-                <i class="fas ${i.icon}" ${i.color?`style="color:#fff!important"`:''}></i>
-                <span ${i.color?`style="color:#fff!important"`:''}>${i.label}</span>
-            </button>`).join('')}
-        </div>
-
-        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin:16px 0 8px;padding:0 2px">👤 Buyer Tools</div>
-        <div class="jm-more-grid" id="jmMoreGridBuyer">
-            ${ITEMS.filter(i=>i.section==='buyer').map(i=>`
-            <button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${i.page}')">
-                <i class="fas ${i.icon}"></i>
-                <span>${i.label}</span>
-            </button>`).join('')}
-        </div>
-
-        <div id="admMoreSection" style="display:none">
-            <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin:16px 0 8px;padding:0 2px">⚙️ Administration</div>
-            <div class="jm-more-grid" id="jmMoreGridAdmin">
-                ${[
-                    ['admin-dashboard','fa-tachometer-alt','Dashboard'],
-                    ['admin-products','fa-box','Products'],
-                    ['admin-sellers','fa-store','Sellers'],
-                    ['admin-buyers','fa-users','Buyers'],
-                    ['admin-orders','fa-receipt','Orders'],
-                    ['admin-payouts','fa-money-check','Payouts'],
-                    ['admin-analytics','fa-chart-pie','Analytics'],
-                    ['admin-settings','fa-cog','Settings'],
-                ].map(([p,ic,lb])=>`
-                <button class="jm-more-item" style="background:linear-gradient(135deg,#1f2937,#374151)!important;color:#fff!important" onclick="window._jmHideMore();window._jmNavMore('${p}')">
-                    <i class="fas ${ic}" style="color:#9ca3af!important"></i>
-                    <span style="color:#d1d5db!important">${lb}</span>
-                </button>`).join('')}
-            </div>
-        </div>
-    `;
-
-    // Show admin section if admin
-    _showAdminSection();
-}
-
-function _showAdminSection() {
-    const user = window.currentUser || window.__kynUser || {};
-    const isAdmin = user.role==='admin' || user.role==='moderator' || user.isAdmin ||
-                    (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
-    const sec = document.getElementById('admMoreSection');
-    if (sec) sec.style.display = isAdmin ? 'block' : 'none';
-
-    // Floating admin button
-    let fab = document.getElementById('admFloatingBtn');
-    if (isAdmin) {
-        if (!fab) {
-            fab = document.createElement('button');
-            fab.id = 'admFloatingBtn';
-            fab.style.cssText = 'display:flex;position:fixed;bottom:70px;right:16px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#111,#374151);color:#fff;border:none;cursor:pointer;font-size:22px;z-index:500;box-shadow:0 4px 16px rgba(0,0,0,.35);align-items:center;justify-content:center;';
-            fab.innerHTML = '⚙️';
-            fab.title = 'Admin Panel';
-            fab.onclick = () => window._jmNavMore('admin-dashboard');
-            document.body.appendChild(fab);
+// ─── Patch _jmNavMore for seller/admin ───────────────────────────────────────
+const _origNavMore = window._jmNavMore;
+window._jmNavMore = function(page) {
+    // Ensure the page container exists inside sidebar with correct styles
+    const isSeller = /^(seller-|my-listings|admin-approval)/.test(page);
+    const isAdmin  = /^admin-/.test(page);
+    if (isSeller || isAdmin) {
+        const prefix  = isAdmin ? 'admPage_' : 'sdPage_';
+        const pageId  = prefix + page.replace(/-/g,'_');
+        let el = document.getElementById(pageId);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = pageId;
+            el.className = 'jm-page';
+            const sidebar = document.getElementById('sidebar') || document.body;
+            // Insert before bottom nav so it doesn't push nav down
+            const nav = document.getElementById('jmBottomNav');
+            if (nav) sidebar.insertBefore(el, nav);
+            else sidebar.appendChild(el);
         }
-        fab.style.display = 'flex';
+        // Deactivate all pages
+        document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
+        el.classList.add('active');
+        // Force flex layout via inline
+        el.style.cssText = 'display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow-y:auto!important;overflow-x:hidden!important;background:#f3f4f6!important;padding-bottom:60px!important';
+        hideMore();
     }
+    _origNavMore?.call(this, page);
+};
+
+// ─── Update More button ───────────────────────────────────────────────────────
+function _updateMoreBtn() {
+    const btn = document.getElementById('jmMoreBtn');
+    if (!btn) return;
+    btn.innerHTML = '<i class="fas fa-th" style="color:#fff;font-size:13px"></i><span style="color:#fff">Menu</span>';
+    btn.onclick = showMore;
+    btn.style.cssText = 'background:#f57224!important;color:#fff!important;border:none!important;border-radius:8px!important;padding:0 12px!important;height:36px!important;display:flex!important;align-items:center!important;gap:5px!important;font-size:13px!important;font-weight:700!important;cursor:pointer!important;flex-shrink:0!important';
 }
 
-// ─── Patch _jmNav to update bottom tab active state ───────────────────────────
-const _origNav = window._jmNav;
-window._jmNav = function(page, subpage) {
-    _origNav?.call(this, page, subpage);
-    // Update bottom nav active tab with inline styles
-    document.querySelectorAll('#jmBottomNav button[data-page]').forEach(tab => {
-        const isActive = tab.dataset.page === page;
-        tab.style.color = isActive ? '#f57224' : '#9ca3af';
-        const icon = tab.querySelector('i');
-        if (icon) icon.style.color = isActive ? '#f57224' : '#9ca3af';
-        const span = tab.querySelector('span');
-        if (span) span.style.color = isActive ? '#f57224' : '#9ca3af';
-    });
-};
-
-// ─── Account page: inject admin quick link ────────────────────────────────────
-const _origRenderAccount = window._renderAccount;
-window._renderAccount = function() {
-    _origRenderAccount?.call(this);
-    setTimeout(() => {
-        const user = window.currentUser || window.__kynUser || {};
-        const isAdmin = user.role==='admin' || user.role==='moderator' || user.isAdmin ||
-                        (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
-        if (!isAdmin) return;
-        const page = document.getElementById('jmPageAccount');
-        if (!page || document.getElementById('admAcctShortcut')) return;
-        const btn = document.createElement('div');
-        btn.id = 'admAcctShortcut';
-        btn.style.cssText = 'margin:0 16px 12px;background:linear-gradient(135deg,#111,#374151);border-radius:14px;padding:16px;display:flex;align-items:center;gap:14px;cursor:pointer;';
-        btn.innerHTML = '<div style="width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">⚙️</div><div style="flex:1"><div style="font-weight:800;font-size:14px;color:#fff">Admin Command Center</div><div style="font-size:12px;color:rgba(255,255,255,.65);margin-top:2px">Manage products, sellers, orders & more</div></div><i class="fas fa-chevron-right" style="color:rgba(255,255,255,.4)"></i>';
-        btn.onclick = () => window._jmNavMore('admin-dashboard');
-        page.insertBefore(btn, page.firstChild.nextSibling);
-    }, 200);
-};
-
-// ─── Initialize ───────────────────────────────────────────────────────────────
-function _init() {
-    _rebuildBottomNav();
+// ─── Main init ────────────────────────────────────────────────────────────────
+function init() {
+    rebuildBottomNav();
     _updateMoreBtn();
-    _rebuildMoreMenu();
-    _showAdminSection();
-
-    // Re-inject on every showMore call
-    const origShowMore = window._jmShowMore;
-    window._jmShowMore = function() {
-        showMore();
-        _rebuildMoreMenu(); // Refresh menu content every open
-        _showAdminSection();
-    };
-
-    // Patch overlay click to hide
-    const overlay = document.getElementById('jmMoreOverlay');
-    if (overlay) overlay.onclick = hideMore;
-
-    console.log('[marketplace-ui-fix.js] ✅ UI fixed — More sheet, bottom nav, admin entry all rebuilt');
+    [300,600,1200,2500].forEach(t => setTimeout(() => {
+        rebuildBottomNav();
+        _updateMoreBtn();
+        _ensureAdminFab();
+    }, t));
+    // overlay click handler
+    const ov = document.getElementById('jmMoreOverlay');
+    if (ov) ov.onclick = hideMore;
 }
 
-// Run after DOM ready and again after JS modules load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _init);
-} else {
-    _init();
-}
-// Re-run after everything loads
-window.addEventListener('load', () => { setTimeout(_init, 300); });
-// Also re-run after auth completes (user role available)
-window.addEventListener('ecom:ready', () => { setTimeout(_showAdminSection, 200); });
-window.addEventListener('message', (e) => {
-    if (e.data?.type === 'tools:active' || e.data?.type === 'PARENT_READY') {
-        setTimeout(_init, 500);
-    }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+else init();
+window.addEventListener('load', () => setTimeout(init, 200));
+window.addEventListener('message', e => {
+    if (e.data?.type==='tools:active'||e.data?.type==='PARENT_READY') setTimeout(init, 300);
 });
 
+console.log('[marketplace-ui-fix v3] ✅ Complete UI fix applied');
 })();

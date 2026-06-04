@@ -547,6 +547,7 @@
         }
         .center-menu-calls i { color: #34d399; }
         .center-menu-group i { color: #60a5fa; }
+        .center-menu-games i { color: #f59e0b; }
         #centerMenuOverlay {
             display: none;
             position: fixed;
@@ -1530,6 +1531,10 @@
             <i class="fas fa-users"></i>
             <span>Groups</span>
         </div>
+        <div class="center-menu-item center-menu-games" onclick="closeCenterMenu(); navigateToPage('games');">
+            <i class="fas fa-gamepad"></i>
+            <span>Games</span>
+        </div>
     </div>
 
     <!-- Profile Edit Panel (full-screen sheet) -->
@@ -1595,6 +1600,9 @@
     </div>
     <div id="toolsContent" class="iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
+    </div>
+    <div id="gamesContent" class="iframe-container hidden">
+        <iframe id="gamesIframe" class="content-iframe" src="game.html" data-module="games"></iframe>
     </div>
     <style>
         .mobile-nav-icon[data-page="tools"] .ecom-nav-badge,
@@ -1691,7 +1699,9 @@
             'setting':   'settingsIframe',
             'tools':     'toolsIframe',
             'tool':      'toolsIframe',
-            'marketplace':'toolsIframe'
+            'marketplace':'toolsIframe',
+            'games':     'gamesIframe',
+            'game':      'gamesIframe',
         };
 
         // FIX-006: Iframe-ready queue — prevents postMessage events dropped during iframe load
@@ -2340,7 +2350,8 @@
             friends:  { icon: 'fa-user-friends', title: 'Friends', subtitle: 'Contacts, requests, and discovery live in one place.' },
             calls:    { icon: 'fa-phone', title: 'Calls', subtitle: 'Recent calls and live call actions are coordinated here.' },
             settings: { icon: 'fa-cog', title: 'Settings', subtitle: 'Profile, privacy, and preferences for the whole app.' },
-            tools:    { icon: 'fa-tools', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' }
+            tools:    { icon: 'fa-tools', title: 'Tools', subtitle: 'Utilities and marketplace actions for power users.' },
+            games:    { icon: 'fa-gamepad', title: 'Games', subtitle: 'Play pool and more — unlimited stages, real physics.' }
         };
 
         function updateHeaderContext(page) {
@@ -2383,7 +2394,8 @@
             settings: [
                 { btnId: 'backToAppBtn', icon: 'fa-arrow-left', title: 'Back to app' }
             ],
-            tools: []
+            tools: [],
+            games: []
         };
 
         function triggerIframeHeaderAction(page, btnId) {
@@ -2412,8 +2424,14 @@
                 headerActionsEl.classList.add('hidden');
                 return;
             }
-            // Hide tools nav for every other page
+            // Hide tools nav for every other page (including games)
             if (toolsNavEl) toolsNavEl.classList.add('hidden');
+            // Games page — no header actions needed
+            if (page === 'games') {
+                headerActionsEl.innerHTML = '';
+                headerActionsEl.classList.add('hidden');
+                return;
+            }
 
             const normalizedPage = (page === 'groups') ? 'group' : page;
             const actions = headerActionConfigByPage[normalizedPage] || headerActionConfigByPage[page] || [];

@@ -6350,90 +6350,134 @@ function _renderAccount() {
     const container = document.getElementById('jmAccountContent');
     if (!container) return;
 
-    const user = window.currentUser || window.__kynUser || { displayName:'User', email:'', wallet:0 };
-    const name = user.displayName || user.username || 'User';
-    const email = user.email || '';
-    const wallet = user.walletBalance || 0;
+    const user   = window.currentUser || window.__kynUser || { displayName:'User', email:'', walletBalance:0 };
+    const name   = user.displayName || user.username || 'User';
+    const email  = user.email || '';
+    const wallet = parseFloat(user.walletBalance || 0);
+    const pts    = user.loyaltyPoints || 0;
+    const tier   = user.loyaltyTier || 'bronze';
+    const tc     = { bronze:'#cd7f32', silver:'#9ca3af', gold:'#f59e0b', platinum:'#8b5cf6' };
+    const isAdmin = user.role==='admin'||user.role==='moderator'||user.isAdmin||
+                    (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
 
     container.innerHTML = `
-        <div class="jm-account-hero">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-                <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#f57224,#ff9a00);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:800;flex-shrink:0">
-                    ${_esc(name[0]?.toUpperCase()||'U')}
+    <!-- Profile hero with chat + WhatsApp buttons -->
+    <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:20px 16px 16px;color:#fff">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+            <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#f57224,#ff9a00);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;font-weight:900;flex-shrink:0">${_esc(name[0]?.toUpperCase()||'U')}</div>
+            <div style="flex:1;min-width:0">
+                <div style="font-weight:800;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Hi, ${_esc(name)}!</div>
+                <div style="font-size:12px;color:rgba(255,255,255,.75);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(email)}</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:5px">
+                    <span style="background:${tc[tier]||'#cd7f32'};color:#fff;border-radius:20px;padding:2px 10px;font-size:10px;font-weight:800;text-transform:uppercase">${tier}</span>
+                    <span style="font-size:12px;color:rgba(255,255,255,.8)">${pts.toLocaleString()} pts</span>
                 </div>
-                <div>
-                    <div class="jm-account-welcome">Welcome ${_esc(name)}!</div>
-                    <div class="jm-account-email">${_esc(email)}</div>
-                </div>
-            </div>
-            <div class="jm-account-balance">
-                <i class="fas fa-wallet" style="font-size:20px"></i>
-                Knecta balance: ${_fmt(wallet)}
-            </div>
-            <div class="jm-account-support-row">
-                <button class="jm-live-chat-btn" onclick="window._jmOpenSupport()">
-                    <i class="fas fa-comment"></i> Live Chat
-                </button>
-                <button class="jm-wa-btn" onclick="window._jmOpenWhatsApp()">
-                    <i class="fab fa-whatsapp"></i> WhatsApp
-                </button>
             </div>
         </div>
-
-        <div class="jm-account-section-label">Need Assistance?</div>
-        <div class="jm-account-menu-group">
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('inbox')">
-                <i class="fas fa-circle-info"></i><span>Help &amp; Support</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+        <!-- Stats row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+            <div style="background:rgba(255,255,255,.15);border-radius:10px;padding:10px;text-align:center;cursor:pointer" onclick="window._jmNavMore('wallet')">
+                <div style="font-size:14px;font-weight:900">${_fmt(wallet)}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:2px">Wallet</div>
+            </div>
+            <div style="background:rgba(255,255,255,.15);border-radius:10px;padding:10px;text-align:center;cursor:pointer" onclick="window._jmNav('orders')">
+                <div style="font-size:14px;font-weight:900">${user.totalOrders||0}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:2px">Orders</div>
+            </div>
+            <div style="background:rgba(255,255,255,.15);border-radius:10px;padding:10px;text-align:center;cursor:pointer" onclick="window._jmNav('wishlist')">
+                <div style="font-size:14px;font-weight:900">${_state.wishlist?.length||0}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.7);margin-top:2px">Saved</div>
+            </div>
+        </div>
+        <!-- Messages row — like WhatsApp icon on phone home screen -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <button onclick="window._jmOpenChat()" style="background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.3);border-radius:12px;padding:12px;color:#fff;font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;justify-content:center">
+                <i class="fas fa-comment-dots" style="font-size:20px"></i>
+                <span>Messages<span id="jmChatBadge" style="display:none;background:#22c55e;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:900;margin-left:4px">0</span></span>
+            </button>
+            <button onclick="window._jmOpenWhatsApp()" style="background:#25d366;border:none;border-radius:12px;padding:12px;color:#fff;font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;justify-content:center">
+                <i class="fab fa-whatsapp" style="font-size:20px"></i> WhatsApp
             </button>
         </div>
+    </div>
 
-        <div class="jm-account-section-label">My Knecta Account</div>
-        <div class="jm-account-menu-group">
-            <button class="jm-account-menu-item" onclick="window._jmNav('orders')">
-                <i class="fas fa-box"></i><span>Orders</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
+    <!-- Seller Tools -->
+    <div style="padding:12px 16px 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:8px">🏪 Seller Tools</div>
+        <div style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+            <button onclick="window._jmHideMore?.();setTimeout(()=>document.getElementById('createListingBtn')?.click(),100)" style="width:100%;display:flex;align-items:center;gap:12px;padding:14px 16px;border:none;background:linear-gradient(135deg,#fff8f5,#fff);cursor:pointer;border-bottom:1px solid #f9fafb">
+                <div style="width:36px;height:36px;border-radius:10px;background:#f57224;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-plus" style="color:#fff;font-size:16px"></i></div>
+                <div style="flex:1;text-align:left"><div style="font-weight:800;font-size:13px;color:#f57224">+ Create New Listing</div><div style="font-size:11px;color:#6b7280;margin-top:1px">Sell a product on the marketplace</div></div>
+                <i class="fas fa-chevron-right" style="color:#f57224;font-size:12px"></i>
             </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('inbox')">
-                <i class="fas fa-envelope"></i><span>Inbox</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('reviews-page')">
-                <i class="fas fa-star"></i><span>Ratings &amp; Reviews</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('vouchers')">
-                <i class="fas fa-ticket-alt"></i><span>Vouchers</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNav('wishlist')">
-                <i class="fas fa-heart"></i><span>Wishlist</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('follow-sellers')">
-                <i class="fas fa-store"></i><span>Follow Seller</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNav('recent')">
-                <i class="fas fa-history"></i><span>Recently Viewed</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
+            ${[
+                ['seller-dashboard',    'fa-tachometer-alt',  '#f57224', 'Seller Dashboard', 'Revenue, orders & overview'],
+                ['my-listings',         'fa-box-open',        '#3b82f6', 'My Listings',       'Manage your products'],
+                ['seller-inventory',    'fa-warehouse',       '#8b5cf6', 'Inventory',         'Stock levels & alerts'],
+                ['seller-shipping',     'fa-shipping-fast',   '#f59e0b', 'Orders & Shipping', 'Fulfill & track orders'],
+                ['seller-payouts',      'fa-money-bill-wave', '#22c55e', 'Payouts',           'Earnings & withdrawals'],
+                ['seller-analytics',    'fa-chart-line',      '#ec4899', 'Analytics',         'Views, sales & conversion'],
+                ['seller-returns',      'fa-undo-alt',        '#ef4444', 'Returns',           'Handle return requests'],
+                ['seller-verification', 'fa-shield-alt',      '#10b981', 'Verification',      'KYC & verified seller badge'],
+            ].map(([page,icon,color,label,desc])=>`
+            <button onclick="window._jmNavMore('${page}')" style="width:100%;display:flex;align-items:center;gap:12px;padding:13px 16px;border:none;background:#fff;cursor:pointer;border-bottom:1px solid #f9fafb;text-align:left">
+                <div style="width:36px;height:36px;border-radius:10px;background:${color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${icon}" style="color:${color};font-size:15px"></i></div>
+                <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;color:#111">${label}</div><div style="font-size:11px;color:#6b7280;margin-top:1px">${desc}</div></div>
+                <i class="fas fa-chevron-right" style="color:#d1d5db;font-size:12px"></i>
+            </button>`).join('')}
         </div>
+    </div>
 
-        <div class="jm-account-section-label">My Settings</div>
-        <div class="jm-account-menu-group">
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('addresses')">
-                <i class="fas fa-map-marker-alt"></i><span>Address Book</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('notifprefs')">
-                <i class="fas fa-bell"></i><span>Notification Preferences</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('analytics')">
-                <i class="fas fa-chart-bar"></i><span>Analytics</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('trust')">
-                <i class="fas fa-shield-alt"></i><span>Trust Stats</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
-            <button class="jm-account-menu-item" onclick="window._jmNavMore('team')">
-                <i class="fas fa-users"></i><span>Team Management</span><i class="fas fa-chevron-right jm-menu-chevron"></i>
-            </button>
+    <!-- Buyer Account -->
+    <div style="padding:12px 16px 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:8px">👤 My Account</div>
+        <div style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+            ${[
+                ['orders',       'fa-box',            '#3b82f6', 'My Orders',        'Track all purchases',       '_jmNav'],
+                ['wishlist',     'fa-heart',          '#ef4444', 'Wishlist',          'Saved items',               '_jmNav'],
+                ['loyalty',      'fa-trophy',         '#f59e0b', 'Loyalty Points',   pts+' pts earned',           '_jmNavMore'],
+                ['wallet',       'fa-wallet',         '#22c55e', 'Wallet',           _fmt(wallet)+' balance',     '_jmNavMore'],
+                ['referral',     'fa-gift',           '#ec4899', 'Refer & Earn',     'KES 100 per referral',      '_jmNavMore'],
+                ['addresses',    'fa-map-marker-alt', '#8b5cf6', 'Address Book',     'Delivery addresses',        '_jmNavMore'],
+                ['vouchers',     'fa-ticket-alt',     '#f97316', 'Vouchers',         'Discount codes',            '_jmNavMore'],
+                ['notifprefs',   'fa-bell',           '#6366f1', 'Notifications',    'Alert settings',            '_jmNavMore'],
+                ['reviews-page', 'fa-star',           '#f59e0b', 'My Reviews',       'Products reviewed',         '_jmNavMore'],
+                ['trust',        'fa-shield-alt',     '#10b981', 'Trust Score',      'Your marketplace reputation','_jmNavMore'],
+            ].map(([page,icon,color,label,desc,fn])=>`
+            <button onclick="window.${fn}('${page}')" style="width:100%;display:flex;align-items:center;gap:12px;padding:13px 16px;border:none;background:#fff;cursor:pointer;border-bottom:1px solid #f9fafb;text-align:left">
+                <div style="width:36px;height:36px;border-radius:10px;background:${color}20;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas ${icon}" style="color:${color};font-size:15px"></i></div>
+                <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;color:#111">${label}</div><div style="font-size:11px;color:#6b7280;margin-top:1px">${desc}</div></div>
+                <i class="fas fa-chevron-right" style="color:#d1d5db;font-size:12px"></i>
+            </button>`).join('')}
         </div>
+    </div>
 
-        <button class="jm-account-logout" onclick="window._jmLogout()">
-            <i class="fas fa-sign-out-alt"></i><span>Log Out</span>
-        </button>`;
+    <!-- Admin Section (only admin/moderator sees this) -->
+    ${isAdmin ? `
+    <div style="padding:12px 16px 0">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:8px">⚙️ Admin Panel</div>
+        <div style="background:linear-gradient(135deg,#111,#1f2937);border-radius:14px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.2)">
+            <button onclick="window._jmNavMore('admin-dashboard')" style="width:100%;display:flex;align-items:center;gap:12px;padding:16px;border:none;background:transparent;cursor:pointer;text-align:left">
+                <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">⚙️</div>
+                <div style="flex:1;min-width:0"><div style="font-weight:800;font-size:14px;color:#fff">Admin Command Center</div><div style="font-size:12px;color:rgba(255,255,255,.6);margin-top:2px">Manage the entire marketplace</div></div>
+                <i class="fas fa-chevron-right" style="color:rgba(255,255,255,.3)"></i>
+            </button>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid rgba(255,255,255,.08)">
+                ${[['admin-products','fa-box','Products'],['admin-sellers','fa-store','Sellers'],['admin-orders','fa-receipt','Orders'],['admin-analytics','fa-chart-pie','Analytics']].map(([p,ic,lb])=>`
+                <button onclick="window._jmNavMore('${p}')" style="background:transparent;border:none;padding:12px 6px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;border-right:1px solid rgba(255,255,255,.08)">
+                    <i class="fas ${ic}" style="color:#9ca3af;font-size:16px"></i>
+                    <span style="color:#d1d5db;font-size:9px;font-weight:600">${lb}</span>
+                </button>`).join('')}
+            </div>
+        </div>
+    </div>` : ''}
+
+    <!-- Logout -->
+    <div style="padding:16px 16px 24px">
+        <button onclick="window._jmLogout()" style="width:100%;background:#fee2e2;color:#ef4444;border:none;border-radius:12px;padding:14px;font-weight:800;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+            <i class="fas fa-sign-out-alt"></i> Log Out
+        </button>
+    </div>`;
 }
 
 // ── ORDERS PAGE ────────────────────────────────────────────────────────────
