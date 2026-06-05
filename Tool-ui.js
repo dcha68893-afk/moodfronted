@@ -6687,193 +6687,207 @@ window._jmFollowSeller = function(sellerId, btn) {
 };
 
 // ── NOTIFICATION PREFS PAGE ────────────────────────────────────────────────
+// ── NOTIFICATION PREFS PAGE ─────────────────────────────────────────────────
 function _renderNotifPrefs() {
-    const container = document.getElementById('jmPageNotifPrefs');
+    let container = document.getElementById('jmPageNotifPrefs');
     if (!container) return;
-    const existing = container.querySelector('.jm-page-title');
-    if (existing) return; // already has static content
-    container.innerHTML = `<div class="jm-page-title">Notifications</div>
-    <div style="padding:14px 16px">
-        ${[
-            ['Order updates','Get notified when your order status changes','order_updates',true],
-            ['Delivery alerts','Track your deliveries in real-time','delivery_alerts',true],
-            ['Flash sale alerts','Be first to know about flash sales','flash_sales',true],
-            ['Price drop alerts','When wishlisted items drop in price','price_drops',true],
-            ['Promotions & offers','Coupons and special deals','promotions',false],
-            ['New products','When followed sellers add products','new_products',false],
-        ].map(([title,desc,key,def])=>`
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #f3f4f6">
-            <div><div style="font-size:14px;font-weight:700;color:#111">${title}</div><div style="font-size:12px;color:#6b7280;margin-top:2px">${desc}</div></div>
-            <label style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;margin-left:12px">
-                <input type="checkbox" ${def?'checked':''} style="opacity:0;width:0;height:0" onchange="this.parentElement.querySelector('span').style.transform=this.checked?'translateX(20px)':'translateX(2px)';this.parentElement.querySelector('div').style.background=this.checked?'#f57224':'#d1d5db'">
-                <div style="position:absolute;inset:0;border-radius:24px;background:${def?'#f57224':'#d1d5db'};transition:.3s"></div>
-                <span style="position:absolute;top:2px;left:${def?'':'0'};width:20px;height:20px;border-radius:50%;background:#fff;transition:.3s;transform:${def?'translateX(20px)':'translateX(2px)'}"></span>
-            </label>
-        </div>`).join('')}
+    if (container.querySelector('.notif-built')) return; // already built (static)
+    container.innerHTML = `<div class="jm-page-title">🔔 Notifications</div>
+    <div class="notif-built" style="padding:0 16px">
+    ${[
+        ['Order updates','Notify when your order status changes','order_updates',true],
+        ['Delivery alerts','Real-time delivery tracking','delivery_alerts',true],
+        ['Flash sale alerts','Be first to know about flash sales','flash_sales',true],
+        ['Price drops','When wishlisted items drop in price','price_drops',true],
+        ['Promotions','Coupons and special deals','promotions',false],
+        ['New products','When followed sellers list products','new_products',false],
+    ].map(([title,desc,key,def])=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 0;border-bottom:1px solid #f3f4f6">
+        <div style="flex:1;padding-right:12px"><div style="font-size:14px;font-weight:700;color:#111">${title}</div><div style="font-size:12px;color:#6b7280;margin-top:2px">${desc}</div></div>
+        <label style="position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0">
+            <input type="checkbox" ${def?'checked':''} style="opacity:0;width:0;height:0" onchange="(s=>{const t=s.parentElement;t.querySelector('div').style.background=s.checked?'#f57224':'#d1d5db';t.querySelector('span').style.transform=s.checked?'translateX(20px)':'translateX(2px)'})(this)">
+            <div style="position:absolute;inset:0;border-radius:26px;background:${def?'#f57224':'#d1d5db'};transition:.3s"></div>
+            <span style="position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:${def?'translateX(20px)':'translateX(2px)'}"></span>
+        </label>
+    </div>`).join('')}
     </div>`;
 }
 
-// ── ANALYTICS PAGE ─────────────────────────────────────────────────────────
+// ── ANALYTICS PAGE ──────────────────────────────────────────────────────────
 function _renderAnalyticsPage() {
     let container = document.getElementById('jmPageAnalytics');
     if (!container) {
         container = document.createElement('div');
-        container.id = 'jmPageAnalytics';
-        container.className = 'jm-page';
+        container.id = 'jmPageAnalytics'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
-    const ecom = window.EcomMarketplace;
-    const listings = ecom ? ecom.ProductEngine.getAllProducts() : (window.currentListings||[]);
-    const myListings = listings.filter(l => {
-        const uid = window.currentUser?.id || window.__kynUser?.id;
-        return l.seller_id === uid || l.sellerId === uid || l.userId === uid;
-    });
-    container.innerHTML = `<div class="jm-page-title">My Analytics</div>
-    <div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        ${[
-            ['📦 My Listings',myListings.length,'Total products'],
-            ['👁️ Total Views',myListings.reduce((s,l)=>s+(l.views||0),0).toLocaleString(),'Across all listings'],
-            ['⭐ Avg Rating',(myListings.reduce((s,l)=>s+(parseFloat(l.rating)||0),0)/(myListings.length||1)).toFixed(1),'Customer rating'],
-            ['🛍️ Items Sold',myListings.reduce((s,l)=>s+(l.sold_count||0),0),'Total units sold'],
-        ].map(([label,val,sub])=>`<div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af;margin-bottom:4px">${label}</div>
-            <div style="font-size:22px;font-weight:900;color:#111">${val}</div>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px">${sub}</div>
+    const listings = (window.EcomMarketplace?.ProductEngine?.getAllProducts?.() || window.currentListings || []);
+    const uid = window.currentUser?.id || window.__kynUser?.id;
+    const mine = listings.filter(l => l.seller_id===uid||l.sellerId===uid||l.userId===uid);
+    const views = mine.reduce((s,l)=>s+(l.views||0),0);
+    const sold  = mine.reduce((s,l)=>s+(l.sold_count||0),0);
+    const rating = mine.length ? (mine.reduce((s,l)=>s+(parseFloat(l.rating)||0),0)/mine.length).toFixed(1) : '—';
+
+    container.innerHTML = `<div class="jm-page-title">📊 My Analytics</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px">
+        ${[['📦 Listings',mine.length,'Products you sell'],['👁️ Views',views.toLocaleString(),'Total product views'],['⭐ Avg Rating',rating,'Customer rating'],['🛍️ Sold',sold,'Units sold total']].map(([l,v,s])=>`
+        <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;margin-bottom:4px">${l}</div>
+            <div style="font-size:22px;font-weight:900;color:#111">${v}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px">${s}</div>
         </div>`).join('')}
     </div>
-    <div style="background:#fff;margin:0 16px 12px;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-        <div style="font-weight:800;font-size:14px;margin-bottom:12px">Top Performing Products</div>
-        ${myListings.length ? myListings.slice(0,5).sort((a,b)=>(b.views||0)-(a.views||0)).map(l=>`
+    ${mine.length ? `
+    <div style="background:#fff;margin:0 16px;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="font-weight:800;font-size:14px;margin-bottom:12px">Top Products by Views</div>
+        ${[...mine].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,5).map((l,i)=>`
         <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f9fafb">
-            <div style="font-size:18px">${_img(l)?`<img src="${_esc(_img(l))}" style="width:36px;height:36px;border-radius:6px;object-fit:cover">`:''}</div>
-            <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(l.title||'')}</div>
-                <div style="font-size:11px;color:#9ca3af">${l.views||0} views · ⭐ ${parseFloat(l.rating||0).toFixed(1)}</div>
-            </div>
+            <div style="width:24px;height:24px;border-radius:50%;background:${i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'#f3f4f6'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0">${i+1}</div>
+            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(l.title||'')}</div><div style="font-size:11px;color:#9ca3af">${l.views||0} views · ${l.sold_count||0} sold</div></div>
             <div style="font-size:13px;font-weight:800;color:#f57224">${_fmt(l.price)}</div>
-        </div>`).join('') : '<div style="text-align:center;padding:16px;color:#9ca3af;font-size:13px">No listings yet</div>'}
-    </div>
-    <div style="padding:0 16px 20px">
-        <button style="width:100%;background:#f57224;color:#fff;border:none;border-radius:12px;padding:13px;font-weight:800;font-size:14px;cursor:pointer" onclick="window._jmNavMore('seller-dashboard')">Full Seller Dashboard →</button>
+        </div>`).join('')}
+    </div>` : `
+    <div style="background:#fff;margin:0 16px;border-radius:14px;padding:40px 20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+        <div style="font-size:48px;margin-bottom:12px">📊</div>
+        <div style="font-size:16px;font-weight:800;color:#111;margin-bottom:8px">No seller data yet</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:16px">Create your first product listing to start tracking analytics.</div>
+        <button onclick="window._jmNavMore('seller-dashboard')" style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-size:14px;font-weight:800;cursor:pointer">Go to Seller Hub →</button>
+    </div>`}
+    <div style="padding:12px 16px 0">
+        <button onclick="window._jmNavMore('seller-analytics')" style="width:100%;background:#111;color:#fff;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer">Full Seller Analytics →</button>
     </div>`;
 }
 
-// ── NOTES PAGE ─────────────────────────────────────────────────────────────
+// ── NOTES PAGE ──────────────────────────────────────────────────────────────
 function _renderNotesPage() {
     let container = document.getElementById('jmPageNotes');
     if (!container) {
         container = document.createElement('div');
-        container.id = 'jmPageNotes';
-        container.className = 'jm-page';
+        container.id = 'jmPageNotes'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
     const notes = _ls.load('jm_notes_v1', []);
-    container.innerHTML = `<div class="jm-page-title" style="display:flex;align-items:center;justify-content:space-between">
-        <span>📝 My Notes</span>
-        <button onclick="window._jmAddNote()" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer">+ New</button>
+
+    container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;background:#fff;border-bottom:1px solid #f3f4f6;flex-shrink:0">
+        <div style="font-size:16px;font-weight:800;color:#111">📝 My Notes</div>
+        <button onclick="window._jmAddNote()" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:700;cursor:pointer">+ New Note</button>
     </div>
-    <div id="jmNotesList" style="padding:10px 16px">
+    <div id="jmNotesList" style="flex:1;overflow-y:auto;padding:12px 16px">
         ${notes.length ? notes.map((n,i)=>`
         <div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-                <div style="font-size:13px;color:#111;line-height:1.5;flex:1">${_esc(n.text||'')}</div>
-                <button onclick="window._jmDeleteNote(${i})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;flex-shrink:0">🗑️</button>
+            <div style="display:flex;align-items:flex-start;gap:8px">
+                <div style="flex:1;font-size:13px;color:#111;line-height:1.6">${_esc(n.text||'')}</div>
+                <button onclick="window._jmDeleteNote(${i})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:16px;flex-shrink:0;padding:0">🗑️</button>
             </div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:6px">${n.date||''}</div>
-        </div>`).join('') : '<div style="text-align:center;padding:32px;color:#9ca3af"><div style="font-size:40px;margin-bottom:10px">📝</div><div>No notes yet. Tap + New to add one!</div></div>'}
+            <div style="font-size:11px;color:#9ca3af;margin-top:8px">${n.date||''}</div>
+        </div>`).join('') : `
+        <div style="padding:50px 20px;text-align:center">
+            <div style="font-size:52px;margin-bottom:14px">📝</div>
+            <div style="font-size:16px;font-weight:800;color:#111;margin-bottom:8px">No notes yet</div>
+            <div style="font-size:13px;color:#6b7280;margin-bottom:20px">Tap the button above to add your first note — shopping reminders, seller ideas, anything!</div>
+            <button onclick="window._jmAddNote()" style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-size:14px;font-weight:800;cursor:pointer">+ Add First Note</button>
+        </div>`}
     </div>`;
 }
+
 window._jmAddNote = function() {
-    const text = prompt('Enter your note:');
+    const text = prompt('What would you like to note?');
     if (!text?.trim()) return;
     const notes = _ls.load('jm_notes_v1', []);
-    notes.unshift({ text: text.trim(), date: new Date().toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric'}) });
+    notes.unshift({ text: text.trim(), date: new Date().toLocaleDateString('en-KE',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) });
     _ls.save('jm_notes_v1', notes.slice(0,100));
     _renderNotesPage();
+    _toast('Note saved!','success','📝');
 };
 window._jmDeleteNote = function(idx) {
+    if (!confirm('Delete this note?')) return;
     const notes = _ls.load('jm_notes_v1', []);
     notes.splice(idx,1);
     _ls.save('jm_notes_v1', notes);
     _renderNotesPage();
 };
 
-// ── TRUST STATS PAGE ───────────────────────────────────────────────────────
+// ── TRUST STATS PAGE ────────────────────────────────────────────────────────
 function _renderTrustPage() {
     let container = document.getElementById('jmPageTrust');
     if (!container) {
         container = document.createElement('div');
-        container.id = 'jmPageTrust';
-        container.className = 'jm-page';
+        container.id = 'jmPageTrust'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
     const user = window.currentUser || window.__kynUser || {};
-    const score = user.trustScore || Math.floor(Math.random()*30)+65;
+    const score = user.trustScore || Math.min(100, 45 + (user.totalOrders||0)*2 + (user.reviewCount||0)*3);
     const color = score>=80?'#22c55e':score>=60?'#f59e0b':'#ef4444';
-    container.innerHTML = `<div class="jm-page-title">🛡️ Trust Stats</div>
-    <div style="margin:16px;background:linear-gradient(135deg,#1e3a5f,#2563eb);border-radius:20px;padding:24px;color:#fff;text-align:center">
-        <div style="font-size:60px;font-weight:900;color:${color};text-shadow:0 2px 8px rgba(0,0,0,.2)">${score}</div>
-        <div style="font-size:14px;font-weight:700;margin-top:4px">Trust Score</div>
-        <div style="font-size:12px;opacity:.8;margin-top:4px">${score>=80?'Excellent — Highly Trusted':score>=60?'Good — Building Trust':'Fair — Needs Improvement'}</div>
+    const label = score>=80?'Excellent':score>=60?'Good':'Needs Improvement';
+
+    container.innerHTML = `<div class="jm-page-title">🛡️ Trust Score</div>
+    <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);margin:12px 16px;border-radius:20px;padding:24px;color:#fff;text-align:center">
+        <div style="font-size:64px;font-weight:900;color:${color}">${score}</div>
+        <div style="font-size:14px;font-weight:700;margin-top:4px">${score>=80?'Excellent — Highly Trusted':score>=60?'Good — Building Trust':'Fair — Keep Improving'}</div>
+        <div style="background:rgba(255,255,255,.15);border-radius:20px;height:10px;overflow:hidden;margin:14px 0 8px"><div style="height:100%;background:${color};width:${score}%;border-radius:20px;transition:width 1s ease"></div></div>
+        <div style="font-size:12px;opacity:.75">${score}/100 trust score</div>
     </div>
     <div style="padding:0 16px">
         ${[
-            ['✅ Orders Completed',user.totalOrders||0,'Each completed order builds trust'],
-            ['⭐ Reviews Received',user.reviewCount||0,'Positive reviews boost your score'],
-            ['📅 Member Since',user.createdAt?new Date(user.createdAt).getFullYear():'—','Account age matters'],
-            ['🛡️ KYC Verified',user.metadata?.kyc?.status==='approved'?'Yes':'No','Verified accounts get higher scores'],
-        ].map(([label,val,tip])=>`
+            ['✅ Orders Completed',user.totalOrders||0,'Each completed order boosts your score'],
+            ['⭐ Reviews Received',user.reviewCount||0,'Positive reviews increase trust'],
+            ['📅 Account Age',user.createdAt?Math.floor((Date.now()-new Date(user.createdAt))/(365.25*86400000))+' year(s)':'New','Older accounts are trusted more'],
+            ['🛡️ KYC Verified',user.metadata?.kyc?.status==='approved'?'Yes ✅':'Not yet','Verified accounts get +20 trust points'],
+        ].map(([l,v,tip])=>`
         <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-                <div>
-                    <div style="font-size:13px;font-weight:700;color:#111">${label}</div>
-                    <div style="font-size:11px;color:#6b7280;margin-top:2px">${tip}</div>
-                </div>
-                <div style="font-size:16px;font-weight:900;color:#374151">${val}</div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div><div style="font-size:13px;font-weight:700;color:#111">${l}</div><div style="font-size:11px;color:#6b7280;margin-top:2px">${tip}</div></div>
+                <div style="font-size:16px;font-weight:900;color:#374151;flex-shrink:0;margin-left:8px">${v}</div>
             </div>
         </div>`).join('')}
+        <button onclick="window._jmNavMore('seller-verification')" style="width:100%;background:#111;color:#fff;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px">Get Verified → +20 Points</button>
     </div>`;
 }
 
-// ── LEADERBOARD PAGE ───────────────────────────────────────────────────────
+// ── LEADERBOARD PAGE ────────────────────────────────────────────────────────
 function _renderLeaderboardPage() {
     let container = document.getElementById('jmPageLeaderboard');
     if (!container) {
         container = document.createElement('div');
-        container.id = 'jmPageLeaderboard';
-        container.className = 'jm-page';
+        container.id = 'jmPageLeaderboard'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
-    const ecom = window.EcomMarketplace;
-    const listings = ecom ? ecom.ProductEngine.getAllProducts() : (window.currentListings||[]);
-    // Build seller leaderboard
+    const listings = window.EcomMarketplace?.ProductEngine?.getAllProducts?.() || window.currentListings || [];
     const sellers = {};
     listings.forEach(l => {
-        const id = l.seller_id||l.sellerId||l.userId||'unknown';
-        if (!sellers[id]) sellers[id] = { id, name:l.seller?.name||'Seller '+id.slice(-4), views:0, sales:0, rating:0, count:0 };
-        sellers[id].views += (l.views||0);
-        sellers[id].sales += (l.sold_count||0);
-        sellers[id].rating += (parseFloat(l.rating)||0);
-        sellers[id].count++;
+        const id = l.seller_id||l.sellerId||'unknown';
+        const name = l.seller?.name||'Seller';
+        if (!sellers[id]) sellers[id]={id,name,views:0,sales:0,rating:0,cnt:0,avatar:(name[0]||'S').toUpperCase()};
+        sellers[id].views += l.views||0;
+        sellers[id].sales += l.sold_count||0;
+        sellers[id].rating += parseFloat(l.rating)||0;
+        sellers[id].cnt++;
     });
-    const ranked = Object.values(sellers).map(s=>({...s,avgRating:(s.rating/Math.max(s.count,1)).toFixed(1)})).sort((a,b)=>b.sales-a.sales).slice(0,10);
+    const ranked = Object.values(sellers).map(s=>({...s,avgRating:(s.cnt?s.rating/s.cnt:0).toFixed(1)})).sort((a,b)=>b.sales-a.sales).slice(0,10);
     const medals = ['🥇','🥈','🥉'];
+
     container.innerHTML = `<div class="jm-page-title">🏆 Leaderboard</div>
-    <div style="padding:0 16px 20px">
-        <div style="display:flex;gap:0;margin-bottom:12px;background:#f3f4f6;border-radius:10px;padding:3px">
-            ${['Top Sellers','Most Views','Best Rated'].map((t,i)=>`<button style="flex:1;padding:7px;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;background:${i===0?'#fff':'transparent'};color:${i===0?'#f57224':'#6b7280'}">${t}</button>`).join('')}
-        </div>
-        ${ranked.length ? ranked.map((s,i)=>`
-        <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f9fafb">
-            <div style="width:32px;text-align:center;font-size:${i<3?'20':'14'}px;font-weight:900;flex-shrink:0">${medals[i]||`#${i+1}`}</div>
-            <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#f57224,#ff4e16);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#fff;flex-shrink:0">${(s.name||'?')[0].toUpperCase()}</div>
+    ${ranked.length ? `
+    <div style="padding:0 16px">
+        ${ranked.map((s,i)=>`
+        <div style="display:flex;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid #f9fafb">
+            <div style="font-size:${i<3?'22':'14'}px;width:28px;text-align:center;flex-shrink:0">${medals[i]||`#${i+1}`}</div>
+            <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#f57224,#ff9a00);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#fff;flex-shrink:0">${s.avatar}</div>
             <div style="flex:1;min-width:0">
                 <div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(s.name)}</div>
-                <div style="font-size:11px;color:#9ca3af">${s.sales} sales · ${s.views} views · ⭐ ${s.avgRating}</div>
+                <div style="font-size:11px;color:#9ca3af">${s.sales} sales · ${s.views.toLocaleString()} views · ⭐ ${s.avgRating}</div>
             </div>
-        </div>`).join('') : '<div style="text-align:center;padding:32px;color:#9ca3af;font-size:13px">No data yet — be the first to sell!</div>'}
-    </div>`;
+        </div>`).join('')}
+    </div>` : `
+    <div style="padding:50px 20px;text-align:center">
+        <div style="font-size:52px;margin-bottom:14px">🏆</div>
+        <div style="font-size:16px;font-weight:800;color:#111;margin-bottom:8px">No sellers yet</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:20px">Be the first to list products and top the leaderboard!</div>
+        <button onclick="window._jmNavMore('seller-dashboard')" style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-size:14px;font-weight:800;cursor:pointer">Start Selling →</button>
+    </div>`}`;
 }
+
 
 // ── ADDRESSES PAGE ─────────────────────────────────────────────────────────
 function _renderAddresses() {

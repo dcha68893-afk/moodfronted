@@ -5622,7 +5622,23 @@
                         _fwdIncomingLogged.add(callKey);
                         console.log('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
                     }
+                    // CRITICAL FIX: Forward to calls iframe so receiver sees incoming screen
+                    const callsFrame = document.getElementById('callsIframe');
+                    if (callsFrame && callsFrame.contentWindow) {
+                        callsFrame.contentWindow.postMessage(
+                            { type: 'CALL_INCOMING', payload, source: 'ws-bridge' }, '*'
+                        );
+                    }
+                    // Also postMessage to ALL iframes (calls might not be active iframe)
+                    document.querySelectorAll('iframe').forEach(function(f) {
+                        try { f.contentWindow.postMessage({ type: 'CALL_INCOMING', payload, source: 'ws-bridge' }, '*'); } catch(_) {}
+                    });
+                    // Show banner on parent shell
                     if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
+                    // Navigate to calls page so user sees the incoming screen
+                    if (typeof navigateToPage === 'function') {
+                        navigateToPage('calls');
+                    }
                 }
                 function _fwdAccepted(callData) {
                     hideGlobalBanner();
@@ -5801,6 +5817,19 @@
                         }
                     }
                     _fwdNewMessageSourceEvent = null;
+
+                    // CRITICAL FIX: If sender is NOT current user, always deliver immediately
+                    // This is User B receiving User A's message — never suppress it
+                    const _incomingSenderId = payload && (payload.senderId || (payload.sender && payload.sender.id));
+                    if (_incomingSenderId && cachedUserId && String(_incomingSenderId) !== String(cachedUserId)) {
+                        const _directEnriched = { ...payload };
+                        if (!_directEnriched.chatId && _directEnriched.conversationId) _directEnriched.chatId = _directEnriched.conversationId;
+                        const _msgIframe2 = document.getElementById('messagesIframe');
+                        if (_msgIframe2 && _msgIframe2.contentWindow) {
+                            _msgIframe2.contentWindow.postMessage({ type: 'message:new', payload: _directEnriched, source: 'ws-bridge-direct' }, '*');
+                        }
+                        return;
+                    }
 
                     // FIXED: Enrich payload — ensure chatId is always present.
                     const _enriched = { ...payload };
