@@ -24,12 +24,15 @@ const CORE_STATIC_ASSETS = [
   //      the install loop normalised '/' → '/index.html' anyway.
   '/index.html',
   '/manifest.json',
-  '/moodchat-192x192.png',
-  '/moodchat-512x512.png',
-  '/api.js',
+  // FIX F-02: Corrected icon paths — old paths did not exist and caused SW install failure
+  '/icons/moodchat-192.png',
+  '/icons/moodchat-512.png',
+  // FIX F-02: Removed /api.js (doesn't exist), /Tool.js (is Tool-ui.js), /group.js (is group-ui.js)
   '/Tool.css',
-  '/Tool.js',
-  '/group.js',
+  '/Tool-ui.js',
+  '/Tool-core.js',
+  '/group-ui.js',
+  '/group-core.js',
 
   // Pages
   '/friend.html',
@@ -77,13 +80,8 @@ const CORE_STATIC_ASSETS = [
   '/fonts/fa-brands-400.woff2',
   '/fonts/fa-brands-400.ttf',
 
-  // Offline icon fallback
-  '/css/offline-icon-fallback.css',
-  '/js/vendor/offline-icon-bootstrap.js',
-
-  // App icons
-  '/icons/moodchat-192.png',
-  '/icons/moodchat-512.png',
+  // FIX F-02: Removed /css/offline-icon-fallback.css and /js/vendor/offline-icon-bootstrap.js
+  // — these files do not exist and caused SW install to fail in strict Chrome environments
 
   // Core CSS
   '/friend.css',
@@ -163,9 +161,8 @@ const STATIC_ASSET_PATTERNS = [
   /\/static\//i,
   /\/webfonts\//i,
   /\/css\/vendor\//i,
-  /\/js\/vendor\//i,
-  /offline-icon-fallback/i,
-  /offline-icon-bootstrap/i
+  /\/js\/vendor\//i
+  // FIX F-02: Removed /offline-icon-fallback/ and /offline-icon-bootstrap/ — files don't exist
 ];
 
 // ---------------------------------------------------------------------------
@@ -203,8 +200,8 @@ function isLocalRequest(url) {
 
 function isFontOrIcon(url) {
   return (
-    /\/webfonts\/|\/fonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url) ||
-    /offline-icon-fallback|offline-icon-bootstrap/i.test(url)
+    /\/webfonts\/|\/fonts\/|font-awesome|\.woff2?$|\.ttf$|\.eot$/i.test(url)
+    // FIX F-02: Removed offline-icon-fallback/offline-icon-bootstrap — files don't exist
   );
 }
 
