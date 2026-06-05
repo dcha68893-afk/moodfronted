@@ -3,352 +3,397 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Games Hub</title>
+<title>Games</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:none;}
-html,body{width:100%;height:100%;overflow:hidden;background:#0a0806;font-family:'Trebuchet MS',Arial,sans-serif;}
-/* ── HUB ── */
-#hub{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 30%,#1a0f2e 0%,#060410 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;z-index:1000;}
-#hub h1{font-size:28px;font-weight:900;color:#f5c518;letter-spacing:3px;text-shadow:0 0 20px rgba(245,197,24,0.5);}
-.hub-games{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;padding:0 16px;}
-.hub-card{background:rgba(255,255,255,0.06);border:2px solid rgba(255,255,255,0.1);border-radius:20px;padding:24px 20px;text-align:center;cursor:pointer;transition:all 0.2s;width:160px;}
-.hub-card:hover,.hub-card:active{border-color:rgba(245,197,24,0.6);background:rgba(245,197,24,0.08);transform:scale(1.04);}
-.hub-card .hc-icon{font-size:48px;margin-bottom:10px;}
-.hub-card .hc-title{font-size:14px;font-weight:800;color:#fff;letter-spacing:1px;}
-.hub-card .hc-sub{font-size:11px;color:#888;margin-top:4px;}
-/* ── SCREENS ── */
-.screen{position:fixed;inset:0;display:none;flex-direction:column;}
-.screen.active{display:flex;}
-.back-btn{position:absolute;top:10px;left:10px;z-index:99;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.2);border-radius:50%;width:38px;height:38px;color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;overflow:hidden;background:#0a0806;font-family:'Trebuchet MS',sans-serif;}
+
+/* ── HUB ──────────────────────────────────────────────────────────────────── */
+#hub{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;background:radial-gradient(ellipse at 30% 20%,#1a0f04 0%,#050402 100%);padding:20px;}
+#hub h1{font-size:26px;font-weight:900;color:#f5c518;letter-spacing:3px;text-shadow:0 0 20px rgba(245,197,24,0.5);margin-bottom:6px;}
+#hub p{color:#888;font-size:13px;margin-bottom:28px;}
+.hub-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;width:100%;max-width:380px;}
+.hub-card{background:linear-gradient(145deg,#1a1005,#0d0a03);border:2px solid rgba(245,197,24,0.2);border-radius:18px;padding:20px 10px;text-align:center;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;}
+.hub-card:hover,.hub-card:active{border-color:#f5c518;transform:translateY(-3px);box-shadow:0 8px 30px rgba(245,197,24,0.25);}
+.hub-card .icon{font-size:38px;display:block;margin-bottom:8px;}
+.hub-card .name{font-size:12px;font-weight:800;color:#f5c518;letter-spacing:1px;text-transform:uppercase;}
+.hub-card .sub{font-size:10px;color:#666;margin-top:3px;}
+.hub-card .badge{position:absolute;top:8px;right:8px;background:#f5c518;color:#111;font-size:9px;font-weight:900;border-radius:4px;padding:2px 5px;}
+
+/* ── GAME WRAPPER ──────────────────────────────────────────────────────────── */
+#gameWrap{display:none;position:absolute;inset:0;flex-direction:column;background:#0a0806;}
+#gameWrap.show{display:flex;}
+#backBtn{display:flex;align-items:center;gap:6px;padding:10px 14px;background:rgba(245,197,24,0.08);border-bottom:1px solid rgba(245,197,24,0.1);color:#f5c518;font-size:13px;font-weight:700;cursor:pointer;user-select:none;letter-spacing:1px;}
+#backBtn:hover{background:rgba(245,197,24,0.14);}
+#gameFrame{flex:1;overflow:hidden;}
+
+/* ── POOL ─────────────────────────────────────────────────────────────────── */
+#poolGame{display:none;width:100%;height:100%;flex-direction:column;}
+#poolGame.show{display:flex;}
+#poolHud{display:flex;align-items:center;gap:8px;padding:6px 10px;width:100%;background:rgba(0,0,0,0.3);}
+.hud-badge{background:linear-gradient(135deg,#f5c518,#e67e22);border-radius:8px;padding:2px 10px;font-weight:900;font-size:13px;color:#111;}
+.hud-score{background:rgba(0,0,0,0.5);border:1px solid rgba(245,197,24,0.3);border-radius:8px;padding:2px 10px;color:#f5c518;font-weight:800;font-size:14px;}
+.hud-lives{display:flex;gap:1px;align-items:center;}
+.spacer{flex:1;}
+#poolMain{position:relative;flex:1;display:flex;}
+#poolCanvas{display:block;touch-action:none;cursor:crosshair;}
+#powerSlider{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:30px;height:140px;display:flex;flex-direction:column;align-items:center;gap:4px;}
+#powerSliderTrack{width:8px;height:120px;background:rgba(255,255,255,0.08);border-radius:4px;position:relative;cursor:pointer;border:1px solid rgba(255,255,255,0.15);}
+#powerFill{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,#3498db,#2ecc71);border-radius:4px;transition:height .05s;height:0%;}
+#powerThumb{position:absolute;left:50%;transform:translateX(-50%);width:16px;height:16px;background:#f5c518;border-radius:50%;border:2px solid #fff;cursor:grab;bottom:0;transition:bottom .05s;}
+#sliderLabel{font-size:9px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;}
+#poolOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(4px);}
+#poolOverlay.show{display:flex;}
+#poolOverlayBox{background:linear-gradient(135deg,#1a2a0a,#0a1205);border:2px solid #f5c518;border-radius:20px;padding:24px 40px;text-align:center;}
+#poolOverlayBox .oi{font-size:52px;margin-bottom:4px;}
+#poolOverlayBox .ot{font-size:26px;font-weight:900;color:#f5c518;margin-bottom:4px;}
+#poolOverlayBox .os{font-size:14px;color:#aaa;margin-bottom:16px;}
+#poolOverlayBox button{background:linear-gradient(135deg,#f5c518,#e67e22);border:none;border-radius:40px;padding:10px 28px;color:#111;font-weight:800;font-size:14px;cursor:pointer;}
+#poolMsg{position:absolute;top:35%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.88);border:2px solid rgba(245,197,24,0.5);border-radius:12px;padding:10px 24px;color:#f5c518;font-size:18px;font-weight:900;pointer-events:none;opacity:0;transition:opacity .3s;white-space:nowrap;}
+#poolMsg.show{opacity:1;}
+#poolInfo{padding:4px 10px;display:flex;align-items:center;gap:10px;background:rgba(0,0,0,0.2);}
+.pool-hint{font-size:10px;color:#555;font-weight:600;text-transform:uppercase;letter-spacing:1px;}
+#powerPct{font-size:11px;color:#f5c518;font-weight:800;min-width:36px;}
+#targetInfo{font-size:11px;color:#888;font-weight:700;}
+
+/* ── WATER SORT ──────────────────────────────────────────────────────────────*/
+#waterGame{display:none;width:100%;height:100%;flex-direction:column;overflow:hidden;}
+#waterGame.show{display:flex;}
+#waterHud{display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(0,0,0,0.3);}
+#waterHud .hud-badge{background:linear-gradient(135deg,#2980b9,#3498db);}
+#waterHud .hud-moves{font-size:13px;color:#3498db;font-weight:800;}
+#waterContent{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px;overflow:hidden;}
+#waterInstruction{font-size:12px;color:#888;margin-bottom:10px;min-height:18px;text-align:center;}
+#waterBottles{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;width:100%;}
+.w-bottle{display:flex;flex-direction:column-reverse;width:38px;height:110px;border:2.5px solid rgba(255,255,255,0.35);border-radius:0 0 12px 12px;border-top:none;cursor:pointer;overflow:hidden;background:rgba(0,0,0,0.3);transition:transform .15s,border-color .15s;position:relative;}
+.w-bottle.selected{border-color:#f5c518;transform:translateY(-8px);box-shadow:0 6px 20px rgba(245,197,24,0.4);}
+.w-bottle.completed{border-color:#2ecc71;opacity:.8;}
+.w-bottle-cap{width:100%;height:6px;border-radius:3px 3px 0 0;position:absolute;top:-8px;left:0;display:none;}
+.w-layer{width:100%;transition:height .25s;flex-shrink:0;}
+#waterControls{display:flex;gap:10px;margin-top:10px;}
+.water-btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);border-radius:8px;padding:7px 14px;color:#ccc;font-size:12px;font-weight:700;cursor:pointer;}
+.water-btn:hover{background:rgba(255,255,255,0.15);}
+#waterOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(4px);}
+#waterOverlay.show{display:flex;}
+#waterOverlayBox{background:linear-gradient(135deg,#0a1a2a,#051020);border:2px solid #3498db;border-radius:20px;padding:24px 40px;text-align:center;}
+#waterOverlayBox .oi{font-size:52px;margin-bottom:4px;}
+#waterOverlayBox .ot{font-size:24px;font-weight:900;color:#3498db;margin-bottom:4px;}
+#waterOverlayBox .os{font-size:13px;color:#aaa;margin-bottom:16px;}
+#waterOverlayBox button{background:linear-gradient(135deg,#2980b9,#3498db);border:none;border-radius:40px;padding:10px 28px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;}
+
+/* ── BLOCK GEM ───────────────────────────────────────────────────────────────*/
+#gemGame{display:none;width:100%;height:100%;flex-direction:column;}
+#gemGame.show{display:flex;}
+#gemHud{display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(0,0,0,0.3);}
+#gemHud .hud-badge{background:linear-gradient(135deg,#8e44ad,#9b59b6);}
+#gemHud .hud-score{border-color:rgba(155,89,182,0.4);color:#9b59b6;}
+#gemHud .combo-badge{background:rgba(155,89,182,0.2);border:1px solid rgba(155,89,182,0.4);border-radius:8px;padding:2px 10px;color:#9b59b6;font-size:12px;font-weight:800;}
+#gemContent{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+#gemBoard{display:grid;grid-gap:3px;touch-action:none;}
+.gem-cell{border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;transition:transform .1s;user-select:none;border:2px solid transparent;position:relative;}
+.gem-cell.selected{border-color:#fff;transform:scale(1.1);z-index:2;box-shadow:0 0 12px rgba(255,255,255,0.4);}
+.gem-cell.hint{animation:gemHint .5s ease-in-out infinite alternate;}
+.gem-cell.destroying{animation:gemPop .25s ease-out forwards;}
+@keyframes gemHint{from{opacity:1}to{opacity:.4}}
+@keyframes gemPop{0%{transform:scale(1);opacity:1}50%{transform:scale(1.3)}100%{transform:scale(0);opacity:0}}
+#gemOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(4px);}
+#gemOverlay.show{display:flex;}
+#gemOverlayBox{background:linear-gradient(135deg,#1a0a2a,#0d0520);border:2px solid #9b59b6;border-radius:20px;padding:24px 40px;text-align:center;}
+#gemOverlayBox .oi{font-size:52px;margin-bottom:4px;}
+#gemOverlayBox .ot{font-size:24px;font-weight:900;color:#9b59b6;margin-bottom:4px;}
+#gemOverlayBox .os{font-size:13px;color:#aaa;margin-bottom:16px;}
+#gemOverlayBox button{background:linear-gradient(135deg,#8e44ad,#9b59b6);border:none;border-radius:40px;padding:10px 28px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;}
 </style>
 </head>
 <body>
 
-<!-- ═══ HUB ═══ -->
+<!-- GAME HUB -->
 <div id="hub">
-  <h1>🎮 GAMES</h1>
-  <div class="hub-games">
-    <div class="hub-card" onclick="launch('pool')">
-      <div class="hc-icon">🎱</div>
-      <div class="hc-title">8-BALL POOL</div>
-      <div class="hc-sub">Pocket all balls</div>
+  <h1>🎮 ARCADE</h1>
+  <p>Choose a game to play</p>
+  <div class="hub-grid">
+    <div class="hub-card" onclick="openGame('pool')">
+      <span class="icon">🎱</span>
+      <div class="name">Pool</div>
+      <div class="sub">Billiards</div>
+      <div class="badge">NEW</div>
     </div>
-    <div class="hub-card" onclick="launch('block')">
-      <div class="hc-icon">💎</div>
-      <div class="hc-title">BLOCK PUZZLE</div>
-      <div class="hc-sub">Gem blast puzzle</div>
+    <div class="hub-card" onclick="openGame('water')">
+      <span class="icon">🧪</span>
+      <div class="name">Water Sort</div>
+      <div class="sub">Puzzle</div>
     </div>
-    <div class="hub-card" onclick="launch('water')">
-      <div class="hc-icon">🧪</div>
-      <div class="hc-title">WATER SORT</div>
-      <div class="hc-sub">Sort the colors</div>
+    <div class="hub-card" onclick="openGame('gem')">
+      <span class="icon">💎</span>
+      <div class="name">Gem Blast</div>
+      <div class="sub">Block Puzzle</div>
     </div>
   </div>
 </div>
 
-<!-- ═══ POOL SCREEN ═══ -->
-<div id="poolScreen" class="screen">
-<button class="back-btn" onclick="goHub()">←</button>
-<canvas id="poolCanvas"></canvas>
-<!-- Power slider -->
-<div id="powerSliderWrap" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:4px;z-index:10;">
-  <div style="font-size:9px;color:#f5c518;font-weight:800;letter-spacing:1px;">PWR</div>
-  <div id="sliderTrack" style="width:28px;height:160px;background:rgba(0,0,0,0.6);border:2px solid rgba(255,255,255,0.2);border-radius:14px;position:relative;cursor:pointer;">
-    <div id="sliderFill" style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(0deg,#e74c3c,#f5c518,#2ecc71);border-radius:12px;height:50%;transition:height 0.05s;"></div>
-    <div id="sliderThumb" style="position:absolute;left:50%;transform:translateX(-50%);bottom:50%;width:24px;height:24px;background:white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.5);transition:bottom 0.05s;"></div>
-  </div>
-  <div id="sliderPct" style="font-size:10px;color:#fff;font-weight:700;">50%</div>
-</div>
-<!-- Spin control -->
-<div id="spinControl" style="position:absolute;left:10px;bottom:80px;z-index:10;">
-  <div style="font-size:9px;color:#f5c518;font-weight:800;text-align:center;letter-spacing:1px;margin-bottom:3px;">SPIN</div>
-  <canvas id="spinCanvas" width="70" height="70" style="border-radius:50%;cursor:pointer;display:block;"></canvas>
-</div>
-<!-- HUD -->
-<div id="poolHud" style="position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:8px 50px 8px 50px;background:rgba(0,0,0,0.75);z-index:10;">
-  <div style="background:linear-gradient(135deg,#f5c518,#e67e22);border-radius:8px;padding:2px 10px;font-weight:900;font-size:12px;color:#111;" id="p_stage">LV.01</div>
-  <div style="display:flex;gap:2px;" id="p_lives"></div>
-  <div style="flex:1;"></div>
-  <div style="background:rgba(0,0,0,0.5);border:1px solid rgba(245,197,24,0.4);border-radius:8px;padding:2px 10px;color:#f5c518;font-weight:800;font-size:13px;" id="p_score">⭐ 0</div>
-  <div style="background:rgba(255,255,255,0.07);border-radius:8px;padding:2px 10px;color:#aaa;font-size:11px;font-weight:600;" id="p_target">0/3 🎯</div>
-  <div style="font-size:10px;color:#666;" id="p_shots">🎯 3 shots</div>
-</div>
-<div id="poolMsg" style="display:none;position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.88);border:2px solid rgba(245,197,24,0.6);border-radius:14px;padding:14px 30px;color:#f5c518;font-size:18px;font-weight:900;letter-spacing:2px;z-index:50;pointer-events:none;white-space:nowrap;"></div>
-<div id="poolOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.75);align-items:center;justify-content:center;z-index:60;backdrop-filter:blur(4px);">
-  <div style="background:linear-gradient(135deg,#1a2a0a,#0a1205);border:2px solid #f5c518;border-radius:22px;padding:28px 48px;text-align:center;box-shadow:0 0 50px rgba(245,197,24,0.35);">
-    <div id="po_icon" style="font-size:56px;margin-bottom:8px;">🎱</div>
-    <div id="po_title" style="font-size:28px;font-weight:900;color:#f5c518;letter-spacing:2px;margin-bottom:6px;"></div>
-    <div id="po_sub" style="font-size:15px;color:#aaa;margin-bottom:20px;"></div>
-    <button id="po_btn" style="background:linear-gradient(135deg,#f5c518,#e67e22);border:none;border-radius:50px;padding:11px 34px;color:#111;font-weight:800;font-size:14px;cursor:pointer;letter-spacing:1px;"></button>
-  </div>
-</div>
-</div>
+<!-- GAME WRAPPER (back button + game area) -->
+<div id="gameWrap">
+  <div id="backBtn" onclick="goBack()">← Back to Games</div>
+  <div id="gameFrame">
+    <!-- POOL GAME -->
+    <div id="poolGame">
+      <div id="poolHud">
+        <div class="hud-badge" id="poolStage">LV.01</div>
+        <div class="hud-lives" id="poolLives"></div>
+        <div class="spacer"></div>
+        <div class="hud-score" id="poolScore">⭐ 0</div>
+        <div id="targetInfo">0/3 🎯</div>
+      </div>
+      <div id="poolInfo">
+        <span class="pool-hint" id="patternHint">TRIANGLE</span>
+        <div class="spacer"></div>
+        <span class="pool-hint">PWR</span>
+        <span id="powerPct">0%</span>
+      </div>
+      <div id="poolMain">
+        <canvas id="poolCanvas"></canvas>
+        <div id="powerSlider">
+          <span id="sliderLabel">POWER</span>
+          <div id="powerSliderTrack">
+            <div id="powerFill"></div>
+            <div id="powerThumb"></div>
+          </div>
+        </div>
+        <div id="poolOverlay">
+          <div id="poolOverlayBox">
+            <div class="oi" id="poolOIcon">🎱</div>
+            <div class="ot" id="poolOTitle">STAGE CLEAR!</div>
+            <div class="os" id="poolOSub">Tap to continue</div>
+            <button id="poolOBtn">NEXT STAGE →</button>
+          </div>
+        </div>
+        <div id="poolMsg"></div>
+      </div>
+    </div>
 
-<!-- ═══ BLOCK PUZZLE SCREEN ═══ -->
-<div id="blockScreen" class="screen" style="background:radial-gradient(ellipse at 50% 0%,#1a1040 0%,#080618 100%);">
-<button class="back-btn" onclick="goHub()">←</button>
-<div id="blockHud" style="display:flex;align-items:center;gap:8px;padding:8px 50px 6px 50px;background:rgba(0,0,0,0.5);">
-  <div style="background:linear-gradient(135deg,#4a9eff,#a855f7);border-radius:8px;padding:2px 10px;font-weight:900;font-size:12px;color:#fff;" id="b_stage">LV.01</div>
-  <div style="flex:1;background:rgba(255,255,255,0.08);border-radius:6px;height:8px;overflow:hidden;"><div id="b_xpBar" style="height:100%;background:linear-gradient(90deg,#4a9eff,#a855f7);width:0%;transition:width 0.5s;"></div></div>
-  <div style="background:rgba(0,0,0,0.5);border:1px solid rgba(168,85,247,0.4);border-radius:8px;padding:2px 10px;color:#a855f7;font-weight:800;font-size:13px;" id="b_score">💎 0</div>
-  <div style="font-size:12px;color:#888;" id="b_moves">🎯 80</div>
-</div>
-<canvas id="blockCanvas" style="flex:1;display:block;width:100%;"></canvas>
-<div id="blockPieces" style="background:rgba(0,0,0,0.5);padding:8px;display:flex;justify-content:space-around;align-items:center;min-height:100px;"></div>
-<div id="blockOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;z-index:60;backdrop-filter:blur(3px);">
-  <div style="background:linear-gradient(135deg,#1a1040,#0d0a2e);border:2px solid #a855f7;border-radius:22px;padding:28px 48px;text-align:center;">
-    <div id="bo_icon" style="font-size:56px;margin-bottom:8px;">💎</div>
-    <div id="bo_title" style="font-size:26px;font-weight:900;color:#a855f7;letter-spacing:2px;margin-bottom:6px;"></div>
-    <div id="bo_sub" style="font-size:14px;color:#aaa;margin-bottom:18px;"></div>
-    <button id="bo_btn" style="background:linear-gradient(135deg,#4a9eff,#a855f7);border:none;border-radius:50px;padding:11px 34px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;"></button>
-  </div>
-</div>
-</div>
+    <!-- WATER SORT GAME -->
+    <div id="waterGame">
+      <div style="position:relative;flex:1;display:flex;flex-direction:column;">
+        <div id="waterHud">
+          <div class="hud-badge" id="waterLevel">LV.1</div>
+          <div class="spacer"></div>
+          <div class="hud-moves">🔄 <span id="waterMoves">0</span> moves</div>
+        </div>
+        <div id="waterContent">
+          <div id="waterInstruction">Tap a bottle to select, then tap destination</div>
+          <div id="waterBottles"></div>
+          <div id="waterControls">
+            <button class="water-btn" onclick="waterUndo()">↩️ Undo (<span id="undoCount">5</span>)</button>
+            <button class="water-btn" onclick="waterRestart()">🔄 Restart</button>
+            <button class="water-btn" onclick="waterNextLevel()">⏭ Skip</button>
+          </div>
+        </div>
+        <div id="waterOverlay">
+          <div id="waterOverlayBox">
+            <div class="oi" id="waterOIcon">🎉</div>
+            <div class="ot" id="waterOTitle">Level Complete!</div>
+            <div class="os" id="waterOSub">Well done!</div>
+            <button id="waterOBtn" onclick="waterNextLevel()">NEXT LEVEL →</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
-<!-- ═══ WATER SORT SCREEN ═══ -->
-<div id="waterScreen" class="screen" style="background:radial-gradient(ellipse at 50% 0%,#1a0a40 0%,#08041a 100%);">
-<button class="back-btn" onclick="goHub()">←</button>
-<div id="waterHud" style="display:flex;align-items:center;justify-content:center;gap:16px;padding:10px 50px 8px 50px;background:rgba(0,0,0,0.5);">
-  <div style="background:rgba(138,43,226,0.3);border:2px solid rgba(138,43,226,0.6);border-radius:20px;padding:4px 20px;font-weight:900;font-size:15px;color:#fff;letter-spacing:2px;" id="w_level">LEVEL 1</div>
-  <button onclick="waterReset()" style="background:rgba(138,43,226,0.4);border:2px solid rgba(138,43,226,0.6);border-radius:50%;width:36px;height:36px;color:#fff;font-size:16px;cursor:pointer;">↻</button>
-  <button onclick="waterUndo()" style="background:rgba(138,43,226,0.4);border:2px solid rgba(138,43,226,0.6);border-radius:50%;width:36px;height:36px;color:#fff;font-size:16px;cursor:pointer;">↩</button>
-  <button onclick="waterAddBottle()" style="background:rgba(138,43,226,0.4);border:2px solid rgba(138,43,226,0.6);border-radius:50%;width:36px;height:36px;color:#fff;font-size:16px;cursor:pointer;">+</button>
-</div>
-<canvas id="waterCanvas" style="flex:1;display:block;width:100%;"></canvas>
-<div id="waterOverlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,0.8);align-items:center;justify-content:center;z-index:60;backdrop-filter:blur(3px);">
-  <div style="background:linear-gradient(135deg,#1a0a40,#0d0520);border:2px solid #8a2be2;border-radius:22px;padding:28px 48px;text-align:center;">
-    <div id="wo_icon" style="font-size:56px;margin-bottom:8px;">🎉</div>
-    <div id="wo_title" style="font-size:26px;font-weight:900;color:#8a2be2;letter-spacing:2px;margin-bottom:6px;"></div>
-    <div id="wo_sub" style="font-size:14px;color:#aaa;margin-bottom:18px;"></div>
-    <button id="wo_btn" style="background:linear-gradient(135deg,#8a2be2,#4169e1);border:none;border-radius:50px;padding:11px 34px;color:#fff;font-weight:800;font-size:14px;cursor:pointer;"></button>
+    <!-- GEM BLOCK GAME -->
+    <div id="gemGame">
+      <div style="position:relative;flex:1;display:flex;flex-direction:column;">
+        <div id="gemHud">
+          <div class="hud-badge" id="gemLevel">LV.1</div>
+          <div class="spacer"></div>
+          <div class="combo-badge" id="comboDisplay" style="display:none">🔥 COMBO x1</div>
+          <div class="hud-score" id="gemScore">💎 0</div>
+        </div>
+        <div id="gemContent">
+          <div id="gemBoard"></div>
+        </div>
+        <div id="gemOverlay">
+          <div id="gemOverlayBox">
+            <div class="oi" id="gemOIcon">🎉</div>
+            <div class="ot" id="gemOTitle">Level Clear!</div>
+            <div class="os" id="gemOSub"></div>
+            <button id="gemOBtn">NEXT LEVEL →</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
-</div>
 </div>
 
 <script>
-(function(){'use strict';
+'use strict';
 
-/* ══════════════════════════════════════════════════
-   HUB
-══════════════════════════════════════════════════ */
-function launch(g){
-  document.getElementById('hub').style.display='none';
-  if(g==='pool'){document.getElementById('poolScreen').classList.add('active');initPool();}
-  else if(g==='block'){document.getElementById('blockScreen').classList.add('active');initBlock();}
-  else if(g==='water'){document.getElementById('waterScreen').classList.add('active');initWater();}
+// ═══════════════════════════════════════════════════════════════════════════
+// HUB NAVIGATION
+// ═══════════════════════════════════════════════════════════════════════════
+function openGame(type) {
+  document.getElementById('hub').style.display = 'none';
+  document.getElementById('gameWrap').classList.add('show');
+  document.getElementById('poolGame').classList.remove('show');
+  document.getElementById('waterGame').classList.remove('show');
+  document.getElementById('gemGame').classList.remove('show');
+  if (type === 'pool')  { document.getElementById('poolGame').classList.add('show');  initPool(); }
+  if (type === 'water') { document.getElementById('waterGame').classList.add('show'); initWater(); }
+  if (type === 'gem')   { document.getElementById('gemGame').classList.add('show');   initGem(); }
 }
-function goHub(){
-  ['poolScreen','blockScreen','waterScreen'].forEach(id=>{
-    document.getElementById(id).classList.remove('active');
-  });
-  if(poolAnim){cancelAnimationFrame(poolAnim);poolAnim=null;}
-  if(blockAnim){cancelAnimationFrame(blockAnim);blockAnim=null;}
-  if(waterAnim){cancelAnimationFrame(waterAnim);waterAnim=null;}
-  document.getElementById('hub').style.display='flex';
+function goBack() {
+  document.getElementById('hub').style.display = 'flex';
+  document.getElementById('gameWrap').classList.remove('show');
+  if (poolAnimId) { cancelAnimationFrame(poolAnimId); poolAnimId = null; }
 }
-window.goHub=goHub;
-window.launch=launch;
-
-/* ══════════════════════════════════════════════════
-   ████████████  POOL GAME  ████████████
-══════════════════════════════════════════════════ */
-const PC=document.getElementById('poolCanvas');
-const PX=PC.getContext('2d');
-let poolAnim=null;
-
-// Table dimensions
-const PW=400,PH=700;
-const PRAIL=36,BR=10,POCKR=16;
-const PFRIC=0.984,PCUSH=0.70,PMINV=0.06;
-const PMAXPWR=20;
-const PCX=PW/2,PCY=PH/2;
-
-const PPOCKETS=[
-  {x:PRAIL,y:PRAIL},{x:PW/2,y:PRAIL-3},{x:PW-PRAIL,y:PRAIL},
-  {x:PRAIL,y:PH-PRAIL},{x:PW/2,y:PH-PRAIL+3},{x:PW-PRAIL,y:PH-PRAIL}
-];
-
-const BCOLORS=[null,'#f5c518','#1a4bb5','#c0392b','#6c2dc7','#e67e22','#1abc9c','#8e1b1b',
-  '#111','#f5c518','#1a4bb5','#c0392b','#6c2dc7','#e67e22','#1abc9c','#8e1b1b'];
-
-const PTHEMES=[
-  {felt:'#1a6b3c',rail:'#5c2e0a',cushion:'#145c30'},
-  {felt:'#0a3d7a',rail:'#2c1a0a',cushion:'#082d5c'},
-  {felt:'#4a0a2a',rail:'#1a0a30',cushion:'#3a0820'},
-  {felt:'#1a3a1a',rail:'#3c1a0a',cushion:'#122812'},
-  {felt:'#2a1a4a',rail:'#1a2a1a',cushion:'#1c1030'},
-  {felt:'#0a3030',rail:'#1a3010',cushion:'#082020'},
-  {felt:'#3a2a0a',rail:'#2a1a0a',cushion:'#2a1a08'},
-];
-
-let pStage=1,pScore=0,pLives=8,pPocketed=0,pTargetCount=3;
-let pBalls=[],pCue={x:0,y:0,vx:0,vy:0};
-let pShooting=false,pScratch=false,pScratchTimer=0;
-let pAimAngle=0,pPower=0.5;
-let pSpinX=0,pSpinY=0; // -1 to 1 each
-let pShotsLeft=5;
-let pDragging=false,pDragStart={x:0,y:0};
-let pTheme=PTHEMES[0];
-let pPats=['triangle','diamond','cross','scatter','twoCluster','line','arc','zigzag'];
-
-// ── Slider drag ──
-let sliderDragging=false;
-const sliderTrack=document.getElementById('sliderTrack');
-sliderTrack.addEventListener('pointerdown',e=>{e.stopPropagation();sliderDragging=true;updateSlider(e);});
-document.addEventListener('pointermove',e=>{if(sliderDragging)updateSlider(e);});
-document.addEventListener('pointerup',()=>{sliderDragging=false;});
-function updateSlider(e){
-  const rect=sliderTrack.getBoundingClientRect();
-  const y=Math.max(0,Math.min(rect.height,(e.clientY||e.touches?.[0]?.clientY||0)-rect.top));
-  pPower=1-(y/rect.height);
-  const pct=Math.round(pPower*100);
-  document.getElementById('sliderFill').style.height=pct+'%';
-  document.getElementById('sliderThumb').style.bottom=pct+'%';
-  document.getElementById('sliderPct').textContent=pct+'%';
-  const c=pPower>0.72?'linear-gradient(0deg,#e74c3c,#f5c518)':
-    pPower>0.42?'linear-gradient(0deg,#f39c12,#2ecc71)':'linear-gradient(0deg,#3498db,#2ecc71)';
-  document.getElementById('sliderFill').style.background=c;
-}
-
-// ── Spin canvas ──
-const SC2=document.getElementById('spinCanvas');
-const SX=SC2.getContext('2d');
-drawSpinControl();
-SC2.addEventListener('pointerdown',e=>{
-  const r=SC2.getBoundingClientRect();
-  const sx=(e.clientX-r.left)/r.width*2-1;
-  const sy=(e.clientY-r.top)/r.height*2-1;
-  const d=Math.sqrt(sx*sx+sy*sy);
-  if(d<1){pSpinX=sx;pSpinY=sy;drawSpinControl();}
+window.addEventListener('kyn:openGames', goBack);
+window.addEventListener('message', e => {
+  if (e.data && (e.data.type === 'OPEN_GAMES' || e.data.type === 'kyn:openGames')) goBack();
 });
-function drawSpinControl(){
-  SX.clearRect(0,0,70,70);
-  SX.beginPath();SX.arc(35,35,32,0,Math.PI*2);
-  const g=SX.createRadialGradient(35,35,0,35,35,32);
-  g.addColorStop(0,'rgba(255,255,255,0.15)');g.addColorStop(1,'rgba(0,0,0,0.4)');
-  SX.fillStyle=g;SX.fill();
-  SX.strokeStyle='rgba(255,255,255,0.3)';SX.lineWidth=1.5;SX.stroke();
-  // Grid lines
-  SX.strokeStyle='rgba(255,255,255,0.1)';SX.lineWidth=1;
-  SX.beginPath();SX.moveTo(35,3);SX.lineTo(35,67);SX.stroke();
-  SX.beginPath();SX.moveTo(3,35);SX.lineTo(67,35);SX.stroke();
-  // Spin dot
-  const dx=35+pSpinX*28,dy=35+pSpinY*28;
-  SX.beginPath();SX.arc(dx,dy,6,0,Math.PI*2);
-  const sg=SX.createRadialGradient(dx-1,dy-1,0,dx,dy,6);
-  sg.addColorStop(0,'#fff');sg.addColorStop(1,'rgba(245,197,24,0.8)');
-  SX.fillStyle=sg;SX.fill();
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ██████╗  ██████╗  ██████╗ ██╗     
+// ██╔══██╗██╔═══██╗██╔═══██╗██║     
+// ██████╔╝██║   ██║██║   ██║██║     
+// ██╔═══╝ ██║   ██║██║   ██║██║     
+// ██║     ╚██████╔╝╚██████╔╝███████╗
+// ╚═╝      ╚═════╝  ╚═════╝ ╚══════╝
+// POOL BILLIARDS GAME
+// ═══════════════════════════════════════════════════════════════════════════
+const POOL = {
+  CW: 640, CH: 360,
+  RAIL: 36, BALL_R: 10, POCKET_R: 17,
+  FRICTION: 0.984, CUSHION: 0.70, MIN_V: 0.07, MAX_PWR: 17,
+  THEMES: [
+    {felt:'#1a6b3c',rail:'#5c2e0a',cushion:'#145c30',dot:'rgba(255,255,255,0.5)'},
+    {felt:'#0a3d7a',rail:'#2c1a0a',cushion:'#082d5c',dot:'rgba(255,230,100,0.5)'},
+    {felt:'#4a0a2a',rail:'#1a0a30',cushion:'#3a0820',dot:'rgba(200,150,255,0.5)'},
+    {felt:'#1a3a1a',rail:'#3c1a0a',cushion:'#122812',dot:'rgba(180,255,180,0.5)'},
+    {felt:'#2a1a4a',rail:'#1a2a1a',cushion:'#1c1030',dot:'rgba(150,200,255,0.5)'},
+    {felt:'#0a3030',rail:'#1a3010',cushion:'#082020',dot:'rgba(100,255,220,0.5)'},
+    {felt:'#3a2a0a',rail:'#2a1a0a',cushion:'#2a1a08',dot:'rgba(255,200,100,0.5)'},
+    {felt:'#1a1a4a',rail:'#0a1a2a',cushion:'#101038',dot:'rgba(180,180,255,0.5)'},
+  ],
+  BALL_COLORS: [null,'#f5c518','#1a4bb5','#c0392b','#6c2dc7','#e67e22','#1abc9c','#8e1b1b','#111111',
+                '#f5c518','#1a4bb5','#c0392b','#6c2dc7','#e67e22','#1abc9c','#8e1b1b'],
+  POCKETS: null,
+};
+
+let poolCanvas, poolCtx, poolAnimId = null;
+let pStage=1, pScore=0, pLives=8, pShooting=false;
+let pPocketed=0, pTarget=3;
+let pBalls=[], pCue={x:0,y:0,vx:0,vy:0};
+let pAimAngle=0, pPower=0;  // pPower 0..1
+let pTheme=POOL.THEMES[0], pPattern='triangle';
+let pScratch=false, pScratchTimer=0;
+let pAiming=false;           // user is currently dragging to aim
+let pSliderDragging=false;
+let pMsgTimer=null;
+
+function initPool() {
+  poolCanvas = document.getElementById('poolCanvas');
+  poolCtx = poolCanvas.getContext('2d');
+  const wrap = document.getElementById('poolMain');
+  const W = wrap.clientWidth - 44; // leave room for slider
+  const H = wrap.clientHeight;
+  const scaleX = W / POOL.CW;
+  const scaleY = H / POOL.CH;
+  const scale = Math.min(scaleX, scaleY);
+  poolCanvas.width  = Math.round(POOL.CW * scale);
+  poolCanvas.height = Math.round(POOL.CH * scale);
+  poolCanvas.style.width  = poolCanvas.width  + 'px';
+  poolCanvas.style.height = poolCanvas.height + 'px';
+
+  POOL.POCKETS = [
+    {x:POOL.RAIL, y:POOL.RAIL},
+    {x:POOL.CW/2, y:POOL.RAIL-4},
+    {x:POOL.CW-POOL.RAIL, y:POOL.RAIL},
+    {x:POOL.RAIL, y:POOL.CH-POOL.RAIL},
+    {x:POOL.CW/2, y:POOL.CH-POOL.RAIL+4},
+    {x:POOL.CW-POOL.RAIL, y:POOL.CH-POOL.RAIL},
+  ];
+
+  poolStartStage(1);
+  if (poolAnimId) cancelAnimationFrame(poolAnimId);
+  poolLoop();
+  poolBindInput();
+  poolBindSlider();
 }
 
-function prng(seed){let s=seed;return()=>{s=(s*1664525+1013904223)&0xffffffff;return(s>>>0)/0xffffffff;};}
-function pshuffle(a,r){for(let i=a.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+// ── STAGE ──
+function rng(s){let x=s;return()=>{x=(x*1664525+1013904223)&0xffffffff;return(x>>>0)/0xffffffff;};}
+function poolStartStage(s) {
+  pStage=s; pPocketed=0; pShooting=false; pScratch=false; pAiming=false; pPower=0;
+  const r=rng(s*1337+42);
+  const patterns=['triangle','diamond','cross','scatter','twoCluster','line','arc','zigzag'];
+  pPattern = patterns[(s-1)%patterns.length];
+  pTheme   = POOL.THEMES[(s-1)%POOL.THEMES.length];
+  pTarget  = Math.min(3+Math.floor((s-1)/2),8);
+  const cueX = POOL.CW*0.25;
+  const cueY = POOL.CH/2 + (-30+60*r());
+  pCue = {x:cueX, y:cueY, vx:0, vy:0};
+  pBalls = poolBuildBalls(pPattern, r);
+  poolUpdateHUD();
+  document.getElementById('patternHint').textContent = pPattern.toUpperCase();
+  document.getElementById('poolOverlay').classList.remove('show');
+}
 
-function pBuildBalls(pat,r){
-  const nums=pshuffle([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],r);
+function poolBuildBalls(pat, r) {
+  const nums=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+  for(let i=nums.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[nums[i],nums[j]]=[nums[j],nums[i]];}
   const i8=nums.indexOf(8);nums.splice(i8,1);nums.splice(7,0,8);
-  const sp=BR*2.3,cx=PW*0.63,cy=PCY;
+  const sp=POOL.BALL_R*2.2, cx=POOL.CW*0.63, cy=POOL.CH/2;
   const pts=[];
-  if(pat==='triangle'){for(let row=0;row<5;row++)for(let col=0;col<=row;col++)pts.push({x:cx+row*sp*0.866,y:cy-row*sp*0.5+col*sp});}
-  else if(pat==='diamond'){[[0,0],[1,-1],[1,0],[1,1],[2,-2],[2,-1],[2,0],[2,1],[2,2],[3,-1],[3,0],[3,1],[4,-1],[4,0],[5,0]].forEach(([a,b])=>pts.push({x:cx+a*sp*0.8,y:cy+b*sp*0.8}));}
-  else if(pat==='cross'){[[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1],[2,0],[-2,0],[0,2],[0,-2],[2,1],[-2,-1]].slice(0,15).forEach(([a,b])=>pts.push({x:cx+a*sp,y:cy+b*sp}));}
-  else if(pat==='scatter'){for(let i=0;i<15;i++)pts.push({x:cx-60+r()*180,y:PCY-120+r()*240});}
-  else if(pat==='twoCluster'){for(let i=0;i<8;i++)pts.push({x:cx-20+(i%3)*sp,y:PCY-30+Math.floor(i/3)*sp});for(let i=0;i<7;i++)pts.push({x:cx+80+(i%3)*sp,y:PCY-20+Math.floor(i/3)*sp});}
-  else if(pat==='line'){for(let i=0;i<15;i++)pts.push({x:cx+(i%5)*sp,y:PCY-28+Math.floor(i/5)*sp});}
-  else if(pat==='arc'){for(let i=0;i<15;i++){const a=(i/14)*Math.PI-Math.PI/2;const rad=60+Math.floor(i/5)*sp;pts.push({x:cx+Math.cos(a)*rad*0.7,y:PCY+Math.sin(a)*rad});}}
-  else{for(let i=0;i<15;i++)pts.push({x:cx+(i%5)*sp*0.95,y:PCY-28+Math.floor(i/5)*sp+(i%2)*14});}
-  return pts.slice(0,15).map((p,i)=>({num:nums[i],x:Math.max(PRAIL+BR+5,Math.min(PW-PRAIL-BR-5,p.x)),y:Math.max(PRAIL+BR+5,Math.min(PH-PRAIL-BR-5,p.y)),vx:0,vy:0,pocketed:false}));
+  if(pat==='triangle'){
+    for(let row=0;row<5;row++)for(let col=0;col<=row;col++)
+      pts.push({x:cx+row*sp*0.866, y:cy-row*sp*0.5+col*sp});
+  } else if(pat==='diamond'){
+    [[0,0],[1,-1],[1,0],[1,1],[2,-2],[2,-1],[2,0],[2,1],[2,2],[3,-1],[3,0],[3,1],[4,-1],[4,0],[5,0]]
+    .forEach(([a,b])=>pts.push({x:cx+a*sp*0.8, y:cy+b*sp*0.8}));
+  } else if(pat==='cross'){
+    [[2,0],[1,0],[0,0],[-1,0],[-2,0],[0,1],[0,-1],[0,2],[0,-2],[1,1],[1,-1],[-1,1],[-1,-1],[2,1],[0,3]]
+    .slice(0,15).forEach(([a,b])=>pts.push({x:cx+a*sp, y:cy+b*sp}));
+  } else if(pat==='scatter'){
+    for(let i=0;i<15;i++) pts.push({x:cx-40+r()*200, y:cy-100+r()*200});
+  } else if(pat==='twoCluster'){
+    for(let i=0;i<8;i++) pts.push({x:cx-30+(i%3)*sp, y:cy-20+Math.floor(i/3)*sp});
+    for(let i=0;i<7;i++) pts.push({x:cx+90+(i%3)*sp, y:cy-15+Math.floor(i/3)*sp});
+  } else if(pat==='line'){
+    for(let i=0;i<15;i++) pts.push({x:cx+(i%5)*sp, y:cy-30+Math.floor(i/5)*sp});
+  } else if(pat==='arc'){
+    for(let i=0;i<15;i++){
+      const a=(i/14)*Math.PI-Math.PI/2;
+      const rad=70+Math.floor(i/5)*sp;
+      pts.push({x:cx+Math.cos(a)*rad*0.7, y:cy+Math.sin(a)*rad});
+    }
+  } else {
+    for(let i=0;i<15;i++) pts.push({x:cx+(i%5)*sp*0.95, y:cy-30+Math.floor(i/5)*sp+(i%2)*16});
+  }
+  return pts.slice(0,15).map((p,i)=>({
+    num:nums[i],
+    x:Math.max(POOL.RAIL+POOL.BALL_R+5,Math.min(POOL.CW-POOL.RAIL-POOL.BALL_R-5,p.x)),
+    y:Math.max(POOL.RAIL+POOL.BALL_R+5,Math.min(POOL.CH-POOL.RAIL-POOL.BALL_R-5,p.y)),
+    vx:0,vy:0,pocketed:false
+  }));
 }
 
-function initPool(){
-  const r=prng(pStage*1337+42);
-  const pat=pPats[(pStage-1)%pPats.length];
-  pTheme=PTHEMES[(pStage-1)%PTHEMES.length];
-  pTargetCount=Math.min(3+Math.floor((pStage-1)/2),10);
-  pPocketed=0;pShooting=false;pScratch=false;pScratchTimer=0;
-  pShotsLeft=3+Math.floor(pStage/2);
-  pCue={x:PW*0.25,y:PCY+(-30+60*r()),vx:0,vy:0};
-  pBalls=pBuildBalls(pat,r);
-  pSpinX=0;pSpinY=0;drawSpinControl();
-  pUpdateHUD();
-  document.getElementById('poolOverlay').style.display='none';
-  setupPoolCanvas();
-  if(poolAnim)cancelAnimationFrame(poolAnim);
-  poolAnim=requestAnimationFrame(poolLoop);
-}
-window.initPool=initPool;
-
-function setupPoolCanvas(){
-  const wrap=document.getElementById('poolScreen');
-  const W=wrap.clientWidth, H=wrap.clientHeight;
-  PC.style.width=W+'px'; PC.style.height=H+'px';
-  PC.width=W; PC.height=H;
-}
-
-function poolToScreen(x,y){
-  const W=PC.width,H=PC.height;
-  const hudH=36,botH=0;
-  const availW=W-50,availH=H-hudH-botH;
-  const scale=Math.min(availW/PW,availH/PH);
-  const ox=(W-PW*scale)/2, oy=hudH+(availH-PH*scale)/2;
-  return {sx:ox+x*scale,sy:oy+y*scale,scale};
-}
-function screenToPool(sx,sy){
-  const {sx:ox,sy:oy,scale}=poolToScreen(0,0);
-  return {x:(sx-ox)/scale,y:(sy-oy)/scale};
-}
-
-// ── Pool input: drag cue around cue ball to aim ──
-PC.addEventListener('pointerdown',pPointerDown);
-PC.addEventListener('pointermove',pPointerMove);
-PC.addEventListener('pointerup',pPointerUp);
-
-function pPointerDown(e){
-  if(pShooting||pScratch)return;
-  pDragging=true;
-  const p=screenToPool(e.clientX,e.clientY);
-  pDragStart={x:p.x,y:p.y};
-  const dx=p.x-pCue.x,dy=p.y-pCue.y;
-  pAimAngle=Math.atan2(dy,dx)+Math.PI; // aim opposite of drag point
-}
-function pPointerMove(e){
-  if(!pDragging||pShooting||pScratch)return;
-  const p=screenToPool(e.clientX,e.clientY);
-  const dx=p.x-pCue.x,dy=p.y-pCue.y;
-  // Drag around cue ball: angle = direction from cue ball to mouse, reversed
-  pAimAngle=Math.atan2(dy,dx)+Math.PI;
-}
-function pPointerUp(e){
-  if(!pDragging)return;
-  pDragging=false;
-  if(pShooting||pScratch)return;
-  if(pShotsLeft<=0)return;
-  // Fire!
-  const angle=pAimAngle+Math.PI; // actual direction of ball
-  const pwr=pPower*PMAXPWR;
-  pCue.vx=Math.cos(angle)*pwr;
-  pCue.vy=Math.sin(angle)*pwr;
-  // Apply spin as small velocity offset
-  pCue.vx+=pSpinX*1.5;
-  pCue.vy+=pSpinY*1.5;
-  pShotsLeft--;
-  pShooting=true;
-  pUpdateHUD();
-}
-
-function pStep(){
+// ── PHYSICS ──
+function poolStep() {
+  const R=POOL.RAIL, BR=POOL.BALL_R, PR=POOL.POCKET_R;
   const all=[pCue,...pBalls.filter(b=>!b.pocketed)];
   all.forEach(b=>{
-    b.x+=b.vx;b.y+=b.vy;
-    b.vx*=PFRIC;b.vy*=PFRIC;
-    if(Math.abs(b.vx)<PMINV&&Math.abs(b.vy)<PMINV){b.vx=0;b.vy=0;}
-    if(b.x-BR<PRAIL){b.x=PRAIL+BR;b.vx=Math.abs(b.vx)*PCUSH;}
-    if(b.x+BR>PW-PRAIL){b.x=PW-PRAIL-BR;b.vx=-Math.abs(b.vx)*PCUSH;}
-    if(b.y-BR<PRAIL){b.y=PRAIL+BR;b.vy=Math.abs(b.vy)*PCUSH;}
-    if(b.y+BR>PH-PRAIL){b.y=PH-PRAIL-BR;b.vy=-Math.abs(b.vy)*PCUSH;}
+    b.x+=b.vx; b.y+=b.vy;
+    b.vx*=POOL.FRICTION; b.vy*=POOL.FRICTION;
+    if(Math.abs(b.vx)<POOL.MIN_V&&Math.abs(b.vy)<POOL.MIN_V){b.vx=0;b.vy=0;}
+    if(b.x-BR<R){b.x=R+BR;b.vx=Math.abs(b.vx)*POOL.CUSHION;}
+    if(b.x+BR>POOL.CW-R){b.x=POOL.CW-R-BR;b.vx=-Math.abs(b.vx)*POOL.CUSHION;}
+    if(b.y-BR<R){b.y=R+BR;b.vy=Math.abs(b.vy)*POOL.CUSHION;}
+    if(b.y+BR>POOL.CH-R){b.y=POOL.CH-R-BR;b.vy=-Math.abs(b.vy)*POOL.CUSHION;}
   });
   for(let i=0;i<all.length;i++){
     for(let j=i+1;j<all.length;j++){
-      const a=all[i],b=all[j],dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy);
+      const a=all[i],b=all[j];
+      const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy);
       if(d<BR*2&&d>0){
         const nx=dx/d,ny=dy/d,ov=BR*2-d;
         a.x-=nx*ov/2;a.y-=ny*ov/2;b.x+=nx*ov/2;b.y+=ny*ov/2;
@@ -359,702 +404,560 @@ function pStep(){
   }
   pBalls.forEach(b=>{
     if(b.pocketed)return;
-    for(const p of PPOCKETS){
+    for(const p of POOL.POCKETS){
       const dx=b.x-p.x,dy=b.y-p.y;
-      if(Math.sqrt(dx*dx+dy*dy)<POCKR){b.pocketed=true;b.vx=0;b.vy=0;pScore+=b.num===8?50:b.num>8?15:10;pPocketed++;pUpdateHUD();break;}
+      if(Math.sqrt(dx*dx+dy*dy)<PR){
+        b.pocketed=true;b.vx=0;b.vy=0;
+        pScore+=(b.num===8?50:b.num>8?15:10); pPocketed++;
+        poolUpdateHUD();break;
+      }
     }
   });
   if(!pScratch){
-    for(const p of PPOCKETS){
+    for(const p of POOL.POCKETS){
       const dx=pCue.x-p.x,dy=pCue.y-p.y;
-      if(Math.sqrt(dx*dx+dy*dy)<POCKR){pScratch=true;pScratchTimer=70;pCue.vx=0;pCue.vy=0;pLives=Math.max(0,pLives-1);pUpdateHUD();pShowMsg('Scratch! -1 Life');if(pLives<=0)setTimeout(pShowGameOver,600);break;}
+      if(Math.sqrt(dx*dx+dy*dy)<PR){
+        pScratch=true;pScratchTimer=80;pCue.vx=0;pCue.vy=0;
+        pLives=Math.max(0,pLives-1);poolUpdateHUD();
+        poolShowMsg('Scratch! -1 Life');
+        if(pLives<=0)setTimeout(()=>poolGameOver(),500);
+        break;
+      }
     }
   }
-  if(pScratch&&pScratchTimer>0){pScratchTimer--;if(pScratchTimer<=0){pScratch=false;pCue.x=PW*0.25;pCue.y=PCY;pCue.vx=0;pCue.vy=0;}}
-  const moving=all.some(b=>Math.abs(b.vx)>0.04||Math.abs(b.vy)>0.04);
+  if(pScratch&&pScratchTimer>0){
+    pScratchTimer--;
+    if(pScratchTimer<=0){pScratch=false;pCue.x=POOL.CW*0.25;pCue.y=POOL.CH/2;pCue.vx=0;pCue.vy=0;}
+  }
+  const moving=all.some(b=>Math.abs(b.vx)>0.05||Math.abs(b.vy)>0.05);
   if(!moving&&pShooting){
     pShooting=false;
-    if(pPocketed>=pTargetCount)setTimeout(pShowClear,400);
-    else if(pShotsLeft<=0&&pPocketed<pTargetCount)setTimeout(pShowFail,400);
+    if(pPocketed>=pTarget) setTimeout(()=>poolStageClear(),300);
   }
 }
 
-function poolLoop(){
-  if(pShooting)pStep();
-  pDraw();
-  poolAnim=requestAnimationFrame(poolLoop);
-}
+// ── DRAW ──
+function poolDraw() {
+  const ctx=poolCtx, CW=POOL.CW, CH=POOL.CH, R=POOL.RAIL;
+  const sc = poolCanvas.width/CW;
+  ctx.save();
+  ctx.scale(sc,sc);
 
-function pDraw(){
-  const W=PC.width,H=PC.height;
-  PX.clearRect(0,0,W,H);
-  const hudH=36;
-  const availW=W-50,availH=H-hudH;
-  const scale=Math.min(availW/PW,availH/PH);
-  const ox=(W-PW*scale)/2, oy=hudH+(availH-PH*scale)/2;
-  PX.save();PX.translate(ox,oy);PX.scale(scale,scale);
+  // Table
+  const rg=ctx.createLinearGradient(0,0,0,CH);
+  rg.addColorStop(0,lighten(pTheme.rail,20));rg.addColorStop(.5,pTheme.rail);rg.addColorStop(1,darken(pTheme.rail,15));
+  ctx.fillStyle=rg; roundRect(ctx,0,0,CW,CH,12); ctx.fill();
+  ctx.fillStyle=pTheme.cushion; ctx.fillRect(R-6,R-6,CW-2*(R-6),CH-2*(R-6));
+  const fg=ctx.createRadialGradient(CW/2,CH/2,50,CW/2,CH/2,CW*0.7);
+  fg.addColorStop(0,lighten(pTheme.felt,12));fg.addColorStop(1,pTheme.felt);
+  ctx.fillStyle=fg; ctx.fillRect(R,R,CW-2*R,CH-2*R);
+  ctx.beginPath();ctx.arc(CW/2,CH/2,2.5,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.15)';ctx.fill();
+  ctx.beginPath();ctx.setLineDash([4,5]);ctx.moveTo(CW*0.25,R);ctx.lineTo(CW*0.25,CH-R);
+  ctx.strokeStyle='rgba(255,255,255,0.07)';ctx.lineWidth=1;ctx.stroke();ctx.setLineDash([]);
 
-  // Rail
-  const railG=PX.createLinearGradient(0,0,0,PH);
-  railG.addColorStop(0,pLighten(pTheme.rail,20));railG.addColorStop(0.5,pTheme.rail);railG.addColorStop(1,pDarken(pTheme.rail,15));
-  PX.fillStyle=railG;pRoundRect(0,0,PW,PH,10);PX.fill();
-  PX.fillStyle=pTheme.cushion;PX.fillRect(PRAIL-5,PRAIL-5,PW-2*(PRAIL-5),PH-2*(PRAIL-5));
-  const feltG=PX.createRadialGradient(PCX,PCY,40,PCX,PCY,PW*0.7);
-  feltG.addColorStop(0,pLighten(pTheme.felt,12));feltG.addColorStop(1,pTheme.felt);
-  PX.fillStyle=feltG;PX.fillRect(PRAIL,PRAIL,PW-2*PRAIL,PH-2*PRAIL);
-  PX.strokeStyle='rgba(255,255,255,0.12)';PX.lineWidth=2;PX.strokeRect(PRAIL-2,PRAIL-2,PW-2*(PRAIL-2),PH-2*(PRAIL-2));
-  // Head line
-  PX.setLineDash([4,5]);PX.strokeStyle='rgba(255,255,255,0.07)';PX.lineWidth=1;
-  PX.beginPath();PX.moveTo(PW*0.25,PRAIL);PX.lineTo(PW*0.25,PH-PRAIL);PX.stroke();
-  PX.setLineDash([]);
-  // Center spot
-  PX.beginPath();PX.arc(PCX,PCY,2,0,Math.PI*2);PX.fillStyle='rgba(255,255,255,0.15)';PX.fill();
-  // Diamond dots
-  for(let i=1;i<5;i++){
-    pDot(PRAIL+i*(PW-2*PRAIL)/5,PRAIL/2,2.5,'rgba(255,255,255,0.45)');
-    pDot(PRAIL+i*(PW-2*PRAIL)/5,PH-PRAIL/2,2.5,'rgba(255,255,255,0.45)');
-  }
-  for(let i=1;i<4;i++){
-    pDot(PRAIL/2,PRAIL+i*(PH-2*PRAIL)/4,2.5,'rgba(255,255,255,0.45)');
-    pDot(PW-PRAIL/2,PRAIL+i*(PH-2*PRAIL)/4,2.5,'rgba(255,255,255,0.45)');
-  }
   // Pockets
-  PPOCKETS.forEach(p=>{
-    PX.beginPath();PX.arc(p.x,p.y,POCKR+4,0,Math.PI*2);PX.fillStyle='rgba(0,0,0,0.5)';PX.fill();
-    PX.beginPath();PX.arc(p.x,p.y,POCKR,0,Math.PI*2);PX.fillStyle='#040302';PX.fill();
-    PX.beginPath();PX.arc(p.x,p.y,POCKR,0,Math.PI*2);PX.strokeStyle='rgba(255,255,255,0.1)';PX.lineWidth=1.5;PX.stroke();
+  POOL.POCKETS.forEach(p=>{
+    ctx.beginPath();ctx.arc(p.x,p.y,POOL.POCKET_R+4,0,Math.PI*2);ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fill();
+    ctx.beginPath();ctx.arc(p.x,p.y,POOL.POCKET_R,0,Math.PI*2);ctx.fillStyle='#040302';ctx.fill();
+    ctx.beginPath();ctx.arc(p.x,p.y,POOL.POCKET_R-3,0,Math.PI*2);ctx.fillStyle='#020201';ctx.fill();
+    ctx.beginPath();ctx.arc(p.x,p.y,POOL.POCKET_R+1,0,Math.PI*2);
+    ctx.strokeStyle='rgba(255,255,255,0.12)';ctx.lineWidth=1.5;ctx.stroke();
   });
 
-  // ── AIM SYSTEM ──
+  // Aim guide (only when not shooting and not scratch)
   if(!pShooting&&!pScratch){
     const cx=pCue.x,cy=pCue.y;
-    // The cue stick points FROM behind cue ball in opposite of aim direction
-    const stickAngle=pAimAngle; // cue stick direction (away from ball)
-    const ballDir=pAimAngle+Math.PI; // ball will travel this way
-    const bfX=Math.cos(ballDir),bfY=Math.sin(ballDir);
+    const fwdX=Math.cos(pAimAngle),fwdY=Math.sin(pAimAngle);
 
-    // Trajectory line (dotted, forward)
-    PX.save();PX.setLineDash([7,7]);
-    PX.beginPath();PX.moveTo(cx,cy);PX.lineTo(cx+bfX*280,cy+bfY*280);
-    PX.strokeStyle='rgba(255,255,255,0.32)';PX.lineWidth=1.5;PX.stroke();
-    PX.setLineDash([]);PX.restore();
+    // Dotted trajectory line (forward from cue ball)
+    ctx.save();
+    ctx.setLineDash([6,7]);
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+fwdX*200,cy+fwdY*200);
+    ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.setLineDash([]);ctx.restore();
 
     // Power ring
-    PX.beginPath();PX.arc(cx,cy,BR+5+pPower*12,0,Math.PI*2);
-    PX.strokeStyle=pPower>0.72?'rgba(255,60,60,0.65)':pPower>0.42?'rgba(245,197,24,0.65)':'rgba(50,220,120,0.65)';
-    PX.setLineDash([4,4]);PX.lineWidth=1.5;PX.stroke();PX.setLineDash([]);
+    const ringR=POOL.BALL_R+4+pPower*12;
+    const rColor=pPower>0.72?'rgba(255,60,60,0.65)':pPower>0.42?'rgba(245,197,24,0.65)':'rgba(50,220,120,0.65)';
+    ctx.beginPath();ctx.arc(cx,cy,ringR,0,Math.PI*2);
+    ctx.strokeStyle=rColor;ctx.setLineDash([4,4]);ctx.lineWidth=1.5;ctx.stroke();ctx.setLineDash([]);
 
-    // Cue stick (extends from behind cue ball)
-    const tipX=cx+Math.cos(stickAngle)*(BR+4);
-    const tipY=cy+Math.sin(stickAngle)*(BR+4);
-    const handleX=cx+Math.cos(stickAngle)*(BR+55+pPower*70);
-    const handleY=cy+Math.sin(stickAngle)*(BR+55+pPower*70);
+    // Cue stick — positioned BEHIND the cue ball (opposite of aim direction)
+    const bkX=Math.cos(pAimAngle+Math.PI),bkY=Math.sin(pAimAngle+Math.PI);
+    // Gap between tip and ball (increases with power for "pull back" effect)
+    const gap = POOL.BALL_R + 3 + pPower*18;
+    const tipX=cx+bkX*gap, tipY=cy+bkY*gap;
+    const stickLen=80+pPower*40;
+    const handleX=tipX+bkX*stickLen, handleY=tipY+bkY*stickLen;
 
-    PX.save();
-    const cueG=PX.createLinearGradient(tipX,tipY,handleX,handleY);
-    cueG.addColorStop(0,'#e8c84a');cueG.addColorStop(0.3,'#b8860b');
-    cueG.addColorStop(0.7,'#6a3d0a');cueG.addColorStop(1,'#3a1a05');
-    PX.shadowColor='rgba(0,0,0,0.6)';PX.shadowBlur=6;
-    PX.beginPath();PX.moveTo(tipX,tipY);PX.lineTo(handleX,handleY);
-    PX.strokeStyle=cueG;PX.lineWidth=5+pPower*1.5;PX.lineCap='round';PX.stroke();
-    PX.restore();
-    // Tip (teal)
-    PX.beginPath();PX.arc(tipX,tipY,3.5,0,Math.PI*2);PX.fillStyle='#6ab8b8';PX.fill();
-    // Purple gems at handle
+    ctx.save();
+    ctx.shadowColor='rgba(0,0,0,0.5)';ctx.shadowBlur=4;
+    const sg=ctx.createLinearGradient(tipX,tipY,handleX,handleY);
+    sg.addColorStop(0,'#e8c84a');sg.addColorStop(0.35,'#b8860b');sg.addColorStop(0.7,'#6a3d0a');sg.addColorStop(1,'#3a1a05');
+    ctx.beginPath();ctx.moveTo(tipX,tipY);ctx.lineTo(handleX,handleY);
+    ctx.strokeStyle=sg;ctx.lineWidth=4+pPower*2;ctx.lineCap='round';ctx.stroke();
+    ctx.restore();
+    // Tip
+    ctx.beginPath();ctx.arc(tipX,tipY,3,0,Math.PI*2);ctx.fillStyle='#6ab8b8';ctx.fill();
+    // Gems on handle
     for(let i=0;i<3;i++){
-      const gx=handleX+Math.cos(stickAngle)*i*9,gy=handleY+Math.sin(stickAngle)*i*9;
-      const gg=PX.createRadialGradient(gx-1,gy-1,0,gx,gy,i===0?5.5:3.5);
+      const gx=handleX+bkX*(-i*8), gy=handleY+bkY*(-i*8);
+      ctx.beginPath();ctx.arc(gx,gy,i===0?4.5:3,0,Math.PI*2);
+      const gg=ctx.createRadialGradient(gx-1,gy-1,0,gx,gy,i===0?4.5:3);
       gg.addColorStop(0,'#c77ce8');gg.addColorStop(1,'#5b1d8a');
-      PX.beginPath();PX.arc(gx,gy,i===0?5.5:3.5,0,Math.PI*2);PX.fillStyle=gg;PX.fill();
-    }
-    // Spin indicator arrow on ball
-    if(Math.abs(pSpinX)>0.05||Math.abs(pSpinY)>0.05){
-      PX.save();PX.strokeStyle='rgba(255,230,50,0.9)';PX.lineWidth=1.5;
-      PX.beginPath();PX.moveTo(cx,cy);PX.lineTo(cx+pSpinX*BR*0.7,cy+pSpinY*BR*0.7);PX.stroke();PX.restore();
+      ctx.fillStyle=gg;ctx.fill();
     }
   }
 
-  // Object balls
-  pBalls.filter(b=>!b.pocketed).forEach(b=>pDrawBall(b));
-  // Cue ball
-  if(!pScratch||pScratchTimer<40)pDrawCueBall();
+  // Balls
+  pBalls.filter(b=>!b.pocketed).forEach(b=>drawPoolBall(ctx,b));
+  drawCueBall(ctx);
 
-  PX.restore();
+  ctx.restore();
+
+  // Power bar in HUD
+  const pct = pShooting ? 0 : pPower*100;
+  document.getElementById('pbarFill') && null;
+  document.getElementById('powerPct').textContent = Math.round(pct)+'%';
+  // Power slider fill
+  document.getElementById('powerFill').style.height = pct+'%';
+  document.getElementById('powerFill').style.background =
+    pct>72 ? 'linear-gradient(to top,#f39c12,#e74c3c)'
+    : pct>42 ? 'linear-gradient(to top,#2ecc71,#f39c12)'
+    : 'linear-gradient(to top,#3498db,#2ecc71)';
+  document.getElementById('powerThumb').style.bottom = pct+'%';
 }
 
-function pDrawBall(b){
-  const x=b.x,y=b.y,n=b.num,isStripe=n>8,col=BCOLORS[n];
-  PX.save();
-  PX.shadowColor='rgba(0,0,0,0.45)';PX.shadowBlur=5;PX.shadowOffsetY=2;
-  PX.beginPath();PX.arc(x,y,BR,0,Math.PI*2);
-  if(isStripe){PX.fillStyle='#f8f3e6';PX.fill();}
-  else{PX.fillStyle=col;PX.fill();}
-  PX.restore();
-  if(isStripe){
-    PX.save();PX.beginPath();PX.arc(x,y,BR,0,Math.PI*2);PX.clip();
-    PX.fillStyle=col;PX.fillRect(x-BR,y-BR*0.44,BR*2,BR*0.88);PX.restore();
-  }
-  PX.beginPath();PX.arc(x,y,BR*0.44,0,Math.PI*2);PX.fillStyle='rgba(255,255,255,0.92)';PX.fill();
-  PX.fillStyle=n===8?'#eee':col;
-  PX.font=`800 ${BR*0.64}px Trebuchet MS,Arial,sans-serif`;
-  PX.textAlign='center';PX.textBaseline='middle';PX.fillText(n,x,y+0.5);
-  const g=PX.createRadialGradient(x-BR*0.25,y-BR*0.32,0,x,y,BR);
-  g.addColorStop(0,'rgba(255,255,255,0.42)');g.addColorStop(0.45,'rgba(255,255,255,0.04)');g.addColorStop(1,'rgba(0,0,0,0.28)');
-  PX.beginPath();PX.arc(x,y,BR,0,Math.PI*2);PX.fillStyle=g;PX.fill();
-  PX.save();PX.beginPath();PX.arc(x,y,BR,0,Math.PI*2);PX.clip();
-  PX.beginPath();PX.ellipse(x-BR*0.22,y-BR*0.35,BR*0.28,BR*0.15,-0.5,0,Math.PI*2);
-  PX.fillStyle='rgba(255,255,255,0.5)';PX.fill();PX.restore();
+function drawPoolBall(ctx,b){
+  const {x,y,num}=b, isStripe=num>8, col=POOL.BALL_COLORS[num], R=POOL.BALL_R;
+  ctx.save();
+  ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);
+  ctx.shadowColor='rgba(0,0,0,0.45)';ctx.shadowBlur=5;ctx.shadowOffsetY=2;
+  if(isStripe){ctx.fillStyle='#f8f3e6';ctx.fill();ctx.restore();
+    ctx.save();ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.clip();
+    ctx.fillStyle=col;ctx.fillRect(x-R,y-R*0.44,R*2,R*0.88);ctx.restore();
+  } else {ctx.fillStyle=col;ctx.fill();ctx.restore();}
+  ctx.save();ctx.beginPath();ctx.arc(x,y,R*0.44,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.92)';ctx.fill();
+  ctx.fillStyle=num===8?'#eee':col;
+  ctx.font=`800 ${R*0.63}px 'Trebuchet MS',sans-serif`;
+  ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(num,x,y+0.5);ctx.restore();
+  const g=ctx.createRadialGradient(x-R*.25,y-R*.32,0,x,y,R);
+  g.addColorStop(0,'rgba(255,255,255,0.42)');g.addColorStop(.45,'rgba(255,255,255,0.05)');g.addColorStop(1,'rgba(0,0,0,0.28)');
+  ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+  ctx.save();ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.clip();
+  ctx.beginPath();ctx.ellipse(x-R*.22,y-R*.35,R*.28,R*.15,-0.5,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.55)';ctx.fill();ctx.restore();
 }
-
-function pDrawCueBall(){
-  const x=pCue.x,y=pCue.y;
+function drawCueBall(ctx){
+  if(pScratch&&pScratchTimer>40)return;
+  const {x,y}=pCue, R=POOL.BALL_R;
   if(pScratch){
-    PX.beginPath();PX.arc(x,y,BR+5,0,Math.PI*2);
-    PX.strokeStyle=`rgba(255,60,60,${0.4+0.4*Math.sin(pScratchTimer*0.3)})`;PX.lineWidth=2;PX.stroke();
+    const a=0.4+0.4*Math.sin(pScratchTimer*0.3);
+    ctx.beginPath();ctx.arc(x,y,R+5,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,60,60,${a*0.25})`;ctx.fill();
+    ctx.strokeStyle=`rgba(255,60,60,${a})`;ctx.lineWidth=2;ctx.stroke();
     return;
   }
-  PX.save();PX.shadowColor='rgba(0,0,0,0.45)';PX.shadowBlur=6;PX.shadowOffsetY=2;
-  const g=PX.createRadialGradient(x-BR*0.28,y-BR*0.35,0,x,y,BR);
-  g.addColorStop(0,'#fff');g.addColorStop(0.55,'#f2eddc');g.addColorStop(1,'#c8c2a8');
-  PX.beginPath();PX.arc(x,y,BR,0,Math.PI*2);PX.fillStyle=g;PX.fill();PX.restore();
-  PX.save();PX.beginPath();PX.arc(x,y,BR,0,Math.PI*2);PX.clip();
-  PX.beginPath();PX.ellipse(x-BR*0.25,y-BR*0.38,BR*0.3,BR*0.16,-0.4,0,Math.PI*2);
-  PX.fillStyle='rgba(255,255,255,0.7)';PX.fill();PX.restore();
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.4)';ctx.shadowBlur=6;ctx.shadowOffsetY=2;
+  const g=ctx.createRadialGradient(x-R*.28,y-R*.35,0,x,y,R);
+  g.addColorStop(0,'#ffffff');g.addColorStop(.55,'#f2eddc');g.addColorStop(1,'#c8c2a8');
+  ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();ctx.restore();
+  ctx.save();ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.clip();
+  ctx.beginPath();ctx.ellipse(x-R*.25,y-R*.38,R*.3,R*.16,-0.4,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.7)';ctx.fill();ctx.restore();
+}
+function poolLoop(){
+  if(pShooting) poolStep();
+  poolDraw();
+  poolAnimId=requestAnimationFrame(poolLoop);
 }
 
-function pUpdateHUD(){
-  document.getElementById('p_stage').textContent='LV.'+(pStage<10?'0'+pStage:pStage);
-  document.getElementById('p_score').textContent='⭐ '+pScore;
-  document.getElementById('p_target').textContent=pPocketed+'/'+pTargetCount+' 🎯';
-  document.getElementById('p_shots').textContent='🎱 '+pShotsLeft+' left';
-  let h='';for(let i=0;i<8;i++)h+=`<span style="filter:${i<pLives?'none':'grayscale(1) opacity(0.3)'}">❤️</span>`;
-  document.getElementById('p_lives').innerHTML=h;
+// ── INPUT: Mouse/touch on canvas to AIM, click/tap to SHOOT ──
+function poolGetPos(e){
+  const rect=poolCanvas.getBoundingClientRect();
+  const sx=POOL.CW/poolCanvas.width, sy=POOL.CH/poolCanvas.height;
+  const cx=e.touches?e.touches[0].clientX:e.clientX;
+  const cy=e.touches?e.touches[0].clientY:e.clientY;
+  return {x:(cx-rect.left)*sx*(POOL.CW/poolCanvas.width), y:(cy-rect.top)*sy*(POOL.CH/poolCanvas.height)};
+}
+function poolAimFrom(e){
+  if(pShooting||pScratch) return;
+  const p=poolGetPos(e);
+  const dx=p.x-pCue.x, dy=p.y-pCue.y;
+  pAimAngle=Math.atan2(dy,dx);
+}
+function poolBindInput(){
+  poolCanvas.addEventListener('mousemove', poolAimFrom);
+  poolCanvas.addEventListener('touchmove', e=>{e.preventDefault();poolAimFrom(e);},{passive:false});
+  poolCanvas.addEventListener('click', poolShoot);
+  poolCanvas.addEventListener('touchend', e=>{e.preventDefault();poolShoot(e.changedTouches?{clientX:e.changedTouches[0].clientX,clientY:e.changedTouches[0].clientY}:e);},{passive:false});
+}
+function poolShoot(e){
+  if(pShooting||pScratch) return;
+  if(pPower<0.05) return; // must have some power
+  const pwr=pPower*POOL.MAX_PWR;
+  pCue.vx=Math.cos(pAimAngle)*pwr;
+  pCue.vy=Math.sin(pAimAngle)*pwr;
+  pShooting=true; pPower=0;
 }
 
-let pMsgTimer=null;
-function pShowMsg(t){
-  const el=document.getElementById('poolMsg');el.textContent=t;el.style.display='block';
-  if(pMsgTimer)clearTimeout(pMsgTimer);pMsgTimer=setTimeout(()=>el.style.display='none',1800);
+// ── POWER SLIDER ──
+function poolBindSlider(){
+  const track=document.getElementById('powerSliderTrack');
+  function setFromEvent(e){
+    const rect=track.getBoundingClientRect();
+    const y=e.touches?e.touches[0].clientY:e.clientY;
+    let pct=1-((y-rect.top)/rect.height);
+    pct=Math.max(0,Math.min(1,pct));
+    pPower=pct;
+  }
+  track.addEventListener('mousedown', e=>{pSliderDragging=true;setFromEvent(e);e.preventDefault();});
+  document.addEventListener('mousemove', e=>{if(pSliderDragging){setFromEvent(e);e.preventDefault();}});
+  document.addEventListener('mouseup', ()=>{pSliderDragging=false;});
+  track.addEventListener('touchstart', e=>{pSliderDragging=true;setFromEvent(e);e.preventDefault();},{passive:false});
+  document.addEventListener('touchmove', e=>{if(pSliderDragging){setFromEvent(e);e.preventDefault();}},{passive:false});
+  document.addEventListener('touchend', ()=>{pSliderDragging=false;});
 }
 
-function pShowClear(){
-  pScore+=pPocketed*5;pUpdateHUD();
-  const ov=document.getElementById('poolOverlay');
-  document.getElementById('po_icon').textContent='🎱';
-  document.getElementById('po_title').textContent='STAGE CLEAR!';
-  document.getElementById('po_sub').textContent='Stage '+pStage+' complete! +Bonus '+(pPocketed*5);
-  document.getElementById('po_btn').textContent='NEXT STAGE →';
-  document.getElementById('po_btn').onclick=()=>{pStage++;initPool();};
-  ov.style.display='flex';
+// ── HUD / OVERLAYS ──
+function poolUpdateHUD(){
+  document.getElementById('poolStage').textContent='LV.'+(pStage<10?'0'+pStage:pStage);
+  document.getElementById('poolScore').textContent='⭐ '+pScore;
+  document.getElementById('targetInfo').textContent=pPocketed+'/'+pTarget+' 🎯';
+  let h='';
+  for(let i=0;i<8;i++) h+=`<span style="filter:${i<pLives?'none':'grayscale(1) opacity(0.3)'}">❤️</span>`;
+  document.getElementById('poolLives').innerHTML=h;
 }
-function pShowFail(){
-  pLives=Math.max(0,pLives-1);pUpdateHUD();
-  if(pLives<=0){pShowGameOver();return;}
-  const ov=document.getElementById('poolOverlay');
-  document.getElementById('po_icon').textContent='😤';
-  document.getElementById('po_title').textContent='OUT OF SHOTS!';
-  document.getElementById('po_sub').textContent='Pocketed '+pPocketed+'/'+pTargetCount+' — -1 Life';
-  document.getElementById('po_btn').textContent='TRY AGAIN';
-  document.getElementById('po_btn').onclick=()=>initPool();
-  ov.style.display='flex';
+function poolShowMsg(txt){
+  const el=document.getElementById('poolMsg');
+  el.textContent=txt;el.classList.add('show');
+  if(pMsgTimer) clearTimeout(pMsgTimer);
+  pMsgTimer=setTimeout(()=>el.classList.remove('show'),1800);
 }
-function pShowGameOver(){
-  const ov=document.getElementById('poolOverlay');
-  document.getElementById('po_icon').textContent='😔';
-  document.getElementById('po_title').textContent='GAME OVER';
-  document.getElementById('po_sub').textContent='Score: '+pScore;
-  document.getElementById('po_btn').textContent='PLAY AGAIN';
-  document.getElementById('po_btn').onclick=()=>{pScore=0;pLives=8;pStage=1;initPool();};
-  ov.style.display='flex';
+function poolStageClear(){
+  pScore+=pPocketed*5; poolUpdateHUD();
+  poolShowMsg('🎱 Stage Clear!');
+  document.getElementById('poolOIcon').textContent='🎱';
+  document.getElementById('poolOTitle').textContent='STAGE CLEAR!';
+  document.getElementById('poolOSub').textContent='Stage '+pStage+' done — Bonus: +'+(pPocketed*5);
+  document.getElementById('poolOBtn').textContent='NEXT STAGE →';
+  document.getElementById('poolOBtn').onclick=()=>poolStartStage(pStage+1);
+  document.getElementById('poolOverlay').classList.add('show');
 }
-function pRoundRect(x,y,w,h,r){PX.beginPath();PX.moveTo(x+r,y);PX.lineTo(x+w-r,y);PX.quadraticCurveTo(x+w,y,x+w,y+r);PX.lineTo(x+w,y+h-r);PX.quadraticCurveTo(x+w,y+h,x+w-r,y+h);PX.lineTo(x+r,y+h);PX.quadraticCurveTo(x,y+h,x,y+h-r);PX.lineTo(x,y+r);PX.quadraticCurveTo(x,y,x+r,y);PX.closePath();}
-function pDot(x,y,r,c){PX.beginPath();PX.arc(x,y,r,0,Math.PI*2);PX.fillStyle=c;PX.fill();}
-function pLighten(h,p){const n=parseInt(h.slice(1),16);return`rgb(${Math.min(255,((n>>16)&0xff)+p)},${Math.min(255,((n>>8)&0xff)+p)},${Math.min(255,(n&0xff)+p)})`;}
-function pDarken(h,p){return pLighten(h,-p);}
+function poolGameOver(){
+  document.getElementById('poolOIcon').textContent='😔';
+  document.getElementById('poolOTitle').textContent='GAME OVER';
+  document.getElementById('poolOSub').textContent='Final Score: '+pScore;
+  document.getElementById('poolOBtn').textContent='PLAY AGAIN';
+  document.getElementById('poolOBtn').onclick=()=>{pScore=0;pLives=8;poolStartStage(1);};
+  document.getElementById('poolOverlay').classList.add('show');
+}
 
-/* ══════════════════════════════════════════════════
-   ████████████  BLOCK PUZZLE GAME  ████████████
-══════════════════════════════════════════════════ */
-const BC=document.getElementById('blockCanvas');
-const BX=BC.getContext('2d');
-let blockAnim=null;
+// ── CANVAS UTILS ──
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function lighten(hex,pct){const n=parseInt(hex.slice(1),16);return`rgb(${Math.min(255,((n>>16)&0xff)+pct)},${Math.min(255,((n>>8)&0xff)+pct)},${Math.min(255,(n&0xff)+pct)})`;}
+function darken(hex,pct){return lighten(hex,-pct);}
 
-const BGRID=10, BCELL=38;
-const BCOLORS_LIST=['#e74c3c','#3498db','#f5c518','#2ecc71','#9b59b6','#e67e22','#1abc9c','#e91e63'];
-const BSTARS=['#e74c3c','#9b59b6'];
 
-let bGrid=[], bPieces=[], bScore=0, bStage=1, bMovesLeft=80;
-let bDragPiece=null, bDragX=0, bDragY=0, bDragOffX=0, bDragOffY=0;
-let bDropRow=-1, bDropCol=-1, bValid=false;
-let bXP=0, bXPNeeded=200;
+// ═══════════════════════════════════════════════════════════════════════════
+// WATER SORT PUZZLE
+// ═══════════════════════════════════════════════════════════════════════════
+const COLORS = {
+  red:    {bg:'#e74c3c',border:'#c0392b',label:'🔴'},
+  blue:   {bg:'#3498db',border:'#2980b9',label:'🔵'},
+  green:  {bg:'#2ecc71',border:'#27ae60',label:'🟢'},
+  yellow: {bg:'#f1c40f',border:'#f39c12',label:'🟡'},
+  purple: {bg:'#9b59b6',border:'#8e44ad',label:'🟣'},
+  orange: {bg:'#e67e22',border:'#d35400',label:'🟠'},
+  pink:   {bg:'#ff6b9d',border:'#e55a8d',label:'🩷'},
+  cyan:   {bg:'#00bcd4',border:'#0097a7',label:'🩵'},
+};
+const CKEYS=Object.keys(COLORS);
 
-function bRng(s){let r=s;return()=>{r=(r*1664525+1013904223)&0xffffffff;return(r>>>0)/0xffffffff;};}
+let wLevel=1, wMoves=0, wUndos=5;
+let wBottles=[], wSelected=-1, wHistory=[];
 
-const BPIECE_SHAPES=[
-  [[1]],
-  [[1,1]],[[1],[1]],
-  [[1,1,1]],[[1],[1],[1]],
-  [[1,1],[1,0]],[[1,0],[1,1]],[[0,1],[1,1]],[[1,1],[0,1]],
-  [[1,1],[1,1]],
-  [[1,1,1],[0,1,0]],[[0,1,0],[1,1,1]],[[1,0],[1,1],[0,1]],[[0,1],[1,1],[1,0]],
-  [[1,1,1],[1,0,0]],[[1,1,1],[0,0,1]],[[1,0,0],[1,1,1]],[[0,0,1],[1,1,1]],
-  [[1,1,1,1]],[[1],[1],[1],[1]],
-  [[1,1,1],[0,1,0],[0,1,0]],
+const WATER_LEVELS = [
+  // [bottles, colors per bottle (capacity), colors array (pre-shuffled)]
+  {bottles:5, cap:4, extra:1, colors:['red','red','red','red','blue','blue','blue','blue','green','green','green','green','yellow','yellow','yellow','yellow']},
+  {bottles:6, cap:4, extra:1, colors:['red','red','red','red','blue','blue','blue','blue','green','green','green','green','yellow','yellow','yellow','yellow','purple','purple','purple','purple']},
+  {bottles:7, cap:4, extra:1, colors:['red','red','red','red','blue','blue','blue','blue','green','green','green','green','yellow','yellow','yellow','yellow','purple','purple','purple','purple','orange','orange','orange','orange']},
+  {bottles:8, cap:4, extra:2, colors:['red','red','red','red','blue','blue','blue','blue','green','green','green','green','yellow','yellow','yellow','yellow','purple','purple','purple','purple','orange','orange','orange','orange']},
+  {bottles:9, cap:4, extra:2, colors:['red','red','red','red','blue','blue','blue','blue','green','green','green','green','yellow','yellow','yellow','yellow','purple','purple','purple','purple','orange','orange','orange','orange','pink','pink','pink','pink']},
 ];
 
-function bMakePiece(r){
-  const shape=BPIECE_SHAPES[Math.floor(r()*BPIECE_SHAPES.length)];
-  const col=BCOLORS_LIST[Math.floor(r()*BCOLORS_LIST.length)];
-  const hasStar=r()<0.15;
-  return{shape,col,hasStar,cells:shape.flatMap((row,ri)=>row.map((v,ci)=>v?{r:ri,c:ci}:null).filter(Boolean))};
-}
+function initWater(level) {
+  wLevel = level || wLevel;
+  wMoves = 0; wSelected = -1; wHistory = []; wUndos = 5;
+  document.getElementById('waterLevel').textContent = 'LV.'+wLevel;
+  document.getElementById('waterMoves').textContent = '0';
+  document.getElementById('undoCount').textContent = wUndos;
+  document.getElementById('waterOverlay').classList.remove('show');
 
-function initBlock(){
-  bGrid=Array.from({length:BGRID},()=>Array(BGRID).fill(null));
-  bScore=0;bStage=1;bMovesLeft=80;bXP=0;
-  const r=bRng(Date.now());
-  bPieces=[bMakePiece(r),bMakePiece(r),bMakePiece(r)];
-  bUpdateHUD();
-  bSetupCanvas();
-  bRenderPieces();
-  if(blockAnim)cancelAnimationFrame(blockAnim);
-  blockAnim=requestAnimationFrame(bLoop);
-  document.getElementById('blockOverlay').style.display='none';
-}
-window.initBlock=initBlock;
-
-function bSetupCanvas(){
-  const wrap=document.getElementById('blockScreen');
-  const hh=document.getElementById('blockHud').offsetHeight||40;
-  const ph=document.getElementById('blockPieces').offsetHeight||100;
-  const W=wrap.clientWidth,H=wrap.clientHeight-hh-ph;
-  BC.width=W;BC.height=H;BC.style.width=W+'px';BC.style.height=H+'px';
-}
-
-function bGridOrigin(){
-  const pad=Math.max(8,(BC.width-BGRID*BCELL)/2);
-  const gy=Math.max(8,(BC.height-BGRID*BCELL)/2);
-  return{ox:pad,oy:gy};
-}
-
-function bDraw(){
-  BX.clearRect(0,0,BC.width,BC.height);
-  const{ox,oy}=bGridOrigin();
-  // Board bg
-  BX.fillStyle='rgba(0,0,0,0.4)';
-  bBRR(BX,ox-6,oy-6,BGRID*BCELL+12,BGRID*BCELL+12,8);BX.fill();
-  // Grid cells
-  for(let r=0;r<BGRID;r++){
-    for(let c=0;c<BGRID;c++){
-      const x=ox+c*BCELL,y=oy+r*BCELL;
-      const v=bGrid[r][c];
-      if(v){bDrawGem(BX,x+2,y+2,BCELL-4,v.col,v.star);}
-      else{
-        BX.fillStyle='rgba(255,255,255,0.04)';
-        bBRR(BX,x+1,y+1,BCELL-2,BCELL-2,4);BX.fill();
-        BX.strokeStyle='rgba(255,255,255,0.06)';BX.lineWidth=1;BX.stroke();
-      }
-    }
-  }
-  // Drop preview
-  if(bDragPiece&&bDropRow>=0&&bDropCol>=0){
-    bDragPiece.cells.forEach(({r,c})=>{
-      const gr=bDropRow+r,gc=bDropCol+c;
-      if(gr>=0&&gr<BGRID&&gc>=0&&gc<BGRID){
-        const x=ox+gc*BCELL+2,y=oy+gr*BCELL+2;
-        BX.fillStyle=bValid?'rgba(255,255,255,0.25)':'rgba(255,60,60,0.2)';
-        bBRR(BX,x,y,BCELL-4,BCELL-4,4);BX.fill();
-      }
-    });
-  }
-  // Drag piece floating
-  if(bDragPiece){
-    BX.globalAlpha=0.85;
-    bDragPiece.cells.forEach(({r,c})=>{
-      bDrawGem(BX,bDragX+c*BCELL,bDragY+r*BCELL,BCELL-4,bDragPiece.col,bDragPiece.hasStar);
-    });
-    BX.globalAlpha=1;
-  }
-}
-
-function bDrawGem(ctx,x,y,sz,col,star){
-  const r=6;
-  // Shadow
-  ctx.shadowColor='rgba(0,0,0,0.4)';ctx.shadowBlur=4;ctx.shadowOffsetY=2;
-  // Main gem
-  const g=ctx.createLinearGradient(x,y,x+sz,y+sz);
-  g.addColorStop(0,bLighten(col,30));g.addColorStop(0.5,col);g.addColorStop(1,bDarken(col,20));
-  ctx.fillStyle=g;bBRR(ctx,x,y,sz,sz,r);ctx.fill();
-  ctx.shadowColor='transparent';
-  // Wooden border
-  const bg=ctx.createLinearGradient(x,y,x,y+sz);
-  bg.addColorStop(0,'rgba(200,140,60,0.8)');bg.addColorStop(1,'rgba(120,60,10,0.8)');
-  ctx.strokeStyle=bg;ctx.lineWidth=2.5;bBRR(ctx,x,y,sz,sz,r);ctx.stroke();
-  // Gloss
-  const gg=ctx.createRadialGradient(x+sz*0.3,y+sz*0.25,0,x+sz*0.5,y+sz*0.5,sz*0.6);
-  gg.addColorStop(0,'rgba(255,255,255,0.45)');gg.addColorStop(1,'rgba(255,255,255,0)');
-  ctx.fillStyle=gg;bBRR(ctx,x,y,sz,sz,r);ctx.fill();
-  // Star
-  if(star){
-    ctx.fillStyle='rgba(255,255,255,0.9)';
-    ctx.font=`bold ${sz*0.42}px Arial`;ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText('★',x+sz/2,y+sz/2);
-  }
-}
-
-function bBRR(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
-function bLighten(h,p){const n=parseInt(h.slice(1),16);return`rgb(${Math.min(255,((n>>16)&0xff)+p)},${Math.min(255,((n>>8)&0xff)+p)},${Math.min(255,(n&0xff)+p)})`;}
-function bDarken(h,p){return bLighten(h,-p);}
-
-function bLoop(){blockAnim=requestAnimationFrame(bLoop);bDraw();}
-
-function bRenderPieces(){
-  const el=document.getElementById('blockPieces');
-  el.innerHTML='';
-  bPieces.forEach((piece,idx)=>{
-    if(!piece){const ph=document.createElement('div');ph.style.width='80px';ph.style.height='80px';el.appendChild(ph);return;}
-    const cv=document.createElement('canvas');
-    const cols=piece.shape[0].length,rows=piece.shape.length;
-    const cs=24;
-    cv.width=cols*cs+4;cv.height=rows*cs+4;cv.style.cursor='grab';
-    cv.style.touchAction='none';
-    const cx2=cv.getContext('2d');
-    piece.cells.forEach(({r,c})=>bDrawGem(cx2,c*cs+2,r*cs+2,cs-2,piece.col,piece.hasStar));
-    // Drag from piece canvas
-    cv.addEventListener('pointerdown',e=>{
-      e.preventDefault();
-      bDragPiece={...piece,idx};
-      const rect=cv.getBoundingClientRect();
-      bDragOffX=e.clientX-rect.left-(cols*cs/2);
-      bDragOffY=e.clientY-rect.top-(rows*cs/2);
-      const bcRect=BC.getBoundingClientRect();
-      bDragX=e.clientX-bcRect.left-(cols*cs/2);
-      bDragY=e.clientY-bcRect.top-(rows*cs/2);
-      cv.setPointerCapture(e.pointerId);
-    });
-    cv.addEventListener('pointermove',e=>{
-      if(!bDragPiece||bDragPiece.idx!==idx)return;
-      e.preventDefault();
-      const bcRect=BC.getBoundingClientRect();
-      bDragX=e.clientX-bcRect.left-bDragOffX;
-      bDragY=e.clientY-bcRect.top-bDragOffY;
-      bCalcDrop();
-    });
-    cv.addEventListener('pointerup',e=>{
-      if(!bDragPiece||bDragPiece.idx!==idx)return;
-      e.preventDefault();
-      bTryPlace();
-      bDragPiece=null;bDropRow=-1;bDropCol=-1;
-    });
-    el.appendChild(cv);
-  });
-}
-
-function bCalcDrop(){
-  if(!bDragPiece)return;
-  const{ox,oy}=bGridOrigin();
-  const r=Math.round((bDragY-oy)/BCELL);
-  const c=Math.round((bDragX-ox)/BCELL);
-  bDropRow=r;bDropCol=c;
-  bValid=bDragPiece.cells.every(({r:dr,c:dc})=>{
-    const gr=r+dr,gc=c+dc;
-    return gr>=0&&gr<BGRID&&gc>=0&&gc<BGRID&&!bGrid[gr][gc];
-  });
-}
-
-function bTryPlace(){
-  if(!bValid||bDropRow<0)return;
-  const piece=bDragPiece;
-  piece.cells.forEach(({r,c})=>{
-    bGrid[bDropRow+r][bDropCol+c]={col:piece.col,star:piece.hasStar};
-  });
-  bScore+=piece.cells.length*10;
-  bMovesLeft--;
-  bXP+=piece.cells.length*5;
-  // Clear full rows/cols
-  bClearLines();
-  bPieces[piece.idx]=null;
-  if(bPieces.every(p=>!p)){const r=bRng(Date.now());bPieces=[bMakePiece(r),bMakePiece(r),bMakePiece(r)];}
-  // Check no moves
-  if(bMovesLeft<=0)setTimeout(bShowClear,400);
-  bUpdateHUD();
-  bRenderPieces();
-}
-
-function bClearLines(){
-  let cleared=0;
-  // Check rows
-  for(let r=0;r<BGRID;r++){
-    if(bGrid[r].every(c=>c)){bGrid[r]=Array(BGRID).fill(null);cleared++;}
-  }
-  // Check cols
-  for(let c=0;c<BGRID;c++){
-    if(bGrid.every(row=>row[c])){bGrid.forEach(row=>row[c]=null);cleared++;}
-  }
-  if(cleared>0)bScore+=cleared*cleared*50;
-}
-
-function bShowClear(){
-  bStage++;bXP+=100;
-  const ov=document.getElementById('blockOverlay');
-  document.getElementById('bo_icon').textContent='💎';
-  document.getElementById('bo_title').textContent='STAGE CLEAR!';
-  document.getElementById('bo_sub').textContent='Score: '+bScore+' — Next stage!';
-  document.getElementById('bo_btn').textContent='NEXT STAGE →';
-  document.getElementById('bo_btn').onclick=()=>{bMovesLeft=80+bStage*5;bUpdateHUD();ov.style.display='none';};
-  ov.style.display='flex';
-}
-
-function bUpdateHUD(){
-  document.getElementById('b_stage').textContent='LV.'+(bStage<10?'0'+bStage:bStage);
-  document.getElementById('b_score').textContent='💎 '+bScore;
-  document.getElementById('b_moves').textContent='🎯 '+bMovesLeft;
-  document.getElementById('b_xpBar').style.width=Math.min(100,bXP/bXPNeeded*100)+'%';
-}
-
-/* ══════════════════════════════════════════════════
-   ████████████  WATER SORT GAME  ████████████
-══════════════════════════════════════════════════ */
-const WC=document.getElementById('waterCanvas');
-const WX=WC.getContext('2d');
-let waterAnim=null;
-
-const WCAP=4; // layers per bottle
-const WCOLORS=['#e74c3c','#3498db','#f5c518','#2ecc71','#9b59b6','#e67e22','#1abc9c','#e91e63','#00bcd4','#ff5722'];
-const WNAMES=['Red','Blue','Yellow','Green','Purple','Orange','Teal','Pink','Cyan','DeepOrng'];
-
-let wBottles=[], wSelected=-1, wLevel=1, wHistory=[], wExtraAdded=false;
-let wBounce=[]; // animation bounce per bottle
-
-function wRng(s){let r=s;return()=>{r=(r*1664525+1013904223)&0xffffffff;return(r>>>0)/0xffffffff;};}
-
-function wGenLevel(lv){
-  const r=wRng(lv*999+7);
-  const numColors=Math.min(3+Math.floor(lv*0.8),8);
-  const numBottles=numColors+Math.min(2,Math.floor(lv/3)+1);
-  // Build full sorted bottles
-  const full=[];
-  for(let i=0;i<numColors;i++){for(let j=0;j<WCAP;j++)full.push(WCOLORS[i%WCOLORS.length]);}
+  const cfg = WATER_LEVELS[Math.min(wLevel-1, WATER_LEVELS.length-1)];
+  const colorArr = [...cfg.colors];
   // Shuffle
-  for(let i=full.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[full[i],full[j]]=[full[j],full[i]];}
-  const bottles=[];
-  for(let i=0;i<numColors;i++){bottles.push(full.slice(i*WCAP,(i+1)*WCAP));}
-  for(let i=0;i<numBottles-numColors;i++)bottles.push([]);
-  // Shuffle bottle order
-  for(let i=bottles.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[bottles[i],bottles[j]]=[bottles[j],bottles[i]];}
-  return bottles;
+  for(let i=colorArr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[colorArr[i],colorArr[j]]=[colorArr[j],colorArr[i]];}
+
+  wBottles = [];
+  let idx=0;
+  for(let b=0;b<cfg.bottles;b++){
+    const contents=[];
+    for(let c=0;c<cfg.cap;c++) if(idx<colorArr.length) contents.push(colorArr[idx++]);
+    wBottles.push({contents, cap:cfg.cap});
+  }
+  // Add empty extra bottles
+  for(let b=0;b<cfg.extra;b++) wBottles.push({contents:[], cap:cfg.cap});
+
+  renderWater();
 }
 
-function initWater(){
-  wLevel=1;wHistory=[];wExtraAdded=false;wSelected=-1;
-  wBottles=wGenLevel(wLevel);
-  wBounce=new Array(wBottles.length).fill(0);
-  document.getElementById('w_level').textContent='LEVEL '+wLevel;
-  wSetupCanvas();
-  document.getElementById('waterOverlay').style.display='none';
-  if(waterAnim)cancelAnimationFrame(waterAnim);
-  waterAnim=requestAnimationFrame(wLoop);
-}
-window.initWater=initWater;
-
-function waterReset(){wBottles=wGenLevel(wLevel);wHistory=[];wSelected=-1;wBounce=new Array(wBottles.length).fill(0);}
-window.waterReset=waterReset;
-function waterUndo(){
-  if(!wHistory.length)return;
-  wBottles=JSON.parse(wHistory.pop());wSelected=-1;
-}
-window.waterUndo=waterUndo;
-function waterAddBottle(){
-  if(wExtraAdded)return;
-  wExtraAdded=true;wBottles.push([]);wBounce.push(0);
-}
-window.waterAddBottle=waterAddBottle;
-
-function wSetupCanvas(){
-  const wrap=document.getElementById('waterScreen');
-  const hh=document.getElementById('waterHud').offsetHeight||50;
-  const W=wrap.clientWidth,H=wrap.clientHeight-hh;
-  WC.width=W;WC.height=H;WC.style.width=W+'px';WC.style.height=H+'px';
-}
-
-const BOTT_W=52,BOTT_H=120,BOTT_R=14;
-
-function wLayout(){
-  const n=wBottles.length;
-  const cols=Math.ceil(Math.sqrt(n*1.6));
-  const rows=Math.ceil(n/cols);
-  const padX=(WC.width-cols*(BOTT_W+18))/2+9;
-  const padY=(WC.height-rows*(BOTT_H+28))/2+14;
-  return{cols,rows,padX,padY};
-}
-
-function wBottlePos(idx){
-  const{cols,padX,padY}=wLayout();
-  const col=idx%cols,row=Math.floor(idx/cols);
-  return{x:padX+col*(BOTT_W+18),y:padY+row*(BOTT_H+28)};
-}
-
-function wDraw(){
-  WX.clearRect(0,0,WC.width,WC.height);
-  // Background
-  const bg=WX.createRadialGradient(WC.width/2,0,50,WC.width/2,WC.height/2,WC.width*0.8);
-  bg.addColorStop(0,'#1a0a40');bg.addColorStop(1,'#08041a');
-  WX.fillStyle=bg;WX.fillRect(0,0,WC.width,WC.height);
-  // Stars
-  WX.fillStyle='rgba(255,255,255,0.4)';
-  for(let i=0;i<40;i++){const sx=(i*137)%WC.width,sy=(i*97)%WC.height;WX.fillRect(sx,sy,1,1);}
-
-  wBottles.forEach((bot,idx)=>{
-    const{x,y}=wBottlePos(idx);
-    const bounce=wBounce[idx]||0;
-    const by=y-bounce;
-    wDrawBottle(WX,x,by,bot,idx===wSelected);
-    if(wBounce[idx]>0)wBounce[idx]=Math.max(0,wBounce[idx]-1.5);
-  });
-}
-
-function wDrawBottle(ctx,x,y,layers,selected){
-  const W2=BOTT_W,H2=BOTT_H,R2=BOTT_R;
-  ctx.save();
-  if(selected){ctx.shadowColor='rgba(255,230,50,0.8)';ctx.shadowBlur=18;}
-  // Bottle body outline (glass)
-  ctx.beginPath();
-  ctx.moveTo(x+R2,y);
-  ctx.lineTo(x+W2-R2,y);
-  ctx.quadraticCurveTo(x+W2,y,x+W2,y+R2);
-  ctx.lineTo(x+W2,y+H2-R2);
-  ctx.quadraticCurveTo(x+W2,y+H2,x+W2-R2,y+H2);
-  ctx.lineTo(x+R2,y+H2);
-  ctx.quadraticCurveTo(x,y+H2,x,y+H2-R2);
-  ctx.lineTo(x,y+R2);
-  ctx.quadraticCurveTo(x,y,x+R2,y);
-  ctx.closePath();
-  ctx.fillStyle='rgba(120,160,255,0.08)';ctx.fill();
-  ctx.strokeStyle=selected?'rgba(255,230,50,0.9)':'rgba(180,200,255,0.35)';
-  ctx.lineWidth=selected?2.5:1.8;ctx.stroke();
-  ctx.restore();
-
-  // Color layers (bottom to top in array, draw bottom-up)
-  const layerH=(H2-8)/WCAP;
-  layers.forEach((col,li)=>{
-    const ly=y+H2-layerH*(li+1)-4;
-    ctx.save();
-    // Clip to bottle interior
-    ctx.beginPath();
-    ctx.moveTo(x+R2,y+2);ctx.lineTo(x+W2-R2,y+2);
-    ctx.quadraticCurveTo(x+W2-2,y+2,x+W2-2,y+R2);
-    ctx.lineTo(x+W2-2,y+H2-R2);ctx.quadraticCurveTo(x+W2-2,y+H2-2,x+W2-R2,y+H2-2);
-    ctx.lineTo(x+R2,y+H2-2);ctx.quadraticCurveTo(x+2,y+H2-2,x+2,y+H2-R2);
-    ctx.lineTo(x+2,y+R2);ctx.quadraticCurveTo(x+2,y+2,x+R2,y+2);
-    ctx.closePath();ctx.clip();
-    // Cylinder gradient for each layer
-    const lg=ctx.createLinearGradient(x+4,ly,x+W2-4,ly);
-    lg.addColorStop(0,wLighten(col,25));lg.addColorStop(0.3,col);
-    lg.addColorStop(0.7,col);lg.addColorStop(1,wDarken(col,20));
-    ctx.fillStyle=lg;
-    const topR=li===layers.length-1?8:0;
-    ctx.beginPath();
-    if(topR>0){ctx.moveTo(x+4+topR,ly);ctx.lineTo(x+W2-4-topR,ly);ctx.quadraticCurveTo(x+W2-4,ly,x+W2-4,ly+topR);ctx.lineTo(x+W2-4,ly+layerH);ctx.lineTo(x+4,ly+layerH);ctx.lineTo(x+4,ly+topR);ctx.quadraticCurveTo(x+4,ly,x+4+topR,ly);}
-    else{ctx.fillRect(x+4,ly,W2-8,layerH+1);}
-    ctx.fill();
-    // Gloss on top layer
-    if(li===layers.length-1){
-      const gg=ctx.createLinearGradient(x+4,ly,x+4,ly+layerH*0.5);
-      gg.addColorStop(0,'rgba(255,255,255,0.3)');gg.addColorStop(1,'rgba(255,255,255,0)');
-      ctx.fillStyle=gg;ctx.fillRect(x+4,ly,W2-8,layerH*0.5);
+function renderWater() {
+  const el=document.getElementById('waterBottles');
+  el.innerHTML='';
+  wBottles.forEach((b,i)=>{
+    const div=document.createElement('div');
+    div.className='w-bottle'+(i===wSelected?' selected':'')+(waterIsComplete(b)?' completed':'');
+    div.style.height=(b.cap*28+4)+'px';
+    div.style.width='36px';
+    // Render layers bottom-to-top (flex-direction:column-reverse)
+    for(let j=0;j<b.contents.length;j++){
+      const layer=document.createElement('div');
+      layer.className='w-layer';
+      layer.style.height='24px';
+      layer.style.background=COLORS[b.contents[j]].bg;
+      layer.style.borderBottom=(j===0?'none':'1px solid rgba(0,0,0,0.15)');
+      div.appendChild(layer);
     }
-    ctx.restore();
+    div.addEventListener('click',()=>waterTap(i));
+    el.appendChild(div);
   });
-
-  // Bottle neck cap
-  const capW=W2*0.55,capH=12;
-  const capX=x+(W2-capW)/2;
-  ctx.save();
-  ctx.fillStyle='rgba(120,160,255,0.12)';
-  ctx.strokeStyle=selected?'rgba(255,230,50,0.9)':'rgba(180,200,255,0.35)';
-  ctx.lineWidth=selected?2.5:1.8;
-  ctx.beginPath();ctx.moveTo(capX+5,y-capH);ctx.lineTo(capX+capW-5,y-capH);
-  ctx.quadraticCurveTo(capX+capW,y-capH,capX+capW,y-capH+5);
-  ctx.lineTo(capX+capW,y);ctx.lineTo(capX,y);
-  ctx.lineTo(capX,y-capH+5);ctx.quadraticCurveTo(capX,y-capH,capX+5,y-capH);
-  ctx.closePath();ctx.fill();ctx.stroke();
-  ctx.restore();
-
-  // Done indicator
-  if(layers.length===WCAP&&layers.every(c=>c===layers[0])){
-    ctx.save();
-    ctx.shadowColor=wLighten(layers[0],50);ctx.shadowBlur=15;
-    ctx.strokeStyle='rgba(255,255,255,0.8)';ctx.lineWidth=2;
-    ctx.beginPath();ctx.arc(x+W2/2,y-capH-12,8,0,Math.PI*2);ctx.stroke();
-    ctx.fillStyle='rgba(80,255,80,0.9)';
-    ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText('✓',x+W2/2,y-capH-12);
-    ctx.restore();
-  }
 }
 
-WC.addEventListener('pointerdown',wTap);
-function wTap(e){
-  e.preventDefault();
-  const rect=WC.getBoundingClientRect();
-  const mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  // Find tapped bottle
-  let hit=-1;
-  wBottles.forEach((_,idx)=>{
-    const{x,y}=wBottlePos(idx);
-    if(mx>=x-4&&mx<=x+BOTT_W+4&&my>=y-20&&my<=y+BOTT_H+4)hit=idx;
-  });
-  if(hit<0){wSelected=-1;return;}
-  if(wSelected<0){
-    if(wBottles[hit].length>0)wSelected=hit;
-    return;
-  }
-  if(wSelected===hit){wSelected=-1;return;}
-  // Try pour
-  const src=wBottles[wSelected],dst=wBottles[hit];
-  if(src.length===0){wSelected=hit;return;}
-  const topColor=src[src.length-1];
-  const canPour=dst.length<WCAP&&(dst.length===0||dst[dst.length-1]===topColor);
-  if(canPour){
-    wHistory.push(JSON.stringify(wBottles));
-    // Pour all matching top colors
-    let count=0;
-    while(src.length>0&&src[src.length-1]===topColor&&dst.length<WCAP){dst.push(src.pop());count++;}
-    wBounce[hit]=12;
+function waterIsComplete(b){
+  return b.contents.length===b.cap && b.contents.every(c=>c===b.contents[0]);
+}
+
+function waterTap(i) {
+  if(wSelected===-1){
+    if(wBottles[i].contents.length===0) return; // can't select empty
+    wSelected=i;
+    document.getElementById('waterInstruction').textContent='Now tap the destination bottle';
+  } else if(wSelected===i){
     wSelected=-1;
-    if(wCheckWin())setTimeout(wShowClear,600);
+    document.getElementById('waterInstruction').textContent='Tap a bottle to select, then tap destination';
   } else {
-    wSelected=hit;
-    wBounce[hit]=8;
+    // Try to pour from wSelected to i
+    if(waterCanPour(wSelected,i)){
+      wHistory.push(JSON.parse(JSON.stringify(wBottles)));
+      waterPour(wSelected,i);
+      wMoves++; document.getElementById('waterMoves').textContent=wMoves;
+    }
+    wSelected=-1;
+    document.getElementById('waterInstruction').textContent='Tap a bottle to select, then tap destination';
+    // Check win
+    setTimeout(()=>{
+      if(wBottles.every(b=>b.contents.length===0||waterIsComplete(b))){
+        document.getElementById('waterOSub').textContent='Level '+wLevel+' complete in '+wMoves+' moves!';
+        document.getElementById('waterOverlay').classList.add('show');
+        wLevel++;
+      }
+    },300);
+  }
+  renderWater();
+}
+
+function waterCanPour(from,to){
+  const src=wBottles[from], dst=wBottles[to];
+  if(src.contents.length===0) return false;
+  if(dst.contents.length===dst.cap) return false;
+  const srcTop=src.contents[src.contents.length-1];
+  if(dst.contents.length>0 && dst.contents[dst.contents.length-1]!==srcTop) return false;
+  return true;
+}
+
+function waterPour(from,to){
+  const src=wBottles[from], dst=wBottles[to];
+  const color=src.contents[src.contents.length-1];
+  // Pour all matching top colors
+  while(src.contents.length>0 && src.contents[src.contents.length-1]===color && dst.contents.length<dst.cap){
+    dst.contents.push(src.contents.pop());
   }
 }
 
-function wCheckWin(){
-  return wBottles.every(b=>b.length===0||(b.length===WCAP&&b.every(c=>c===b[0])));
+function waterUndo(){
+  if(wHistory.length===0||wUndos<=0) return;
+  wBottles=JSON.parse(JSON.stringify(wHistory.pop()));
+  wSelected=-1; wUndos--;
+  document.getElementById('undoCount').textContent=wUndos;
+  renderWater();
+}
+function waterRestart(){ initWater(wLevel); }
+function waterNextLevel(){ initWater(wLevel); }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BLOCK GEM PUZZLE (Match-3 style)
+// ═══════════════════════════════════════════════════════════════════════════
+const GEM_COLS = ['#e74c3c','#3498db','#2ecc71','#f1c40f','#9b59b6','#e67e22'];
+const GEM_EMOJI = ['💎','💠','💚','💛','💜','🧡'];
+const GRID_COLS = 7, GRID_ROWS = 7;
+
+let gLevel=1, gScore=0, gCombo=0, gTarget=0;
+let gGrid=[], gSelected=-1, gAnimating=false;
+
+function initGem(level){
+  gLevel=level||gLevel; gScore=0; gCombo=0; gSelected=-1;
+  gTarget=gLevel*15+20;
+  document.getElementById('gemLevel').textContent='LV.'+gLevel;
+  document.getElementById('gemScore').textContent='💎 0';
+  document.getElementById('comboDisplay').style.display='none';
+  document.getElementById('gemOverlay').classList.remove('show');
+  gGrid=[];
+  for(let i=0;i<GRID_ROWS*GRID_COLS;i++) gGrid.push(Math.floor(Math.random()*Math.min(4+Math.floor(gLevel/2),6)));
+  // Ensure no initial matches
+  for(let pass=0;pass<5;pass++){
+    for(let r=0;r<GRID_ROWS;r++){
+      for(let c=0;c<GRID_COLS;c++){
+        const idx=r*GRID_COLS+c;
+        const matches=gemFindMatchAt(r,c,gGrid[idx]);
+        if(matches.length>=3){gGrid[idx]=Math.floor(Math.random()*Math.min(4+Math.floor(gLevel/2),6));}
+      }
+    }
+  }
+  renderGem();
 }
 
-function wShowClear(){
-  const ov=document.getElementById('waterOverlay');
-  document.getElementById('wo_icon').textContent='🎉';
-  document.getElementById('wo_title').textContent='LEVEL CLEAR!';
-  document.getElementById('wo_sub').textContent='Level '+wLevel+' solved!';
-  document.getElementById('wo_btn').textContent='NEXT LEVEL →';
-  document.getElementById('wo_btn').onclick=()=>{wLevel++;wHistory=[];wExtraAdded=false;wSelected=-1;wBottles=wGenLevel(wLevel);wBounce=new Array(wBottles.length).fill(0);document.getElementById('w_level').textContent='LEVEL '+wLevel;ov.style.display='none';};
-  ov.style.display='flex';
+function renderGem(){
+  const board=document.getElementById('gemBoard');
+  const content=document.getElementById('gemContent');
+  const size=Math.min(Math.floor((content.clientWidth-20)/GRID_COLS), Math.floor((content.clientHeight-20)/GRID_ROWS));
+  const cellSize=Math.max(36,Math.min(52,size));
+  board.style.gridTemplateColumns=`repeat(${GRID_COLS},${cellSize}px)`;
+  board.style.gridTemplateRows=`repeat(${GRID_ROWS},${cellSize}px)`;
+  board.innerHTML='';
+  gGrid.forEach((gem,i)=>{
+    const cell=document.createElement('div');
+    cell.className='gem-cell'+(i===gSelected?' selected':'');
+    cell.style.background=GEM_COLORS_LIGHT[gem]||'#333';
+    cell.style.width=cellSize+'px';
+    cell.style.height=cellSize+'px';
+    cell.style.fontSize=Math.floor(cellSize*0.5)+'px';
+    cell.textContent=GEM_EMOJI[gem]||'💎';
+    cell.addEventListener('click',()=>gemTap(i));
+    board.appendChild(cell);
+  });
+}
+const GEM_COLORS_LIGHT=['rgba(231,76,60,0.25)','rgba(52,152,219,0.25)','rgba(46,204,113,0.25)','rgba(241,196,15,0.25)','rgba(155,89,182,0.25)','rgba(230,126,34,0.25)'];
+
+function gemTap(i){
+  if(gAnimating) return;
+  const r=Math.floor(i/GRID_COLS), c=i%GRID_COLS;
+  if(gSelected===-1){
+    gSelected=i; renderGem();
+  } else if(gSelected===i){
+    gSelected=-1; renderGem();
+  } else {
+    const sr=Math.floor(gSelected/GRID_COLS), sc=gSelected%GRID_COLS;
+    // Only allow adjacent swaps
+    if(Math.abs(sr-r)+Math.abs(sc-c)===1){
+      // Swap
+      [gGrid[gSelected],gGrid[i]]=[gGrid[i],gGrid[gSelected]];
+      const matches=gemFindAllMatches();
+      if(matches.length===0){
+        // Swap back
+        [gGrid[gSelected],gGrid[i]]=[gGrid[i],gGrid[gSelected]];
+        gSelected=-1; renderGem(); return;
+      }
+      gSelected=-1;
+      gCombo=1;
+      gemProcessMatches(matches);
+    } else {
+      gSelected=i; renderGem();
+    }
+  }
 }
 
-function wLoop(){waterAnim=requestAnimationFrame(wLoop);wDraw();}
-function wLighten(h,p){const n=parseInt(h.slice(1),16);return`rgb(${Math.min(255,((n>>16)&0xff)+p)},${Math.min(255,((n>>8)&0xff)+p)},${Math.min(255,(n&0xff)+p)})`;}
-function wDarken(h,p){return wLighten(h,-p);}
+function gemFindMatchAt(r,c,gem){
+  const all=[]; const idx=r*GRID_COLS+c;
+  // Horizontal
+  let h=[idx];
+  for(let dc=1;c+dc<GRID_COLS&&gGrid[(r)*GRID_COLS+(c+dc)]===gem;dc++) h.push(r*GRID_COLS+(c+dc));
+  for(let dc=1;c-dc>=0&&gGrid[(r)*GRID_COLS+(c-dc)]===gem;dc++) h.push(r*GRID_COLS+(c-dc));
+  if(h.length>=3) h.forEach(x=>all.push(x));
+  // Vertical
+  let v=[idx];
+  for(let dr=1;r+dr<GRID_ROWS&&gGrid[(r+dr)*GRID_COLS+c]===gem;dr++) v.push((r+dr)*GRID_COLS+c);
+  for(let dr=1;r-dr>=0&&gGrid[(r-dr)*GRID_COLS+c]===gem;dr++) v.push((r-dr)*GRID_COLS+c);
+  if(v.length>=3) v.forEach(x=>all.push(x));
+  return [...new Set(all)];
+}
 
-// Resize handler
-window.addEventListener('resize',()=>{
-  if(document.getElementById('poolScreen').classList.contains('active'))setupPoolCanvas();
-  if(document.getElementById('blockScreen').classList.contains('active'))bSetupCanvas();
-  if(document.getElementById('waterScreen').classList.contains('active'))wSetupCanvas();
-});
+function gemFindAllMatches(){
+  const matched=new Set();
+  for(let r=0;r<GRID_ROWS;r++){
+    for(let c=0;c<GRID_COLS;c++){
+      const m=gemFindMatchAt(r,c,gGrid[r*GRID_COLS+c]);
+      m.forEach(x=>matched.add(x));
+    }
+  }
+  return [...matched];
+}
 
-})();
+function gemProcessMatches(matches){
+  if(matches.length===0){gCombo=0;gAnimating=false;renderGem();return;}
+  gAnimating=true;
+  const pts=matches.length*(gCombo>1?gCombo*2:1)*10;
+  gScore+=pts; gCombo++;
+  if(gCombo>2){
+    const cd=document.getElementById('comboDisplay');
+    cd.style.display='block';cd.textContent=`🔥 COMBO x${gCombo-1}`;
+    setTimeout(()=>cd.style.display='none',1500);
+  }
+  document.getElementById('gemScore').textContent='💎 '+gScore;
+  // Mark cells for destruction
+  const board=document.getElementById('gemBoard');
+  matches.forEach(i=>{
+    const cell=board.children[i];
+    if(cell){cell.classList.add('destroying');}
+    gGrid[i]=-1;
+  });
+  setTimeout(()=>{
+    // Drop gems down
+    for(let c=0;c<GRID_COLS;c++){
+      const col=[];
+      for(let r=GRID_ROWS-1;r>=0;r--){const v=gGrid[r*GRID_COLS+c];if(v>=0)col.push(v);}
+      while(col.length<GRID_ROWS) col.push(Math.floor(Math.random()*Math.min(4+Math.floor(gLevel/2),6)));
+      for(let r=GRID_ROWS-1;r>=0;r--) gGrid[r*GRID_COLS+c]=col[GRID_ROWS-1-r];
+    }
+    renderGem();
+    // Check new matches
+    setTimeout(()=>{
+      const newMatches=gemFindAllMatches();
+      if(newMatches.length>0) gemProcessMatches(newMatches);
+      else {gAnimating=false; gCombo=0;}
+    },100);
+    // Check level complete
+    if(gScore>=gTarget){
+      setTimeout(()=>{
+        document.getElementById('gemOSub').textContent='Target '+gTarget+' pts — Score: '+gScore;
+        document.getElementById('gemOBtn').onclick=()=>{gLevel++;initGem(gLevel);};
+        document.getElementById('gemOverlay').classList.add('show');
+        gAnimating=false;
+      },500);
+    }
+  },280);
+}
+
+// Set up gem overlay btn
+document.getElementById('gemOBtn').onclick=()=>{gLevel++;initGem(gLevel);};
 </script>
 </body>
 </html>

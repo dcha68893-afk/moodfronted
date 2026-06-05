@@ -5622,23 +5622,7 @@
                         _fwdIncomingLogged.add(callKey);
                         console.log('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
                     }
-                    // CRITICAL FIX: Forward to calls iframe so receiver sees incoming screen
-                    const callsFrame = document.getElementById('callsIframe');
-                    if (callsFrame && callsFrame.contentWindow) {
-                        callsFrame.contentWindow.postMessage(
-                            { type: 'CALL_INCOMING', payload, source: 'ws-bridge' }, '*'
-                        );
-                    }
-                    // Also postMessage to ALL iframes (calls might not be active iframe)
-                    document.querySelectorAll('iframe').forEach(function(f) {
-                        try { f.contentWindow.postMessage({ type: 'CALL_INCOMING', payload, source: 'ws-bridge' }, '*'); } catch(_) {}
-                    });
-                    // Show banner on parent shell
                     if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
-                    // Navigate to calls page so user sees the incoming screen
-                    if (typeof navigateToPage === 'function') {
-                        navigateToPage('calls');
-                    }
                 }
                 function _fwdAccepted(callData) {
                     hideGlobalBanner();
@@ -5773,9 +5757,43 @@
                 // Tracks which socket event triggered _fwdNewMessage so echo prevention
                 // can be skipped for recipient-only events (receive_message / message:received).
                 let _fwdNewMessageSourceEvent = null;
+                // ── RECEIVER FIX: Queue messages that arrive before the iframe is ready ──
+                // Without this, messages sent to the receiver while messagesIframe is still
+                // loading are silently dropped — the receiver never sees them.
+                var _msgQueue = [];
+                var _msgQueueFlushing = false;
+                function _flushMsgQueue() {
+                    if (_msgQueueFlushing) return;
+                    _msgQueueFlushing = true;
+                    var q = _msgQueue.splice(0);
+                    q.forEach(function(item) {
+                        _fwdNewMessageSourceEvent = item.src;
+                        _fwdNewMessage(item.payload);
+                    });
+                    _msgQueueFlushing = false;
+                }
+                // Flush queue whenever messagesIframe posts its ready signal
+                window.addEventListener('message', function(ev) {
+                    if (ev.data && (ev.data.type === 'MESSAGES_IFRAME_READY' || ev.data.type === 'FRAME_READY') && _msgQueue.length > 0) {
+                        setTimeout(_flushMsgQueue, 80);
+                    }
+                });
                 function _fwdNewMessage(payload) {
                     const msgIframe = document.getElementById('messagesIframe');
-                    if (!msgIframe || !msgIframe.contentWindow) return;
+                    if (!msgIframe || !msgIframe.contentWindow) {
+                        // Queue for delivery once iframe is ready, retry every 400ms up to 10s
+                        if (!_msgQueueFlushing) {
+                            _msgQueue.push({ payload: payload, src: _fwdNewMessageSourceEvent });
+                            var _qRetries = 0;
+                            var _qTimer = setInterval(function() {
+                                _qRetries++;
+                                var fi = document.getElementById('messagesIframe');
+                                if (fi && fi.contentWindow) { clearInterval(_qTimer); _flushMsgQueue(); }
+                                else if (_qRetries > 25) clearInterval(_qTimer); // give up after 10s
+                            }, 400);
+                        }
+                        return;
+                    }
 
                     // FIXED ECHO PREVENTION:
                     // receive_message / message:received are recipient-only socket events — skip echo check.
@@ -5817,19 +5835,6 @@
                         }
                     }
                     _fwdNewMessageSourceEvent = null;
-
-                    // CRITICAL FIX: If sender is NOT current user, always deliver immediately
-                    // This is User B receiving User A's message — never suppress it
-                    const _incomingSenderId = payload && (payload.senderId || (payload.sender && payload.sender.id));
-                    if (_incomingSenderId && cachedUserId && String(_incomingSenderId) !== String(cachedUserId)) {
-                        const _directEnriched = { ...payload };
-                        if (!_directEnriched.chatId && _directEnriched.conversationId) _directEnriched.chatId = _directEnriched.conversationId;
-                        const _msgIframe2 = document.getElementById('messagesIframe');
-                        if (_msgIframe2 && _msgIframe2.contentWindow) {
-                            _msgIframe2.contentWindow.postMessage({ type: 'message:new', payload: _directEnriched, source: 'ws-bridge-direct' }, '*');
-                        }
-                        return;
-                    }
 
                     // FIXED: Enrich payload — ensure chatId is always present.
                     const _enriched = { ...payload };
@@ -6240,6 +6245,41 @@
             // This covers Socket.IO reconnects — after a reconnect the event fires again
             // and listeners must be re-registered on the new socket.
             window.addEventListener('kyn:realtimeReady', function() {
+                // ── FIX: Remove all previous listeners before re-binding ──────
+                // Without this, every reconnect stacks duplicate handlers causing
+                // the receiver to get double/triple events and ghost messages.
+                if (window.wsService && typeof window.wsService.off === 'function') {
+                    const _rebindEvents = [
+                        'call:incoming','incoming_call','call_incoming',
+                        'call:answered','call:accepted','call_accepted','call_answered',
+                        'call:rejected','call_rejected','call:ended','call_ended',
+                        'call_force_ended','call:force_end','call:force_ended',
+                        'call:cancelled','call_cancelled',
+                        'call_participant_joined','call:participant_joined',
+                        'call_participant_left','call:participant_left',
+                        'call_offer','call_answer','ice_candidate',
+                        'call:offer','call:answer','call:ice_candidate',
+                        'webrtc:signal','webrtc_signal',
+                        'message:sent','message_sent',
+                        'message:new','new_message','newMessage','chat:message',
+                        'receive_message','message:received',
+                        'message:delivered','message_delivered',
+                        'message:read','message_read',
+                        'user:online','user:offline','presence:update',
+                        'message:deleted','message_deleted',
+                        'message:reaction','message_reaction',
+                        'group:created','group_created','group:message','group_message',
+                        'group:reaction','group:message:deleted','group:message:edited',
+                        'group:localSync','group:updated','group:membership_change',
+                        'group:member:added','group:member:removed','group:refresh_needed',
+                        'GROUP_MEMBER_ADDED','group:member:left','group:member:joined',
+                        'group:joined','group_joined','group:invitation:received','group:typing',
+                        'friend:online','friend:offline','friend:typing','friend:block','friend:mute'
+                    ];
+                    _rebindEvents.forEach(function(ev) {
+                        try { window.wsService.off(ev); } catch(_) {}
+                    });
+                }
                 _wsCallListenersBound = false; // allow re-bind with the real service
                 _bindWsCallListeners();
 
