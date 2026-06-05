@@ -66,3 +66,7 @@ coverage/
 
 # Optional eslint cache
 .eslintcache
+
+# Dead/empty files (Forensic Audit cleanup)
+js/part1.js
+origin chat.html

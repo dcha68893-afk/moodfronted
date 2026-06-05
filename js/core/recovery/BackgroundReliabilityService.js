@@ -198,6 +198,16 @@
         if (type === 'sw:push_received') {
           window.KynectaEventBus?.emit('PUSH_NOTIFICATION', payload, { async: true });
         }
+        // FIX (Forensic Audit P3): Handle background sync flush trigger from SW
+        if (type === 'FLUSH_OFFLINE_QUEUE') {
+          console.log('[BackgroundReliabilityService] Background sync flush triggered by SW');
+          window.__OfflineMessageQueue?.flushAll?.().catch(() => {});
+          window.__KynectaOfflineQueue?.flushAll?.().catch?.(() => {});
+          window.KynectaEventBus?.emit('OFFLINE_QUEUE_FLUSH_REQUESTED', { source: 'background-sync' }, { async: true });
+        }
+        if (type === 'SYNC_STATUS_UPDATES') {
+          window.KynectaEventBus?.emit('STATUS_SYNC_REQUESTED', { source: 'background-sync' }, { async: true });
+        }
       });
     }
   }

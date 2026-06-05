@@ -722,10 +722,61 @@ async function cleanupOldEntries() {
   }
 }
 
+// FIX (Forensic Audit P3): Background Sync for offline queue replay.
+// Previously the service worker had no sync event handler, so queued messages
+// were only replayed when the user actively reopened the app. With background
+// sync, the browser wakes the SW when connectivity returns (even if the tab
+// is closed) and triggers a flush of the pending message queue.
+self.addEventListener('sync', function(event) {
+  console.log('[SW] Background sync event:', event.tag);
+
+  if (event.tag === 'offline-message-queue') {
+    event.waitUntil(
+      // Notify the main window to replay offline queue.
+      // If no window is available (tab closed), the sync is retried by the browser.
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then(function(clients) {
+          if (clients.length === 0) {
+            // No window open — re-queue for next wake-up
+            console.log('[SW] No clients open for sync — will retry');
+            return;
+          }
+          // Signal first available client to flush its queue
+          var target = clients.find(function(c) { return c.focused; }) || clients[0];
+          target.postMessage({ type: 'FLUSH_OFFLINE_QUEUE', source: 'background-sync' });
+          console.log('[SW] Sent FLUSH_OFFLINE_QUEUE to client:', target.url);
+        })
+        .catch(function(err) {
+          console.warn('[SW] Background sync error:', err);
+        })
+    );
+  }
+
+  if (event.tag === 'offline-status-sync') {
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window' }).then(function(clients) {
+        clients.forEach(function(c) {
+          c.postMessage({ type: 'SYNC_STATUS_UPDATES', source: 'background-sync' });
+        });
+      })
+    );
+  }
+});
+
 // Also allow manual trigger from the page
 self.addEventListener('message', function(event) {
   if (event.data && event.data.type === 'RUN_CLEANUP') {
     event.waitUntil(cleanupOldEntries());
+  }
+
+  // FIX (Forensic Audit P3): Allow app to register background sync from within the SW context
+  if (event.data && event.data.type === 'REGISTER_BACKGROUND_SYNC') {
+    const tag = event.data.tag || 'offline-message-queue';
+    self.registration.sync.register(tag).then(function() {
+      console.log('[SW] Background sync registered:', tag);
+    }).catch(function(err) {
+      console.warn('[SW] Background sync registration failed:', tag, err);
+    });
   }
 });
 

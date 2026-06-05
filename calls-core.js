@@ -4793,7 +4793,10 @@ function applySession(sessionData) {
 
 
 
-            groupCalls: false,
+            // FIX (Forensic Audit P1): groupCalls was hard-blocked (false) with no activation
+            // path, making group calls unavailable to all users. Enabled by default.
+            // Premium gate retained only for advanced features (whiteboard, polls).
+            groupCalls: true,
 
 
 
@@ -34796,11 +34799,12 @@ clearActiveCall: function() {
 
 
 
+            // FIX (Forensic Audit P1): Premium gate removed. groupCalls.enabled=true by default.
+            // Keep gate logic for future premium-only features but not group calls.
             if (!callsState.isPremium && !callsState.premiumFeatures.groupCalls) {
-
-
-
-                notifyListeners('premium_required', { feature: 'groupCalls' });
+                // groupCalls is now always true; this branch should not be reached.
+                // Log warning in case premiumFeatures gets set externally to false.
+                console.warn('[Calls] groupCalls gate triggered but should be open — check premiumFeatures state');
 
 
 

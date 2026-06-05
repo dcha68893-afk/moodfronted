@@ -1881,13 +1881,89 @@ function handlePongMessage(message) {
 }
 
 // =============================================
-// PLACEHOLDER HANDLERS TO PREVENT UNDEFINED ERRORS
+// SESSION SYNC HANDLERS (FIX: Forensic Audit P2 — were empty stubs)
 // =============================================
-function handleSessionData(message) {}
-function handleModuleRegisteredMessage(message) {}
-function handleSessionSyncMessage(message) {}
-function handleSessionUpdateMessage(message) {}
-function handleSessionInvalidatedMessage(message) {}
+
+function handleSessionData(message) {
+    // Initial session delivery from parent frame on load
+    const sessionData = message?.session || message?.data?.session || message?.data || message;
+    if (!sessionData) return;
+    const token  = sessionData.token || sessionData.accessToken;
+    const user   = sessionData.user  || (sessionData.id ? sessionData : null);
+    const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3_600_000);
+    if (token || user) {
+        window.session = window.session || {};
+        if (token)  { window.session.token     = token; }
+        if (user)   { window.session.user      = typeof user === 'object' ? { ...user } : user;
+                      window.currentUser       = window.session.user; }
+        if (expiry) { window.session.expiresAt = expiry; }
+        window.parentSessionReceived  = true;
+        window.sessionValidated       = true;
+        window.__SETTINGS_SESSION_ACTIVE__ = true;
+    }
+}
+
+function handleModuleRegisteredMessage(message) {
+    // Parent confirms this module has been registered — safe to request data
+    window.__statusModuleRegistered = true;
+    // Re-request any pending status data now that the channel is confirmed open
+    if (window.__statusPendingLoad) {
+        window.__statusPendingLoad = false;
+        window.dispatchEvent(new CustomEvent('status:requestInitialLoad', { detail: {} }));
+    }
+}
+
+function handleSessionSyncMessage(message) {
+    // Parent is syncing session state (e.g. after a token refresh or tab focus)
+    const sessionData = message?.session || message?.data?.session || message?.data || message;
+    if (!sessionData) return;
+    const token = sessionData.token || sessionData.accessToken;
+    const user  = sessionData.user  || (sessionData.id ? sessionData : null);
+    if (!token && !user) return;
+    window.session = window.session || {};
+    if (token) { window.session.token = token; }
+    if (user)  {
+        window.session.user  = typeof user === 'object' ? { ...user } : user;
+        window.currentUser   = window.session.user;
+        currentUser          = window.session.user;
+    }
+    window.session.expiresAt = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3_600_000);
+    window.__SETTINGS_SESSION_ACTIVE__ = true;
+    // Re-render in case the user object changed (e.g. avatar or displayName updated)
+    window.dispatchEvent(new CustomEvent('status:sessionRefreshed', {
+        detail: { userId: window.session.user?.id, token: !!token }
+    }));
+}
+
+function handleSessionUpdateMessage(message) {
+    // A field-level session update (e.g. user changed their avatar or name)
+    const update = message?.update || message?.data?.update || message?.data || {};
+    if (!window.session?.user) return;
+    window.session.user = Object.assign({}, window.session.user, update);
+    window.currentUser  = window.session.user;
+    currentUser         = window.session.user;
+    // Propagate into any visible status UI
+    window.dispatchEvent(new CustomEvent('status:userUpdated', {
+        detail: { user: window.session.user }
+    }));
+}
+
+function handleSessionInvalidatedMessage(message) {
+    // Parent signals that the current session is no longer valid (logout / expiry)
+    window.session = { token: null, user: null, expiresAt: 0, version: 0 };
+    window.currentUser  = null;
+    currentUser         = null;
+    window.parentSessionReceived          = false;
+    window.sessionValidated               = false;
+    window.__SETTINGS_SESSION_ACTIVE__    = false;
+    window.__statusModuleRegistered       = false;
+    // Clear any cached status data that may contain PII
+    try {
+        const keysToRemove = Object.keys(sessionStorage).filter(k => k.startsWith('status_'));
+        keysToRemove.forEach(k => sessionStorage.removeItem(k));
+    } catch(_) {}
+    window.dispatchEvent(new CustomEvent('status:sessionInvalidated', { detail: {} }));
+}
 function handleSettingsLoadResponseMessage(message) {
     // Settings data returned from parent's cache/backend — merge into SettingsState
     const settings = message?.settings || message?.data?.settings || message?.data || null;

@@ -40,7 +40,7 @@
     // ── Phase 2: Hybrid Transport ────────────────────────────────────────
     'network/HybridTransportEngine.js',
     'network/LANCommunicationEngine.js',
-    'network/MeshRelayEngine.js',
+    'network/MeshRelayEngine.js',        // lightweight relay engine (always loaded)
     'queue/OfflineMessageQueue.js',
     'realtime/ReliableDeliveryEngine.js',
     'realtime/RealtimeSyncEngine.js',
@@ -78,6 +78,18 @@
     '/js/transport/HybridTransportRuntime.js',
   ];
 
+  // FIX (Forensic Audit P3): Rich /mesh/ engine — crypto, transport, router, orchestrator.
+  // Previously only the lightweight MeshRelayEngine was loaded; the full E2EE mesh stack
+  // in /mesh/ was never initialized. Load order matters: crypto → transport → router → engine.
+  // mesh-messages-bridge.js is loaded last as it depends on MeshEngine + MeshTransport.
+  const MESH_MODULES = [
+    '/mesh/mesh-crypto.js',
+    '/mesh/mesh-transport.js',
+    '/mesh/mesh-router.js',
+    '/mesh/mesh-engine.js',
+    '/mesh/mesh-messages-bridge.js',
+  ];
+
   // Phase 11: Central Orchestration Runtime — wires all engines together
   const PHASE11_MODULES = [
     'orchestration/CentralOrchestrationRuntime.js',
@@ -106,6 +118,10 @@
     // ── Phase 10: load transport runtime + deletion registry ─────────────
     for (const src of PHASE10_MODULES) await loadScript(src);
     console.log('[Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded');
+
+    // ── Mesh Engine (rich /mesh/ stack): crypto → transport → router → engine → bridge ──
+    for (const src of MESH_MODULES) await loadScript(src);
+    console.log('[Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)');
 
     // ── Phase 11: load Central Orchestration Runtime ──────────────────────
     for (const m of PHASE11_MODULES) await loadScript(BASE + m);
@@ -336,6 +352,42 @@
     const lan = window.__LANCommunicationEngine;
     if (lan?.isEnabled?.()) {
       console.log('[Phase10] LAN engine active — peers:', lan.getPeers?.()?.length || 0);
+    }
+
+    // FIX (Forensic Audit P3): Wire rich MeshEngine into HybridTransportEngine's mesh slot.
+    // Previously MeshRelayEngine was loaded but never connected to the transport decision layer.
+    // Now: if MeshEngine (full E2EE stack) is available, register it as the mesh transport.
+    // If only MeshRelayEngine is available (lightweight fallback), use that.
+    const richMesh   = window.MeshEngine;    // /mesh/mesh-engine.js
+    const relayMesh  = window.__MeshRelayEngine; // /js/core/network/MeshRelayEngine.js
+    const transport  = window.__Phase10TransportRuntime || window.__HybridTransportEngine;
+    if (richMesh && transport?.registerMeshTransport) {
+      transport.registerMeshTransport({
+        send:        (payload, targetId) => richMesh.send?.(targetId, JSON.stringify(payload)),
+        relay:       (payload, targetId) => richMesh.relay?.(payload, targetId),
+        isReachable: (deviceId)          => richMesh.isOnline?.() || false,
+        getStats:    ()                  => richMesh.getDiag?.() || {},
+      });
+      console.log('[Phase10] ✅ Rich MeshEngine (E2EE) registered as mesh transport');
+    } else if (relayMesh && transport?.registerMeshTransport) {
+      transport.registerMeshTransport({
+        send:        (payload, targetId) => relayMesh.relay?.(payload, targetId),
+        relay:       (payload, targetId) => relayMesh.relay?.(payload, targetId),
+        isReachable: (deviceId)          => relayMesh.isReachable?.(deviceId) || false,
+        getStats:    ()                  => relayMesh.getDiagnostics?.() || {},
+      });
+      console.log('[Phase10] ✅ MeshRelayEngine (lightweight) registered as mesh transport');
+    }
+
+    // Also update the offline queue mesh path to prefer rich engine
+    if (richMesh) {
+      window.__MeshMessagesTransport = {
+        send: (payload) => {
+          const targetId = payload?.to || payload?.userId || payload?.targetUserId;
+          if (!targetId) return false;
+          return richMesh.send?.(targetId, typeof payload === 'string' ? payload : JSON.stringify(payload)) ?? false;
+        }
+      };
     }
 
     // 4. Emit phase10 ready event for any waiting modules

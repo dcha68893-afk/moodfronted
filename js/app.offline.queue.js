@@ -74,6 +74,17 @@
       await this._persist();
       this._emit('OFFLINE_QUEUE_ADDED', { id: item.id, type: item.type, action: item.action });
 
+      // FIX (Forensic Audit P3): Register background sync so the SW can replay
+      // this queue when connectivity returns, even if the tab is later closed.
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        try {
+          navigator.serviceWorker.controller.postMessage({
+            type: 'REGISTER_BACKGROUND_SYNC',
+            tag: 'offline-message-queue'
+          });
+        } catch (_) {}
+      }
+
       // Process immediately if online — but never block the caller
       if (navigator.onLine) this.process().catch(() => {});
 

@@ -26,6 +26,19 @@
         if (DEBUG) console.log(...args);
     }
 
+    // FIX (Forensic Audit P2): Canonical timestamp normalizer — single source of truth.
+    // Previously 7 identical inline functions (_tsMs, _tsMs2, _tsMs3, _tsMs4, _tsF, _tsF2, _tsRt)
+    // scattered across the module caused confusion and occasional sort bugs on mixed
+    // ISO-string vs unix-ms timestamps. All sort comparators use this function.
+    function _normalizeTs(m) {
+        const v = (typeof m === 'object' && m !== null)
+            ? (m.createdAt || m.timestamp || m.created_at || 0)
+            : m;
+        if (!v) return 0;
+        if (typeof v === 'string') return new Date(v).getTime() || 0;
+        return Number(v) || 0;
+    }
+
     // Real data only — no demo data
 
     // =============================================
@@ -241,7 +254,10 @@
         }
     }
     
-    setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
+    // FIX (Forensic Audit P1): Store interval ID for cleanup on teardown
+    const _cleanupPendingInterval = setInterval(cleanupPendingRequests, TIMING.CLEANUP_INTERVAL);
+    // Register cleanup on page unload to prevent memory leak
+    window.addEventListener('beforeunload', () => { clearInterval(_cleanupPendingInterval); }, { once: true });
 
     // =============================================
     // MESSAGE QUEUE SYSTEM
@@ -1687,7 +1703,9 @@ try {
             this._setupMessageListener();
             this._initialized = true;
             
-            setInterval(() => this._processQueue(), 5000);
+            // FIX (Forensic Audit P1): Store interval ID on instance for cleanup
+            this._queueInterval = setInterval(() => this._processQueue(), 5000);
+            window.addEventListener('beforeunload', () => { clearInterval(this._queueInterval); }, { once: true });
             
             Logger.info('ParentConnectionManager', 'Initialized');
             return this;
@@ -2082,7 +2100,7 @@ try {
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
             if (activeChat && chatId && String(activeChat.id) === String(chatId)) {
                 try {
-                    const _tsMs4 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const _tsMs4 = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
                     // STRICT: filter to this chat only — never pass all messages to renderMessages
                     const _all = (ChatManager._messages || []);
                     const _chatMsgs = _all
@@ -2732,7 +2750,7 @@ try {
                     this.setMessages(hydratedMessages, conversationId);
                     // FIXED: Merge back realtime messages that arrived before chat open
                     if (_rtPreserve && _rtPreserve.length > 0) {
-                        const _tsF2 = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        const _tsF2 = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
                         for (const _pm of _rtPreserve) {
                             const _pmId = String(_pm.serverId || _pm.id || '');
                             if (_pmId && !this._messagesMap.has(_pmId)) {
@@ -2785,7 +2803,7 @@ try {
                     this.setMessages(normalizedMessages, conversationId);
                     // Merge back realtime messages that arrived before this fetch completed
                     if (_rtPreserve && _rtPreserve.length > 0) {
-                        const _tsRt = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        const _tsRt = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
                         for (const _pm of _rtPreserve) {
                             const _pmId = String(_pm.serverId || _pm.id || '');
                             if (_pmId && !this._messagesMap.has(_pmId)) {
@@ -3315,7 +3333,7 @@ try {
                         }
                     }
                     if (_activeForRender && String(_activeForRender.id) === _aid) {
-                        const _tsMs2 = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                        const _tsMs2 = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
                         const _filtered = this._messages
                             .filter(m => {
                                 const mid = String(m.chatId || m.conversationId || '');
@@ -3442,7 +3460,7 @@ try {
             this._messagesMap.set(msgId, message);
             
             // FIX: parse ISO createdAt to numeric ms for correct ASC sort
-            const _tsMs = m => { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+            const _tsMs = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
             this._messages.sort((a, b) => _tsMs(a) - _tsMs(b));
             
             if (message.conversationId) {
@@ -3491,7 +3509,7 @@ try {
                     }
                 }
                 if (_render) {
-                    const _tsF = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    const _tsF = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
                     const _fid = _msgCid || _actCid;
                     const _renderConv = this._activeConversation;
                     const _chatMsgs = this._messages.filter(function(m) {
@@ -4550,32 +4568,57 @@ try {
             
             if (!canSendUserMessages()) return false;
             if (!SessionManager.isAuthenticated()) return false;
-            
-            const result = safeSend(OUTGOING_ACTIONS.EDIT_MESSAGE, {
-                messageId,
-                content: newContent
-            }, { requireAck: false });
-            
-            if (result.blocked) {
-                return false;
-            }
-            
-            const messages = ChatManager.getMessages();
-            const message = messages.find(m => m.id === messageId);
+
+            // FIX (Forensic Audit P1): editMessage previously only used socket relay (safeSend),
+            // which is lossy. Now also calls the REST API for durable persistence.
+            const messages = ChatManager.getMessages() || [];
+            const message = messages.find(
+                (m) => String(m.id) === String(messageId)
+                     || String(m.localId || '') === String(messageId)
+                     || String(m.serverId || '') === String(messageId)
+            );
+            const targetId = message?.serverId || message?.id || messageId;
+            const sanitized = SecurityUtils.sanitizeString(newContent);
+
+            // Optimistic update first
             if (message) {
-                message.content = SecurityUtils.sanitizeString(newContent);
+                message.content = sanitized;
                 message.edited = true;
                 message.editedAt = Date.now();
-                
                 if (ChatManager.getActiveChat()) {
                     try {
-                        SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, messages);
+                        SafeStorage.setJSON(
+                            `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`,
+                            messages
+                        );
                     } catch (e) {}
                 }
-                
-                EventBus.emit('message:edited', { messageId, content: newContent });
+                EventBus.emit('message:edited', { messageId: targetId, content: sanitized });
             }
-            
+
+            // Durable REST persist (fire-and-forget with rollback on failure)
+            makeApiRequest(`/messages/${targetId}`, 'PUT', { content: sanitized })
+                .then(() => {
+                    // Optionally also relay via socket for live receivers
+                    safeSend(OUTGOING_ACTIONS.EDIT_MESSAGE, { messageId: targetId, content: sanitized }, { requireAck: false });
+                    // Update IndexedDB
+                    if (window.KynectaLocalStore && message) {
+                        window.KynectaLocalStore.saveMessage({ ...message, content: sanitized, edited: true }).catch(() => {});
+                    }
+                })
+                .catch((error) => {
+                    console.error('[MessageHandler] editMessage REST persist failed — rolling back:', error);
+                    // Rollback optimistic update
+                    if (message) {
+                        message.content = message._preEditContent || message.content;
+                        message.edited = !!message._preEditContent;
+                        EventBus.emit('message:edit_failed', { messageId: targetId, error: error.message });
+                    }
+                });
+
+            // Store pre-edit content for rollback
+            if (message) message._preEditContent = message.content;
+
             return true;
         },
         
@@ -6298,7 +6341,7 @@ try {
         let hasRealtimeBinding = false;
 
         const renderRealtimeUpdate = function(chatId, normalizedMessage = null) {
-            const _tsMs3 = function(v) { return typeof v === 'string' ? new Date(v).getTime() : Number(v || 0); };
+            const _tsMs3 = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
 
             if (normalizedMessage && ChatManager && ChatManager.addMessage) {
                 // FIX: normalize timestamps to numeric ms before storing
@@ -6897,7 +6940,8 @@ try {
             // Now 30 000ms (30s) — only poll when tab is visible and chat is active.
             let _lastPollChatId = null;
             let _lastPollMsgCount = 0;
-            setInterval(() => {
+            // FIX (Forensic Audit P1): Store ID to prevent memory leak
+            const _activeChatPollInterval = setInterval(() => {
                 if (document.hidden) return;           // skip when tab not visible
                 const activeChat = ChatManager.getActiveChat();
                 if (!activeChat || !activeChat.id) return;
@@ -6914,6 +6958,7 @@ try {
                 _lastPollMsgCount = msgCount;
                 ChatManager.fetchMessages(activeChat.id, { limit: 20, minFetchGap: 10000 }).catch(() => {});
             }, 30000);
+            window.addEventListener('beforeunload', () => { clearInterval(_activeChatPollInterval); }, { once: true });
         }
     }
 
