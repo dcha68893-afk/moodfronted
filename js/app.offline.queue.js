@@ -456,5 +456,17 @@
   window.KynectaOfflineQueue = offlineQueue;
   if (window.__KYNECTA_AUTHORITIES__) window.__KYNECTA_AUTHORITIES__.offlineQueue = offlineQueue;
 
+  // FIX TRANSPORT DISCONNECTION: HybridTransportRuntime calls window.__OfflineMessageQueue.flushAll()
+  // and window.__OfflineMessageQueue.enqueue(), but this queue only registered as
+  // window.KynectaOfflineQueue with .process() and .queue() methods.
+  // All transport layers failed to find the queue, causing offline messages to be lost.
+  offlineQueue.flushAll   = function()     { return this.process(); };
+  offlineQueue.enqueue    = function(item) { return this.queue(item); };
+  offlineQueue.size       = function()     { return this._queue.length; };
+  offlineQueue.getPending = function()     { return [...this._queue]; };
+  window.__OfflineMessageQueue = offlineQueue;  // HybridTransportRuntime alias
+  window.KynectaMsgQueue        = offlineQueue;  // messages-core alias
+
+
   console.log('[OfflineQueue] ✅ Ready (offline-first v2.1)');
 })();

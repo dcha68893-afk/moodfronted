@@ -10643,6 +10643,42 @@ if (detectExistingCore()) {
     console.log('[calls-ui] callContainer dark-screen guard installed (v3 — no observer).');
 })();
 
+// ── AUDIO UNLOCK — must fire before any ringtone attempt ─────────────────────
+// On mobile/Chrome, AudioContext starts in 'suspended' state until a user gesture.
+// We pre-create and resume a silent AudioContext on first touch/click so that
+// subsequent ringtone chimes (which create their own ctx) are allowed to play.
+(function _unlockAudioContext() {
+    let _unlocked = false;
+    function _unlock() {
+        if (_unlocked) return;
+        _unlocked = true;
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            if (ctx.state === 'suspended') {
+                ctx.resume().then(function() {
+                    // Silent oscillator burst to fully unlock
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    gain.gain.setValueAtTime(0, ctx.currentTime); // silent
+                    osc.connect(gain); gain.connect(ctx.destination);
+                    osc.start(ctx.currentTime);
+                    osc.stop(ctx.currentTime + 0.001);
+                    window.__audioContextUnlocked = true;
+                    console.log('[calls-ui] ✅ AudioContext unlocked for ringtones');
+                }).catch(function() {});
+            } else {
+                window.__audioContextUnlocked = true;
+            }
+        } catch(e) {}
+        ['click','touchstart','touchend','keydown','pointerdown'].forEach(function(evt) {
+            document.removeEventListener(evt, _unlock, true);
+        });
+    }
+    ['click','touchstart','touchend','keydown','pointerdown'].forEach(function(evt) {
+        document.addEventListener(evt, _unlock, { capture: true, passive: true, once: false });
+    });
+})();
+
 // ── CALLS_IFRAME_READY handshake ─────────────────────────────────────────────
 // Signal to the parent (chat.html) that this iframe has fully loaded and is
 // ready to receive CALL_INCOMING postMessages.  Must fire after all scripts run.

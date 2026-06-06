@@ -4362,7 +4362,9 @@ try {
                 local: true,
                 optimistic: true,
                 attachment: options.attachment ? { ...options.attachment } : null,
-                replyTo: options.replyTo,
+                // FIX: include both replyToId AND the full replyTo object for immediate UI render
+                replyToId: options.replyToId || (options.replyTo && options.replyTo.id) || null,
+                replyTo: options.replyTo || null,
                 mentions: options.mentions,
                 isLocalOnly: true
             };
@@ -7202,6 +7204,18 @@ try {
                     const bc = new BroadcastChannel('kynecta_sync');
                     bc.postMessage({ type: 'tombstone', entity: 'conversation', id: sid, ts: Date.now() });
                     bc.close();
+                } catch(_) {}
+
+                // 7. FIX: Clear from IndexedDB so refresh doesn't resurrect the chat
+                try {
+                    if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteMessagesByChat === 'function') {
+                        window.KynectaLocalStore.deleteMessagesByChat(sid).catch(() => {});
+                    }
+                    // Also try generic IDB deletion
+                    if (window.KynectaDB) {
+                        window.KynectaDB.deleteMessages(sid).catch(() => {});
+                        window.KynectaDB.deleteConversation(sid).catch(() => {});
+                    }
                 } catch(_) {}
             } catch(_) {}
 

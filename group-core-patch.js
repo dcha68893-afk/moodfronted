@@ -462,7 +462,15 @@ function _setupSocketHandlers(GC) {
                     if (!member?.groupId || !member?.userId) return;
                     await LocalGroupStore.saveMemberLocal({ ...member, isLocalOnly: false });
                     const grp = GC.getGroupById(member.groupId);
-                    if (grp) { if (!grp.members) grp.members = []; if (!grp.members.some(m => String(m.userId) === String(member.userId))) grp.members.push(member); GC.updateGroupInLists(grp); GC.saveGroups(); GC.emit('group:member-added', { groupId: member.groupId, member }); }
+                    if (grp) {
+                        if (!grp.members) grp.members = [];
+                        if (!grp.members.some(m => String(m.userId) === String(member.userId))) grp.members.push(member);
+                        // FIX: update memberCount from server payload or recompute from members array
+                        const newCount = data.memberCount || grp.members.length;
+                        grp.memberCount = newCount;
+                        if (grp.stats) grp.stats.totalMembers = newCount;
+                        GC.updateGroupInLists(grp); GC.saveGroups(); GC.emit('group:member-added', { groupId: member.groupId, member, memberCount: newCount });
+                    }
                 } else if (action === 'member_remove') {
                     if (!groupId || !userId) return;
                     await LocalGroupStore.deleteMemberLocal(`${groupId}_${userId}`, groupId);

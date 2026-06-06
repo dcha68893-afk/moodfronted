@@ -3634,6 +3634,8 @@ function _applyViewerMode(isOwner, status) {
         // Update seen count from status data
         const seenEl = document.getElementById('seenCountNum');
         if (seenEl) seenEl.textContent = status.viewCount || status.views || 0;
+        // FIX: Load viewer list for owner — was never called, so list was always empty
+        _loadViewersForOwner(status);
     } else {
         footer.classList.add('friend-mode');
         footer.classList.remove('owner-mode');

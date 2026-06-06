@@ -3631,13 +3631,14 @@
 
                     <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
 
-                        <div class="message-image" onclick="window.messagesUI?.viewMedia('${message.content}', '${message.fileName || 'image'}')">
+                        <div class="message-image" onclick="window.messagesUI?.viewMedia('${message.mediaUrl || message.fileUrl || message.content}', '${message.fileName || 'image'}')">
 
-                            <img src="${message.content}" alt="${message.fileName || 'Image'}" loading="lazy">
+                            <img src="${message.mediaUrl || message.fileUrl || message.content}" alt="${message.fileName || 'Image'}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='flex')">
+                            <div style="display:none;align-items:center;justify-content:center;padding:12px;color:#888;font-size:13px">📷 Image unavailable</div>
 
                         </div>
 
-                        ${message.caption ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.caption) : message.caption}</div>` : ''}
+                        ${message.content && message.type === 'image' && message.content !== (message.mediaUrl||message.fileUrl) ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.content) : message.content}</div>` : ''}
 
                         <div class="message-meta">
 
@@ -3697,13 +3698,13 @@
 
                     <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
 
-                        <div class="message-video" onclick="window.messagesUI?.playVideo('${message.content}')">
+                        <div class="message-video" onclick="window.messagesUI?.playVideo('${message.mediaUrl || message.fileUrl || message.content}')">
 
-                            <video src="${message.content}" poster="${message.thumbnail || ''}" controls></video>
+                            <video src="${message.mediaUrl || message.fileUrl || message.content}" poster="${message.thumbnail || ''}" controls preload="metadata"></video>
 
                         </div>
 
-                        ${message.caption ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.caption) : message.caption}</div>` : ''}
+                        ${message.content && message.content !== (message.mediaUrl||message.fileUrl) ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.content) : message.content}</div>` : ''}
 
                         <div class="message-meta">
 
@@ -3767,7 +3768,7 @@
 
                         <div class="message-audio">
 
-                            <button class="audio-play-btn" onclick="this.classList.toggle('playing'); window.messagesUI?.playAudio('${message.id}', '${message.content}', ${message.duration || 0})">
+                            <button class="audio-play-btn" onclick="this.classList.toggle('playing'); window.messagesUI?.playAudio('${message.id}', '${message.mediaUrl || message.fileUrl || message.content}', ${message.duration || 0})">
 
                                 <i class="fas fa-play"></i>
 
@@ -9375,11 +9376,24 @@ Type: ${message.type || 'text'}`;
 
             let result;
             try {
+                // FIX: include replyToId / replyTo from window.replyToMessage
+                const _replyMsg = window.replyToMessage || null;
                 result = core?.sendMessage(content, {
 
                     type: attachment?.type || 'text',
 
-                    attachment: attachment
+                    attachment: attachment,
+
+                    // FIX: reply context was never passed — caused reply indicator to never render
+                    replyToId: _replyMsg ? (_replyMsg.id || _replyMsg.messageId || null) : null,
+                    replyTo:   _replyMsg ? {
+                        id:          _replyMsg.id || _replyMsg.messageId,
+                        content:     _replyMsg.content || _replyMsg.text || '',
+                        type:        _replyMsg.type || 'text',
+                        senderId:    _replyMsg.senderId || _replyMsg.userId,
+                        senderName:  _replyMsg.senderName || (_replyMsg.sender && (_replyMsg.sender.username || _replyMsg.sender.displayName)) || '',
+                        senderAvatar:_replyMsg.senderAvatar || (_replyMsg.sender && _replyMsg.sender.avatar) || '',
+                    } : null,
 
                 });
             } catch (sendErr) {
@@ -9557,75 +9571,57 @@ Type: ${message.type || 'text'}`;
 
             }
 
+            // FIX: Upload to server first, then send message with absolute URL.
+            // Old code used FileReader.readAsDataURL which sent raw base64 into
+            // the message content — bloating the DB and breaking cross-device rendering.
+            const type = file.type.startsWith('image/') ? 'image' :
+                         file.type.startsWith('video/') ? 'video' :
+                         file.type.startsWith('audio/') ? 'audio' : 'file';
 
+            // Show optimistic preview while uploading
+            const core = getMessagesCore();
+            const localPreviewUrl = URL.createObjectURL(file);
+            const previewAttachment = { type, data: localPreviewUrl, name: file.name, size: file.size, uploading: true };
+            if (core) {
+                core.setCurrentAttachment?.(previewAttachment);
+                core.showAttachmentPreview?.(previewAttachment);
+            }
 
-            const reader = new FileReader();
+            try {
+                const { uploadFile: _upload } = await import('./js/api.messages.js').catch(() => ({}));
+                const uploadFn = _upload || (typeof window.uploadFile === 'function' ? window.uploadFile : null);
+                if (!uploadFn) throw new Error('uploadFile not available');
 
-            reader.onloadend = () => {
-
-                UIFailsafe.queueAction(() => {
-
-                    const type = file.type.startsWith('image/') ? 'image' :
-
-                                file.type.startsWith('video/') ? 'video' :
-
-                                file.type.startsWith('audio/') ? 'audio' : 'file';
-
-                    
-
-                    const attachment = {
-
-                        type,
-
-                        data: reader.result,
-
-                        name: file.name,
-
-                        size: file.size
-
-                    };
-
-                    
-
-                    if (type === 'audio') {
-
-                        const audio = new Audio(reader.result);
-
-                        audio.onloadedmetadata = () => {
-
-                            attachment.duration = Math.floor(audio.duration);
-
-                            const core = getMessagesCore();
-
-                            if (core) {
-
-                                core.setCurrentAttachment?.(attachment);
-
-                                core.showAttachmentPreview?.(attachment);
-
-                            }
-
-                        };
-
-                    } else {
-
-                        const core = getMessagesCore();
-
-                        if (core) {
-
-                            core.setCurrentAttachment?.(attachment);
-
-                            core.showAttachmentPreview?.(attachment);
-
-                        }
-
-                    }
-
+                const chatId = core?.getCurrentConversation?.()?.id || core?.ChatManager?.getActiveChat?.()?.id;
+                const result = await uploadFn(chatId, file, (progress) => {
+                    const pct = Math.round(progress * 100);
+                    UIRenderer.showNotification(`Uploading… ${pct}%`, 'info', 0);
                 });
 
-            };
+                UIRenderer.showNotification('', 'info', 1); // clear progress toast
+                URL.revokeObjectURL(localPreviewUrl);
 
-            reader.readAsDataURL(file);
+                const serverUrl = result?.url || result?.data?.url || result?.fileUrl || result?.mediaUrl || '';
+                if (!serverUrl) throw new Error('No URL in upload response');
+
+                const attachment = { type, url: serverUrl, mediaUrl: serverUrl, name: file.name, size: file.size };
+                if (core) {
+                    core.setCurrentAttachment?.(attachment);
+                    core.showAttachmentPreview?.(attachment);
+                }
+            } catch(uploadErr) {
+                console.error('[FileDrop] Upload failed, falling back to local preview:', uploadErr.message);
+                URL.revokeObjectURL(localPreviewUrl);
+                // Fallback: use local FileReader (will only work in same session)
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    UIFailsafe.queueAction(() => {
+                        const fallbackAttachment = { type, data: reader.result, name: file.name, size: file.size };
+                        if (core) { core.setCurrentAttachment?.(fallbackAttachment); core.showAttachmentPreview?.(fallbackAttachment); }
+                    });
+                };
+                reader.readAsDataURL(file);
+            }
 
         },
 
@@ -9857,7 +9853,15 @@ Type: ${message.type || 'text'}`;
 
                 const core = getMessagesCore();
 
-                const chats = core?.getConversations?.() || [];
+                let chats = core?.getConversations?.() || [];
+
+                // FIX: if no chats loaded yet, trigger fetch then re-render
+                if (chats.length === 0 && core && typeof core.fetchConversations === 'function') {
+                    core.fetchConversations().then(() => {
+                        const refreshedChats = core.getConversations?.() || [];
+                        UIRenderer.renderMultiSendChats(refreshedChats);
+                    }).catch(() => {});
+                }
 
                 UIRenderer.renderMultiSendChats(chats);
                 if (window.messagesUI && typeof window.messagesUI.loadMultiSendHistory === 'function') {

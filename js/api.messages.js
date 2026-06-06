@@ -2879,23 +2879,27 @@ export async function uploadFile(conversationId, file, onProgress = null) {
     try {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('conversationId', conversationId);
+        if (conversationId) formData.append('conversationId', conversationId);
         
         const xhr = new XMLHttpRequest();
         
         const uploadPromise = new Promise((resolve, reject) => {
-            xhr.open('POST', '/api/files/upload');
+            // FIX: use absolute URL and include auth token
+            const token = localStorage.getItem('authToken') || localStorage.getItem('token') ||
+                          sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
+            const baseUrl = window.__API_BASE_URL || window.API_BASE_URL || '';
+            xhr.open('POST', `${baseUrl}/api/files/upload`);
+            if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
             
             if (onProgress) {
                 xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable) {
-                        onProgress(e.loaded / e.total);
-                    }
+                    if (e.lengthComputable) onProgress(e.loaded / e.total);
                 });
             }
             
             xhr.onload = () => {
-                if (xhr.status === 200) {
+                // FIX: accept both 200 and 201 (new files.js returns 201)
+                if (xhr.status === 200 || xhr.status === 201) {
                     try {
                         const response = JSON.parse(xhr.responseText);
                         resolve(response);
@@ -2907,7 +2911,7 @@ export async function uploadFile(conversationId, file, onProgress = null) {
                 }
             };
             
-            xhr.onerror = () => reject(new Error('Upload failed'));
+            xhr.onerror = () => reject(new Error('Network error during upload'));
             xhr.send(formData);
         });
         

@@ -1202,6 +1202,15 @@
                 'device:registered', 'device:trust_updated', 'session:revoked',
                 'session:restored', 'reconnect:required', 'turn:config',
                 'security:replay_rejected',
+                // FIX: presence events were never registered — user online/offline
+                // indicators never updated without these
+                'user:online', 'user:offline',
+                // FIX: typing indicators were never forwarded to iframes
+                'typing:start', 'typing:stop',
+                // FIX: group:localSync for memberCount updates
+                'group:localSync',
+                // FIX: chat:read event
+                'chat:read',
             ];
 
             const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events];

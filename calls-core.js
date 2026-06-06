@@ -6134,10 +6134,18 @@ function applySession(sessionData) {
 
         PROTOCOL_VERSION: 'KYN-9.0',
 
-
+        // FIX: Centralised audio constraints used by ALL call paths (caller + callee + reconnect).
+        // Previously callee used plain `audio: true` which skips echo cancellation on many devices,
+        // causing echo feedback and occasional null audio tracks on Android WebView.
+        AUDIO_CONSTRAINTS: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl:  true,
+            sampleRate:       48000,
+            channelCount:     1,
+        },
 
         
-
 
 
         PARENT_READY_TIMEOUT: 20000,
@@ -12628,29 +12636,23 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    iceServers: [
-
-
-
-                        { urls: 'stun:stun.l.google.com:19302' },
-
-
-
-                        { urls: 'stun:stun1.l.google.com:19302' },
-
-
-
-                        { urls: 'stun:stun2.l.google.com:19302' }
-
-                        // TURN servers — required for NAT traversal behind cloud/Render hosting
-                        ,{ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
-                        ,{ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
-                        ,{ urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-                        ,{ urls: 'stun:stun.relay.metered.ca:80' }
-
-
-
-                    ],
+                    // FIX: use server-pushed TURN credentials if available, else free fallback
+                    iceServers: (function() {
+                        const _stun = [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' },
+                            { urls: 'stun:stun2.l.google.com:19302' },
+                        ];
+                        const _turnFallback = [
+                            { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+                            { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+                            { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+                        ];
+                        const serverTURN = window.__kynTURNServers;
+                        return serverTURN && serverTURN.length
+                            ? [..._stun, ...serverTURN]
+                            : [..._stun, ..._turnFallback];
+                    })(),
 
 
 
@@ -13104,6 +13106,8 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                         remoteVideo.id = 'remoteVideo';
                         remoteVideo.autoplay = true;
                         remoteVideo.setAttribute('playsinline', '');
+                        // FIX: must start muted for autoplay policy; unmuted after play() resolves
+                        remoteVideo.muted = true;
                         remoteVideo.style.cssText = 'width:100%;height:100%;object-fit:cover;background:#000;';
                         const wrap = document.getElementById('incallAvatarWrap');
                         const parent = wrap ? wrap.parentNode : document.body;
@@ -13123,10 +13127,13 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                     if (avatarWrap) avatarWrap.style.display = 'none';
                     const _inCallBg = document.getElementById('inCallScreen');
                     if (_inCallBg) _inCallBg.classList.add('video-active');
-                    remoteVideo.muted = false; // never mute remote video
-                    remoteVideo.play().catch(function(videoPlayErr) {
+                    // FIX: muted=true first so autoplay policy allows it, then unmute once playing
+                    remoteVideo.muted = true;
+                    remoteVideo.play().then(function() {
+                        remoteVideo.muted = false; // restore audio after autoplay succeeds
+                    }).catch(function(videoPlayErr) {
                         const retryVideoPlay = function() {
-                            remoteVideo.play().catch(function() {});
+                            remoteVideo.play().then(function() { remoteVideo.muted = false; }).catch(function() {});
                             document.removeEventListener('click',      retryVideoPlay);
                             document.removeEventListener('touchstart', retryVideoPlay);
                             document.removeEventListener('touchend',   retryVideoPlay);
@@ -16828,11 +16835,7 @@ initiateCall: async function(callType, participants = []) {
 
     const permCheck = await PermissionManager.checkPermissions({
 
-
-
-        audio: true,
-
-
+        audio: CONFIG.AUDIO_CONSTRAINTS,
 
         video: callType === 'video'
 
@@ -17610,9 +17613,8 @@ initiateCall: async function(callType, participants = []) {
                 const constraints = {
 
 
-
-                    audio: true,
-
+                    // FIX: use full audio constraints (echo cancel, noise suppress) on callee side
+                    audio: CONFIG.AUDIO_CONSTRAINTS,
 
 
                     video: callType === 'video'
@@ -29996,7 +29998,7 @@ window.CallHandlers = {
 
 
 
-            const constraints = { audio: true, video: callsState.callType === 'video' };
+            const constraints = { audio: CONFIG.AUDIO_CONSTRAINTS, video: callsState.callType === 'video' };
 
 
 
@@ -37316,6 +37318,26 @@ clearActiveCall: function() {
 
 
         window.addEventListener('kyn:realtimeReady', _bindRealtime, { once: false });
+
+        // FIX: Listen for TURN credentials pushed by server after call initiate/accept
+        // Without this, the hardcoded free TURN servers are always used and may fail
+        window.addEventListener('kyn:turn:config', function(e) {
+            const servers = e.detail?.servers || e.detail?.iceServers;
+            if (Array.isArray(servers) && servers.length) {
+                window.__kynTURNServers = servers;
+                console.log('[CallsCore] ✅ TURN config received from server — ICE servers updated:', servers.length);
+            }
+        });
+        // Also handle via postMessage bridge from parent frame
+        window.addEventListener('message', function(e) {
+            if (e.data && (e.data.event === 'turn:config' || e.data.type === 'TURN_CONFIG')) {
+                const servers = e.data.payload?.servers || e.data.servers;
+                if (Array.isArray(servers) && servers.length) {
+                    window.__kynTURNServers = servers;
+                    console.log('[CallsCore] ✅ TURN config received via postMessage bridge');
+                }
+            }
+        });
 
 
 

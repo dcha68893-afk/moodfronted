@@ -4583,6 +4583,10 @@
                     window.__activeCallInProgress = false;
                     document.body.classList.remove('call-screen-active');
 
+                    // FIX: Always restore nav icons when call ends
+                    clearTimeout(window.__navHideWatchdog);
+                    document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
+
                     // Navigate back to where the call was triggered from.
                     // 'calls'    → calls sidebar (call started from calls module)
                     // 'messages' → messages, re-open specific chat
@@ -5272,8 +5276,15 @@
 
                 if (data.type === 'HIDE_SIDEBAR_ICONS') {
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = '0.3'; el.style.pointerEvents = 'none'; });
+                    // FIX: Watchdog — auto-restore nav after 90s max (prevents permanent freeze if SHOW never fires)
+                    clearTimeout(window.__navHideWatchdog);
+                    window.__navHideWatchdog = setTimeout(function() {
+                        document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
+                        console.warn('[NavWatchdog] Auto-restored nav icons after timeout');
+                    }, 90000);
                 }
                 if (data.type === 'SHOW_SIDEBAR_ICONS') {
+                    clearTimeout(window.__navHideWatchdog);
                     document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
                 }
 

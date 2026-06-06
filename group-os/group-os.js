@@ -522,9 +522,13 @@
                 try {
                     const r = await fetch('/api/media/upload', { method:'POST', headers:{'Authorization':'Bearer '+_tok()}, body: fd });
                     const d = await r.json();
-                    const url = d.data?.url || d.url;
-                    if (url) {
-                        await _api('POST', `/${_groupId}/group-files`, { name: file.name, url, mimeType: file.type, sizeBytes: file.size });
+                    // FIX: handle response from both /api/media/upload and /api/files/upload
+                    const url = d.data?.url || d.data?.media?.url || d.url || d.fileUrl || d.mediaUrl;
+                    const absUrl = url && url.startsWith('/') 
+                        ? `${window.location.protocol}//${window.location.host}${url}` 
+                        : url;
+                    if (absUrl) {
+                        await _api('POST', `/${_groupId}/group-files`, { name: file.name, url: absUrl, mimeType: file.type, sizeBytes: file.size });
                         _showToast(`${file.name} uploaded ✓`,'success');
                         if (_activeTab==='files') _openTab('files');
                     }
