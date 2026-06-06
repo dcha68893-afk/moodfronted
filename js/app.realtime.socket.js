@@ -496,6 +496,20 @@
 
             this._socket.on('authenticated', (data) => {
                 console.log('[Realtime] ✅ Server confirmed authentication:', data);
+                // FIX-CALL-DELIVERY: Re-join user rooms on authenticated confirmation.
+                // The connect-time join_user_room may fire before the server middleware
+                // has finished auth, so the join silently fails.  Re-joining here (after
+                // the server has confirmed auth) guarantees sendToUser() can reach us.
+                try {
+                    const myId = data?.userId || this._getUserId();
+                    if (myId && this._socket && typeof this._socket.emit === 'function') {
+                        const idStr = String(myId);
+                        this._socket.emit('join_user_room', { userId: myId });
+                        this._socket.emit('join', { room: 'user:' + idStr });
+                        this._socket.emit('join', { room: 'user_' + idStr });
+                        console.log('[Realtime] ✅ Re-joined user rooms after auth confirmation, userId:', myId);
+                    }
+                } catch (_authJoinErr) {}
             });
         }
 
@@ -800,6 +814,19 @@
             if (message.type === 'message' && message.message && typeof message.message === 'object') {
                 this._routeMessage({ ...message.message, transportMeta: { from: message.from, timestamp: message.timestamp } });
                 return;
+            }
+
+            // FIX-MSG-DELIVERY: Normalize chatId so messages-core always has a valid chatId.
+            // Backend may send conversationId, chat_id, or roomId instead of chatId.
+            if (message.payload && typeof message.payload === 'object') {
+                const p = message.payload;
+                if (!p.chatId && (p.conversationId || p.chat_id || p.roomId || p.conversation_id)) {
+                    p.chatId = p.conversationId || p.chat_id || p.roomId || p.conversation_id;
+                }
+                // Also normalize nested message object
+                if (p.message && typeof p.message === 'object' && !p.message.chatId) {
+                    p.message.chatId = p.message.chatId || p.chatId || p.conversationId || p.chat_id;
+                }
             }
 
             // FIX #15 — CANONICAL EVENT NORMALIZATION: alias events map to one canonical type.
@@ -1255,7 +1282,12 @@
                 'chat:read',
             ];
 
-            const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events];
+            const allEvents = [...messageEvents, ...callEvents, ...friendEvents, ...marketplaceEvents, ...groupEvents, ...statusEvents, ...phase5Events,
+                // FIX-GROUP-INVITE: group invitation events were never forwarded to iframes
+                'group:invitation', 'group:invite', 'group_invitation', 'group_invite',
+                'group:invitation_received', 'invitation:received', 'group:invitation_sent',
+                'notification:new',
+            ];
 
             if (this._socket && typeof this._socket.on === 'function') {
                 // Use RealtimeStabilizationLayer.safeOn if available to prevent duplicate listeners

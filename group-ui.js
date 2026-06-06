@@ -2708,8 +2708,12 @@ async function _fetchInvites() {
             headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
         });
         const data = await res.json();
-        const invites = (data.data && Array.isArray(data.data)) ? data.data :
-                        (data.data && data.data.invitations) || data.invitations || [];
+        // FIX: Backend returns { success, data: { invitations: [...], total: N } }
+        // Handle all nesting shapes defensively
+        const invites = (data.data && data.data.invitations && Array.isArray(data.data.invitations)) ? data.data.invitations :
+                        (data.data && Array.isArray(data.data)) ? data.data :
+                        (Array.isArray(data.invitations)) ? data.invitations :
+                        (data.data && data.data.data && Array.isArray(data.data.data)) ? data.data.data : [];
         listEl.innerHTML = '';
         if (!invites.length) {
             listEl.innerHTML = '<div class="empty-state"><i class="fas fa-envelope-open" style="font-size:32px;opacity:.3"></i><p style="margin-top:10px">No pending invitations</p></div>';
@@ -2718,9 +2722,14 @@ async function _fetchInvites() {
         const badge = document.getElementById('invitesCount') || document.getElementById('invitesSectionCount');
         if (badge) badge.textContent = invites.length;
         invites.forEach(inv => {
-            const gname   = (inv.group && inv.group.name) || inv.groupName || 'Group';
+            // FIX-GROUP-INVITE: Backend Sequelize include uses alias 'userGroup' but
+            // frontend was reading inv.group — causing group name to always be 'Group'.
+            // Now check both aliases for backwards compatibility.
+            const gname   = (inv.userGroup && inv.userGroup.name) || (inv.group && inv.group.name) || inv.groupName || inv.group_name || 'Group';
             const gavatar = gname.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
-            const inviter = (inv.inviter && (inv.inviter.displayName || inv.inviter.firstName || inv.inviter.username)) || inv.inviterName || 'Someone';
+            const inviter = (inv.inviter && (inv.inviter.displayName || inv.inviter.firstName || inv.inviter.username))
+                         || (inv.sender  && (inv.sender.displayName  || inv.sender.firstName  || inv.sender.username))
+                         || inv.inviterName || inv.senderName || 'Someone';
             const card = document.createElement('div');
             card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:12px;margin-bottom:10px;';
             card.innerHTML =
@@ -4513,7 +4522,18 @@ export async function loadDiscoverGroups(query, purpose) {
     function setTab(w){var mt=document.getElementById('dscMyTab'),ot=document.getElementById('dscOtherTab'),ml=document.getElementById('dscMyList'),ol=document.getElementById('dscOtherList');if(!mt)return;var pc='var(--primary-color,#6c63ff)',ts='var(--text-secondary)';if(w==='my'){mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='';ol.style.display='none';}else{ot.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid '+pc+';font-weight:700;font-size:14px;color:'+pc+';cursor:pointer';mt.style.cssText='flex:1;padding:10px;background:none;border:none;border-bottom:3px solid transparent;font-weight:600;font-size:14px;color:'+ts+';cursor:pointer';ml.style.display='none';ol.style.display='';}}
     function makeCard(g,isOwn){var ii=(g.name||'G').split(' ').map(function(w){return w[0];}).join('').toUpperCase().slice(0,2);var mc=(g.stats&&g.stats.totalMembers)||g.memberCount||0;var ob='<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="open" style="padding:7px 10px;border-radius:8px;background:none;border:1px solid var(--primary-color,#6c63ff);color:var(--primary-color,#6c63ff);cursor:pointer;font-size:13px;display:flex;align-items:center;gap:5px"><i class="fas fa-door-open"></i> Open</button>';var jb=isOwn?'':'<button data-gid="'+g.id+'" data-gname="'+g.name+'" data-action="join" style="padding:7px 10px;border-radius:8px;background:var(--primary-color,#6c63ff);color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">Join</button>';var h='<div style="display:flex;align-items:center;gap:12px"><div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:15px;flex-shrink:0">'+ii+'</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+g.name+'</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+((g.description||'').slice(0,55)||'No description')+'</div><div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap"><span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(108,99,255,.13);color:var(--primary-color,#6c63ff)">\uD83D\uDC65 '+mc+'</span>'+(g.purpose?'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#48bb7822;color:#48bb78">'+g.purpose+'</span>':'')+'<span style="padding:2px 8px;border-radius:20px;font-size:11px;background:#eee;color:#666">'+(g.isPublic?'\uD83C\uDF10 Public':'\uD83D\uDD12 Private')+'</span></div></div><div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">'+ob+jb+'</div></div>';var card=panelCard(h);card.querySelectorAll('[data-gid]').forEach(function(btn){btn.addEventListener('click',async function(){var action=this.dataset.action,gid2=this.dataset.gid,gname=this.dataset.gname;if(action==='open'){var GC=window.GroupCore;var found=GC&&(GC.groups||[]).find(function(x){return String(x.id)===String(gid2);});if(!found){try{var d=await panelFetch('/api/groups/'+gid2);found=d&&(d.data&&d.data.group||d.group||d.data);}catch(e){}}if(found&&typeof window.openGroupChat==='function'){var dp=document.getElementById('discoverPanel');if(dp)dp.style.display='none';window.openGroupChat(found);}return;}var b2=this;b2.disabled=true;b2.textContent='Joining…';try{var res=await panelFetch('/api/groups/'+gid2+'/join',{method:'POST',body:'{}'});if(res.success!==false){b2.textContent='✓ Joined';b2.style.background='#48bb78';if(typeof showNotification==='function')showNotification('Joined "'+gname+'"!','success');var gc3=window.GroupCore;if(gc3&&typeof gc3.requestGroupList==='function')gc3.requestGroupList().catch(function(){});}else{b2.disabled=false;b2.textContent='Join';if(typeof showNotification==='function')showNotification(res.message||'Failed','error');}}catch(e){b2.disabled=false;b2.textContent='Join';}});});return card;}
     async function loadMyGroups(){var list=document.getElementById('dscMyList');if(!list)return;list.innerHTML=panelLoader();try{var GC=window.GroupCore;var myGrps=(GC&&GC.groups&&GC.groups.length)?GC.groups:[];if(!myGrps.length){var data=await panelFetch('/api/groups/user');myGrps=data&&(data.data&&(data.data.groups||data.data.myGroups)||data.groups)||[];}if(!myGrps.length){list.innerHTML=panelEmpty('fas fa-users','You have no groups yet.');return;}list.innerHTML='';myGrps.forEach(function(g){list.appendChild(makeCard(g,true));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Could not load groups.');}}
-    async function loadPublicGroups(){var list=document.getElementById('dscOtherList');if(!list)return;list.innerHTML=panelLoader();try{var url='/api/groups/public?limit=30';if(query)url+='&query='+encodeURIComponent(query);if(purpose&&purpose!=='all')url+='&purpose='+purpose;var data=await panelFetch(url);var grps=data&&(data.data&&data.data.groups||data.groups)||[];var GC=window.GroupCore;var myIds=new Set((GC&&GC.myGroups||[]).map(function(g){return String(g.id);}));var others=grps.filter(function(g){return !myIds.has(String(g.id));});if(!others.length){list.innerHTML=panelEmpty('fas fa-search','No public groups from other users.');return;}list.innerHTML='';others.forEach(function(g){list.appendChild(makeCard(g,false));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Failed to load public groups.');}}
+    async function loadPublicGroups(){var list=document.getElementById('dscOtherList');if(!list)return;list.innerHTML=panelLoader();try{var url='/api/groups/public?limit=30';if(query)url+='&query='+encodeURIComponent(query);if(purpose&&purpose!=='all')url+='&purpose='+purpose;var data=await panelFetch(url);var grps=data&&(data.data&&data.data.groups||data.groups)||[];var GC=window.GroupCore;
+        // FIX-DISCOVER: GC.myGroups may be undefined — fall back to GC.groups.
+        // Without this fallback myIds is always empty so ALL groups (including own) appear.
+        var myGroups=(GC&&(GC.myGroups&&GC.myGroups.length?GC.myGroups:GC.groups))||[];
+        var myIds=new Set(myGroups.map(function(g){return String(g.id);}));
+        // Also filter by current user as owner/creator
+        var myUserId=String(localStorage.getItem('userId')||localStorage.getItem('moodchat_userId')||'');
+        var others=grps.filter(function(g){
+            if(myIds.has(String(g.id)))return false;
+            if(myUserId&&(String(g.createdBy||'')===myUserId||String(g.ownerId||'')===myUserId||String(g.userId||'')===myUserId))return false;
+            return true;
+        });if(!others.length){list.innerHTML=panelEmpty('fas fa-search','No public groups from other users.');return;}list.innerHTML='';others.forEach(function(g){list.appendChild(makeCard(g,false));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Failed to load public groups.');}}
     var mt2=document.getElementById('dscMyTab'),ot2=document.getElementById('dscOtherTab');
     if(mt2)mt2.addEventListener('click',function(){setTab('my');loadMyGroups();});
     if(ot2)ot2.addEventListener('click',function(){setTab('other');loadPublicGroups();});

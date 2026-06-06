@@ -3372,6 +3372,29 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
                 }
             });
         }
+
+        // PHASE14 FIX P1: Listen for group invitation received socket event
+        // Backend emits 'group:invitation:received' but group-core had no listener.
+        if (!window.__groupCoreListenersRegistered.has('p14:group:invitation:received')) {
+            window.__groupCoreListenersRegistered.add('p14:group:invitation:received');
+            window.addEventListener('kyn:group:invitation:received', function(evt) {
+                const d = evt.detail || {};
+                if (typeof window.__groupCoreRefreshInvitations === 'function') {
+                    window.__groupCoreRefreshInvitations();
+                }
+                try { window.dispatchEvent(new CustomEvent('groupInvitationReceived', { detail: d })); } catch(_) {}
+            });
+            window.addEventListener('message', function(evt) {
+                if (!evt.data || typeof evt.data !== 'object') return;
+                if (evt.data.type === 'REALTIME_EVENT:group:invitation:received') {
+                    const d = evt.data.payload || {};
+                    if (typeof window.__groupCoreRefreshInvitations === 'function') {
+                        window.__groupCoreRefreshInvitations();
+                    }
+                    try { window.dispatchEvent(new CustomEvent('groupInvitationReceived', { detail: d })); } catch(_) {}
+                }
+            });
+        }
     }
     
     // ✅ ENHANCED: Handle real-time group member events

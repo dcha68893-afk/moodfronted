@@ -7579,11 +7579,19 @@ function getDiscoverableUsers() {
     // Get current user ID
     const currentUserId = __session.user?.id || currentUser?.id;
     
-    // Filter out current user and existing friends
+    // Filter out current user, existing friends, and system/bot accounts
     const discoverable = allUsersList.filter(user => {
         if (!user || !user.id) return false;
         if (currentUserId && String(user.id) === String(currentUserId)) return false;
         if (friendIds.has(String(user.id))) return false;
+        // FIX-DISCOVER-BOTS: Filter out system/bot/admin accounts from discover list
+        const uname = (user.username || '').toLowerCase();
+        const dname = (user.displayName || user.name || '').toLowerCase();
+        if (uname.startsWith('bot_') || uname.startsWith('system_') || uname.startsWith('admin_')) return false;
+        if (dname === 'system' || dname === 'bot' || dname === 'admin') return false;
+        if (user.isBot || user.is_bot || user.isSystem || user.is_system) return false;
+        if (user.role === 'admin' && (user.isSystem || uname.includes('system') || uname.includes('bot'))) return false;
+        if (user.accountType === 'bot' || user.account_type === 'bot') return false;
         return true;
     });
     

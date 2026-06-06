@@ -3817,8 +3817,23 @@
 
             function pushSettingsToModule(iframe, moduleName) {
                 if (!iframe || !iframe.contentWindow) return;
-                const settings = getCachedSettings();
-                if (!settings) return;
+                // FIX-SETTINGS-PROPAGATION: Try multiple sources so a module always
+                // gets settings even when knecta_settings_cache hasn't been written yet.
+                let settings = getCachedSettings();
+                if (!settings || Object.keys(settings).length === 0) {
+                    // Try AppSettings as fallback
+                    if (window.AppSettings && typeof window.AppSettings.getAll === 'function') {
+                        try { settings = window.AppSettings.getAll(); } catch(e) {}
+                    }
+                }
+                if (!settings || Object.keys(settings).length === 0) {
+                    // Try raw localStorage key written by settingsManager
+                    try {
+                        const raw = localStorage.getItem('knecta_settings_cache') || localStorage.getItem('moodchat_settings_default');
+                        if (raw) { const p = JSON.parse(raw); settings = p?.data || p; }
+                    } catch(e) {}
+                }
+                if (!settings || Object.keys(settings).length === 0) return; // nothing to push
                 iframe.contentWindow.postMessage({
                     type: 'SETTINGS_UPDATED',
                     source: 'parent',
@@ -3826,6 +3841,19 @@
                     payload: { settings, timestamp: Date.now() },
                     timestamp: Date.now()
                 }, '*');
+                // Also push as SETTING_CHANGED entries for modules that only listen per-key
+                try {
+                    Object.entries(settings).forEach(([section, vals]) => {
+                        if (!vals || typeof vals !== 'object') return;
+                        Object.entries(vals).forEach(([key, value]) => {
+                            iframe.contentWindow.postMessage({
+                                type: 'SETTING_CHANGED',
+                                source: 'parent',
+                                payload: { section, key, value, timestamp: Date.now() }
+                            }, '*');
+                        });
+                    });
+                } catch(e) {}
             }
 
             function emitGlobalAppEvent(type, payload, options = {}) {
