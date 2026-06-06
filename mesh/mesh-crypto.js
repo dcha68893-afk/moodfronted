@@ -11,7 +11,13 @@
  */
 'use strict';
 
-const MeshCrypto = (() => {
+// FIX Bug2: Guard against re-declaration when loaded in multiple iframes.
+// Changed 'const MeshCrypto' → 'window.MeshCrypto' so re-execution is safe.
+if (typeof window !== 'undefined' && window.MeshCrypto) {
+    // Already loaded — skip re-declaration
+} else {
+
+window.MeshCrypto = (() => {
     // ── Constants ──────────────────────────────────────────────────────────
     const ALGO_ECDH    = { name: 'ECDH',  namedCurve: 'P-256' };
     const ALGO_ECDSA   = { name: 'ECDSA', namedCurve: 'P-256' };
@@ -211,5 +217,6 @@ const MeshCrypto = (() => {
     };
 })();
 
-if (typeof module !== 'undefined') module.exports = MeshCrypto;
-window.MeshCrypto = MeshCrypto;
+if (typeof module !== 'undefined') module.exports = window.MeshCrypto;
+
+} // end if (!window.MeshCrypto)

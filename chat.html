@@ -5642,7 +5642,7 @@
                 if (!window.wsService || typeof window.wsService.on !== 'function') {
                     // wsService not ready yet — retry every 150ms for up to 6s
                     if (!window._wsBindRetryCount) window._wsBindRetryCount = 0;
-                    if (window._wsBindRetryCount < 40) {
+                    if (window._wsBindRetryCount < 120) {  // FIX Bug4: was 40 (6s) → 120 (18s)
                         window._wsBindRetryCount++;
                         setTimeout(_bindWsCallListeners, 150);
                     } else {
@@ -6366,6 +6366,18 @@
 
         // DOMContentLoaded handlers
         document.addEventListener('DOMContentLoaded', function() {
+
+            // FIX Bug4: Ensure window.wsService alias is set as soon as KynectaRealtime
+            // becomes available. Without this, _bindWsCallListeners can miss the window
+            // entirely during slow-loading iframes, causing incoming calls to be silent.
+            (function _ensureWsService() {
+                if (window.KynectaRealtime) {
+                    if (!window.wsService) window.wsService = window.KynectaRealtime;
+                    return;
+                }
+                setTimeout(_ensureWsService, 100);
+            })();
+
             if ('serviceWorker' in navigator && !window.__chatSwListenerBound) {
                 window.__chatSwListenerBound = true;
                 navigator.serviceWorker.addEventListener('message', function(evt) {

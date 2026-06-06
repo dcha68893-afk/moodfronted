@@ -515,6 +515,48 @@
             this._processQueue();
             this._registerMessageBridgeListeners();
             this._triggerSync();
+
+            // CRITICAL FIX: Emit join_user_room so the server places this socket in the
+            // correct user:<id> and user_<id> rooms. Without this, sendToUser() on the
+            // backend cannot deliver messages or call:incoming events to this client.
+            // The backend handler in webSocketService.js joins the rooms on this event.
+            try {
+                const myId = this._getUserId();
+                if (myId && this._socket && typeof this._socket.emit === 'function') {
+                    this._socket.emit('join_user_room', { userId: myId });
+                    console.log('[Realtime] ✅ Emitted join_user_room for userId:', myId);
+                }
+            } catch (_jrErr) {}
+        }
+
+        // Helper to get current user ID from multiple possible storage locations
+        _getUserId() {
+            try {
+                // Try SessionManager first (fastest)
+                if (window.SessionManager && typeof window.SessionManager.getUserId === 'function') {
+                    const id = window.SessionManager.getUserId();
+                    if (id) return id;
+                }
+                // Try common localStorage keys
+                for (const key of ['moodchat_user', 'kynecta_auth', 'authUser', 'user']) {
+                    const raw = localStorage.getItem(key);
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        const id = parsed?.id || parsed?.user?.id || parsed?.userId;
+                        if (id) return id;
+                    }
+                }
+                // Try token decode (last resort)
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token');
+                if (token) {
+                    const parts = token.split('.');
+                    if (parts.length === 3) {
+                        const payload = JSON.parse(atob(parts[1]));
+                        return payload?.id || payload?.userId || payload?.sub || null;
+                    }
+                }
+            } catch (_) {}
+            return null;
         }
 
         _onSocketIOMessage(data) {

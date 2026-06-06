@@ -2685,6 +2685,15 @@ try {
             }
             this._lastMessagesFetchAt.set(fetchKey, now);
 
+            // FIX Bug3: Honor merge:true — when called with merge:true (e.g. from SYNC_STARTED),
+            // set options.after to the timestamp of the last known message so we only
+            // fetch NEW messages and merge them in, instead of wiping all existing messages.
+            if (options.merge && this._messages && this._messages.length > 0) {
+                const lastMsg = this._messages[this._messages.length - 1];
+                options.after = options.after || lastMsg?.createdAt || lastMsg?.timestamp;
+                console.log('[ChatManager] merge:true — fetching only messages after', options.after);
+            }
+
             // FIXED: Preserve realtime messages that arrived before this chat was opened.
             // fetchMessages → setMessages clears _messages, losing them.
             const _rtPreserve = (this._messages || []).filter(function(m) {
@@ -2747,7 +2756,22 @@ try {
                         before: options.before || null
                     });
 
-                    this.setMessages(hydratedMessages, conversationId);
+                    // FIX Bug3: When merge:true, add only new messages instead of replacing all
+                    if (options.merge && hydratedMessages && hydratedMessages.length > 0) {
+                        const _normalizeTs2 = _normalizeTs;
+                        for (const m of hydratedMessages) {
+                            const k = String(m.serverId || m.id || '');
+                            if (k && !this._messagesMap.has(k)) {
+                                this._messages.push(m);
+                                this._messagesMap.set(k, m);
+                            }
+                        }
+                        this._messages.sort((a, b) => _normalizeTs2(a) - _normalizeTs2(b));
+                        this._notifySubscribers();
+                        this._notifySuccess('Messages synced');
+                    } else {
+                        this.setMessages(hydratedMessages, conversationId);
+                    }
                     // FIXED: Merge back realtime messages that arrived before chat open
                     if (_rtPreserve && _rtPreserve.length > 0) {
                         const _tsF2 = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
@@ -2800,7 +2824,22 @@ try {
                         chatId: conversationId,
                         isLocalOnly: false
                     }));
-                    this.setMessages(normalizedMessages, conversationId);
+                    // FIX Bug3: When merge:true, add only new messages instead of replacing all
+                    if (options.merge && normalizedMessages.length > 0) {
+                        const _normalizeTs3 = _normalizeTs;
+                        for (const m of normalizedMessages) {
+                            const k = String(m.serverId || m.id || '');
+                            if (k && !this._messagesMap.has(k)) {
+                                this._messages.push(m);
+                                this._messagesMap.set(k, m);
+                            }
+                        }
+                        this._messages.sort((a, b) => _normalizeTs3(a) - _normalizeTs3(b));
+                        this._notifySubscribers();
+                        this._notifySuccess('Messages synced');
+                    } else {
+                        this.setMessages(normalizedMessages, conversationId);
+                    }
                     // Merge back realtime messages that arrived before this fetch completed
                     if (_rtPreserve && _rtPreserve.length > 0) {
                         const _tsRt = _normalizeTs; // FIX: consolidated to canonical _normalizeTs

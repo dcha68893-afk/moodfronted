@@ -120,8 +120,13 @@
     console.log('[Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded');
 
     // ── Mesh Engine (rich /mesh/ stack): crypto → transport → router → engine → bridge ──
-    for (const src of MESH_MODULES) await loadScript(src);
-    console.log('[Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)');
+    // FIX Bug2: Only load mesh modules if MeshCrypto is not already declared (iframe guard)
+    if (!window.MeshCrypto) {
+      for (const src of MESH_MODULES) await loadScript(src);
+      console.log('[Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)');
+    } else {
+      console.log('[Phase6Bootstrap] ℹ️ MeshCrypto already loaded — skipping MESH_MODULES (iframe guard)');
+    }
 
     // ── Phase 11: load Central Orchestration Runtime ──────────────────────
     for (const m of PHASE11_MODULES) await loadScript(BASE + m);
@@ -149,6 +154,17 @@
   function _wireOfflineQueue() {
     const q = window.__OfflineMessageQueue;
     if (!q) return;
+    // FIX Bug1: Defensive check — some queue implementations (KynectaOfflineQueue alias)
+    // don't have setSendHandler. Skip wiring if the method is missing or already set.
+    if (typeof q.setSendHandler !== 'function') {
+      console.log('[Phase6Bootstrap] ℹ️ _wireOfflineQueue: setSendHandler not available — skipping (KynectaOfflineQueue handles delivery internally)');
+      return;
+    }
+    if (q._sendHandlerWired) {
+      console.log('[Phase6Bootstrap] ℹ️ _wireOfflineQueue: send handler already wired — skipping');
+      return;
+    }
+    q._sendHandlerWired = true;
     q.setSendHandler(async msg => {
       // PHASE10: Route through TransportRuntime for proper priority + receipts
       const p10Runtime = window.__Phase10TransportRuntime;

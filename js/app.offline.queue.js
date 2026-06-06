@@ -464,8 +464,38 @@
   offlineQueue.enqueue    = function(item) { return this.queue(item); };
   offlineQueue.size       = function()     { return this._queue.length; };
   offlineQueue.getPending = function()     { return [...this._queue]; };
-  window.__OfflineMessageQueue = offlineQueue;  // HybridTransportRuntime alias
-  window.KynectaMsgQueue        = offlineQueue;  // messages-core alias
+
+  // FIX Bug1: Add setSendHandler, markDelivered, onStateChange stubs so this queue is
+  // compatible with the full OfflineMessageQueue API expected by phase6.bootstrap.js.
+  // phase6._wireOfflineQueue() now guards against missing setSendHandler, but these stubs
+  // ensure forward-compatibility if any other code calls them.
+  if (!offlineQueue.setSendHandler) {
+    offlineQueue._sendHandler = null;
+    offlineQueue.setSendHandler = function(handler) {
+      this._sendHandler = handler;
+      console.log('[OfflineQueue] setSendHandler registered (stub — handler stored but not used; delivery handled internally)');
+    };
+  }
+  if (!offlineQueue.markDelivered) {
+    offlineQueue.markDelivered = function(id) {
+      const idx = this._queue.findIndex(q => q.id === id);
+      if (idx !== -1) { this._queue.splice(idx, 1); this._persist().catch(() => {}); }
+    };
+  }
+  if (!offlineQueue.onStateChange) {
+    offlineQueue.onStateChange = function(fn) {
+      // Stub — state change is published via KynectaEventBus already
+      return function() {}; // unsubscribe noop
+    };
+  }
+
+  // FIX Bug1: Only set window.__OfflineMessageQueue if the proper full-featured queue
+  // (OfflineMessageQueue from js/core/queue/) hasn't already been loaded.
+  // This prevents overwriting a richer implementation that DOES have setSendHandler.
+  if (!window.__OfflineMessageQueue || !window.__OfflineMessageQueue._sendHandlerWired) {
+    window.__OfflineMessageQueue = offlineQueue;  // HybridTransportRuntime alias
+  }
+  window.KynectaMsgQueue = offlineQueue;  // messages-core alias
 
 
   console.log('[OfflineQueue] ✅ Ready (offline-first v2.1)');

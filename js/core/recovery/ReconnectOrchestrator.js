@@ -172,6 +172,15 @@
       this._reconnectCount  = 0;
       this._lastConnectedAt = null;
       this._started    = false;
+
+      // FIX Bug4: Boot grace period — suppress DISCONNECTED UI warnings during initial load.
+      // The socket may not be authenticated yet in the first 10 seconds; any DISCONNECTED
+      // state during this window is a false positive (not a real "weak network" event).
+      this._bootWindowActive = true;
+      setTimeout(() => {
+        this._bootWindowActive = false;
+        console.log('[Reconnect] Boot grace period ended');
+      }, 10000);
     }
 
     start() {
@@ -307,6 +316,15 @@
 
     _onDisconnected(reason) {
       this._lastDisconnectedAt = Date.now(); // FIX #17 — track disconnect time for missed-event window
+
+      // FIX Bug4: During the 10-second boot grace window, the socket hasn't been
+      // authenticated yet — any DISCONNECTED is a false positive. Don't propagate
+      // to UI or trigger "Slow connection" warnings during boot.
+      if (this._bootWindowActive && this._reconnectCount === 0) {
+        console.log('[Reconnect] Suppressing DISCONNECTED during boot grace window (reason:', reason, ')');
+        return;
+      }
+
       this._setState(RECOVERY_STATE.DISCONNECTED);
 
       if (reason === 'io server disconnect' || reason === 'transport close') {
