@@ -32,9 +32,21 @@
   }
 
   function _isOnline() {
-    return navigator.onLine &&
-      (window.KynectaRealtime?._socket?.connected === true ||
-       window.KynectaRealtime?.state === 'authenticated');
+    // FIX: During socket reconnect cycles, KynectaRealtime._socket?.connected is
+    // temporarily false even though the device has working internet (WiFi).
+    // The old check caused messages to be queued offline during every reconnect.
+    //
+    // New logic: consider online if:
+    //   1. Browser says online AND socket is connected/authenticated, OR
+    //   2. Browser says online AND socket is in a transient reconnecting state
+    //      (connecting/reconnecting/authenticating) — internet IS available, socket
+    //      will reconnect shortly, don't queue as offline
+    if (!navigator.onLine) return false;
+    const state = window.KynectaRealtime?._state || '';
+    const connected = window.KynectaRealtime?._socket?.connected === true ||
+                      state === 'authenticated';
+    const transient = state === 'reconnecting' || state === 'connecting' || state === 'authenticating';
+    return connected || transient;
   }
 
   function _hasLAN() {

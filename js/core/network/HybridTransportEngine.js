@@ -266,20 +266,33 @@
     _startHealthPolling() {
       setInterval(() => {
         // PHASE10: Poll actual connectivity state of all transports
-        // Internet — check socket OR iframe bridge (child iframes use bridged socket)
         const socket = window.KynectaRealtime?._socket;
         const inIframe = window.parent !== window;
         const bridgeReady = window.__kynParentReady === true ||
                             window.KynectaRealtime?.state === 'authenticated' ||
                             window.KynectaRealtime?.isConnected?.() === true;
 
-        // In iframes: trust the bridge state, not raw socket.connected
+        // FIX (WiFi→Offline bug): Don't mark INTERNET unavailable just because the
+        // socket is momentarily reconnecting. navigator.onLine is the OS/browser ground
+        // truth for whether the device has internet. Checking socket.connected caused
+        // INTERNET→OFFLINE during the few seconds of every reconnect cycle, queuing
+        // messages unnecessarily and showing "offline" to users on working WiFi.
+        const realtimeState = window.KynectaRealtime?._state || '';
+        const socketTransient = realtimeState === 'reconnecting' ||
+                                realtimeState === 'connecting' ||
+                                realtimeState === 'authenticating';
+
         const internetConnected = inIframe
           ? (navigator.onLine && (bridgeReady || true))  // iframe always has internet via parent
-          : (socket ? socket.connected : navigator.onLine);
+          : (navigator.onLine && (
+              (socket && socket.connected) ||  // socket connected
+              socketTransient ||               // FIX: transient reconnect — don't go offline
+              !socket                          // FIX: socket not yet created — still online
+            ));
 
         this._health.record(TRANSPORT.INTERNET, internetConnected, 0);
-        if (!internetConnected && this._orchestrator.getCurrent() === TRANSPORT.INTERNET) {
+        // FIX: Only switch away from INTERNET when browser itself reports offline
+        if (!internetConnected && !navigator.onLine && this._orchestrator.getCurrent() === TRANSPORT.INTERNET) {
           this._orchestrator.switchTo(this._priority.selectBest(), 'socket_disconnected');
         }
 

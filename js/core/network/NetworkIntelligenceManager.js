@@ -26,23 +26,32 @@
     OFFLINE: 'OFFLINE',
   };
 
-  const PROBE_URL = (() => {
-    // Use a known-always-up tiny resource; fallback to backend health endpoint
+  // FIX: Multi-URL probe with fallbacks. Render free-tier HEAD requests return 405/503.
+  // WiFi-connected users were falsely marked OFFLINE because the single probe failed.
+  const _backendBase = (() => {
     if (window.__kynAPI && window.__kynAPI.baseUrl) {
-      return window.__kynAPI.baseUrl.replace(/\/+$/, '') + '/health';
+      return window.__kynAPI.baseUrl.replace(/\/+$/, '').replace(/\/api\/?$/, '');
     }
-    return 'https://moodchat-fy56.onrender.com/health';
+    return 'https://moodchat-fy56.onrender.com';
   })();
 
+  const PROBE_URLS = [
+    _backendBase + '/health',            // backend health (GET)
+    'https://www.google.com/generate_204', // always-up fallback
+  ];
+
+  const PROBE_URL = PROBE_URLS[0]; // kept for backward compat references
+
   const DEFAULTS = {
-    probeIntervalMs: 15000,
+    probeIntervalMs: 20000,       // FIX: was 15s — increased to reduce false offline on slow WiFi
     probeFastIntervalMs: 5000,
-    probeTimeoutMs: 5000,
+    probeTimeoutMs: 8000,         // FIX: was 5s — Render cold-starts take up to 7s
     bandwidthSampleSize: 5,
     latencyHistorySize: 20,
     jitterWindowSize: 10,
     captivePortalCheckUrl: 'https://www.google.com/generate_204',
     captivePortalExpectedStatus: 204,
+    failuresBeforeOffline: 2,     // FIX: require 2 consecutive failures before OFFLINE
   };
 
   // ─── NetworkStateClassifier ──────────────────────────────────────────────────
@@ -292,29 +301,42 @@
       let success = false;
       let status = null;
 
-      try {
-        const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), DEFAULTS.probeTimeoutMs);
+      // FIX: Try each probe URL until one succeeds.
+      // Use GET (not HEAD) — Render free-tier health routes don't respond to HEAD.
+      // This is the root cause of WiFi users seeing "offline" — the HEAD probe to
+      // the backend failed (405 or cold-start 503), marking internet unavailable.
+      for (const url of PROBE_URLS) {
+        try {
+          const controller = new AbortController();
+          const tid = setTimeout(() => controller.abort(), DEFAULTS.probeTimeoutMs);
 
-        const res = await fetch(PROBE_URL, {
-          method: 'HEAD',
-          cache: 'no-store',
-          signal: controller.signal,
-        });
+          const res = await fetch(url, {
+            method: 'GET',       // FIX: was HEAD — backend health only handles GET
+            cache: 'no-store',
+            signal: controller.signal,
+            mode: 'no-cors',     // FIX: allows cross-origin probes without CORS preflight failure
+          });
 
-        clearTimeout(tid);
-        success = res.ok || res.status < 500;
-        status = res.status;
+          clearTimeout(tid);
+          // With no-cors, res.type === 'opaque' and res.status === 0 — treat as success
+          success = res.ok || res.status === 0 || res.status < 500;
+          status = res.status;
 
-        const durationMs = Math.round(performance.now() - start);
-        this._latency.record(durationMs);
-        this._jitter.record(durationMs);
-        this._packetLoss.record(true);
+          const durationMs = Math.round(performance.now() - start);
+          this._latency.record(durationMs);
+          this._jitter.record(durationMs);
+          this._packetLoss.record(true);
 
-        // Bandwidth rough estimate from Content-Length if available
-        const cl = res.headers.get('content-length');
-        if (cl) this._bandwidth.record(parseInt(cl, 10), durationMs);
-      } catch (_) {
+          const cl = res.headers.get('content-length');
+          if (cl) this._bandwidth.record(parseInt(cl, 10), durationMs);
+
+          if (success) break; // First successful probe wins — no need to try more
+        } catch (_) {
+          // This URL failed — try next
+        }
+      }
+
+      if (!success) {
         this._packetLoss.record(false);
       }
 
@@ -331,9 +353,18 @@
       const browserOnline = navigator.onLine !== false;
       const navBw = this._bandwidth.fromNavigator();
 
+      // FIX: Do NOT declare OFFLINE on a single probe failure.
+      // WiFi users on slow connections or when the Render backend cold-starts
+      // would get false OFFLINE state from one missed probe.
+      // Require (failuresBeforeOffline) consecutive failures OR browser offline.
+      const recentProbes = this._probeHistory.slice(-DEFAULTS.failuresBeforeOffline);
+      const allRecentFailed = recentProbes.length >= DEFAULTS.failuresBeforeOffline &&
+                              recentProbes.every(p => !p.success);
+      const probeReachable = probeSuccess || (!allRecentFailed && browserOnline);
+
       const metrics = {
         browserOnline,
-        probeReachable: probeSuccess,
+        probeReachable,
         latency: this._latency.average(),
         packetLoss: this._packetLoss.rate(),
         jitter: this._jitter.compute(),
@@ -359,7 +390,6 @@
 
       const lifecycle = this._lifecycle.getState();
 
-      // LAN / local network detection (Phase 1 READ-ONLY)
       const lanAvailable = this._detectLAN();
       const localDiscoveryPossible = lanAvailable && !captivePortal;
 

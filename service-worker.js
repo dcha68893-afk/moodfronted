@@ -149,7 +149,15 @@ const BYPASS_PATTERNS = [
   /\/wss\//i,
   /\/graphql/i,
   /\/webhook/i,
-  /^https?:\/\/api\./i
+  /^https?:\/\/api\./i,
+  // FIX (WiFi→Offline): Backend health probe URLs must bypass cache.
+  // Without this, the SW returned a 503 from its catch() for the health probe,
+  // causing NetworkIntelligenceManager to mark internet OFFLINE even on WiFi.
+  /moodchat-fy56\.onrender\.com/i,
+  /onrender\.com\/health/i,
+  /\.onrender\.com\/api/i,
+  /www\.google\.com\/generate_204/i,
+  /cloudflare\.com\/cdn-cgi/i,
 ];
 
 // Static assets get cache-first treatment
