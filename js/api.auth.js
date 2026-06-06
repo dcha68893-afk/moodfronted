@@ -2937,9 +2937,13 @@
                             console.log(' [AUTH] Login timestamp set for flicker prevention');
                             
                             // CRITICAL FIX: Store to exact keys required by session manager
+                            // PHASE14 FIX: Write ALL token keys so chat.html, socket, and sync manager all find the token
                             localStorage.setItem("auth_token", token);
+                            localStorage.setItem("authToken", token);
+                            localStorage.setItem("accessToken", token);
+                            localStorage.setItem("moodchat_token", token);
                             localStorage.setItem("auth_user", JSON.stringify(user));
-                            console.log(' [AUTH] Session stored to auth_token and auth_user keys');
+                            console.log(' [AUTH] Session stored to auth_token, authToken, accessToken, moodchat_token and auth_user keys');
                             
                             setUserToken(token, expiresIn);
                             
@@ -3113,9 +3117,13 @@ try {
                 console.log(' [AUTH] Login timestamp set for flicker prevention (fallback path)');
                 
                 // CRITICAL FIX: Store to exact keys required by session manager
+                // PHASE14 FIX: Write ALL token keys so chat.html, socket, and sync manager all find the token
                 localStorage.setItem("auth_token", token);
+                localStorage.setItem("authToken", token);
+                localStorage.setItem("accessToken", token);
+                localStorage.setItem("moodchat_token", token);
                 localStorage.setItem("auth_user", JSON.stringify(user));
-                console.log(' [AUTH] Session stored to auth_token and auth_user keys (fallback path)');
+                console.log(' [AUTH] Session stored to auth_token, authToken, accessToken, moodchat_token and auth_user keys (fallback path)');
                 
                 // Store tokens with enhanced method
                 const tokenStored = setUserToken(token, expiresIn);

@@ -263,6 +263,28 @@ export const CartEngine = {
     _save() {
         _lsSave(_LS.CART, Array.from(_store.cart.values()));
         window.dispatchEvent(new CustomEvent('ecom:cart-updated', { detail: { cart: this.getCart() }}));
+        // PHASE14 FIX: persist cart to server so it survives page reload and cross-device
+        this._syncToServer().catch(() => {});
+    },
+
+    // Debounced server sync to avoid spamming on rapid adds
+    _syncToServerTimer: null,
+    async _syncToServer() {
+        clearTimeout(this._syncToServerTimer);
+        this._syncToServerTimer = setTimeout(async () => {
+            try {
+                const items = Array.from(_store.cart.values()).map(i => ({
+                    product_id: i.product?.id,
+                    quantity: i.quantity,
+                    title: i.product?.title,
+                    price: i.product?.price,
+                    image: i.product?.images?.[0] || i.product?.image,
+                })).filter(i => i.product_id);
+                if (items.length > 0) {
+                    await _api('POST', '/api/marketplace/cart', { items });
+                }
+            } catch (_) { /* non-fatal */ }
+        }, 800);
     },
 
     add(product, quantity = 1) {
@@ -346,7 +368,7 @@ export const CartEngine = {
         }
         // Fetch from server
         try {
-            const resp = await _api('GET', '/api/tools/marketplace/cart');
+            const resp = await _api('GET', '/api/marketplace/cart');
             const items = resp?.data?.items || resp?.items || [];
             if (items.length >= 0) {
                 // Server truth: replace local cart entirely

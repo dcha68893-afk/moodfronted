@@ -4985,6 +4985,40 @@
                     return;
                 }
 
+                // PHASE14 FIX: Relay typing indicators from messages-core iframe to socket
+                // messages-core sends START_TYPING/STOP_TYPING via postMessage but chat.html
+                // was silently dropping them — typing indicators never reached the server/recipients
+                if (data.type === 'START_TYPING' || data.type === 'STOP_TYPING') {
+                    try {
+                        const chatId = data.payload?.conversationId || data.payload?.chatId || data.conversationId || data.chatId;
+                        if (chatId) {
+                            const wsRef = window.wsService || window.KynectaRealtime;
+                            if (wsRef && typeof wsRef.emit === 'function') {
+                                wsRef.emit(data.type === 'START_TYPING' ? 'typing:start' : 'typing:stop', { chatId });
+                            } else if (window.KynectaRealtime?._socket?.connected) {
+                                window.KynectaRealtime._socket.emit(
+                                    data.type === 'START_TYPING' ? 'typing:start' : 'typing:stop',
+                                    { chatId }
+                                );
+                            }
+                        }
+                    } catch (_) {}
+                    return;
+                }
+
+                // PHASE14 FIX: Relay MARK_AS_READ from messages-core to socket for real-time read receipts
+                if (data.type === 'MARK_AS_READ' || data.type === 'mark_as_read') {
+                    try {
+                        const chatId = data.payload?.chatId || data.chatId;
+                        const messageIds = data.payload?.messageIds || data.messageIds || [];
+                        const wsRef = window.KynectaRealtime?._socket;
+                        if (wsRef?.connected && chatId) {
+                            wsRef.emit('mark_as_read', { chatId, messageIds });
+                        }
+                    } catch (_) {}
+                    return;
+                }
+
                 // API REQUEST HANDLER
                 if (data.type === 'API_REQUEST') {
                     let endpoint = data.payload?.endpoint || data.endpoint;

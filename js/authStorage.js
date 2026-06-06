@@ -1,5 +1,5 @@
 // authStorage.js - Persistent Authentication Storage
-// VERSION: 1.5.0 - Silent refresh-first strategy, no redirect on token expiry + atomic old-token wipe on save
+// VERSION: 1.1.0 - WhatsApp-style persistent auth layer
 // PURPOSE: Single source of truth for auth persistence in localStorage
 
 (function () {
@@ -7,14 +7,17 @@
 
     const AUTH_STORAGE_KEY = 'kynecta_auth';
     const LOGIN_STATE_KEY = 'isLoggedIn';
-    const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token'];
+    const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token', 'auth_token', 'kyn_token', 'kyn_access_token'];
     const LEGACY_USER_KEYS = ['currentUser', 'user', 'moodchat_user'];
 
-    // PATCH v1.2: Mutation guard is a no-op — we always allow auth mutations.
-    // The original conditional guard silently dropped saves in certain boot orders,
-    // which caused the session to never persist after auto-login, producing the reopen loop.
     function withAuthMutation(fn) {
-        return fn();
+        const previous = window.__allowAuthStorageMutation__;
+        window.__allowAuthStorageMutation__ = true;
+        try {
+            return fn();
+        } finally {
+            window.__allowAuthStorageMutation__ = previous === true;
+        }
     }
 
     function safeParse(raw, fallback = null) {
@@ -36,26 +39,50 @@
                 token: data.token,
                 refreshToken: data.refreshToken || null,
                 user: data.user || null,
-                expiresAt: data.expiresAt || (Date.now() + 30 * 24 * 60 * 60 * 1000), // 30-day default for offline persistence
+                expiresAt: data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
                 issuedAt: data.issuedAt || Date.now(),
-                lastLogin: data.lastLogin || Date.now(), // track last successful login
-                savedAt: new Date().toISOString()
+                savedAt: new Date().toISOString(),
+                _version: '1.2.0'
             };
 
+            // CRITICAL: Non-blocking storage write with timeout protection
+            const writeStartTime = Date.now();
+            
             withAuthMutation(() => {
-                // PATCH v1.4: Wipe ALL old token copies first so no stale token can
-                // linger alongside the new one and cause auth header mismatches.
-                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.removeItem(key));
-                LEGACY_USER_KEYS.forEach((key) => localStorage.removeItem(key));
-
-                // Now write fresh values
-                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-                LEGACY_TOKEN_KEYS.forEach((key) => localStorage.setItem(key, payload.token));
-                LEGACY_USER_KEYS.forEach((key) => localStorage.setItem(key, JSON.stringify(payload.user || null)));
-                localStorage.setItem(LOGIN_STATE_KEY, 'true');
+                try {
+                    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
+                    
+                    // Set legacy keys for compatibility (non-blocking)
+                    LEGACY_TOKEN_KEYS.forEach((key) => {
+                        try {
+                            localStorage.setItem(key, payload.token);
+                        } catch (e) {
+                            console.warn(`[AuthStorage] Failed to set legacy token key ${key}:`, e.message);
+                        }
+                    });
+                    
+                    LEGACY_USER_KEYS.forEach((key) => {
+                        try {
+                            localStorage.setItem(key, JSON.stringify(payload.user || null));
+                        } catch (e) {
+                            console.warn(`[AuthStorage] Failed to set legacy user key ${key}:`, e.message);
+                        }
+                    });
+                    
+                    localStorage.setItem(LOGIN_STATE_KEY, 'true');
+                    
+                    const writeDuration = Date.now() - writeStartTime;
+                    if (writeDuration > 50) {
+                        console.warn(`[AuthStorage] Slow storage write detected: ${writeDuration}ms`);
+                    }
+                    
+                    console.log('[AuthStorage] ✅ Auth data saved successfully');
+                } catch (storageError) {
+                    console.error('[AuthStorage] Storage write error:', storageError.message);
+                    throw storageError;
+                }
             });
 
-            console.log('[AuthStorage] Auth saved to localStorage, token length:', payload.token.length);
             return true;
         } catch (error) {
             console.error('[AuthStorage] saveAuth failed:', error.message);
@@ -65,27 +92,102 @@
 
     function getAuth() {
         try {
+            // CRITICAL: Instant read with performance tracking
+            const readStartTime = Date.now();
+            
             const raw = localStorage.getItem(AUTH_STORAGE_KEY);
             if (raw) {
                 const parsed = safeParse(raw);
+                // CRITICAL: Validate structure only, never throw
                 if (parsed && typeof parsed === 'object' && parsed.token) {
+                    const readDuration = Date.now() - readStartTime;
+                    if (readDuration > 10) {
+                        console.warn(`[AuthStorage] Slow auth read detected: ${readDuration}ms`);
+                    }
+                    
+                    // Set global state immediately for UI rendering
+                    if (!window.currentUser && parsed.user) {
+                        window.currentUser = parsed.user;
+                    }
+                    
                     return parsed;
                 }
             }
 
-            const fallbackToken = LEGACY_TOKEN_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
+            // Fallback to legacy keys (non-blocking)
+            const fallbackToken = LEGACY_TOKEN_KEYS.map((key) => {
+                try {
+                    return localStorage.getItem(key);
+                } catch (e) {
+                    console.warn(`[AuthStorage] Failed to read legacy token key ${key}:`, e.message);
+                    return null;
+                }
+            }).find(Boolean);
+            
             if (!fallbackToken) return null;
 
-            const fallbackUserRaw = LEGACY_USER_KEYS.map((key) => localStorage.getItem(key)).find(Boolean);
-            return {
+            const fallbackUserRaw = LEGACY_USER_KEYS.map((key) => {
+                try {
+                    return localStorage.getItem(key);
+                } catch (e) {
+                    console.warn(`[AuthStorage] Failed to read legacy user key ${key}:`, e.message);
+                    return null;
+                }
+            }).find(Boolean);
+            
+            const fallbackAuth = {
                 token: fallbackToken,
                 refreshToken: null,
                 user: safeParse(fallbackUserRaw),
                 expiresAt: null,
-                issuedAt: null
+                issuedAt: null,
+                _fallback: true // Mark as fallback for debugging
+            };
+            
+            // Set global state immediately for UI rendering
+            if (!window.currentUser && fallbackAuth.user) {
+                window.currentUser = fallbackAuth.user;
+            }
+            
+            const readDuration = Date.now() - readStartTime;
+            if (readDuration > 20) {
+                console.warn(`[AuthStorage] Slow fallback auth read: ${readDuration}ms`);
+            }
+            
+            return fallbackAuth;
+        } catch (error) {
+            // CRITICAL: NEVER throw, always return null on any error
+            console.warn('[AuthStorage] getAuth() handled error safely:', error.message);
+            return null;
+        }
+    }
+    
+    // CRITICAL: Add saveSession method that matches expected interface
+    function saveSession(data) {
+        return saveAuth(data);
+    }
+    
+    // CRITICAL: Add getSession alias that never throws
+    function getSession() {
+        try {
+            const auth = getAuth();
+            if (!auth) {
+                return null;
+            }
+            
+            // Return session structure with required fields
+            return {
+                token: auth.token,
+                refreshToken: auth.refreshToken,
+                user: auth.user,
+                userId: auth.user?.id || auth.user?.uid || null,
+                expiresAt: auth.expiresAt,
+                issuedAt: auth.issuedAt,
+                authenticated: !!auth.token
             };
         } catch (error) {
-            console.warn('[AuthStorage] getAuth() parse error:', error.message);
+            // CRITICAL: NEVER throw, always return null
+            console.warn('[AuthStorage] getSession() handled corruption safely:', error.message);
             return null;
         }
     }
@@ -98,7 +200,6 @@
                 LEGACY_USER_KEYS.forEach((key) => localStorage.removeItem(key));
                 localStorage.removeItem(LOGIN_STATE_KEY);
             });
-            console.log('[AuthStorage] Auth cleared from localStorage');
             return true;
         } catch (error) {
             console.error('[AuthStorage] clearAuth failed:', error.message);
@@ -109,61 +210,8 @@
     function hasValidAuth() {
         const auth = getAuth();
         if (!auth || !auth.token) return false;
-        // PATCH v1.5: NEVER block on expiresAt here.
-        // Token expiry is handled by the proactive refresh scheduler (api_auth.js) and
-        // the periodic session check (auth_session_manager.js) — both attempt a silent
-        // background refresh and only clear the session if the refresh itself fails.
-        // Blocking here would cause flash-redirects to login on every app open when
-        // the JWT has expired but the refresh token is still valid.
+        if (auth.expiresAt && Date.now() > auth.expiresAt) return false;
         return true;
-    }
-
-    // PATCH v1.5: Safe re-auth helper — called by UI when auth:session:ended fires.
-    // Shows a gentle re-authentication prompt rather than a hard page redirect.
-    // The UI layer should call this instead of doing window.location.href manually.
-    function notifySessionEnded(reason) {
-        try {
-            window.dispatchEvent(new CustomEvent('auth:session:ended', {
-                detail: { reason: reason || 'unknown', timestamp: Date.now() }
-            }));
-        } catch (_) {}
-    }
-
-    // PATCH v1.4: Returns milliseconds until the stored token expires, or 0 if already expired.
-    // Returns null if no expiry information is present (non-expiring / unknown).
-    function getTokenExpiresAt() {
-        const auth = getAuth();
-        if (!auth) return null;
-
-        // Prefer the explicit expiresAt stored in our payload
-        if (auth.expiresAt && typeof auth.expiresAt === 'number') {
-            return auth.expiresAt;
-        }
-
-        // Fall back to decoding JWT exp claim directly
-        try {
-            const parts = (auth.token || '').split('.');
-            if (parts.length === 3) {
-                const payload = JSON.parse(atob(parts[1]));
-                if (payload.exp) return payload.exp * 1000;
-            }
-        } catch (_) {}
-
-        return null;
-    }
-
-    // PATCH v1.4: Returns true when the token is present but will expire within
-    // `thresholdMs` milliseconds (default 5 minutes).  Used by the proactive
-    // refresh scheduler to trigger a background refresh before the token actually
-    // expires, so the user never notices a token change.
-    function isTokenExpiringSoon(thresholdMs = 5 * 60 * 1000) {
-        const auth = getAuth();
-        if (!auth || !auth.token) return false;
-        const expiresAt = getTokenExpiresAt();
-        if (expiresAt === null) return false; // no expiry info → assume valid
-        const msRemaining = expiresAt - Date.now();
-        // Also return true when already expired so callers treat both cases uniformly
-        return msRemaining <= thresholdMs;
     }
 
     function updateAuthTokens({ token, refreshToken, expiresAt }) {
@@ -185,7 +233,7 @@
     function getToken() {
         const auth = getAuth();
         const token = auth?.token || null;
-        console.log('[AuthStorage] getToken() called, token present:', !!token);
+        console.log('[AUTH TOKEN]', token);
         return token;
     }
 
@@ -193,53 +241,7 @@
         return getAuth()?.user || null;
     }
 
-    // PATCH v1.3: Strict session validator — single source of truth for what constitutes
-    // a usable session. Used by auth_session_manager on every boot to detect corruption
-    // before it reaches the UI layer. Does NOT check expiry — server enforces that.
-    function isValidSession(session) {
-        if (!session || typeof session !== 'object') return false;
-        if (!session.token || typeof session.token !== 'string' || session.token.length < 10) return false;
-        if (!session.user || typeof session.user !== 'object') return false;
-        return true;
-    }
-
-    // PATCH v1.3: setSession / clearSession — canonical aliases that guarantee
-    // all callers use a single write path.
-    function setSession(session) {
-        return saveAuth(session);
-    }
-
-    function clearSession() {
-        return clearAuth();
-    }
-
-    // PATCH v1.3: getSession — returns the full auth object or null
-    function getSession() {
-        const auth = getAuth();
-        return isValidSession(auth) ? auth : null;
-    }
-
-    // PATCH v1.3: Synchronous session getter — avoids depending on SessionManager being loaded first.
-    function getSessionSync() {
-        try {
-            const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-            if (raw) {
-                const auth = JSON.parse(raw);
-                if (auth && auth.token) return auth;
-            }
-        } catch (_) {}
-        return null;
-    }
-
-    const AuthStorage = {
-        saveAuth, getAuth, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser,
-        // v1.3 additions
-        isValidSession, setSession, clearSession, getSession, getSessionSync,
-        // v1.4 additions — proactive refresh support
-        getTokenExpiresAt, isTokenExpiringSoon,
-        // v1.5 additions — graceful re-auth without redirect
-        notifySessionEnded
-    };
+    const AuthStorage = { saveAuth, saveSession, getAuth, getSession, clearAuth, hasValidAuth, updateAuthTokens, getToken, getUser };
 
     window.AuthStorage = AuthStorage;
     window.api = window.api || {};

@@ -254,6 +254,11 @@
             since: this._lastDisconnectedAt || (Date.now() - 5 * 60 * 1000),
             userId: myId
           });
+          // PHASE14 FIX: also request missed messages (delta-sync for every chat)
+          socket.emit('sync:missed_messages', {
+            since: this._lastDisconnectedAt || (Date.now() - 5 * 60 * 1000),
+            chatIds: [] // empty = server fetches all chats for this user
+          });
           // Trigger full message sync
           if (window.KynectaSyncEngine?.scheduleSyncAll) {
             window.KynectaSyncEngine.scheduleSyncAll(800);
