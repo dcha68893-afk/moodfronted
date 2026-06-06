@@ -6859,10 +6859,60 @@
 
 
 
-    function showForwardModal(message) {
+    async function showForwardModal(message) {
+        // FIX: was alert() stub — now calls POST /api/messages/:id/forward
+        const core = getMessagesCore();
+        const conversations = core?.getConversations?.() || [];
+        if (!conversations.length) {
+            UIRenderer.showNotification('No conversations to forward to', 'info');
+            return;
+        }
 
-        alert('Forward feature - select a contact to forward this message');
+        // Build a simple selection modal
+        const existing = document.getElementById('_forwardModal');
+        if (existing) existing.remove();
 
+        const modal = document.createElement('div');
+        modal.id = '_forwardModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+        modal.innerHTML = `
+          <div style="background:var(--bg-primary,#1a1a2e);border-radius:16px;width:100%;max-width:360px;padding:20px;max-height:70vh;overflow-y:auto;">
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--text-primary,#fff)">Forward to</h3>
+            <div id="_fwdList" style="display:flex;flex-direction:column;gap:8px;">
+              ${conversations.slice(0,20).map(c => `
+                <button data-chat-id="${c.id}" style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;border:none;background:var(--bg-secondary,#16213e);cursor:pointer;color:var(--text-primary,#fff);font-size:14px;text-align:left;">
+                  <img src="${c.avatar || c.participantAvatar || ''}" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">
+                  <span>${UIFailsafe.escapeHtml(c.name || c.participantName || 'Chat')}</span>
+                </button>`).join('')}
+            </div>
+            <button id="_fwdCancel" style="margin-top:16px;width:100%;padding:10px;border-radius:10px;border:none;background:var(--bg-secondary,#16213e);color:var(--text-muted,#888);cursor:pointer;">Cancel</button>
+          </div>`;
+
+        document.body.appendChild(modal);
+        document.getElementById('_fwdCancel').onclick = () => modal.remove();
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+        modal.querySelectorAll('[data-chat-id]').forEach(btn => {
+            btn.onclick = async () => {
+                modal.remove();
+                try {
+                    const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                    const base  = window.__API_BASE_URL || window.API_BASE_URL || '';
+                    const res   = await fetch(`${base}/api/messages/${message.id}/forward`, {
+                        method : 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body   : JSON.stringify({ targetChatIds: [parseInt(btn.dataset.chatId)] })
+                    });
+                    if (res.ok) {
+                        UIRenderer.showNotification('Message forwarded', 'success');
+                    } else {
+                        UIRenderer.showNotification('Forward failed', 'error');
+                    }
+                } catch(e) {
+                    UIRenderer.showNotification('Forward failed: ' + e.message, 'error');
+                }
+            };
+        });
     }
 
 

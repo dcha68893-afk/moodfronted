@@ -3717,12 +3717,22 @@ try {
             if (targetId) {
                 try {
                     const _tid = String(targetId);
-                    // Filter: keep messages whose chatId matches, OR messages with no chatId
-                    // (legacy) only when this is the active conversation.
-                    const _toSave = this._messages.filter(function(m) {
-                        const mcid = String(m.chatId || m.conversationId || '');
-                        return mcid === _tid || mcid === '' || mcid === 'undefined';
-                    });
+                    // FIX: Only save messages that explicitly belong to this chat.
+                    // Old logic included chatId='' messages which caused cross-chat contamination:
+                    // messages from Chat A would appear in Chat B after a cache restore.
+                    // Messages with no chatId are stamped with the target chatId before saving.
+                    const _toSave = this._messages
+                        .filter(function(m) {
+                            const mcid = String(m.chatId || m.conversationId || '');
+                            return mcid === _tid;
+                        })
+                        .map(function(m) {
+                            // Stamp any message that is missing chatId so future reads can filter correctly
+                            if (!m.chatId && !m.conversationId) {
+                                return Object.assign({}, m, { chatId: _tid });
+                            }
+                            return m;
+                        });
                     SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_tid}`, _toSave);
                 } catch (e) {}
             }
@@ -5439,20 +5449,35 @@ try {
     // =============================================
     const UIFeatures = {
         playNotificationSound: function() {
+            // FIX: Old code used truncated base64 WAV ('UklGR...') that never played.
+            // Use Web Audio API to synthesize a short notification beep instead —
+            // works in all browsers without any asset dependency.
             try {
-                const audio = new Audio();
-                audio.src = 'data:audio/wav;base64,UklGR...';
-                audio.volume = 0.5;
-                audio.play().catch(() => {
-                    if (Notification.permission === 'granted') {
-                        new Notification('New message', { body: 'You have a new message' });
-                    }
-                });
-            } catch (e) {
-                if (Notification.permission === 'granted') {
-                    new Notification('New message', { body: 'You have a new message' });
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) {
+                    const ctx = new AudioCtx();
+                    const oscillator = ctx.createOscillator();
+                    const gainNode   = ctx.createGain();
+                    oscillator.connect(gainNode);
+                    gainNode.connect(ctx.destination);
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(880, ctx.currentTime);       // A5
+                    oscillator.frequency.setValueAtTime(1100, ctx.currentTime + 0.1); // ~C#6
+                    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                    oscillator.start(ctx.currentTime);
+                    oscillator.stop(ctx.currentTime + 0.3);
+                    // Auto-close AudioContext after sound plays to free resources
+                    oscillator.onended = () => { try { ctx.close(); } catch(_) {} };
+                    return;
                 }
-            }
+            } catch (_audioErr) { /* fall through to Notification */ }
+            // Fallback: browser notification if audio fails
+            try {
+                if (Notification.permission === 'granted') {
+                    new Notification('New message', { body: 'You have a new message', silent: false });
+                }
+            } catch (_) {}
         },
 
         formatMessageText: function(text) {

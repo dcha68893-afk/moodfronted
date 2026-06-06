@@ -247,7 +247,7 @@ const PAY_OPTIONS = [
     { id:'mpesa', name:'M-Pesa',          icon:'📱', desc:'Lipa na M-Pesa STK Push' },
     { id:'card',  name:'Card Payment',    icon:'💳', desc:'Visa / Mastercard (coming soon)', disabled:true },
     { id:'cod',   name:'Cash on Delivery',icon:'💵', desc:'Pay when you receive your order' },
-    { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Use your Knecta wallet' },
+    { id:'wallet',name:'Wallet Balance',  icon:'👛', desc:'Wallet system coming soon', disabled:true },
 ];
 
 // ─── Get cart items ────────────────────────────────────────────────────────────

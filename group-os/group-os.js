@@ -10,7 +10,20 @@
 'use strict';
 
 (function GroupOS() {
-    const BASE = '/api/groups';
+    // FIX: Was hardcoded '/api/groups' — fails in iframe since relative URL
+    // hits the frontend server (moodfronted.onrender.com/api/groups → 404).
+    // Now resolves the backend API base from the window context (set by group.html)
+    // or falls back to the known production backend URL.
+    const _apiOrigin = (
+        window.__API_BASE_URL ||
+        window.__kynApiBase ||
+        window.__API_BASE ||
+        (window.__getApiBase && window.__getApiBase()) ||
+        'https://moodchat-fy56.onrender.com/api'
+    ).replace(/\/$/, '');
+    const BASE = _apiOrigin.endsWith('/api')
+        ? _apiOrigin + '/groups'
+        : _apiOrigin + '/api/groups';
     let _groupId  = null;
     let _userId   = null;
     let _role     = 'member';

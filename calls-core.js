@@ -37339,6 +37339,47 @@ clearActiveCall: function() {
             }
         });
 
+        // FIX: Proactively prefetch ICE/TURN config from /api/calls/ice-config when session is ready.
+        // Previously window.__kynTURNServers was only set if the server emitted turn:config via socket
+        // after a call started — meaning the first call always used free fallback TURN servers.
+        // Now we prefetch on session ready so fresh TURN credentials are available before any call.
+        function _prefetchIceConfig(token) {
+            if (!token) return;
+            if (window.__kynTURNServers && window.__kynTURNServers.length) return;
+            try {
+                var baseUrl = (
+                    window.__API_BASE_URL ||
+                    window.__kynApiBase ||
+                    window.__apiBaseUrl ||
+                    (window.parent && window.parent.__apiBaseUrl) ||
+                    (window.parent && window.parent.__getApiBase && window.parent.__getApiBase()) ||
+                    'https://moodchat-fy56.onrender.com'
+                ).replace(/\/+$/, '');
+                fetch(baseUrl + '/api/calls/ice-config', {
+                    method: 'GET',
+                    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+                }).then(function(r) { return r.ok ? r.json() : null; })
+                  .then(function(data) {
+                      if (data && Array.isArray(data.iceServers) && data.iceServers.length) {
+                          var turnOnly = data.iceServers.filter(function(s) {
+                              return s.urls && (String(s.urls).indexOf('turn:') === 0 || String(s.urls).indexOf('turns:') === 0);
+                          });
+                          if (turnOnly.length) {
+                              window.__kynTURNServers = turnOnly;
+                              console.log('[CallsCore] ✅ ICE config prefetched —', turnOnly.length, 'TURN server(s) cached');
+                              window.dispatchEvent(new CustomEvent('kyn:turn:config', { detail: { iceServers: turnOnly } }));
+                          }
+                      }
+                  }).catch(function() {});
+            } catch(_) {}
+        }
+        window.addEventListener('sessionUpdated', function(e) {
+            var token = (e.detail && e.detail.token) || (callsState && callsState.session && callsState.session.token) || null;
+            _prefetchIceConfig(token);
+        });
+        var _existingToken = (callsState && callsState.session && callsState.session.token) || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token);
+        if (_existingToken) setTimeout(function() { _prefetchIceConfig(_existingToken); }, 2000);
+
 
 
 

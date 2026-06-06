@@ -2700,8 +2700,8 @@
 
     <script type="module" src="localstore.tools.js"></script>
 
-    <script type="module" src="tool core.patch.js"></script>
-    <script type="module" src="tool ui.patch.js"></script>
+    <script type="module" src="tool-core-patch.js"></script>
+    <script type="module" src="tool-ui-patch.js"></script>
     <script type="module" src="Tool-core.js"></script>
     <script type="module" src="Tool-ui.js"></script>
 
@@ -3392,6 +3392,12 @@
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
+<!-- ═══ Core Ecommerce Engine ══════════════════════════════════════════════════════
+  EcomMarketplace · CartEngine · ProductNormalizer · SearchEngine · CategoryFilter
+  CRITICAL: must load FIRST — all other marketplace modules depend on EcomMarketplace
+  and CartEngine being defined on window.
+════════════════════════════════════════════════════════════════════════ -->
+<script src="/marketplace-ecommerce.js"></script>
 <!-- ═══ Marketplace Checkout Flow ════════════════════════════════════════════════════
   Complete buyer checkout: Address → Delivery → Payment → Success + Order Tracking
   Must load AFTER Tool-ui.js. Overrides _jmCheckout and _jmViewOrder.
