@@ -887,16 +887,21 @@
                 message = { ...message, type: canonicalType };
             }
 
-            // FIX #15 — DEDUP: drop identical payloads arriving within 800ms (aliases fire twice)
+            // FIX #15 — DEDUP: drop identical payloads arriving within dedup window
+            // Different event types get different windows:
+            //   - call:incoming / call events: 5000ms (multiple socket bindings fire at once)
+            //   - message events: 800ms (normal duplicate suppression)
             if (!this._recentRouted) this._recentRouted = new Map();
-            if (message.payload?.id || message.payload?.messageId) {
-                const dedupKey = canonicalType + ':' + (message.payload.id || message.payload.messageId);
+            if (message.payload?.id || message.payload?.messageId || message.payload?.callId) {
+                const _isCallEvent = canonicalType.startsWith('call:') || canonicalType.startsWith('call_') || canonicalType.includes('call');
+                const _dedupWindow = _isCallEvent ? 5000 : 800;
+                const dedupKey = canonicalType + ':' + (message.payload.callId || message.payload.id || message.payload.messageId);
                 const lastSeen = this._recentRouted.get(dedupKey) || 0;
-                if (Date.now() - lastSeen < 800) return; // duplicate — drop
+                if (Date.now() - lastSeen < _dedupWindow) return; // duplicate — drop
                 this._recentRouted.set(dedupKey, Date.now());
                 // Prune map periodically
                 if (this._recentRouted.size > 200) {
-                    const cutoff = Date.now() - 5000;
+                    const cutoff = Date.now() - 10000;
                     for (const [k, v] of this._recentRouted) { if (v < cutoff) this._recentRouted.delete(k); }
                 }
             }

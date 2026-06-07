@@ -6598,9 +6598,17 @@ try {
                 // BUT sender and receiver are different browsers/users so they have separate
                 // window.__realtimeProcessedIds Sets. Within one browser (same user), this
                 // prevents the 12-listener-firing duplicates without blocking cross-user delivery.
-                const _dedupKey = (_safeId ? (chatId + ':' + _safeId) : null) ||
-                    (_safeLocalId ? (chatId + ':' + _safeLocalId) : null) ||
-                    (chatId + ':' + (message.content || '') + ':' + (message.createdAt || message.timestamp || ''));
+                // FIX BUG #6: Dedup key MUST include a valid chatId.
+                // If chatId is missing/undefined, using it as prefix causes all messages
+                // for different chats to share the same "undefined:id" key — silently
+                // dropping all messages after the first.
+                // Only use chatId-prefixed key when chatId is a real, non-empty value.
+                const _validChatId = chatId && chatId !== 'undefined' && chatId !== 'null' ? chatId : null;
+                const _dedupKey = (_validChatId && _safeId ? (_validChatId + ':' + _safeId) : null) ||
+                    (_validChatId && _safeLocalId ? (_validChatId + ':' + _safeLocalId) : null) ||
+                    (_safeId ? ('msg:' + _safeId) : null) ||
+                    (_safeLocalId ? ('local:' + _safeLocalId) : null) ||
+                    ((_validChatId || 'nochat') + ':' + (message.content || '') + ':' + (message.createdAt || message.timestamp || ''));
                 if (_realtimeProcessedIds.has(_dedupKey)) return;
                 _realtimeProcessedIds.add(_dedupKey);
                 setTimeout(function() { _realtimeProcessedIds.delete(_dedupKey); }, 8000);

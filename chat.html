@@ -5910,15 +5910,30 @@
                     // (and the alias 'call:incoming') to trigger handleIncomingCall() and show the
                     // ring screen. Without this postMessage the iframe never receives the event and
                     // the call is silently dropped — the receiver sees nothing.
+                    // FIX BUG #7: Guard against iframe JS not loaded yet — queue the message
+                    // until CALLS_IFRAME_READY fires, with a 2s fallback.
                     const _callsIframe = document.getElementById('callsIframe');
-                    if (_callsIframe && _callsIframe.contentWindow) {
-                        // Send both type variants for compatibility
-                        _callsIframe.contentWindow.postMessage(
-                            { type: 'INCOMING_CALL', payload, source: 'ws-bridge' }, '*'
-                        );
-                        _callsIframe.contentWindow.postMessage(
-                            { type: 'call:incoming', payload, source: 'ws-bridge' }, '*'
-                        );
+                    function _deliverCallToIframe() {
+                        const _fi = document.getElementById('callsIframe');
+                        if (_fi && _fi.contentWindow) {
+                            _fi.contentWindow.postMessage({ type: 'INCOMING_CALL', payload, source: 'ws-bridge' }, '*');
+                            _fi.contentWindow.postMessage({ type: 'call:incoming', payload, source: 'ws-bridge' }, '*');
+                        }
+                    }
+                    if (window.__callsIframeReady) {
+                        // Iframe already ready — deliver immediately
+                        _deliverCallToIframe();
+                    } else if (_callsIframe && _callsIframe.contentWindow) {
+                        // Iframe exists but JS may not be initialized — wait for CALLS_IFRAME_READY
+                        const _callFallback = setTimeout(_deliverCallToIframe, 2000);
+                        function _onCallIframeReady(evt) {
+                            if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
+                                clearTimeout(_callFallback);
+                                window.removeEventListener('message', _onCallIframeReady);
+                                _deliverCallToIframe();
+                            }
+                        }
+                        window.addEventListener('message', _onCallIframeReady);
                     }
                     // Also show the parent-frame banner (existing behaviour preserved)
                     if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
