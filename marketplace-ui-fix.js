@@ -198,10 +198,13 @@ function ensureAdminFab(){
         fab.id='admFab';
         fab.innerHTML='⚙️';
         fab.title='Admin Panel';
+        fab.setAttribute('aria-label','Admin Panel');
         fab.onclick=()=>window._jmNavMore('admin-dashboard');
         document.body.appendChild(fab);
     }
-    fab.style.cssText='display:flex!important;position:fixed!important;bottom:66px!important;right:14px!important;width:50px!important;height:50px!important;border-radius:50%!important;background:linear-gradient(135deg,#111,#374151)!important;color:#fff!important;border:none!important;cursor:pointer!important;font-size:22px!important;z-index:400!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;align-items:center!important;justify-content:center!important';
+    // FIX: z-index 9999 so it always shows above marketplace cards;
+    // bottom 80px so it clears the bottom nav bar on mobile (56px nav + safe area).
+    fab.style.cssText='display:flex!important;position:fixed!important;bottom:80px!important;right:14px!important;width:50px!important;height:50px!important;border-radius:50%!important;background:linear-gradient(135deg,#111,#374151)!important;color:#fff!important;border:none!important;cursor:pointer!important;font-size:22px!important;z-index:9999!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;align-items:center!important;justify-content:center!important';
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

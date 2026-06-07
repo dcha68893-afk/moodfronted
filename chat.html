@@ -1069,17 +1069,12 @@
             }
 
             /* ── CALL SCREEN: calls iframe goes TRULY full screen ── */
-            /* position:fixed inside iframe = fixed to iframe viewport  */
-            /* We must expand the iframe to cover the full screen so    */
-            /* the calling panel fills edge-to-edge, name + buttons     */
-            /* are not clipped behind header or nav bar.                */
             body.call-screen-active #callsContent {
                 top: 0 !important;
                 bottom: 0 !important;
                 left: 0 !important;
                 right: 0 !important;
                 z-index: 10000 !important;
-                /* Override .hidden — the iframe MUST be visible during a call */
                 visibility: visible !important;
                 pointer-events: auto !important;
                 display: block !important;
@@ -1096,8 +1091,6 @@
                 pointer-events: none !important;
                 visibility: hidden !important;
             }
-            /* group-panel-active: keep globalHeader VISIBLE — it now shows
-               the group name/avatar/back/call/more icons when in a group */
             body.group-panel-active #globalHeader {
                 opacity: 1 !important;
                 visibility: visible !important;
@@ -1108,6 +1101,34 @@
             }
             .profile-name-sm {
                 display: none;
+            }
+
+            /* FIX: Ensure header action buttons (More Options, call, search) are
+               always visible on mobile — never hidden by overflow or flex collapse */
+            .header-actions {
+                display: flex !important;
+                flex-shrink: 0 !important;
+                gap: 6px !important;
+            }
+            .header-action-btn {
+                display: inline-flex !important;
+                width: 34px !important;
+                height: 34px !important;
+                flex-shrink: 0 !important;
+            }
+
+            /* FIX: Admin icon/FAB always on top in mobile */
+            #admFab {
+                display: flex !important;
+                bottom: 80px !important;
+                right: 12px !important;
+                z-index: 9999 !important;
+            }
+
+            /* FIX: Viewport fill for iframes on iOS */
+            .content-iframe {
+                height: 100% !important;
+                width: 100% !important;
             }
         }
 

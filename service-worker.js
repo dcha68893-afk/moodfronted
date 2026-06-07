@@ -1,19 +1,19 @@
 // service-worker.js
-// Version: 17.0.0 - RELOAD LOOP FIX + OFFLINE-FIRST PRESERVED
+// Version: 18.0.0 - INSTANT PWA UPDATE + OFFLINE-FIRST PRESERVED
 // Strategy:
 //   Navigation (HTML pages) -> Network-first, cache fallback, inline shell
 //   Static assets (JS/CSS/fonts/images) -> Cache-first, network fallback
 //   API / auth requests -> Always bypass to network (never cached)
 //   /login + /register HTML pages -> Navigation handler (NOT bypassed)
-//   FIXED: No forced reloads - updates happen in background
+//   FIX v18: skipWaiting() fires immediately; clients notified to reload on controllerchange
 
 'use strict';
 
-// FIXED: Version bumped to 17.0.0 — reload loop elimination
-// Network-first patterns preserved for critical JS files to ensure updates reach users
-// WITHOUT forcing page reloads - updates happen naturally on next navigation
-const SW_VERSION = '17.0.0';
-const CACHE_NAME = 'moodchat-static-v17-stable'; // New cache name for clean update
+// FIX v18.0.0: Bumped from v17 — new cache name forces cache eviction on deploy.
+// skipWaiting() in install + clients.claim() in activate = new SW takes control
+// within seconds of deploy, both in browser tabs AND installed PWA.
+const SW_VERSION = '18.0.0';
+const CACHE_NAME = 'moodchat-static-v18'; // Bumped — old v17 cache auto-deleted on activate
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------

@@ -261,7 +261,16 @@ const MeshEngine = (() => {
     function _updateOfflineIndicator() {
         let badge = document.getElementById('meshOfflineBadge');
         const online   = navigator.onLine;
-        const wsOk     = !!window.wsService?.isConnected?.();
+        // FIX: also accept socket.connected as a valid "live" signal.
+        // isConnected() requires state===AUTHENTICATED which is briefly false
+        // during reconnect, causing a false "Weak network" badge on good internet.
+        const ws = window.wsService;
+        const wsOk = !!(ws && (
+            ws.isConnected?.() ||
+            ws._socket?.connected ||
+            ws.socket?.connected ||
+            ws.io?.engine?.readyState === 'open'
+        ));
         const meshPeers = MeshTransport.getPeerCount();
 
         if (online && wsOk) {

@@ -66,7 +66,35 @@
            ONLY DYNAMIC/ENHANCED UI ELEMENTS v5.0
            (Non-duplicate - not in Tool.css)
            ============================================= */
-        
+
+        /* FIX: Ensure scroll works in Tools/Marketplace on all screen sizes */
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        /* Main tool wrapper must scroll, not the body */
+        #toolsWrapper, #appWrapper, .tools-wrapper, .app-wrapper,
+        .tool-main, #toolMain, .sidebar, #sidebar {
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        /* Ensure marketplace content containers scroll */
+        .jm-page.active, [id^="sdPage_"].active, [id^="admPage_"].active {
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        .sd-body, .adm-body {
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        /* Mobile: ensure full viewport used */
+        @media (max-width: 768px) {
+            html, body {
+                height: 100vh;
+                height: -webkit-fill-available;
+            }
+        }
+
         /* Debug Panel - Dynamic overlay */
         #debugPanel {
             position: fixed;

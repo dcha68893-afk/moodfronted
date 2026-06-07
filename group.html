@@ -2628,30 +2628,49 @@ else setTimeout(init,500);
    GROUP OS PANEL — Opens the Smart Group OS overlay
    Called from the ⚙ Tools button and More Options > Group Tools
 ════════════════════════════════════════════════════════════════ */
-// Priority 1 FIX: Open Group OS from sidebar even when no chat is open
+// Priority 1 FIX: Open Group OS from sidebar — no prior group selection required.
+// Opens immediately using the active group, first available group, or generic mode.
 window._openSmartGroupOSFromSidebar = function() {
-    // Try to get the currently selected/active group id
-    const activeGroupId = window.__currentGroupId ||
-        document.querySelector('.group-item.active, .group-item.selected')?.dataset.groupId ||
-        document.querySelector('.group-item')?.dataset.groupId || null;
+    // 1. Try already-known group id (multiple sources)
+    const activeGroupId =
+        window.__currentGroupId ||
+        window.__activeGroupId ||
+        (window.GroupCore && (typeof window.GroupCore.getActiveGroupId === 'function'
+            ? window.GroupCore.getActiveGroupId()
+            : window.GroupCore._activeGroup?.id)) ||
+        document.querySelector('.group-item.active[data-group-id], .group-item.selected[data-group-id]')?.dataset.groupId ||
+        document.querySelector('.group-item[data-group-id]')?.dataset.groupId ||
+        document.querySelector('[data-group-id]')?.dataset.groupId ||
+        null;
+
     if (activeGroupId) {
         window.__currentGroupId = activeGroupId;
+        window.__activeGroupId  = activeGroupId;
+        window._openGroupOSPanel();
+        return;
+    }
+
+    // 2. No group selected — auto-click first available group and open
+    const firstItem = document.querySelector('.group-item[data-group-id]');
+    if (firstItem) {
+        firstItem.click();
+        setTimeout(() => {
+            const gid = window.__currentGroupId || window.__activeGroupId || firstItem.dataset.groupId;
+            if (gid) { window.__currentGroupId = gid; window.__activeGroupId = gid; }
+            window._openGroupOSPanel();
+        }, 300);
+        return;
+    }
+
+    // 3. No groups at all — open OS panel in generic mode (it handles empty state)
+    if (typeof window._openGroupOSPanel === 'function') {
         window._openGroupOSPanel();
     } else {
-        // No group selected — show a picker or prompt
-        const groups = document.querySelectorAll('.group-item[data-group-id]');
-        if (groups.length > 0) {
-            // Auto-select first group and open
-            groups[0].click();
-            setTimeout(() => window._openGroupOSPanel(), 400);
-        } else {
-            // Show toast/info
-            const t = document.createElement('div');
-            t.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#667eea;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.2)';
-            t.textContent = 'Select a group first to use Smart Tools';
-            document.body.appendChild(t);
-            setTimeout(() => t.remove(), 2500);
-        }
+        const t = document.createElement('div');
+        t.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#667eea;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.2)';
+        t.textContent = 'Create or join a group to use Smart Tools';
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 2500);
     }
 };
 
