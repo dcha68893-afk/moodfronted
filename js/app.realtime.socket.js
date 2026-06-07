@@ -214,6 +214,7 @@
             this._lastSignalPayload = null;
             this._manualDisconnect = false;
             this._lastParseErrorAt = null;
+            this._isConnecting = false; // FIX: mutex to prevent concurrent _connectInternal() races
 
             this._consecutiveErrors = 0;
             this._lastConnectionAttempt = 0;
@@ -389,7 +390,10 @@
             this._reconnectAttempts = 0;
 
             if (this._state === CONNECTION_STATE.AUTHENTICATED) return Promise.resolve(this);
-            return this.connect(this._sessionToken);
+            // FIX: route through _scheduleReconnect so the _isConnecting mutex and
+            // timer guard are always respected — calling this.connect() directly bypassed both.
+            this._scheduleReconnect();
+            return Promise.resolve(this);
         }
 
         getStats() {
@@ -408,7 +412,14 @@
         // ── Private methods ────────────────────────────────────────────────────
 
         async _connectInternal() {
-            if (this._socket && (this._socket.connected || this._socket.connecting)) return;
+            // FIX: mutex guard — prevents concurrent connection races
+            if (this._isConnecting) return;
+            this._isConnecting = true;
+
+            if (this._socket && (this._socket.connected || this._socket.connecting)) {
+                this._isConnecting = false;
+                return;
+            }
 
             if (this._socket) {
                 if (this._socket.disconnect) {
@@ -437,6 +448,9 @@
                 }
             } catch (err) {
                 this._onError(err);
+            } finally {
+                // FIX: always release the mutex so future reconnect attempts can proceed
+                this._isConnecting = false;
             }
         }
 
@@ -1069,7 +1083,7 @@
                             this._reconnectAttempts = 0;
                             this.handleReconnect({ reason: 'ping-timeout-visibility' });
                         }
-                    }, 5000);
+                    }, 10000); // FIX: increased from 5s to 10s — 5s fired too quickly after throttled tabs
                     try {
                         this._socket.once('pong', () => {
                             pongReceived = true;
