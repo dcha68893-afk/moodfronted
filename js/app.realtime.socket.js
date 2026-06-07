@@ -76,16 +76,16 @@
     };
 
     const SOCKET_CONFIG = {
-        reconnectAttempts:    15,
+        reconnectAttempts:    20,
         reconnectBaseDelay:   3000,
-        reconnectMaxDelay:    30000,
+        reconnectMaxDelay:    60000,
         reconnectJitter:      0.3,
         errorCooldown:        5000,
         maxConsecutiveErrors: 5,
         heartbeatInterval:    30000,
-        heartbeatTimeout:     5000,
-        connectionTimeout:    20000,
-        authTimeout:          5000,
+        heartbeatTimeout:     10000,
+        connectionTimeout:    30000,
+        authTimeout:          10000,
         messageQueueLimit:    500,
         tokenWaitMs:          10000,
         tokenPollInterval:    200,
@@ -537,6 +537,20 @@
                     this._emitStateChange();
                     return;
                 }
+                // FIX-DISCONNECT-LOOP: 'transport close' fires during the polling→WebSocket
+                // upgrade handshake — a NORMAL, transient phase of Socket.IO.
+                // If we immediately call _onClose() + _scheduleReconnect() the client
+                // creates a new socket before the WS upgrade completes, causing the rapid
+                // connect/disconnect cycle seen in the validator as alternating ✅ / ❌.
+                // Fix: delay 800ms and only proceed if the socket is still truly gone.
+                if (reason === 'transport close' || reason === 'transport error') {
+                    const _savedSocket = this._socket;
+                    setTimeout(() => {
+                        if (_savedSocket && _savedSocket.connected) return; // upgraded — ignore
+                        this._onClose();
+                    }, 800);
+                    return;
+                }
                 this._onClose();
             });
 
@@ -560,6 +574,38 @@
                         console.log('[Realtime] ✅ Re-joined user rooms after auth confirmation, userId:', myId);
                     }
                 } catch (_authJoinErr) {}
+            });
+
+            // FIX-SESSION-REPLACED: When server evicts this socket (e.g. max concurrent
+            // sessions reached), it sends 'session_replaced'. Without a handler, the client
+            // immediately tried to reconnect, which hit the limit again, triggering eviction
+            // again — a tight disconnect/reconnect loop seen in the validator as ❌/✅ spam.
+            // Fix: stop reconnecting for a cooldown period, then try once (the new tab is now
+            // the active session). The reconnect is still desirable because the user may have
+            // closed the other tab and wants this one to take over.
+            this._socket.on('session_replaced', (data) => {
+                console.warn('[Realtime] Session replaced by server:', data?.reason || 'new connection from same account');
+                this._state = CONNECTION_STATE.DISCONNECTED;
+                this._emitStateChange();
+                // Wait 5s before reconnecting — the other session should be closing
+                clearTimeout(this._sessionReplacedTimer);
+                this._sessionReplacedTimer = setTimeout(() => {
+                    if (this._state !== CONNECTION_STATE.AUTHENTICATED) {
+                        this._reconnectAttempts = 0;
+                        this._connectInternal().catch(() => {});
+                    }
+                }, 5000);
+            });
+
+            // FIX-AUTH-ERROR: Server emits auth_error when secondary token check fails.
+            // Without a handler, this event was silently ignored and the socket stayed
+            // connected in an unauthenticated state, never receiving messages.
+            this._socket.on('auth_error', (data) => {
+                console.error('[Realtime] ❌ Server auth_error:', data?.reason || 'unknown');
+                this._authenticated = false;
+                this._state = CONNECTION_STATE.ERROR;
+                this._emitStateChange();
+                // Don't reconnect — auth errors require a new login, not a retry
             });
         }
 

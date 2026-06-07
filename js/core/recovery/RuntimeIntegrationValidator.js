@@ -86,15 +86,26 @@
       // PHASE10-FIX: In iframes, socket is bridged through parent frame.
       // Check all possible indicators of a live connection:
       const inIframe = window.parent !== window;
+
+      const state = rt.getState?.() || rt.state || 'UNKNOWN';
+
+      // FIX-SOCKET-FLICKER: Socket.IO upgrades polling→WebSocket which briefly
+      // sets socket.connected = false during the transport handshake.
+      // We must treat TRANSIENT states (connecting/reconnecting/authenticating)
+      // as "connected" — the socket is not dead, it is mid-upgrade or mid-auth.
+      // Previously this caused the validator to log socket: ❌ then ✅ repeatedly.
+      const HEALTHY_STATES = ['authenticated', 'connected', 'connecting', 'reconnecting', 'authenticating'];
+      const stateIsHealthy = HEALTHY_STATES.includes(state.toLowerCase());
+
       const connected =
-        socket?.connected === true ||           // direct socket
+        socket?.connected === true ||           // direct socket confirmed
         rt.isConnected?.() === true ||          // compat method
         rt.state === 'authenticated' ||         // bridge state
         rt.getState?.() === 'authenticated' ||  // state method
+        stateIsHealthy ||                       // FIX: transient states are not dead
         window.__kynParentReady === true ||     // parent shell confirmed ready
         (inIframe && navigator.onLine);         // iframe always connected via parent
 
-      const state     = rt.getState?.() || rt.state || 'UNKNOWN';
       const listeners = rt._listeners?.size || 0;
 
       return {
@@ -183,12 +194,22 @@
         repairs.push('group_orchestrator:started');
       }
 
-      // Repair 5: Flush any queued messages now that socket is connected
+      // Repair 5: Flush any queued messages now that socket is connected.
+      // FIX: Guard with a per-socket-id flag so we only flush ONCE per connection,
+      // not on every periodic validation cycle. This eliminates the repeated
+      // "queues:flushed" + "Flushing offline queue via TransportRuntime" log spam.
       const socket = window.KynectaRealtime?._socket;
       if (socket?.connected) {
-        window.__OfflineMessageQueue?.flushAll?.();
-        window.__DurableQueueLayer?.flushAll?.();
-        repairs.push('queues:flushed');
+        const flushKey = socket.id || 'default';
+        if (!this._lastFlushedSocketId || this._lastFlushedSocketId !== flushKey) {
+          this._lastFlushedSocketId = flushKey;
+          window.__OfflineMessageQueue?.flushAll?.();
+          window.__DurableQueueLayer?.flushAll?.();
+          repairs.push('queues:flushed');
+        }
+      } else {
+        // Socket not connected — reset so we flush again on next connection
+        this._lastFlushedSocketId = null;
       }
 
       return repairs;
@@ -284,6 +305,7 @@
       this._dlAudit     = new DuplicateListenerAuditor();
       this._report      = null;
       this._started     = false;
+      this._lastSummaryKey = null; // FIX: dedup log output
     }
 
     async start() {
@@ -319,20 +341,29 @@
       this._report = report;
       window.__Phase6Report = report;
 
-      // Log summary
+      // FIX-LOG-DEDUP: Only log the validation summary when something changes.
+      // Previously it logged every 5 minutes regardless — together with the
+      // socket flicker bug this produced the spam:
+      //   socket: ❌, repairs: 0 ... socket: ✅, repairs: 1 ... socket: ❌ ...
+      // Now we log only when: socket state changes, repair count changes, or
+      // unhealthy module count changes.
       const { healthy, unhealthy, total } = report.modules;
       const socketOk = report.socket.connected ? '✅' : '❌';
-      console.log(`[Phase6] Validation: ${healthy}/${total} modules healthy, socket: ${socketOk}, repairs: ${report.repairs.length}`);
+      const summaryKey = `${healthy}/${total}|${socketOk}|${report.repairs.join(',')}`;
+      if (summaryKey !== this._lastSummaryKey) {
+        this._lastSummaryKey = summaryKey;
+        console.log(`[Phase6] Validation: ${healthy}/${total} modules healthy, socket: ${socketOk}, repairs: ${report.repairs.length}`);
 
-      if (unhealthy > 0) {
-        const dead = Object.entries(report.modules.results)
-          .filter(([, v]) => !v.alive && v.required)
-          .map(([name]) => name);
-        console.warn('[Phase6] Required modules NOT loaded:', dead.join(', '));
-      }
+        if (unhealthy > 0) {
+          const dead = Object.entries(report.modules.results)
+            .filter(([, v]) => !v.alive && v.required)
+            .map(([name]) => name);
+          console.warn('[Phase6] Required modules NOT loaded:', dead.join(', '));
+        }
 
-      if (report.repairs.length > 0) {
-        console.log('[Phase6] Auto-repairs applied:', report.repairs.join(', '));
+        if (report.repairs.length > 0) {
+          console.log('[Phase6] Auto-repairs applied:', report.repairs.join(', '));
+        }
       }
 
       // Extend the Phase 5 monitoring with Phase 6 data

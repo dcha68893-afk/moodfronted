@@ -37249,6 +37249,15 @@ clearActiveCall: function() {
 
             rt.__callsCoreBound = true;
 
+            // FIX-RECONNECT-REBIND: Reset bound flag on disconnect so listeners re-register
+            // after the next reconnect. Without this, call events are silently dropped
+            // after the first disconnect because listeners were cleared but the flag stays true.
+            if (!rt.__callsCoreBoundDisconnectWired) {
+                rt.__callsCoreBoundDisconnectWired = true;
+                rt.on('disconnect', function() { rt.__callsCoreBound = false; });
+                rt.on('connect', function() { rt.__callsCoreBound = false; setTimeout(_bindRealtime, 150); });
+            }
+
 
 
 

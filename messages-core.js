@@ -7043,6 +7043,21 @@ try {
                     handleRealtimePayload(eventName, payload);
                 });
             });
+            // FIX-RECONNECT-REBIND: When socket disconnects, clear the bound flag
+            // so that the next reconnect re-registers the listeners above.
+            // Without this, after the first disconnect the listeners are gone
+            // (socket cleared them) and __msgCoreBound=true prevents re-registration.
+            if (!rt.__msgCoreBoundDisconnectWired) {
+                rt.__msgCoreBoundDisconnectWired = true;
+                rt.on('disconnect', function() {
+                    rt.__msgCoreBound = false;
+                });
+                // Also re-bind on reconnect/connect
+                rt.on('connect', function() {
+                    rt.__msgCoreBound = false;
+                    _bindKynectaRealtime();
+                });
+            }
             console.log('[messages] ✅ Bound to KynectaRealtime singleton events');
         }
         _bindKynectaRealtime();

@@ -348,8 +348,13 @@
     if (q && window.__Phase10TransportRuntime) {
       const origFlush = q.flushAll?.bind(q);
       q.flushAll = async function () {
-        console.log('[Phase10] Flushing offline queue via TransportRuntime');
+        // FIX-LOG-NOISE: Only log when there are actually pending messages to flush.
+        // Previously it logged "[Phase10] Flushing offline queue via TransportRuntime"
+        // on every validator cycle (every 5 min), even when the queue was empty.
         const pending = q.getPending?.() || [];
+        if (pending.length > 0) {
+          console.log('[Phase10] Flushing offline queue via TransportRuntime — pending:', pending.length);
+        }
         for (const entry of pending) {
           try {
             const result = await window.__Phase10TransportRuntime.deliver(
