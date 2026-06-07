@@ -53,9 +53,39 @@ async function _api(method, endpoint, body=null) {
 
 // ─── Admin role guard ─────────────────────────────────────────────────────────
 function _isAdmin() {
-    const user = window.currentUser || window.__kynUser || {};
-    return user.role === 'admin' || user.role === 'moderator' || user.isAdmin === true || _ls.load('_adminMode', false);
+    // FIX 2: Extended role check — covers all session propagation paths
+    const user = window.currentUser || window.__kynUser ||
+                 window.__PARENT_SESSION__?.user ||
+                 window.__kynAPI?.currentUser || {};
+    if (user.role === 'admin' || user.role === 'moderator' || user.isAdmin === true) return true;
+    // localStorage fallbacks
+    const lsRole = localStorage.getItem('userRole') || '';
+    if (lsRole === 'admin' || lsRole === 'moderator') return true;
+    if (_ls.load('_adminMode', false)) return true;
+    // Check parent session via postMessage cache
+    if (window.__cachedUserRole === 'admin' || window.__cachedUserRole === 'moderator') return true;
+    return false;
 }
+
+// FIX 2: Listen for role updates from parent frame
+window.addEventListener('message', function(e) {
+    if (e.data?.type === 'USER_ROLE_UPDATE') {
+        const role = e.data.role || 'user';
+        const isAdmin = e.data.isAdmin || role === 'admin' || role === 'moderator';
+        window.__cachedUserRole = role;
+        localStorage.setItem('userRole', role);
+        if (window.currentUser) { window.currentUser.role = role; window.currentUser.isAdmin = isAdmin; }
+        if (window.__kynUser) { window.__kynUser.role = role; window.__kynUser.isAdmin = isAdmin; }
+        // Re-check admin FAB/button visibility
+        if (typeof window._jmEnsureAdminFab === 'function') window._jmEnsureAdminFab();
+    }
+    if (e.data?.type === 'SESSION_DATA' && e.data?.payload?.user) {
+        const u = e.data.payload.user;
+        if (u.role) { window.__cachedUserRole = u.role; localStorage.setItem('userRole', u.role); }
+        if (!window.currentUser) window.currentUser = u;
+        else { window.currentUser.role = u.role; window.currentUser.isAdmin = u.isAdmin; }
+    }
+});
 
 // ─── Inject CSS ───────────────────────────────────────────────────────────────
 (function _css() {

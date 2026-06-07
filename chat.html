@@ -3650,12 +3650,46 @@
                         cachedUser.id = cachedUser.id ?? cachedUserId;
                         cachedUser.userId = cachedUser.userId ?? cachedUserId;
                     }
+                    // FIX 3: Hydrate role from backend if not already known
+                    if (!cachedUser.role && cachedToken) { _fetchAndCacheUserRole(cachedToken); }
                     requestFriendsFromFriendIframe();
                 } else {
                     cachedToken = null;
                     cachedUserId = null;
                     cachedUser = null;
                 }
+            }
+
+            // FIX 3: Fetch profile role from /api/profile and cache it
+            let _roleFetchInFlight = false;
+            async function _fetchAndCacheUserRole(token) {
+                if (_roleFetchInFlight) return;
+                _roleFetchInFlight = true;
+                try {
+                    const base = (window.__kynAPI?.baseUrl || '').replace(/\/api$/, '').replace(/\/$/, '') ||
+                                 (typeof window.__getApiBase === 'function' ? window.__getApiBase().replace(/\/api$/, '') : '') || '';
+                    const res = await fetch(base + '/api/profile', {
+                        method: 'GET',
+                        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+                    });
+                    if (res.ok) {
+                        const profile = await res.json();
+                        const role = profile?.role || profile?.user?.role || 'user';
+                        const isAdmin = role === 'admin' || role === 'moderator' || profile?.isAdmin === true;
+                        localStorage.setItem('userRole', role);
+                        window.__cachedUserRole = role;
+                        if (cachedUser) { cachedUser.role = role; cachedUser.isAdmin = isAdmin; }
+                        if (window.currentUser) { window.currentUser.role = role; window.currentUser.isAdmin = isAdmin; }
+                        if (window.__kynUser) { window.__kynUser.role = role; window.__kynUser.isAdmin = isAdmin; }
+                        // Propagate to Tools/marketplace iframe
+                        const toolsFrame = document.getElementById('toolsIframe') || document.getElementById('marketplaceIframe');
+                        if (toolsFrame?.contentWindow) {
+                            toolsFrame.contentWindow.postMessage({ type: 'USER_ROLE_UPDATE', role, isAdmin }, '*');
+                        }
+                    }
+                } catch(e) {
+                    console.warn('[chat.html] Profile role fetch failed:', e.message);
+                } finally { _roleFetchInFlight = false; }
             }
 
             function requestFriendsFromFriendIframe() {
@@ -3714,7 +3748,10 @@
                     displayName: cachedUser?.displayName || cachedUser?.username || 'User',
                     email: cachedUser?.email || '',
                     firstName: cachedUser?.firstName || '',
-                    lastName: cachedUser?.lastName || ''
+                    lastName: cachedUser?.lastName || '',
+                    // FIX 1: Always propagate role & isAdmin to iframes via SESSION_DATA
+                    role: cachedUser?.role || window.__cachedUserRole || localStorage.getItem('userRole') || 'user',
+                    isAdmin: cachedUser?.isAdmin === true || cachedUser?.role === 'admin' || cachedUser?.role === 'moderator' || window.__cachedUserRole === 'admin' || localStorage.getItem('userRole') === 'admin'
                 };
 
                 const sessionData = {
@@ -7028,5 +7065,104 @@ window.__groupHdrHide = hideGroupHeader;
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
+
+<!-- PWA Install Banner + Instant Update -->
+<script>
+(function _pwaInstallAndUpdate() {
+    'use strict';
+    var isStandalone = function() {
+        return window.matchMedia('(display-mode: standalone)').matches ||
+               window.navigator.standalone === true ||
+               document.referrer.includes('android-app://');
+    };
+    function _showEl(id, html) {
+        if (document.getElementById(id)) return;
+        var el = document.createElement('div');
+        el.id = id;
+        el.innerHTML = html;
+        document.body.appendChild(el);
+    }
+
+    // Install Banner
+    var _dp = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        _dp = e;
+        var ts = parseInt(localStorage.getItem('pwa_dismissed') || '0');
+        if (Date.now() - ts < 3 * 86400000) return;
+        _showEl('pwaInstallBanner',
+            '<div style="position:fixed;bottom:0;left:0;right:0;z-index:999999;background:#fff;border-top:2px solid #667eea;box-shadow:0 -4px 20px rgba(0,0,0,.15);padding:14px 16px;display:flex;align-items:center;gap:12px;font-family:-apple-system,sans-serif;animation:_pslide .35s ease">' +
+            '<style>@keyframes _pslide{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>' +
+            '<img src="/moodchat-192.png" style="width:44px;height:44px;border-radius:10px;flex-shrink:0" onerror="this.style.display=\'none\'">' +
+            '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:14px;color:#111">Install MoodChat</div>' +
+            '<div style="font-size:12px;color:#6b7280;margin-top:1px">Faster &amp; works offline</div></div>' +
+            '<button onclick="window._pwaInstall()" style="background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">Install</button>' +
+            '<button onclick="window._pwaDismiss()" style="background:none;border:none;color:#9ca3af;font-size:22px;line-height:1;cursor:pointer;padding:2px;flex-shrink:0">&times;</button></div>'
+        );
+    });
+    window._pwaInstall = async function() {
+        if (!_dp) return;
+        _dp.prompt();
+        var r = await _dp.userChoice;
+        _dp = null;
+        var b = document.getElementById('pwaInstallBanner');
+        if (b) b.remove();
+    };
+    window._pwaDismiss = function() {
+        var b = document.getElementById('pwaInstallBanner');
+        if (b) b.remove();
+        localStorage.setItem('pwa_dismissed', String(Date.now()));
+    };
+    window.addEventListener('appinstalled', function() {
+        var b = document.getElementById('pwaInstallBanner');
+        if (b) b.remove();
+    });
+
+    // SW update — force instant skipWaiting + banner
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
+            function _checkWaiting(sw) {
+                if (!sw) return;
+                sw.postMessage({ type: 'SKIP_WAITING' });
+                _showUpdateBanner();
+            }
+            if (reg.waiting) _checkWaiting(reg.waiting);
+            reg.addEventListener('updatefound', function() {
+                var nw = reg.installing;
+                nw.addEventListener('statechange', function() {
+                    if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                        _checkWaiting(nw);
+                    }
+                });
+            });
+            setInterval(function() { reg.update().catch(function(){}); }, 30 * 60000);
+        }).catch(function(e) { console.warn('[PWA] SW reg failed:', e); });
+
+        var _refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+            if (_refreshing) return;
+            _refreshing = true;
+            if (sessionStorage.getItem('pwa_update_ack')) window.location.reload();
+        });
+    }
+
+    function _showUpdateBanner() {
+        if (document.getElementById('pwaUpdateBanner')) return;
+        _showEl('pwaUpdateBanner',
+            '<div style="position:fixed;top:0;left:0;right:0;z-index:999999;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;font-family:-apple-system,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.2);animation:_uslide .3s ease">' +
+            '<style>@keyframes _uslide{from{transform:translateY(-100%)}to{transform:translateY(0)}}</style>' +
+            '<span style="font-size:18px">&#10024;</span>' +
+            '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">New update available!</div>' +
+            '<div style="font-size:11px;opacity:.85">Tap Refresh for latest features</div></div>' +
+            '<button onclick="window._pwaApplyUpdate()" style="background:#fff;color:#667eea;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0">Refresh</button>' +
+            '<button onclick="document.getElementById(\'pwaUpdateBanner\').remove()" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:18px;cursor:pointer;padding:2px;flex-shrink:0">&times;</button></div>'
+        );
+    }
+    window._pwaApplyUpdate = function() {
+        sessionStorage.setItem('pwa_update_ack', '1');
+        window.location.reload();
+    };
+})();
+</script>
 </body>
 </html>

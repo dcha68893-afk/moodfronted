@@ -195,10 +195,14 @@ function showCallingScreenViaPatch(callInfo) {
     window.__callActive     = true;
     document.body.classList.add('call-active');
 
-    // Fix 4: Persist peer info durably so CALL_ACCEPTED survives a force_ended wipe
+    // Fix 4 + FIX 8: Persist peer info durably — both window globals AND sessionStorage
+    // so the name survives any race-condition CALL_FORCE_ENDED wipe before CALL_ACCEPTED fires
     window.__activePeerName   = callInfo.userName   || null;
     window.__activePeerType   = callInfo.callType   || 'voice';
     window.__activePeerAvatar = callInfo.userAvatar || null;
+    // FIX 8: sessionStorage backup — survives window global wipes
+    if (callInfo.userName) { try { sessionStorage.setItem('_kyn_peer_name', callInfo.userName); } catch(_) {} }
+    if (callInfo.callType) { try { sessionStorage.setItem('_kyn_peer_type', callInfo.callType); } catch(_) {} }
     // Reset accept dedup so this new call can be handled
     window.__callAcceptedHandled = 0;
 
@@ -660,10 +664,13 @@ const GlobalCallHistory = {
     UIState.callActive = true;
     UIState.callState  = 'calling';
     window.__callActive = true;
-    // Fix 4: Persist peer info durably
+    // Fix 4 + FIX 8: Persist peer info durably
     window.__activePeerName   = callInfo.userName   || window.__activePeerName   || null;
     window.__activePeerType   = callInfo.callType   || window.__activePeerType   || 'voice';
     window.__activePeerAvatar = callInfo.userAvatar || window.__activePeerAvatar || null;
+    // FIX 8: sessionStorage backup
+    if (window.__activePeerName) { try { sessionStorage.setItem('_kyn_peer_name', window.__activePeerName); } catch(_) {} }
+    if (window.__activePeerType) { try { sessionStorage.setItem('_kyn_peer_type', window.__activePeerType); } catch(_) {} }
     window.__callAcceptedHandled = 0; // reset dedup for this new call
 
     console.log('[Calls UI] Calling screen setup complete');
@@ -5194,14 +5201,24 @@ handleContactItemClick: function(e) {
             UIState.activeCallId  = (callData && (callData.callId || callData.id)) || UIState.activeCallId;
             window.__callActive   = true;
 
-            // ── Resolve name: on caller side use __activePeerName (set at dial time) ──
-            //    On receiver side use __incomingCallerName (set when incoming call arrived) ──
+            // ── FIX 8: Resolve name — extended chain uses sessionStorage backup + all backend fields ──
+            const _hcaSsName = (function() { try { return sessionStorage.getItem('_kyn_peer_name'); } catch(_) { return null; } })();
             const name = window.__activePeerName
+                || _hcaSsName
                 || window.__incomingCallerName
-                || (callData && (callData.callerName || callData.userName || callData.receiverName || callData.calleeName))
+                || (callData && (
+                      callData.calleeName      ||  // FIX 8: backend now sends this
+                      callData.receiverName    ||  // FIX 8: alias
+                      callData.callerName      ||  // FIX 8: caller name
+                      callData.userName        ||
+                      (callData.calleeInfo && (callData.calleeInfo.displayName || callData.calleeInfo.username)) ||
+                      (callData.callerInfo && (callData.callerInfo.displayName || callData.callerInfo.username))
+                   ))
                 || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
                 || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
                 || 'User';
+            // Restore from sessionStorage if global was wiped
+            if (!window.__activePeerName && _hcaSsName) window.__activePeerName = _hcaSsName;
             const type = window.__activePeerType || (callData && callData.callType) || UIState.callType || 'voice';
             setCallParticipants((callData && callData.participants && callData.participants.length)
                 ? callData.participants
@@ -5321,6 +5338,8 @@ handleContactItemClick: function(e) {
             window.__callAcceptedHandled = 0; window.__callReceiverAccepted = false;
             window.__activePeerName = null; window.__activePeerType = null; window.__activePeerAvatar = null;
             window.__incomingCallerName = null; window.__incomingCallerAvatar = null;
+            // FIX 8: also clear sessionStorage backup on clean call end
+            try { sessionStorage.removeItem('_kyn_peer_name'); sessionStorage.removeItem('_kyn_peer_type'); } catch(_) {}
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             if (typeof window.endCallScreens === 'function') window.endCallScreens();
@@ -5748,15 +5767,33 @@ handleContactItemClick: function(e) {
     const _im = document.getElementById('incomingCallModal');
     if (_im && _im.dataset.timer) { clearInterval(parseInt(_im.dataset.timer)); _im.dataset.timer = ''; }
 
-    // ── Resolve peer name: use window globals first (survive force_ended wipe) ─
+    // ── FIX 8: Resolve peer name — extended chain covers all backend-provided fields ─
+    // Priority: window globals (set at dial) → sessionStorage backup → UIState → backend payload
+    const _ssName = (function() { try { return sessionStorage.getItem('_kyn_peer_name'); } catch(_) { return null; } })();
+    const _ssType = (function() { try { return sessionStorage.getItem('_kyn_peer_type'); } catch(_) { return null; } })();
     const _peerName = window.__activePeerName
+        || _ssName
+        || window.__incomingCallerName
         || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
         || (UIState.pendingCallUser && UIState.pendingCallUser.userName)
-        || _ap.callerName || _ap.userName || _ap.name || 'User';
+        // FIX 8: backend now sends all of these — use whichever is present
+        || (_ap.calleeName)         // receiver's name (new from FIX 7)
+        || (_ap.receiverName)       // alias
+        || (_ap.callerName)         // caller's name (new from FIX 7)
+        || (_ap.userName)
+        || (_ap.name)
+        || (_ap.callerInfo && (_ap.callerInfo.displayName || _ap.callerInfo.username))
+        || (_ap.calleeInfo && (_ap.calleeInfo.displayName || _ap.calleeInfo.username))
+        || 'User';
     const _peerType = window.__activePeerType
+        || _ssType
         || UIState.callType || _ap.callType || 'voice';
     const _peerAva  = window.__activePeerAvatar
-        || (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar) || null;
+        || window.__incomingCallerAvatar
+        || (UIState.pendingCallUser && UIState.pendingCallUser.userAvatar)
+        || _ap.calleeAvatar || _ap.callerAvatar || null;
+    // FIX 8: refresh window globals from sessionStorage if they were wiped
+    if (!window.__activePeerName && _ssName) window.__activePeerName = _ssName;
 
     // ── Dismiss incoming call modal (receiver side cleanup) ───────────────
     if (_im) { _im.classList.remove('active'); _im.style.setProperty('display','none','important'); }

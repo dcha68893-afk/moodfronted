@@ -908,6 +908,14 @@
                         </div>
                         <div class="quick-action-text">Events</div>
                     </button>
+                    <!-- Priority 1 FIX: Smart Group OS accessible from sidebar (not just inside chat) -->
+                    <button class="quick-action-btn" id="smartGroupOsBtn" title="Smart Group Tools — Tasks, Events, Polls, Notes, Files, Analytics, AI" onclick="window._openSmartGroupOSFromSidebar()" style="position:relative">
+                        <div class="quick-action-icon" style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:10px;padding:6px">
+                            <i class="fas fa-layer-group" style="color:#fff"></i>
+                        </div>
+                        <div class="quick-action-text" style="font-weight:700">Smart Tools</div>
+                        <span style="position:absolute;top:4px;right:4px;background:#667eea;color:#fff;font-size:8px;font-weight:900;border-radius:4px;padding:1px 4px;letter-spacing:.3px">OS</span>
+                    </button>
                 </div>
                 
                 <!-- ========== EXISTING: Group Stats ========== -->
@@ -2620,6 +2628,33 @@ else setTimeout(init,500);
    GROUP OS PANEL — Opens the Smart Group OS overlay
    Called from the ⚙ Tools button and More Options > Group Tools
 ════════════════════════════════════════════════════════════════ */
+// Priority 1 FIX: Open Group OS from sidebar even when no chat is open
+window._openSmartGroupOSFromSidebar = function() {
+    // Try to get the currently selected/active group id
+    const activeGroupId = window.__currentGroupId ||
+        document.querySelector('.group-item.active, .group-item.selected')?.dataset.groupId ||
+        document.querySelector('.group-item')?.dataset.groupId || null;
+    if (activeGroupId) {
+        window.__currentGroupId = activeGroupId;
+        window._openGroupOSPanel();
+    } else {
+        // No group selected — show a picker or prompt
+        const groups = document.querySelectorAll('.group-item[data-group-id]');
+        if (groups.length > 0) {
+            // Auto-select first group and open
+            groups[0].click();
+            setTimeout(() => window._openGroupOSPanel(), 400);
+        } else {
+            // Show toast/info
+            const t = document.createElement('div');
+            t.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#667eea;color:#fff;padding:12px 20px;border-radius:12px;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,.2)';
+            t.textContent = 'Select a group first to use Smart Tools';
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 2500);
+        }
+    }
+};
+
 (function _installGroupOSPanel() {
     'use strict';
 
@@ -2779,5 +2814,6 @@ else setTimeout(init,500);
   DO NOT move above existing scripts.
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
+<script src="/pwa-manager.js" defer></script>
 </body>
 </html>

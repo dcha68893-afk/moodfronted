@@ -57,10 +57,25 @@ window._jmHideMore=window._hideMore=hideMore;
 
 // ─── Admin check ──────────────────────────────────────────────────────────────
 function isAdmin(){
-    const u=window.currentUser||window.__kynUser||{};
-    return u.role==='admin'||u.role==='moderator'||u.isAdmin===true||
-    (()=>{try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false}})();
+    // FIX 2: Extended — covers all session paths
+    const u=window.currentUser||window.__kynUser||window.__PARENT_SESSION__?.user||{};
+    if(u.role==='admin'||u.role==='moderator'||u.isAdmin===true) return true;
+    const lsRole=localStorage.getItem('userRole')||'';
+    if(lsRole==='admin'||lsRole==='moderator') return true;
+    if(window.__cachedUserRole==='admin'||window.__cachedUserRole==='moderator') return true;
+    try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false}
 }
+// FIX 2: React to role updates from parent
+window.addEventListener('message',function(e){
+    if(e.data?.type==='USER_ROLE_UPDATE'||e.data?.type==='SESSION_DATA'){
+        const u=e.data.user||e.data.payload?.user||{};
+        const role=e.data.role||u.role||localStorage.getItem('userRole')||'user';
+        if(role){window.__cachedUserRole=role;localStorage.setItem('userRole',role);}
+        if(window.currentUser){window.currentUser.role=role;window.currentUser.isAdmin=isAdmin();}
+        setTimeout(()=>{ensureAdminFab();rebuildMenu();},100);
+    }
+});
+window._jmEnsureAdminFab=function(){ensureAdminFab();};
 
 // ─── Rebuild More menu ────────────────────────────────────────────────────────
 function rebuildMenu(){
