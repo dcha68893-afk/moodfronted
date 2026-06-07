@@ -2127,24 +2127,14 @@ try {
             } catch (_e) {}
 
             // Re-render messages panel only if receiver is currently viewing this chat
-            // FIX-MSG2: use numeric equality for chatId comparison (server may send int, local stores string)
             const activeChat = ChatManager && ChatManager.getActiveChat && ChatManager.getActiveChat();
-            const _stripPMsg = function(s) { const ss = String(s||''); return ss.startsWith('pending_') ? ss.slice(8) : ss; };
-            const _isSameChat = activeChat && chatId && (
-                String(activeChat.id) === String(chatId) ||
-                _stripPMsg(activeChat.id) === _stripPMsg(chatId) ||
-                Number(_stripPMsg(activeChat.id)) === Number(_stripPMsg(chatId))
-            );
-            if (_isSameChat) {
+            if (activeChat && chatId && String(activeChat.id) === String(chatId)) {
                 try {
-                    const _tsMs4 = _normalizeTs;
+                    const _tsMs4 = _normalizeTs; // FIX: consolidated to canonical _normalizeTs
+                    // STRICT: filter to this chat only — never pass all messages to renderMessages
                     const _all = (ChatManager._messages || []);
-                    const _activeCidStr = _stripPMsg(activeChat.id);
                     const _chatMsgs = _all
-                        .filter(m => {
-                            const mc = _stripPMsg(m.chatId || m.conversationId || '');
-                            return mc === _activeCidStr || Number(mc) === Number(_activeCidStr);
-                        })
+                        .filter(m => String(m.chatId || m.conversationId || '') === String(chatId))
                         .sort((a, b) => _tsMs4(a) - _tsMs4(b));
                     if (_chatMsgs.length > 0) {
                         window.dispatchEvent(new CustomEvent('renderMessages', {
@@ -2156,19 +2146,6 @@ try {
                         }));
                     }
                 } catch (_e) {}
-            } else {
-                // FIX-MSG3: user is NOT currently viewing this chat — fire kyn:incomingMessage
-                // so the parent shell shows a badge/notification, and the message is
-                // already persisted in IDB (addMessage above). When the user opens the chat,
-                // fetchMessages / setMessages will load it from IDB and render it.
-                try {
-                    window.parent && window.parent.postMessage({
-                        type: 'kyn:incomingMessage',
-                        detail: normalizedMessage,
-                        payload: normalizedMessage,
-                        source: 'messages-core'
-                    }, '*');
-                } catch(_e) {}
             }
             
             if (UIFeatures) {
@@ -3597,15 +3574,7 @@ try {
                 const _ar = this._activeConversation;
                 const _msgCid = String(message.chatId || message.conversationId || '');
                 const _actCid = _ar ? String(_ar.id || '') : '';
-                // FIX-MSG1: Also match when one side is numeric and the other is a string
-                // (server sends integer chatId, local stores string). Without this User B's
-                // reply is never rendered in User A's open chat panel.
-                const _stripP2 = function(s) { const ss = String(s||''); return ss.startsWith('pending_') ? ss.slice(8) : ss; };
-                let _render = !!(_msgCid && _actCid && (
-                    _msgCid === _actCid ||
-                    _stripP2(_msgCid) === _stripP2(_actCid) ||
-                    Number(_stripP2(_msgCid)) === Number(_stripP2(_actCid))
-                ));
+                let _render = !!(_msgCid && _actCid && _msgCid === _actCid);
                 // Fallback: friendId match for receiver-reply
                 if (!_render && _ar && message.senderId) {
                     const _afid = String(_ar.friendId || _ar.otherUserId ||
