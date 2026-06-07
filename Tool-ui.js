@@ -6357,7 +6357,12 @@ function _renderAccount() {
     const pts    = user.loyaltyPoints || 0;
     const tier   = user.loyaltyTier || 'bronze';
     const tc     = { bronze:'#cd7f32', silver:'#9ca3af', gold:'#f59e0b', platinum:'#8b5cf6' };
-    const isAdmin = user.role==='admin'||user.role==='moderator'||user.isAdmin||
+    // FIX Bug #6: Broaden admin detection — check all known role/flag variants so
+    // the Admin Panel section is not hidden for users whose role string differs
+    // from the hardcoded list (e.g. 'superadmin', 'super_admin', 'owner', etc.).
+    const _adminRoleSet = new Set(['admin','moderator','superadmin','super_admin','owner','staff']);
+    const isAdmin = _adminRoleSet.has((user.role||'').toLowerCase()) ||
+                    !!user.isAdmin || !!user.is_admin ||
                     (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
 
     container.innerHTML = `

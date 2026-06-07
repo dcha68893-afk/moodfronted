@@ -5884,6 +5884,22 @@
                         _fwdIncomingLogged.add(callKey);
                         console.log('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
                     }
+                    // FIX Bug #3: MUST postMessage INCOMING_CALL to callsIframe BEFORE showing banner.
+                    // calls-core.js inside the iframe listens for postMessage type 'INCOMING_CALL'
+                    // (and the alias 'call:incoming') to trigger handleIncomingCall() and show the
+                    // ring screen. Without this postMessage the iframe never receives the event and
+                    // the call is silently dropped — the receiver sees nothing.
+                    const _callsIframe = document.getElementById('callsIframe');
+                    if (_callsIframe && _callsIframe.contentWindow) {
+                        // Send both type variants for compatibility
+                        _callsIframe.contentWindow.postMessage(
+                            { type: 'INCOMING_CALL', payload, source: 'ws-bridge' }, '*'
+                        );
+                        _callsIframe.contentWindow.postMessage(
+                            { type: 'call:incoming', payload, source: 'ws-bridge' }, '*'
+                        );
+                    }
+                    // Also show the parent-frame banner (existing behaviour preserved)
                     if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
                 }
                 function _fwdAccepted(callData) {

@@ -6196,35 +6196,35 @@ try {
         _uiInitialized = true;
     }
     
-    // ONE-TIME: Clear duplicate conversations from IDB only.
-    // NOTE: We intentionally do NOT clear the deleted-chats blocklist here —
-    // doing so would restore conversations the user explicitly deleted after a refresh.
+    // ONE-TIME: Clear ONLY the stale chats list-cache (localStorage) on new devices.
+    // NOTE: We intentionally do NOT call KynectaLocalStore.clearAll() here —
+    // doing so would wipe ALL offline message history before the server repopulates,
+    // causing messages to disappear after reopen on a new device (Bug #2).
+    // The IDB message store is the offline cache: clearing it on first load of a new
+    // device destroys data the user cannot recover until every chat is reopened.
+    // Instead, server-sync (startDataFlow → fetchConversations) handles merging fresh
+    // server data with any locally-cached messages — no nuclear clear needed.
     (function _runOnceConversationCleanup() {
-        const CLEANUP_VERSION = 'kynecta_conv_cleanup_v2';
+        const CLEANUP_VERSION = 'kynecta_conv_cleanup_v3'; // bumped from v2 — v2 called clearAll()
         try {
-            if (localStorage.getItem(CLEANUP_VERSION)) return; // already ran
+            if (localStorage.getItem(CLEANUP_VERSION)) return; // already ran on this device
             localStorage.setItem(CLEANUP_VERSION, '1');
         } catch (_) { return; }
 
-        console.log('[CLEANUP] Running one-time conversation de-dupe & IDB reset…');
+        console.log('[CLEANUP] Running one-time stale-cache purge (IDB preserved)…');
 
         // 1. DO NOT clear the deleted-chats blocklist — preserve user deletions across refresh.
-        // try { localStorage.removeItem('kynecta_deleted_chats_v8'); } catch (_) {}
 
-        // 2. Clear the chats cache so stale/duplicate entries are dropped.
+        // 2. Clear only the stale chats LIST cache so the sidebar re-fetches from server.
+        //    This is safe: it's just the sidebar cache key, not the message store.
         try {
-            const _cacheKey = 'kynecta_chats_cache_v8';
-            localStorage.removeItem(_cacheKey);
+            localStorage.removeItem('kynecta_chats_cache_v8');
         } catch (_) {}
 
-        // 3. Wipe all IDB messages & chats so we start fresh from the server.
-        if (window.KynectaLocalStore && typeof window.KynectaLocalStore.clearAll === 'function') {
-            window.KynectaLocalStore.clearAll().then(function() {
-                console.log('[CLEANUP] IDB cleared — server data will repopulate on next fetch.');
-            }).catch(function(e) {
-                console.warn('[CLEANUP] IDB clear error:', e);
-            });
-        }
+        // 3. DO NOT call KynectaLocalStore.clearAll() — that nukes ALL IDB message history.
+        //    Server data will repopulate naturally via the normal fetchConversations() call
+        //    that runs as part of startDataFlow() immediately after this IIFE.
+        console.log('[CLEANUP] Stale sidebar cache cleared — IDB message history preserved.');
     })();
 
     function startDataFlow() {
