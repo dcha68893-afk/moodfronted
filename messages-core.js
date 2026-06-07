@@ -7533,7 +7533,42 @@ try {
                 cm.markRead(convId);
             }
         } catch (_) {}
+
+        // PHASE15 FIX: Flush any messages that arrived while the user was on another screen.
+        // app.realtime.socket.js persists incoming message:new events to kyn_pending_messages.
+        // Here we process them so messages are never lost even if the chat panel was closed.
+        _flushPendingLocalMessages();
     });
+
+    // PHASE15 FIX: Flush pending messages that arrived while the user was away.
+    // Called on visibilitychange AND on initial module load.
+    function _flushPendingLocalMessages() {
+        try {
+            var _raw = localStorage.getItem('kyn_pending_messages');
+            if (!_raw) return;
+            var _pending = JSON.parse(_raw);
+            if (!Array.isArray(_pending) || _pending.length === 0) return;
+            // Clear the queue first so duplicate processing is impossible
+            localStorage.removeItem('kyn_pending_messages');
+            var chatMgr = window.MessagesCore && window.MessagesCore.ChatManager;
+            if (!chatMgr || typeof chatMgr.addMessage !== 'function') {
+                // ChatManager not ready — put them back for next flush
+                try { localStorage.setItem('kyn_pending_messages', JSON.stringify(_pending)); } catch(_) {}
+                return;
+            }
+            // Filter out messages older than 24 hours to prevent stale replays
+            var _cutoff = Date.now() - 86400000;
+            _pending.forEach(function(msg) {
+                try {
+                    if (msg._arrivedAt && msg._arrivedAt < _cutoff) return; // too old
+                    chatMgr.addMessage(msg);
+                } catch(_) {}
+            });
+            console.log('[MessagesCore] PHASE15: Flushed', _pending.length, 'pending messages from localStorage');
+        } catch (_) {}
+    }
+    // Flush on load (catches messages that arrived before this module loaded)
+    setTimeout(_flushPendingLocalMessages, 1500);
 
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = MessagesCore;

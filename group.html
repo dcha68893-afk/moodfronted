@@ -911,10 +911,11 @@
                     <!-- Priority 1 FIX: Smart Group OS accessible from sidebar (not just inside chat) -->
                     <button class="quick-action-btn" id="smartGroupOsBtn" title="Smart Group Tools — Open, Create or Join a Group for Tasks, Events, Polls, Notes, Files, Analytics, AI" onclick="window._openSmartGroupOSFromSidebar()" style="position:relative">
                         <div class="quick-action-icon" style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:10px;padding:6px">
-                            <i class="fas fa-layer-group" style="color:#fff"></i>
+                            <i id="smartGroupOsIcon" class="fas fa-layer-group" style="color:#fff"></i>
                         </div>
                         <div class="quick-action-text" style="font-weight:700">Smart Tools</div>
-                        <span id="smartGroupOsBadge" style="position:absolute;top:4px;right:4px;background:#667eea;color:#fff;font-size:8px;font-weight:900;border-radius:4px;padding:1px 4px;letter-spacing:.3px">OS</span>
+                        <!-- PHASE15 FIX: badge shows + (create/join) or OS (tools), updated by _updateSmartBadge() -->
+                        <span id="smartGroupOsBadge" style="position:absolute;top:4px;right:4px;background:#48bb78;color:#fff;font-size:8px;font-weight:900;border-radius:4px;padding:1px 4px;letter-spacing:.3px">+</span>
                     </button>
                 </div>
                 
@@ -2826,6 +2827,30 @@ window._openSmartGroupOSFromSidebar = function() {
                                     window.GroupCore.showCreateGroupModal();
                                 }
                             }
+                            // PHASE15 FIX: Listen for group:created event and re-open smart group panel
+                            // so user lands back in the Smart Tools screen with their new group selected.
+                            var _reopenOnCreate = function(e) {
+                                window.removeEventListener('group:created', _reopenOnCreate);
+                                window.removeEventListener('groupCreated',  _reopenOnCreate);
+                                var newGroupId = e && e.detail && (e.detail.id || e.detail.groupId);
+                                if (newGroupId) {
+                                    window.__currentGroupId = newGroupId;
+                                    window.__activeGroupId  = newGroupId;
+                                }
+                                setTimeout(function() { window._openSmartGroupOSFromSidebar && window._openSmartGroupOSFromSidebar(); }, 400);
+                            };
+                            window.addEventListener('group:created', _reopenOnCreate);
+                            window.addEventListener('groupCreated',  _reopenOnCreate);
+                            // Also hook GroupCore if available
+                            if (window.GroupCore && typeof window.GroupCore.on === 'function') {
+                                var _gcOnce = function(data) {
+                                    window.GroupCore.off('group:created', _gcOnce);
+                                    var newId = data && (data.id || data.groupId);
+                                    if (newId) { window.__currentGroupId = newId; window.__activeGroupId = newId; }
+                                    setTimeout(function() { window._openSmartGroupOSFromSidebar && window._openSmartGroupOSFromSidebar(); }, 400);
+                                };
+                                window.GroupCore.on('group:created', _gcOnce);
+                            }
                         });
                     }
                     if (_discBtn) {
@@ -2837,6 +2862,27 @@ window._openSmartGroupOSFromSidebar = function() {
                             if (discoverTab) { discoverTab.click(); }
                             else if (window.GroupCore && typeof window.GroupCore.showDiscoverPanel === 'function') {
                                 window.GroupCore.showDiscoverPanel();
+                            }
+                            // PHASE15 FIX: Re-open smart group panel after user joins a group
+                            var _reopenOnJoin = function(e) {
+                                window.removeEventListener('group:joined', _reopenOnJoin);
+                                window.removeEventListener('groupJoined',  _reopenOnJoin);
+                                var joinedId = e && e.detail && (e.detail.id || e.detail.groupId);
+                                if (joinedId) { window.__currentGroupId = joinedId; window.__activeGroupId = joinedId; }
+                                setTimeout(function() { window._openSmartGroupOSFromSidebar && window._openSmartGroupOSFromSidebar(); }, 400);
+                            };
+                            window.addEventListener('group:joined', _reopenOnJoin);
+                            window.addEventListener('groupJoined',  _reopenOnJoin);
+                            if (window.GroupCore && typeof window.GroupCore.on === 'function') {
+                                var _gcJoinOnce = function(data) {
+                                    window.GroupCore.off('group:joined', _gcJoinOnce);
+                                    window.GroupCore.off('group:join-request-approved', _gcJoinOnce);
+                                    var newId = data && (data.id || data.groupId);
+                                    if (newId) { window.__currentGroupId = newId; window.__activeGroupId = newId; }
+                                    setTimeout(function() { window._openSmartGroupOSFromSidebar && window._openSmartGroupOSFromSidebar(); }, 400);
+                                };
+                                window.GroupCore.on('group:joined', _gcJoinOnce);
+                                window.GroupCore.on('group:join-request-approved', _gcJoinOnce);
                             }
                         });
                     }
@@ -2955,14 +3001,19 @@ window._openSmartGroupOSFromSidebar = function() {
             window.__activeGroupId ||
             document.querySelector('.group-item[data-group-id]')
         );
+        var icon = document.getElementById('smartGroupOsIcon');
         if (!hasGroup) {
             badge.textContent = '+';
-            badge.title = 'Create or join a group';
+            badge.title = 'Create or join a group to unlock Smart Tools';
             badge.style.background = '#48bb78';
+            if (icon) { icon.className = 'fas fa-plus-circle'; }
+            document.getElementById('smartGroupOsBtn') && (document.getElementById('smartGroupOsBtn').title = 'Create or Join a Group to access Smart Tools');
         } else {
             badge.textContent = 'OS';
             badge.title = 'Open Smart Group Tools';
             badge.style.background = '#667eea';
+            if (icon) { icon.className = 'fas fa-layer-group'; }
+            document.getElementById('smartGroupOsBtn') && (document.getElementById('smartGroupOsBtn').title = 'Smart Group Tools');
         }
     }
     // Run on load and whenever groups are updated

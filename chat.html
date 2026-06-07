@@ -5999,8 +5999,14 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
-                    const f = document.getElementById('callsIframe');
-                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
+                    // PHASE15 FIX: Broadcast to ALL iframes (not just callsIframe) so both
+                    // caller and receiver screens reset when call is force-ended.
+                    document.querySelectorAll('iframe').forEach(f => {
+                        if (f.contentWindow) {
+                            f.contentWindow.postMessage({ type: 'CALL_FORCE_ENDED', payload: callData, source: 'ws-bridge' }, '*');
+                            f.contentWindow.postMessage({ type: 'CALL_ENDED',       payload: callData, source: 'ws-bridge' }, '*');
+                        }
+                    });
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 }
                 function _fwdRejected(callData) {
@@ -6016,8 +6022,13 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
-                    const f = document.getElementById('callsIframe');
-                    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'CALL_CANCELLED', payload: callData, source: 'ws-bridge' }, '*');
+                    // PHASE15 FIX: Broadcast to ALL iframes so caller AND receiver screens reset
+                    document.querySelectorAll('iframe').forEach(f => {
+                        if (f.contentWindow) {
+                            f.contentWindow.postMessage({ type: 'CALL_CANCELLED', payload: callData, source: 'ws-bridge' }, '*');
+                            f.contentWindow.postMessage({ type: 'CALL_ENDED',     payload: callData, source: 'ws-bridge' }, '*');
+                        }
+                    });
                     setTimeout(() => refreshCallHistoryForUser(cachedUserId), 500);
                 }
                 function _fwdToCallsIframe(type, payload) {

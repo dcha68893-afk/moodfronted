@@ -1031,14 +1031,57 @@
                                 f.contentWindow.postMessage({ type: 'new_message',  payload: payload }, '*');
                             } catch(_) {}
                         });
+                        // PHASE15 FIX: Also fire on parent window so chat.html catches it
+                        // even when messages-core runs in the same frame (no iframe).
+                        try { window.dispatchEvent(new CustomEvent('kyn:message:new', { detail: payload })); } catch(_) {}
+                        try { window.dispatchEvent(new CustomEvent('kyn:new_message',  { detail: payload })); } catch(_) {}
+                        // PHASE15 FIX: Persist incoming message to localStorage so it survives
+                        // if the user is on a different screen when the message arrives.
+                        // messages-core flushes kyn_pending_messages on load / tab focus.
+                        try {
+                            if (payload && payload.id) {
+                                var _pq = JSON.parse(localStorage.getItem('kyn_pending_messages') || '[]');
+                                var _alreadyQueued = _pq.some(function(m) { return String(m.id) === String(payload.id); });
+                                if (!_alreadyQueued) {
+                                    _pq.push(Object.assign({}, payload, { _arrivedAt: Date.now() }));
+                                    // Keep last 200 messages max
+                                    if (_pq.length > 200) _pq = _pq.slice(-200);
+                                    localStorage.setItem('kyn_pending_messages', JSON.stringify(_pq));
+                                }
+                            }
+                        } catch(_) {}
                     } catch(_) {}
                 }
 
-                if (evType.startsWith('call') || evType.startsWith('webrtc')) {
-                    const colonForm = evType.replace(/_/g, ':').replace(/^call:/, 'call:');
-                    if (colonForm !== evType) {
-                        try { window.dispatchEvent(new CustomEvent('kyn:' + colonForm, { detail: payload })); } catch (_) {}
-                    }
+                // PHASE15 FIX: Fan out ALL call and webrtc events to ALL iframes.
+                // Previously only call:incoming was fanned out — this meant the calls.html
+                // iframe NEVER received call:accepted, call:ended, call:rejected etc.
+                // Result: caller stayed stuck on outgoing screen; ending/rejecting only
+                // closed one side. Now every call-related event is forwarded in both
+                // colon (call:accepted) and underscore (call_accepted) forms so all
+                // listener patterns in calls-core.js and calls-ui.js are satisfied.
+                if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice')) {
+                    try {
+                        var _callAllFrames = document.querySelectorAll('iframe');
+                        var _colonForm = evType.indexOf('_') !== -1 ? evType.replace(/_/g, ':') : evType;
+                        var _underForm = evType.indexOf(':') !== -1 ? evType.replace(/:/g, '_') : evType;
+                        _callAllFrames.forEach(function(f) {
+                            try {
+                                // Always send original form
+                                f.contentWindow.postMessage({ type: evType, payload: payload }, '*');
+                                // Send colon form if different
+                                if (_colonForm !== evType) f.contentWindow.postMessage({ type: _colonForm, payload: payload }, '*');
+                                // Send underscore form if different
+                                if (_underForm !== evType) f.contentWindow.postMessage({ type: _underForm, payload: payload }, '*');
+                                // Also REALTIME_EVENT prefix form for compatibility
+                                f.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + evType, payload: payload }, '*');
+                            } catch(_) {}
+                        });
+                        // Also normalise kyn: dispatch for same-frame listeners
+                        if (_colonForm !== evType) {
+                            try { window.dispatchEvent(new CustomEvent('kyn:' + _colonForm, { detail: payload })); } catch (_) {}
+                        }
+                    } catch(_) {}
                 }
 
                 // For message events: fire kyn:message:new, kyn:message:read etc.

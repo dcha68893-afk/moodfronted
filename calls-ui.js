@@ -5362,6 +5362,15 @@ handleContactItemClick: function(e) {
             window.__incomingCallerName = null; window.__incomingCallerAvatar = null;
             // FIX 8: also clear sessionStorage backup on clean call end
             try { sessionStorage.removeItem('_kyn_peer_name'); sessionStorage.removeItem('_kyn_peer_type'); } catch(_) {}
+            // PHASE15 FIX: Clear receiver fallback timer so it doesn't fire on next call
+            if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
+            // PHASE15 FIX: Reset pending incoming call data so second call isn't blocked by stale data
+            window.__pendingIncomingCallData = null;
+            window.__lastProcessedCallId = null;
+            // PHASE15 FIX: Clear all outgoing ring timers to prevent ghost timers interfering with second call
+            if (window._outgoingRingTimer)  { clearInterval(window._outgoingRingTimer);  window._outgoingRingTimer  = null; }
+            if (window._callRingTimer)       { clearInterval(window._callRingTimer);       window._callRingTimer       = null; }
+            if (window._currentCallTimer)    { clearInterval(window._currentCallTimer);    window._currentCallTimer    = null; }
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
             // FIX-CALL4: Always hide all call screens and restore idle screen,
@@ -5421,6 +5430,12 @@ handleContactItemClick: function(e) {
             UIState.callParticipants = [];
             UIState.callStartTime = null;
             UIState.callType = null;
+            // PHASE15 FIX: Clear all UIState call properties that could block second call
+            UIState.pendingCallUser = null;
+            UIState.sdpOffer = null;
+            UIState.sdpAnswer = null;
+            UIState.iceCandidates = [];
+            UIState.peerConnection = null;
             window._currentIncomingCallId = null;
             document.body.classList.remove('call-connected');
             syncParticipantBadge();
