@@ -222,8 +222,12 @@
                 resolve({ success: false, message: error.message });
               }
             } else {
-              // Fallback to direct fetch
-              fetch(endpoint, options)
+              // Fallback to direct fetch — build absolute URL so it hits the backend, not the static frontend
+              const _apiBase = (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null)
+                || (typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() + '/api' : null)
+                || 'https://moodchat-fy56.onrender.com/api';
+              const _absEndpoint = endpoint.startsWith('http') ? endpoint : _apiBase + (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
+              fetch(_absEndpoint, options)
                 .then(response => response.json())
                 .then(data => resolve({ success: true, data }))
                 .catch(error => resolve({ success: false, message: error.message }));
