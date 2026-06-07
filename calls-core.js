@@ -28041,6 +28041,25 @@ _escapeHtml: function(text) {
 
 
 
+        
+        // FIX-PHASE15: Normalize callerName from all payload shapes.
+        // Backend may send: callData.callerName, callData.caller.username,
+        // callData.caller.displayName, or callData.fromUserName.
+        if (!callData.callerName || callData.callerName === 'Unknown') {
+            var _c = callData.caller || {};
+            var _first = _c.firstName || '';
+            var _last  = _c.lastName  || '';
+            var _full  = (_first + (_last ? ' ' + _last : '')).trim();
+            callData.callerName = _full
+                || _c.displayName || _c.username
+                || callData.fromUserName || callData.senderName
+                || (callData.callerId ? ('User ' + callData.callerId) : 'Unknown Caller');
+        }
+        if (!callData.callerAvatar) {
+            callData.callerAvatar = (callData.caller && callData.caller.avatar) || null;
+        }
+        if (!callData.callType && callData.type) callData.callType = callData.type;
+
         callsState.callData = callData;
 
 
@@ -28197,7 +28216,14 @@ _escapeHtml: function(text) {
 
 
 
-        notifyListeners('incoming_call', callData);
+        // FIX-PHASE15: Enrich callData before notifying so ALL listeners
+        // (calls-ui.js, callOverlay.manager.js, etc.) get callerName populated.
+        var _enrichedCall = Object.assign({}, callData, {
+            callerName:   callData.callerName   || (callData.caller && (callData.caller.username || callData.caller.displayName)) || ('User ' + callData.callerId),
+            callerAvatar: callData.callerAvatar || (callData.caller && callData.caller.avatar) || null,
+            callType:     callData.callType     || callData.type || 'audio',
+        });
+        notifyListeners('incoming_call', _enrichedCall);
 
         // FIX-CALL-ACK: Emit call:received to backend so caller gets confirmation
         // and the 20-second no-answer timer is cleared on the server side.
@@ -38310,4 +38336,12 @@ function applySettingToCallsModule(section, key, value) {
 
 
 
-})();
+})()
+        // FIX-PHASE15: Normalize callerName in Governor too
+        if (callData && (!callData.callerName || callData.callerName === 'Unknown')) {
+            var _gc = callData.caller || {};
+            callData.callerName = (_gc.firstName ? (_gc.firstName + (_gc.lastName ? ' ' + _gc.lastName : '')).trim() : null)
+                || _gc.displayName || _gc.username
+                || callData.fromUserName || (callData.callerId ? ('User ' + callData.callerId) : 'Caller');
+        }
+        ;

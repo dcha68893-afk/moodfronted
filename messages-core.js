@@ -7006,6 +7006,15 @@ try {
             }
         });
 
+        // FIX-PHASE15: Re-bind on socket reconnect. If socket disconnects and
+        // reconnects, wsService listeners must be re-registered.
+        if (window.KynectaRealtime && typeof window.KynectaRealtime.on === 'function') {
+            window.KynectaRealtime.on('connect', function() {
+                // Clear the realtimeBinding flag so next message triggers re-bind
+                window.__messagesRealtimeBound = false;
+            });
+        }
+
         if (!hasRealtimeBinding && window.wsService?.on) {
             hasRealtimeBinding = true;
             ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {

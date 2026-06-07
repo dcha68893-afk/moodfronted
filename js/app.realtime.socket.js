@@ -521,6 +521,10 @@
             });
 
             this._socket.on('disconnect', (reason) => {
+                // FIX-PHASE15: Clear registered listener set so they re-bind on next connect.
+                // Without this, after a reconnect no message:new/call:incoming listeners
+                // are added (Set already contains them) → all real-time events silently drop.
+                this._registeredSocketListeners.clear();
                 if (this._lastConnectLogState !== 'disconnected') {
                     console.log('[Realtime] Socket.IO disconnected:', reason);
                     this._lastConnectLogState = 'disconnected';
@@ -955,6 +959,35 @@
                 try { window.dispatchEvent(new CustomEvent('kyn:' + evType, { detail: payload })); } catch (_) {}
 
                 // For call events: also normalize underscore→colon so 'call_ended' fires 'kyn:call:ended'
+                // FIX-PHASE15: Fan out call:incoming and message:new to ALL iframes immediately.
+                // calls.html and message.html run in iframes and MUST receive these events.
+                if (evType === 'call:incoming' || evType === 'incoming_call' || evType === 'call_incoming') {
+                    try {
+                        var _callFrames = document.querySelectorAll('iframe');
+                        _callFrames.forEach(function(f) {
+                            try {
+                                f.contentWindow.postMessage({ type: 'REALTIME_EVENT:call:incoming', payload: payload }, '*');
+                                f.contentWindow.postMessage({ type: 'REALTIME_EVENT:incoming_call', payload: payload }, '*');
+                                f.contentWindow.postMessage({ type: evType, payload: payload }, '*');
+                            } catch(_) {}
+                        });
+                        window.dispatchEvent(new CustomEvent('kyn:call:incoming', { detail: payload }));
+                        window.dispatchEvent(new CustomEvent('kyn:incoming_call',  { detail: payload }));
+                    } catch(_) {}
+                }
+
+                if (evType === 'message:new' || evType === 'new_message' || evType === 'chat:message') {
+                    try {
+                        var _msgFrames = document.querySelectorAll('iframe');
+                        _msgFrames.forEach(function(f) {
+                            try {
+                                f.contentWindow.postMessage({ type: 'message:new', payload: payload }, '*');
+                                f.contentWindow.postMessage({ type: 'new_message',  payload: payload }, '*');
+                            } catch(_) {}
+                        });
+                    } catch(_) {}
+                }
+
                 if (evType.startsWith('call') || evType.startsWith('webrtc')) {
                     const colonForm = evType.replace(/_/g, ':').replace(/^call:/, 'call:');
                     if (colonForm !== evType) {

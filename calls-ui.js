@@ -4706,7 +4706,21 @@ handleContactItemClick: function(e) {
         
         handleIncomingCall: function(callData) {
             // Store caller name durably so transitionToInCall can use it on receiver side
-            const _callerName = (callData && (callData.callerName || callData.fromUserName || callData.userName || callData.name)) || null;
+            // FIX-PHASE15: Extract callerName from ALL possible payload shapes.
+            const _callerRaw = callData || {};
+            const _callerObj  = _callerRaw.caller || _callerRaw.callerInfo || {};
+            const _callerFullName = (_callerObj.firstName
+                ? (_callerObj.firstName + (_callerObj.lastName ? ' ' + _callerObj.lastName : '')).trim()
+                : null);
+            const _callerName = _callerRaw.callerName
+                || _callerRaw.fromUserName
+                || _callerRaw.userName
+                || _callerRaw.name
+                || _callerFullName
+                || _callerObj.displayName
+                || _callerObj.username
+                || (_callerRaw.callerId ? ('User ' + _callerRaw.callerId) : null)
+                || null;
             const incomingId = callData.callId || callData.id || null;
             const incomingType = callData.callType || callData.type || 'voice';
             const callerParticipant = {
