@@ -290,8 +290,8 @@
       if (this._started) return;
       this._started = true;
 
-      // Run initial validation after short delay (let all modules boot)
-      await new Promise(r => setTimeout(r, 3000));
+      // Run initial validation after delay — give socket time to authenticate
+      await new Promise(r => setTimeout(r, 8000));
       await this._runValidation();
 
       // Periodic re-validation every 5 minutes
@@ -357,13 +357,20 @@
 
   const validator = new RuntimeIntegrationValidator();
 
-  // Start after all modules have loaded
-  window.addEventListener('moodchat:ready', () => validator.start());
-  window.addEventListener('phase5:ready',   () => validator.start());
-  window.addEventListener('phase4:ready',   () => validator.start());
+  // Start after all modules have loaded — guard against duplicate events
+  // FIX: only bind ONE start trigger; duplicates caused the "started twice" log.
+  let _validatorStarted = false;
+  function _startOnce() {
+    if (_validatorStarted) return;
+    _validatorStarted = true;
+    validator.start();
+  }
+  window.addEventListener('moodchat:ready', _startOnce);
+  window.addEventListener('phase5:ready',   _startOnce);
+  window.addEventListener('phase4:ready',   _startOnce);
 
-  // Fallback if no ready event fires
-  setTimeout(() => validator._started || validator.start(), 8000);
+  // Fallback — give socket 12 s to connect before first validation
+  setTimeout(() => _startOnce(), 12000);
 
   window.__RuntimeIntegrationValidator = validator;
   window.__Phase6Validator             = validator;
