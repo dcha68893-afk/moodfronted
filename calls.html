@@ -4805,7 +4805,16 @@ window.__CALLS_IFRAME__ = {
                     });
                     break;
 
+                // FIX: Handle all incoming call event name variants.
+                // chat.html _fwdIncoming sends 'INCOMING_CALL' and 'call:incoming'.
+                // showIncomingCallBanner sends 'CALL_INCOMING'.
+                // app.realtime.socket.js fanout sends 'REALTIME_EVENT:call:incoming' and 'call:incoming'.
+                // All must route to _onIncomingCall — previously only 'CALL_INCOMING' was handled.
                 case 'CALL_INCOMING':
+                case 'INCOMING_CALL':
+                case 'call:incoming':
+                case 'call_incoming':
+                case 'REALTIME_EVENT:call:incoming':
                     _onIncomingCall(pay);
                     break;
 

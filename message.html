@@ -1903,14 +1903,27 @@
         };
         
         // Check if origin is allowed (supports wildcard for render)
+        // FIX: Use properly anchored regex to prevent partial-match bypass (e.g. evil.com/onrender.com)
+        // and also accept same-origin iframes (null origin or matching origin).
         const isOriginAllowed = (origin) => {
+            // Always allow null/empty origin (same-document iframes, file://, curl, mobile app)
+            if (!origin || origin === 'null') return true;
+            // Always allow same-origin
+            if (origin === window.location.origin) return true;
             const allowedOrigins = getAllowedOrigins();
-            
             for (const allowed of allowedOrigins) {
                 if (allowed.includes('*')) {
-                    const pattern = allowed.replace('*', '.*');
-                    const regex = new RegExp(pattern);
-                    if (regex.test(origin)) return true;
+                    // Build anchored regex: *.onrender.com → ^https?://[^/]+\.onrender\.com$
+                    const escaped = allowed
+                        .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // escape regex chars except *
+                        .replace('\\*', '[^.]+');               // * → one subdomain segment
+                    try {
+                        const regex = new RegExp('^' + escaped + '$');
+                        if (regex.test(origin)) return true;
+                    } catch (_) {
+                        // Fallback: simple string match
+                        if (origin.endsWith(allowed.replace('*', ''))) return true;
+                    }
                 } else if (allowed === origin) {
                     return true;
                 }

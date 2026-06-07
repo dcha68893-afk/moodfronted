@@ -2270,8 +2270,15 @@
                     _delivered = true;
                     const callsIframe = document.getElementById('callsIframe');
                     if (callsIframe && callsIframe.contentWindow) {
+                        // FIX: Send all variant names — calls.html switch now handles all of them
                         callsIframe.contentWindow.postMessage(
                             { type: 'CALL_INCOMING', payload: callData, source: 'banner-bridge' }, '*'
+                        );
+                        callsIframe.contentWindow.postMessage(
+                            { type: 'INCOMING_CALL', payload: callData, source: 'banner-bridge' }, '*'
+                        );
+                        callsIframe.contentWindow.postMessage(
+                            { type: 'call:incoming', payload: callData, source: 'banner-bridge' }, '*'
                         );
                     }
                 }
@@ -5934,8 +5941,12 @@
                     function _deliverCallToIframe() {
                         const _fi = document.getElementById('callsIframe');
                         if (_fi && _fi.contentWindow) {
-                            _fi.contentWindow.postMessage({ type: 'INCOMING_CALL', payload, source: 'ws-bridge' }, '*');
-                            _fi.contentWindow.postMessage({ type: 'call:incoming', payload, source: 'ws-bridge' }, '*');
+                            // FIX: Send ALL variant names so calls.html switch catches it regardless
+                            // of which case is present. CALL_INCOMING is the canonical handled case.
+                            _fi.contentWindow.postMessage({ type: 'CALL_INCOMING',  payload, source: 'ws-bridge' }, '*');
+                            _fi.contentWindow.postMessage({ type: 'INCOMING_CALL',  payload, source: 'ws-bridge' }, '*');
+                            _fi.contentWindow.postMessage({ type: 'call:incoming',  payload, source: 'ws-bridge' }, '*');
+                            _fi.contentWindow.postMessage({ type: 'call_incoming',  payload, source: 'ws-bridge' }, '*');
                         }
                     }
                     if (window.__callsIframeReady) {
