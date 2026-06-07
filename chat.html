@@ -3113,18 +3113,19 @@
                     typeof hideBanner === 'function' && hideBanner();
                 }
 
-                // ── FIX 1: Echo CALL_ACCEPTED back to calls iframe so CALLER transitions ──
+                // ── FIX 1: Echo CALL_ACCEPTED back so CALLER transitions to in-call ──
                 // The receiver's acceptIncomingCallGeneric posts CALL_ACCEPTED to parent.
-                // Parent must echo it back so the caller side fires transitionToInCall.
+                // FIX-CALL1: broadcast to ALL iframes so whatever iframe the caller is in also gets it.
                 if (data.type === 'CALL_ACCEPTED' && data.source !== 'parent-echo' && data.source !== 'ws-bridge' && data.source !== 'parent-accept-broadcast') {
-                    var _callsIframe = document.getElementById('callsIframe');
-                    if (_callsIframe && _callsIframe.contentWindow) {
-                        _callsIframe.contentWindow.postMessage({
-                            type: 'CALL_ACCEPTED',
-                            payload: data.payload || {},
-                            source: 'parent-echo'
-                        }, '*');
-                    }
+                    document.querySelectorAll('iframe').forEach(function(f) {
+                        if (f.contentWindow && f.contentWindow !== event.source) {
+                            f.contentWindow.postMessage({
+                                type: 'CALL_ACCEPTED',
+                                payload: data.payload || {},
+                                source: 'parent-accept-broadcast'
+                            }, '*');
+                        }
+                    });
                     typeof hideBanner === 'function' && hideBanner();
                     window.__activeCallInProgress = true;
                     // ── Ensure callsContent is visible for in-call screen ──
@@ -3141,19 +3142,19 @@
                     return;
                 }
 
-                // ── FIX 3: Echo CALL_ENDED back so BOTH sides reset when one ends ──
-                // When end-btn fires CALL_ENDED to parent, echo it back so the remote
-                // side's iframe also resets. source='end-btn' marks the originating side
-                // so it doesn't double-reset itself.
+                // ── FIX 3: When end-btn fires CALL_ENDED, broadcast to ALL other iframes ──
+                // FIX-CALL3: The old code only echoed to callsIframe. When the sender is
+                // in a different iframe (receiver in calls.html), the caller never got it.
                 if (data.type === 'CALL_ENDED' && data.source === 'end-btn') {
-                    var _callsIframe3 = document.getElementById('callsIframe');
-                    if (_callsIframe3 && _callsIframe3.contentWindow) {
-                        _callsIframe3.contentWindow.postMessage({
-                            type: 'CALL_ENDED',
-                            payload: data.payload || {},
-                            source: 'parent-echo'
-                        }, '*');
-                    }
+                    document.querySelectorAll('iframe').forEach(function(f) {
+                        if (f.contentWindow && f.contentWindow !== event.source) {
+                            f.contentWindow.postMessage({
+                                type: 'CALL_ENDED',
+                                payload: data.payload || {},
+                                source: 'parent-end-broadcast'
+                            }, '*');
+                        }
+                    });
                 }
             });
         }

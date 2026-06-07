@@ -34069,11 +34069,13 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
     console.log('[CallsCore] Force resetting call state');
 
-
-
-    
-
-
+    // FIX-CALL4: Clear caller-role flags so second call starts clean
+    callsState._isCaller = false;
+    window.__callerCallId = null;
+    window.__callReceiverAccepted = false;
+    window.__callAcceptedHandled = 0;
+    window.__callInitiatedAt = 0;
+    window.__activeCallInProgress = false;
 
     // Reset all call state variables
 

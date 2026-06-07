@@ -5314,12 +5314,19 @@ handleContactItemClick: function(e) {
             // ── Guard: ignore if no call was actually active ─────────────────
             // Stale CALL_ENDED echoes arrive during WebRTC setup. If no call screen
             // is visible and UIState says idle, this is a ghost signal — drop it.
+            // FIX-CALL3: Also treat 'incoming' and 'initiating' as active — these are the
+            // states the CALLER and RECEIVER are in before the call connects, so when one
+            // side ends/rejects the other must reset even if their full screen isn't open yet.
             const _anyScreenActive =
                 UIState.callActive ||
                 UIState.callState === 'calling' ||
                 UIState.callState === 'ringing' ||
                 UIState.callState === 'connecting' ||
                 UIState.callState === 'connected' ||
+                UIState.callState === 'incoming' ||
+                UIState.callState === 'initiating' ||
+                UIState.callState === 'in-call' ||
+                UIState.activeCallId != null ||
                 (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active')) ||
                 (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
                 (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active'));
@@ -5350,14 +5357,32 @@ handleContactItemClick: function(e) {
             window._currentIncomingCallId = null;
             window.__callActive = false;
             window.__callAcceptedHandled = 0; window.__callReceiverAccepted = false;
+            window.__callerCallId = null; window.__callInitiatedAt = 0; // FIX-CALL4: clear for second call
             window.__activePeerName = null; window.__activePeerType = null; window.__activePeerAvatar = null;
             window.__incomingCallerName = null; window.__incomingCallerAvatar = null;
             // FIX 8: also clear sessionStorage backup on clean call end
             try { sessionStorage.removeItem('_kyn_peer_name'); sessionStorage.removeItem('_kyn_peer_type'); } catch(_) {}
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
             if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
-            if (typeof window.endCallScreens === 'function') window.endCallScreens();
-            else { var _csY = document.getElementById('callingScreen'), _isY = document.getElementById('inCallScreen'); if (_csY) { _csY.classList.remove('active'); _csY.style.setProperty('display','none','important'); } if (_isY) { _isY.classList.remove('active'); _isY.style.setProperty('display','none','important'); } }
+            // FIX-CALL4: Always hide all call screens and restore idle screen,
+            // so the iframe is not dark on the second call initiation.
+            (function _resetScreens() {
+                var _cs = document.getElementById('callingScreen');
+                var _is = document.getElementById('inCallScreen');
+                var _im2 = document.getElementById('incomingCallModal');
+                if (_cs) { _cs.classList.remove('active'); _cs.style.setProperty('display','none','important'); }
+                if (_is) { _is.classList.remove('active'); _is.style.setProperty('display','none','important'); }
+                if (_im2) { _im2.classList.remove('active'); _im2.style.setProperty('display','none','important'); }
+                // Call endCallScreens if available (CallOverlayManager reset)
+                if (typeof window.endCallScreens === 'function') { try { window.endCallScreens(); } catch(_) {} }
+                // Always show idleScreen so next call has a clean starting point
+                if (typeof showIdleScreen === 'function') { try { showIdleScreen(); } catch(_) {} }
+                else if (typeof window.showIdleScreen === 'function') { try { window.showIdleScreen(); } catch(_) {} }
+                else {
+                    var idle = document.getElementById('idleScreen');
+                    if (idle) { idle.classList.add('active'); idle.style.setProperty('display','block','important'); }
+                }
+            })();
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────
             (function _saveEndedLocally() {
@@ -5749,12 +5774,13 @@ handleContactItemClick: function(e) {
 }
                     case 'call_accepted':
                     case 'CALL_ACCEPTED': {
-    // Receiver answered — transition caller to in-call screen
-    // ── Dedup: ignore if we already transitioned to in-call ──────────────
-    // ✅ FIX: Reduced from 5000ms to 500ms — both sides receive CALL_ACCEPTED,
-    // the previous 5s guard blocked the caller from transitioning.
-    if (window.__callAcceptedHandled && (Date.now() - window.__callAcceptedHandled) < 500) {
-        console.log('[Calls UI] ⏭ CALL_ACCEPTED dedup — already handled');
+    // Receiver answered — transition BOTH caller and receiver to in-call screen.
+    // ── FIX-CALL1: Replace time-based dedup (500ms was too short for WS round-trip)
+    // with a screen-visibility dedup. If inCallScreen is already active this side has
+    // already transitioned — skip. Otherwise always proceed, regardless of timestamps.
+    const _inCallNow = document.getElementById('inCallScreen');
+    if (_inCallNow && _inCallNow.classList.contains('active')) {
+        console.log('[Calls UI] ⏭ CALL_ACCEPTED dedup — in-call screen already active');
         break;
     }
     window.__callAcceptedHandled = Date.now();
