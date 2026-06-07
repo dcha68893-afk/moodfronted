@@ -217,6 +217,32 @@
     }
     const processedMessageIds = _makePersistentSet('kyn_processed_msg_ids', 500);
     const sentMessageIds      = _makePersistentSet('kyn_sent_msg_ids', 200);
+
+    // FIX Bug 6: Clear processedMessageIds when the page becomes visible again.
+    // If a message arrived while this iframe was hidden (user on another tab/page),
+    // its ID was stored in sessionStorage. When the user returns, the dedup set
+    // would silently drop the message. Clearing on visibility-restore ensures
+    // any queued/pending messages are re-processed and shown.
+    (function _installVisibilityResetForDedup() {
+        const _clearOnVisible = () => {
+            if (document.visibilityState === 'visible') {
+                // Only clear if we've been hidden for more than 2 seconds to avoid
+                // clearing during brief focus losses (e.g. clicking a link)
+                if (window._kynLastHiddenAt && Date.now() - window._kynLastHiddenAt > 2000) {
+                    processedMessageIds.clear();
+                }
+            } else {
+                window._kynLastHiddenAt = Date.now();
+            }
+        };
+        document.addEventListener('visibilitychange', _clearOnVisible);
+        // Also clear on postMessage PAGE_FOCUS (parent fires this when switching back to messages tab)
+        window.addEventListener('message', (evt) => {
+            if (evt.data && (evt.data.type === 'PAGE_FOCUS' || evt.data.type === 'MODULE_FOCUSED')) {
+                processedMessageIds.clear();
+            }
+        });
+    })();
     
     let _lastSessionId = null;
     let _validSessionSet = false;
@@ -1466,7 +1492,11 @@ try {
             
             const data = event.data;
             
-            if (data.source && data.source !== 'parent') {
+            // FIX Bug 1: Allow 'ws-bridge' and 'banner-bridge' sources through —
+            // chat.html posts socket-originated messages with source:'ws-bridge'.
+            // Previously these were silently dropped by the security validator.
+            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast']);
+            if (data.source && !ALLOWED_SOURCES.has(data.source)) {
                 return { valid: false, reason: 'invalid_source' };
             }
             
@@ -7213,11 +7243,18 @@ try {
             ModuleCoreController.init();
             ModuleLifecycleController.start();
             
+            // FIX Bug 2: Pre-register the realtime message listener immediately on boot,
+            // BEFORE the module reaches ACTIVE state. Without this, any socket event
+            // (message:new, call:incoming, etc.) that arrives during the INITIALIZING →
+            // ACTIVE window is silently dropped because the listener doesn't exist yet.
+            // setupRealtimeMessageListener() is idempotent — calling it twice is safe.
+            try { setupRealtimeMessageListener(); } catch(_earlyListenerErr) {}
+            
             stateListeners.add((toState) => {
                 if (toState === LIFECYCLE_STATES.ACTIVE) {
                     BootController.completeBoot();
                     console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
-                    startRealtimeSync();
+                    startRealtimeSync(); // ensures full sync triggers; listener already attached above
                 }
             });
             

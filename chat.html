@@ -1747,16 +1747,18 @@
             const iframe = document.getElementById(iframeId);
             if (!iframe || !iframe.contentWindow) return;
 
-            // Throttle: max 10 postMessages per second per module
+            // FIX Bug 3: Throttle raised to 30/sec (was 10). Real-time message events
+            // (message:new, CALL_INCOMING etc.) are NEVER dropped regardless of rate.
             const _now = Date.now();
             if (!_postThrottleWindows.has(moduleName)) _postThrottleWindows.set(moduleName, []);
             const _wins = _postThrottleWindows.get(moduleName);
             // Drop timestamps older than 1 second
             while (_wins.length && _now - _wins[0] > 1000) _wins.shift();
-            if (_wins.length >= 10) {
-                // Storm detected — only drop non-critical setting floods
+            if (_wins.length >= 30) {
+                // Storm detected — only drop low-priority setting floods, never real-time data
                 const _t = message && message.type;
-                if (_t === 'SETTING_CHANGED' || _t === 'SETTINGS_GLOBAL_UPDATE') {
+                const _isCritical = !_t || _t === 'message:new' || _t === 'new_message' || _t === 'CALL_INCOMING' || _t === 'call:incoming' || _t === 'CALL_INCOMING' || _t === 'FRIENDS_LIST_UPDATE' || _t === 'SESSION_DATA' || _t === 'AUTH_READY' || _t === 'PARENT_READY';
+                if (!_isCritical && (_t === 'SETTING_CHANGED' || _t === 'SETTINGS_GLOBAL_UPDATE')) {
                     console.warn('[IframeQueue] postMessage storm — dropped', _t, 'for', moduleName);
                     return;
                 }
@@ -2826,6 +2828,19 @@
             if (page === 'group')    sendFriendsToGroupIframe();
             if (page === 'status')   sendFriendsToStatusIframe();
             if (page === 'tools')    sendFriendsToToolsIframe();
+
+            // FIX Bug 6: When user navigates TO the messages page, notify the iframe
+            // so it can clear processedMessageIds and re-render messages that arrived
+            // while the user was on another tab. Without this, off-screen messages
+            // are permanently lost due to sessionStorage-backed dedup.
+            if (page === 'messages') {
+                const _msgIframe = document.getElementById('messagesIframe');
+                if (_msgIframe && _msgIframe.contentWindow) {
+                    setTimeout(() => {
+                        _msgIframe.contentWindow.postMessage({ type: 'MODULE_FOCUSED', source: 'parent', timestamp: Date.now() }, '*');
+                    }, 150);
+                }
+            }
 
             const iframeId = moduleToIframeId[page];
             if (iframeId) {
