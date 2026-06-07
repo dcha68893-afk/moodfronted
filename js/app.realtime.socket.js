@@ -1,5 +1,5 @@
 /**
- * app.realtime.socket.js — RAW WEBSOCKET FIRST v3.3.0
+ * app.realtime.socket.js — RAW WEBSOCKET FIRST v3.4.0
  *
  * FIXES IN THIS VERSION:
  *  1. acquireToken() now checks window.__kynToken FIRST (set immediately after login)
@@ -8,16 +8,48 @@
  *  4. Token passed in BOTH auth.token AND query.token for max compatibility
  *  5. Reconnect loop prevention: auth errors don't auto-reconnect (avoids spam)
  *  6. [BUG 2 FIX] friend:request → now posts BOTH REALTIME_EVENT:friend:request AND
- *     FRIEND_REQUEST_RECEIVED to every iframe. Previously only the passthrough form
- *     was sent; if friend-core.js's REALTIME_EVENT: unwrapper wasn't matching, the
- *     event was silently dropped and the receiver's incoming count stayed 0.
- *  7. [BUG 2 FIX] friend:accepted → same dual-post fix: posts both
- *     REALTIME_EVENT:friend:accepted AND FRIEND_REQUEST_ACCEPTED so the sender's
- *     client updates its local store and friend list regardless of unwrapper path.
+ *     FRIEND_REQUEST_RECEIVED to every iframe.
+ *  7. [BUG 2 FIX] friend:accepted → same dual-post fix.
+ *  8. [BUG FIX] REALTIME_SEND handler added — child iframe sends (calls, messages)
+ *     now actually reach the Socket.IO server instead of being silently dropped.
+ *  9. [BUG FIX] Console noise suppressed — repeated identical log lines are
+ *     deduplicated; a message only re-logs when its content changes or a
+ *     feature is re-triggered.
+ * 10. [BUG FIX] SETTING_CHANGED storm eliminated — broadcasts only fire when the
+ *     user actually changes a setting (userTriggered:true), not on every load/sync.
  */
 
 (function () {
     'use strict';
+
+    // ── Console dedup utility ─────────────────────────────────────────────────
+    // Prevents repeated identical log messages from flooding the console.
+    // A message re-logs only when its content changes or after a reset.
+    if (!window.__consoleDedupInstalled) {
+        window.__consoleDedupInstalled = true;
+        (function() {
+            const _logCache = new Map();
+            const DEDUP_MS = 5000; // same message within 5s = suppressed
+            ['log', 'warn', 'info'].forEach(function(method) {
+                const _orig = console[method].bind(console);
+                console[method] = function() {
+                    try {
+                        const key = Array.prototype.slice.call(arguments).join('|');
+                        const now = Date.now();
+                        const last = _logCache.get(key) || 0;
+                        if (now - last < DEDUP_MS) return;
+                        _logCache.set(key, now);
+                        // Prune cache periodically
+                        if (_logCache.size > 300) {
+                            const cutoff = now - DEDUP_MS * 2;
+                            _logCache.forEach(function(ts, k) { if (ts < cutoff) _logCache.delete(k); });
+                        }
+                    } catch(_) {}
+                    _orig.apply(console, arguments);
+                };
+            });
+        })();
+    }
 
     // ── Socket.IO client loader ───────────────────────────────────────────────
     // Grab the Socket.IO client from window.io (loaded via <script> in chat.html).
@@ -1476,6 +1508,20 @@
                     realtimeManager.handleReconnect({ token: t, reason: 'session-data' });
                 }
             }
+        }
+
+        // ── FIX: REALTIME_SEND relay — child iframes proxy socket sends through parent ──
+        // When calls-core / messages-core / friend-core (inside iframes) call
+        // KynectaRealtime.send() they post REALTIME_SEND to window.parent.
+        // Without this handler the message was silently dropped — nothing ever
+        // reached the Socket.IO server, so calls never rang and messages had no ACK.
+        if (type === 'REALTIME_SEND' && evt.data.eventType) {
+            const evType = evt.data.eventType;
+            const evPayload = evt.data.payload || {};
+            try {
+                realtimeManager.send(evType, evPayload);
+            } catch (_) {}
+            return;
         }
     });
 

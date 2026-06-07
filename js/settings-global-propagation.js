@@ -353,9 +353,24 @@
         }
         global.__SETTINGS_PROPAGATION_HOOKED__ = true;
 
-        // Subscribe: called immediately with current settings AND on every future change
-        AS.subscribe((settings, path, value) => {
+        // Subscribe: called immediately with current settings AND on every future change.
+        // We only log/broadcast to iframes for genuine user-triggered changes.
+        // Background syncs (server fetch, boot load, broadcast-receive) are applied
+        // silently to avoid the 100+ SETTING_CHANGED postMessage storm.
+        AS.subscribe((settings, path, value, meta) => {
             applySettings(settings);
+
+            const isUserChange = (meta && meta.userTriggered === true) ||
+                                 (meta && (meta.source === 'user-action' || meta.source === 'ui-save' || meta.source === 'local-set'));
+
+            // Only broadcast SETTING_CHANGED to iframes when the user actually changed something
+            if (isUserChange && path && path !== '*') {
+                const parts = path.split('.');
+                const section = parts[0];
+                const key = parts.slice(1).join('.') || parts[0];
+                debugLog('[SettingsPropagation] User changed setting:', path, '=', value);
+                _broadcastToFrames('SETTING_CHANGED', { section, key, value, timestamp: Date.now() });
+            }
 
             // For single-key updates, also fire SettingsState._applySettingGlobally if available
             if (path && path !== '*') {

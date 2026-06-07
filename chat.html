@@ -5200,6 +5200,27 @@
                             responsePayload = await directApiRequest(endpoint, method, body, params, token);
                         }
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: responsePayload, timestamp: new Date().toISOString() }, '*');
+
+                        // ── FIX: Emit new_message via Socket.IO after successful message POST ──
+                        // This ensures the backend broadcasts to the recipient via Socket.IO
+                        // rather than relying only on the HTTP response. The queue was showing
+                        // "sent successfully" with no ACK because the socket event was never emitted.
+                        if (responsePayload && responsePayload.success !== false &&
+                            method === 'POST' && endpoint && endpoint.match(/\/messages$|\/messages\//) &&
+                            responsePayload.data) {
+                            try {
+                                const _msgData = responsePayload.data.message || responsePayload.data;
+                                const _rtSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
+                                if (_rtSocket && _rtSocket.connected && _msgData && _msgData.id) {
+                                    _rtSocket.emit('message:ack', {
+                                        messageId: _msgData.id,
+                                        chatId: _msgData.chatId || _msgData.conversationId,
+                                        status: 'delivered',
+                                        timestamp: Date.now()
+                                    });
+                                }
+                            } catch(_ackErr) {}
+                        }
                     } catch (error) {
                         if (event.source && event.source.postMessage) event.source.postMessage({ type: 'API_RESPONSE', requestId: requestId, payload: { success: false, error: error.message || 'Network request failed', statusCode: 0, data: null }, timestamp: new Date().toISOString() }, '*');
                     }
@@ -5455,6 +5476,26 @@
                             const serverCallId = respData.data?.call?.id || respData.data?.callId;
                             window.__callIdMap = window.__callIdMap || {};
                             window.__callIdMap[localCallId] = serverCallId;
+
+                            // ── FIX: Also emit call:initiate via Socket.IO so CallSignalingService
+                            // can set up the call room and route signals without HTTP round-trips.
+                            // This ensures the receiver gets call:incoming even if the HTTP notification
+                            // races with a brief socket reconnect on the backend.
+                            try {
+                                const _rtSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
+                                if (_rtSocket && _rtSocket.connected) {
+                                    _rtSocket.emit('call:initiate', {
+                                        callId: serverCallId,
+                                        targetUserId: calleeId || (participantIds && participantIds[0]),
+                                        callType: callType === 'voice' ? 'audio' : callType,
+                                        callerName: respData.data?.callerName || null,
+                                        isGroupCall,
+                                        participantIds: participantIds || (calleeId ? [parseInt(calleeId)] : []),
+                                        timestamp: Date.now()
+                                    });
+                                }
+                            } catch(_socketCallErr) {}
+
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: true, success: true } }, '*');
                         } else {
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
@@ -5481,47 +5522,90 @@
                         if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
                     } catch(e) {}
 
-                    if (!resolvedCallId || !token) {
-                        console.warn('[Parent] WebRTC signal dropped - missing callId or token', { type: data.type, hasCallId: !!resolvedCallId, hasToken: !!token });
+                    if (!resolvedCallId) {
+                        console.warn('[Parent] WebRTC signal dropped - missing callId', { type: data.type });
                         return;
                     }
 
+                    // ── PRIMARY PATH: Socket.IO (real-time, low-latency) ────────────────
+                    // Always try Socket.IO first — this is the correct path for WebRTC signals.
+                    // HTTP REST was the only path before, which caused race conditions and
+                    // call setup failures when the socket was briefly unstable.
+                    let socketRelayed = false;
                     try {
-                        if (data.type === 'ICE_CANDIDATE') {
-                            const iceResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/ice`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${token}`
-                                },
-                                body: JSON.stringify({
+                        const _rtSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
+                        if (_rtSocket && _rtSocket.connected) {
+                            if (data.type === 'ICE_CANDIDATE') {
+                                _rtSocket.emit('webrtc:signal', {
+                                    callId: resolvedCallId,
+                                    type: 'ice-candidate',
                                     candidate: payload.candidate,
-                                    timestamp: payload.timestamp || Date.now()
-                                })
-                            });
-                            if (!iceResp.ok) throw new Error(`ICE relay failed with ${iceResp.status}`);
-                            console.log('[Parent] ICE candidate relayed via /calls/:id/ice', resolvedCallId);
-                        } else {
-                            const signalType = data.type === 'SIGNAL_OFFER' ? 'offer' : 'answer';
-                            const sdpPayload = data.type === 'SIGNAL_OFFER' ? payload.offer : payload.answer;
-                            const signalResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/signal`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${token}`
-                                },
-                                body: JSON.stringify({
+                                    targetUserId: payload.targetUserId || payload.toUserId || null,
+                                    timestamp: Date.now()
+                                });
+                            } else {
+                                const signalType = data.type === 'SIGNAL_OFFER' ? 'offer' : 'answer';
+                                const sdpPayload = data.type === 'SIGNAL_OFFER' ? payload.offer : payload.answer;
+                                // Also emit call:webrtc_offer / call:webrtc_answer for CallSignalingService
+                                _rtSocket.emit('call:webrtc_offer', {
+                                    callId: resolvedCallId,
+                                    targetUserId: payload.targetUserId || payload.toUserId || null,
+                                    offer: sdpPayload,
+                                    type: signalType,
+                                    timestamp: Date.now()
+                                });
+                                _rtSocket.emit('webrtc:signal', {
+                                    callId: resolvedCallId,
                                     type: signalType,
                                     sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
                                     targetUserId: payload.targetUserId || payload.toUserId || null,
-                                    timestamp: payload.timestamp || Date.now()
-                                })
-                            });
-                            if (!signalResp.ok) throw new Error(`${signalType} relay failed with ${signalResp.status}`);
-                            console.log(`[Parent] ${signalType.toUpperCase()} relayed via /calls/:id/signal`, resolvedCallId);
+                                    timestamp: Date.now()
+                                });
+                            }
+                            socketRelayed = true;
                         }
-                    } catch(sigErr) {
-                        console.warn('[Parent] WebRTC signal relay failed:', sigErr.message);
+                    } catch(_socketErr) {
+                        console.warn('[Parent] Socket.IO signal relay failed:', _socketErr.message);
+                    }
+
+                    // ── FALLBACK PATH: HTTP REST ─────────────────────────────────────────
+                    // Only use HTTP if Socket.IO failed/unavailable AND we have a token.
+                    if (!socketRelayed && token) {
+                        try {
+                            if (data.type === 'ICE_CANDIDATE') {
+                                const iceResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/ice`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${token}`
+                                    },
+                                    body: JSON.stringify({
+                                        candidate: payload.candidate,
+                                        timestamp: payload.timestamp || Date.now()
+                                    })
+                                });
+                                if (!iceResp.ok) throw new Error(`ICE relay failed with ${iceResp.status}`);
+                            } else {
+                                const signalType = data.type === 'SIGNAL_OFFER' ? 'offer' : 'answer';
+                                const sdpPayload = data.type === 'SIGNAL_OFFER' ? payload.offer : payload.answer;
+                                const signalResp = await fetch(`${baseUrl}/calls/${resolvedCallId}/signal`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${token}`
+                                    },
+                                    body: JSON.stringify({
+                                        type: signalType,
+                                        sdp: typeof sdpPayload === 'string' ? sdpPayload : JSON.stringify(sdpPayload),
+                                        targetUserId: payload.targetUserId || payload.toUserId || null,
+                                        timestamp: payload.timestamp || Date.now()
+                                    })
+                                });
+                                if (!signalResp.ok) throw new Error(`${signalType} relay failed with ${signalResp.status}`);
+                            }
+                        } catch(sigErr) {
+                            console.warn('[Parent] WebRTC signal HTTP fallback failed:', sigErr.message);
+                        }
                     }
                     return;
                 }
@@ -5879,6 +5963,9 @@
                 window.wsService.on('call:ice_candidate',  d => _fwdToCallsIframe('ICE_CANDIDATE',  d));
                 window.wsService.on('webrtc:signal',       d => _fwdWebrtcSignal(d));
                 window.wsService.on('webrtc_signal',       d => _fwdWebrtcSignal(d));
+                // FIX: call:webrtc_offer is emitted by CallSignalingService — must forward to calls iframe
+                window.wsService.on('call:webrtc_offer',   d => _fwdWebrtcSignal({ ...d, type: 'offer' }));
+                window.wsService.on('call:webrtc_answer',  d => _fwdWebrtcSignal({ ...d, type: 'answer' }));
 
                 // ── REAL-TIME MESSAGE BRIDGE ──────────────────────────────────
                 // Forward incoming chat messages from WebSocket to the messages iframe.

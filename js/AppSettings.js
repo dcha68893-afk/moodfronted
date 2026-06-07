@@ -912,6 +912,19 @@
             }
         });
 
+        // Only fire appSettingsChanged (and downstream SETTING_CHANGED postMessages)
+        // when the change was user-triggered or explicitly flagged. Background loads
+        // (server sync, boot, broadcast-receive) should NOT flood the console or
+        // cause iframe storm with SETTING_CHANGED messages.
+        const source = (meta && meta.source) || '';
+        const isUserChange = (meta && meta.userTriggered === true) ||
+                             source === 'user-action' ||
+                             source === 'ui-save' ||
+                             source === 'local-set';
+        const isBackgroundLoad = source === 'server-sync' || source === 'broadcast' ||
+                                 source === 'boot' || source === 'login-event' ||
+                                 source === 'parent-socket-relay' || source === 'merge';
+
         try {
             global.dispatchEvent(new CustomEvent('appSettingsChanged', {
                 detail: {
@@ -919,6 +932,8 @@
                     path,
                     value,
                     userId: _activeUserId,
+                    userTriggered: isUserChange,
+                    backgroundLoad: isBackgroundLoad,
                     ...(meta || {})
                 }
             }));

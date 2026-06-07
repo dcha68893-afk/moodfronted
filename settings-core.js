@@ -455,7 +455,8 @@ const SettingsState = {
         // STEP 1: Update AppSettings FIRST (single source of truth)
         // This triggers all module subscriptions instantly
         if (window.AppSettings) {
-            window.AppSettings.set(section + '.' + key, value);
+            // Mark as user-triggered so propagation layer logs and broadcasts to iframes
+            window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });
         }
 
         // STEP 2: Update local state for backwards compatibility
@@ -582,7 +583,7 @@ const SettingsState = {
     _applySettingGlobally(section, key, value) {
         // 1. Push into AppSettings (single source of truth)
         if (window.AppSettings) {
-            window.AppSettings.set(section + '.' + key, value);
+            window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });
         }
 
         // 2. Notify parent frame
