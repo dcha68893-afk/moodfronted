@@ -798,3 +798,65 @@ self.addEventListener('unhandledrejection', function(event) {
 });
 
 console.log('[SW] v' + SW_VERSION + ' loaded - offline-first navigation active');
+
+// ── PHASE14 FIX: Push notification handlers ──────────────────────────────────
+// Without these, web push notifications are silently swallowed — the browser
+// receives the push message from the server but no notification is displayed.
+
+self.addEventListener('push', function(event) {
+    if (!event.data) return;
+
+    let data = {};
+    try { data = event.data.json(); } catch(_) {
+        try { data = { title: 'MoodChat', body: event.data.text() }; } catch(__) { return; }
+    }
+
+    const title   = data.title   || 'MoodChat';
+    const options = {
+        body:    data.body    || data.message || 'You have a new notification',
+        icon:    data.icon    || '/icons/moodchat-192.png',
+        badge:   data.badge   || '/icons/moodchat-192.png',
+        tag:     data.tag     || 'moodchat-notification',
+        data:    data.data    || { url: data.url || '/chat.html' },
+        vibrate: [200, 100, 200],
+        requireInteraction: data.requireInteraction || false
+    };
+
+    // For message notifications: include sender info
+    if (data.type === 'message' || data.type === 'new_message') {
+        options.tag  = 'msg-' + (data.chatId || 'chat');
+        options.body = data.senderName ? `${data.senderName}: ${options.body}` : options.body;
+    }
+
+    event.waitUntil(
+        self.registration.showNotification(title, options)
+    );
+});
+
+self.addEventListener('notificationclick', function(event) {
+    event.notification.close();
+
+    const targetUrl = (event.notification.data && event.notification.data.url)
+        ? event.notification.data.url
+        : '/chat.html';
+
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+            // Focus existing open tab if found
+            for (var i = 0; i < clientList.length; i++) {
+                var client = clientList[i];
+                if (client.url.includes('/chat.html') && 'focus' in client) {
+                    return client.focus();
+                }
+            }
+            // Otherwise open a new window
+            if (clients.openWindow) {
+                return clients.openWindow(targetUrl);
+            }
+        })
+    );
+});
+
+self.addEventListener('notificationclose', function(event) {
+    // Optional: track dismissed notifications
+});

@@ -1262,6 +1262,10 @@
                 'call:initiated', 'call_initiated',
                 'webrtc:signal', 'webrtc_signal',
                 'call:ringing', 'call_ringing',
+                // FIX: These were missing — calls-core.js emits and listens for these
+                'call:webrtc_offer', 'call:webrtc_answer',
+                'call:ice_candidate', 'call_ice_candidate', 'ice_candidate',
+                'call:receiver_offline', 'call:no_answer', 'call:receiver_ack',
             ];
 
             // FIX: friend events were missing — without these the socket never
