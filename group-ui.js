@@ -4614,20 +4614,29 @@ export async function loadReceivedInvites() {
     if (!body) return;
     body.innerHTML = panelLoader();
     try {
-        const data = await panelFetch('/api/groups/invitations?status=pending');
-        const invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
+        // FIX: Use /api/group-members/invitations (canonical) with /api/groups/invitations as fallback
+        let data = await panelFetch('/api/group-members/invitations?status=pending').catch(() => null);
+        if (!data || data.success === false) {
+            data = await panelFetch('/api/groups/invitations?status=pending').catch(() => ({}));
+        }
+        // Handle all nested response shapes from both endpoints
+        const invites = (data?.data?.invitations && Array.isArray(data.data.invitations)) ? data.data.invitations :
+                        (data?.invitations && Array.isArray(data.invitations)) ? data.invitations :
+                        (Array.isArray(data?.data)) ? data.data : [];
         if (!invites.length) { body.innerHTML = panelEmpty('fas fa-envelope-open', 'No pending invitations.'); return; }
         body.innerHTML = '';
         invites.forEach(inv => {
-            const gname = inv.group?.name || inv.groupName || 'Group #' + inv.groupId;
-            const inviter = inv.inviter?.username || inv.inviterName || 'Someone';
+            // FIX: check userGroup (group-members endpoint alias) then group (groups endpoint alias)
+            const groupObj = inv.userGroup || inv.group || null;
+            const gname = groupObj?.name || inv.groupName || 'Group #' + inv.groupId;
+            const inviter = inv.inviter?.displayName || inv.inviter?.username || inv.sender?.username || inv.inviterName || 'Someone';
             const initials = gname.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
             const card = panelCard(`
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;${inv.group?.avatar?'background-image:url('+inv.group.avatar+');background-size:cover;':''}">${inv.group?.avatar?'':initials}</div>
+                    <div style="width:44px;height:44px;border-radius:50%;background:var(--primary-color,#6c63ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;flex-shrink:0;${groupObj?.avatar?'background-image:url('+groupObj.avatar+');background-size:cover;':''}">${groupObj?.avatar?'':initials}</div>
                     <div style="flex:1"><div style="font-weight:700;font-size:14px;color:var(--text-primary)">${gname}</div>
                     <div style="font-size:12px;color:var(--text-secondary)">Invited by @${inviter} · ${timeAgo(inv.createdAt)}</div>
-                    ${inv.group?.description?'<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+inv.group.description.slice(0,70)+'</div>':''}</div>
+                    ${groupObj?.description?'<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">'+groupObj.description.slice(0,70)+'</div>':''}</div>
                 </div>
                 <div style="display:flex;gap:8px">
                     <button data-inv="${inv.id}" data-action="decline" data-name="${gname}" style="flex:1;padding:8px;border-radius:8px;background:none;border:1px solid var(--border-color);cursor:pointer;color:var(--text-primary);font-weight:600;font-size:13px">Decline</button>

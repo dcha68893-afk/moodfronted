@@ -3013,18 +3013,36 @@ function updateAllUsersCache() {
 
 // Get filtered users based on search term
 function getFilteredUsers(searchTerm) {
-    const users = window.safeArray(_allUsersCache.length > 0 ? _allUsersCache : updateAllUsersCache());
-    const currentUserId = currentUser?.id;
-    
-    let filtered = users.filter(user => {
-        if (!user || !user.id) return false;
-        if (user.id === currentUserId) return false;
-        return true;
-    });
+    // FIX-DISCOVER: Use getDiscoverableUsers() which filters out bots, system accounts,
+    // AND existing friends. Previously _allUsersCache was used directly, skipping all filters.
+    let users;
+    if (typeof window.getDiscoverableUsers === 'function') {
+        try { users = window.getDiscoverableUsers(_allUsersCache); } catch(_) {}
+    }
+    if (!users || !users.length) {
+        // fallback: filter manually from cache
+        const currentUserId = currentUser?.id;
+        const existingFriendIds = new Set(
+            window.safeArray(window.FriendCore?.friends || window.FriendCore?.getFriends?.() || [])
+                .map(f => String(f.id || f.userId || ''))
+                .filter(Boolean)
+        );
+        users = window.safeArray(_allUsersCache.length > 0 ? _allUsersCache : updateAllUsersCache()).filter(user => {
+            if (!user || !user.id) return false;
+            if (currentUserId && String(user.id) === String(currentUserId)) return false;
+            if (existingFriendIds.has(String(user.id))) return false;
+            // Filter bots/system accounts
+            const uname = (user.username || '').toLowerCase();
+            if (uname.startsWith('bot_') || uname.startsWith('system_') || uname.startsWith('admin_')) return false;
+            if (user.isBot || user.is_bot || user.isSystem || user.is_system) return false;
+            if (user.accountType === 'bot' || user.account_type === 'bot') return false;
+            return true;
+        });
+    }
     
     if (searchTerm) {
         const term = searchTerm.toLowerCase().trim();
-        filtered = filtered.filter(user => {
+        users = users.filter(user => {
             const displayNameMatch = (user.displayName || '').toLowerCase().includes(term);
             const usernameMatch = (user.username || '').toLowerCase().includes(term);
             const emailMatch = (user.email || '').toLowerCase().includes(term);
@@ -3033,14 +3051,14 @@ function getFilteredUsers(searchTerm) {
     }
     
     // Sort users: online first, then alphabetically
-    filtered.sort((a, b) => {
+    users.sort((a, b) => {
         const aOnline = a.online === true || a.status === 'online';
         const bOnline = b.online === true || b.status === 'online';
         if (aOnline !== bOnline) return bOnline ? 1 : -1;
         return (a.displayName || '').localeCompare(b.displayName || '');
     });
     
-    return filtered;
+    return users;
 }
 
 // Render all users from cache (instant)
