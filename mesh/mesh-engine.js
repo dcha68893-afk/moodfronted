@@ -258,25 +258,70 @@ const MeshEngine = (() => {
     }
 
     // ── Offline indicator ──────────────────────────────────────────────────
+    // FIX: Debounce — only show badge after 5s of sustained bad state.
+    // This prevents the "Weak network · Messages queued" flash during normal
+    // Socket.IO reconnect cycles (which last 1-3s) on a perfectly good connection.
+    let _offlineBadgeTimer = null;
+    let _offlineBadgePending = false;
+
     function _updateOfflineIndicator() {
         let badge = document.getElementById('meshOfflineBadge');
-        const online   = navigator.onLine;
-        // FIX: also accept socket.connected as a valid "live" signal.
-        // isConnected() requires state===AUTHENTICATED which is briefly false
-        // during reconnect, causing a false "Weak network" badge on good internet.
+        const online = navigator.onLine;
+        // FIX: Accept socket connected OR any transient reconnecting state as "ok".
+        // isConnected() briefly returns false during the reconnect window, which
+        // previously caused the false "Weak network" badge on good WiFi/mobile.
         const ws = window.wsService;
+        const wsState = ws?.io?.engine?.readyState || '';
         const wsOk = !!(ws && (
             ws.isConnected?.() ||
             ws._socket?.connected ||
             ws.socket?.connected ||
-            ws.io?.engine?.readyState === 'open'
+            wsState === 'open' ||
+            wsState === 'opening' ||
+            // KynectaRealtime bridge — parent-frame socket is authoritative
+            window.KynectaRealtime?.isConnected?.() ||
+            window.KynectaRealtime?._socket?.connected ||
+            window.__kynParentReady === true ||
+            // In iframe mode the parent owns the socket — always trust online state
+            (window.parent !== window && navigator.onLine)
         ));
         const meshPeers = MeshTransport.getPeerCount();
 
+        // If online and socket ok — immediately clear badge and cancel any pending show
         if (online && wsOk) {
+            if (_offlineBadgeTimer) { clearTimeout(_offlineBadgeTimer); _offlineBadgeTimer = null; }
+            _offlineBadgePending = false;
             badge && badge.remove();
             return;
         }
+
+        // If browser is fully offline — show immediately (no debounce needed)
+        if (!online) {
+            _showBadge(badge, meshPeers);
+            return;
+        }
+
+        // Transient state (online but wsOk=false): debounce 5s before showing badge.
+        // This swallows the false-positive during every reconnect cycle.
+        if (!_offlineBadgePending) {
+            _offlineBadgePending = true;
+            _offlineBadgeTimer = setTimeout(() => {
+                _offlineBadgePending = false;
+                // Re-evaluate: if state recovered during the 5s window, do nothing
+                const wsOkNow = !!(ws && (
+                    ws.isConnected?.() || ws._socket?.connected ||
+                    window.KynectaRealtime?.isConnected?.() ||
+                    window.__kynParentReady === true ||
+                    (window.parent !== window && navigator.onLine)
+                ));
+                if (navigator.onLine && wsOkNow) { document.getElementById('meshOfflineBadge')?.remove(); return; }
+                _showBadge(document.getElementById('meshOfflineBadge'), MeshTransport.getPeerCount());
+            }, 5000);
+        }
+        return; // don't show badge yet — wait for debounce
+    }
+
+    function _showBadge(badge, meshPeers) {
         if (!badge) {
             badge = document.createElement('div');
             badge.id = 'meshOfflineBadge';

@@ -244,6 +244,10 @@
       let _qualityDebounce = null;
       intel.onChange(state => {
         const inIframe = window.parent !== window;
+        // FIX: Only mark INTERNET unavailable when truly OFFLINE.
+        // Previously POOR quality (high latency, some packet loss) marked INTERNET
+        // unavailable, falling through to MESH/OFFLINE transport. POOR quality is
+        // slow but still functional — keep using INTERNET and let TCP handle retries.
         const available = inIframe
           ? navigator.onLine
           : (state.internetAvailable && state.internetQuality !== 'OFFLINE');
@@ -251,15 +255,18 @@
         this._health.record(TRANSPORT.INTERNET, available, state.estimatedLatency || 0);
         this._health.setAvailable(TRANSPORT.LAN, state.lanAvailable || false);
 
-        // Debounce switch: only act if quality is consistently bad for 3s
+        // Debounce switch: only act if quality is consistently bad for 5s (was 3s)
+        // The extra 2s prevents false switches on brief congestion spikes.
         if (_qualityDebounce) clearTimeout(_qualityDebounce);
         _qualityDebounce = setTimeout(() => {
           _qualityDebounce = null;
+          // Re-check: if internet recovered during the debounce window, stay put
+          if (navigator.onLine && this._health.isAvailable(TRANSPORT.INTERNET)) return;
           const best = this._priority.selectBest();
           if (best !== this._orchestrator.getCurrent()) {
             this._orchestrator.switchTo(best, 'network_quality_change');
           }
-        }, 3000);
+        }, 5000);
       });
     }
 

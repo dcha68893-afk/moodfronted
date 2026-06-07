@@ -13,6 +13,10 @@ html,body{height:100%!important;margin:0!important;padding:0!important;overflow:
 #sidebar{width:100%!important;height:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;position:relative!important}
 .jm-page{display:none;min-height:0;overflow:hidden;flex-direction:column}
 .jm-page.active{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important}
+/* FIX: Account page inner wrap must scroll — not the page container */
+#jmPageAccount.active .jm-account-wrap{flex:1!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;min-height:0!important;padding-bottom:80px!important}
+/* FIX: All scrollable inner pages need this pattern */
+.jm-page.active > .jm-cat-layout,.jm-page.active > .jm-cart-wrap,.jm-page.active > .jm-wishlist-wrap{flex:1!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;min-height:0!important;padding-bottom:70px!important}
 [id^="sdPage_"],[id^="admPage_"]{display:none;min-height:0;overflow:hidden;flex-direction:column;background:#f3f4f6}
 [id^="sdPage_"].active,[id^="admPage_"].active{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important}
 .sd-wrap,.adm-page{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important}
@@ -217,12 +221,34 @@ function init(){
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
 else init();
-[200,500,1000,2000].forEach(t=>setTimeout(()=>{
+[200,500,1000,2000,4000].forEach(t=>setTimeout(()=>{
     rebuildBottomNav();updateMoreBtn();ensureAdminFab();
 },t));
 window.addEventListener('load',()=>setTimeout(init,200));
 window.addEventListener('message',e=>{
     if(e.data?.type==='tools:active'||e.data?.type==='PARENT_READY') setTimeout(init,300);
+});
+
+// FIX: Re-check admin status whenever account page is opened (role may arrive late via postMessage)
+const _origJmNav = window._jmNav;
+window._jmNav = function(p, s) {
+    _origJmNav?.call(this, p, s);
+    if (p === 'account') setTimeout(ensureAdminFab, 100);
+    setTimeout(() => setActive(p), 40);
+};
+
+// FIX: Also refresh when any session/role postMessage arrives (covers late parent injection)
+window.addEventListener('message', function(e) {
+    const t = e.data?.type;
+    if (t === 'PARENT_SESSION' || t === 'SESSION_DATA' || t === 'USER_DATA' || t === 'CHILD_SESSION') {
+        const u = e.data?.user || e.data?.payload?.user || e.data?.session?.user || {};
+        const role = u.role || e.data?.role || e.data?.payload?.role || '';
+        if (role) {
+            window.__cachedUserRole = role;
+            try { localStorage.setItem('userRole', role); } catch(_) {}
+        }
+        setTimeout(() => { ensureAdminFab(); rebuildMenu(); }, 150);
+    }
 });
 
 console.log('[ui-fix v4] ✅ loaded');
