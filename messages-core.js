@@ -2230,6 +2230,18 @@ try {
                 setState(LIFECYCLE_STATES.WAIT_PARENT, 'child_ready_sent');
                 console.log(`[${MODULE_NAME}] CHILD_READY sent`);
                 console.log(`[${MODULE_NAME}] WAIT_PARENT`);
+                // FIX-WAIT_PARENT-MSG: 5-second initialization queue flush timeout
+                // Prevents "Message ERROR blocked in WAIT_PARENT" indefinitely.
+                if (!window.__msgWaitParentTimeout) {
+                    window.__msgWaitParentTimeout = setTimeout(function() {
+                        window.__msgWaitParentTimeout = null;
+                        if (currentState === LIFECYCLE_STATES.WAIT_PARENT || currentState === LIFECYCLE_STATES.WAITING_AUTH) {
+                            console.warn('[' + MODULE_NAME + '] WAIT_PARENT timeout — forcing ACTIVE to unblock messages');
+                            try { setState(LIFECYCLE_STATES.ACTIVE, 'wait_parent_timeout'); } catch(_) { currentState = LIFECYCLE_STATES.ACTIVE; }
+                            if (typeof processQueue === 'function') processQueue();
+                        }
+                    }, 5000);
+                }
             } else {
                 Logger.error('ParentConnectionManager', 'Failed to send CHILD_READY', result);
             }
@@ -6689,6 +6701,18 @@ try {
 
                 renderRealtimeUpdate(chatId, normalizedMessage);
                 ackMessageDelivered(normalizedMessage).catch(() => {});
+                // FIX-MSG-DELIVERY-ACK: Phase 2 — tell server we received this message
+                // so the sender gets 'message:delivered' and delivery timeout is cleared.
+                try {
+                    var _delSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+                    if (_delSocket && typeof _delSocket.emit === 'function') {
+                        _delSocket.emit('message:delivery_ack', {
+                            messageId: normalizedMessage.serverId || normalizedMessage.id,
+                            chatId:    normalizedMessage.chatId || normalizedMessage.conversationId,
+                            senderId:  normalizedMessage.senderId || normalizedMessage.userId,
+                        });
+                    }
+                } catch(_dErr) { /* silent — delivery ack is best-effort */ }
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}
                 return;
@@ -6715,6 +6739,28 @@ try {
                         localId:  d.localId  || null,
                         serverId: d.serverId || d.messageId || d.id || null
                     });
+                }
+                return;
+            }
+
+            // FIX-MSG-DELIVERY: Handle Phase 1 — server received message
+            if (normalizedType === 'message_received_by_server' || normalizedType === 'message:received_by_server') {
+                const mid = (data.messageId || data.payload?.messageId || '');
+                if (mid) {
+                    // Update local message status to 'received' (single tick → double tick)
+                    EventBus.emit('message:status_update', { messageId: mid, status: 'received', timestamp: data.timestamp || Date.now() });
+                    console.log('[messages-core] 📡 message received by server mid=' + mid);
+                }
+                return;
+            }
+
+            // FIX-MSG-DELIVERY: Handle delivery failure — mark as failed
+            if (normalizedType === 'message_delivery_failed' || normalizedType === 'message:delivery_failed') {
+                const mid = (data.messageId || data.payload?.messageId || '');
+                const reason = data.reason || 'delivery_timeout';
+                if (mid) {
+                    EventBus.emit('message:status_update', { messageId: mid, status: 'failed', reason, timestamp: data.timestamp || Date.now() });
+                    console.warn('[messages-core] ❌ message delivery failed mid=' + mid + ' reason=' + reason);
                 }
                 return;
             }

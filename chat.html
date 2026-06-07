@@ -1710,9 +1710,28 @@
         const _iframeQueue = new Map();         // module -> Array<message> (queued before CHILD_READY)
         const _IFRAME_QUEUE_MAX = 100;          // cap per module to prevent memory growth
 
+        // FIX-POSTMESSAGE-STORM: sliding-window throttle — max 10 msgs/sec per module
+        const _postThrottleWindows = new Map();
         function _postToModule(moduleName, iframeId, message) {
             const iframe = document.getElementById(iframeId);
             if (!iframe || !iframe.contentWindow) return;
+
+            // Throttle: max 10 postMessages per second per module
+            const _now = Date.now();
+            if (!_postThrottleWindows.has(moduleName)) _postThrottleWindows.set(moduleName, []);
+            const _wins = _postThrottleWindows.get(moduleName);
+            // Drop timestamps older than 1 second
+            while (_wins.length && _now - _wins[0] > 1000) _wins.shift();
+            if (_wins.length >= 10) {
+                // Storm detected — only drop non-critical setting floods
+                const _t = message && message.type;
+                if (_t === 'SETTING_CHANGED' || _t === 'SETTINGS_GLOBAL_UPDATE') {
+                    console.warn('[IframeQueue] postMessage storm — dropped', _t, 'for', moduleName);
+                    return;
+                }
+            }
+            _wins.push(_now);
+
             if (_iframeReady.has(moduleName)) {
                 try { iframe.contentWindow.postMessage(message, '*'); } catch(e) {
                     console.error('[IframeQueue] postMessage failed for', moduleName, e.message);
@@ -3856,7 +3875,24 @@
                 } catch(e) {}
             }
 
+            // FIX-POSTMESSAGE: 100ms debounce for SETTING_CHANGED floods during navigation
+            var _settingChangedDebounce = {};
             function emitGlobalAppEvent(type, payload, options = {}) {
+                // Debounce SETTING_CHANGED / SETTINGS_GLOBAL_UPDATE to 100ms per key
+                if (type === 'SETTING_CHANGED' || type === 'SETTINGS_GLOBAL_UPDATE') {
+                    var _debKey = type + ':' + (payload && payload.section || '') + ':' + (payload && payload.key || '');
+                    if (_settingChangedDebounce[_debKey]) clearTimeout(_settingChangedDebounce[_debKey]);
+                    _settingChangedDebounce[_debKey] = setTimeout(function() {
+                        delete _settingChangedDebounce[_debKey];
+                        if (window.appEvents && typeof window.appEvents.emit === 'function') {
+                            window.appEvents.emit(type, payload, options); return;
+                        }
+                        if (window.KynectaEventBus && typeof window.KynectaEventBus.emit === 'function') {
+                            window.KynectaEventBus.emit(type, payload, options);
+                        }
+                    }, 100);
+                    return;
+                }
                 if (window.appEvents && typeof window.appEvents.emit === 'function') {
                     window.appEvents.emit(type, payload, options);
                     return;
@@ -4695,8 +4731,28 @@
                     const targetModule = data.module || data.source || data.payload?.module || null;
                     if (targetModule) {
                         registerModule(targetModule);
-                        _iframeReady.add(targetModule);   // FIX-006: mark ready
-                        _flushIframeQueue(targetModule);  // FIX-006: deliver queued events
+                        // FIX-OBJECTMULTIPLEX: Only mark ready + flush AFTER the iframe's
+                        // 'load' event has fired. If the iframe is still loading, the
+                        // flush may cause ObjectMultiplex "orphaned data" errors because
+                        // the child's message handler isn't mounted yet.
+                        const _iframeEl = moduleToIframeId[targetModule]
+                            ? document.getElementById(moduleToIframeId[targetModule]) : null;
+                        const _doReadyFlush = function() {
+                            _iframeReady.add(targetModule);
+                            _flushIframeQueue(targetModule);
+                        };
+                        if (_iframeEl && !_iframeEl.dataset.loadFired) {
+                            // Not yet load-fired — wait for it (with 2s fallback)
+                            const _loadGuard = setTimeout(_doReadyFlush, 2000);
+                            _iframeEl.addEventListener('load', function _onLoad() {
+                                _iframeEl.removeEventListener('load', _onLoad);
+                                _iframeEl.dataset.loadFired = '1';
+                                clearTimeout(_loadGuard);
+                                _doReadyFlush();
+                            }, { once: true });
+                        } else {
+                            _doReadyFlush();   // already loaded — flush immediately
+                        }
                     }
                     if (targetModule && moduleToIframeId[targetModule]) {
                         const iframe = document.getElementById(moduleToIframeId[targetModule]);

@@ -2110,15 +2110,21 @@ const VERIFICATION_COOLDOWN = 5000;
 
             transitionTo(LifecycleState.WAIT_PARENT, 'child_ready_sent');
 
-
-
-            
-
-
+            // FIX-WAIT_PARENT: 5-second safety timeout — force ACTIVE if PARENT_READY never arrives
+            if (!window.__waitParentTimeout) {
+                window.__waitParentTimeout = setTimeout(function() {
+                    window.__waitParentTimeout = null;
+                    if (typeof currentState !== 'undefined' && currentState === LifecycleState.WAIT_PARENT) {
+                        console.warn('[' + MODULE_NAME + '] WAIT_PARENT timeout — forcing ACTIVE to unblock queue');
+                        try { transitionTo(LifecycleState.ACTIVE, 'wait_parent_timeout_forced'); } catch(_) {
+                            currentState = LifecycleState.ACTIVE;
+                        }
+                        if (typeof flushQueue === 'function') flushQueue();
+                    }
+                }, 5000);
+            }
 
             return true;
-
-
 
         } catch (error) {
 
@@ -28193,13 +28199,19 @@ _escapeHtml: function(text) {
 
         notifyListeners('incoming_call', callData);
 
-
-
+        // FIX-CALL-ACK: Emit call:received to backend so caller gets confirmation
+        // and the 20-second no-answer timer is cleared on the server side.
+        try {
+            var _ackSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+            if (_ackSocket && typeof _ackSocket.emit === 'function') {
+                _ackSocket.emit('call:received', {
+                    callId:   callData.callId || callData.id,
+                    callerId: callData.callerId || callData.caller,
+                });
+                console.log('[CallsCore] ✅ call:received ack sent to server');
+            }
+        } catch(_ackErr) { console.warn('[CallsCore] call:received ack failed', _ackErr); }
     }
-
-
-
-    
 
 
 
@@ -28704,8 +28716,20 @@ _escapeHtml: function(text) {
                     if (window.parent && window.parent !== window) {
                         window.parent.postMessage({ type: 'SIGNAL_OFFER', payload: _offerPayload, source: 'calls-core-direct' }, '*');
                     }
-                    safeSend('SIGNAL_OFFER', _offerPayload, false);
-                    console.log('[CallsCore] ✅ OFFER SENT to remote peer (direct + safeSend)');
+                    // FIX-CALL-DIRECT: Bypass postMessage for WebRTC offers — emit directly via Socket.IO
+                    var _directSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+                    var _offerId = _offerPayload.callId || _offerPayload.sessionId;
+                    var _offTarget = _offerPayload.targetUserId || _offerPayload.remoteUserId;
+                    if (_directSocket && typeof _directSocket.emit === 'function' && _offTarget) {
+                        _directSocket.emit('call:webrtc_offer', {
+                            callId: _offerId, targetUserId: _offTarget,
+                            offer: _offerPayload.offer || _offerPayload.sdp || _offerPayload,
+                        });
+                        console.log('[CallsCore] ✅ OFFER sent directly via Socket.IO (bypassing postMessage)');
+                    } else {
+                        safeSend('SIGNAL_OFFER', _offerPayload, false);
+                        console.log('[CallsCore] ✅ OFFER SENT via safeSend (Socket.IO socket unavailable)');
+                    }
 
 
 
@@ -37267,7 +37291,32 @@ clearActiveCall: function() {
 
                 ['call:failed',    (p) => handleCallFailed(p)],
 
-
+                // FIX-CALL-ACK: New signaling events from patched backend
+                ['call:no_answer',      (p) => {
+                    console.warn('[CallsCore] 📵 call:no_answer — user did not answer', p);
+                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'no_answer' });
+                    else if (typeof resetCallState === 'function') resetCallState();
+                }],
+                ['call:receiver_offline', (p) => {
+                    console.warn('[CallsCore] 📵 call:receiver_offline', p);
+                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'receiver_offline' });
+                    else if (typeof resetCallState === 'function') resetCallState();
+                }],
+                ['call:receiver_ack', (p) => {
+                    // Receiver confirmed ring is showing — stop "failed to reach" guard
+                    console.log('[CallsCore] ✅ call:receiver_ack — receiver is ringing', p);
+                    if (typeof setCallingStatus === 'function') setCallingStatus('ringing');
+                }],
+                ['call:webrtc_offer', (p) => {
+                    // Direct Socket.IO WebRTC offer (bypassed postMessage)
+                    console.log('[CallsCore] 📡 call:webrtc_offer received via Socket.IO');
+                    if (typeof handleRemoteOffer === 'function') handleRemoteOffer(p.offer || p, p.callerId);
+                    else if (typeof handleSignalOffer === 'function') handleSignalOffer(p);
+                }],
+                ['user_online_status', (p) => {
+                    // Response to check_user_online — used by UI before sending a message
+                    EventBus && EventBus.emit && EventBus.emit('user:online_status', p);
+                }],
 
             ];
 
