@@ -5905,6 +5905,8 @@
                         _fwdIncomingLogged.add(callKey);
                         console.log('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
                     }
+                    // ── FORENSIC LOG: CALL_SIGNAL_RECEIVED ───────────────────────────
+                    console.log(`[FORENSIC] CALL_SIGNAL_RECEIVED | callId=${callKey} | callerName=${payload.callerName} | callType=${payload.callType} | ts=${Date.now()}`);
                     // FIX Bug #3: MUST postMessage INCOMING_CALL to callsIframe BEFORE showing banner.
                     // calls-core.js inside the iframe listens for postMessage type 'INCOMING_CALL'
                     // (and the alias 'call:incoming') to trigger handleIncomingCall() and show the
@@ -5936,7 +5938,11 @@
                         window.addEventListener('message', _onCallIframeReady);
                     }
                     // Also show the parent-frame banner (existing behaviour preserved)
-                    if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
+                    if (window.showIncomingCallBanner) {
+                        // ── FORENSIC LOG: CALL_UI_RENDERED ───────────────────────────
+                        console.log(`[FORENSIC] CALL_UI_RENDERED | callId=${callKey} | callerName=${payload.callerName} | ts=${Date.now()}`);
+                        window.showIncomingCallBanner(payload);
+                    }
                 }
                 function _fwdAccepted(callData) {
                     hideGlobalBanner();

@@ -4407,7 +4407,10 @@ try {
             
             const localId = SecurityUtils.generateMessageId();
             const requestId = SecurityUtils.generateRequestId();
-            
+
+            // ── FORENSIC LOG: SEND_START ──────────────────────────────────────
+            console.log(`[FORENSIC] SEND_START | localId=${localId} | conversationId=${conversationId} | contentLen=${(content||'').length} | type=${options.type||'text'} | ts=${Date.now()}`);
+
             const optimisticMessage = {
                 id: localId,
                 localId: localId,
@@ -4437,6 +4440,10 @@ try {
             EventBus.emit('message:sending', { message: optimisticMessage, optimistic: true });
             
             try {
+                // ── FORENSIC LOG: TRANSPORT_SELECTED ─────────────────────────
+                const _bestTx = window.__HybridTransportEngine?.getBestTransport?.() || 'INTERNET';
+                console.log(`[FORENSIC] TRANSPORT_SELECTED | localId=${localId} | transport=${_bestTx} | online=${navigator.onLine} | ts=${Date.now()}`);
+
                 const result = await ChatManager.sendMessageToBackend(content, conversationId, {
                     ...options,
                     localId
@@ -6508,6 +6515,9 @@ try {
                     }
                     const _renderMsgs = _msgs.length > 0 ? _msgs : (normalizedMessage ? [normalizedMessage] : []);
                     if (_renderMsgs.length > 0 && _now) {
+                        // ── FORENSIC LOG: UI_RENDERED ─────────────────────────────────
+                        const _rmId = normalizedMessage ? (normalizedMessage.id || normalizedMessage.localId || '?') : '?';
+                        console.log(`[FORENSIC] UI_RENDERED | messageId=${_rmId} | chatId=${chatId} | msgCount=${_renderMsgs.length} | ts=${Date.now()}`);
                         window.dispatchEvent(new CustomEvent('renderMessages', {
                             detail: { messages: _renderMsgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
                         }));
