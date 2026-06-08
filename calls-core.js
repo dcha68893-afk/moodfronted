@@ -38346,11 +38346,3 @@ function applySettingToCallsModule(section, key, value) {
 
 
 })()
-        // FIX-PHASE15: Normalize callerName in Governor too
-        if (callData && (!callData.callerName || callData.callerName === 'Unknown')) {
-            var _gc = callData.caller || {};
-            callData.callerName = (_gc.firstName ? (_gc.firstName + (_gc.lastName ? ' ' + _gc.lastName : '')).trim() : null)
-                || _gc.displayName || _gc.username
-                || callData.fromUserName || (callData.callerId ? ('User ' + callData.callerId) : 'Caller');
-        }
-        ;

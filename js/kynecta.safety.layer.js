@@ -30,6 +30,12 @@
             'background-liveness',
             'app-init-liveness',
             'Invalid message format',
+            // FIX-4: Also suppress MaxListenersExceededWarning — these come from
+            // browser extensions (MetaMask etc.), not from app code. Filtering here
+            // keeps the console clean without hiding real Socket.IO listener leaks
+            // (those are deduped by _safeOn in app.realtime.socket.js instead).
+            'MaxListenersExceededWarning',
+            'Possible EventEmitter memory leak',
         ];
         function _shouldSuppress(args) {
             const msg = String(args[0] || '');

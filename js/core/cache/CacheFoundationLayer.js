@@ -437,9 +437,67 @@
   window.__PHASE10_DeletionRegistry = registry;
 
   // Sync from server on load and reconnect
-  setTimeout(() => registry.syncFromServer(Date.now() - 7 * 24 * 60 * 60 * 1000), 3000);
-  window.addEventListener('kyn:connected', () => registry.syncFromServer(Date.now() - 24 * 60 * 60 * 1000));
-  window.addEventListener('online', () => registry.syncFromServer(Date.now() - 24 * 60 * 60 * 1000));
+  // FIX: Circuit breaker for /api/deletions polling to prevent 404 storm on cold-start.
+  // 2 consecutive failures → open for 5 minutes. Concurrency guard prevents overlapping.
+  // Initial sync delayed from 3s → 15s to allow Phase10/server routes to initialise.
+  const _deletionCB = {
+    failures: 0,
+    openUntil: 0,
+    inFlight: false,
+    MAX_FAILURES: 2,
+    OPEN_MS: 5 * 60 * 1000, // 5 minutes
+  };
+
+  async function _safeSyncFromServer(since) {
+    const now = Date.now();
+    if (_deletionCB.inFlight) return;              // concurrency guard
+    if (now < _deletionCB.openUntil) return;       // circuit open — skip
+    _deletionCB.inFlight = true;
+    try {
+      const base = window.__getApiBase?.() || '';
+      const _token = window.__kynToken
+        || window.AppStorage?.get?.('authToken')
+        || window.AppStorage?.get?.('token')
+        || (() => {
+             try {
+               const keys = ['authToken', 'token', 'kyn_token', 'accessToken'];
+               for (const k of keys) { const v = localStorage.getItem(k); if (v && v.startsWith('eyJ')) return v; }
+             } catch(_) {}
+             return '';
+           })();
+      if (!_token) { _deletionCB.inFlight = false; return; }
+      const res = await fetch(`${base}/deletions?since=${since || 0}`, {
+        headers: { Authorization: `Bearer ${_token}` }
+      });
+      if (!res.ok) {
+        _deletionCB.failures++;
+        if (_deletionCB.failures >= _deletionCB.MAX_FAILURES) {
+          _deletionCB.openUntil = Date.now() + _deletionCB.OPEN_MS;
+          console.warn('[CacheFoundation] /api/deletions circuit open for 5 min after', _deletionCB.failures, 'failures');
+        }
+        _deletionCB.inFlight = false;
+        return;
+      }
+      _deletionCB.failures = 0; // reset on success
+      const data = await res.json();
+      (data.deletions || []).forEach(d => {
+        if (d.type === 'status' && d.reason !== 'deleted') return;
+        registry.mark(d.type, d.id, d.reason);
+      });
+    } catch(_) {
+      _deletionCB.failures++;
+      if (_deletionCB.failures >= _deletionCB.MAX_FAILURES) {
+        _deletionCB.openUntil = Date.now() + _deletionCB.OPEN_MS;
+      }
+    } finally {
+      _deletionCB.inFlight = false;
+    }
+  }
+
+  // Delay initial sync by 15s (was 3s) to allow server routes to register on cold-start
+  setTimeout(() => _safeSyncFromServer(Date.now() - 7 * 24 * 60 * 60 * 1000), 15000);
+  window.addEventListener('kyn:connected', () => _safeSyncFromServer(Date.now() - 24 * 60 * 60 * 1000));
+  window.addEventListener('online', () => _safeSyncFromServer(Date.now() - 24 * 60 * 60 * 1000));
 
   // Listen for deletion events from socket
   window.addEventListener('message', (evt) => {

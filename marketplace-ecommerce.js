@@ -1,3 +1,6 @@
+(function() {
+"use strict";
+
 /**
  * marketplace-ecommerce.js — COMPLETE REALTIME ECOMMERCE SYSTEM v1.0
  * ═══════════════════════════════════════════════════════════════════════
@@ -132,7 +135,7 @@ async function _api(method, endpoint, body = null) {
 // SECTION 3 — PRODUCT ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const ProductEngine = {
+const ProductEngine = {
 
     async init() {
         if (_store.initialized) return;
@@ -258,7 +261,7 @@ const _DEFAULT_CATEGORIES = [
 // SECTION 4 — CART ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const CartEngine = {
+const CartEngine = {
 
     _save() {
         _lsSave(_LS.CART, Array.from(_store.cart.values()));
@@ -392,7 +395,7 @@ export const CartEngine = {
 // SECTION 5 — ORDER ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const ORDER_STATUS = {
+const ORDER_STATUS = {
     PENDING:    'pending',
     PAID:       'paid',
     PROCESSING: 'processing',
@@ -402,7 +405,7 @@ export const ORDER_STATUS = {
     REFUNDED:   'refunded',
 };
 
-export const OrderEngine = {
+const OrderEngine = {
 
     _save() {
         _lsSave(_LS.ORDERS, Array.from(_store.orders.values()));
@@ -535,7 +538,7 @@ export const OrderEngine = {
 // SECTION 6 — PAYMENT ENGINE (M-Pesa + Card)
 // ══════════════════════════════════════════════════════════════════════
 
-export const PaymentEngine = {
+const PaymentEngine = {
 
     async initiateMpesa({ phone, amount, orderId, description = '' }) {
         if (!phone || !amount || !orderId) return { success: false, message: 'Missing payment fields' };
@@ -616,7 +619,7 @@ function _normalizeMpesaPhone(phone) {
 // SECTION 7 — WISHLIST ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const WishlistEngine = {
+const WishlistEngine = {
 
     _save() {
         _lsSave(_LS.WISHLIST, Array.from(_store.wishlist));
@@ -659,7 +662,7 @@ export const WishlistEngine = {
 // SECTION 8 — REVIEW ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const ReviewEngine = {
+const ReviewEngine = {
 
     async getReviews(productId, { page = 1, limit = 20 } = {}) {
         const resp = await _api('GET', `/api/marketplace/products/${productId}/reviews?page=${page}&limit=${limit}`);
@@ -706,7 +709,7 @@ export const ReviewEngine = {
 // SECTION 9 — SELLER DASHBOARD ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const SellerEngine = {
+const SellerEngine = {
 
     async getProfile(sellerId) {
         const resp = await _api('GET', `/api/marketplace/sellers/${sellerId}`);
@@ -835,7 +838,7 @@ export const SellerEngine = {
 // SECTION 10 — INVENTORY ENGINE (Realtime stock management)
 // ══════════════════════════════════════════════════════════════════════
 
-export const InventoryEngine = {
+const InventoryEngine = {
 
     /** Called when a socket event arrives */
     handleStockUpdate({ product_id, quantity }) {
@@ -874,7 +877,7 @@ export const InventoryEngine = {
 // SECTION 11 — NOTIFICATION ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const NotificationEngine = {
+const NotificationEngine = {
 
     show(message, type = 'info', icon = 'ℹ️', duration = 3500) {
         // Try to use the existing showNotification from Tool-core.js
@@ -946,7 +949,7 @@ function _createToast(message, type, icon, duration) {
 // SECTION 12 — DELIVERY ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const DeliveryEngine = {
+const DeliveryEngine = {
 
     async getZones() {
         const resp = await _api('GET', '/api/marketplace/delivery/zones');
@@ -1090,7 +1093,7 @@ function _initRealtimeListeners() {
 // SECTION 14 — CHAT SELLER BRIDGE
 // ══════════════════════════════════════════════════════════════════════
 
-export const ChatBridge = {
+const ChatBridge = {
     openWithSeller(product) {
         if (!product) return;
         const seller = product.seller || { id: product.seller_id, name: 'Seller' };
@@ -1129,7 +1132,7 @@ export const ChatBridge = {
 // SECTION 15 — ADMIN ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-export const AdminEngine = {
+const AdminEngine = {
     async getReports() { return (await _api('GET', '/api/admin/marketplace/reports'))?.data?.reports || []; },
     async removeProduct(productId, reason) {
         const resp = await _api('DELETE', `/api/admin/marketplace/products/${productId}`, { reason });
@@ -1152,7 +1155,7 @@ const _settings = {
     notifications: true,
 };
 
-export const SettingsEngine = {
+const SettingsEngine = {
     apply(newSettings) {
         Object.assign(_settings, newSettings);
         // Dark mode
@@ -1275,7 +1278,7 @@ window.addEventListener('message', (e) => {
 // SECTION 18 — MAIN INITIALIZER
 // ══════════════════════════════════════════════════════════════════════
 
-export async function initEcommerceMarketplace() {
+async function initEcommerceMarketplace() {
     await ProductEngine.init();
     _initRealtimeListeners();
     // Only sync wishlist if token is available (avoids 401 errors on startup)
@@ -1348,9 +1351,33 @@ if (document.readyState === 'loading') {
     _autoInit();
 }
 
-export default {
-    ProductEngine, CartEngine, OrderEngine, PaymentEngine,
-    WishlistEngine, ReviewEngine, SellerEngine, InventoryEngine,
-    NotificationEngine, DeliveryEngine, ChatBridge, AdminEngine,
-    SettingsEngine, initEcommerceMarketplace,
-};
+
+
+  // Export to global scope
+  window.PRODUCT_SCHEMA_VERSION = PRODUCT_SCHEMA_VERSION;
+  window.ProductEngine = ProductEngine;
+  window._DEFAULT_CATEGORIES = _DEFAULT_CATEGORIES;
+  window.CartEngine = CartEngine;
+  window.ORDER_STATUS = ORDER_STATUS;
+  window.OrderEngine = OrderEngine;
+  window.PaymentEngine = PaymentEngine;
+  window.WishlistEngine = WishlistEngine;
+  window.ReviewEngine = ReviewEngine;
+  window.SellerEngine = SellerEngine;
+  window.InventoryEngine = InventoryEngine;
+  window.NotificationEngine = NotificationEngine;
+  window.DeliveryEngine = DeliveryEngine;
+  window._DEFAULT_DELIVERY_ZONES = _DEFAULT_DELIVERY_ZONES;
+  window.ChatBridge = ChatBridge;
+  window.AdminEngine = AdminEngine;
+  window._settings = _settings;
+  window.SettingsEngine = SettingsEngine;
+  window.initEcommerceMarketplace = initEcommerceMarketplace;
+  window._normalizeMpesaPhone = _normalizeMpesaPhone;
+  window._createToast = _createToast;
+  window._estimateDistance = _estimateDistance;
+  window._socketEmit = _socketEmit;
+  window._initRealtimeListeners = _initRealtimeListeners;
+  window._autoInit = _autoInit;
+
+})();
