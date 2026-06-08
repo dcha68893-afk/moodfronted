@@ -120,23 +120,29 @@ window.__CALLS_IFRAME__ = {
             }
 
         } else if (screenName === 'idle') {
-            // GUARD: never go to idle while a call is active
+            // GUARD: never go to idle while a call is active or during transitions
             var _incomingActive = document.getElementById('incomingCallModal') &&
                                   document.getElementById('incomingCallModal').classList.contains('active');
             var _callingActive  = document.getElementById('callingScreen') &&
                                   document.getElementById('callingScreen').classList.contains('active');
+            var _inCallActive   = document.getElementById('inCallScreen') &&
+                                  document.getElementById('inCallScreen').classList.contains('active');
             if (window.__callActive ||
                 window.__callEndedNavigating ||
+                window.__callTransitioning ||
                 _currentScreen === 'calling' ||
                 _currentScreen === 'in-call' ||
+                _currentScreen === 'incoming' ||
                 _incomingActive ||
                 _callingActive ||
+                _inCallActive ||
                 (window.UIState && (
                     window.UIState.callActive ||
                     window.UIState.callState === 'calling' ||
                     window.UIState.callState === 'ringing' ||
                     window.UIState.callState === 'connecting' ||
-                    window.UIState.callState === 'connected'
+                    window.UIState.callState === 'connected' ||
+                    window.UIState.callState === 'incoming'
                 ))) {
                 return;
             }
@@ -3830,6 +3836,38 @@ window.__CALLS_IFRAME__ = {
                 initializeApp();
             }
         })();
+    </script>
+    <script>
+    // ── FIX: STALE CALL PREVENTION ON REFRESH ─────────────────────────────────
+    // On every fresh page load, scrub any lingering call state from sessionStorage
+    // so a page refresh can never re-trigger an ended or missed call.
+    (function _clearStaleCalls() {
+        try {
+            // Only clear if this is a hard navigation (not a programmatic iframe src set)
+            var _nav = performance && performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+            var _isReload = !_nav || _nav.type === 'reload' || _nav.type === 'navigate';
+            if (_isReload) {
+                sessionStorage.removeItem('kyn_incoming_call_id');
+                sessionStorage.removeItem('kyn_incoming_caller');
+                sessionStorage.removeItem('kyn_active_call_id');
+                sessionStorage.removeItem('kyn_call_state');
+                // Reset all in-memory flags so no auto-trigger fires
+                window.__callActive = false;
+                window.__callEndedNavigating = false;
+                window.__callTransitioning = false;
+                if (window.UIState) {
+                    window.UIState.callActive = false;
+                    window.UIState.callState  = 'idle';
+                    window.UIState.activeCallId = null;
+                }
+                if (window.callsState) {
+                    window.callsState.callActive  = false;
+                    window.callsState.callState   = 'idle';
+                    window.callsState.activeCallId = null;
+                }
+            }
+        } catch(e) {}
+    })();
     </script>
     
     <!-- Debug mode toggle (only visible in debug mode) -->

@@ -103,9 +103,9 @@
     // ── Main render ──────────────────────────────────────────────────────
     function _buildShell() {
         _container.innerHTML = `
-        <div class="gos-root" style="display:flex;flex-direction:column;height:100%;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+        <div class="gos-root" style="display:flex;flex-direction:column;height:100%;min-height:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;flex:1;">
           <div class="gos-tabs" id="gosTabs" style="display:flex;overflow-x:auto;background:#fff;border-bottom:1px solid rgba(0,0,0,.08);padding:0 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;flex-shrink:0;"></div>
-          <div class="gos-body" id="gosBody" style="flex:1;overflow-y:auto;padding:0;-webkit-overflow-scrolling:touch;"></div>
+          <div class="gos-body" id="gosBody" style="flex:1;overflow-y:auto;padding:0;-webkit-overflow-scrolling:touch;min-height:0;"></div>
         </div>`;
         _renderTabs();
         _openTab(_modules[0] || 'tasks');

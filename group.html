@@ -1040,8 +1040,9 @@
                         <i class="fas fa-tools"></i>
                         <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;background:#667eea;border-radius:50%;display:none" id="gosNewDot"></span>
                     </button>
-                    <button class="chat-header-btn" id="chatCallBtn" title="Voice call"><i class="fas fa-phone"></i></button>
-                    <button class="chat-header-btn" id="chatVideoCallBtn" title="Video call"><i class="fas fa-video"></i></button>
+                    <!-- NOTE: call/video/more buttons intentionally omitted here.
+                         They are rendered by chat.html's #hdrGroupCall, #hdrGroupVideo, #hdrGroupMore
+                         in the parent page header bar to avoid duplicate icons. -->
                     <button class="chat-header-btn" id="chatDropdownBtn" title="More chat options"><i class="fas fa-caret-down"></i></button>
                     <div style="position:relative">
                         <button class="chat-header-btn" id="chatMoreBtn" title="More options"><i class="fas fa-ellipsis-v"></i></button>
@@ -2596,7 +2597,27 @@ function setupInput(){
     var attBtn=document.getElementById('chatAttachBtn'),attInp=document.getElementById('groupAttachmentInput');
     if(attBtn&&attInp&&!attBtn._gcI){attBtn._gcI=true;attBtn.addEventListener('click',function(e){e.stopPropagation();attInp.click();});attInp.addEventListener('change',function(){var f=this.files&&this.files[0];if(!f)return;var t=f.type.startsWith('image/')?'image':f.type.startsWith('audio/')?'audio':f.type.startsWith('video/')?'video':'file';uploadFile(f,t);this.value='';});}
     var camBtn=document.getElementById('chatCameraBtn'),camInp=document.getElementById('groupCameraInput');
-    if(camBtn&&camInp&&!camBtn._gcI){camBtn._gcI=true;camBtn.addEventListener('click',function(e){e.stopPropagation();camInp.click();});camInp.addEventListener('change',function(){var f=this.files&&this.files[0];if(!f)return;uploadFile(f,'image');this.value='';});}
+    if(camBtn&&camInp&&!camBtn._gcI){
+        camBtn._gcI=true;
+        camBtn.addEventListener('click',function(e){
+            e.stopPropagation();
+            // FIX: recreate the input each click so capture= attr is freshly set
+            // This ensures mobile browsers open the camera, not the file picker
+            var fresh=document.createElement('input');
+            fresh.type='file';
+            fresh.accept='image/*';
+            fresh.setAttribute('capture','environment');
+            fresh.style.display='none';
+            fresh.addEventListener('change',function(){
+                var f=this.files&&this.files[0];
+                if(f) uploadFile(f,'image');
+                document.body.removeChild(fresh);
+            });
+            document.body.appendChild(fresh);
+            // Small delay so DOM paint settles before .click()
+            setTimeout(function(){fresh.click();},30);
+        });
+    }
     var micBtn=document.getElementById('chatMicBtn');if(micBtn&&!micBtn._gcI){micBtn._gcI=true;micBtn.addEventListener('click',function(){if(_mr&&_mr.state==='recording')stopRec();else startRec();});}
 }
 
@@ -2755,6 +2776,7 @@ window._openSmartGroupOSFromSidebar = function() {
             'position:fixed', 'inset:0', 'z-index:9999',
             'background:#f8fafc', 'display:flex', 'flex-direction:column',
             'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif',
+            'overflow:hidden',
         ].join(';');
 
         // Header
@@ -2767,7 +2789,7 @@ window._openSmartGroupOSFromSidebar = function() {
         // Mount point
         var mount = document.createElement('div');
         mount.id = 'gosMount';
-        mount.style.cssText = 'flex:1;overflow:hidden;';
+        mount.style.cssText = 'flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0;height:100%;';
 
         overlay.appendChild(header);
         overlay.appendChild(mount);

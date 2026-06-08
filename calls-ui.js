@@ -4901,13 +4901,12 @@ handleContactItemClick: function(e) {
                 elements.incomingCallModal.dataset.timer = timer;
                 elements.incomingCallModal.classList.add('active'); elements.incomingCallModal.style.setProperty('display','flex','important');
                 UIState.activeModals.add('incomingCallModal');
+                // GUARD FIX: Mark call as active so showScreen('idle') can't fire during ring
+                window.__callActive = true;
+                if (window.UIState) { window.UIState.callActive = true; window.UIState.callState = 'incoming'; }
                 // ✅ FIX: Start incoming ringtone when modal shows
                 if (typeof window._startIncomingRingtone === 'function') window._startIncomingRingtone();
                 else if (typeof window._playIncomingRing === 'function') window._playIncomingRing();
-                // ✅ FIX: ensure showScreen sees the incoming modal (it's position:fixed, not part of callContainer)
-                if (typeof window.showScreen === 'function') {
-                    // Don't call showScreen here — incoming modal has its own positioning
-                }
             }
         },
         
