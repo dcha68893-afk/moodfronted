@@ -6343,13 +6343,12 @@ function _renderAccount() {
     const pts    = user.loyaltyPoints || 0;
     const tier   = user.loyaltyTier || 'bronze';
     const tc     = { bronze:'#cd7f32', silver:'#9ca3af', gold:'#f59e0b', platinum:'#8b5cf6' };
-    // FIX Bug #6: Broaden admin detection — check all known role/flag variants so
-    // the Admin Panel section is not hidden for users whose role string differs
-    // from the hardcoded list (e.g. 'superadmin', 'super_admin', 'owner', etc.).
-    const _adminRoleSet = new Set(['admin','moderator','superadmin','super_admin','owner','staff']);
-    const isAdmin = _adminRoleSet.has((user.role||'').toLowerCase()) ||
-                    !!user.isAdmin || !!user.is_admin ||
-                    (()=>{ try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false} })();
+    // PHASE15 FIX Phase-E: Admin panel must ONLY show for mwita@gmail.com.
+    // Previous broad detection (role === 'admin', isAdmin flag, localStorage _adminMode)
+    // allowed any user who had an admin role in their profile to see admin tools.
+    // Per spec: only ONE specific email gets the admin panel.
+    const ADMIN_EMAIL = 'mwita@gmail.com';
+    const isAdmin = (email.toLowerCase().trim() === ADMIN_EMAIL);
 
     container.innerHTML = `
     <!-- Profile hero with chat + WhatsApp buttons -->

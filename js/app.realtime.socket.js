@@ -1050,6 +1050,19 @@
                                 }
                             }
                         } catch(_) {}
+                        // PHASE15 FIX-PHASE-A: Also persist to IndexedDB immediately via
+                        // KynectaLocalStore so messages survive page refresh / logout / restart.
+                        // localStorage alone is wiped by browser private mode and storage quota.
+                        try {
+                            if (payload && payload.id && window.KynectaLocalStore) {
+                                var _msg = Object.assign({}, payload);
+                                // Ensure chatId is set — fall back to conversationId
+                                if (!_msg.chatId && _msg.conversationId) _msg.chatId = _msg.conversationId;
+                                if (_msg.chatId) {
+                                    window.KynectaLocalStore.saveMessage(_msg).catch(function(){});
+                                }
+                            }
+                        } catch(_) {}
                     } catch(_) {}
                 }
 

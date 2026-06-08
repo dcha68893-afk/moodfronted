@@ -436,11 +436,16 @@ async function handleApiRequest(request) {
 self.addEventListener('install', function(event) {
   console.log('[SW] Installing v' + SW_VERSION + ' (network-first for all critical JS)');
 
-  // ✅ CRITICAL: skipWaiting() IMMEDIATELY — the new SW takes control without
-  // waiting for all existing tabs to close. This is the ONLY reliable way to
-  // push JS fixes to users who have the app open. Combined with clients.claim()
-  // in activate, this guarantees the new SW controls all tabs within seconds.
-  self.skipWaiting();
+  // PHASE15 FIX-PHASE-H: Do NOT call skipWaiting() unconditionally on install.
+  // The previous pattern (skipWaiting immediately in install) caused a reload
+  // loop because:
+  //   1. New SW installs → skipWaiting fires → controllerchange fires on all tabs
+  //   2. pwa-manager.js catches controllerchange and calls window.location.reload()
+  //   3. Reload triggers a fresh SW check → new SW installs again → loop
+  // Fix: only skip waiting when the pwa-manager explicitly sends SKIP_WAITING,
+  // which only happens AFTER the user taps the "Refresh" button in the banner.
+  // This matches Chrome/Firefox best practices for user-initiated updates.
+  // skipWaiting() is now handled below in the 'message' event handler.
 
   event.waitUntil(
     caches.open(CACHE_NAME).then(function(cache) {

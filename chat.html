@@ -734,7 +734,7 @@
             bottom: 0;
             left: 0;
             right: 0;
-            height: 76px;
+            height: 60px; /* PHASE15 FIX: reduced from 76px */
             background: linear-gradient(180deg, rgba(10,13,22,0.98) 0%, rgba(13,17,28,0.99) 100%);
             backdrop-filter: blur(24px) saturate(200%);
             -webkit-backdrop-filter: blur(24px) saturate(200%);
@@ -2696,6 +2696,10 @@
         }
 
         function getReturnPage() {
+            // PHASE15 FIX: Use navigation history stack if available
+            if (window.__navHistory && window.__navHistory.length > 0) {
+                return window.__navHistory[window.__navHistory.length - 1];
+            }
             if (window.__lastActivePage && window.__lastActivePage !== window.__currentPage) return window.__lastActivePage;
             if (window.__currentPage && window.__currentPage !== 'messages') return 'messages';
             return 'messages';
@@ -2758,7 +2762,14 @@
             }
 
             if (window.__currentPage !== 'messages') {
-                navigateToPage(getReturnPage());
+                // PHASE15 FIX: Pop from history stack for correct back navigation
+                var _backPage = 'messages';
+                if (window.__navHistory && window.__navHistory.length > 0) {
+                    _backPage = window.__navHistory.pop();
+                } else {
+                    _backPage = getReturnPage();
+                }
+                navigateToPage(_backPage, { fromHistory: true });
                 logProcessStatus('back-navigation', true, 'returned-previous-page');
                 return true;
             }
@@ -2783,6 +2794,13 @@
             }
             const fromHistory = !!options.fromHistory;
             if (window.__currentPage !== page) {
+                // PHASE15 FIX: Maintain a proper navigation history stack
+                if (!window.__navHistory) window.__navHistory = [];
+                if (!fromHistory && window.__currentPage) {
+                    window.__navHistory.push(window.__currentPage);
+                    // Cap history stack at 20 entries
+                    if (window.__navHistory.length > 20) window.__navHistory.shift();
+                }
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
                 console.log('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
@@ -7096,6 +7114,22 @@ window.addEventListener('message', function (e) {
         setTimeout(function () { postToGroup('PARENT_REFRESH_GROUPS', {}); }, 250);
         return;
     }
+
+    // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ────────────────────────
+    if (d.type === 'POST_CALL_RESTORE') {
+        // Remove call-screen body classes so sidebar/nav reappear
+        document.body.classList.remove('call-screen-active', 'in-call-active');
+        // Navigate to the page the user was on before the call
+        var _pcReturnTo = (d.returnTo || 'messages');
+        var _pcPageMap = { conversations: 'messages', chats: 'messages', home: 'messages' };
+        var _pcPage = _pcPageMap[_pcReturnTo] || _pcReturnTo;
+        if (typeof navigateToPage === 'function') {
+            setTimeout(function() { navigateToPage(_pcPage); }, 100);
+        }
+        console.log('[chat.html] PHASE15 ✅ POST_CALL_RESTORE → navigating to: ' + _pcPage);
+        return;
+    }
+    // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────
 }, true);
 
 /* ── Purge a group from every localStorage / sessionStorage key ─ */

@@ -121,7 +121,7 @@
     
     /* ========== PERMANENT SIDEBAR (LEFT PANEL) - FIXED NAVIGATION ========== */
     .chat-list-container {
-        width: 380px;
+        width: 320px; /* PHASE15 FIX: reduced from 380px */
         height: 100vh;
         background: var(--kynecta-light);
         border-right: 1px solid var(--kynecta-border);

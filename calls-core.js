@@ -14631,20 +14631,44 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
     // Unlock governor transition lock so next call isn't blocked
 
-
-
     if (typeof CallsStateGovernor !== 'undefined' && CallsStateGovernor) {
-
-
-
         CallsStateGovernor._transitionLock = false;
-
-
-
     }
 
-
-
+    // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ──────────────────────
+    // After a call ends: restore sidebar, release media, navigate back.
+    try {
+        // Stop lingering video/audio elements
+        var _vcEls = document.querySelectorAll('video, audio');
+        _vcEls.forEach(function(el) {
+            try {
+                if (el.srcObject) {
+                    el.srcObject.getTracks && el.srcObject.getTracks().forEach(function(t){t.stop();});
+                    el.srcObject = null;
+                }
+                el.load();
+            } catch(_) {}
+        });
+        // Restore main UI
+        if (typeof window.showScreen === 'function') { window.showScreen('idle'); }
+        // Restore sidebar / nav visibility
+        document.querySelectorAll('.sidebar, .chat-list-container, .mobile-nav-bar').forEach(function(el) {
+            try { el.style.display = ''; el.classList.remove('hidden', 'd-none'); } catch(_) {}
+        });
+        // Remove in-call body class
+        try { document.body.classList.remove('call-screen-active', 'in-call-active'); } catch(_) {}
+        // Tell parent frame to restore the pre-call screen
+        var _returnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _returnTarget, timestamp: Date.now() }, '*');
+            }
+        } catch(_) {}
+        console.log('[CallsCore] PHASE15 ✅ Post-call UI restored to: ' + _returnTarget);
+    } catch(_restoreErr) {
+        console.warn('[CallsCore] Post-call restore error:', _restoreErr && _restoreErr.message);
+    }
+    // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────
 }
 
 
@@ -16286,7 +16310,13 @@ _clearStaleCallState: function() {
 
 
         // Allow 120s for TURN relay connection; also skip if receiver has accepted
-        if (callDuration > 120000 && callsState.callState !== 'connected' && callsState.callState !== 'in-call' && callsState.callState !== 'in_call' && callsState.callState !== 'connecting') {
+        // PHASE15 FIX: Added 'starting', 'initiated', 'ringing', 'incoming' to safe states.
+        // callsState.callState is set to 'starting' when the call is accepted and media
+        // streams are being set up, and 'connected' only after RTCPeerConnection fires
+        // 'connected'. The previous list was missing 'starting' and 'initiated', causing
+        // live calls to be auto-terminated if connection took > 120s (common on TURN relays).
+        const _ACTIVE_CALL_STATES = new Set(['connected','in-call','in_call','connecting','starting','initiated','ringing','incoming','in_progress']);
+        if (callDuration > 120000 && !_ACTIVE_CALL_STATES.has(callsState.callState)) {
 
 
 
@@ -16338,7 +16368,7 @@ _clearStaleCallState: function() {
 
 
 
-        if (callDuration > 120000) { // 120 second timeout — TURN relay needs more time
+        if (callDuration > 300000) { // PHASE15 FIX: 300s (5min) — was 120s which killed calls on slow TURN relays
 
 
 

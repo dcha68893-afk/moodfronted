@@ -2185,7 +2185,12 @@ function injectCSS(){
     '#gcRecTimer{font-size:15px;font-weight:700;flex:1;color:var(--text-primary);font-variant-numeric:tabular-nums;}',
     '.gcr-btn{border:none;cursor:pointer;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;}',
     /* Hide internal chat header — parent globalHeader handles it */
-    '.chat-header{display:none!important;height:0!important;overflow:hidden!important;padding:0!important;border:none!important;}',
+    /* PHASE15 FIX: Only hide .chat-header elements that are NOT inside #groupChatPanel — */
+    /* the group panel needs its own header for the three-dot menu and action buttons.     */
+    '.chat-panel > .chat-header:not(#groupChatPanel .chat-header){display:none!important;height:0!important;overflow:hidden!important;padding:0!important;border:none!important;}',
+    /* Ensure the group chat header and its menu are always visible */
+    '#groupChatPanel .chat-header{display:flex!important;height:auto!important;overflow:visible!important;}',
+    '#chatMoreMenu{z-index:99999!important;}',
     /* Sub-panel */
     '#gcSubPanel{position:absolute;top:0;right:0;bottom:0;width:310px;max-width:100%;background:var(--bg-color);border-left:1px solid var(--border-color);z-index:700;display:none;flex-direction:column;box-shadow:-4px 0 16px rgba(0,0,0,.15);animation:gcsl .2s;}',
     '#gcSubPanel.open{display:flex!important;}',

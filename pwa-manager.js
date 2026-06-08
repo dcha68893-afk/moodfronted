@@ -117,12 +117,20 @@
         console.warn('[pwa-manager] SW registration failed:', err);
     });
 
-    // When controller changes (new SW took over) → reload if user clicked Refresh
+    // PHASE15 FIX-PHASE-H: Prevent reload loop.
+    // The old code reloaded on EVERY controllerchange event after the user
+    // clicked Refresh. If skipWaiting() fires repeatedly (e.g. because the
+    // SW re-installs itself on a hot-deploy cycle), controllerchange fires
+    // multiple times → page reloads repeatedly → flash/loop.
+    // Fix: only reload ONCE per user-initiated update, then immediately clear
+    // the flag so subsequent controllerchange events are silently ignored.
     var _refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
         if (_refreshing) return;
-        _refreshing = true;
-        if (sessionStorage.getItem('pwa_update_acknowledged')) {
+        var ackKey = 'pwa_update_acknowledged';
+        if (sessionStorage.getItem(ackKey)) {
+            _refreshing = true;
+            sessionStorage.removeItem(ackKey); // clear BEFORE reload to avoid loop
             window.location.reload();
         }
     });
