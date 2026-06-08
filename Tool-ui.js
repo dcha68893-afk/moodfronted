@@ -2921,7 +2921,6 @@ const renderers = {
 // =============================================
 // SIMPLIFIED: Removed isActive() checks from showCreateListingModal
 function showCreateListingModal() {
-    console.log('[Tool-ui] showCreateListingModal called - DIRECT');
     // Direct DOM access - don't rely on DOM cache
     const modal = document.getElementById('createListingModal');
     if (modal) {
@@ -4150,7 +4149,6 @@ if (document.readyState === 'loading') {
 window.addEventListener('tools:active', () => {
     if (!window._toolsActiveHandled) {
         window._toolsActiveHandled = true;
-        console.log('[Tool-ui] tools:active received, re-binding UI events');
         setTimeout(forceBindAllUIEvents, 200);
         setTimeout(() => { window._toolsActiveHandled = false; }, 5000);
     }
@@ -4169,7 +4167,7 @@ window.addEventListener('marketplaceCoreReady', () => {
 // =============================================
 
 function directAttachHandlers() {
-    console.log('[DIRECT] Attaching click handlers');
+    // FIX (Issue 7): removed console.log spam — only log errors
     
     // Create Listing button
     const createBtn = document.getElementById('createListingBtn');
@@ -4177,14 +4175,10 @@ function directAttachHandlers() {
         createBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('[DIRECT] Create Listing clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             return false;
         };
-        console.log('[DIRECT] createListingBtn OK');
-    } else {
-        console.log('[DIRECT] createListingBtn NOT FOUND');
     }
     
     // Sell Service button
@@ -4193,7 +4187,6 @@ function directAttachHandlers() {
         serviceBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('[DIRECT] Sell Service clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             // Try to switch to service tab
@@ -4201,7 +4194,6 @@ function directAttachHandlers() {
             if (serviceTab) serviceTab.click();
             return false;
         };
-        console.log('[DIRECT] sellServiceBtn OK');
     }
     
     // Sell Digital button
@@ -4210,14 +4202,12 @@ function directAttachHandlers() {
         digitalBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('[DIRECT] Sell Digital clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             const digitalTab = document.querySelector('.create-listing-tab[data-tab="digital"]');
             if (digitalTab) digitalTab.click();
             return false;
         };
-        console.log('[DIRECT] sellDigitalBtn OK');
     }
     
     // Quick Create button
@@ -4226,12 +4216,10 @@ function directAttachHandlers() {
         quickBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
-            console.log('[DIRECT] Quick Create clicked');
             const modal = document.getElementById('createListingModal');
             if (modal) modal.classList.add('active');
             return false;
         };
-        console.log('[DIRECT] createListingQuickBtn OK');
     }
     
     // Close modal button
@@ -4243,7 +4231,6 @@ function directAttachHandlers() {
             if (modal) modal.classList.remove('active');
             return false;
         };
-        console.log('[DIRECT] closeCreateListingModal OK');
     }
     
     // Category tabs
@@ -4254,7 +4241,6 @@ function directAttachHandlers() {
             tab.onclick = function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('[DIRECT] Tab clicked:', tabId);
                 // Remove active from all tabs
                 tabs.forEach(id => {
                     const t = document.getElementById(id);
@@ -4265,7 +4251,6 @@ function directAttachHandlers() {
                 setActiveTab(tabName);
                 return false;
             };
-            console.log('[DIRECT] Tab attached:', tabId);
         }
     });
     
@@ -4274,7 +4259,6 @@ function directAttachHandlers() {
     if (viewAnalytics) {
         viewAnalytics.onclick = function(e) {
             e.preventDefault();
-            console.log('[DIRECT] Analytics clicked');
             const modal = document.getElementById('analyticsModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4285,7 +4269,6 @@ function directAttachHandlers() {
     if (viewSaved) {
         viewSaved.onclick = function(e) {
             e.preventDefault();
-            console.log('[DIRECT] Saved clicked');
             const modal = document.getElementById('savedItemsModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4296,7 +4279,6 @@ function directAttachHandlers() {
     if (viewNotes) {
         viewNotes.onclick = function(e) {
             e.preventDefault();
-            console.log('[DIRECT] Notes clicked');
             const modal = document.getElementById('myNotesModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4307,7 +4289,6 @@ function directAttachHandlers() {
     if (viewTrust) {
         viewTrust.onclick = function(e) {
             e.preventDefault();
-            console.log('[DIRECT] Trust stats clicked');
             const modal = document.getElementById('trustStatsModal');
             if (modal) modal.classList.add('active');
             return false;
@@ -4318,18 +4299,24 @@ function directAttachHandlers() {
     if (premiumOpts) {
         premiumOpts.onclick = function(e) {
             e.preventDefault();
-            console.log('[DIRECT] Premium options clicked');
             const modal = document.getElementById('premiumOptionsModal');
             if (modal) modal.classList.add('active');
             return false;
         };
     }
     
-    console.log('[DIRECT] All handlers attached');
 }
 
-// Run once and after DOM ready only
-directAttachHandlers();
+// FIX (Issue 3 & 7): Only run after DOM is ready — never run immediately before DOM loads
+// This eliminates both the "NOT FOUND" warning and the repeated bind noise
+function directAttachHandlersSafe() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', directAttachHandlers, { once: true });
+    } else {
+        directAttachHandlers();
+    }
+}
+directAttachHandlersSafe();
 setTimeout(directAttachHandlers, 800);
 
 // Also run when DOM is ready
@@ -4339,7 +4326,6 @@ if (document.readyState === 'loading') {
 
 // Also run when tools becomes active
 window.addEventListener('tools:active', function() {
-    console.log('[DIRECT] tools:active event');
     setTimeout(directAttachHandlers, 100);
 });
 

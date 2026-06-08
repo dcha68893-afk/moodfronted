@@ -4472,15 +4472,18 @@ window.addEventListener('message', function directSessionListener(event) {
             window.__kynUserId = userId;
             if (token) window.__kynToken = token;
             
+            // FIX (Issue 4): p/s were undefined — extract from data.payload directly
+            const _payload = data.payload || {};
+            const _user = _payload.user || {};
             const session = {
                 userId: userId,
                 userToken: token,
                 token: token,
-                displayName: p.displayName || s.displayName || p.user?.displayName || 'User',
-                email: p.email || s.email || p.user?.email || '',
-                photoURL: p.photoURL || s.photoURL || p.user?.photoURL || '',
-                isPremium: p.isPremium || s.isPremium || false,
-                trustLevel: p.trustLevel || s.trustLevel || 'new'
+                displayName: _payload.displayName || _user.displayName || _user.username || 'User',
+                email: _payload.email || _user.email || '',
+                photoURL: _payload.photoURL || _user.photoURL || '',
+                isPremium: _payload.isPremium || _user.isPremium || false,
+                trustLevel: _payload.trustLevel || _user.trustLevel || 'new'
             };
             
             const accepted = sessionClient.acceptParentSession(session);
@@ -4536,13 +4539,16 @@ window.addEventListener('message', function directSessionListener(event) {
             if (token2) window.__kynToken = token2;
             
             if (window.__TOOLS_DEBUG__) console.log('[Tools][DirectListener] Found session in AUTH_READY:', { userId: userId2, hasToken: !!token2 });
+            // FIX (Issue 4): s2/p2 were undefined — extract from data.payload directly
+            const _payload2 = data.payload || {};
+            const _user2 = _payload2.user || {};
             const session2 = {
                 userId: userId2, userToken: token2, token: token2,
-                displayName: s2.displayName || p2.displayName || 'User',
-                email: s2.email || p2.email || '',
-                photoURL: s2.photoURL || p2.photoURL || '',
-                isPremium: s2.isPremium || p2.isPremium || false,
-                trustLevel: s2.trustLevel || p2.trustLevel || 'new'
+                displayName: _payload2.displayName || _user2.displayName || _user2.username || 'User',
+                email: _payload2.email || _user2.email || '',
+                photoURL: _payload2.photoURL || _user2.photoURL || '',
+                isPremium: _payload2.isPremium || _user2.isPremium || false,
+                trustLevel: _payload2.trustLevel || _user2.trustLevel || 'new'
             };
             
             const accepted2 = sessionClient.acceptParentSession(session2);
@@ -8058,7 +8064,8 @@ window.addEventListener('message', function(evt) {
             // safeApiCall is the primary path — token-aware inside Tool-core.js
             if (typeof safeApiCall === 'function') {
                 try {
-                    return await safeApiCall(endpoint, method.toUpperCase(), body);
+                    // FIX (Issue 1): safeApiCall(method, endpoint, data) — was reversed
+                    return await safeApiCall(method.toUpperCase(), endpoint, body);
                 } catch(_) {}
             }
             // Direct authorizedFetch fallback

@@ -312,7 +312,8 @@ function __isValidSession(session) {
 
 
 
-                }, 5000);
+                // FIX (Issue 6): Increased timeout to handle slow parent init
+                }, 8000);
 
 
 

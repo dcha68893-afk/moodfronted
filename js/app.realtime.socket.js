@@ -1615,6 +1615,8 @@
         window.dispatchEvent(new CustomEvent('kyn:realtimeReady', { detail: { manager: realtimeManager } }));
     } catch (_) {}
 
+    // FIX (Issue 5): Dedup set to prevent FRIENDS_SYNC relay storm
+    var _friendsSyncSeen = new Set();
     window.addEventListener('message', function (evt) {
         if (!evt.data || typeof evt.data !== 'object') return;
         const { type, payload } = evt.data;
@@ -1623,6 +1625,15 @@
         // and FRIEND_RELATIONSHIP_CHANGED to every OTHER iframe so chat, calls, status,
         // groups all see updated friends instantly without a poll cycle.
         if (type === 'FRIENDS_SYNC' || type === 'FRIENDS_DATA' || type === 'FRIEND_RELATIONSHIP_CHANGED') {
+            // FIX (Issue 5): Deduplicate by timestamp to prevent relay storm
+            const _dedupKey = type + ':' + (evt.data.timestamp || 0);
+            if (_friendsSyncSeen.has(_dedupKey)) return;
+            _friendsSyncSeen.add(_dedupKey);
+            // Prune old keys (keep last 50)
+            if (_friendsSyncSeen.size > 50) {
+                const _iter = _friendsSyncSeen.values();
+                _friendsSyncSeen.delete(_iter.next().value);
+            }
             var _iframes = document.querySelectorAll('iframe');
             _iframes.forEach(function (frame) {
                 if (frame.contentWindow === evt.source) return; // don't echo back to sender
