@@ -521,20 +521,40 @@
             });
 
             this._socket.on('disconnect', (reason) => {
-                // FIX-PHASE15: Clear registered listener set so they re-bind on next connect.
-                // Without this, after a reconnect no message:new/call:incoming listeners
-                // are added (Set already contains them) → all real-time events silently drop.
-                this._registeredSocketListeners.clear();
+                // FIX-PHASE16: Do NOT clear _registeredSocketListeners here.
+                // The Set is cleared in the 'authenticated' handler on reconnect,
+                // ensuring listeners are re-registered against the new socket only
+                // after the server confirms auth. Clearing here caused a race where
+                // message:new / call:incoming were silently dropped after every reconnect.
                 if (this._lastConnectLogState !== 'disconnected') {
                     console.log('[Realtime] Socket.IO disconnected:', reason);
                     this._lastConnectLogState = 'disconnected';
                 }
                 // Don't reconnect on server-forced auth disconnects
                 if (reason === 'io server disconnect') {
-                    console.warn('[Realtime] Server forcefully disconnected — likely auth issue, not reconnecting');
+                    console.warn('[Realtime] Server forcefully disconnected — likely auth issue. Will retry once in 8s.');
                     this._state = CONNECTION_STATE.ERROR;
                     this._authenticated = false;
                     this._emitStateChange();
+                    // FIX-PHASE16: Previously we returned without scheduling any reconnect,
+                    // which left the socket permanently dead after a transient server restart
+                    // or a momentary auth hiccup. Now we retry ONCE after 8s with a fresh
+                    // token read — if the token is still bad the error repeats but at least
+                    // network recovery (new token after re-login) can wake the socket.
+                    clearTimeout(this._ioServerDisconnectTimer);
+                    this._ioServerDisconnectTimer = setTimeout(() => {
+                        this._ioServerDisconnectTimer = null;
+                        if (this._state === CONNECTION_STATE.ERROR ||
+                            this._state === CONNECTION_STATE.DISCONNECTED) {
+                            // Re-read token in case user just re-authenticated
+                            const freshToken = acquireToken();
+                            if (freshToken) {
+                                this._sessionToken = freshToken;
+                                this._reconnectAttempts = 0;
+                                this._connectInternal().catch(() => {});
+                            }
+                        }
+                    }, 8000);
                     return;
                 }
                 // FIX-DISCONNECT-LOOP: 'transport close' fires during the polling→WebSocket
@@ -560,10 +580,21 @@
 
             this._socket.on('authenticated', (data) => {
                 console.log('[Realtime] ✅ Server confirmed authentication:', data);
+                // FIX-PHASE16: Mark state AUTHENTICATED here (not in _onSocketIOConnect).
+                // This is the only authoritative signal that the server accepted our JWT.
+                this._authenticated = true;
+                this._state = CONNECTION_STATE.AUTHENTICATED;
+                this._emitStateChange();
+                this._resolveConnectPromise();
+
                 // FIX-CALL-DELIVERY: Re-join user rooms on authenticated confirmation.
                 // The connect-time join_user_room may fire before the server middleware
                 // has finished auth, so the join silently fails.  Re-joining here (after
                 // the server has confirmed auth) guarantees sendToUser() can reach us.
+                // FIX-PHASE16: Also clear and re-register all bridge listeners here so
+                // that after a reconnect they are fully bound to the NEW socket object.
+                this._registeredSocketListeners.clear();
+                this._registerMessageBridgeListeners();
                 try {
                     const myId = data?.userId || this._getUserId();
                     if (myId && this._socket && typeof this._socket.emit === 'function') {
@@ -618,12 +649,23 @@
             this._state = CONNECTION_STATE.CONNECTED;
             this._emitStateChange();
 
-            this._authenticated = true;
-            this._state = CONNECTION_STATE.AUTHENTICATED;
-            this._emitStateChange();
-            this._resolveConnectPromise();
-            this._processQueue();
+            // FIX-PHASE16: Do NOT set _authenticated = true here prematurely.
+            // The Socket.IO 'connect' event fires as soon as the transport opens,
+            // BEFORE the server middleware has verified the JWT. Setting
+            // _authenticated=true here means the state machine skips the 'authenticated'
+            // event handler, so join_user_room fires before auth completes and the
+            // server silently ignores it (socket not yet in the authed room).
+            //
+            // New flow:
+            //   1. 'connect'       → state = CONNECTED, emit join_user_room (optimistic)
+            //   2. 'authenticated' → state = AUTHENTICATED, re-join rooms, register listeners
+            //
+            // The 'authenticated' handler (below) already does the authoritative room join
+            // and listener registration. We still call _processQueue() here so queued
+            // messages are attempted immediately — they'll be deduped server-side if the
+            // socket isn't fully authed yet.
             this._registerMessageBridgeListeners();
+            this._processQueue();
             this._triggerSync();
 
             // CRITICAL FIX: Emit join_user_room so the server places this socket in the
@@ -826,7 +868,15 @@
                 this._socket = null;
             }
             this._authenticated = false;
-            this._registeredSocketListeners.clear();
+            // FIX-PHASE16: Do NOT clear _registeredSocketListeners here.
+            // Clearing the Set here was causing a race: if the reconnect happens
+            // quickly, _connectSocketIO() re-attaches listeners but then the
+            // 'disconnect' handler (which fires slightly after) clears the Set again,
+            // leaving the new socket with zero bridge listeners — so message:new and
+            // call:incoming are silently dropped after every reconnect.
+            //
+            // The Set is cleared in the 'authenticated' handler AFTER the new socket
+            // is confirmed working, ensuring clean re-registration at the right time.
             this._bridgeListenersLogged = false;
             this._hasSyncedThisConnection = false;
 

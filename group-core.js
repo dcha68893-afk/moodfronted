@@ -5499,7 +5499,11 @@ async function loadGroupNotes(groupId) {
         } catch (error) {}
         
         const groupNotesPanel = safeGetElement('#groupNotesPanel');
-        if (groupNotesPanel && currentChatGroup && (currentChatGroup.isAdmin || currentChatGroup.isCreator || cachedNotes)) {
+        // FIX-PHASE16: Show notes panel to ALL members, not just admins/creators.
+        // Previously checking isAdmin||isCreator meant the panel stayed hidden for
+        // regular members — even though they can read notes. Admin-only actions
+        // (edit/save) are controlled inside the panel's own buttons, not by hiding it.
+        if (groupNotesPanel && currentChatGroup) {
             groupNotesPanel.style.display = 'block';
         }
     } catch (error) {
@@ -5554,7 +5558,8 @@ async function loadGroupEvents(groupId) {
                 }
             } else {
                 eventCountdownDisplay.innerHTML = 'No upcoming events';
-                eventCountdownPanel.style.display = currentChatGroup && (currentChatGroup.isAdmin || currentChatGroup.isCreator) ? 'block' : 'none';
+                // FIX-PHASE16: Show events panel to all members (admin creates, members view)
+                eventCountdownPanel.style.display = currentChatGroup ? 'block' : 'none';
             }
         }
     } catch (error) {
@@ -5590,7 +5595,9 @@ async function loadTransparencyLog(groupId) {
         const adminTransparencyPanel = safeGetElement('#adminTransparencyPanel');
         
         if (adminTransparencyLog && adminTransparencyPanel) {
-            if (log.length > 0 && currentChatGroup && currentChatGroup.isAdmin) {
+            // FIX-PHASE16: Show transparency log to all members (it's a read-only audit log).
+            // Admins see admin-specific actions; members see group-level changes.
+            if (log.length > 0 && currentChatGroup) {
                 let logHTML = '';
                 log.slice(0, 5).forEach(item => {
                     logHTML += `
