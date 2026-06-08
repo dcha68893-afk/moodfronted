@@ -2245,9 +2245,106 @@
         body[data-parent-shell="true"] #sidebar {
             padding-top: 0 !important;
         }
+
+        /* ── Hide old quick-action grid ─────────────────────────── */
+        .quick-actions { display: none !important; }
+
+        /* ── WhatsApp-style friend rows ─────────────────────────── */
+        .friends-list .friend-item,
+        .friends-list [class*="friend-card"],
+        .friends-list [class*="contact-item"] {
+            display: flex !important;
+            align-items: center !important;
+            gap: 0 !important;
+            padding: 0 16px !important;
+            min-height: 72px !important;
+            border-bottom: 1px solid rgba(255,255,255,.05) !important;
+            background: transparent !important;
+            border-radius: 0 !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            cursor: pointer;
+            transition: background .12s;
+        }
+        .friends-list .friend-item:active,
+        .friends-list [class*="friend-card"]:active {
+            background: rgba(255,255,255,.04) !important;
+        }
+        /* Avatar */
+        .friends-list .friend-item .friend-avatar,
+        .friends-list .friend-item .avatar,
+        .friends-list [class*="friend-card"] .friend-avatar {
+            width: 52px !important;
+            height: 52px !important;
+            min-width: 52px !important;
+            border-radius: 50% !important;
+            margin-right: 14px !important;
+            object-fit: cover;
+        }
+        /* Name + sub row */
+        .friends-list .friend-item .friend-info,
+        .friends-list [class*="friend-card"] .friend-info {
+            flex: 1 !important;
+            min-width: 0 !important;
+            border-bottom: none !important;
+        }
+        .friends-list .friend-item .friend-name,
+        .friends-list [class*="friend-card"] .friend-name {
+            font-size: 16px !important;
+            font-weight: 500 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            margin-bottom: 2px !important;
+        }
+        .friends-list .friend-item .friend-status,
+        .friends-list .friend-item .friend-username,
+        .friends-list [class*="friend-card"] .friend-status {
+            font-size: 13px !important;
+            opacity: .55 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+        /* Action buttons on right */
+        .friends-list .friend-item .friend-actions,
+        .friends-list [class*="friend-card"] .friend-actions {
+            display: flex !important;
+            gap: 8px !important;
+            align-items: center !important;
+            flex-shrink: 0 !important;
+            margin-left: 8px !important;
+        }
+
+        /* ── Bottom FAB ─────────────────────────────────────────── */
+        #friendAddFAB {
+            position: fixed;
+            bottom: 24px;
+            right: 20px;
+            z-index: 500;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            font-size: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(102,126,234,.55);
+            transition: transform .15s, box-shadow .15s;
+        }
+        #friendAddFAB:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(102,126,234,.7); }
+        #friendAddFAB:active { transform: scale(.93); }
     </style>
 </head>
 <body>
+    <!-- FAB — bottom right, triggers Add Friend modal -->
+    <button id="friendAddFAB" title="Add Friend" onclick="document.getElementById('addFriendBtn') && document.getElementById('addFriendBtn').click();">
+        <i class="fas fa-user-plus" style="font-size:18px;"></i>
+    </button>
     <!-- Data Source Indicator -->
     <div class="data-source-indicator" id="dataSourceIndicator">
         <span id="dataSourceText">Loading...</span>
@@ -2353,7 +2450,7 @@
         <div class="sidebar active" id="sidebar">
             <div class="sidebar-header">
                 <h2>Friends</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="display: flex; gap: 8px; align-items: center;">
                     <!-- V6 Connection Status Indicator -->
                     <div class="connection-status" id="connectionStatus">
                         <i class="fas fa-circle"></i>
@@ -2362,11 +2459,76 @@
                     <button class="add-friend-btn" id="startNewChatBtn" title="Start New Chat">
                         <i class="fas fa-comments"></i>
                     </button>
-                    <button class="add-friend-btn" id="addFriendBtn" title="Add new friend">
-                        <i class="fas fa-user-plus"></i>
-                    </button>
+                    <!-- Three-dot More menu -->
+                    <div style="position:relative;" id="friendMoreMenuWrap">
+                        <button class="add-friend-btn" id="friendMoreBtn" title="More options" onclick="
+                            var m=document.getElementById('friendMoreDropdown');
+                            m.style.display = m.style.display==='block' ? 'none' : 'block';
+                            event.stopPropagation();
+                        ">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                        <div id="friendMoreDropdown" style="
+                            display:none;position:absolute;top:calc(100% + 6px);right:0;
+                            min-width:220px;background:var(--card-bg,#1e2a3a);
+                            border:1px solid rgba(255,255,255,.08);border-radius:12px;
+                            box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:9999;overflow:hidden;">
+                            <!-- New Group -->
+                            <button onclick="document.getElementById('friendMoreDropdown').style.display='none'; document.getElementById('addFriendBtn') && document.getElementById('addFriendBtn').click();"
+                                style="display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;
+                                       background:none;border:none;cursor:pointer;color:inherit;font-size:15px;
+                                       border-bottom:1px solid rgba(255,255,255,.06);text-align:left;">
+                                <span style="width:40px;height:40px;border-radius:50%;background:rgba(102,126,234,.18);
+                                             display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                    <i class="fas fa-user-plus" style="color:#667eea;font-size:16px;"></i>
+                                </span>
+                                <span>Add new friend</span>
+                            </button>
+                            <!-- Sync Contacts -->
+                            <button onclick="document.getElementById('friendMoreDropdown').style.display='none'; document.getElementById('syncContactsBtn') && document.getElementById('syncContactsBtn').click();"
+                                style="display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;
+                                       background:none;border:none;cursor:pointer;color:inherit;font-size:15px;
+                                       border-bottom:1px solid rgba(255,255,255,.06);text-align:left;">
+                                <span style="width:40px;height:40px;border-radius:50%;background:rgba(52,211,153,.15);
+                                             display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                    <i class="fas fa-sync-alt" style="color:#34d399;font-size:16px;"></i>
+                                </span>
+                                <span>Sync contacts</span>
+                            </button>
+                            <!-- Scan QR -->
+                            <button onclick="document.getElementById('friendMoreDropdown').style.display='none'; document.getElementById('scanQRBtn') && document.getElementById('scanQRBtn').click();"
+                                style="display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;
+                                       background:none;border:none;cursor:pointer;color:inherit;font-size:15px;
+                                       border-bottom:1px solid rgba(255,255,255,.06);text-align:left;">
+                                <span style="width:40px;height:40px;border-radius:50%;background:rgba(251,191,36,.15);
+                                             display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                    <i class="fas fa-qrcode" style="color:#fbbf24;font-size:16px;"></i>
+                                </span>
+                                <span>Scan QR code</span>
+                            </button>
+                            <!-- Discover -->
+                            <button onclick="document.getElementById('friendMoreDropdown').style.display='none'; document.getElementById('discoverBtn') && document.getElementById('discoverBtn').click();"
+                                style="display:flex;align-items:center;gap:14px;width:100%;padding:16px 18px;
+                                       background:none;border:none;cursor:pointer;color:inherit;font-size:15px;
+                                       text-align:left;">
+                                <span style="width:40px;height:40px;border-radius:50%;background:rgba(99,179,237,.15);
+                                             display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                    <i class="fas fa-compass" style="color:#63b3ed;font-size:16px;"></i>
+                                </span>
+                                <span>Discover friends</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <script>
+            // Close More dropdown when clicking outside
+            document.addEventListener('click', function(e){
+                var wrap = document.getElementById('friendMoreMenuWrap');
+                var dd = document.getElementById('friendMoreDropdown');
+                if(dd && wrap && !wrap.contains(e.target)) dd.style.display='none';
+            });
+            </script>
             
             <div class="friend-categories">
                 <button class="category-btn active" id="allTab">All Friends <span class="badge" id="totalFriends">0</span></button>
@@ -2386,28 +2548,14 @@
             </div>
             
             <div class="friend-list">
-                <div class="quick-actions">
-                    <button class="quick-action-btn" id="syncContactsBtn" title="Sync phone contacts">
-                        <div class="quick-action-icon">
-                            <i class="fas fa-sync-alt"></i>
-                        </div>
-                        <div class="quick-action-text">Sync Contacts</div>
-                    </button>
-                    <button class="quick-action-btn" id="scanQRBtn" title="Scan QR code">
-                        <div class="quick-action-icon">
-                            <i class="fas fa-qrcode"></i>
-                        </div>
-                        <div class="quick-action-text">Scan QR</div>
-                    </button>
-                    <button class="quick-action-btn" id="discoverBtn" title="Discover friends">
-                        <div class="quick-action-icon">
-                            <i class="fas fa-compass"></i>
-                        </div>
-                        <div class="quick-action-text">Discover</div>
-                    </button>
-                </div>
+                <!-- Hidden trigger buttons - keep for JS wiring, invisible -->
+                <button id="syncContactsBtn" style="display:none"></button>
+                <button id="scanQRBtn" style="display:none"></button>
+                <button id="discoverBtn" style="display:none"></button>
+                <!-- ADD FRIEND button kept hidden, triggered from More menu -->
+                <button id="addFriendBtn" style="display:none"></button>
                 
-                <!-- Friend Stats -->
+                <!-- Friend Stats (compact row) -->
                 <div class="friend-stats">
                     <div class="stats-container">
                         <div class="stat-item">

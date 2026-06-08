@@ -1612,20 +1612,8 @@
     </button>
 
     <!-- IFrame Containers for each module -->
-    <div id="messagesContent" class="iframe-container" style="position:relative;">
+    <div id="messagesContent" class="iframe-container">
         <iframe id="messagesIframe" class="content-iframe" src="message.html" data-module="messages"></iframe>
-        <!-- FIX 7: Add Friend FAB — messages module (bottom-left) -->
-        <button id="fabAddFriendMessages"
-            onclick="navigateToPage('friends')"
-            title="Add Friend"
-            style="position:absolute;bottom:84px;left:16px;z-index:200;
-                   width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;
-                   background:linear-gradient(135deg,#667eea,#764ba2);
-                   color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;
-                   box-shadow:0 4px 16px rgba(102,126,234,.5);
-                   transition:transform .15s,box-shadow .15s;">
-            <i class="fas fa-user-plus" style="font-size:16px;"></i>
-        </button>
     </div>
     <div id="statusContent" class="iframe-container hidden">
         <iframe id="statusIframe" class="content-iframe" src="status.html" data-module="status"></iframe>
@@ -1636,20 +1624,8 @@
     <div id="friendsContent" class="iframe-container hidden">
         <iframe id="friendsIframe" class="content-iframe" src="friend.html" data-module="friends" allow="camera; microphone; geolocation"></iframe>
     </div>
-    <div id="callsContent" class="iframe-container hidden" style="position:relative;">
+    <div id="callsContent" class="iframe-container hidden">
         <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" allow="camera; microphone"></iframe>
-        <!-- FIX 7: Add Friend FAB — calls module (bottom-left, above mobile nav) -->
-        <button id="fabAddFriendCalls"
-            onclick="navigateToPage('friends')"
-            title="Add Friend"
-            style="position:absolute;bottom:84px;left:16px;z-index:200;
-                   width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;
-                   background:linear-gradient(135deg,#667eea,#764ba2);
-                   color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;
-                   box-shadow:0 4px 16px rgba(102,126,234,.5);
-                   transition:transform .15s,box-shadow .15s;">
-            <i class="fas fa-user-plus" style="font-size:16px;"></i>
-        </button>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
         <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
@@ -1657,6 +1633,20 @@
     <div id="toolsContent" class="iframe-container hidden">
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
     </div>
+
+    <!-- ── Add Friend FAB (fixed, bottom-left of screen, above mobile nav) ── -->
+    <!-- Shown only on messages and calls modules via JS below -->
+    <button id="fabAddFriend"
+        onclick="navigateToPage('friends')"
+        title="Add Friend"
+        style="display:none;position:fixed;bottom:76px;left:16px;z-index:400;
+               width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;
+               background:linear-gradient(135deg,#667eea,#764ba2);
+               color:#fff;display:none;align-items:center;justify-content:center;
+               box-shadow:0 4px 16px rgba(102,126,234,.5);
+               transition:transform .15s,box-shadow .15s;">
+        <i class="fas fa-user-plus" style="font-size:16px;pointer-events:none;"></i>
+    </button>
     <div id="gamesContent" class="iframe-container hidden">
         <iframe id="gamesIframe" class="content-iframe" src="game.html" data-module="games"></iframe>
     </div>
@@ -1678,33 +1668,20 @@
             border-radius: 50%; border: 2px solid rgba(10,13,22,0.98); display: none;
         }
         /* ── Add-Friend FAB ─────────────────────────────────────────────── */
-        #fabAddFriendMessages,
-        #fabAddFriendCalls {
+        #fabAddFriend {
             transition: transform .15s ease, box-shadow .15s ease;
         }
-        #fabAddFriendMessages:hover,
-        #fabAddFriendCalls:hover {
+        #fabAddFriend:hover {
             transform: scale(1.1);
             box-shadow: 0 6px 24px rgba(102,126,234,.65) !important;
         }
-        #fabAddFriendMessages:active,
-        #fabAddFriendCalls:active {
-            transform: scale(.94);
-        }
-        /* Hide FAB while a call is active (body has .call-active class) */
-        body.call-active #fabAddFriendMessages,
-        body.call-active #fabAddFriendCalls,
-        body.in-call-screen #fabAddFriendMessages,
-        body.in-call-screen #fabAddFriendCalls {
-            display: none !important;
-        }
-        /* On desktop sidebar layout, shift FAB to avoid sidebar overlap */
+        #fabAddFriend:active { transform: scale(.94); }
+        /* Hide FAB while a call is active */
+        body.call-active #fabAddFriend,
+        body.in-call-screen #fabAddFriend { display: none !important; }
+        /* Desktop: sit left of sidebar */
         @media (min-width: 768px) {
-            #fabAddFriendMessages,
-            #fabAddFriendCalls {
-                left: calc(16px) !important;
-                bottom: 24px !important;
-            }
+            #fabAddFriend { bottom: 24px !important; left: 80px !important; }
         }
     </style>
 
@@ -2845,6 +2822,12 @@
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
+            }
+            // ── FAB visibility: show only on messages + calls modules ──
+            var _fab = document.getElementById('fabAddFriend');
+            if (_fab) {
+                var _fabPages = ['messages', 'calls'];
+                _fab.style.display = _fabPages.includes(page) ? 'flex' : 'none';
             }
             const fromHistory = !!options.fromHistory;
             if (window.__currentPage !== page) {
