@@ -3947,6 +3947,10 @@
                     } catch(e) {}
                 }
                 if (!settings || Object.keys(settings).length === 0) return; // nothing to push
+                // PHASE15 FIX: Send ONE batched SETTINGS_UPDATED message instead of
+                // one SETTING_CHANGED per key. With 118+ settings keys, the old approach
+                // fired 118 postMessages per navigation causing a massive storm that
+                // overwhelmed RealtimeStabilizationLayer and delayed real events.
                 iframe.contentWindow.postMessage({
                     type: 'SETTINGS_UPDATED',
                     source: 'parent',
@@ -3954,18 +3958,14 @@
                     payload: { settings, timestamp: Date.now() },
                     timestamp: Date.now()
                 }, '*');
-                // Also push as SETTING_CHANGED entries for modules that only listen per-key
+                // PHASE15 FIX: Send ONE aggregate SETTING_CHANGED with all keys flattened
+                // instead of one postMessage per key. Receivers can expand this themselves.
                 try {
-                    Object.entries(settings).forEach(([section, vals]) => {
-                        if (!vals || typeof vals !== 'object') return;
-                        Object.entries(vals).forEach(([key, value]) => {
-                            iframe.contentWindow.postMessage({
-                                type: 'SETTING_CHANGED',
-                                source: 'parent',
-                                payload: { section, key, value, timestamp: Date.now() }
-                            }, '*');
-                        });
-                    });
+                    iframe.contentWindow.postMessage({
+                        type: 'SETTINGS_BATCH',
+                        source: 'parent',
+                        payload: { settings, timestamp: Date.now() }
+                    }, '*');
                 } catch(e) {}
             }
 
