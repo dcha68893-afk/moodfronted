@@ -181,17 +181,26 @@
       }
 
       // Repair 3: If reconnect orchestrator not started, start it
-      const reco = window.__ReconnectOrchestrator;
-      if (reco && !reco._started) {
-        reco.start?.();
-        repairs.push('reconnect_orchestrator:started');
-      }
+      // FIX: Only start in the TOP FRAME (parent shell). In child iframes the
+      // orchestrators are present in memory but must NOT be started — they have no
+      // direct socket and starting them in bridge-mode frames creates phantom
+      // reconnect loops and repeated 'reconnect_orchestrator:started' log spam
+      // every validation cycle.
+      if (window.parent === window) {
+        const reco = window.__ReconnectOrchestrator;
+        if (reco && !reco._started) {
+          reco.start?.();
+          repairs.push('reconnect_orchestrator:started');
+        }
 
-      // Repair 4: If group orchestrator not started, start it
-      const go = window.__GroupOrchestrator;
-      if (go && !go._started) {
-        go.start?.();
-        repairs.push('group_orchestrator:started');
+        // Repair 4: If group orchestrator not started, start it
+        // FIX: Same parent-frame guard as Repair 3 — iframes must not start the
+        // GroupOrchestrator independently; the parent shell owns orchestration.
+        const go = window.__GroupOrchestrator;
+        if (go && !go._started) {
+          go.start?.();
+          repairs.push('group_orchestrator:started');
+        }
       }
 
       // Repair 5: Flush any queued messages now that socket is connected.
@@ -312,6 +321,16 @@
       if (this._started) return;
       this._started = true;
 
+      // In child iframes: skip the 8-second boot delay — just run the lightweight
+      // bridge-mode validation once and set up a long interval (no spam).
+      if (window.parent !== window) {
+        await this._runValidation();
+        // Check every 10 minutes in iframes — nothing meaningful to repair there
+        setInterval(() => this._runValidation(), 10 * 60 * 1000);
+        console.log('[Phase6] ✅ Runtime Integration Validator started (bridge/iframe mode)');
+        return;
+      }
+
       // Run initial validation after delay — give socket time to authenticate
       await new Promise(r => setTimeout(r, 8000));
       await this._runValidation();
@@ -325,6 +344,51 @@
     getReport() { return this._report; }
 
     async _runValidation() {
+      // ── IFRAME / BRIDGE-MODE GUARD ─────────────────────────────────────────
+      // The validator loads in ALL frames (chat.html + 7 child iframes).
+      // In child iframes:
+      //   • KynectaRealtime._socket is ALWAYS null (socket lives in parent shell)
+      //   • Modules like __ReconnectOrchestrator are present but must NOT be started
+      //   • The socket bridge IS working — postMessage to parent confirms connectivity
+      // Running full validation in iframes produces false ❌ for every check that
+      // touches the raw socket, and triggers spurious repairs (Repairs 3 & 4)
+      // on every validation cycle. We short-circuit here with a lightweight
+      // bridge-health check instead.
+      if (window.parent !== window) {
+        // We are inside a child iframe. Build a minimal healthy report.
+        const rt = window.KynectaRealtime;
+        const bridgeReady = window.__kynParentReady === true || !!rt;
+        const state = rt?.getState?.() || rt?.state || 'bridge';
+
+        const report = {
+          ts:        new Date().toISOString(),
+          isBridge:  true,
+          socket:    {
+            connected:   bridgeReady || navigator.onLine,
+            state:       state,
+            inIframe:    true,
+            parentReady: window.__kynParentReady === true,
+            bridgeMode:  true,
+          },
+          modules:   { healthy: 0, unhealthy: 0, total: 0, bridgeMode: true },
+          repairs:   [],
+          eventBus:  { healthy: !!window.KynectaEventBus },
+          ui:        { bridgeMode: true },
+          listeners: { duplicates: 0, events: {} },
+        };
+
+        this._report = report;
+        window.__Phase6Report = report;
+
+        // Log only once per session in iframe (not repeatedly)
+        if (!this._iframeModeLogged) {
+          this._iframeModeLogged = true;
+          console.log('[Phase6] ℹ️  Running in child iframe (bridge mode) — full validation skipped. Bridge ready:', bridgeReady);
+        }
+
+        return report;
+      }
+      // ── END IFRAME GUARD ──────────────────────────────────────────────────
       const report = {
         ts:         new Date().toISOString(),
         modules:    this._moduleCheck.check(),
