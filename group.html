@@ -779,6 +779,7 @@
 .group-stats { display: none !important; }
 .type-filters { display: none !important; }
 </style>
+<script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
 <body>
     <!-- ========== MODIFIED: Toast Container at Bottom ========== -->
@@ -2512,6 +2513,21 @@ function setupMenu(){
     btn.addEventListener('click',function(e){e.stopPropagation();menu.style.display=menu.style.display==='none'?'block':'none';});
     document.addEventListener('click',function(){if(menu)menu.style.display='none';});
     menu.querySelectorAll('.gcm-item').forEach(function(it){it.addEventListener('click',function(e){e.stopPropagation();menu.style.display='none';var a=it.getAttribute('data-action');if(a==='leave')doLeave();else if(a==='delete')doDelete();else if(a==='tools')window._openGroupOSPanel();else openSub(a);});});
+    // ✅ FIX: Listen for parent postMessage so hdrGroupMore in chat.html opens this menu
+    window.addEventListener('message', function(ev) {
+        var d = ev.data;
+        if (!d || typeof d !== 'object') return;
+        if (d.type === 'OPEN_GROUP_MORE_MENU') {
+            var m = document.getElementById('chatMoreMenu');
+            if (m) {
+                m.style.display = m.style.display === 'none' ? 'block' : 'none';
+                // Position menu relative to viewport top-right if triggered from outside iframe
+                m.style.setProperty('position', 'fixed', 'important');
+                m.style.setProperty('top', '56px', 'important');
+                m.style.setProperty('right', '8px', 'important');
+            }
+        }
+    });
 }
 
 /* ─── Sub-panel ───────────────────────────────────────────────── */

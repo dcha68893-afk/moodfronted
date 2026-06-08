@@ -696,6 +696,18 @@
                     try { fn(value, key); } catch (e) { console.error('[SettingsManager] Listener error:', e); }
                 });
             });
+            // ✅ FIX: Broadcast to all iframes via BroadcastChannel + localStorage event
+            // so every module (messages, calls, friends, status, tools) reacts to setting changes.
+            if (key !== 'initialized') {
+                try {
+                    const payload = { type: 'SETTINGS_CHANGED', key, value, settings: this.currentSettings, ts: Date.now() };
+                    if (typeof BroadcastChannel !== 'undefined') {
+                        if (!this._bc) { try { this._bc = new BroadcastChannel('kynecta_settings'); } catch(_) {} }
+                        if (this._bc) this._bc.postMessage(payload);
+                    }
+                    localStorage.setItem('kynecta_settings_broadcast', JSON.stringify(payload));
+                } catch(_) {}
+            }
         }
 
         // ─── Utilities ────────────────────────────────────────────────────────────

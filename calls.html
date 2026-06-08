@@ -2626,6 +2626,7 @@ window.__CALLS_IFRAME__ = {
         }
     </style>
     <link rel="stylesheet" href="/css/suppress-webgl.css">
+<script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
 <body>
     <!-- Debug Toggle (only visible in debug mode) -->
@@ -5317,10 +5318,10 @@ window.__CALLS_IFRAME__ = {
                 var _visObs = new IntersectionObserver(function(entries) {
                     entries.forEach(function(entry) {
                         if (entry.isIntersecting) {
-                            // ✅ FIX: Delay 600ms to let OPEN_CALL_WITH_USER arrive first
-                            // If a call starts during this window, _onIframeVisible will
-                            // detect callActive=true and skip the idle reset
-                            setTimeout(_onIframeVisible, 600);
+                            // ✅ FIX: Delay 1500ms to let OPEN_CALL_WITH_USER and call flags arrive first.
+                            // Parent sets __callActive then navigates, but navigation + iframe-render
+                            // can take >600ms. 1500ms ensures the flag is set before we check.
+                            setTimeout(_onIframeVisible, 1500);
                         }
                     });
                 }, { threshold: 0.1 });

@@ -1510,9 +1510,8 @@
         <button class="nav-icon active" data-page="messages"><i class="fas fa-comments"></i></button>
         <button class="nav-icon" data-page="status"><i class="fas fa-circle"></i></button>
         <button class="nav-icon" data-page="group"><i class="fas fa-users"></i></button>
-        <button class="nav-icon" data-page="friends"><i class="fas fa-user-friends"></i></button>
-        <button class="nav-icon" data-page="calls"><i class="fas fa-phone"></i></button>
         <button class="nav-icon" data-page="games"><i class="fas fa-gamepad"></i></button>
+        <button class="nav-icon" data-page="calls"><i class="fas fa-phone"></i></button>
         <button class="nav-icon" data-page="settings"><i class="fas fa-cog"></i></button>
         <button class="nav-icon" data-page="tools"><i class="fas fa-tools"></i></button>
         <div class="mt-auto mb-4 relative">
@@ -1528,10 +1527,10 @@
             <span class="nav-label">Chat</span>
         </button>
 
-        <!-- 2. Explore / Discover -->
-        <button class="mobile-nav-icon" data-page="friends" aria-label="Explore">
-            <i class="fas fa-compass"></i>
-            <span class="nav-label">Explore</span>
+        <!-- 2. Games -->
+        <button class="mobile-nav-icon" data-page="games" aria-label="Games">
+            <i class="fas fa-gamepad"></i>
+            <span class="nav-label">Games</span>
         </button>
 
         <!-- 3. CENTER — Quick Action (+) with popup menu -->
@@ -1563,9 +1562,9 @@
             <i class="fas fa-users"></i>
             <span>Groups</span>
         </div>
-        <div class="center-menu-item center-menu-games" onclick="closeCenterMenu(); navigateToPage('games');">
-            <i class="fas fa-gamepad"></i>
-            <span>Games</span>
+        <div class="center-menu-item center-menu-friends" onclick="closeCenterMenu(); navigateToPage('friends');">
+            <i class="fas fa-user-friends"></i>
+            <span>Friends</span>
         </div>
     </div>
 
@@ -3122,7 +3121,17 @@
                         document.body.classList.add('call-screen-active');
                         // ── FIX: callsContent must NOT have .hidden when a call is active.
                         var _cc = document.getElementById('callsContent');
-                        if (_cc) _cc.classList.remove('hidden');
+                        if (_cc) {
+                            _cc.classList.remove('hidden');
+                            _cc.style.setProperty('position', 'fixed', 'important');
+                            _cc.style.setProperty('top', '0', 'important');
+                            _cc.style.setProperty('left', '0', 'important');
+                            _cc.style.setProperty('right', '0', 'important');
+                            _cc.style.setProperty('bottom', '0', 'important');
+                            _cc.style.setProperty('z-index', '99999', 'important');
+                            _cc.style.setProperty('display', 'block', 'important');
+                            _cc.style.setProperty('visibility', 'visible', 'important');
+                        }
                         logProcessStatus('call-screen', true, 'active');
                     } else {
                         // ── Guard: if a call was just dispatched within 15s, this inactive
@@ -4706,17 +4715,35 @@
 
                     console.log('[Parent] Dispatching call → user=' + userName + '(' + userId + ') type=' + callType + ' returnTo=' + returnTo);
 
-                    // Set flags BEFORE navigating
+                    // ✅ FIX: Set ALL call flags BEFORE navigation so the iframe's
+                    // IntersectionObserver/_onIframeVisible sees callActive=true and
+                    // does NOT reset to idle. Previously __callActive was set after
+                    // navigateToPage(), causing the outgoing screen to be wiped.
+                    window.__callActive = true;
                     window.__activeCallInProgress = true;
-                    window.__callDispatchedAt = Date.now(); // used by CALL_ENDED_RETURN guard
+                    window.__callDispatchedAt = Date.now();
                     document.body.classList.add('call-screen-active');
+
+                    // Pre-seed peer info so calling screen can populate instantly
+                    window.__activePeerName   = userName;
+                    window.__activePeerType   = callType;
+                    window.__activePeerAvatar = null;
 
                     navigateToPage('calls');
 
-                    // ── FIX: navigateToPage removes .hidden from callsContent but
-                    // body.call-screen-active also needs callsContent visible (no hidden class).
+                    // ── FIX: ensure callsContent is fully visible with correct positioning
                     var _callsCC = document.getElementById('callsContent');
-                    if (_callsCC) _callsCC.classList.remove('hidden');
+                    if (_callsCC) {
+                        _callsCC.classList.remove('hidden');
+                        _callsCC.style.setProperty('position', 'fixed', 'important');
+                        _callsCC.style.setProperty('top', '0', 'important');
+                        _callsCC.style.setProperty('left', '0', 'important');
+                        _callsCC.style.setProperty('right', '0', 'important');
+                        _callsCC.style.setProperty('bottom', '0', 'important');
+                        _callsCC.style.setProperty('z-index', '99999', 'important');
+                        _callsCC.style.setProperty('display', 'block', 'important');
+                        _callsCC.style.setProperty('visibility', 'visible', 'important');
+                    }
 
                     const callsIframe = document.getElementById('callsIframe');
                     if (!callsIframe) return;
@@ -7086,24 +7113,13 @@ function wireButtons() {
     if (vid && !vid._ghw) { vid._ghw = true;
         vid.addEventListener('click', function () { postToGroup('PARENT_GROUP_CALL', { type: 'video' }); });
     }
-    /* Three-dots */
+    /* Three-dots — forwards to group iframe's chatMoreMenu (the authoritative menu) */
     var more = document.getElementById('hdrGroupMore');
-    var menu = document.getElementById('hdrGroupMenu');
-    if (more && menu && !more._ghw) { more._ghw = true;
+    if (more && !more._ghw) { more._ghw = true;
         more.addEventListener('click', function (e) {
             e.stopPropagation();
-            menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
-        });
-        document.addEventListener('click', function () { if (menu) menu.style.display = 'none'; });
-        menu.querySelectorAll('.hgm-item').forEach(function (it) {
-            it.addEventListener('click', function (e) {
-                e.stopPropagation();
-                menu.style.display = 'none';
-                var a = it.getAttribute('data-hga');
-                if (a === 'leave')   postToGroup('PARENT_GROUP_ACTION', { action: 'leave' });
-                else if (a === 'delete') postToGroup('PARENT_GROUP_ACTION', { action: 'delete' });
-                else postToGroup('PARENT_GROUP_ACTION', { action: a });
-            });
+            // Send message to group iframe — group.html's setupMenu() handles it
+            postToGroup('OPEN_GROUP_MORE_MENU', {});
         });
     }
     /* Avatar → group info sub-panel */

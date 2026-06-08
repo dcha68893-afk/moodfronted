@@ -1316,6 +1316,7 @@
         border-color: #e5e7eb !important;
     }
     </style>
+<script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
 <body>
     <div class="app-container">
@@ -2728,10 +2729,28 @@
 
     <script type="module" src="localstore.tools.js"></script>
 
-    <script type="module" src="tool-core-patch.js"></script>
-    <script type="module" src="tool-ui-patch.js"></script>
+    <!-- ✅ FIX: Load core BEFORE patches so patches can safely wrap originals -->
     <script type="module" src="Tool-core.js"></script>
     <script type="module" src="Tool-ui.js"></script>
+    <script type="module" src="tool-core-patch.js"></script>
+    <script type="module" src="tool-ui-patch.js"></script>
+
+    <!-- ✅ FIX: Global error boundary — prevents white screen on unhandled JS errors -->
+    <script>
+    window.addEventListener('error', function(e) {
+        console.error('[Tools] Uncaught error:', e.message, e.filename, e.lineno);
+        // If main content is empty, show a friendly fallback instead of white screen
+        setTimeout(function() {
+            var container = document.querySelector('.app-container') || document.body;
+            if (container && container.innerHTML.trim().length < 50) {
+                container.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;font-family:system-ui,sans-serif;color:#6b7280"><i class="fas fa-exclamation-triangle" style="font-size:40px;color:#f59e0b"></i><p style="font-size:16px;font-weight:600;margin:0">Something went wrong loading Tools</p><button onclick="window.location.reload()" style="padding:10px 20px;border-radius:8px;border:none;background:#0084ff;color:#fff;cursor:pointer;font-size:14px">Refresh</button></div>';
+            }
+        }, 2000);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error('[Tools] Unhandled promise rejection:', e.reason);
+    });
+    </script>
 
 
 
@@ -2833,17 +2852,11 @@
 <!-- ============================================= -->
 
 <!-- Core module dependencies -->
-<script type="module" src="localstore.tools.js"></script>
+<!-- Core module dependencies (already loaded above, no duplicates) -->
 <script type="module" src="toolregistry.manage.js"></script>
 <script type="module" src="toolpermission.guard.js"></script>
 <script type="module" src="toolexecution.sandbox.js"></script>
 <script type="module" src="toolsync.engine.js"></script>
-
-<!-- Main Core (must be loaded as module due to exports) -->
-<script type="module" src="Tool-core.js"></script>
-
-<!-- UI Controller (depends on Tool-core exports) -->
-<script type="module" src="Tool-ui.js"></script>
 
     <!-- Purchase / Checkout Modal -->
     <div class="create-listing-modal" id="purchaseModal" style="z-index:10002;">

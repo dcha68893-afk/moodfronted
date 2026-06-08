@@ -477,7 +477,7 @@ self.addEventListener('install', function(event) {
 // FIXED: Removed all client reload logic that caused infinite loops
 // ---------------------------------------------------------------------------
 self.addEventListener('activate', function(event) {
-  console.log('[SW] Activating v' + SW_VERSION + ' (safe mode - no forced reloads)');
+  console.log('[SW] Activating v' + SW_VERSION);
 
   event.waitUntil(
     caches.keys()
@@ -492,15 +492,18 @@ self.addEventListener('activate', function(event) {
         );
       })
       .then(function() {
-        // ✅ SAFE: claim() makes this SW control all open tabs
-        // WITHOUT forcing them to reload
         return self.clients.claim();
       })
       .then(function() {
-        // ✅ FIXED: Clear stale log entries WITHOUT notifying clients
         loggedCacheHits.clear();
-        // ✅ FIXED: Don't notify clients of activation to prevent reload loops
-        console.log('[SW] v' + SW_VERSION + ' activated safely - cache cleaned, no reloads forced');
+        // ✅ FIX: Notify all windows so the app can show an "Update available" prompt
+        return self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      })
+      .then(function(allClients) {
+        allClients.forEach(function(client) {
+          client.postMessage({ type: 'SW_UPDATED', version: SW_VERSION });
+        });
+        console.log('[SW] v' + SW_VERSION + ' activated — ' + allClients.length + ' client(s) notified');
       })
   );
 });

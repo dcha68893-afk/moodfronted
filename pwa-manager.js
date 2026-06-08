@@ -90,6 +90,20 @@
     /* ── SW update: force instant activation ────────────────────────────── */
     if (!('serviceWorker' in navigator)) return;
 
+    // ✅ FIX: Listen for SW_UPDATED message from the service worker itself.
+    // When service-worker.js activates a new version, it posts SW_UPDATED to
+    // all clients. This handler shows the update banner immediately — even
+    // for installed PWAs that would otherwise only see it via 'updatefound'.
+    navigator.serviceWorker.addEventListener('message', function (event) {
+        if (event.data && event.data.type === 'SW_UPDATED') {
+            console.log('[pwa-manager] SW_UPDATED received — version:', event.data.version);
+            _showUpdateBanner();
+        }
+        if (event.data && event.data.type === 'CACHE_CLEARED') {
+            console.log('[pwa-manager] Cache cleared by SW');
+        }
+    });
+
     navigator.serviceWorker.register('/service-worker.js').then(function (reg) {
 
         function _skipAndBanner(sw) {
@@ -112,6 +126,12 @@
 
         // Poll every 30 minutes (important for long-lived PWA sessions)
         setInterval(function () { reg.update().catch(function () {}); }, 30 * 60 * 1000);
+
+        // ✅ FIX: For installed PWAs poll every 5 minutes so updates are detected fast
+        if (isStandalone()) {
+            setInterval(function () { reg.update().catch(function () {}); }, 5 * 60 * 1000);
+            console.log('[pwa-manager] Running as PWA — fast update polling enabled (5 min)');
+        }
 
     }).catch(function (err) {
         console.warn('[pwa-manager] SW registration failed:', err);

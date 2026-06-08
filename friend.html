@@ -2339,6 +2339,7 @@
         #friendAddFAB:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(102,126,234,.7); }
         #friendAddFAB:active { transform: scale(.93); }
     </style>
+<script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
 <body>
     <!-- FAB — bottom right, triggers Add Friend modal -->
@@ -2530,15 +2531,15 @@
             });
             </script>
             
-            <div class="friend-categories">
-                <button class="category-btn active" id="allTab">All Friends <span class="badge" id="totalFriends">0</span></button>
-                <button class="category-btn" id="contactsTab">Contacts <span class="badge" id="contactsCount">0</span></button>
-                <button class="category-btn" id="friendsTab">Friends <span class="badge" id="friendsCount">0</span></button>
-                <button class="category-btn" id="requestsTab">Requests <span class="badge" id="requestsCount">0</span></button>
-                <button class="category-btn" id="temporaryTab">Temporary <span class="badge" id="temporaryCount">0</span></button>
-                <button class="category-btn" id="pinnedTab">Pinned <span class="badge" id="pinnedCount">0</span></button>
-                <button class="category-btn" id="mutedTab">Muted <span class="badge" id="mutedCount">0</span></button>
-            </div>
+            <!-- Category tabs removed — friends accessible from Messages/Calls plus menu -->
+            <!-- Hidden stubs keep JS wiring intact -->
+            <button id="allTab"       style="display:none"></button>
+            <button id="contactsTab"  style="display:none"></button>
+            <button id="friendsTab"   style="display:none"></button>
+            <button id="requestsTab"  style="display:none"></button>
+            <button id="temporaryTab" style="display:none"></button>
+            <button id="pinnedTab"    style="display:none"></button>
+            <button id="mutedTab"     style="display:none"></button>
             
             <div class="search-container">
                 <div class="search-box">
@@ -2573,19 +2574,7 @@
                     </div>
                 </div>
                 
-                <!-- Category Filters -->
-                <div class="category-filters">
-                    <div class="category-filters-container">
-                        <button class="category-filter-btn active" data-category="all">All</button>
-                        <button class="category-filter-btn acquaintance" data-category="acquaintance">Acquaintance</button>
-                        <button class="category-filter-btn friend" data-category="friend">Friend</button>
-                        <button class="category-filter-btn close-friend" data-category="close-friend">Close Friend</button>
-                        <button class="category-filter-btn family" data-category="family">Family</button>
-                        <button class="category-filter-btn business" data-category="business">Business</button>
-                        <button class="category-filter-btn pinned" data-category="pinned">⭐ Pinned</button>
-                        <button class="category-filter-btn muted" data-category="muted">🔇 Muted</button>
-                    </div>
-                </div>
+                <!-- Category filters removed — use search to find friends -->
                 
                 <div class="friend-list-content">
                     <!-- All Friends Section -->
