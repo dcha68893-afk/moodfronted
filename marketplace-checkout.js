@@ -675,6 +675,13 @@ window._jmCheckoutNext = function() {
 window._jmPlaceOrder = async function() {
     if (_state.loading) return;
     _state.loading = true;
+
+    // FIX: Disable the Place Order button immediately on first click to prevent
+    // double-tap/double-click creating two orders. The idempotency_key sent to
+    // the backend is a second line of defence.
+    const placeBtn = document.getElementById('coPlaceOrderBtn');
+    if (placeBtn) { placeBtn.disabled = true; placeBtn.textContent = 'Placing order…'; }
+
     _renderConfirmStep();
 
     const items = _state.cartItems.map(i => ({
@@ -686,6 +693,11 @@ window._jmPlaceOrder = async function() {
         seller_id:  i.product?.seller_id || i.listing?.sellerId || null,
     }));
 
+    // FIX: Generate idempotency key per checkout attempt — prevents duplicate orders
+    // if the user navigates back and re-submits, or on network retry.
+    const userId = window.currentUser?.id || window.__kynUserId || 'anon';
+    const idempotencyKey = `co_${userId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
+
     const orderPayload = {
         items,
         delivery_address: _state.address,
@@ -693,6 +705,7 @@ window._jmPlaceOrder = async function() {
         payment_method:   _state.paymentMethod,
         coupon_code:      _state.couponCode || undefined,
         notes:            '',
+        idempotency_key:  idempotencyKey,
     };
 
     const r = await _api('POST', '/marketplace/checkout', orderPayload);

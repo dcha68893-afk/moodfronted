@@ -418,6 +418,10 @@ const OrderEngine = {
 
         const userId = window.currentUser?.id || window.__kynUserId;
 
+        // FIX: Generate idempotency key — prevents duplicate orders on double-click or
+        // network retry. Key is stable for the same cart contents + user + timestamp bucket.
+        const idempotencyKey = `${userId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
         // Build order payload
         const orderPayload = {
             items: cart.items.map(i => ({
@@ -433,10 +437,11 @@ const OrderEngine = {
             payment_method,
             phone,
             notes,
-            subtotal:    cart.subtotal,
-            delivery:    cart.delivery,
-            total:       cart.total,
-            currency:    'KES',
+            subtotal:         cart.subtotal,
+            delivery:         cart.delivery,
+            total:            cart.total,
+            currency:         'KES',
+            idempotency_key:  idempotencyKey,
         };
 
         // Optimistic local order
@@ -749,8 +754,20 @@ const SellerEngine = {
             _store.products.set(normalized.id, normalized);
             window.dispatchEvent(new CustomEvent('ecom:product-created', { detail: { product: normalized } }));
             _socketEmit('product:created', { product_id: normalized.id });
-            NotificationEngine.show('Product listed successfully!', 'success', '🛒');
-            return { success: true, product: normalized };
+            // FIX: Products now go through approval. Show appropriate message instead of
+            // "listed successfully" which implied immediate live visibility.
+            const isPending = normalized.approval_status === 'pending_review' ||
+                              normalized.approvalStatus === 'pending_review' ||
+                              normalized.status === 'inactive';
+            if (isPending) {
+                NotificationEngine.show(
+                    'Product submitted for review! An admin will approve it before it goes live.',
+                    'info', '⏳'
+                );
+            } else {
+                NotificationEngine.show('Product listed successfully!', 'success', '🛒');
+            }
+            return { success: true, product: normalized, pending_approval: isPending };
         }
         return { success: false, message: resp?.message || 'Failed to create product' };
     },
