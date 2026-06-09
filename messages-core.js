@@ -1373,16 +1373,17 @@ try {
         quotaExceeded: false,
         _initialized: false,
         _initPromise: null,
-        
+
         init: function() {
             if (this._initialized) return this;
-            
-            this._initPromise = new Promise((resolve) => {
-                this._checkStorage();
-                this._initialized = true;
-                resolve(this);
-            });
-            
+            // ✅ FIX: Check storage availability IMMEDIATELY (synchronously) so that
+            // any set() calls made before the async init resolves still persist to
+            // localStorage. Previously storageAvailable stayed false until the Promise
+            // resolved, meaning early writes went only to memoryStore and were lost
+            // when the user navigated away.
+            this._checkStorage();
+            this._initialized = true;
+            this._initPromise = Promise.resolve(this);
             return this;
         },
         
@@ -3791,30 +3792,27 @@ try {
         },
         
         _saveMessagesToCache: function(chatId) {
-            // ROOT-FIX-C: Never write the entire _messages array (which may contain messages
-            // from multiple chats) to a single chat key.  Filter to only the messages that
-            // belong to this chatId before writing.
             const targetId = chatId || this._activeConversation?.id;
             if (targetId) {
                 try {
                     const _tid = String(targetId);
-                    // FIX: Only save messages that explicitly belong to this chat.
-                    // Old logic included chatId='' messages which caused cross-chat contamination:
-                    // messages from Chat A would appear in Chat B after a cache restore.
-                    // Messages with no chatId are stamped with the target chatId before saving.
                     const _toSave = this._messages
                         .filter(function(m) {
                             const mcid = String(m.chatId || m.conversationId || '');
                             return mcid === _tid;
                         })
                         .map(function(m) {
-                            // Stamp any message that is missing chatId so future reads can filter correctly
                             if (!m.chatId && !m.conversationId) {
                                 return Object.assign({}, m, { chatId: _tid });
                             }
                             return m;
                         });
-                    SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_tid}`, _toSave);
+                    const _key = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${_tid}`;
+                    SafeStorage.setJSON(_key, _toSave);
+                    // ✅ FIX: Direct localStorage write as guaranteed fallback.
+                    // SafeStorage may be in memoryStore-only mode during early lifecycle,
+                    // causing messages to vanish when the user leaves the app.
+                    try { localStorage.setItem(_key, JSON.stringify(_toSave)); } catch (_e) {}
                 } catch (e) {}
             }
         },
@@ -7233,9 +7231,34 @@ try {
         
         TypingManager.stopTyping();
         
+        // ✅ FIX: Flush ALL loaded conversations to localStorage on page unload/navigation.
+        // Previously only the active conversation was saved; messages in other loaded chats
+        // were held in memoryStore and lost when the user left the app.
+        try {
+            const allConvs = ChatManager.getConversations ? ChatManager.getConversations() : [];
+            allConvs.forEach(function(conv) {
+                try {
+                    const cid = conv.id || conv.chatId;
+                    if (!cid) return;
+                    const msgs = ChatManager._messages
+                        ? ChatManager._messages.filter(function(m) {
+                            return String(m.chatId || m.conversationId || '') === String(cid);
+                          })
+                        : [];
+                    if (msgs.length > 0) {
+                        const _key = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${cid}`;
+                        localStorage.setItem(_key, JSON.stringify(msgs));
+                    }
+                } catch (_) {}
+            });
+        } catch (_) {}
+
+        // Also save the active conversation explicitly
         if (ChatManager.getActiveChat()) {
             try {
-                SafeStorage.setJSON(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`, ChatManager.getMessages());
+                const _activeKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${ChatManager.getActiveChat().id}`;
+                SafeStorage.setJSON(_activeKey, ChatManager.getMessages());
+                localStorage.setItem(_activeKey, JSON.stringify(ChatManager.getMessages()));
             } catch (e) {}
         }
         
@@ -7518,6 +7541,24 @@ try {
     // FIX-014: Mark messages as read when the user returns to this tab.
     // Without this, messages received while the tab was hidden are never marked seen.
     document.addEventListener('visibilitychange', function() {
+        // ✅ FIX: Flush messages to localStorage when app goes to background on mobile.
+        // Mobile browsers may kill the page without firing beforeunload, but they
+        // reliably fire visibilitychange+hidden. Without this, messages sent/received
+        // while the chat was open disappear after the user switches apps.
+        if (document.visibilityState === 'hidden') {
+            try {
+                const activeChat = ChatManager.getActiveChat && ChatManager.getActiveChat();
+                if (activeChat) {
+                    const _key = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${activeChat.id}`;
+                    const _msgs = ChatManager.getMessages ? ChatManager.getMessages() : [];
+                    if (_msgs.length > 0) {
+                        localStorage.setItem(_key, JSON.stringify(_msgs));
+                    }
+                }
+            } catch (_) {}
+            return;
+        }
+
         if (document.visibilityState !== 'visible') return;
         try {
             const cm = window.MessagesCore && window.MessagesCore.ConversationManager;

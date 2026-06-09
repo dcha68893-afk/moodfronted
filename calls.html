@@ -3693,8 +3693,18 @@ window.__CALLS_IFRAME__ = {
 
                 const originalShowCallingScreen = window.showCallingScreen;
                 window.showCallingScreen = function(callInfo) {
-                    if (!isCallActive()) {
-                        hardReset('before-outgoing-call', { stopLocalMedia: true, resetCore: false });
+                    // ✅ FIX: Set callActive flags FIRST so isCallActive() is true
+                    // before anything checks it. Previously hardReset() was called
+                    // when isCallActive()=false (flags not yet set), wiping the DOM
+                    // and causing the outgoing screen to appear only after a delay.
+                    window.__callActive = true;
+                    if (window.UIState) {
+                        window.UIState.callActive = true;
+                        window.UIState.callState  = 'calling';
+                    }
+                    if (window.callsState) {
+                        window.callsState.callActive = true;
+                        window.callsState.callState  = 'calling';
                     }
                     return originalShowCallingScreen.apply(this, arguments);
                 };
@@ -4353,6 +4363,21 @@ window.__CALLS_IFRAME__ = {
                     }
                 }
             }
+
+            // ✅ FIX: Force callContainer visible BEFORE showScreen so there's
+            // zero frame delay between call start and seeing the outgoing screen.
+            var _container = document.getElementById('callContainer');
+            if (_container) {
+                _container.classList.add('active');
+                _container.classList.remove('idle-active');
+                _container.style.setProperty('display', 'flex', 'important');
+            }
+            // Also ensure the calls iframe wrapper is not hidden in the parent
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
+                }
+            } catch (_) {}
 
             if (typeof window.showScreen === 'function') window.showScreen('calling');
             _startOutgoingRingtone();
@@ -5318,10 +5343,9 @@ window.__CALLS_IFRAME__ = {
                 var _visObs = new IntersectionObserver(function(entries) {
                     entries.forEach(function(entry) {
                         if (entry.isIntersecting) {
-                            // ✅ FIX: Delay 1500ms to let OPEN_CALL_WITH_USER and call flags arrive first.
-                            // Parent sets __callActive then navigates, but navigation + iframe-render
-                            // can take >600ms. 1500ms ensures the flag is set before we check.
-                            setTimeout(_onIframeVisible, 1500);
+                            // ✅ FIX: 100ms is enough — root cause (hardReset guard + flag
+                            // ordering) is fixed. Flags are set before navigation now.
+                            setTimeout(_onIframeVisible, 100);
                         }
                     });
                 }, { threshold: 0.1 });

@@ -1,118 +1,202 @@
 /**
- * settings-broadcast-listener.js
- * Included in every module iframe (messages, calls, friends, status, tools, group).
- * Listens for settings changes broadcast by settingsManager.js and applies them
- * to this page's DOM immediately — so theme/font/accent changes propagate instantly.
+ * settings-broadcast-listener.js  v2
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Embedded in EVERY module iframe (messages, calls, status, group, friend,
+ * tools). Receives settings changes from the parent/settingsManager and applies
+ * them to this page instantly.
+ *
+ * Two delivery paths:
+ *   1. BroadcastChannel('kynecta_settings') — instant, same-origin cross-iframe
+ *   2. localStorage 'storage' event        — cross-tab fallback
+ *
+ * On first load it also bootstraps from 'knecta_settings_cache' so settings
+ * are applied before the parent even sends SETTINGS_UPDATED.
  */
-(function () {
+(function _settingsBroadcastListener() {
     'use strict';
 
-    function applySettingsToDom(settings) {
-        if (!settings) return;
+    // ── Resolve theme from raw value ─────────────────────────────────────────
+    function _resolveTheme(t) {
+        if (t === 'auto') return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        return t || 'dark';
+    }
+
+    // ── Apply a full settings object to this iframe's DOM ────────────────────
+    function applyFull(settings) {
+        if (!settings || typeof settings !== 'object') return;
         var root = document.documentElement;
+        var body = document.body;
 
-        // ── Theme ──────────────────────────────────────────────────────────────
-        var theme = (settings.appearance && settings.appearance.theme) ||
-                    localStorage.getItem('kynecta_theme') || 'dark';
-        root.setAttribute('data-theme', theme);
-        document.body.setAttribute('data-theme', theme);
-        if (theme === 'light') {
-            root.classList.remove('dark-theme', 'auto-theme');
-            root.classList.add('light-theme');
-        } else if (theme === 'dark') {
-            root.classList.remove('light-theme', 'auto-theme');
-            root.classList.add('dark-theme');
-        } else {
-            root.classList.remove('light-theme', 'dark-theme');
-            root.classList.add('auto-theme');
+        // — appearance —
+        var ap = settings.appearance || {};
+        if (ap.theme) {
+            var th = _resolveTheme(ap.theme);
+            root.setAttribute('data-theme', th);
+            if (body) body.setAttribute('data-theme', th);
+        }
+        if (ap.accentColor) root.style.setProperty('--accent-color', ap.accentColor);
+        if (ap.fontSize) {
+            var fmap = { small: '13px', medium: '15px', large: '17px', 'x-large': '19px' };
+            var fs = fmap[ap.fontSize] || ap.fontSize;
+            root.style.setProperty('--base-font-size', fs);
+            if (body) body.style.fontSize = fs;
+        }
+        if (ap.compactMode !== undefined) {
+            root.setAttribute('data-compact', ap.compactMode ? 'true' : 'false');
+            if (body) body.classList.toggle('compact-mode', !!ap.compactMode);
+        }
+        if (ap.animationsEnabled !== undefined || ap.animations !== undefined) {
+            var anim = ap.animationsEnabled !== undefined ? ap.animationsEnabled : ap.animations;
+            root.setAttribute('data-animations', anim ? 'true' : 'false');
+            if (body) body.classList.toggle('no-animations', !anim);
+        }
+        if (ap.reduceMotion !== undefined) {
+            root.setAttribute('data-reduce-motion', ap.reduceMotion ? 'true' : 'false');
+            if (body) body.classList.toggle('reduce-motion', !!ap.reduceMotion);
+            var rmStyle = document.getElementById('__rmStyle');
+            if (ap.reduceMotion) {
+                if (!rmStyle) {
+                    rmStyle = document.createElement('style');
+                    rmStyle.id = '__rmStyle';
+                    rmStyle.textContent = '*, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }';
+                    document.head.appendChild(rmStyle);
+                }
+            } else if (rmStyle) {
+                rmStyle.remove();
+            }
         }
 
-        // ── Accent colour ──────────────────────────────────────────────────────
-        var accent = settings.appearance && settings.appearance.accentColor;
-        if (accent) root.style.setProperty('--accent-color', accent);
+        // — privacy —
+        var pr = settings.privacy || {};
+        if (pr.readReceipts !== undefined)     { window.__readReceiptsEnabled   = pr.readReceipts;     root.setAttribute('data-read-receipts', pr.readReceipts ? 'true' : 'false'); }
+        if (pr.typingIndicators !== undefined) { window.__typingIndicatorsEnabled = pr.typingIndicators; root.setAttribute('data-typing-indicators', pr.typingIndicators ? 'true' : 'false'); }
+        if (pr.onlineStatus !== undefined)     window.__showOnlineStatus = pr.onlineStatus;
+        if (pr.lastSeen !== undefined)         window.__showLastSeen     = pr.lastSeen;
 
-        // ── Font size ──────────────────────────────────────────────────────────
-        var fsize = settings.appearance && settings.appearance.fontSize;
-        if (fsize) {
-            var sizeMap = { small: '13px', medium: '15px', large: '17px', 'x-large': '19px' };
-            root.style.setProperty('--base-font-size', sizeMap[fsize] || fsize);
-            document.body.style.fontSize = sizeMap[fsize] || fsize;
+        // — notifications —
+        var no = settings.notifications || {};
+        if (no.soundEnabled !== undefined || no.notificationSound !== undefined)
+            window.__notificationSoundEnabled = no.soundEnabled !== undefined ? no.soundEnabled : no.notificationSound;
+        if (no.vibrationEnabled !== undefined) window.__vibrationEnabled = no.vibrationEnabled;
+        if (no.messageNotifications !== undefined || no.enableNotifications !== undefined)
+            window.__messageNotificationsEnabled = no.messageNotifications !== undefined ? no.messageNotifications : no.enableNotifications;
+        if (no.groupNotifications !== undefined)   window.__groupNotificationsEnabled   = no.groupNotifications;
+        if (no.callNotifications !== undefined)    window.__callNotificationsEnabled    = no.callNotifications;
+        if (no.mentionNotifications !== undefined) window.__mentionNotificationsEnabled = no.mentionNotifications;
+        if (no.desktopEnabled !== undefined)       window.__desktopNotificationsEnabled = no.desktopEnabled;
+
+        // — chat —
+        var ch = settings.chat || {};
+        if (ch.enterToSend !== undefined || ch.enterKeySends !== undefined)
+            window.__enterToSend = ch.enterToSend !== undefined ? ch.enterToSend : ch.enterKeySends;
+        if (ch.messageFontSize !== undefined) {
+            var mfmap = { small: '13px', medium: '15px', large: '18px' };
+            root.style.setProperty('--message-font-size', mfmap[ch.messageFontSize] || '15px');
         }
+        if (ch.showTimestamps !== undefined) { window.__showTimestamps = ch.showTimestamps; root.setAttribute('data-show-timestamps', ch.showTimestamps ? 'true' : 'false'); }
+        if (ch.messagePreviews !== undefined) window.__messagePreviews = ch.messagePreviews;
+        if (ch.allowReactions !== undefined)  { window.__allowReactions = ch.allowReactions; root.setAttribute('data-allow-reactions', ch.allowReactions ? 'true' : 'false'); }
+        if (ch.showReadReceipts !== undefined) { window.__readReceiptsEnabled = ch.showReadReceipts; root.setAttribute('data-read-receipts', ch.showReadReceipts ? 'true' : 'false'); }
 
-        // ── Reduce motion ──────────────────────────────────────────────────────
-        var rm = settings.appearance && settings.appearance.reduceMotion;
-        if (rm === true) {
-            var style = document.getElementById('_rmStyle') || document.createElement('style');
-            style.id = '_rmStyle';
-            style.textContent = '*, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }';
-            if (!style.parentNode) document.head.appendChild(style);
-        } else {
-            var existing = document.getElementById('_rmStyle');
-            if (existing) existing.remove();
-        }
+        // — calls —
+        var ca = settings.calls || {};
+        if (ca.ringtoneEnabled !== undefined) window.__ringtoneEnabled = ca.ringtoneEnabled;
+        if (ca.callNotifications !== undefined) window.__callNotificationsEnabled = ca.callNotifications;
+        if (ca.videoQuality !== undefined)    window.__videoQuality    = ca.videoQuality;
+        if (ca.noiseCancellation !== undefined) window.__noiseCancellation = ca.noiseCancellation;
+        if (ca.backgroundBlur !== undefined)  window.__backgroundBlur  = ca.backgroundBlur;
 
-        // ── Notification sound ─────────────────────────────────────────────────
-        var notifSound = settings.notifications && settings.notifications.sound;
-        if (typeof notifSound !== 'undefined') window.__settingsNotifSound = notifSound;
+        // — advanced —
+        var adv = settings.advanced || {};
+        if (adv.developerMode !== undefined || adv.developerTools !== undefined)
+            window.__developerMode = adv.developerMode !== undefined ? adv.developerMode : adv.developerTools;
+        if (adv.debugLogging !== undefined || adv.debugMode !== undefined)
+            window.__debugLogging = adv.debugLogging !== undefined ? adv.debugLogging : adv.debugMode;
+        if (adv.performanceMode !== undefined) root.setAttribute('data-performance-mode', adv.performanceMode ? 'true' : 'false');
+        if (adv.dataSaver !== undefined) window.__dataSaver = adv.dataSaver;
+        if (adv.reduceMotion !== undefined) root.setAttribute('data-reduce-motion', adv.reduceMotion ? 'true' : 'false');
 
-        // ── Privacy: read receipts ────────────────────────────────────────────
-        var readReceipts = settings.privacy && settings.privacy.readReceipts;
-        if (typeof readReceipts !== 'undefined') window.__settingsReadReceipts = readReceipts;
+        // — mood —
+        var mo = settings.mood || {};
+        if (mo.currentMood !== undefined) { window.__currentMood = mo.currentMood; root.setAttribute('data-mood', mo.currentMood); }
+        if (mo.autoMoodDetection !== undefined) window.__autoMoodDetection = mo.autoMoodDetection;
+        if (mo.shareMoodStatus !== undefined)   window.__shareMoodStatus   = mo.shareMoodStatus;
 
-        // ── Privacy: online status ─────────────────────────────────────────────
-        var onlineStatus = settings.privacy && settings.privacy.onlineStatus;
-        if (typeof onlineStatus !== 'undefined') window.__settingsOnlineStatus = onlineStatus;
+        // — status —
+        var st = settings.status || {};
+        if (st.whoCanViewMyStatus !== undefined) window.__whoCanViewMyStatus = st.whoCanViewMyStatus;
+        if (st.autoExpireStatus !== undefined)   window.__autoExpireStatus   = st.autoExpireStatus;
+        if (st.allowStatusReplies !== undefined) window.__allowStatusReplies = st.allowStatusReplies;
 
-        // Store full settings for modules to read
+        // Store and notify
         window.__cachedSettings = settings;
+        try { document.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings })); } catch (_) {}
+        if (typeof window.onSettingsChange === 'function') { try { window.onSettingsChange(settings); } catch (_) {} }
+    }
 
-        // Notify any module-level listeners registered via window.onSettingsChange
-        if (typeof window.onSettingsChange === 'function') {
-            try { window.onSettingsChange(settings); } catch (_) {}
-        }
-        // Fire a DOM event for modules that prefer event listeners
+    // ── Apply a single key change ────────────────────────────────────────────
+    function applySingle(section, key, value) {
+        var patch = {};
+        patch[section] = {};
+        patch[section][key] = value;
+        applyFull(patch);
+    }
+
+    // ── Bootstrap from localStorage on load ─────────────────────────────────
+    function bootstrap() {
         try {
-            document.dispatchEvent(new CustomEvent('settingsUpdated', { detail: settings }));
+            var sources = [
+                localStorage.getItem('knecta_settings_cache'),
+                localStorage.getItem('kyn_app_settings'),
+                localStorage.getItem('user_settings')
+            ];
+            for (var i = 0; i < sources.length; i++) {
+                if (!sources[i]) continue;
+                var parsed = JSON.parse(sources[i]);
+                var s = (parsed && parsed.data && typeof parsed.data === 'object') ? parsed.data : parsed;
+                if (s && typeof s === 'object' && !Array.isArray(s) && Object.keys(s).length > 0) {
+                    applyFull(s);
+                    break;
+                }
+            }
         } catch (_) {}
     }
 
-    function loadAndApply() {
-        try {
-            var raw = localStorage.getItem('knecta_settings_cache') ||
-                      localStorage.getItem('app_settings') ||
-                      localStorage.getItem('kynecta_settings');
-            if (raw) applySettingsToDom(JSON.parse(raw));
-        } catch (_) {}
-    }
+    // Run immediately
+    bootstrap();
 
-    // Apply immediately on load
-    loadAndApply();
-
-    // Listen via BroadcastChannel (same origin, works across iframes)
+    // ── BroadcastChannel listener ────────────────────────────────────────────
     try {
         if (typeof BroadcastChannel !== 'undefined') {
             var bc = new BroadcastChannel('kynecta_settings');
             bc.onmessage = function (e) {
-                if (e.data && e.data.type === 'SETTINGS_CHANGED') {
-                    applySettingsToDom(e.data.settings);
-                }
+                if (!e.data) return;
+                if (e.data.type === 'SETTINGS_CHANGED' && e.data.settings) applyFull(e.data.settings);
+                if (e.data.type === 'SETTING_CHANGED' && e.data.section && e.data.key !== undefined)
+                    applySingle(e.data.section, e.data.key, e.data.value);
             };
         }
     } catch (_) {}
 
-    // Fallback: storage event (cross-tab, same origin)
+    // ── localStorage storage event (cross-tab fallback) ──────────────────────
     window.addEventListener('storage', function (e) {
-        if (e.key === 'kynecta_settings_broadcast' && e.newValue) {
-            try {
+        if (!e.newValue) return;
+        try {
+            if (e.key === 'kynecta_settings_broadcast') {
                 var d = JSON.parse(e.newValue);
-                if (d && d.type === 'SETTINGS_CHANGED') applySettingsToDom(d.settings);
-            } catch (_) {}
-        }
-        if ((e.key === 'knecta_settings_cache' || e.key === 'app_settings') && e.newValue) {
-            try { applySettingsToDom(JSON.parse(e.newValue)); } catch (_) {}
-        }
+                if (d.type === 'SETTINGS_CHANGED' && d.settings) applyFull(d.settings);
+                if (d.type === 'SETTING_CHANGED' && d.section && d.key !== undefined) applySingle(d.section, d.key, d.value);
+            }
+            if (e.key === 'knecta_settings_cache' || e.key === 'kyn_app_settings') {
+                var p = JSON.parse(e.newValue);
+                var s = (p && p.data) ? p.data : p;
+                if (s && typeof s === 'object') applyFull(s);
+            }
+        } catch (_) {}
     });
 
     // Expose for manual calls
-    window.__applyBroadcastSettings = applySettingsToDom;
+    window.__applyBroadcastSettings = applyFull;
+    window.__applyBroadcastSetting  = applySingle;
+    window.__bootstrapSettings      = bootstrap;
 })();

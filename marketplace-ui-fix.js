@@ -124,11 +124,11 @@ ${[['admin-dashboard','fa-tachometer-alt','Control'],['admin-products','fa-box',
 
 // ─── Rebuild bottom nav ───────────────────────────────────────────────────────
 function rebuildBottomNav(){
-    document.querySelectorAll('.jm-bottom-nav,#jmBottomNav').forEach(e=>e.remove());
-    const nav=document.createElement('div');
-    nav.id='jmBottomNav';
-    nav.style.cssText='display:flex!important;align-items:stretch!important;flex-shrink:0!important;height:56px!important;background:#fff!important;border-top:1px solid #e5e7eb!important;z-index:300!important;box-shadow:0 -2px 12px rgba(0,0,0,.07)!important';
-    const cur=window._state?.page||'home';
+    // ✅ FIX: Skip rebuild if nav already exists with all tabs — repeated rebuilds
+    // destroy event bindings set by Tool-core.js / Tool-ui.js on nav items,
+    // causing features to silently stop working after the 200/500/1000/2000/4000ms
+    // re-init timers fire.
+    const existingNav = document.getElementById('jmBottomNav');
     const TABS=[
         {p:'home',i:'fa-home',l:'Home'},
         {p:'categories',i:'fa-th-large',l:'Browse'},
@@ -136,6 +136,16 @@ function rebuildBottomNav(){
         {p:'orders',i:'fa-shopping-bag',l:'Orders'},
         {p:'account',i:'fa-user',l:'Account'},
     ];
+    if (existingNav && existingNav.querySelectorAll('[data-page]').length >= TABS.length) {
+        // Nav is intact — just update active state
+        setActive(window._state?.page || 'home');
+        return;
+    }
+    document.querySelectorAll('.jm-bottom-nav,#jmBottomNav').forEach(e=>e.remove());
+    const nav=document.createElement('div');
+    nav.id='jmBottomNav';
+    nav.style.cssText='display:flex!important;align-items:stretch!important;flex-shrink:0!important;height:56px!important;background:#fff!important;border-top:1px solid #e5e7eb!important;z-index:300!important;box-shadow:0 -2px 12px rgba(0,0,0,.07)!important';
+    const cur=window._state?.page||'home';
     nav.innerHTML=TABS.map(t=>`<button data-page="${t.p}" onclick="window._jmNav('${t.p}')" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;font-size:10px;font-weight:600;color:${t.p===cur?'#f57224':'#9ca3af'};padding:4px 2px;min-width:0;outline:none"><i class="fas ${t.i}" style="font-size:18px;color:inherit"></i><span style="color:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52px">${t.l}</span></button>`).join('')+`
     <button id="jmMoreTab" onclick="window._jmShowMore()" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;padding:4px 2px;min-width:0;outline:none">
         <i class="fas fa-ellipsis-h" style="font-size:18px;color:#f57224"></i>
@@ -156,12 +166,17 @@ function setActive(page){
     });
 }
 
-// ─── Patch _jmNav ─────────────────────────────────────────────────────────────
-const _origNav=window._jmNav;
-window._jmNav=function(p,s){_origNav?.call(this,p,s);setTimeout(()=>setActive(p),40);};
+// ─── Patch _jmNav (once only) ─────────────────────────────────────────────────
+if (!window.__jmNavPatched) {
+    window.__jmNavPatched = true;
+    const _origNav=window._jmNav;
+    window._jmNav=function(p,s){_origNav?.call(this,p,s);setTimeout(()=>setActive(p),40);};
+}
 
-// ─── Patch _jmNavMore — ensure page container has correct height ──────────────
-const _origMore=window._jmNavMore;
+// ─── Patch _jmNavMore (once only) — ensure page container has correct height ──
+if (!window.__jmNavMorePatched) {
+    window.__jmNavMorePatched = true;
+    const _origMore=window._jmNavMore;
 window._jmNavMore=function(page){
     const prefix=/^admin-/.test(page)?'admPage_':'sdPage_';
     const isMine=/^(seller-|my-listings|admin-|admin-approval)/.test(page);
@@ -177,12 +192,12 @@ window._jmNavMore=function(page){
         }
         document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
         el.classList.add('active');
-        // Force inline styles — critical so flex layout works
         el.style.cssText='display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important';
         hideMore();
     }
     _origMore?.call(this,page);
-};
+  };
+} // end __jmNavMorePatched guard
 
 // ─── Update More button in header ─────────────────────────────────────────────
 function updateMoreBtn(){
@@ -221,21 +236,25 @@ function init(){
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
 else init();
-[200,500,1000,2000,4000].forEach(t=>setTimeout(()=>{
-    rebuildBottomNav();updateMoreBtn();ensureAdminFab();
-},t));
+// ✅ FIX: Only run one deferred init at 300ms instead of 5 timers at 200/500/1000/2000/4000ms.
+// The repeated rebuilds were destroying event bindings set by Tool-core/Tool-ui between runs.
+// rebuildBottomNav is now idempotent (skips if nav intact), so one pass is enough.
+setTimeout(()=>{ rebuildBottomNav(); updateMoreBtn(); ensureAdminFab(); }, 300);
 window.addEventListener('load',()=>setTimeout(init,200));
 window.addEventListener('message',e=>{
     if(e.data?.type==='tools:active'||e.data?.type==='PARENT_READY') setTimeout(init,300);
 });
 
-// FIX: Re-check admin status whenever account page is opened (role may arrive late via postMessage)
-const _origJmNav = window._jmNav;
-window._jmNav = function(p, s) {
-    _origJmNav?.call(this, p, s);
-    if (p === 'account') setTimeout(ensureAdminFab, 100);
-    setTimeout(() => setActive(p), 40);
-};
+// FIX: Re-check admin status whenever account page is opened (merged into the
+// single __jmNavPatched wrapper above to prevent stacking overrides)
+if (!window.__jmNavAccountPatched) {
+    window.__jmNavAccountPatched = true;
+    const _origJmNav2 = window._jmNav;
+    window._jmNav = function(p, s) {
+        _origJmNav2?.call(this, p, s);
+        if (p === 'account') setTimeout(ensureAdminFab, 100);
+    };
+}
 
 // FIX: Also refresh when any session/role postMessage arrives (covers late parent injection)
 window.addEventListener('message', function(e) {
