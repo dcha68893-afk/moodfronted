@@ -5263,23 +5263,46 @@ window.__CALLS_IFRAME__ = {
         // When callsContent iframe becomes visible again (parent navigates back
         // to calls page), we must ensure the screens are properly visible.
         // This handles the dark screen on 2nd+ call from either user.
+        // FIX: Debounce _onIframeVisible so rapid visibility flicker
+        // (IntersectionObserver + visibilitychange firing together) doesn't
+        // call showScreen('idle') multiple times and kill an active call screen.
+        var _onIframeVisibleTimer = null;
         function _onIframeVisible() {
-            // ✅ FIX: Only reset to idle if NO call is currently active
-            // If a call IS in progress, leave the current screen alone
-            var callInProgress = (window.callsState && (window.callsState.callActive || 
+            if (_onIframeVisibleTimer) { clearTimeout(_onIframeVisibleTimer); }
+            _onIframeVisibleTimer = setTimeout(function() {
+                _onIframeVisibleTimer = null;
+                _doIframeVisibleCheck();
+            }, 300); // 300ms debounce — enough for flags to settle after call starts
+        }
+
+        function _doIframeVisibleCheck() {
+            // FIX: Expanded callInProgress — includes inCallScreen and all call states
+            // Also guards against calls that just started (within last 5 seconds)
+            var _recentlyStarted = window.__callInitiatedAt && (Date.now() - window.__callInitiatedAt < 5000);
+            var callInProgress = _recentlyStarted
+                              || window.__callActive
+                              || (window.callsState && (
+                                  window.callsState.callActive ||
                                   window.callsState.callState === 'initiating' ||
                                   window.callsState.callState === 'in-call' ||
-                                  window.callsState.callState === 'connected'))
-                              || (window.UIState && (window.UIState.callActive ||
+                                  window.callsState.callState === 'connected' ||
+                                  window.callsState.callState === 'ringing' ||
+                                  window.callsState.callState === 'incoming'))
+                              || (window.UIState && (
+                                  window.UIState.callActive ||
                                   window.UIState.callState === 'ringing' ||
-                                  window.UIState.callState === 'calling'))
-                              || window.__callActive
-                              // ✅ FIX: Incoming modal visible = call in progress
+                                  window.UIState.callState === 'calling' ||
+                                  window.UIState.callState === 'incoming' ||
+                                  window.UIState.callState === 'connected'))
+                              // DOM checks — most reliable source of truth
                               || (document.getElementById('incomingCallModal') &&
                                   document.getElementById('incomingCallModal').classList.contains('active'))
-                              // ✅ FIX: Calling screen visible = call in progress
                               || (document.getElementById('callingScreen') &&
-                                  document.getElementById('callingScreen').classList.contains('active'));
+                                  document.getElementById('callingScreen').classList.contains('active'))
+                              || (document.getElementById('inCallScreen') &&
+                                  document.getElementById('inCallScreen').classList.contains('active'))
+                              || document.body.classList.contains('call-active')
+                              || document.body.classList.contains('call-connected');
 
             if (callInProgress) {
                 _log('Iframe visible — call in progress, leaving screens alone');
@@ -5339,23 +5362,30 @@ window.__CALLS_IFRAME__ = {
             });
 
             // Listen for visibility via IntersectionObserver (iframe shown/hidden)
+            // FIX: Only trigger idle-restore when iframe becomes visible AND no call is active
             if (typeof IntersectionObserver !== 'undefined') {
                 var _visObs = new IntersectionObserver(function(entries) {
                     entries.forEach(function(entry) {
                         if (entry.isIntersecting) {
-                            // ✅ FIX: 100ms is enough — root cause (hardReset guard + flag
-                            // ordering) is fixed. Flags are set before navigation now.
-                            setTimeout(_onIframeVisible, 100);
+                            // FIX: 300ms delay — lets call setup flags settle before we check
+                            setTimeout(_onIframeVisible, 300);
                         }
                     });
                 }, { threshold: 0.1 });
                 _visObs.observe(document.documentElement);
             }
 
-            // Also handle document becoming visible
+            // Also handle document becoming visible — but NOT if a call is in progress
             document.addEventListener('visibilitychange', function() {
                 if (document.visibilityState === 'visible') {
-                    setTimeout(_onIframeVisible, 100);
+                    // FIX: Only reset to idle if no call flags are set
+                    // Don't use _onIframeVisible if we're already in a call
+                    var _anyCallFlag = window.__callActive ||
+                        document.body.classList.contains('call-active') ||
+                        document.body.classList.contains('call-connected');
+                    if (!_anyCallFlag) {
+                        setTimeout(_onIframeVisible, 300);
+                    }
                 }
             });
 

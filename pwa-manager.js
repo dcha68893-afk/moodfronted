@@ -90,14 +90,21 @@
     /* ── SW update: force instant activation ────────────────────────────── */
     if (!('serviceWorker' in navigator)) return;
 
-    // ✅ FIX: Listen for SW_UPDATED message from the service worker itself.
-    // When service-worker.js activates a new version, it posts SW_UPDATED to
-    // all clients. This handler shows the update banner immediately — even
-    // for installed PWAs that would otherwise only see it via 'updatefound'.
+    // FIX: SW_UPDATED fires on every activate, including FIRST-TIME install.
+    // Only show the update banner if there was already a controller before (i.e. this is a real update).
+    // Track whether SW was already controlling before registration.
+    var _hadControllerOnLoad = !!navigator.serviceWorker.controller;
+
     navigator.serviceWorker.addEventListener('message', function (event) {
         if (event.data && event.data.type === 'SW_UPDATED') {
             console.log('[pwa-manager] SW_UPDATED received — version:', event.data.version);
-            _showUpdateBanner();
+            // Only show banner if this is a real update (had a previous SW controlling)
+            if (_hadControllerOnLoad) {
+                _showUpdateBanner();
+            } else {
+                console.log('[pwa-manager] First install — suppressing update banner');
+                _hadControllerOnLoad = true; // future SW_UPDATED messages are real updates
+            }
         }
         if (event.data && event.data.type === 'CACHE_CLEARED') {
             console.log('[pwa-manager] Cache cleared by SW');
@@ -109,7 +116,11 @@
         function _skipAndBanner(sw) {
             if (!sw) return;
             sw.postMessage({ type: 'SKIP_WAITING' });
-            _showUpdateBanner();
+            // Only show banner if there was already a controller (real update, not first install)
+            if (_hadControllerOnLoad) {
+                _showUpdateBanner();
+            }
+            _hadControllerOnLoad = true;
         }
 
         // Already waiting on page load (user opened tab after bg update)
@@ -137,21 +148,18 @@
         console.warn('[pwa-manager] SW registration failed:', err);
     });
 
-    // PHASE15 FIX-PHASE-H: Prevent reload loop.
-    // The old code reloaded on EVERY controllerchange event after the user
-    // clicked Refresh. If skipWaiting() fires repeatedly (e.g. because the
-    // SW re-installs itself on a hot-deploy cycle), controllerchange fires
-    // multiple times → page reloads repeatedly → flash/loop.
-    // Fix: only reload ONCE per user-initiated update, then immediately clear
-    // the flag so subsequent controllerchange events are silently ignored.
+    // FIX: Prevent reload loop on controllerchange.
+    // Only reload ONCE when user explicitly tapped Refresh (pwa_update_acknowledged set).
+    // Set _refreshing=true BEFORE reload to block any re-entrant controllerchange events.
     var _refreshing = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
         if (_refreshing) return;
         var ackKey = 'pwa_update_acknowledged';
         if (sessionStorage.getItem(ackKey)) {
             _refreshing = true;
-            sessionStorage.removeItem(ackKey); // clear BEFORE reload to avoid loop
-            window.location.reload();
+            sessionStorage.removeItem(ackKey); // clear BEFORE reload
+            // Short delay lets the SW fully settle before reload
+            setTimeout(function() { window.location.reload(); }, 50);
         }
     });
 

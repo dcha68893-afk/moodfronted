@@ -2279,6 +2279,10 @@
                     // received the incoming call event.
                     document.body.classList.add('call-screen-active');
                     window.__activeCallInProgress = true;
+                    // FIX: Set __callActive = true so _onIframeVisible in calls.html
+                    // sees a call in progress and does NOT reset to idle screen.
+                    window.__callActive = true;
+                    window.__callInitiatedAt = Date.now(); // used by 5s recency guard
                     window.__callDispatchedAt = Date.now(); // suppress stale CALL_FORCE_ENDED echoes for 15s
                     window.__lastActivePage = window.__currentPage || 'messages';
                     banner.style.display = 'none';

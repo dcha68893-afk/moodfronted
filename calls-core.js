@@ -12765,13 +12765,41 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        // ✅ FIX: Send ICE via direct postMessage + safeSend (bypasses state queue)
+        // FIX: Include targetUserId in ICE candidate payload.
+        // Resolve remote user from callsState so backend can route to correct peer.
         if (this._currentCallId) {
-            var _icePayload = { callId: this._currentCallId, candidate: event.candidate, timestamp: Date.now() };
+            var _iceRemoteUserId = (function() {
+                if (callsState._isCaller) {
+                    // Caller sends ICE to receiver (participants[0])
+                    if (callsState.activeCall && callsState.activeCall.participants && callsState.activeCall.participants.length > 0) {
+                        var p = callsState.activeCall.participants[0];
+                        return typeof p === 'object' ? (p.id || p.userId) : p;
+                    }
+                } else {
+                    // Receiver sends ICE back to caller
+                    return (callsState.callData && callsState.callData.callerId) || null;
+                }
+                return null;
+            })();
+            var _icePayload = {
+                callId: this._currentCallId,
+                candidate: event.candidate,
+                targetUserId: _iceRemoteUserId,
+                remoteUserId: _iceRemoteUserId,
+                timestamp: Date.now()
+            };
             if (window.parent && window.parent !== window) {
                 window.parent.postMessage({ type: 'ICE_CANDIDATE', payload: _icePayload, source: 'calls-core-direct' }, '*');
             }
-            safeSend('ICE_CANDIDATE', _icePayload, false);
+            // Also emit directly via socket for lowest latency
+            var _iceSock = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+            if (_iceSock && typeof _iceSock.emit === 'function' && _iceRemoteUserId) {
+                _iceSock.emit('call:ice_candidate', {
+                    callId: this._currentCallId, targetUserId: _iceRemoteUserId, candidate: event.candidate,
+                });
+            } else {
+                safeSend('ICE_CANDIDATE', _icePayload, false);
+            }
         }
 
 
@@ -28750,11 +28778,18 @@ _escapeHtml: function(text) {
 
         if (WebRTCManager._peerConnection && callsState.callActive) {
 
-
-
             console.log('[CallsCore] ✅ CALL ACCEPTED — creating SDP offer for WebRTC');
 
-
+            // FIX: Resolve the target user (receiver) for the offer.
+            // callsState.activeCall.participants[0] is set when startCall() is called.
+            // Also check callData fields as fallback.
+            var _resolveOfferTarget = function() {
+                if (callsState.activeCall && callsState.activeCall.participants && callsState.activeCall.participants.length > 0) {
+                    var p = callsState.activeCall.participants[0];
+                    return typeof p === 'object' ? (p.id || p.userId) : p;
+                }
+                return callData && (callData.receiverId || callData.calleeId || callData.targetUserId || callData.remoteUserId) || null;
+            };
 
             WebRTCManager.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
 
@@ -28762,30 +28797,41 @@ _escapeHtml: function(text) {
 
                 .then(function(offer) {
 
-
-
                     const callId = callsState.serverCallId || callsState.activeCallId || (callData && callData.callId);
 
+                    // FIX: targetUserId MUST be in the payload — backend silently drops offer if missing.
+                    // Resolve from participants (set at startCall) or callData fields.
+                    var _resolvedTarget = (function() {
+                        if (callsState.activeCall && callsState.activeCall.participants && callsState.activeCall.participants.length > 0) {
+                            var p = callsState.activeCall.participants[0];
+                            return typeof p === 'object' ? (p.id || p.userId) : p;
+                        }
+                        return (callData && (callData.receiverId || callData.calleeId || callData.targetUserId || callData.remoteUserId)) || null;
+                    })();
 
-
-                    // ✅ FIX: Send via direct postMessage (bypasses safeSend state check) + safeSend for reliability
-                    var _offerPayload = { callId: callId, offer: offer, timestamp: Date.now() };
+                    var _offerPayload = {
+                        callId: callId,
+                        offer: offer,
+                        targetUserId: _resolvedTarget,
+                        remoteUserId: _resolvedTarget,
+                        timestamp: Date.now()
+                    };
                     if (window.parent && window.parent !== window) {
                         window.parent.postMessage({ type: 'SIGNAL_OFFER', payload: _offerPayload, source: 'calls-core-direct' }, '*');
                     }
-                    // FIX-CALL-DIRECT: Bypass postMessage for WebRTC offers — emit directly via Socket.IO
+                    // FIX-CALL-DIRECT: Emit directly via Socket.IO for lowest latency
                     var _directSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
-                    var _offerId = _offerPayload.callId || _offerPayload.sessionId;
-                    var _offTarget = _offerPayload.targetUserId || _offerPayload.remoteUserId;
+                    var _offerId = callId;
+                    var _offTarget = _resolvedTarget;
                     if (_directSocket && typeof _directSocket.emit === 'function' && _offTarget) {
                         _directSocket.emit('call:webrtc_offer', {
                             callId: _offerId, targetUserId: _offTarget,
-                            offer: _offerPayload.offer || _offerPayload.sdp || _offerPayload,
+                            offer: offer,
                         });
-                        console.log('[CallsCore] ✅ OFFER sent directly via Socket.IO (bypassing postMessage)');
+                        console.log('[CallsCore] ✅ OFFER sent via Socket.IO to targetUserId:', _offTarget);
                     } else {
                         safeSend('SIGNAL_OFFER', _offerPayload, false);
-                        console.log('[CallsCore] ✅ OFFER SENT via safeSend (Socket.IO socket unavailable)');
+                        console.log('[CallsCore] ✅ OFFER sent via safeSend (no direct socket). targetUserId:', _offTarget);
                     }
 
 
@@ -30175,14 +30221,32 @@ window.CallHandlers = {
 
 
 
-        // ✅ FIX: Direct postMessage for SIGNAL_ANSWER + safeSend
-        var _answerPayload = { callId: payload.callId || callsState.activeCallId, answer: answer, timestamp: Date.now() };
+        // FIX: targetUserId MUST be in the answer payload — the backend routes the
+        // answer back to the original caller. payload.callerId is the caller's ID.
+        var _answerTargetId = (payload && (payload.callerId || payload.callerId)) ||
+                              (callsState.callData && callsState.callData.callerId) || null;
+        var _answerPayload = {
+            callId: payload.callId || callsState.activeCallId,
+            answer: answer,
+            targetUserId: _answerTargetId,
+            remoteUserId: _answerTargetId,
+            timestamp: Date.now()
+        };
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({ type: 'SIGNAL_ANSWER', payload: _answerPayload, source: 'calls-core-direct' }, '*');
         }
-        safeSend('SIGNAL_ANSWER', _answerPayload, false);
+        // Also emit directly via Socket.IO for reliability
+        var _directSockAns = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+        if (_directSockAns && typeof _directSockAns.emit === 'function' && _answerTargetId) {
+            _directSockAns.emit('call:webrtc_answer', {
+                callId: _answerPayload.callId, targetUserId: _answerTargetId, answer: answer,
+            });
+            console.log('[CallsCore] ✅ ANSWER sent via Socket.IO to caller:', _answerTargetId);
+        } else {
+            safeSend('SIGNAL_ANSWER', _answerPayload, false);
+            console.log('[CallsCore] ✅ ANSWER sent via safeSend. targetUserId:', _answerTargetId);
+        }
         DiagnosticsAgent.record('signaling_send');
-        console.log('[CallsCore] ✅ ANSWER SENT to remote peer (direct + safeSend)');
 
 
 
@@ -37514,7 +37578,16 @@ clearActiveCall: function() {
 
 
     window.addEventListener('beforeunload', () => {
-        // ✅ FIX: Only cleanup on unload if NO active call — prevents SW reload from destroying calls
+        // FIX: Skip cleanup if this is a PWA service-worker-triggered reload.
+        // When the user taps "Refresh" in the update banner, pwa-manager sets
+        // pwa_update_acknowledged in sessionStorage before reloading. We must
+        // not send CALL_ENDED in that case — the call is still alive.
+        var _isPwaReload = false;
+        try { _isPwaReload = !!sessionStorage.getItem('pwa_update_acknowledged'); } catch(_) {}
+        if (_isPwaReload) {
+            console.log('[calls-core] beforeunload: skipping cleanup — PWA update reload');
+            return;
+        }
         if (window.callCore && window.callCore.cleanup) {
             var _cs = window.callsState;
             var _callInProgress = _cs && (_cs.callActive || _cs.callState === 'in-call' || _cs.callState === 'connected' || _cs.callState === 'initiating');

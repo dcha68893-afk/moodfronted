@@ -2138,14 +2138,34 @@
                     if (!validateLoginInputs(identifier, password, method)) return;
                     setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Logging in...', true);
 
-                    // Show wake-up notice after 4 seconds (Render cold start can take ~50s)
-                    const wakeTimer = setTimeout(() => {
+                    // FIX: Only show "waking up" if the server health probe actually fails/is slow.
+                    // Previously this fired after 4s unconditionally — even when the server was
+                    // fully awake, giving users a false "sleeping" message on every login attempt.
+                    let wakeTimer = null;
+                    let _wakeNotified = false;
+                    const _showWakeNotice = () => {
+                        if (_wakeNotified) return;
+                        _wakeNotified = true;
                         const btn = document.getElementById('login-button');
                         if (btn) btn.title = 'Server is waking up, please wait…';
                         const sp = document.getElementById('loginButtonText');
                         if (sp) sp.textContent = 'Server waking up… (~30s)';
                         window.CoreUtils?.showNotification('Please wait', 'The server is starting up. This takes about 30 seconds on the first request.', 'info');
-                    }, 4000);
+                    };
+                    // Probe the health endpoint: if it doesn't respond within 3s, server is sleeping
+                    (async () => {
+                        try {
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://moodchat-fy56.onrender.com';
+                            const ctrl = new AbortController();
+                            const tid = setTimeout(() => { ctrl.abort(); _showWakeNotice(); }, 3000);
+                            const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
+                            clearTimeout(tid);
+                            // Only show notice if server returned non-ok (still booting)
+                            if (!hr.ok) _showWakeNotice();
+                        } catch (_) {
+                            _showWakeNotice();
+                        }
+                    })();
 
                     const doLogin = async () => {
                         const baseUrl = window.__getApiOrigin
@@ -2240,12 +2260,28 @@
                     if (!validateRegisterInputs(displayName, username, email, password, confirm, accept)) return;
                     setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Creating account...', true);
 
-                    // Show wake-up notice after 4 seconds
-                    const wakeTimerReg = setTimeout(() => {
+                    // FIX: Only show "waking up" if the health probe actually fails/times out
+                    let wakeTimerReg = null;
+                    let _wakeRegNotified = false;
+                    const _showWakeNoticeReg = () => {
+                        if (_wakeRegNotified) return;
+                        _wakeRegNotified = true;
                         const sp = document.getElementById('registerButtonText');
                         if (sp) sp.textContent = 'Server waking up… (~30s)';
                         window.CoreUtils?.showNotification('Please wait', 'The server is starting up. This takes about 30 seconds on the first request.', 'info');
-                    }, 4000);
+                    };
+                    (async () => {
+                        try {
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://moodchat-fy56.onrender.com';
+                            const ctrl = new AbortController();
+                            const tid = setTimeout(() => { ctrl.abort(); _showWakeNoticeReg(); }, 3000);
+                            const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
+                            clearTimeout(tid);
+                            if (!hr.ok) _showWakeNoticeReg();
+                        } catch (_) {
+                            _showWakeNoticeReg();
+                        }
+                    })();
 
                     try {
                         let response;
