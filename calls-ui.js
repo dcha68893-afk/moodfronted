@@ -7324,59 +7324,62 @@ handleContactItemClick: function(e) {
                 showNotification('Screen sharing is not supported in your browser', 'error');
                 return;
             }
-            
+
+            const _onShareStarted = (stream) => {
+                UIState.screenStream = stream;
+                UIState.isScreenSharing = true;
+                if (elements.screenShareBtn) elements.screenShareBtn.classList.add('active');
+                if (elements.screenShareBtn) elements.screenShareBtn.setAttribute('aria-label', 'Stop screen share');
+                showNotification('Screen sharing started — annotation toolbar enabled', 'success');
+                if (window._kynAnnounce) window._kynAnnounce('Screen sharing started.');
+
+                // ── Screen Share Annotation Toolbar ───────────────────────────
+                // Renders a floating draw-over-screen toolbar once sharing starts.
+                _KynScreenAnnotation.attach(stream);
+
+                // Auto-stop annotation when track ends (user stops via browser UI)
+                stream.getVideoTracks().forEach(t => {
+                    t.addEventListener('ended', () => {
+                        UIEventHandlers.stopScreenShare();
+                        _KynScreenAnnotation.detach();
+                    });
+                });
+            };
+
             if (coreInstance && coreInstance.startScreenShare) {
                 coreInstance.startScreenShare()
                     .then(result => {
-                        if (result.success) {
+                        if (result && result.success && result.stream) {
+                            _onShareStarted(result.stream);
+                        } else if (result && result.success) {
                             UIState.isScreenSharing = true;
-                            if (elements.screenShareBtn) {
-                                elements.screenShareBtn.classList.add('active');
-                            }
+                            if (elements.screenShareBtn) elements.screenShareBtn.classList.add('active');
                             showNotification('Screen sharing started', 'success');
                         } else {
-                            showNotification(result.error || 'Failed to start screen sharing', 'error');
+                            showNotification((result && result.error) || 'Failed to start screen sharing', 'error');
                         }
                     })
-                    .catch(error => {
-                        UILogger.error('Error starting screen share', error);
-                        showNotification('Failed to start screen sharing', 'error');
-                    });
+                    .catch(err => showNotification('Failed to start screen sharing', 'error'));
             } else {
-                navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-                    .then(stream => {
-                        UIState.screenStream = stream;
-                        UIState.isScreenSharing = true;
-                        
-                        if (elements.screenShareBtn) {
-                            elements.screenShareBtn.classList.add('active');
-                        }
-                        
-                        showNotification('Screen sharing started', 'success');
-                    })
-                    .catch(error => {
-                        UILogger.error('Error starting screen share', error);
-                        showNotification('Failed to start screen sharing', 'error');
-                    });
+                navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true })
+                    .then(_onShareStarted)
+                    .catch(err => showNotification('Failed to start screen sharing', 'error'));
             }
         },
-        
+
         stopScreenShare: function() {
-            if (coreInstance && coreInstance.stopScreenShare) {
-                coreInstance.stopScreenShare();
-            }
-            
+            if (coreInstance && coreInstance.stopScreenShare) coreInstance.stopScreenShare();
             if (UIState.screenStream) {
-                UIState.screenStream.getTracks().forEach(track => track.stop());
+                UIState.screenStream.getTracks().forEach(t => t.stop());
                 UIState.screenStream = null;
             }
-            
             UIState.isScreenSharing = false;
-            
             if (elements.screenShareBtn) {
                 elements.screenShareBtn.classList.remove('active');
+                elements.screenShareBtn.setAttribute('aria-label', 'Share screen');
             }
-            
+            _KynScreenAnnotation.detach();
+            if (window._kynAnnounce) window._kynAnnounce('Screen sharing stopped.');
             showNotification('Screen sharing stopped', 'info');
         },
         
@@ -11034,5 +11037,476 @@ if (detectExistingCore()) {
         body: JSON.stringify({ rating, feedback }),
       }).catch(() => {});
     } catch (_) {}
+  }
+})();
+
+// ── Live Captions (Web Speech API) ───────────────────────────────────────────
+// Enables real-time speech-to-text during calls using the browser's built-in
+// SpeechRecognition API. Captions appear in an overlay at the bottom of the
+// call screen and are relayed to remote participants via the data channel.
+(function initLiveCaptions() {
+  'use strict';
+
+  var _recognition = null;
+  var _captionActive = false;
+  var _captionOverlay = null;
+  var _finalBuffer = '';
+  var _relayTimer = null;
+
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function _createOverlay() {
+    if (_captionOverlay) return _captionOverlay;
+    var el = document.createElement('div');
+    el.id = 'kyn-captions-overlay';
+    el.setAttribute('role', 'log');
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('aria-label', 'Live captions');
+    el.style.cssText = [
+      'position:fixed','bottom:80px','left:50%','transform:translateX(-50%)',
+      'max-width:70%','min-width:280px','z-index:9998',
+      'background:rgba(0,0,0,0.78)','color:#fff','font-size:15px',
+      'line-height:1.5','border-radius:10px','padding:10px 16px',
+      'display:none','text-align:center','word-wrap:break-word',
+      'pointer-events:none','transition:opacity 0.3s'
+    ].join(';');
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.setAttribute('aria-label', 'Close live captions');
+    closeBtn.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:none;color:#aaa;cursor:pointer;font-size:12px;pointer-events:auto;';
+    closeBtn.addEventListener('click', function() { stopCaptions(); });
+
+    _captionOverlay = el;
+    el.appendChild(closeBtn);
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function _showCaption(text, isFinal) {
+    var overlay = _createOverlay();
+    overlay.style.display = 'block';
+    overlay.style.opacity = '1';
+
+    var p = overlay.querySelector('p') || document.createElement('p');
+    p.style.margin = '0';
+    p.textContent = (isFinal ? '' : '…') + text;
+    if (!overlay.querySelector('p')) overlay.insertBefore(p, overlay.firstChild);
+
+    // Auto-hide after silence
+    clearTimeout(_relayTimer);
+    if (isFinal) {
+      _relayTimer = setTimeout(function() {
+        overlay.style.opacity = '0';
+        setTimeout(function() { overlay.style.display = 'none'; }, 300);
+      }, 4000);
+    }
+  }
+
+  function startCaptions(lang) {
+    if (!SpeechRecognition) {
+      console.warn('[Captions] SpeechRecognition not supported in this browser');
+      if (window._kynAnnounce) window._kynAnnounce('Live captions are not supported in this browser.');
+      return false;
+    }
+    if (_captionActive) return true;
+
+    _recognition = new SpeechRecognition();
+    _recognition.continuous     = true;
+    _recognition.interimResults = true;
+    _recognition.maxAlternatives = 1;
+    _recognition.lang = lang || navigator.language || 'en-US';
+
+    _recognition.onresult = function(e) {
+      var interim = '', final = '';
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var txt = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          final += txt;
+          _finalBuffer += txt + ' ';
+        } else {
+          interim += txt;
+        }
+      }
+      _showCaption(final || interim, !!final);
+
+      // Relay caption to remote peers via data channel + socket
+      if (final) {
+        var payload = { type: 'CAPTION', text: final.trim(), ts: Date.now() };
+        window.dispatchEvent(new CustomEvent('kyn:datachannel:send', { detail: payload }));
+        try {
+          var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
+          var cid = window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId);
+          if (sock && sock.connected && cid) {
+            sock.emit('call:caption', { callId: cid, text: final.trim(), senderId: window.callsState && window.callsState.userId, ts: Date.now() });
+          }
+        } catch(_e) {}
+      }
+    };
+
+    _recognition.onerror = function(e) {
+      if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        console.warn('[Captions] Recognition error:', e.error);
+      }
+    };
+
+    _recognition.onend = function() {
+      // Auto-restart unless explicitly stopped
+      if (_captionActive) {
+        try { _recognition.start(); } catch(_e) {}
+      }
+    };
+
+    try {
+      _recognition.start();
+      _captionActive = true;
+      _createOverlay();
+      if (window._kynAnnounce) window._kynAnnounce('Live captions started.');
+      return true;
+    } catch(e) {
+      console.error('[Captions] Failed to start:', e.message);
+      return false;
+    }
+  }
+
+  function stopCaptions() {
+    _captionActive = false;
+    if (_recognition) {
+      try { _recognition.stop(); } catch(_e) {}
+      _recognition = null;
+    }
+    var overlay = document.getElementById('kyn-captions-overlay');
+    if (overlay) overlay.style.display = 'none';
+    if (window._kynAnnounce) window._kynAnnounce('Live captions stopped.');
+  }
+
+  function toggleCaptions(lang) {
+    return _captionActive ? stopCaptions() : startCaptions(lang);
+  }
+
+  // Listen for remote captions relayed via socket
+  window.addEventListener('kyn:datachannel:message', function(e) {
+    var msg = e.detail || e.data;
+    if (!msg || msg.type !== 'CAPTION') return;
+    // Show remotely with speaker attribution if available
+    var text = (msg.senderName ? msg.senderName + ': ' : '') + msg.text;
+    _showCaption(text, true);
+  });
+
+  // Socket relay from backend
+  window.addEventListener('kyn:socket:call:caption', function(e) {
+    var d = e.detail || {};
+    _showCaption((d.senderName || '') + (d.senderName ? ': ' : '') + d.text, true);
+  });
+
+  // Stop on call end
+  window.addEventListener('callCore:stateChange', function(e) {
+    if (e.detail && (e.detail.state === 'IDLE' || e.detail.state === 'ENDED')) {
+      stopCaptions();
+    }
+  });
+
+  // Public API
+  window.KynLiveCaptions = { start: startCaptions, stop: stopCaptions, toggle: toggleCaptions, isActive: function() { return _captionActive; } };
+})();
+
+// ── Screen Share Annotation ───────────────────────────────────────────────────
+// Floating drawing toolbar that overlays the screen during screen share.
+// Uses a transparent canvas placed over the call video container.
+var _KynScreenAnnotation = (function() {
+  'use strict';
+  var _canvas = null, _ctx = null, _toolbar = null, _drawing = false;
+  var _tool = 'pen', _color = '#ff3b3b', _width = 4;
+  var _lx = 0, _ly = 0;
+
+  function attach() {
+    if (_canvas) return; // Already attached
+
+    var container = document.getElementById('callExpandedPanel') ||
+                    document.getElementById('callOverlay') ||
+                    document.body;
+    if (container !== document.body) container.style.position = 'relative';
+
+    _canvas = document.createElement('canvas');
+    _canvas.id = 'kyn-annotation-canvas';
+    _canvas.setAttribute('aria-label', 'Screen annotation canvas');
+    _canvas.style.cssText = [
+      'position:absolute','top:0','left:0','width:100%','height:100%',
+      'z-index:500','pointer-events:none','cursor:crosshair'
+    ].join(';');
+
+    _toolbar = document.createElement('div');
+    _toolbar.id = 'kyn-annotation-toolbar';
+    _toolbar.setAttribute('role', 'toolbar');
+    _toolbar.setAttribute('aria-label', 'Annotation tools');
+    _toolbar.style.cssText = [
+      'position:absolute','top:8px','left:50%','transform:translateX(-50%)',
+      'z-index:501','background:rgba(0,0,0,0.72)','border-radius:10px',
+      'padding:6px 12px','display:flex','gap:8px','align-items:center'
+    ].join(';');
+    _toolbar.innerHTML = [
+      '<button id="ann-pen"    aria-label="Pen"    aria-pressed="true"  style="background:#6366f1;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12px;">✏️ Pen</button>',
+      '<button id="ann-arrow"  aria-label="Arrow"  aria-pressed="false" style="background:#374151;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12px;">→ Arrow</button>',
+      '<button id="ann-eraser" aria-label="Eraser" aria-pressed="false" style="background:#374151;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12px;">⌫ Erase</button>',
+      '<input  id="ann-color"  type="color" value="#ff3b3b" title="Color" aria-label="Annotation color" style="width:26px;height:26px;border:none;cursor:pointer;border-radius:4px;">',
+      '<button id="ann-clear"  aria-label="Clear all annotations" style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12px;">🗑 Clear</button>',
+      '<button id="ann-toggle" aria-label="Toggle draw mode" aria-pressed="false" style="background:#374151;color:#fff;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12px;">Draw: OFF</button>',
+      '<button id="ann-close"  aria-label="Close annotation toolbar" style="background:#374151;color:#aaa;border:none;border-radius:5px;padding:4px 10px;cursor:pointer;font-size:12px;">✕</button>',
+    ].join('');
+
+    container.appendChild(_canvas);
+    container.appendChild(_toolbar);
+
+    // Resize canvas
+    function _resize() {
+      var r = _canvas.getBoundingClientRect();
+      _canvas.width  = r.width  || 1280;
+      _canvas.height = r.height || 720;
+    }
+    _resize();
+    window.addEventListener('resize', _resize);
+
+    _ctx = _canvas.getContext('2d');
+    _ctx.lineCap = _ctx.lineJoin = 'round';
+
+    // Pointer events
+    _canvas.addEventListener('pointerdown', function(e) {
+      if (!_drawMode) return;
+      _drawing = true;
+      var r = _canvas.getBoundingClientRect();
+      _lx = e.clientX - r.left; _ly = e.clientY - r.top;
+      _canvas.setPointerCapture(e.pointerId);
+      // Arrow: record start point
+      if (_tool === 'arrow') { _arrowStart = { x: _lx, y: _ly }; _arrowSnapshot = _ctx.getImageData(0, 0, _canvas.width, _canvas.height); }
+    });
+    _canvas.addEventListener('pointermove', function(e) {
+      if (!_drawing || !_drawMode) return;
+      var r = _canvas.getBoundingClientRect();
+      var x = e.clientX - r.left, y = e.clientY - r.top;
+      if (_tool === 'eraser') {
+        _ctx.globalCompositeOperation = 'destination-out';
+        _ctx.beginPath(); _ctx.arc(x, y, 18, 0, Math.PI * 2); _ctx.fill();
+        _ctx.globalCompositeOperation = 'source-over';
+      } else if (_tool === 'arrow' && _arrowStart) {
+        _ctx.putImageData(_arrowSnapshot, 0, 0);
+        _drawArrow(_arrowStart.x, _arrowStart.y, x, y);
+      } else {
+        _ctx.strokeStyle = _color; _ctx.lineWidth = _width;
+        _ctx.beginPath(); _ctx.moveTo(_lx, _ly); _ctx.lineTo(x, y); _ctx.stroke();
+      }
+      _lx = x; _ly = y;
+      _relayAnnotation({ tool: _tool, x0: _lx, y0: _ly, x1: x, y1: y, color: _color, width: _width });
+    });
+    _canvas.addEventListener('pointerup',    function() { _drawing = false; });
+    _canvas.addEventListener('pointerleave', function() { _drawing = false; });
+
+    // Toolbar handlers
+    var _drawMode = false, _arrowStart = null, _arrowSnapshot = null;
+    document.getElementById('ann-toggle').addEventListener('click', function() {
+      _drawMode = !_drawMode;
+      _canvas.style.pointerEvents = _drawMode ? 'auto' : 'none';
+      this.textContent = 'Draw: ' + (_drawMode ? 'ON' : 'OFF');
+      this.style.background = _drawMode ? '#22c55e' : '#374151';
+      this.setAttribute('aria-pressed', String(_drawMode));
+    });
+    document.getElementById('ann-pen').addEventListener('click', function() { _tool = 'pen'; _setActive(this); });
+    document.getElementById('ann-arrow').addEventListener('click', function() { _tool = 'arrow'; _setActive(this); });
+    document.getElementById('ann-eraser').addEventListener('click', function() { _tool = 'eraser'; _setActive(this); });
+    document.getElementById('ann-color').addEventListener('input', function(e) { _color = e.target.value; });
+    document.getElementById('ann-clear').addEventListener('click', function() {
+      _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
+      _relayAnnotation({ action: 'clear' });
+    });
+    document.getElementById('ann-close').addEventListener('click', function() { detach(); });
+  }
+
+  function _setActive(btn) {
+    ['ann-pen','ann-arrow','ann-eraser'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) { el.style.background = '#374151'; el.setAttribute('aria-pressed','false'); }
+    });
+    btn.style.background = '#6366f1'; btn.setAttribute('aria-pressed','true');
+  }
+
+  function _drawArrow(x0, y0, x1, y1) {
+    _ctx.strokeStyle = _color; _ctx.lineWidth = _width;
+    _ctx.beginPath(); _ctx.moveTo(x0, y0); _ctx.lineTo(x1, y1); _ctx.stroke();
+    var angle = Math.atan2(y1 - y0, x1 - x0);
+    var hw = 14;
+    _ctx.beginPath();
+    _ctx.moveTo(x1, y1);
+    _ctx.lineTo(x1 - hw * Math.cos(angle - 0.4), y1 - hw * Math.sin(angle - 0.4));
+    _ctx.lineTo(x1 - hw * Math.cos(angle + 0.4), y1 - hw * Math.sin(angle + 0.4));
+    _ctx.closePath(); _ctx.fillStyle = _color; _ctx.fill();
+  }
+
+  function _relayAnnotation(data) {
+    window.dispatchEvent(new CustomEvent('kyn:datachannel:send', { detail: { type: 'ANNOTATION', data: data } }));
+  }
+
+  // Receive remote annotations
+  window.addEventListener('kyn:datachannel:message', function(e) {
+    var msg = e.detail || e.data;
+    if (!msg || msg.type !== 'ANNOTATION' || !_ctx) return;
+    var d = msg.data || {};
+    if (d.action === 'clear') { _ctx.clearRect(0, 0, _canvas.width, _canvas.height); return; }
+    if (d.tool === 'eraser') {
+      _ctx.globalCompositeOperation = 'destination-out';
+      _ctx.beginPath(); _ctx.arc(d.x1, d.y1, 18, 0, Math.PI*2); _ctx.fill();
+      _ctx.globalCompositeOperation = 'source-over';
+    } else if (d.tool === 'arrow') {
+      _drawArrow(d.x0, d.y0, d.x1, d.y1);
+    } else {
+      _ctx.strokeStyle = d.color || '#ff3b3b'; _ctx.lineWidth = d.width || 4;
+      _ctx.beginPath(); _ctx.moveTo(d.x0, d.y0); _ctx.lineTo(d.x1, d.y1); _ctx.stroke();
+    }
+  });
+
+  function detach() {
+    if (_canvas) { _canvas.remove(); _canvas = null; _ctx = null; }
+    if (_toolbar) { _toolbar.remove(); _toolbar = null; }
+    _drawing = false;
+  }
+
+  return { attach: attach, detach: detach };
+})();
+
+// ── Recording Consent + Controls ──────────────────────────────────────────────
+// Shows a consent banner to ALL participants when host starts recording.
+// Provides start/stop recording buttons wired to backend endpoints.
+(function initRecordingControls() {
+  'use strict';
+
+  var _isRecording = false;
+
+  // ── Consent banner (shown to all non-host participants) ──────────────────
+  function _showConsentBanner(data) {
+    if (document.getElementById('kyn-recording-consent')) return;
+
+    var banner = document.createElement('div');
+    banner.id = 'kyn-recording-consent';
+    banner.setAttribute('role', 'alert');
+    banner.setAttribute('aria-live', 'assertive');
+    banner.setAttribute('aria-label', 'Recording notification');
+    banner.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','z-index:99999',
+      'background:#dc2626','color:#fff','text-align:center',
+      'padding:12px 20px','font-size:14px','font-weight:600',
+      'display:flex','align-items:center','justify-content:center','gap:12px'
+    ].join(';');
+    banner.innerHTML = [
+      '<i class="fas fa-circle" style="color:#fff;animation:kyn-pulse 1s infinite;"></i>',
+      '<span>🔴 This call is being recorded</span>',
+      '<button id="kyn-consent-dismiss" aria-label="Dismiss recording notice" ',
+      'style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:4px;',
+      'padding:4px 10px;cursor:pointer;font-size:13px;">OK</button>'
+    ].join('');
+
+    document.body.appendChild(banner);
+    document.getElementById('kyn-consent-dismiss').addEventListener('click', function() {
+      banner.style.display = 'none';
+    });
+
+    if (window._kynAnnounce) window._kynAnnounce('Warning: This call is now being recorded.');
+  }
+
+  function _hideConsentBanner() {
+    var el = document.getElementById('kyn-recording-consent');
+    if (el) el.remove();
+    if (window._kynAnnounce) window._kynAnnounce('Recording has stopped.');
+  }
+
+  // ── Record button in controls bar ────────────────────────────────────────
+  function _addRecordButton() {
+    if (document.getElementById('kyn-record-btn')) return;
+    var controlsBar = document.getElementById('callControls');
+    if (!controlsBar) return;
+
+    var btn = document.createElement('button');
+    btn.id = 'kyn-record-btn';
+    btn.className = 'incall-ctrl-btn';
+    btn.setAttribute('title', 'Record call (host only)');
+    btn.setAttribute('aria-label', 'Start recording');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.style.display = 'none'; // Only visible for host
+    btn.innerHTML = '<i class="fas fa-circle" style="color:#ef4444;" aria-hidden="true"></i>';
+    controlsBar.insertBefore(btn, controlsBar.querySelector('#endCallBtn'));
+
+    btn.addEventListener('click', function() {
+      var callId = window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId);
+      if (!callId) return;
+      var apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (window.config && window.config.apiUrl) || '';
+      var token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+      if (!apiBase || !token) return;
+
+      if (_isRecording) {
+        fetch(apiBase + '/api/calls/' + callId + '/recording/stop', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+        }).catch(function(){});
+      } else {
+        fetch(apiBase + '/api/calls/' + callId + '/recording/start', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+        }).catch(function(){});
+      }
+    });
+  }
+
+  // ── Socket event listeners ────────────────────────────────────────────────
+  window.addEventListener('kyn:socket:call:recording_started', function(e) {
+    _isRecording = true;
+    _showConsentBanner(e.detail || {});
+    var btn = document.getElementById('kyn-record-btn');
+    if (btn) {
+      btn.style.background = '#dc2626';
+      btn.setAttribute('aria-label', 'Stop recording');
+      btn.setAttribute('aria-pressed', 'true');
+      btn.setAttribute('title', 'Stop recording');
+    }
+  });
+
+  window.addEventListener('kyn:socket:call:recording_stopped', function(e) {
+    _isRecording = false;
+    _hideConsentBanner();
+    var btn = document.getElementById('kyn-record-btn');
+    if (btn) {
+      btn.style.background = '';
+      btn.setAttribute('aria-label', 'Start recording');
+      btn.setAttribute('aria-pressed', 'false');
+      btn.setAttribute('title', 'Record call (host only)');
+    }
+  });
+
+  // Also handle via generic socket message
+  window.addEventListener('message', function(e) {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'CALL_RECORDING_STARTED') _showConsentBanner(e.data);
+    if (e.data.type === 'CALL_RECORDING_STOPPED') _hideConsentBanner();
+  });
+
+  // Show record button for host when call connects
+  window.addEventListener('callCore:stateChange', function(e) {
+    var state = e.detail && e.detail.state;
+    if (state === 'CONNECTED') {
+      _addRecordButton();
+      // Show record button only if user is host (callerId)
+      var callerId = window.callsState && window.callsState.callerId;
+      var myId = window.callsState && window.callsState.userId;
+      var btn = document.getElementById('kyn-record-btn');
+      if (btn && callerId && myId && String(callerId) === String(myId)) {
+        btn.style.display = 'inline-flex';
+      }
+    }
+    if (state === 'IDLE' || state === 'ENDED') {
+      _isRecording = false;
+      _hideConsentBanner();
+    }
+  });
+
+  // Add pulse animation style
+  if (!document.getElementById('kyn-record-style')) {
+    var style = document.createElement('style');
+    style.id = 'kyn-record-style';
+    style.textContent = '@keyframes kyn-pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }';
+    document.head.appendChild(style);
   }
 })();

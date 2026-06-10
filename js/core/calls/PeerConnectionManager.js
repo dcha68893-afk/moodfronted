@@ -66,7 +66,31 @@
     }
   }
 
-  // ─── ICE Configuration ────────────────────────────────────────────────────
+  // ─── Simulcast helper ─────────────────────────────────────────────────────
+  // Adds 3-layer simulcast (high/medium/low) encoding parameters to video sender.
+  // This allows the remote peer (or SFU) to subscribe to the appropriate layer
+  // based on their bandwidth. No SFU required for hint delivery — it improves
+  // adaptive quality even in P2P by letting the browser choose layers.
+  async function _applySimulcastEncoding(pc) {
+    try {
+      const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+      if (!videoSender) return;
+      const params = videoSender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [
+          { rid: 'h', active: true, maxBitrate: 1200000, scaleResolutionDownBy: 1.0 },
+          { rid: 'm', active: true, maxBitrate: 500000,  scaleResolutionDownBy: 2.0 },
+          { rid: 'l', active: true, maxBitrate: 150000,  scaleResolutionDownBy: 4.0 },
+        ];
+      } else {
+        // Already has encodings — ensure bandwidth caps
+        if (params.encodings[0] && !params.encodings[0].maxBitrate) params.encodings[0].maxBitrate = 1200000;
+      }
+      await videoSender.setParameters(params);
+    } catch (_) {} // Non-fatal — simulcast is a quality improvement, not required
+  }
+
+
 
   const DEFAULT_ICE_CONFIG = {
     iceServers: [
@@ -439,6 +463,8 @@
 
     async _createAndSendOffer() {
       await this._renego.withLock(async () => {
+        // Apply simulcast encoding hints before creating offer
+        await _applySimulcastEncoding(this._pc);
         const offer = await this._pc.createOffer();
         const sdpWithVP9 = _preferVP9Codec(offer.sdp);
         await this._pc.setLocalDescription({ type: offer.type, sdp: sdpWithVP9 });

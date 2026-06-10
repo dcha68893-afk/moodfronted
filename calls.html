@@ -2723,7 +2723,7 @@ window.__CALLS_IFRAME__ = {
     
     <!-- ==================== INCOMING CALL SCREEN (RECEIVER) ==================== -->
     <!-- Shows to the person being called. Stays until: accepted → in-call, declined → idle, or caller cancels → idle -->
-    <div class="unified-incoming-screen" id="incomingCallModal">
+    <div class="unified-incoming-screen" id="incomingCallModal" role="dialog" aria-modal="true" aria-labelledby="incomingCallName" aria-describedby="incomingCallType" tabindex="-1">
         <div class="unified-call-bg incoming-bg"></div>
         <div class="unified-call-wrap">
             <p class="unified-call-label incoming-label">Incoming Call</p>
@@ -3379,9 +3379,10 @@ window.__CALLS_IFRAME__ = {
                 <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
 
                 <!-- ── PiP: local camera preview ─────────────────────────── -->
-                <div class="incall-pip" id="pipContainer" style="display:none">
-                    <video class="incall-pip-video" id="pipVideo" autoplay playsinline muted></video>
-                    <button class="incall-pip-close" id="pipCloseBtn"><i class="fas fa-times"></i></button>
+                <div class="incall-pip" id="pipContainer" style="display:none" aria-label="Local camera preview">
+                    <video class="incall-pip-video" id="pipVideo" autoplay playsinline muted aria-label="Your camera"></video>
+                    <button class="incall-pip-close" id="pipCloseBtn" aria-label="Close picture-in-picture preview"><i class="fas fa-times" aria-hidden="true"></i></button>
+                    <button class="incall-pip-native" id="pipNativeBtn" title="Pop out video (browser Picture-in-Picture)" aria-label="Open browser picture-in-picture" style="position:absolute;bottom:4px;right:28px;background:rgba(0,0,0,0.6);border:none;border-radius:4px;color:#fff;font-size:11px;padding:2px 6px;cursor:pointer;display:none;">⧉ PiP</button>
                 </div>
 
                 <!-- ── Reactions overlay ──────────────────────────────────── -->
@@ -3400,6 +3401,12 @@ window.__CALLS_IFRAME__ = {
                     </button>
                     <button class="incall-ctrl-btn" id="videoBtn" title="Camera (V)" aria-label="Toggle camera">
                         <i class="fas fa-video" aria-hidden="true"></i>
+                    </button>
+                    <button class="incall-ctrl-btn" id="pipToggleBtn" title="Picture-in-Picture (P)" aria-label="Toggle Picture-in-Picture" style="display:none;">
+                        <i class="fas fa-compress-arrows-alt" aria-hidden="true"></i>
+                    </button>
+                    <button class="incall-ctrl-btn" id="captionsBtn" title="Live Captions (C)" aria-label="Toggle live captions" aria-pressed="false">
+                        <i class="fas fa-closed-captioning" aria-hidden="true"></i>
                     </button>
                     <button class="incall-ctrl-btn" id="raiseHandBtn" title="Raise hand (H)" aria-label="Raise hand" aria-pressed="false" style="display:none;">
                         <i class="fas fa-hand-paper" aria-hidden="true"></i>
@@ -5457,6 +5464,14 @@ window.__CALLS_IFRAME__ = {
         e.preventDefault();
         const handBtn = document.getElementById('raiseHandBtn');
         if (handBtn) handBtn.click();
+      } else if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        const pipBtn = document.getElementById('pipToggleBtn');
+        if (pipBtn) pipBtn.click();
+      } else if (e.key === 'c' || e.key === 'C') {
+        e.preventDefault();
+        const capBtn = document.getElementById('captionsBtn');
+        if (capBtn) capBtn.click();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         const endBtn = document.getElementById('endCallBtn') || document.getElementById('hangupBtn');
@@ -5503,8 +5518,74 @@ window.__CALLS_IFRAME__ = {
   } else {
     _wireFs();
   }
-// Raise Hand button wiring
+})();
+
+// ── Picture-in-Picture API wiring ────────────────────────────────────────────
 (function() {
+  'use strict';
+  function _wirePip() {
+    var pipBtn = document.getElementById('pipToggleBtn');
+    if (!pipBtn || pipBtn._pipBound) return;
+    pipBtn._pipBound = true;
+
+    function _enterPip() {
+      var remoteVideo = document.getElementById('remoteVideo');
+      if (!remoteVideo) return;
+      if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(function(){});
+        return;
+      }
+      if (typeof remoteVideo.requestPictureInPicture === 'function') {
+        remoteVideo.requestPictureInPicture().then(function() {
+          var icon = pipBtn.querySelector('i');
+          if (icon) icon.className = 'fas fa-expand-arrows-alt';
+          pipBtn.setAttribute('aria-label', 'Exit Picture-in-Picture');
+          pipBtn.setAttribute('title', 'Exit PiP (P)');
+        }).catch(function(e) {
+          // Fallback: floating overlay
+          var pc = document.getElementById('pipContainer');
+          if (pc) pc.style.display = pc.style.display === 'none' ? 'block' : 'none';
+          console.warn('[PiP] Native PiP failed, using floating overlay:', e.message);
+        });
+      } else {
+        // No browser support — toggle floating overlay
+        var pc2 = document.getElementById('pipContainer');
+        if (pc2) pc2.style.display = pc2.style.display === 'none' ? 'block' : 'none';
+      }
+    }
+
+    pipBtn.addEventListener('click', _enterPip);
+    document.getElementById('pipNativeBtn') && document.getElementById('pipNativeBtn').addEventListener('click', function(e) { e.stopPropagation(); _enterPip(); });
+
+    document.addEventListener('leavepictureinpicture', function() {
+      var icon = pipBtn.querySelector('i');
+      if (icon) icon.className = 'fas fa-compress-arrows-alt';
+      pipBtn.setAttribute('aria-label', 'Toggle Picture-in-Picture (P)');
+      pipBtn.setAttribute('title', 'Picture-in-Picture (P)');
+    });
+
+    // Show PiP button only when remote video is active
+    function _checkPipAvail() {
+      var rv = document.getElementById('remoteVideo');
+      if (rv && rv.srcObject && rv.srcObject.getVideoTracks().length) {
+        pipBtn.style.display = 'inline-flex';
+        var nb = document.getElementById('pipNativeBtn');
+        if (nb && document.pictureInPictureEnabled) nb.style.display = 'inline-block';
+      }
+    }
+    window.addEventListener('callCore:stateChange', function(e) {
+      if (e.detail && e.detail.state === 'CONNECTED') setTimeout(_checkPipAvail, 1200);
+      if (e.detail && (e.detail.state === 'IDLE' || e.detail.state === 'ENDED')) {
+        pipBtn.style.display = 'none';
+        if (document.pictureInPictureElement) document.exitPictureInPicture().catch(function(){});
+      }
+    });
+  }
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _wirePip); }
+  else { _wirePip(); }
+})();
+
+// Raise Hand button wiring
   var _handRaised = false;
   function _wireHand() {
     var btn = document.getElementById('raiseHandBtn');
@@ -5548,6 +5629,124 @@ window.__CALLS_IFRAME__ = {
   } else {
     _wireHand();
   }
+})();
+
+// ── WCAG 2.2 Focus Trap for call modals ──────────────────────────────────────
+(function() {
+  'use strict';
+  var _prevFocus = null;
+
+  var FOCUSABLE = [
+    'a[href]','button:not([disabled])','input:not([disabled])',
+    'select:not([disabled])','textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])','[contenteditable="true"]'
+  ].join(',');
+
+  function _trapFocus(modal) {
+    var els = Array.from(modal.querySelectorAll(FOCUSABLE));
+    if (!els.length) return;
+    var first = els[0], last = els[els.length - 1];
+    modal.addEventListener('keydown', function _trap(e) {
+      if (e.key !== 'Tab') return;
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+      } else {
+        if (document.activeElement === last)  { e.preventDefault(); first.focus(); }
+      }
+    });
+  }
+
+  function _openModal(modal) {
+    if (!modal) return;
+    _prevFocus = document.activeElement;
+    modal.removeAttribute('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    _trapFocus(modal);
+    // Focus the decline button first (safe default), then accept
+    var focusTarget = modal.querySelector('#declineCallBtn') || modal.querySelector('[tabindex]:not([tabindex="-1"])');
+    if (focusTarget) setTimeout(function() { focusTarget.focus(); }, 80);
+    _announce('Incoming call. Press A to accept or D to decline.');
+  }
+
+  function _closeModal(modal) {
+    if (!modal) return;
+    modal.setAttribute('aria-hidden', 'true');
+    if (_prevFocus && _prevFocus.focus) { try { _prevFocus.focus(); } catch(_) {} }
+    _prevFocus = null;
+  }
+
+  // ── Screen-reader live region ─────────────────────────────────────────────
+  var _liveRegion = document.createElement('div');
+  _liveRegion.id  = 'kyn-sr-live';
+  _liveRegion.setAttribute('aria-live', 'assertive');
+  _liveRegion.setAttribute('aria-atomic', 'true');
+  _liveRegion.setAttribute('role', 'status');
+  _liveRegion.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;';
+  document.body.appendChild(_liveRegion);
+
+  function _announce(msg) {
+    _liveRegion.textContent = '';
+    setTimeout(function() { _liveRegion.textContent = msg; }, 50);
+  }
+  window._kynAnnounce = _announce; // expose for other scripts
+
+  // Watch incoming call modal visibility changes
+  var _modal = document.getElementById('incomingCallModal');
+  if (_modal && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        if (m.attributeName === 'style' || m.attributeName === 'class') {
+          var visible = _modal.style.display !== 'none' &&
+                        !_modal.classList.contains('hidden') &&
+                        _modal.style.visibility !== 'hidden';
+          visible ? _openModal(_modal) : _closeModal(_modal);
+        }
+      });
+    }).observe(_modal, { attributes: true });
+  }
+
+  // Announce call state changes for screen readers
+  window.addEventListener('callCore:stateChange', function(e) {
+    var state = e.detail && e.detail.state;
+    var msgs = {
+      CONNECTED:    'Call connected.',
+      RECONNECTING: 'Call connection lost. Reconnecting…',
+      ENDED:        'Call ended.',
+      FAILED:       'Call failed to connect.'
+    };
+    if (msgs[state]) _announce(msgs[state]);
+  });
+
+  // Announce mute state changes
+  window.addEventListener('kyn:ui:mute_changed', function(e) {
+    _announce(e.detail && e.detail.muted ? 'Microphone muted.' : 'Microphone unmuted.');
+  });
+  window.addEventListener('kyn:ui:video_changed', function(e) {
+    _announce(e.detail && e.detail.enabled ? 'Camera on.' : 'Camera off.');
+  });
+  window.addEventListener('kyn:group:call:hand_raised', function(e) {
+    var uid = e.detail && e.detail.userName;
+    _announce((uid || 'A participant') + ' raised their hand.');
+  });
+// Captions button wiring
+(function() {
+  function _wireCaptions() {
+    var btn = document.getElementById('captionsBtn');
+    if (!btn || btn._capBound) return;
+    btn._capBound = true;
+    btn.addEventListener('click', function() {
+      if (window.KynLiveCaptions) {
+        var active = window.KynLiveCaptions.toggle();
+        var on = window.KynLiveCaptions.isActive();
+        btn.setAttribute('aria-pressed', String(on));
+        btn.style.background = on ? '#6366f1' : '';
+        btn.setAttribute('title', on ? 'Stop captions (C)' : 'Live captions (C)');
+        btn.setAttribute('aria-label', on ? 'Stop live captions' : 'Toggle live captions');
+      }
+    });
+  }
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _wireCaptions); }
+  else { _wireCaptions(); }
 })();
 </script>
 </body>
