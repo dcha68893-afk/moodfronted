@@ -114,12 +114,19 @@ class StatusWebSocket {
         s.on('new_status',      (data) => this._handleStatusCreated(data));
         s.on('status_created',  (data) => this._handleStatusCreated(data));
 
+        // P1 FIX: status:new is emitted by backend on creation AND scheduled publish
+        s.on('status:new',          (data) => this._handleStatusNew(data));
+
         s.on('status:viewed',       (data) => this._handleStatusViewed(data));
         s.on('status:viewer_update',(data) => this._handleViewerUpdate(data));
         s.on('status:expired',      (data) => this._handleStatusExpired(data));
         s.on('status:updated',      (data) => this._handleStatusUpdated(data));
         s.on('status:deleted',      (data) => this._handleStatusDeleted(data));
         s.on('status_deleted',      (data) => this._handleStatusDeleted(data)); // legacy alias
+
+        // P2 FIX: poll and question real-time events
+        s.on('status:poll_update',    (data) => this._handlePollUpdate(data));
+        s.on('status:question_answer',(data) => this._handleQuestionAnswer(data));
 
         // Real-time reaction & reply events
         s.on('status:reaction',     (data) => this._handleStatusReaction(data));
@@ -148,6 +155,50 @@ class StatusWebSocket {
     // FIX: backend now sends { status: <full object>, statusId, userId, ... }
     //      We prefer the full status object but fall back to reconstructing it
     //      from the flat fields so old backend versions still work.
+    // P1 FIX: status:new handler (backend sends this on creation and scheduled publish)
+    _handleStatusNew(data) {
+        if (!data) return;
+        console.log('[StatusWebSocket] status:new received', data.statusId || (data.status && data.status.id));
+        // Delegate to existing creation handler — same payload shape
+        this._handleStatusCreated(data);
+    }
+
+    // P2 FIX: poll_update handler — update live poll results
+    _handlePollUpdate(data) {
+        if (!data || !data.statusId) return;
+        this._emit('status:poll_update', data);
+        // If this status is currently open in viewer, update its metadata
+        if (window.currentViewerStatus && window.currentViewerStatus.id === data.statusId) {
+            if (data.pollOptions && window.currentViewerStatus.metadata) {
+                window.currentViewerStatus.metadata.pollOptions = data.pollOptions;
+                // Trigger re-render if possible
+                const pollCont = document.getElementById('statusPollOverlay');
+                if (pollCont && pollCont.style.display !== 'none') {
+                    // Force re-display — fire the status:new path which calls the overlay renderer
+                    if (typeof displayStatusSlide === 'function') {
+                        try { displayStatusSlide(window.currentViewerStatus); } catch (_) {}
+                    }
+                }
+            }
+        }
+    }
+
+    // P2 FIX: question answer handler
+    _handleQuestionAnswer(data) {
+        if (!data) return;
+        this._emit('status:question_answer', data);
+        // Notify status owner if they're viewing their own status
+        if (window.currentViewerStatus && window.currentViewerStatus.id === data.statusId) {
+            const owner = window.currentUser || window.currentViewerStatus.user;
+            if (owner && String(owner.id) === String(window.currentViewerStatus.userId)) {
+                // Show a toast that someone answered the question
+                if (typeof showNotification === 'function') {
+                    showNotification('Someone answered your question!', 'success');
+                }
+            }
+        }
+    }
+
     _handleStatusCreated(data) {
         if (!data) return;
 

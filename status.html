@@ -3316,7 +3316,26 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             <div class="action-buttons-overlay" id="actionButtonsOverlay">
                 <!-- Action buttons will be loaded here -->
             </div>
-            
+
+            <!-- P2 FIX: Poll overlay for poll-type statuses -->
+            <div class="status-poll-overlay" id="statusPollOverlay" style="display:none;">
+                <!-- Poll options will be rendered here -->
+            </div>
+
+            <!-- P2 FIX: Question sticker overlay for question-type statuses -->
+            <div class="status-question-overlay" id="statusQuestionOverlay" style="display:none;">
+                <div class="question-sticker">
+                    <p class="question-label"><i class="fas fa-question-circle"></i> Question</p>
+                    <p class="question-text" id="statusQuestionText"></p>
+                    <div class="question-answer-row">
+                        <input type="text" id="questionAnswerInput" placeholder="Your answer…" maxlength="200">
+                        <button id="submitQuestionAnswerBtn" onclick="window._handleQuestionAnswer && window._handleQuestionAnswer()">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div class="viewer-footer" id="viewerFooter">
                 <!-- Owner controls — shown only to status creator -->
                 <div class="owner-controls" id="ownerControls">

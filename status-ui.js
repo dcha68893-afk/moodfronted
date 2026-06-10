@@ -3840,6 +3840,11 @@ function loadViewerContent(statusData) {
         viewerContent.appendChild(createMediaStatusSlide(sanitized));
     } else if (sanitized.type === 'poll') {
         viewerContent.appendChild(createPollStatusSlide(sanitized));
+    } else if (sanitized.type === 'question') {
+        // P2 FIX: Render question-type status as text slide + question overlay
+        const qSlide = createTextStatusSlide(sanitized);
+        viewerContent.appendChild(qSlide);
+        // The question overlay is rendered below in the overlay section
     } else if (sanitized.type === 'mood') {
         // Render mood as styled text slide
         const moodSlide = document.createElement('div');
@@ -3857,6 +3862,9 @@ function loadViewerContent(statusData) {
         // Last resort: render as text
         viewerContent.appendChild(createTextStatusSlide(sanitized));
     }
+    // P2 FIX: Render question overlay (or hide if not question type)
+    if (window._renderQuestionOverlay) window._renderQuestionOverlay(sanitized);
+
     // Only rebuild progress if NOT already built by showStatusGroupViewer
     // (showStatusGroupViewer calls _buildProgressSegments before loadViewerContent)
     if (progressIndicators && !document.getElementById('progressSegments')) {
@@ -3867,18 +3875,130 @@ function loadViewerContent(statusData) {
         `;
     }
     if (actionButtonsOverlay && sanitized.actionButtons) {
-        actionButtonsOverlay.innerHTML = sanitized.actionButtons.map(btnKey => {
-            const btn = actionButtons[btnKey];
+        actionButtonsOverlay.innerHTML = sanitized.actionButtons.map((btnKey, idx) => {
+            const btn = typeof btnKey === 'object' ? btnKey : actionButtons[btnKey];
             if (!btn) return '';
+            const label = btn.name || btn.label || btnKey;
+            const icon  = btn.icon || 'fas fa-external-link-alt';
+            const url   = btn.url || btn.linkUrl || null;
             return `
-                <button class="action-btn ${btnKey}" data-action="${btnKey}">
-                    <i class="${btn.icon}"></i>
-                    <span>${btn.name}</span>
+                <button class="action-btn ${typeof btnKey === 'string' ? btnKey : ''}"
+                        data-action="${typeof btnKey === 'string' ? btnKey : 'link'}"
+                        data-btn-index="${idx}"
+                        data-btn-label="${label}"
+                        ${url ? `data-url="${url}"` : ''}
+                        onclick="window._handleStatusActionBtnClick && window._handleStatusActionBtnClick(this)">
+                    <i class="${icon}"></i>
+                    <span>${label}</span>
                 </button>
             `;
         }).join('');
     }
+
+    // P2 FIX: Poll rendering in story viewer
+    const pollContainer = document.getElementById('statusPollOverlay');
+    if (sanitized.metadata && sanitized.metadata.pollOptions && pollContainer) {
+        const opts = sanitized.metadata.pollOptions;
+        const voters = sanitized.metadata.pollVoters || {};
+        const myVote = voters[currentUser && currentUser.id];
+        const totalVotes = opts.reduce((s, o) => s + (o.votes || 0), 0);
+        pollContainer.innerHTML = `
+            <div class="status-poll">
+                <p class="poll-question">${UISanitizer.sanitizeHTML(sanitized.metadata.questionText || sanitized.content || 'Poll')}</p>
+                ${opts.map(opt => {
+                    const pct = totalVotes > 0 ? Math.round((opt.votes || 0) / totalVotes * 100) : 0;
+                    const voted = myVote == opt.id;
+                    return `<div class="poll-option ${voted ? 'voted' : ''}" data-option-id="${opt.id}"
+                                  onclick="window._handlePollVote && window._handlePollVote(${sanitized.id}, ${opt.id})">
+                                <span class="poll-option-text">${UISanitizer.sanitizeHTML(opt.text)}</span>
+                                <div class="poll-bar" style="width:${pct}%"></div>
+                                <span class="poll-pct">${pct}%</span>
+                            </div>`;
+                }).join('')}
+                <p class="poll-votes-count">${totalVotes} vote${totalVotes !== 1 ? 's' : ''}</p>
+            </div>`;
+        pollContainer.style.display = 'block';
+    } else if (pollContainer) {
+        pollContainer.style.display = 'none';
+    }
 }
+
+// P2 FIX: Action button click handler with tracking
+window._handleStatusActionBtnClick = function(btn) {
+    const url = btn.dataset.url;
+    const statusId = window.currentViewerStatus && window.currentViewerStatus.id;
+    const idx = btn.dataset.btnIndex;
+    const label = btn.dataset.btnLabel;
+    if (statusId) {
+        const api = window.StatusAPI;
+        if (api && api.trackActionClick) api.trackActionClick(statusId, idx, label).catch(() => {});
+    }
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+};
+
+// P2 FIX: Question sticker rendering
+function renderQuestionOverlay(statusData) {
+    const overlay = document.getElementById('statusQuestionOverlay');
+    const textEl  = document.getElementById('statusQuestionText');
+    if (!overlay || !textEl) return;
+    const meta = statusData && statusData.metadata;
+    if (statusData && statusData.type === 'question' && meta && meta.questionText) {
+        textEl.textContent = meta.questionText;
+        overlay.style.display = 'flex';
+        const input = document.getElementById('questionAnswerInput');
+        if (input) input.value = '';
+    } else {
+        overlay.style.display = 'none';
+    }
+}
+window._renderQuestionOverlay = renderQuestionOverlay;
+
+// P2 FIX: Question answer submit
+window._handleQuestionAnswer = async function() {
+    const statusId = window.currentViewerStatus && window.currentViewerStatus.id;
+    const input = document.getElementById('questionAnswerInput');
+    const text = input ? input.value.trim() : '';
+    if (!statusId || !text) return;
+    const api = window.StatusAPI;
+    if (!api || !api.answerQuestion) return;
+    try {
+        const btn = document.getElementById('submitQuestionAnswerBtn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+        const result = await api.answerQuestion(statusId, text);
+        if (result && result.success) {
+            if (input) input.value = '';
+            showNotification('Answer sent!', 'success');
+        } else {
+            showNotification((result && result.message) || 'Failed to submit answer', 'error');
+        }
+    } catch (e) {
+        showNotification('Failed to submit answer', 'error');
+    } finally {
+        const btn = document.getElementById('submitQuestionAnswerBtn');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i>'; }
+    }
+};
+
+// P2 FIX: Poll vote handler
+window._handlePollVote = async function(statusId, optionId) {
+    const api = window.StatusAPI;
+    if (!api || !api.votePoll) return;
+    try {
+        const result = await api.votePoll(statusId, optionId);
+        if (result && result.success && result.data && result.data.pollOptions) {
+            // Re-render poll with updated counts
+            if (window.currentViewerStatus && window.currentViewerStatus.metadata) {
+                window.currentViewerStatus.metadata.pollOptions = result.data.pollOptions;
+                window.currentViewerStatus.metadata.pollVoters = result.data.pollVoters ||
+                    { ...(window.currentViewerStatus.metadata.pollVoters || {}), [currentUser && currentUser.id]: optionId };
+                // Trigger re-render by calling displayStatus if available
+                if (typeof displayStatusSlide === 'function') displayStatusSlide(window.currentViewerStatus);
+            }
+        }
+    } catch (e) { console.warn('[status-ui] Poll vote error:', e.message); }
+};
+
+// IIFE removed (was closing brace) — keep this comment for clarity
 
 function createTextStatusSlide(statusData) {
     const slide = document.createElement('div');
@@ -4217,7 +4337,10 @@ async function handleStatusAction(action, statusData, button) {
             try {
                 button.disabled = true;
                 button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-                const muteResponse = await core.muteUser(statusData.userId);
+                const api = window.StatusAPI;
+                const muteResponse = api && api.muteUser
+                    ? await api.muteUser(statusData.userId)
+                    : (core && core.muteUser ? await core.muteUser(statusData.userId) : { success: false });
                 if (muteResponse && muteResponse.success) {
                     showNotification('User muted', 'success');
                     const parent = button.closest('.status-actions');
@@ -4257,7 +4380,10 @@ async function handleStatusAction(action, statusData, button) {
             try {
                 button.disabled = true;
                 button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-                const unmuteResponse = await core.unmuteUser(statusData.userId);
+                const api = window.StatusAPI;
+                const unmuteResponse = api && api.unmuteUser
+                    ? await api.unmuteUser(statusData.userId)
+                    : (core && core.unmuteUser ? await core.unmuteUser(statusData.userId) : { success: false });
                 if (unmuteResponse && unmuteResponse.success) {
                     showNotification('User unmuted', 'success');
                     const parent = button.closest('.status-actions');
@@ -4470,20 +4596,26 @@ function handleMuteFromViewer() {
     }
 }
 
-function shareCurrentStatus() {
+async function shareCurrentStatus() {
     if (!ensureUIActive('shareStatus')) return;
-    if (currentViewerStatus) {
-        if (navigator.share) {
-            navigator.share({
-                title: `Status from ${currentViewerStatus.user?.displayName || 'User'}`,
-                text: currentViewerStatus.text || 'Check out this status',
-                url: window.location.href
-            }).catch(() => {});
-        } else {
-            navigator.clipboard.writeText(window.location.href)
-                .then(() => showNotification('Link copied', 'success'))
-                .catch(() => showNotification('Failed to copy', 'error'));
-        }
+    if (!currentViewerStatus) return;
+
+    // P2 FIX: First record the in-app share via backend API, then use Web Share / clipboard
+    const api = window.StatusAPI;
+    if (api && api.shareStatus) {
+        api.shareStatus(currentViewerStatus.id, '', 'friends').catch(() => {});
+    }
+
+    if (navigator.share) {
+        navigator.share({
+            title: `Status from ${currentViewerStatus.user?.displayName || 'User'}`,
+            text: currentViewerStatus.content || currentViewerStatus.text || 'Check out this status',
+            url: window.location.href
+        }).catch(() => {});
+    } else {
+        navigator.clipboard.writeText(window.location.href)
+            .then(() => showNotification('Link copied to clipboard', 'success'))
+            .catch(() => showNotification('Failed to copy link', 'error'));
     }
 }
 
@@ -5907,20 +6039,14 @@ async function handlePostStatus() {
         const file = mediaFileInput && mediaFileInput.files && mediaFileInput.files[0];
 
         if (file) {
-            showNotification('Uploading media…', 'info');
-            try {
-                const uploadedUrl = await uploadMediaFile(file);
-                statusData.mediaUrl = uploadedUrl;
-                statusData.mediaType = file.type.startsWith('video')
-                    ? 'video'
-                    : file.type.startsWith('audio')
-                        ? 'audio'
-                        : 'image';
-                statusData.type = statusData.mediaType;
-            } catch (uploadErr) {
-                showNotification('Media upload failed: ' + (uploadErr.message || 'Unknown error'), 'error');
-                return;
-            }
+            // P1 FIX: use multipart upload (createStatusWithFile) instead of separate upload + URL
+            statusData._mediaFile = file; // flag for the posting path below
+            statusData.mediaType = file.type.startsWith('video')
+                ? 'video'
+                : file.type.startsWith('audio')
+                    ? 'audio'
+                    : 'image';
+            statusData.type = statusData.mediaType;
         } else {
             // Fallback: try to read src from the first preview image (already base64)
             const firstImg = mediaPreview.querySelector('img, video');
@@ -5957,8 +6083,10 @@ async function handlePostStatus() {
             showNotification('Please enter at least 2 options', 'error');
             return;
         }
-        statusData.question = question;
-        statusData.options = options;
+        statusData.content = question;
+        statusData.text = question;
+        statusData.type = 'poll';
+        statusData.pollOptions = options.map(o => o.text); // backend expects string array
         const durationSelect = UIElements.getElement('pollDurationSelect');
         if (durationSelect) statusData.duration = durationSelect.value;
     }
@@ -5985,23 +6113,18 @@ async function handlePostStatus() {
         // This means status creation works even when the module is not yet ACTIVE.
         // ─────────────────────────────────────────────────────────────────────────
 
-        // Handle media upload first (same for both paths)
-        if (statusData.type === 'media' && statusData.file) {
-            showNotification('Uploading media...', 'info');
-            const api = window.StatusAPI;
-            const uploadResult = await api.uploadMedia(statusData.file);
-            if (uploadResult.success) {
-                statusData.mediaUrl = uploadResult.url;
-                statusData.mediaType = statusData.file.type.startsWith('video') ? 'video' : 'image';
-            } else {
-                throw new Error(uploadResult.error);
-            }
-        }
-
-        // Offline path — queue immediately, no backend call needed
+        // P1 FIX: Offline path — queue immediately
         if (!navigator.onLine) {
             if (window.StatusCache) await window.StatusCache.addToSyncQueue(statusData);
             response = { success: true, queued: true, offline: true };
+        } else if (statusData._mediaFile) {
+            // P1 FIX: Direct multipart upload — bypasses postMessage chain so file
+            // binary can be sent as FormData directly to the backend
+            showNotification('Uploading media…', 'info');
+            const api = window.StatusAPI;
+            const mediaFile = statusData._mediaFile;
+            delete statusData._mediaFile; // remove before serialising
+            response = await api.createStatusWithFile(statusData, mediaFile);
         } else {
             // Try core postStatus() first — it uses the postMessage bridge which
             // correctly relays to chat.html → directApiRequest → backend
@@ -6018,11 +6141,9 @@ async function handlePostStatus() {
                 }
             } else {
                 // FIX Bug B fallback: module not yet ACTIVE — use StatusAPI direct fetch
-                // so the user can post immediately without waiting for the iframe handshake
                 console.warn('[status-ui] Core not ready — falling back to direct API fetch for status creation');
                 const api = window.StatusAPI;
                 response = await api.createStatus(statusData);
-                // StatusAPI.createStatus returns { success, status } already normalised
             }
         }
         
@@ -6248,20 +6369,40 @@ async function handleConfirmSchedule() {
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scheduling...';
         }
-        const core = getCore();
-        const response = await core.scheduleStatus(statusData, scheduleDateTime.toISOString());
+        // P1 FIX: Use StatusAPI.createStatus with metadata.scheduled flag instead of
+        // core.scheduleStatus which relied on an unimplemented postMessage handler.
+        // The backend auto-publish cron picks up statuses where metadata.scheduled=true.
+        const api = window.StatusAPI;
+        const scheduledPayload = {
+            ...statusData,
+            isActive: false, // will be activated by the cron worker at scheduledFor time
+            metadata: {
+                ...(statusData.metadata || {}),
+                scheduled: true,
+                scheduledFor: scheduleDateTime.toISOString(),
+            },
+        };
+        let response;
+        if (api && api.createStatus) {
+            response = await api.createStatus(scheduledPayload);
+        } else {
+            const core = getCore();
+            response = core && core.scheduleStatus
+                ? await core.scheduleStatus(statusData, scheduleDateTime.toISOString())
+                : { success: false };
+        }
         if (response && response.success) {
-            showNotification('Status scheduled successfully', 'success');
+            showNotification('Status scheduled for ' + scheduleDateTime.toLocaleString(), 'success');
             const scheduleModal = UIElements.scheduleModal || document.getElementById('scheduleModal');
             if (scheduleModal) scheduleModal.classList.remove('active');
             const createModal = UIElements.createStatusModal || document.getElementById('createStatusModal');
             if (createModal) createModal.classList.remove('active');
             updateScheduledStatusesList();
         } else {
-            // Fallback: save scheduled locally even if API returns non-success
+            // Fallback: save locally
             if (!Array.isArray(scheduledStatuses)) scheduledStatuses = [];
             scheduledStatuses.push({ ...statusData, scheduledAt: scheduleDateTime.toISOString(), id: 'sched_' + Date.now() });
-            showNotification('Status saved for scheduling', 'success');
+            showNotification('Status saved for scheduling (offline)', 'success');
             const scheduleModal = UIElements.scheduleModal || document.getElementById('scheduleModal');
             if (scheduleModal) scheduleModal.classList.remove('active');
             const createModal = UIElements.createStatusModal || document.getElementById('createStatusModal');
@@ -6284,40 +6425,58 @@ async function handleSaveStatus() {
     if (!ensureUIActive('saveStatus')) return;
     if (!currentViewerStatus) return;
     const btn = UIElements.getElement('saveStatusBtn');
-    const action = btn.dataset.action;
-    if (action === 'save') {
-        if (highlights.length === 0) {
-            showNotification('Please create a highlight first', 'info');
-            showHighlightsModal();
-            return;
-        }
-        const highlight = highlights[0];
-        if (!highlight.statusIds) highlight.statusIds = [];
-        if (!highlight.statusIds.includes(currentViewerStatus.id)) {
-            highlight.statusIds.push(currentViewerStatus.id);
-            highlight.count = highlight.statusIds.length;
-            if (typeof window.localStorage !== 'undefined') {
-                localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+    const action = btn ? btn.dataset.action : 'save';
+    const api = window.StatusAPI;
+
+    if (!action || action === 'save') {
+        try {
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            // P2 FIX: server-persist bookmark via API
+            if (api && api.bookmarkStatus) {
+                const result = await api.bookmarkStatus(currentViewerStatus.id);
+                if (result && result.success) {
+                    if (btn) {
+                        btn.innerHTML = '<i class="fas fa-bookmark"></i>';
+                        btn.title = 'Remove Bookmark';
+                        btn.dataset.action = 'unsave';
+                    }
+                    showNotification('Status bookmarked', 'success');
+                } else {
+                    showNotification('Failed to bookmark', 'error');
+                    if (btn) btn.innerHTML = '<i class="far fa-bookmark"></i>';
+                }
+            } else {
+                if (btn) { btn.innerHTML = '<i class="fas fa-bookmark"></i>'; btn.dataset.action = 'unsave'; }
+                showNotification('Status saved', 'success');
             }
-            btn.innerHTML = '<i class="fas fa-bookmark"></i>';
-            btn.title = 'Remove from Highlights';
-            btn.dataset.action = 'unsave';
-            showNotification('Status saved to highlights', 'success');
+        } catch (e) {
+            showNotification('Failed to bookmark', 'error');
+            if (btn) btn.innerHTML = '<i class="far fa-bookmark"></i>';
+        } finally {
+            if (btn) btn.disabled = false;
         }
     } else if (action === 'unsave') {
-        highlights.forEach(highlight => {
-            if (highlight.statusIds && highlight.statusIds.includes(currentViewerStatus.id)) {
-                highlight.statusIds = highlight.statusIds.filter(id => id !== currentViewerStatus.id);
-                highlight.count = highlight.statusIds.length;
+        try {
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+            if (api && api.removeBookmark) {
+                const result = await api.removeBookmark(currentViewerStatus.id);
+                if (result && result.success) {
+                    if (btn) {
+                        btn.innerHTML = '<i class="far fa-bookmark"></i>';
+                        btn.title = 'Save';
+                        btn.dataset.action = 'save';
+                    }
+                    showNotification('Bookmark removed', 'success');
+                }
+            } else {
+                if (btn) { btn.innerHTML = '<i class="far fa-bookmark"></i>'; btn.dataset.action = 'save'; }
+                showNotification('Bookmark removed', 'success');
             }
-        });
-        if (typeof window.localStorage !== 'undefined') {
-            localStorage.setItem(LOCAL_STORAGE_KEYS.HIGHLIGHTS, JSON.stringify(highlights));
+        } catch (e) {
+            showNotification('Failed to remove bookmark', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
-        btn.innerHTML = '<i class="far fa-bookmark"></i>';
-        btn.title = 'Save to Highlights';
-        btn.dataset.action = 'save';
-        showNotification('Status removed from highlights', 'success');
     }
 }
 
@@ -6342,8 +6501,17 @@ async function handleSubmitReport() {
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
         }
+        // P2 FIX: use StatusAPI directly for report (core.reportStatus may not exist)
+        const api = window.StatusAPI;
         const core = getCore();
-        const response = await core.reportStatus(currentViewerStatus.id, selectedReason, details);
+        let response;
+        if (api && api.reportStatus) {
+            response = await api.reportStatus(currentViewerStatus.id, selectedReason, details);
+        } else if (core && core.reportStatus) {
+            response = await core.reportStatus(currentViewerStatus.id, selectedReason, details);
+        } else {
+            response = { success: false, message: 'Report service unavailable' };
+        }
         if (response && response.success) {
             showNotification('Report submitted', 'success');
             const modal = UIElements.reportModal;

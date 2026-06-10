@@ -570,6 +570,238 @@ class StatusAPI {
         }
     }
 
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P1 FIX: createStatusWithFile — multipart upload (file from device)
+    // ─────────────────────────────────────────────────────────────────────────
+    async createStatusWithFile(statusData, file) {
+        try {
+            const formData = new FormData();
+            formData.append('media', file);
+            // Append all scalar status fields
+            const fields = ['content', 'type', 'moodType', 'location', 'latitude', 'longitude',
+                'isPublic', 'privacy', 'duration', 'expiresAt', 'background', 'caption',
+                'fontFamily', 'textColor', 'allowReplies', 'altText', 'linkUrl', 'linkLabel'];
+            for (const f of fields) {
+                if (statusData[f] !== undefined && statusData[f] !== null) {
+                    formData.append(f, statusData[f]);
+                }
+            }
+            if (statusData.actionButtons) formData.append('actionButtons', JSON.stringify(statusData.actionButtons));
+            if (statusData.pollOptions)   formData.append('pollOptions',   JSON.stringify(statusData.pollOptions));
+            if (statusData.mentions)      formData.append('mentions',      JSON.stringify(statusData.mentions));
+            if (statusData.hashtags)      formData.append('hashtags',      JSON.stringify(statusData.hashtags));
+
+            const response = await this._fetch(this.resolveUrl(this.baseURL), {
+                method: 'POST',
+                headers: { ...this.getAuthHeaders() }, // No Content-Type — let browser set multipart boundary
+                body: formData,
+            });
+            if (!response.ok) {
+                const err = await this._parseJSON(response).catch(() => ({}));
+                return { success: false, error: err.message || `HTTP ${response.status}` };
+            }
+            const result = await this._parseJSON(response);
+            const status = result?.data?.status || result?.status || null;
+            if (!status?.id) return { success: false, error: 'Invalid response from server' };
+            return { success: true, status };
+        } catch (error) {
+            console.error('[StatusAPI] createStatusWithFile error:', error.message);
+            return { success: false, error: error.message };
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P1/P2: Mute / Unmute user from statuses (server-persisted)
+    // ─────────────────────────────────────────────────────────────────────────
+    async muteUser(userId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/mute/${userId}`), {
+                method: 'POST', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async unmuteUser(userId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/mute/${userId}`), {
+                method: 'DELETE', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async getMutedUsers() {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/muted`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, mutedUserIds: [] }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Share, Report, Pin/Unpin
+    // ─────────────────────────────────────────────────────────────────────────
+    async shareStatus(statusId, caption, privacy) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/share`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ caption, privacy }),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async reportStatus(statusId, reason, description) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/report`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ reason, description }),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async pinStatus(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/pin`), {
+                method: 'POST', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async unpinStatus(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/pin`), {
+                method: 'DELETE', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Poll vote
+    // ─────────────────────────────────────────────────────────────────────────
+    async votePoll(statusId, optionId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/poll/vote`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ optionId }),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Question answer
+    // ─────────────────────────────────────────────────────────────────────────
+    async answerQuestion(statusId, text) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/question/answer`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ text }),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Bookmark / Save status
+    // ─────────────────────────────────────────────────────────────────────────
+    async bookmarkStatus(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/bookmark`), {
+                method: 'POST', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async removeBookmark(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/bookmark`), {
+                method: 'DELETE', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async getBookmarks() {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/bookmarks`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, statuses: [] }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Named Highlight Albums
+    // ─────────────────────────────────────────────────────────────────────────
+    async createHighlightAlbum(name, coverImage) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/highlights/albums`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ name, coverImage }),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async getHighlightAlbums() {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/highlights/albums`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, albums: [] }; }
+    }
+
+    async addToHighlightAlbum(albumId, statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/highlights/albums/${albumId}/add`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ statusId }),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Action button click tracking
+    // ─────────────────────────────────────────────────────────────────────────
+    async trackActionClick(statusId, buttonIndex, buttonLabel) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/action-click`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify({ buttonIndex, buttonLabel }),
+            });
+            return this._parseJSON(r).catch(() => ({ success: true }));
+        } catch (e) { return { success: true }; } // non-critical — fire and forget
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2: Hashtag feed
+    // ─────────────────────────────────────────────────────────────────────────
+    async getHashtagFeed(tag) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/hashtag/${encodeURIComponent(tag)}`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, statuses: [] }; }
+    }
+
 } // end class StatusAPI
 
 // Singleton
