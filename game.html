@@ -1022,10 +1022,21 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
     </div>
     <div class="modal-body">
       <div class="lb-tabs">
-        <div class="lb-tab active" onclick="setLbTab('global',this)">🌍 Global</div>
+        <div class="lb-tab active" onclick="setLbTab('alltime',this)">🏆 All Time</div>
         <div class="lb-tab" onclick="setLbTab('weekly',this)">📅 Weekly</div>
-        <div class="lb-tab" onclick="setLbTab('pool',this)">🎱 Pool</div>
-        <div class="lb-tab" onclick="setLbTab('trivia',this)">🧠 Trivia</div>
+        <div class="lb-tab" onclick="setLbTab('daily',this)">⚡ Daily</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:12px;">
+        <button class="lb-mode-btn active" onclick="setLbMode('global',this)" style="
+          flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:700;
+          background:var(--gold-dim);border:1px solid var(--gold);color:var(--gold);cursor:pointer;">
+          🌍 Global
+        </button>
+        <button class="lb-mode-btn" onclick="setLbMode('friends',this)" style="
+          flex:1;padding:6px;border-radius:8px;font-size:11px;font-weight:700;
+          background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:#888;cursor:pointer;">
+          👥 Friends
+        </button>
       </div>
       <div class="lb-list" id="lbList"></div>
     </div>
@@ -1104,32 +1115,119 @@ let tvTimerInterval=null;
 const SAVE_KEY = 'arcade_platform_v1';
 let PS = null; // Platform State
 
+// Resolve API base and auth token from parent app storage
+const _API_BASE = (() => {
+  try {
+    const s = sessionStorage.getItem('moodchat_api_base') || localStorage.getItem('moodchat_api_base');
+    if (s) return s.replace(/\/$/, '');
+  } catch(_){}
+  return window.MOODCHAT_API_BASE || '';
+})();
+const _getAuthToken = () => {
+  try {
+    return sessionStorage.getItem('auth_token') || sessionStorage.getItem('token') ||
+           localStorage.getItem('auth_token')   || localStorage.getItem('token') || null;
+  } catch(_){ return null; }
+};
+const _getUserId = () => {
+  try {
+    const t = _getAuthToken();
+    if (!t) return null;
+    // JWT payload (middle part)
+    const p = JSON.parse(atob(t.split('.')[1]));
+    return p.userId || p.id || p.sub || null;
+  } catch(_){ return null; }
+};
+
+function psApplyDefaults() {
+  PS.coins        = PS.coins        ?? 250;
+  PS.gems         = PS.gems         ?? 5;
+  PS.xp           = PS.xp           ?? 0;
+  PS.level        = PS.level        ?? 1;
+  PS.avatar       = PS.avatar       ?? '🦁';
+  PS.name         = PS.name         ?? 'Player';
+  PS.streak       = PS.streak       ?? 0;
+  PS.lastLogin    = PS.lastLogin    ?? null;
+  PS.lastClaim    = PS.lastClaim    ?? null;
+  PS.dayIndex     = PS.dayIndex     ?? 0;
+  PS.achievements = PS.achievements ?? {};
+  PS.shopOwned    = PS.shopOwned    ?? [];
+  PS.bestScores   = PS.bestScores   ?? {};
+  PS.totalGames   = PS.totalGames   ?? 0;
+  PS.totalPockets = PS.totalPockets ?? 0;
+  PS.totalLevels  = PS.totalLevels  ?? 0;
+  PS.streakFreezes= PS.streakFreezes?? 0;
+  // Read player name from auth if available
+  try {
+    const uRaw = sessionStorage.getItem('current_user') || localStorage.getItem('current_user');
+    if (uRaw) {
+      const u = JSON.parse(uRaw);
+      PS.name = u.displayName || u.username || PS.name;
+    }
+  } catch(_){}
+}
+
 function psLoad() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) PS = JSON.parse(raw);
   } catch(e){}
   if (!PS) PS = {};
-  // Defaults
-  PS.coins      = PS.coins      ?? 250;
-  PS.gems       = PS.gems       ?? 5;
-  PS.xp         = PS.xp         ?? 0;
-  PS.level      = PS.level      ?? 1;
-  PS.avatar     = PS.avatar     ?? '🦁';
-  PS.name       = PS.name       ?? 'Player';
-  PS.streak     = PS.streak     ?? 0;
-  PS.lastLogin  = PS.lastLogin  ?? null;
-  PS.dayIndex   = PS.dayIndex   ?? 0; // which reward day we're on (0-6)
-  PS.achievements = PS.achievements ?? {};
-  PS.shopOwned  = PS.shopOwned  ?? [];
-  PS.bestScores = PS.bestScores ?? {};
-  PS.totalGames = PS.totalGames ?? 0;
-  PS.totalPockets = PS.totalPockets ?? 0;
-  PS.totalLevels  = PS.totalLevels  ?? 0;
+  psApplyDefaults();
+  // Attempt server sync in background
+  psSyncFromServer();
 }
 
+// ─── Debounced save ────────────────────────────────────────────────────────
+let _saveTimer = null;
 function psSave() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(PS)); } catch(e){}
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => psSyncToServer(), 500);
+}
+
+// ─── Server sync ──────────────────────────────────────────────────────────
+async function psSyncToServer() {
+  const token = _getAuthToken();
+  if (!token || !_API_BASE) return;
+  try {
+    await fetch(`${_API_BASE}/api/games/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        xp: PS.xp, level: PS.level, coins: PS.coins, gems: PS.gems,
+        streak: PS.streak, dayIndex: PS.dayIndex, lastClaim: PS.lastClaim,
+        avatar: PS.avatar, achievements: PS.achievements, shopOwned: PS.shopOwned,
+        bestScores: PS.bestScores, totalGames: PS.totalGames,
+        totalPockets: PS.totalPockets, totalLevels: PS.totalLevels,
+      }),
+    });
+  } catch(e) { /* offline — local save already done */ }
+}
+
+async function psSyncFromServer() {
+  const token = _getAuthToken();
+  if (!token || !_API_BASE) return;
+  try {
+    const r = await fetch(`${_API_BASE}/api/games/progress`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!r.ok) return;
+    const { progress } = await r.json();
+    if (!progress) return;
+    // Use server data if it's newer than local
+    const serverUpdated = progress.updatedAt ? new Date(progress.updatedAt).getTime() : 0;
+    const localUpdated  = PS._savedAt ? new Date(PS._savedAt).getTime() : 0;
+    if (serverUpdated >= localUpdated) {
+      // Merge server data, preserving local name
+      const localName = PS.name;
+      Object.assign(PS, progress);
+      PS.name = localName; // name comes from auth, not game server
+      psApplyDefaults();
+      try { localStorage.setItem(SAVE_KEY, JSON.stringify(PS)); } catch(_){}
+      updatePlatformBar();
+    }
+  } catch(e) { /* offline */ }
 }
 
 // ─── XP / LEVELS ───────────────────────────────────────────────────────────
@@ -1185,7 +1283,7 @@ function updatePlatformBar() {
   const unlockedAch = Object.values(PS.achievements).filter(v=>v>=1).length;
   document.getElementById('statAch').textContent = unlockedAch;
   document.getElementById('statStreak').textContent = PS.streak+'🔥';
-  document.getElementById('statRank').textContent = '#'+(Math.floor(Math.random()*200)+1); // simulated
+  document.getElementById('statRank').textContent = 'LV.'+PS.level;
   // Card scores
   const bs = PS.bestScores;
   ['pool','water','block','crossword','trivia'].forEach(g=>{
@@ -1244,14 +1342,27 @@ function claimDailyReward() {
   const today = new Date().toDateString();
   if(PS.lastLogin && new Date(PS.lastLogin).toDateString() === today) return;
   const r = DAILY_REWARDS[PS.dayIndex % DAILY_REWARDS.length];
-  // Streak calc
+  // Streak calc — check if yesterday was claimed
   const yesterday = new Date(); yesterday.setDate(yesterday.getDate()-1);
-  if(PS.lastLogin && new Date(PS.lastLogin).toDateString() === yesterday.toDateString())
+  const yesterdayStr = yesterday.toDateString();
+  const lastLoginStr = PS.lastLogin ? new Date(PS.lastLogin).toDateString() : null;
+  if (lastLoginStr === yesterdayStr) {
     PS.streak++;
-  else
+  } else if (lastLoginStr && lastLoginStr !== today) {
+    // Missed a day — check for streak freeze
+    if (PS.streakFreezes > 0) {
+      PS.streakFreezes--;
+      PS.streak++;
+      showNotif('🛡️', 'Streak Freeze used! Streak preserved!');
+    } else {
+      PS.streak = 1;
+    }
+  } else {
     PS.streak = 1;
-  PS.lastLogin = new Date().toISOString();
-  PS.dayIndex = (PS.dayIndex+1) % DAILY_REWARDS.length;
+  }
+  PS.lastLogin  = new Date().toISOString();
+  PS.lastClaim  = PS.lastLogin;
+  PS.dayIndex   = (PS.dayIndex+1) % DAILY_REWARDS.length;
   if(r.coins) PS.coins += r.coins;
   if(r.gems)  PS.gems  += r.gems;
   psSave();
@@ -1302,8 +1413,36 @@ function setAchProg(id, val) {
     psSave();
     updatePlatformBar();
     showNotif(def.icon, `Achievement: ${def.name} — +${def.reward}🪙`);
+    // Show share action
+    setTimeout(() => showPostAchievementShare(def), 800);
   }
   psSave();
+}
+
+function showPostAchievementShare(def) {
+  const banner = document.createElement('div');
+  banner.style.cssText = `
+    position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+    background:linear-gradient(135deg,rgba(20,17,35,0.98),rgba(30,20,50,0.98));
+    border:1px solid var(--gem);border-radius:14px;padding:12px 16px;
+    display:flex;gap:8px;align-items:center;z-index:9999;
+    box-shadow:0 4px 24px rgba(61,214,245,0.2);max-width:360px;width:calc(100% - 32px);
+    animation:rewardPop .3s ease;
+  `;
+  banner.innerHTML = `
+    <span style="font-size:22px;">${def.icon}</span>
+    <div style="flex:1;font-size:12px;color:#ccc;">
+      <b style="color:var(--gem);">Achievement Unlocked!</b><br>
+      ${def.name}
+    </div>
+    <button onclick="showShareModal(null,0,'achievement','${def.name}','${def.icon}');this.closest('[style]').remove()" style="
+      background:rgba(61,214,245,0.15);border:1px solid var(--gem);
+      border-radius:20px;padding:6px 12px;font-size:11px;font-weight:900;
+      color:var(--gem);cursor:pointer;flex-shrink:0;">📤 Share</button>
+    <button onclick="this.closest('[style]').remove()" style="background:none;border:none;color:#888;font-size:16px;cursor:pointer;">✕</button>
+  `;
+  document.body.appendChild(banner);
+  setTimeout(() => { if(banner.parentNode) banner.remove(); }, 7000);
 }
 
 function checkAchievements() {
@@ -1351,22 +1490,10 @@ function renderAchList() {
   });
 }
 
-// ─── LEADERBOARD ─────────────────────────────────────────────────────────────
-const LB_NAMES = ['Kioni','Wanjiru','Odhiambo','Nyawira','Kimani','Achieng','Mutua','Wambui','Otieno','Njeri','Kamau','Adhiambo','Mwangi','Akoth','Kariuki','Nafula','Gitonga','Moraa','Njenga','Awino'];
-const LB_AVATARS = ['🦁','🐯','🦊','🐺','🦅','🐉','🦋','🦚','🐬','🦄'];
-let _lbTab = 'global';
-let _lbData = {};
-
-function genLb(tab) {
-  if(_lbData[tab]) return _lbData[tab];
-  const entries = LB_NAMES.slice(0,10).map((name,i)=>({
-    name, avatar:LB_AVATARS[i%LB_AVATARS.length],
-    score: Math.floor(Math.random()*(50000-5000*i)+5000)
-  }));
-  entries.sort((a,b)=>b.score-a.score);
-  _lbData[tab] = entries;
-  return entries;
-}
+// ─── LEADERBOARD — REAL API-backed ──────────────────────────────────────────
+let _lbTab = 'alltime';
+let _lbMode = 'global'; // 'global' | 'friends'
+let _lbLoading = false;
 
 function setLbTab(tab, el) {
   _lbTab = tab;
@@ -1374,26 +1501,66 @@ function setLbTab(tab, el) {
   if(el) el.classList.add('active');
   renderLb();
 }
-function renderLb() {
+function setLbMode(mode, el) {
+  _lbMode = mode;
+  document.querySelectorAll('.lb-mode-btn').forEach(b=>b.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderLb();
+}
+
+async function renderLb() {
   const list = document.getElementById('lbList');
-  list.innerHTML = '';
-  const data = genLb(_lbTab);
-  // Insert player
-  const playerEntry = {name:PS.name, avatar:PS.avatar, score:PS.bestScores['pool']||0, isMe:true};
-  const combined = [...data, playerEntry].sort((a,b)=>b.score-a.score);
-  const medals = ['🥇','🥈','🥉'];
-  combined.forEach((e,i) => {
-    const div = document.createElement('div');
-    div.className = 'lb-entry' + (e.isMe?' me':'');
-    const rankClass = i<3 ? ['gold','silver','bronze'][i] : '';
-    const rankText = i<3 ? medals[i] : (i+1);
-    div.innerHTML = `
-      <span class="lb-rank ${rankClass}">${rankText}</span>
-      <div class="lb-avatar">${e.avatar}</div>
-      <span class="lb-name">${e.name}${e.isMe?' (You)':''}</span>
-      <span class="lb-score">${formatNum(e.score)}</span>`;
-    list.appendChild(div);
-  });
+  if (!list) return;
+  if (_lbLoading) return;
+
+  const token = _getAuthToken();
+  if (!token || !_API_BASE) {
+    // Offline fallback: show only the player's own score
+    list.innerHTML = `<div style="text-align:center;padding:20px;color:#888;font-size:13px;">
+      🔒 Sign in to see the real leaderboard.<br>
+      <span style="color:var(--gold);font-weight:700">Your best pool score: ${formatNum(PS.bestScores['pool']||0)}</span>
+    </div>`;
+    return;
+  }
+
+  _lbLoading = true;
+  list.innerHTML = `<div style="text-align:center;padding:24px;color:#888;">⏳ Loading…</div>`;
+
+  try {
+    const endpoint = _lbMode === 'friends'
+      ? `${_API_BASE}/api/games/leaderboard/friends`
+      : `${_API_BASE}/api/games/leaderboard?tab=${_lbTab}&gameType=pool`;
+
+    const r = await fetch(endpoint, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!r.ok) throw new Error('fetch failed');
+    const { entries } = await r.json();
+
+    list.innerHTML = '';
+    const medals = ['🥇','🥈','🥉'];
+    if (!entries || entries.length === 0) {
+      list.innerHTML = `<div style="text-align:center;padding:24px;color:#888;font-size:13px;">No scores yet. Be the first! 🏆</div>`;
+    } else {
+      entries.forEach((e, i) => {
+        const div = document.createElement('div');
+        div.className = 'lb-entry' + (e.isMe?' me':'');
+        const rankClass = i<3 ? ['gold','silver','bronze'][i] : '';
+        const rankText  = i<3 ? medals[i] : (e.rank || i+1);
+        div.innerHTML = `
+          <span class="lb-rank ${rankClass}">${rankText}</span>
+          <div class="lb-avatar">${e.avatar||'🎮'}</div>
+          <span class="lb-name">${e.name||'Player'}${e.isMe?' (You)':''}</span>
+          <span class="lb-score">${formatNum(e.xp||0)} XP</span>`;
+        list.appendChild(div);
+      });
+    }
+  } catch(err) {
+    list.innerHTML = `<div style="text-align:center;padding:20px;color:#888;font-size:13px;">
+      ⚡ Couldn't load leaderboard.<br>
+      <span style="color:var(--gold);font-weight:700">Your XP: ${formatNum(PS.xp||0)}</span>
+    </div>`;
+  } finally {
+    _lbLoading = false;
+  }
 }
 
 // ─── SHOP ───────────────────────────────────────────────────────────────────
@@ -1402,6 +1569,7 @@ const SHOP_PACKS = [
   {icon:'💰',name:'Coin Chest',   desc:'1500 Coins',  price:5,  currency:'gem', coins:1500, gems:0},
   {icon:'💎',name:'Gem Pack',     desc:'10 Gems',     price:200,currency:'coin',coins:0,    gems:10},
   {icon:'👑',name:'Royal Pack',   desc:'5000 Coins + 20 Gems',price:15,currency:'gem',coins:5000,gems:20},
+  {icon:'🛡️',name:'Streak Freeze',desc:'Protect your streak for 1 missed day',price:200,currency:'coin',coins:0,gems:0,streakFreeze:true},
 ];
 const SHOP_AVATARS = [
   {icon:'🐉',name:'Dragon',    price:500,  currency:'coin'},
@@ -1424,8 +1592,15 @@ function renderShop() {
       if(p.currency==='gem' && PS.gems >= p.price) { PS.gems-=p.price; canAfford=true; }
       if(p.currency==='coin' && PS.coins >= p.price) { PS.coins-=p.price; canAfford=true; }
       if(!canAfford){ showNotif('❌','Not enough '+p.currency+'s!'); return; }
-      PS.coins += p.coins; PS.gems += p.gems; psSave(); updatePlatformBar();
-      showNotif(p.icon, p.name+' purchased!'); checkAchievements();
+      if(p.coins) PS.coins += p.coins;
+      if(p.gems)  PS.gems  += p.gems;
+      if(p.streakFreeze) {
+        PS.streakFreezes = (PS.streakFreezes||0) + 1;
+        showNotif('🛡️', 'Streak Freeze added! ('+PS.streakFreezes+' stored)');
+      } else {
+        showNotif(p.icon, p.name+' purchased!');
+      }
+      psSave(); updatePlatformBar(); checkAchievements();
     };
     grid.appendChild(div);
   });
@@ -1518,6 +1693,8 @@ function onLevelCleared(gameId, score) {
   addXP(15 + Math.floor(score/200));
   checkAchievements();
   updatePlatformBar();
+  // Show social actions after level clear
+  showPostGameActions(gameId, score);
 }
 function onPoolPocket() {
   PS.totalPockets++;
@@ -1528,6 +1705,232 @@ function onTriviaStreak(streak) {
   setAchProg('streak_7', Math.min(streak, 7));
 }
 
+// ─── POST-GAME SOCIAL ACTIONS ────────────────────────────────────────────────
+let _pgaBanner = null;
+function showPostGameActions(gameId, score) {
+  // Remove any existing banner
+  if(_pgaBanner) _pgaBanner.remove();
+  const gameNames = {pool:'Pool 🎱',water:'Water Sort 💧',block:'Block Puzzle 🧩',crossword:'Crossword Jam 📖',trivia:'Trivia Master 🧠'};
+  const gameName = gameNames[gameId] || gameId;
+  const banner = document.createElement('div');
+  banner.id = 'pgaBanner';
+  banner.style.cssText = `
+    position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+    background:linear-gradient(135deg,rgba(20,17,35,0.98),rgba(30,20,50,0.98));
+    border:1px solid var(--gold);border-radius:14px;padding:12px 16px;
+    display:flex;gap:8px;align-items:center;z-index:9999;
+    box-shadow:0 4px 24px rgba(0,0,0,0.6);max-width:360px;width:calc(100% - 32px);
+    animation:rewardPop .3s ease;
+  `;
+  banner.innerHTML = `
+    <div style="flex:1;font-size:12px;color:#ccc;">
+      <span style="color:var(--gold);font-weight:900;">${formatNum(score)}</span> in ${gameName}
+    </div>
+    <button onclick="showChallengeModal('${gameId}',${score})" style="
+      background:linear-gradient(135deg,var(--gold),var(--gold2));
+      border:none;border-radius:20px;padding:6px 12px;font-size:11px;
+      font-weight:900;color:#111;cursor:pointer;flex-shrink:0;">
+      ⚔️ Challenge
+    </button>
+    <button onclick="showShareModal('${gameId}',${score},'score')" style="
+      background:rgba(61,214,245,0.15);border:1px solid var(--gem);
+      border-radius:20px;padding:6px 12px;font-size:11px;font-weight:900;
+      color:var(--gem);cursor:pointer;flex-shrink:0;">
+      📤 Share
+    </button>
+    <button onclick="this.closest('#pgaBanner').remove()" style="
+      background:none;border:none;color:#888;font-size:16px;cursor:pointer;
+      padding:0 4px;flex-shrink:0;">✕</button>
+  `;
+  document.body.appendChild(banner);
+  _pgaBanner = banner;
+  setTimeout(() => { if(banner.parentNode) banner.remove(); }, 8000);
+}
+
+// ─── CHALLENGE MODAL ─────────────────────────────────────────────────────────
+function showChallengeModal(gameId, score) {
+  const token = _getAuthToken();
+  if (!token) { showNotif('🔒','Sign in to challenge friends'); return; }
+
+  // Inline modal for friend selection
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;`;
+  overlay.innerHTML = `
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:18px;padding:20px;width:320px;max-width:90vw;">
+      <div style="font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;color:var(--gold);margin-bottom:12px;">⚔️ Challenge a Friend</div>
+      <div style="font-size:12px;color:#888;margin-bottom:12px;">Share your score of <b style="color:var(--gold)">${formatNum(score)}</b> in ${gameId} and dare a friend to beat it.</div>
+      <div id="challengeFriendList" style="max-height:180px;overflow-y:auto;margin-bottom:12px;">
+        <div style="color:#666;font-size:12px;text-align:center;">Loading friends…</div>
+      </div>
+      <button onclick="this.closest('[style*=inset]').remove()" style="
+        width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
+        border-radius:10px;padding:8px;color:#888;cursor:pointer;font-size:13px;">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Load friends
+  fetch(`${_API_BASE}/api/friends`, { headers: { 'Authorization': `Bearer ${token}` } })
+    .then(r => r.json())
+    .then(data => {
+      const friends = data.friends || data.data || data || [];
+      const list = overlay.querySelector('#challengeFriendList');
+      if (!friends.length) { list.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;">No friends yet</div>'; return; }
+      list.innerHTML = friends.slice(0,20).map(f => `
+        <div onclick="sendChallenge('${gameId}',${score},${f.id || f.friendId},this)" style="
+          display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;
+          cursor:pointer;transition:background .2s;" onmouseover="this.style.background='rgba(245,197,24,0.08)'" onmouseout="this.style.background='none'">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:18px;">${f.avatar||'👤'}</div>
+          <span style="font-size:13px;color:var(--text);">${f.displayName||f.username||'Friend'}</span>
+        </div>
+      `).join('');
+    })
+    .catch(() => {
+      overlay.querySelector('#challengeFriendList').innerHTML = '<div style="color:#e74c3c;font-size:12px;text-align:center;">Could not load friends</div>';
+    });
+}
+
+async function sendChallenge(gameId, score, targetId, el) {
+  const token = _getAuthToken();
+  if (!token) return;
+  try {
+    el.style.opacity = '0.5';
+    const r = await fetch(`${_API_BASE}/api/games/challenges`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
+      body: JSON.stringify({ gameType: gameId, score, targetFriendId: targetId }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showNotif('⚔️', 'Challenge sent!');
+      el.closest('[style*=inset]')?.remove();
+    } else {
+      showNotif('❌', 'Could not send challenge');
+      el.style.opacity = '1';
+    }
+  } catch(e) {
+    showNotif('❌', 'Network error');
+    el.style.opacity = '1';
+  }
+}
+
+// ─── SHARE MODAL ─────────────────────────────────────────────────────────────
+function showShareModal(gameId, score, shareType, achievementName, achievementIcon) {
+  const token = _getAuthToken();
+  if (!token) {
+    // Fallback: postMessage to parent iframe (works even without auth)
+    try {
+      const gameName = {pool:'Pool 🎱',water:'Water Sort 💧',block:'Block Puzzle 🧩',crossword:'Crossword Jam 📖',trivia:'Trivia Master 🧠'}[gameId]||gameId;
+      window.parent.postMessage({
+        type: 'SHARE_GAME_SCORE',
+        gameType: gameId, score,
+        achievementName, achievementIcon, shareType,
+        text: shareType==='achievement'
+          ? `🏆 I unlocked ${achievementIcon||''} ${achievementName||'an achievement'}!`
+          : `🎮 I scored ${formatNum(score)} in ${gameName}! Can you beat it?`,
+      }, '*');
+      showNotif('📤', 'Shared to chat!');
+    } catch(_){}
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;`;
+  overlay.innerHTML = `
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:18px;padding:20px;width:320px;max-width:90vw;">
+      <div style="font-family:'Rajdhani',sans-serif;font-size:18px;font-weight:700;color:var(--gem);margin-bottom:12px;">📤 Share to Chat</div>
+      <div id="shareTargetList" style="max-height:220px;overflow-y:auto;margin-bottom:12px;">
+        <div style="color:#666;font-size:12px;text-align:center;">Loading chats…</div>
+      </div>
+      <button onclick="this.closest('[style*=inset]').remove()" style="
+        width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
+        border-radius:10px;padding:8px;color:#888;cursor:pointer;font-size:13px;">Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Load recent chats
+  fetch(`${_API_BASE}/api/chats`, { headers: { 'Authorization': `Bearer ${token}` } })
+    .then(r => r.json())
+    .then(data => {
+      const chats = data.chats || data.data || data || [];
+      const list = overlay.querySelector('#shareTargetList');
+      if (!chats.length) { list.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;">No chats yet</div>'; return; }
+      list.innerHTML = chats.slice(0,15).map(c => `
+        <div onclick="sendGameShare('${gameId}',${score},'${shareType||'score'}',${c.id},null,'${achievementName||''}','${achievementIcon||''}',this)" style="
+          display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;
+          cursor:pointer;transition:background .2s;" onmouseover="this.style.background='rgba(61,214,245,0.08)'" onmouseout="this.style.background='none'">
+          <div style="width:32px;height:32px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:16px;">💬</div>
+          <span style="font-size:13px;color:var(--text);">${c.name||c.title||'Chat'}</span>
+        </div>
+      `).join('');
+    })
+    .catch(() => {
+      // Fallback to parent postMessage
+      overlay.remove();
+      try {
+        window.parent.postMessage({ type:'SHARE_GAME_SCORE', gameType:gameId, score, shareType, achievementName, achievementIcon }, '*');
+        showNotif('📤','Shared!');
+      } catch(_){ showNotif('❌','Could not share'); }
+    });
+}
+
+async function sendGameShare(gameId, score, shareType, chatId, groupId, achievementName, achievementIcon, el) {
+  const token = _getAuthToken();
+  if (!token) return;
+  try {
+    el.style.opacity = '0.5';
+    const r = await fetch(`${_API_BASE}/api/games/share`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
+      body: JSON.stringify({ chatId, groupId, gameType:gameId, score, shareType, achievementName, achievementIcon }),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      showNotif('📤','Shared to chat!');
+      el.closest('[style*=inset]')?.remove();
+    } else {
+      showNotif('❌','Could not share');
+      el.style.opacity = '1';
+    }
+  } catch(e) {
+    showNotif('❌','Network error');
+    el.style.opacity = '1';
+  }
+}
+
+// ─── INCOMING CHALLENGE HANDLER ──────────────────────────────────────────────
+// Called when parent app forwards a game:challenge socket event
+window.addEventListener('message', evt => {
+  if (!evt.data) return;
+  if (evt.data.type === 'game:challenge') {
+    const c = evt.data;
+    const banner = document.createElement('div');
+    banner.style.cssText = `
+      position:fixed;top:60px;left:50%;transform:translateX(-50%);
+      background:linear-gradient(135deg,rgba(30,20,50,0.98),rgba(20,17,35,0.98));
+      border:1px solid #e74c3c;border-radius:14px;padding:12px 16px;
+      display:flex;gap:8px;align-items:center;z-index:9998;
+      box-shadow:0 4px 24px rgba(231,76,60,0.3);max-width:360px;width:calc(100% - 32px);
+      animation:rewardPop .3s ease;
+    `;
+    banner.innerHTML = `
+      <span style="font-size:20px;">⚔️</span>
+      <div style="flex:1;font-size:12px;color:#ccc;">
+        <b style="color:#e74c3c;">${c.challengerName||'Someone'}</b> challenged you!<br>
+        Beat <b style="color:var(--gold)">${formatNum(c.challengerScore||0)}</b> in ${c.gameType||'a game'}
+      </div>
+      <button onclick="openGame('${c.gameType||'pool'}');this.closest('[style*=inset\\,top]').remove()" style="
+        background:linear-gradient(135deg,#e74c3c,#c0392b);
+        border:none;border-radius:20px;padding:6px 12px;font-size:11px;
+        font-weight:900;color:#fff;cursor:pointer;">PLAY</button>
+      <button onclick="this.closest('[style]').remove()" style="background:none;border:none;color:#888;font-size:16px;cursor:pointer;">✕</button>
+    `;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 15000);
+  }
+});
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 psLoad();
 updatePlatformBar();
@@ -1536,7 +1939,19 @@ buildDailyCalendar();
 // ═══════════════════════════════════════════════════════════════════════════
 // HUB NAVIGATION
 // ═══════════════════════════════════════════════════════════════════════════
+// Track active event listeners for cleanup (memory leak fix)
+let _activeGameListeners = [];
+function _addGameListener(el, event, fn) {
+  el.addEventListener(event, fn);
+  _activeGameListeners.push({ el, event, fn });
+}
+function _cleanupGameListeners() {
+  _activeGameListeners.forEach(({ el, event, fn }) => el.removeEventListener(event, fn));
+  _activeGameListeners = [];
+}
+
 function openGame(type) {
+  _cleanupGameListeners();
   document.getElementById('hub').style.display = 'none';
   document.getElementById('platformBar').classList.add('hidden');
   document.getElementById('gameWrap').classList.add('show');
@@ -1552,6 +1967,8 @@ function openGame(type) {
   onGamePlayed(type);
 }
 function goBack() {
+  _cleanupGameListeners();
+  if(_pgaBanner) { _pgaBanner.remove(); _pgaBanner = null; }
   document.getElementById('hub').style.display = '';
   document.getElementById('platformBar').classList.remove('hidden');
   document.getElementById('gameWrap').classList.remove('show');
@@ -3148,6 +3565,22 @@ function poolLoop(){
   poolDraw();
   poolAnimId=requestAnimationFrame(poolLoop);
 }
+
+// Pause pool loop (and other timers) when tab is hidden to save battery
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (poolAnimId) { cancelAnimationFrame(poolAnimId); poolAnimId = null; }
+    if (tvTimerInterval) { clearInterval(tvTimerInterval); tvTimerInterval = null; }
+    if (typeof wTimer !== 'undefined' && wTimer) { clearInterval(wTimer); wTimer = null; }
+  } else {
+    // Resume pool if pool game is active
+    const poolEl = document.getElementById('poolGame');
+    if (poolEl && poolEl.classList.contains('show') && !poolAnimId) poolLoop();
+    // Resume trivia timer if trivia is active
+    const triviaEl = document.getElementById('triviaGame');
+    if (triviaEl && triviaEl.classList.contains('show') && typeof tvStartTimer === 'function') tvStartTimer();
+  }
+});
 
 // ────────────────────────────────────────────────────────────
 // INPUT — Aiming
