@@ -26,15 +26,17 @@
   // ─── Call States ──────────────────────────────────────────────────────────
 
   const CALL_STATE = Object.freeze({
-    IDLE:         'IDLE',
-    INITIATING:   'INITIATING',   // Outbound: waiting for callee to ring
-    RINGING:      'RINGING',      // Inbound: showing incoming call UI
-    CONNECTING:   'CONNECTING',   // ICE + media negotiation
-    CONNECTED:    'CONNECTED',    // Media flowing
-    RECONNECTING: 'RECONNECTING', // Recovering from transport loss
-    ENDING:       'ENDING',       // Teardown in progress
-    ENDED:        'ENDED',        // Terminal
-    FAILED:       'FAILED',       // Terminal — error
+    IDLE:          'IDLE',
+    INITIATING:    'INITIATING',    // Outbound: waiting for callee to ring
+    RINGING:       'RINGING',       // Inbound: showing incoming call UI
+    CONNECTING:    'CONNECTING',    // ICE + media negotiation
+    CONNECTED:     'CONNECTED',     // Media flowing
+    RECONNECTING:  'RECONNECTING',  // Recovering from transport loss
+    ENDING:        'ENDING',        // Teardown in progress
+    ENDED:         'ENDED',         // Terminal
+    FAILED:        'FAILED',        // Terminal — error
+    SCHEDULED:     'SCHEDULED',     // Scheduled future call — waiting for start time
+    WAITING_ROOM:  'WAITING_ROOM',  // Host not yet admitted participant
   });
 
   const CALL_TYPE = Object.freeze({
@@ -71,15 +73,17 @@
 
     canTransition(newState) {
       const allowed = {
-        [CALL_STATE.IDLE]:         [CALL_STATE.INITIATING, CALL_STATE.RINGING],
-        [CALL_STATE.INITIATING]:   [CALL_STATE.RINGING, CALL_STATE.CONNECTING, CALL_STATE.ENDED, CALL_STATE.FAILED],
-        [CALL_STATE.RINGING]:      [CALL_STATE.CONNECTING, CALL_STATE.ENDED, CALL_STATE.FAILED],
-        [CALL_STATE.CONNECTING]:   [CALL_STATE.CONNECTED, CALL_STATE.RECONNECTING, CALL_STATE.ENDED, CALL_STATE.FAILED],
-        [CALL_STATE.CONNECTED]:    [CALL_STATE.RECONNECTING, CALL_STATE.ENDING, CALL_STATE.ENDED, CALL_STATE.FAILED],
-        [CALL_STATE.RECONNECTING]: [CALL_STATE.CONNECTED, CALL_STATE.ENDED, CALL_STATE.FAILED],
-        [CALL_STATE.ENDING]:       [CALL_STATE.ENDED],
-        [CALL_STATE.ENDED]:        [],
-        [CALL_STATE.FAILED]:       [],
+        [CALL_STATE.IDLE]:          [CALL_STATE.INITIATING, CALL_STATE.RINGING, CALL_STATE.SCHEDULED],
+        [CALL_STATE.INITIATING]:    [CALL_STATE.RINGING, CALL_STATE.CONNECTING, CALL_STATE.ENDED, CALL_STATE.FAILED],
+        [CALL_STATE.RINGING]:       [CALL_STATE.CONNECTING, CALL_STATE.WAITING_ROOM, CALL_STATE.ENDED, CALL_STATE.FAILED],
+        [CALL_STATE.CONNECTING]:    [CALL_STATE.CONNECTED, CALL_STATE.RECONNECTING, CALL_STATE.ENDED, CALL_STATE.FAILED],
+        [CALL_STATE.CONNECTED]:     [CALL_STATE.RECONNECTING, CALL_STATE.ENDING, CALL_STATE.ENDED, CALL_STATE.FAILED],
+        [CALL_STATE.RECONNECTING]:  [CALL_STATE.CONNECTED, CALL_STATE.ENDED, CALL_STATE.FAILED],
+        [CALL_STATE.ENDING]:        [CALL_STATE.ENDED],
+        [CALL_STATE.ENDED]:         [],
+        [CALL_STATE.FAILED]:        [],
+        [CALL_STATE.SCHEDULED]:     [CALL_STATE.INITIATING, CALL_STATE.RINGING, CALL_STATE.ENDED],
+        [CALL_STATE.WAITING_ROOM]:  [CALL_STATE.CONNECTING, CALL_STATE.ENDED, CALL_STATE.FAILED],
       };
       return (allowed[this.state] || []).includes(newState);
     }

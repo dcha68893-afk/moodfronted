@@ -6127,6 +6127,85 @@ function applySession(sessionData) {
 
 
 
+    // ═══ Multi-Tab Call Conflict Prevention ═════════════════════════════════
+    // Uses BroadcastChannel so only ONE tab handles calls at a time.
+    // When another tab becomes the active call handler (leader), this tab
+    // suppresses incoming call UI and defers all call operations.
+    // ─────────────────────────────────────────────────────────────────────────
+    var _tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    var _isCallLeader = false;
+    var _callBroadcast = null;
+    var _callLeaderHeartbeatTimer = null;
+    var _leaderTimestamp = 0;
+
+    (function _initTabLeader() {
+        try {
+            if (typeof BroadcastChannel === 'undefined') {
+                _isCallLeader = true; // Fallback: no BroadcastChannel, act as leader
+                return;
+            }
+            _callBroadcast = new BroadcastChannel('kyn_call_tab_leader');
+
+            _callBroadcast.onmessage = function(e) {
+                var msg = e.data;
+                if (!msg || !msg.type) return;
+                if (msg.type === 'CALL_LEADER_CLAIM' && msg.tabId !== _tabId) {
+                    // Another tab claimed leadership — yield
+                    _isCallLeader = false;
+                    clearInterval(_callLeaderHeartbeatTimer);
+                } else if (msg.type === 'CALL_LEADER_HEARTBEAT' && msg.tabId !== _tabId) {
+                    _leaderTimestamp = Date.now();
+                    _isCallLeader = false;
+                } else if (msg.type === 'CALL_LEADER_RELEASE' && msg.tabId !== _tabId) {
+                    // Previous leader released — race to claim
+                    _tryClaimLeader();
+                } else if (msg.type === 'CALL_LEADER_QUERY') {
+                    if (_isCallLeader) {
+                        _callBroadcast.postMessage({ type: 'CALL_LEADER_HEARTBEAT', tabId: _tabId, ts: Date.now() });
+                    }
+                }
+            };
+
+            function _tryClaimLeader() {
+                setTimeout(function() {
+                    var now = Date.now();
+                    if (now - _leaderTimestamp > 3000) { // No heartbeat for 3s → claim
+                        _isCallLeader = true;
+                        _callBroadcast.postMessage({ type: 'CALL_LEADER_CLAIM', tabId: _tabId, ts: now });
+                        clearInterval(_callLeaderHeartbeatTimer);
+                        _callLeaderHeartbeatTimer = setInterval(function() {
+                            if (_isCallLeader && _callBroadcast) {
+                                _callBroadcast.postMessage({ type: 'CALL_LEADER_HEARTBEAT', tabId: _tabId, ts: Date.now() });
+                            }
+                        }, 1500);
+                    }
+                }, Math.random() * 200); // Random jitter to avoid simultaneous claims
+            }
+
+            // Query for existing leader first
+            _callBroadcast.postMessage({ type: 'CALL_LEADER_QUERY', tabId: _tabId });
+            setTimeout(function() {
+                if (!_isCallLeader && (Date.now() - _leaderTimestamp > 2000)) {
+                    _tryClaimLeader();
+                }
+            }, 500);
+
+            // Release leader on tab close
+            window.addEventListener('beforeunload', function() {
+                if (_isCallLeader && _callBroadcast) {
+                    _callBroadcast.postMessage({ type: 'CALL_LEADER_RELEASE', tabId: _tabId });
+                }
+                if (_callBroadcast) { try { _callBroadcast.close(); } catch(_) {} }
+            });
+
+        } catch(err) {
+            _isCallLeader = true; // Fail-open: always be leader if BroadcastChannel errors
+        }
+    })();
+
+    // Helper: should this tab handle a call event?
+    function _isActiveCallTab() { return _isCallLeader; }
+
     // ==================== CONFIGURATION ====================
 
 
@@ -8215,23 +8294,28 @@ function applySession(sessionData) {
 
 
 
+
             window.addEventListener('online', () => {
-
-
 
                 this._online = true;
 
-
-
                 this._notifyListeners('online', {});
 
+                logInfo(MODULE, 'Network online — attempting call recovery if active');
 
-
-                logInfo(MODULE, 'Network online');
-
-
+                // If a call is active, trigger ICE restart to recover the connection
+                try {
+                    var activeCallId = window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId);
+                    if (activeCallId && window.__PeerConnectionManager) {
+                        logInfo(MODULE, 'Triggering ICE restart after network recovery');
+                        setTimeout(function() {
+                            try { window.__PeerConnectionManager.restartICEForAll && window.__PeerConnectionManager.restartICEForAll(); } catch(_e) {}
+                        }, 800); // Short delay to let network stabilise
+                    }
+                } catch(_e) {}
 
             });
+
 
 
 
@@ -27866,6 +27950,18 @@ _escapeHtml: function(text) {
 
     function handleIncomingCall(callData) {
 
+        // ── Multi-tab guard: only the leader tab handles incoming calls ────────
+        // Other tabs suppress the UI but keep the call record for history.
+        if (typeof _isActiveCallTab === 'function' && !_isActiveCallTab()) {
+            logInfo(MODULE, '[multi-tab] Suppressing call:incoming — not the active call tab');
+            // Notify the call broadcast channel so the leader knows another tab received it
+            if (_callBroadcast) {
+                try { _callBroadcast.postMessage({ type: 'CALL_INCOMING_SUPPRESSED', callId: callData && callData.callId, tabId: _tabId }); } catch(_e) {}
+            }
+            return;
+        }
+
+
 
 
         logCall(MODULE, 'handleIncomingCall', callData);
@@ -35717,32 +35813,30 @@ clearActiveCall: function() {
 
         sendChatMessage: function(message) {
 
-
-
             if (!assertActive('sendChatMessage')) return;
 
+            var _chatTs = Date.now();
+            var _chatCallId = callsState.activeCallId || callsState.serverCallId;
 
-
-            
-
-
-
+            // Primary: data channel (low-latency real-time)
             IframeTransport.sendAction('SEND_CHAT_MESSAGE', {
-
-
-
-                message,
-
-
-
-                timestamp: Date.now()
-
-
-
+                message: message,
+                timestamp: _chatTs
             });
 
-
-
+            // Persistence: relay via WebSocket so messages survive ICE restart
+            try {
+                var _sock = (window.KynectaRealtime && window.KynectaRealtime._socket)
+                            || window.__appSocket;
+                if (_sock && _sock.connected && _chatCallId) {
+                    _sock.emit('call:chat_message', {
+                        callId:    _chatCallId,
+                        message:   message,
+                        timestamp: _chatTs,
+                        senderId:  callsState.userId || (callsState.session && callsState.session.userId)
+                    });
+                }
+            } catch (_e) {}
         },
 
 
@@ -35789,44 +35883,146 @@ clearActiveCall: function() {
 
         startWhiteboard: function() {
 
-
-
             if (!assertActive('startWhiteboard')) return;
 
-
-
-            
-
-
-
-            if (!callsState.isPremium && !callsState.premiumFeatures.whiteboard) {
-
-
-
-                notifyListeners('premium_required', { feature: 'whiteboard' });
-
-
-
+            // Whiteboard: draw-over-canvas, synced via data channel
+            // Creates an overlay canvas, sends draw events as data channel messages.
+            if (callsState._whiteboardActive) {
+                // Toggle off
+                callsState._whiteboardActive = false;
+                var existing = document.getElementById('kyn-whiteboard-overlay');
+                if (existing) existing.remove();
+                IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'stop', timestamp: Date.now() });
+                notifyListeners('whiteboard_stopped', {});
                 return;
-
-
-
             }
 
+            callsState._whiteboardActive = true;
+            IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'start', timestamp: Date.now() });
 
+            // Build the whiteboard overlay
+            var videoContainer = document.getElementById('remoteVideo') ||
+                                 document.getElementById('callVideoContainer') ||
+                                 document.body;
 
-            IframeTransport.sendAction('START_WHITEBOARD', {
+            var wb = document.createElement('div');
+            wb.id = 'kyn-whiteboard-overlay';
+            wb.setAttribute('role', 'application');
+            wb.setAttribute('aria-label', 'Shared whiteboard');
+            wb.style.cssText = [
+                'position:absolute', 'top:0', 'left:0', 'width:100%', 'height:100%',
+                'z-index:1000', 'pointer-events:auto'
+            ].join(';');
 
+            var canvas = document.createElement('canvas');
+            canvas.id = 'kyn-whiteboard-canvas';
+            canvas.style.cssText = 'width:100%;height:100%;cursor:crosshair;touch-action:none;';
+            canvas.setAttribute('aria-label', 'Drawing canvas');
 
+            // Toolbar
+            var toolbar = document.createElement('div');
+            toolbar.style.cssText = [
+                'position:absolute', 'top:8px', 'left:8px', 'z-index:10',
+                'display:flex', 'gap:6px', 'background:rgba(0,0,0,0.65)',
+                'border-radius:8px', 'padding:6px 10px'
+            ].join(';');
+            toolbar.innerHTML = [
+                '<button id="wb-pen"    aria-label="Pen"   style="background:#6366f1;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;">Pen</button>',
+                '<button id="wb-eraser" aria-label="Erase" style="background:#374151;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;">Eraser</button>',
+                '<button id="wb-clear"  aria-label="Clear" style="background:#dc2626;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;">Clear</button>',
+                '<input  id="wb-color"  type="color" value="#ffffff" title="Color" style="width:28px;height:28px;border:none;cursor:pointer;border-radius:4px;">',
+                '<button id="wb-close"  aria-label="Close whiteboard" style="background:#374151;color:#fff;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;">✕</button>',
+            ].join('');
 
-                timestamp: Date.now()
+            wb.appendChild(canvas);
+            wb.appendChild(toolbar);
 
+            var target = videoContainer;
+            if (target !== document.body) target.style.position = 'relative';
+            target.appendChild(wb);
 
+            // Size canvas to container
+            var _resizeCanvas = function() {
+                var rect = canvas.getBoundingClientRect();
+                canvas.width  = rect.width  || 640;
+                canvas.height = rect.height || 480;
+            };
+            _resizeCanvas();
+            window.addEventListener('resize', _resizeCanvas);
 
+            var ctx = canvas.getContext('2d');
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth   = 3;
+            ctx.lineCap     = 'round';
+            ctx.lineJoin    = 'round';
+
+            var _drawing   = false;
+            var _tool      = 'pen';
+            var _lastX = 0, _lastY = 0;
+
+            function _getPos(e) {
+                var rect = canvas.getBoundingClientRect();
+                var src  = e.touches ? e.touches[0] : e;
+                return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+            }
+
+            function _draw(x0, y0, x1, y1, color, width, tool) {
+                ctx.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
+                ctx.strokeStyle = color;
+                ctx.lineWidth   = tool === 'eraser' ? 24 : width;
+                ctx.beginPath();
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x1, y1);
+                ctx.stroke();
+                ctx.globalCompositeOperation = 'source-over';
+            }
+
+            function _sendDrawEvent(x0, y0, x1, y1) {
+                var evt = { action: 'draw', x0: x0, y0: y0, x1: x1, y1: y1,
+                            color: ctx.strokeStyle, width: ctx.lineWidth, tool: _tool };
+                IframeTransport.sendAction('WHITEBOARD_EVENT', evt);
+            }
+
+            canvas.addEventListener('pointerdown', function(e) {
+                _drawing = true;
+                var pos = _getPos(e);
+                _lastX = pos.x; _lastY = pos.y;
+                canvas.setPointerCapture(e.pointerId);
+            });
+            canvas.addEventListener('pointermove', function(e) {
+                if (!_drawing) return;
+                var pos = _getPos(e);
+                _draw(_lastX, _lastY, pos.x, pos.y, ctx.strokeStyle, ctx.lineWidth, _tool);
+                _sendDrawEvent(_lastX, _lastY, pos.x, pos.y);
+                _lastX = pos.x; _lastY = pos.y;
+            });
+            canvas.addEventListener('pointerup',   function() { _drawing = false; });
+            canvas.addEventListener('pointerleave', function() { _drawing = false; });
+
+            // Toolbar handlers
+            document.getElementById('wb-pen')    .addEventListener('click', function() { _tool = 'pen'; });
+            document.getElementById('wb-eraser') .addEventListener('click', function() { _tool = 'eraser'; });
+            document.getElementById('wb-color')  .addEventListener('input', function(e) { ctx.strokeStyle = e.target.value; });
+            document.getElementById('wb-clear')  .addEventListener('click', function() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'clear' });
+            });
+            document.getElementById('wb-close')  .addEventListener('click', function() {
+                window.callCore && window.callCore.startWhiteboard(); // toggle off
             });
 
+            // Receive remote draw events
+            var _wbListener = function(e) {
+                var msg = e.detail || e.data;
+                if (!msg || msg.type !== 'WHITEBOARD_EVENT') return;
+                var d = msg.data || msg;
+                if (d.action === 'draw')  _draw(d.x0, d.y0, d.x1, d.y1, d.color, d.width, d.tool);
+                if (d.action === 'clear') ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (d.action === 'stop')  { wb.remove(); window.removeEventListener('kyn:datachannel:message', _wbListener); }
+            };
+            window.addEventListener('kyn:datachannel:message', _wbListener);
 
-
+            notifyListeners('whiteboard_started', {});
         },
 
 
@@ -35837,93 +36033,105 @@ clearActiveCall: function() {
 
         createPoll: function(question, options) {
 
-
-
             if (!assertActive('createPoll')) return;
 
-
-
-            
-
-
-
-            if (!callsState.isPremium && !callsState.premiumFeatures.polls) {
-
-
-
-                notifyListeners('premium_required', { feature: 'polls' });
-
-
-
+            if (!question || !Array.isArray(options) || options.length < 2) {
+                logError(MODULE, 'createPoll: question and at least 2 options are required');
                 return;
-
-
-
             }
 
+            var pollId = 'poll_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+            var poll = {
+                pollId:    pollId,
+                question:  String(question).substring(0, 280),
+                options:   options.slice(0, 8).map(function(o, idx) {
+                    return { id: String(idx), text: String(o).substring(0, 120), votes: [] };
+                }),
+                createdBy: callsState.userId || callsState.session && callsState.session.userId,
+                createdAt: Date.now(),
+                active:    true,
+            };
 
+            // Store locally
+            if (!callsState.polls) callsState.polls = {};
+            callsState.polls[pollId] = poll;
 
-            IframeTransport.sendAction('CREATE_POLL', {
+            // Broadcast via data channel (real-time) AND socket (persistence)
+            IframeTransport.sendAction('POLL_EVENT', { action: 'create', poll: poll });
 
+            try {
+                var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
+                var cid  = callsState.activeCallId || callsState.serverCallId;
+                if (sock && sock.connected && cid) {
+                    sock.emit('call:poll_event', { callId: cid, action: 'create', poll: poll });
+                }
+            } catch(_e) {}
 
-
-                question,
-
-
-
-                options,
-
-
-
-                timestamp: Date.now()
-
-
-
-            });
-
-
-
+            notifyListeners('poll_created', { poll: poll });
+            return pollId;
         },
-
-
-
-        
-
-
 
         votePoll: function(pollId, optionId) {
 
-
-
             if (!assertActive('votePoll')) return;
 
+            var poll = callsState.polls && callsState.polls[pollId];
+            if (!poll || !poll.active) { logWarn(MODULE, 'votePoll: poll not found or inactive'); return; }
 
+            var option = poll.options.find(function(o) { return o.id === String(optionId); });
+            if (!option) { logWarn(MODULE, 'votePoll: invalid optionId'); return; }
 
-            
+            var myId = String(callsState.userId || (callsState.session && callsState.session.userId));
 
-
-
-            IframeTransport.sendAction('VOTE_POLL', {
-
-
-
-                pollId,
-
-
-
-                optionId,
-
-
-
-                timestamp: Date.now()
-
-
-
+            // Remove previous vote from all options (one vote per person)
+            poll.options.forEach(function(o) {
+                o.votes = o.votes.filter(function(v) { return v !== myId; });
             });
 
+            // Add vote
+            option.votes.push(myId);
 
+            var votePayload = { pollId: pollId, optionId: String(optionId), voterId: myId, timestamp: Date.now() };
 
+            // Broadcast vote
+            IframeTransport.sendAction('POLL_EVENT', { action: 'vote', vote: votePayload });
+
+            try {
+                var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
+                var cid  = callsState.activeCallId || callsState.serverCallId;
+                if (sock && sock.connected && cid) {
+                    sock.emit('call:poll_event', { callId: cid, action: 'vote', vote: votePayload });
+                }
+            } catch(_e) {}
+
+            notifyListeners('poll_voted', { poll: poll, votePayload: votePayload });
         },
+
+        closePoll: function(pollId) {
+
+            if (!assertActive('closePoll')) return;
+
+            var poll = callsState.polls && callsState.polls[pollId];
+            if (!poll) return;
+            poll.active = false;
+
+            IframeTransport.sendAction('POLL_EVENT', { action: 'close', pollId: pollId });
+
+            try {
+                var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
+                var cid  = callsState.activeCallId || callsState.serverCallId;
+                if (sock && sock.connected && cid) {
+                    sock.emit('call:poll_event', { callId: cid, action: 'close', pollId: pollId });
+                }
+            } catch(_e) {}
+
+            notifyListeners('poll_closed', { pollId: pollId, results: poll });
+        },
+
+        getPolls: function() {
+            return callsState.polls ? Object.values(callsState.polls) : [];
+        },
+
 
 
 

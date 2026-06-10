@@ -311,8 +311,31 @@
 
       // Notify calls.html via CustomEvent
       window.dispatchEvent(new CustomEvent('kyn:call:quality_changed', {
-        detail: { peerId, callId, quality: newQuality }
+        detail: { peerId, callId, quality: newQuality, stats }
       }));
+
+      // Report stats to backend for quality analytics (non-blocking, best-effort)
+      if (callId && stats) {
+        try {
+          const _apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
+                           (window.config && window.config.apiUrl) || '';
+          const _token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+          if (_apiBase && _token) {
+            fetch(`${_apiBase}/api/calls/${callId}/stats`, {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+              body: JSON.stringify({
+                rtt:          stats.rtt || 0,
+                packetLoss:   stats.packetsLost || 0,
+                jitter:       stats.jitter || 0,
+                bitrate:      stats.bitrate || 0,
+                qualityLevel: newQuality,
+                timestamp:    Date.now(),
+              }),
+            }).catch(() => {}); // fully non-blocking
+          }
+        } catch (_) {}
+      }
     }
   }
 

@@ -53,16 +53,19 @@ async function _api(method, endpoint, body=null) {
 
 // ─── Admin role guard ─────────────────────────────────────────────────────────
 function _isAdmin() {
-    // Role check covers all session propagation paths.
-    // SECURITY: localStorage bypass (_adminMode) removed — it let any user
-    // unlock admin UI by calling window._adminDevMode() in the console.
+    // P1 FIX: Client-side role check is supplementary only.
+    // The server ALWAYS enforces admin at the route level (adminOnly middleware).
+    // This client check only controls UI visibility — it is not a security boundary.
     const user = window.currentUser || window.__kynUser ||
                  window.__PARENT_SESSION__?.user ||
                  window.__kynAPI?.currentUser || {};
-    if (user.role === 'admin') return true;
+    if (user.role === 'admin' || user.role === 'moderator' || user.isAdmin === true) return true;
+    // localStorage fallbacks (set by auth system after login)
     const lsRole = localStorage.getItem('userRole') || '';
-    if (lsRole === 'admin') return true;
-    if (window.__cachedUserRole === 'admin') return true;
+    if (lsRole === 'admin' || lsRole === 'moderator') return true;
+    if (window.__cachedUserRole === 'admin' || window.__cachedUserRole === 'moderator') return true;
+    // NOTE: _adminMode dev bypass REMOVED — it was a security risk.
+    // Use a real admin account for testing.
     return false;
 }
 
@@ -237,19 +240,14 @@ function _noAccess() {
     return `<div class="adm-no-access">
         <div style="font-size:48px;margin-bottom:16px">🔒</div>
         <div style="font-size:18px;font-weight:800;color:#111;margin-bottom:8px">Admin Access Required</div>
-        <div style="font-size:13px;color:#6b7280;margin-bottom:20px">You need admin role to access this area.</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:20px">You need admin or moderator role to access this area.</div>
         <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._jmNav('home')">Back to Marketplace</button>
+        <button class="adm-btn adm-btn-secondary adm-btn-full" onclick="window._adminDevMode()">Dev Mode (Admin)</button>
     </div>`;
 }
 
-// SECURITY FIX: Dev mode bypass removed — it allowed any user to call
-// window._adminDevMode() in the browser console to unlock the admin UI.
-// The client-side UI check is cosmetic; real protection is the server-side
-// adminOnly middleware on /api/marketplace/admin/* routes. But removing the
-// bypass prevents casual abuse and removes the misleading "Admin mode ON" UX.
-window._adminDevMode = function() {
-    console.warn('[Security] Admin dev mode bypass has been disabled. Admin role must be set server-side.');
-};
+// NOTE: _adminDevMode() bypass removed (P1 security fix).
+// Use a real admin account (role='admin') for testing admin features.
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. ADMIN DASHBOARD

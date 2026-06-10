@@ -584,15 +584,17 @@ window._jmApplyCoupon = async function() {
     if (!code) { _toast('Enter a coupon code','warning','🎟️'); return; }
     const btn = document.querySelector('.co-coupon-btn');
     if (btn) btn.textContent = '…';
-    const r = await _api('POST','/marketplace/coupons/validate',{ code, subtotal: _state.subtotal });
+    // P1 FIX: Use correct endpoint /marketplace/coupon/validate
+    const r = await _api('POST','/marketplace/coupon/validate',{ code, subtotal: _state.subtotal });
     if (btn) btn.textContent = 'Apply';
-    if (r?.data?.discount || r?.discount) {
+    if (r?.data?.discount != null && r?.data?.valid) {
         _state.couponCode     = code;
-        _state.couponDiscount = r.data?.discount || r.discount;
-        _toast('Coupon applied! 🎉','success','✅');
+        _state.couponDiscount = parseFloat(r.data.discount || 0);
+        _state.freeShipping   = r.data.free_shipping || false;
+        _toast(`Coupon applied! You save KES ${_state.couponDiscount.toFixed(0)} 🎉`,'success','✅');
         _renderPaymentStep();
     } else {
-        _toast(r?.message || 'Invalid coupon code','error','❌');
+        _toast(r?.message || r?.data?.message || 'Invalid or expired coupon','error','❌');
         _state.couponCode = ''; _state.couponDiscount = 0;
     }
 };
@@ -675,13 +677,6 @@ window._jmCheckoutNext = function() {
 window._jmPlaceOrder = async function() {
     if (_state.loading) return;
     _state.loading = true;
-
-    // FIX: Disable the Place Order button immediately on first click to prevent
-    // double-tap/double-click creating two orders. The idempotency_key sent to
-    // the backend is a second line of defence.
-    const placeBtn = document.getElementById('coPlaceOrderBtn');
-    if (placeBtn) { placeBtn.disabled = true; placeBtn.textContent = 'Placing order…'; }
-
     _renderConfirmStep();
 
     const items = _state.cartItems.map(i => ({
@@ -693,10 +688,13 @@ window._jmPlaceOrder = async function() {
         seller_id:  i.product?.seller_id || i.listing?.sellerId || null,
     }));
 
-    // FIX: Generate idempotency key per checkout attempt — prevents duplicate orders
-    // if the user navigates back and re-submits, or on network retry.
-    const userId = window.currentUser?.id || window.__kynUserId || 'anon';
-    const idempotencyKey = `co_${userId}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`;
+    // P1 FIX: Generate idempotency key to prevent double orders on double-click
+    // Key is stored in sessionStorage so it's cleared when the tab closes.
+    const idempotencyKey = sessionStorage.getItem('_checkout_idem_key') || (() => {
+        const k = `ck_${Date.now()}_${Math.random().toString(36).slice(2,10)}`;
+        sessionStorage.setItem('_checkout_idem_key', k);
+        return k;
+    })();
 
     const orderPayload = {
         items,
@@ -709,6 +707,8 @@ window._jmPlaceOrder = async function() {
     };
 
     const r = await _api('POST', '/marketplace/checkout', orderPayload);
+    // Clear idempotency key on success so next checkout gets a fresh key
+    if (r && !r._error) sessionStorage.removeItem('_checkout_idem_key');
     _state.loading = false;
 
     if (!r) {

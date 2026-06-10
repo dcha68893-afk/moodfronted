@@ -22,6 +22,50 @@
 
   if (window.__PeerConnectionManager) return;
 
+  // ─── VP9 Codec Preference Helper ─────────────────────────────────────────
+  // Rewrites SDP to move VP9 to the front of the video codec preference list.
+  // VP9 offers ~30% better compression than VP8 at same quality, reducing
+  // bandwidth usage especially on mobile. Falls back gracefully if VP9 absent.
+  function _preferVP9Codec(sdp) {
+    if (!sdp || typeof sdp !== 'string') return sdp;
+    try {
+      const lines = sdp.split('\r\n');
+      let inVideoSection = false;
+      let mLineIdx = -1;
+      const codecPayloads = {}; // name → payload type
+
+      // First pass: collect payload numbers for video codecs
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('m=video')) {
+          inVideoSection = true;
+          mLineIdx = i;
+        } else if (lines[i].startsWith('m=') && !lines[i].startsWith('m=video')) {
+          inVideoSection = false;
+        }
+        if (inVideoSection && lines[i].startsWith('a=rtpmap:')) {
+          const match = lines[i].match(/^a=rtpmap:(\d+)\s+([^/]+)/);
+          if (match) {
+            codecPayloads[match[2].toUpperCase()] = match[1];
+          }
+        }
+      }
+
+      const vp9Pt = codecPayloads['VP9'];
+      if (!vp9Pt || mLineIdx < 0) return sdp; // VP9 not available — return unchanged
+
+      // Reorder the m=video line to put VP9 first
+      const mLineParts = lines[mLineIdx].split(' ');
+      const header = mLineParts.slice(0, 3); // m=video port RTP/SAVPF
+      const payloads = mLineParts.slice(3);
+      const reordered = [vp9Pt, ...payloads.filter(pt => pt !== vp9Pt)];
+      lines[mLineIdx] = [...header, ...reordered].join(' ');
+
+      return lines.join('\r\n');
+    } catch (_) {
+      return sdp; // Never fail on SDP manipulation
+    }
+  }
+
   // ─── ICE Configuration ────────────────────────────────────────────────────
 
   const DEFAULT_ICE_CONFIG = {
@@ -188,8 +232,9 @@
           this._iceMgr.setRemoteReady();
           await this._iceMgr.drainTo(this._pc);
           const answer = await this._pc.createAnswer();
-          await this._pc.setLocalDescription(answer);
-          this._signal({ type: 'answer', sdp: answer.sdp, callId: this.callId });
+          const sdpWithVP9 = _preferVP9Codec(answer.sdp);
+          await this._pc.setLocalDescription({ type: answer.type, sdp: sdpWithVP9 });
+          this._signal({ type: 'answer', sdp: sdpWithVP9, callId: this.callId });
         });
       } else if (type === 'answer') {
         await this._renego.withLock(async () => {
@@ -236,9 +281,10 @@
     async _iceRestart() {
       await this._renego.withLock(async () => {
         const offer = await this._pc.createOffer({ iceRestart: true });
-        await this._pc.setLocalDescription(offer);
+        const sdpWithVP9 = _preferVP9Codec(offer.sdp);
+        await this._pc.setLocalDescription({ type: offer.type, sdp: sdpWithVP9 });
         this._iceMgr.reset();
-        this._signal({ type: 'offer', sdp: offer.sdp, callId: this.callId, iceRestart: true });
+        this._signal({ type: 'offer', sdp: sdpWithVP9, callId: this.callId, iceRestart: true });
       });
     }
 
@@ -394,8 +440,9 @@
     async _createAndSendOffer() {
       await this._renego.withLock(async () => {
         const offer = await this._pc.createOffer();
-        await this._pc.setLocalDescription(offer);
-        this._signal({ type: 'offer', sdp: offer.sdp, callId: this.callId });
+        const sdpWithVP9 = _preferVP9Codec(offer.sdp);
+        await this._pc.setLocalDescription({ type: offer.type, sdp: sdpWithVP9 });
+        this._signal({ type: 'offer', sdp: sdpWithVP9, callId: this.callId });
       });
     }
 
@@ -521,6 +568,27 @@
         });
       }
     }
+
+    // ── restartICEForAll ─────────────────────────────────────────────────────
+    // Called after network reconnection to recover all active peer connections.
+    async restartICEForAll() {
+      const keys = Array.from(this._peers.keys());
+      if (!keys.length) return;
+      console.log(`[PeerConn] restartICEForAll — restarting ${keys.length} session(s)`);
+      for (const key of keys) {
+        const session = this._peers.get(key);
+        if (session && typeof session.iceRestart === 'function') {
+          try {
+            await session.iceRestart();
+          } catch (e) {
+            console.warn(`[PeerConn] ICE restart failed for ${key}:`, e.message);
+          }
+        }
+      }
+    }
+
+    // ── getActivePeerCount ───────────────────────────────────────────────────
+    getActivePeerCount() { return this._peers.size; }
   }
 
   // ─── Singleton ───────────────────────────────────────────────────────────

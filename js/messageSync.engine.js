@@ -90,7 +90,7 @@
                 if (!localStore) return;
 
                 const convs = await localStore.getAllConversations();
-                if (convs.length === 0) return;
+                if (convs.length === 0) { return; } // _syncing reset in finally
 
                 await Promise.allSettled(convs.map(c => this.syncChat(c.id)));
 

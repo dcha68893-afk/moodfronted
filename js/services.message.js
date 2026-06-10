@@ -75,7 +75,11 @@
             try {
                 const response = await this._makeRequest('POST', '/api/messages', {
                     ...normalizedPayload,
-                    localId
+                    localId,
+                    // Attach any pending link preview from KynectaLinkPreview
+                    linkPreview: (window.KynectaLinkPreview && typeof window.KynectaLinkPreview.getPreviewForMessage === 'function')
+                        ? window.KynectaLinkPreview.getPreviewForMessage()
+                        : undefined,
                 });
 
                 const serverEnvelope = response?.data?.message || response?.message || response?.data || response;
@@ -105,6 +109,8 @@
 
                 this._updateStoreMessages(normalizedPayload.chatId, finalMsg);
                 this._emitEvent('MESSAGE_SENT', finalMsg);
+                // Clear link preview card after send
+                try { window.KynectaLinkPreview?.clearAfterSend?.(); } catch (_) {}
 
                 return finalMsg;
 

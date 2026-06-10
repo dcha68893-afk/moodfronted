@@ -2743,14 +2743,14 @@ window.__CALLS_IFRAME__ = {
             <p class="unified-auto-decline">Auto declining in <span id="declineTimer">180</span>s</p>
             <div class="unified-call-actions">
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-decline" id="declineCallBtn">
-                        <i class="fas fa-phone-slash"></i>
+                    <button class="unified-btn unified-btn-decline" id="declineCallBtn" aria-label="Decline incoming call" title="Decline call (D)">
+                        <i class="fas fa-phone-slash" aria-hidden="true"></i>
                     </button>
                     <span>Decline</span>
                 </div>
                 <div class="unified-action-item">
-                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn">
-                        <i class="fas fa-phone"></i>
+                    <button class="unified-btn unified-btn-accept" id="acceptCallBtn" aria-label="Accept incoming call" title="Accept call (A)">
+                        <i class="fas fa-phone" aria-hidden="true"></i>
                     </button>
                     <span>Accept</span>
                 </div>
@@ -3395,20 +3395,26 @@ window.__CALLS_IFRAME__ = {
 
                 <!-- ── BOTTOM: WhatsApp-style control bar ─────────────────── -->
                 <div class="incall-controls-bar" id="callControls">
-                    <button class="incall-ctrl-btn" id="moreBtn" title="More options">
-                        <i class="fas fa-ellipsis-h"></i>
+                    <button class="incall-ctrl-btn" id="moreBtn" title="More options" aria-label="More call options">
+                        <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
                     </button>
-                    <button class="incall-ctrl-btn" id="videoBtn" title="Camera">
-                        <i class="fas fa-video"></i>
+                    <button class="incall-ctrl-btn" id="videoBtn" title="Camera (V)" aria-label="Toggle camera">
+                        <i class="fas fa-video" aria-hidden="true"></i>
                     </button>
-                    <button class="incall-ctrl-btn" id="speakerBtn" title="Speaker">
-                        <i class="fas fa-volume-up"></i>
+                    <button class="incall-ctrl-btn" id="raiseHandBtn" title="Raise hand (H)" aria-label="Raise hand" aria-pressed="false" style="display:none;">
+                        <i class="fas fa-hand-paper" aria-hidden="true"></i>
                     </button>
-                    <button class="incall-ctrl-btn" id="muteBtn" title="Mute">
-                        <i class="fas fa-microphone-slash"></i>
+                    <button class="incall-ctrl-btn" id="speakerBtn" title="Speaker (S)" aria-label="Toggle speaker">
+                        <i class="fas fa-volume-up" aria-hidden="true"></i>
                     </button>
-                    <button class="incall-ctrl-btn incall-end-btn" id="endCallBtn" title="End Call">
-                        <i class="fas fa-phone-slash"></i>
+                    <button class="incall-ctrl-btn" id="muteBtn" title="Mute (M)" aria-label="Toggle microphone mute">
+                        <i class="fas fa-microphone-slash" aria-hidden="true"></i>
+                    </button>
+                    <button class="incall-ctrl-btn" id="fullscreenBtn" title="Fullscreen (F)" aria-label="Toggle fullscreen" style="display:inline-flex;">
+                        <i class="fas fa-expand" aria-hidden="true"></i>
+                    </button>
+                    <button class="incall-ctrl-btn incall-end-btn" id="endCallBtn" title="End Call (Escape)" aria-label="End call">
+                        <i class="fas fa-phone-slash" aria-hidden="true"></i>
                     </button>
                 </div>
 
@@ -5406,5 +5412,143 @@ window.__CALLS_IFRAME__ = {
 <script src="/pwa-manager.js" defer></script>
 
 <script src="js/phase15.delivery.patch.js"></script>
+
+<!-- ═══ Accessibility: Keyboard shortcuts for call controls ═══════════════ -->
+<script>
+(function() {
+  'use strict';
+  // Keyboard shortcuts: A = accept, D = decline, M = mute, V = toggle video, Escape = end call
+  document.addEventListener('keydown', function(e) {
+    // Only fire when no input/textarea is focused
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    const incomingModal = document.getElementById('incomingCallModal') ||
+                          document.getElementById('unifiedCallModal');
+    const isIncomingVisible = incomingModal &&
+      (incomingModal.style.display !== 'none') &&
+      (incomingModal.classList.contains('active') || incomingModal.style.display === 'flex' || incomingModal.style.display === 'block');
+
+    if (isIncomingVisible) {
+      if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        const btn = document.getElementById('acceptCallBtn');
+        if (btn) btn.click();
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'Escape') {
+        e.preventDefault();
+        const btn = document.getElementById('declineCallBtn');
+        if (btn) btn.click();
+      }
+    } else {
+      // In-call shortcuts
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        const muteBtn = document.getElementById('muteBtn') || document.getElementById('toggleMicBtn');
+        if (muteBtn) muteBtn.click();
+      } else if (e.key === 'v' || e.key === 'V') {
+        e.preventDefault();
+        const videoBtn = document.getElementById('toggleVideoBtn') || document.getElementById('cameraBtn');
+        if (videoBtn) videoBtn.click();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        const fsBtn = document.getElementById('fullscreenBtn');
+        if (fsBtn) fsBtn.click();
+      } else if (e.key === 'h' || e.key === 'H') {
+        e.preventDefault();
+        const handBtn = document.getElementById('raiseHandBtn');
+        if (handBtn) handBtn.click();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        const endBtn = document.getElementById('endCallBtn') || document.getElementById('hangupBtn');
+        if (endBtn) endBtn.click();
+      }
+    }
+  });
+})();
+
+// Fullscreen button wiring
+(function() {
+  function _wireFs() {
+    const fsBtn = document.getElementById('fullscreenBtn');
+    if (!fsBtn || fsBtn._fsBound) return;
+    fsBtn._fsBound = true;
+    fsBtn.addEventListener('click', function() {
+      const target = document.getElementById('callOverlay') ||
+                     document.getElementById('callExpandedPanel') ||
+                     document.documentElement;
+      if (!document.fullscreenElement) {
+        (target.requestFullscreen || target.webkitRequestFullscreen || function(){}).call(target).catch(function(){});
+        const icon = fsBtn.querySelector('i');
+        if (icon) icon.className = 'fas fa-compress';
+        fsBtn.setAttribute('aria-label', 'Exit fullscreen');
+        fsBtn.setAttribute('title', 'Exit fullscreen (F)');
+      } else {
+        (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document).catch(function(){});
+        const icon = fsBtn.querySelector('i');
+        if (icon) icon.className = 'fas fa-expand';
+        fsBtn.setAttribute('aria-label', 'Toggle fullscreen');
+        fsBtn.setAttribute('title', 'Fullscreen (F)');
+      }
+    });
+    document.addEventListener('fullscreenchange', function() {
+      if (!document.fullscreenElement) {
+        const icon = fsBtn.querySelector('i');
+        if (icon) icon.className = 'fas fa-expand';
+        fsBtn.setAttribute('aria-label', 'Toggle fullscreen');
+      }
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _wireFs);
+  } else {
+    _wireFs();
+  }
+// Raise Hand button wiring
+(function() {
+  var _handRaised = false;
+  function _wireHand() {
+    var btn = document.getElementById('raiseHandBtn');
+    if (!btn || btn._handBound) return;
+    btn._handBound = true;
+    btn.addEventListener('click', function() {
+      _handRaised = !_handRaised;
+      btn.setAttribute('aria-pressed', String(_handRaised));
+      btn.style.background = _handRaised ? '#f59e0b' : '';
+      btn.style.color = _handRaised ? '#fff' : '';
+      btn.setAttribute('title', _handRaised ? 'Lower hand (H)' : 'Raise hand (H)');
+      btn.setAttribute('aria-label', _handRaised ? 'Lower hand' : 'Raise hand');
+      if (window.__GroupCallEngine) {
+        _handRaised ? window.__GroupCallEngine.raiseHand() : window.__GroupCallEngine.lowerHand();
+      }
+      // Also dispatch for calls-core to handle via data channel
+      window.dispatchEvent(new CustomEvent('kyn:ui:raise_hand', { detail: { raised: _handRaised } }));
+    });
+  }
+  // Show raise hand button only in group calls
+  window.addEventListener('kyn:group:call:started', function() {
+    var btn = document.getElementById('raiseHandBtn');
+    if (btn) { btn.style.display = 'inline-flex'; _wireHand(); }
+  });
+  window.addEventListener('kyn:group:call:ended', function() {
+    var btn = document.getElementById('raiseHandBtn');
+    if (btn) { btn.style.display = 'none'; _handRaised = false; }
+  });
+  // Also listen for hand raises from peers — show notification
+  window.addEventListener('kyn:group:call:hand_raised', function(e) {
+    var uid = e.detail && e.detail.userId;
+    if (!uid) return;
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e1e2e;color:#fff;padding:10px 18px;border-radius:10px;z-index:99999;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;';
+    toast.textContent = '✋ A participant raised their hand';
+    document.body.appendChild(toast);
+    setTimeout(function() { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4000);
+  });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _wireHand);
+  } else {
+    _wireHand();
+  }
+})();
+</script>
 </body>
 </html>

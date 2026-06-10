@@ -7385,20 +7385,51 @@ handleContactItemClick: function(e) {
 
             const icon = elements.speakerBtn && elements.speakerBtn.querySelector('i');
             if (icon) icon.className = UIState.isSpeakerOn ? 'fas fa-volume-up' : 'fas fa-headphones';
-            if (elements.speakerBtn) elements.speakerBtn.classList.toggle('active', UIState.isSpeakerOn);
+            if (elements.speakerBtn) {
+                elements.speakerBtn.classList.toggle('active', UIState.isSpeakerOn);
+                elements.speakerBtn.setAttribute('aria-label', UIState.isSpeakerOn ? 'Switch to earpiece' : 'Switch to speaker');
+                elements.speakerBtn.setAttribute('title', UIState.isSpeakerOn ? 'Earpiece (S)' : 'Speaker (S)');
+            }
 
-            // Route audio output
-            const remoteAudio = document.getElementById('remoteAudio');
-            if (remoteAudio) {
-                if (typeof remoteAudio.setSinkId === 'function') {
-                    navigator.mediaDevices.enumerateDevices().then(devices => {
-                        const earpiece = devices.find(d => d.kind === 'audiooutput' && /earpiece|handset/i.test(d.label));
-                        const speaker  = devices.find(d => d.kind === 'audiooutput' && /speaker/i.test(d.label));
-                        const target   = UIState.isSpeakerOn ? (speaker || '') : (earpiece || '');
-                        remoteAudio.setSinkId(typeof target === 'string' ? target : (target.deviceId || '')).catch(()=>{});
-                    }).catch(()=>{});
-                }
-                remoteAudio.volume = UIState.isSpeakerOn ? 1.0 : 0.4;
+            // Collect ALL remote audio elements (1-on-1 + group call tiles)
+            const audioEls = Array.from(document.querySelectorAll(
+                '#remoteAudio, audio[data-remote], .participant-tile audio, .remote-stream-audio'
+            )).filter(Boolean);
+            if (!audioEls.length) {
+                const ra = document.getElementById('remoteAudio');
+                if (ra) audioEls.push(ra);
+            }
+
+            const _routeAudio = function(devices) {
+                const earpiece = devices.find(d => d.kind === 'audiooutput' && /earpiece|handset|receiver/i.test(d.label));
+                const speaker  = devices.find(d => d.kind === 'audiooutput' && /speaker/i.test(d.label));
+                const targetDevice = UIState.isSpeakerOn
+                    ? (speaker  ? speaker.deviceId  : '')
+                    : (earpiece ? earpiece.deviceId : '');
+
+                audioEls.forEach(function(el) {
+                    if (typeof el.setSinkId === 'function') {
+                        el.setSinkId(targetDevice).catch(function(){});
+                    }
+                    el.volume = UIState.isSpeakerOn ? 1.0 : 0.7;
+                });
+            };
+
+            // Use DeviceMediaManager.AudioOutputManager if available
+            if (window.__DeviceMediaManager && window.__DeviceMediaManager.audioOutput &&
+                typeof window.__DeviceMediaManager.audioOutput.getDevices === 'function') {
+                window.__DeviceMediaManager.audioOutput.getDevices()
+                    .then(_routeAudio)
+                    .catch(function() {
+                        audioEls.forEach(function(el) { el.volume = UIState.isSpeakerOn ? 1.0 : 0.7; });
+                    });
+            } else if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+                navigator.mediaDevices.enumerateDevices()
+                    .then(_routeAudio)
+                    .catch(function(){});
+            } else {
+                // Fallback: just adjust volume
+                audioEls.forEach(function(el) { el.volume = UIState.isSpeakerOn ? 1.0 : 0.7; });
             }
 
             if (coreInstance && coreInstance.setSpeakerEnabled) coreInstance.setSpeakerEnabled(UIState.isSpeakerOn);
@@ -10785,4 +10816,223 @@ if (detectExistingCore()) {
     } else {
         _signal();
     }
+})();
+// ── Network Quality Indicator ─────────────────────────────────────────────────
+// Listens to kyn:call:quality_changed from AdaptiveBitrateEngine and renders
+// a visual 1-4 bar signal indicator in the active call UI.
+(function initNetworkQualityIndicator() {
+  'use strict';
+
+  // Map quality profile names to bar counts (1=worst, 4=best)
+  const QUALITY_BARS = { HD: 4, SD: 3, LOW: 2, AUDIO_ONLY: 1 };
+  const QUALITY_LABELS = { HD: 'Excellent', SD: 'Good', LOW: 'Fair', AUDIO_ONLY: 'Poor (audio only)' };
+  const QUALITY_COLORS = { HD: '#22c55e', SD: '#84cc16', LOW: '#f59e0b', AUDIO_ONLY: '#ef4444' };
+
+  function _ensureIndicator() {
+    let el = document.getElementById('kyn-network-quality-indicator');
+    if (el) return el;
+
+    el = document.createElement('div');
+    el.id = 'kyn-network-quality-indicator';
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('aria-label', 'Network quality indicator');
+    el.setAttribute('title', 'Network quality');
+    el.style.cssText = [
+      'position:fixed',
+      'top:12px',
+      'right:16px',
+      'z-index:9999',
+      'display:flex',
+      'align-items:flex-end',
+      'gap:2px',
+      'cursor:default',
+      'opacity:0.9',
+      'transition:opacity 0.3s',
+    ].join(';');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function _renderBars(quality) {
+    const indicator = _ensureIndicator();
+    const bars = QUALITY_BARS[quality] || 0;
+    const color = QUALITY_COLORS[quality] || '#9ca3af';
+    const label = QUALITY_LABELS[quality] || 'Unknown';
+
+    // Build 4 bars, lit up to the count for the current quality
+    let html = '';
+    for (let i = 1; i <= 4; i++) {
+      const height = 6 + i * 4; // 10px, 14px, 18px, 22px
+      const active = i <= bars;
+      html += `<div style="width:4px;height:${height}px;border-radius:2px;background:${active ? color : 'rgba(255,255,255,0.3)'}"></div>`;
+    }
+    indicator.innerHTML = html;
+    indicator.setAttribute('title', `Network: ${label}`);
+    indicator.setAttribute('aria-label', `Network quality: ${label}`);
+    indicator.style.display = 'flex';
+  }
+
+  function _hideIndicator() {
+    const el = document.getElementById('kyn-network-quality-indicator');
+    if (el) el.style.display = 'none';
+  }
+
+  // Listen for quality changes from AdaptiveBitrateEngine
+  window.addEventListener('kyn:call:quality_changed', function(e) {
+    const quality = e.detail && (e.detail.quality || e.detail.newQuality || e.detail.profile);
+    if (quality) _renderBars(quality);
+  });
+
+  // Also listen for call state changes — hide when not in a call
+  window.addEventListener('callCore:stateChange', function(e) {
+    const state = e.detail && e.detail.state;
+    if (state === 'IDLE' || state === 'ENDED' || state === 'FAILED') {
+      _hideIndicator();
+    }
+  });
+
+  // Also update via postMessage from iframe parent or calls-core
+  window.addEventListener('message', function(e) {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'CALL_QUALITY_UPDATE') {
+      const q = e.data.quality;
+      if (q) _renderBars(q);
+    }
+  });
+})();
+
+// ── Post-Call Rating Dialog ───────────────────────────────────────────────────
+// Shows a 1-5 star rating prompt after a completed call (>=10 seconds duration)
+// Submits via POST /api/calls/:id/rate
+(function initPostCallRating() {
+  'use strict';
+
+  let _pendingCallId = null;
+  let _callStartedAt = null;
+
+  // Track when a call starts
+  window.addEventListener('kyn:call:state_changed', function(e) {
+    const state = e && e.detail && e.detail.state;
+    if (state === 'CONNECTED') {
+      _callStartedAt = Date.now();
+      _pendingCallId = e.detail.callId || null;
+    }
+  });
+  window.addEventListener('callCore:stateChange', function(e) {
+    const state = e && e.detail && e.detail.state;
+    if (state === 'CONNECTED') {
+      _callStartedAt = Date.now();
+      _pendingCallId = (e.detail && e.detail.callId) || _pendingCallId;
+    }
+    if ((state === 'IDLE' || state === 'ENDED') && _callStartedAt) {
+      const dur = Date.now() - _callStartedAt;
+      _callStartedAt = null;
+      // Only show for calls >=10 seconds
+      if (dur >= 10000 && _pendingCallId) {
+        setTimeout(() => _showRatingDialog(_pendingCallId), 600);
+      }
+    }
+  });
+  // Capture callId from incoming CALL_ENDED messages
+  window.addEventListener('message', function(e) {
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'CALL_ENDED' && e.data.callId) {
+      _pendingCallId = e.data.callId;
+    }
+  });
+
+  function _showRatingDialog(callId) {
+    if (document.getElementById('kyn-post-call-rating')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'kyn-post-call-rating';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'kyn-rating-title');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:99999',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(0,0,0,0.55)', 'font-family:inherit',
+    ].join(';');
+
+    overlay.innerHTML = `
+      <div style="background:#1e1e2e;border-radius:16px;padding:28px 32px;max-width:340px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.5);color:#fff;">
+        <div style="font-size:32px;margin-bottom:8px;">📞</div>
+        <h3 id="kyn-rating-title" style="margin:0 0 6px;font-size:18px;font-weight:600;">How was your call?</h3>
+        <p style="margin:0 0 20px;font-size:13px;opacity:0.7;">Rate the call quality</p>
+        <div id="kyn-stars" style="display:flex;justify-content:center;gap:8px;margin-bottom:20px;" role="group" aria-label="Rate call 1 to 5 stars">
+          ${[1,2,3,4,5].map(i => `
+            <button data-star="${i}" aria-label="${i} star${i>1?'s':''}"
+              style="background:none;border:none;font-size:30px;cursor:pointer;transition:transform 0.1s;padding:0;line-height:1;"
+              tabindex="0">☆</button>
+          `).join('')}
+        </div>
+        <textarea id="kyn-rating-feedback" placeholder="Optional feedback..." maxlength="500"
+          aria-label="Optional call feedback"
+          style="width:100%;box-sizing:border-box;background:#2a2a3e;border:1px solid #3a3a52;border-radius:8px;color:#fff;padding:10px;font-size:13px;resize:vertical;min-height:60px;margin-bottom:16px;"></textarea>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button id="kyn-rating-skip"
+            style="padding:8px 20px;border-radius:8px;border:1px solid #3a3a52;background:transparent;color:#aaa;cursor:pointer;font-size:14px;">
+            Skip
+          </button>
+          <button id="kyn-rating-submit" disabled
+            style="padding:8px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-size:14px;opacity:0.5;">
+            Submit
+          </button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    let selectedRating = 0;
+
+    const stars = overlay.querySelectorAll('[data-star]');
+    const submitBtn = overlay.querySelector('#kyn-rating-submit');
+
+    stars.forEach(btn => {
+      btn.addEventListener('click', function() {
+        selectedRating = parseInt(this.dataset.star, 10);
+        stars.forEach((s, idx) => {
+          s.textContent = idx < selectedRating ? '★' : '☆';
+          s.style.color = idx < selectedRating ? '#f59e0b' : '';
+        });
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+      });
+      btn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.click(); }
+      });
+    });
+
+    overlay.querySelector('#kyn-rating-skip').addEventListener('click', _close);
+    submitBtn.addEventListener('click', function() {
+      if (!selectedRating) return;
+      const feedback = overlay.querySelector('#kyn-rating-feedback').value.trim();
+      _submitRating(callId, selectedRating, feedback);
+      _close();
+    });
+
+    function _close() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+
+    // Auto-dismiss after 30s
+    setTimeout(_close, 30000);
+    // Focus first star for accessibility
+    stars[0] && stars[0].focus();
+  }
+
+  function _submitRating(callId, rating, feedback) {
+    try {
+      const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
+                      (window.config && window.config.apiUrl) || '';
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+      if (!apiBase || !token) return;
+      fetch(`${apiBase}/api/calls/${callId}/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ rating, feedback }),
+      }).catch(() => {});
+    } catch (_) {}
+  }
 })();

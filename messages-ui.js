@@ -13090,10 +13090,17 @@ Type: ${message.type || 'text'}`;
                         // Set PIN then hide
                         window.messagesUI._showSetHiddenPin(function(pin) {
                             if (pin) {
-                                localStorage.setItem(STORAGE_KEY_HIDDEN_PIN, pin);
-                                _setAdd(STORAGE_KEY_HIDDEN, chatId);
-                                _showToast('Chat hidden — access via 🔒 Hidden Chats');
-                                window.messagesUI?.refreshChatsList?.();
+                                // SECURITY FIX: Store SHA-256 hash of PIN, never plaintext
+                                (async function() {
+                                    const encoder = new TextEncoder();
+                                    const data = encoder.encode(pin + 'kyn_vault_salt_v1');
+                                    const hashBuf = await crypto.subtle.digest('SHA-256', data);
+                                    const hashHex = Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+                                    localStorage.setItem(STORAGE_KEY_HIDDEN_PIN, hashHex);
+                                    _setAdd(STORAGE_KEY_HIDDEN, chatId);
+                                    _showToast('Chat hidden — access via 🔒 Hidden Chats');
+                                    window.messagesUI?.refreshChatsList?.();
+                                })();
                             }
                         });
                     }
@@ -13282,8 +13289,17 @@ Type: ${message.type || 'text'}`;
         };
         window.messagesUI._showHiddenPinPrompt = function(cb) {
             const saved = localStorage.getItem(STORAGE_KEY_HIDDEN_PIN);
-            _showPinDialog('Enter your PIN to unlock', function(pin) {
-                cb(pin === saved);
+            _showPinDialog('Enter your PIN to unlock', async function(pin) {
+                if (!pin) { cb(false); return; }
+                try {
+                    // Hash the entered PIN and compare against stored hash
+                    const encoder = new TextEncoder();
+                    const data = encoder.encode(pin + 'kyn_vault_salt_v1');
+                    const hashBuf = await crypto.subtle.digest('SHA-256', data);
+                    const hashHex = Array.from(new Uint8Array(hashBuf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+                    // Support legacy plaintext PINs (migration path)
+                    cb(hashHex === saved || pin === saved);
+                } catch(e) { cb(pin === saved); }
             }, false);
         };
 

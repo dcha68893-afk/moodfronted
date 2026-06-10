@@ -324,6 +324,49 @@
       });
     }
 
+    // ── Raise Hand ────────────────────────────────────────────────────────────
+    raiseHand() {
+      this._handRaised = true;
+      this._sendGroupEvent('group:call:hand_raised', {
+        groupId: this._groupId, callId: this._callId,
+        userId: this._localUserId, timestamp: Date.now(),
+      });
+      this._notify('hand_raised', { userId: this._localUserId, raised: true });
+      // Update local participant tile
+      const local = this._participants.get(this._localUserId);
+      if (local) { local.handRaised = true; this._layout?.updateIndicators(this._localUserId, { handRaised: true }); }
+    }
+
+    lowerHand() {
+      this._handRaised = false;
+      this._sendGroupEvent('group:call:hand_lowered', {
+        groupId: this._groupId, callId: this._callId,
+        userId: this._localUserId, timestamp: Date.now(),
+      });
+      this._notify('hand_lowered', { userId: this._localUserId, raised: false });
+      const local = this._participants.get(this._localUserId);
+      if (local) { local.handRaised = false; this._layout?.updateIndicators(this._localUserId, { handRaised: false }); }
+    }
+
+    toggleHand() {
+      this._handRaised ? this.lowerHand() : this.raiseHand();
+    }
+
+    isHandRaised(userId) {
+      if (!userId || userId === this._localUserId) return this._handRaised || false;
+      const p = this._participants.get(String(userId));
+      return !!(p && p.handRaised);
+    }
+
+    // Host: lower a participant's hand
+    lowerParticipantHand(userId) {
+      if (!this._isHost) return;
+      this._sendGroupEvent('group:call:lower_hand', {
+        groupId: this._groupId, callId: this._callId, targetUserId: userId,
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     pinParticipant(userId) { this._layout?.pinTile(userId); }
 
     getParticipants() { return Array.from(this._participants.values()); }
@@ -432,6 +475,38 @@
         if (String(data.targetUserId) === this._localUserId) {
           window.__DeviceMediaManager.muteAudio(true);
           this._notify('muted_by_host', {});
+        }
+      });
+
+      // ── Raise Hand events ────────────────────────────────────────────────
+      window.addEventListener('kyn:group:call:hand_raised', e => {
+        const data = e.detail || {};
+        const uid = String(data.userId || '');
+        if (!uid) return;
+        const p = this._participants.get(uid);
+        if (p) {
+          p.handRaised = true;
+          this._layout?.updateIndicators(uid, { handRaised: true });
+        }
+        this._notify('hand_raised', { userId: uid, raised: true });
+      });
+
+      window.addEventListener('kyn:group:call:hand_lowered', e => {
+        const data = e.detail || {};
+        const uid = String(data.userId || '');
+        if (!uid) return;
+        const p = this._participants.get(uid);
+        if (p) {
+          p.handRaised = false;
+          this._layout?.updateIndicators(uid, { handRaised: false });
+        }
+        this._notify('hand_lowered', { userId: uid, raised: false });
+      });
+
+      window.addEventListener('kyn:group:call:lower_hand', e => {
+        const data = e.detail || {};
+        if (String(data.targetUserId) === this._localUserId) {
+          this.lowerHand();
         }
       });
     }
