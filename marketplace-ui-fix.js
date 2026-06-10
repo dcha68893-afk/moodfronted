@@ -67,7 +67,7 @@ function isAdmin(){
     const lsRole=localStorage.getItem('userRole')||'';
     if(lsRole==='admin'||lsRole==='moderator') return true;
     if(window.__cachedUserRole==='admin'||window.__cachedUserRole==='moderator') return true;
-    try{return JSON.parse(localStorage.getItem('_adminMode')||'false')}catch(_){return false}
+    return false; // P1 FIX: no localStorage bypass — role must come from server session
 }
 // FIX 2: React to role updates from parent
 window.addEventListener('message',function(e){

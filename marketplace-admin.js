@@ -242,7 +242,6 @@ function _noAccess() {
         <div style="font-size:18px;font-weight:800;color:#111;margin-bottom:8px">Admin Access Required</div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:20px">You need admin or moderator role to access this area.</div>
         <button class="adm-btn adm-btn-primary adm-btn-full" onclick="window._jmNav('home')">Back to Marketplace</button>
-        <button class="adm-btn adm-btn-secondary adm-btn-full" onclick="window._adminDevMode()">Dev Mode (Admin)</button>
     </div>`;
 }
 
