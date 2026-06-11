@@ -3801,7 +3801,8 @@
                         const profile = await res.json();
                         const role = profile?.role || profile?.user?.role || 'user';
                         const isAdmin = role === 'admin' || role === 'moderator' || profile?.isAdmin === true;
-                        localStorage.setItem('userRole', role);
+                        // P1 FIX: Do NOT persist role in localStorage — keeps role in memory only
+                        // localStorage.setItem('userRole', role); // REMOVED — localStorage role is a security risk
                         window.__cachedUserRole = role;
                         if (cachedUser) { cachedUser.role = role; cachedUser.isAdmin = isAdmin; }
                         if (window.currentUser) { window.currentUser.role = role; window.currentUser.isAdmin = isAdmin; }
@@ -7331,13 +7332,9 @@ window.__groupHdrHide = hideGroupHeader;
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
 
 <!-- Kynecta Feature Modules: server-sync, link preview, voice recorder -->
-<script src="js/e2e-encryption.js" defer></script>
 <script src="js/chat-sync.js" defer></script>
 <script src="js/link-preview.js" defer></script>
 <script src="js/voice-recorder.js" defer></script>
-<script src="js/virtual-scroll.js" defer></script>
-<script src="js/push-manager.js" defer></script>
-<script src="js/backup-manager.js" defer></script>
 
 <!-- PWA Install Banner + Instant Update -->
 <script>
