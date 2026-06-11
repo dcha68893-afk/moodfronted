@@ -3395,6 +3395,105 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
                 }
             });
         }
+
+        // P1 FIX: Disappearing messages — clear UI when server fires expired event
+        if (!window.__groupCoreListenersRegistered.has('p1:group:messages:disappeared')) {
+            window.__groupCoreListenersRegistered.add('p1:group:messages:disappeared');
+            window.addEventListener('kyn:group:messages:disappeared', function(evt) {
+                const { groupId } = evt.detail || {};
+                if (!groupId) return;
+                const activeGid = window._activeGroupId;
+                if (String(groupId) === String(activeGid)) {
+                    // Reload messages to reflect deletions
+                    if (typeof loadGroupChatMessages === 'function') {
+                        loadGroupChatMessages(groupId).catch(() => {});
+                    }
+                }
+            });
+        }
+
+        // P1 FIX: Pinned messages — refresh pinned banner in group header
+        if (!window.__groupCoreListenersRegistered.has('p1:group:message:pinned')) {
+            window.__groupCoreListenersRegistered.add('p1:group:message:pinned');
+            window.addEventListener('kyn:group:message:pinned', function(evt) {
+                const { groupId, messageId } = evt.detail || {};
+                if (!groupId) return;
+                // Update local group record
+                const group = GroupCore.getGroupById(groupId);
+                if (group) {
+                    if (!Array.isArray(group.pinnedMessageIds)) group.pinnedMessageIds = [];
+                    if (!group.pinnedMessageIds.includes(messageId)) group.pinnedMessageIds.push(messageId);
+                    GroupCore.updateGroupInLists(group);
+                }
+                // Show banner toast
+                try {
+                    if (typeof showToast === 'function') showToast('📌 A message was pinned', 'info');
+                } catch (_) {}
+            });
+            window.addEventListener('kyn:group:message:unpinned', function(evt) {
+                const { groupId, messageId } = evt.detail || {};
+                if (!groupId) return;
+                const group = GroupCore.getGroupById(groupId);
+                if (group && Array.isArray(group.pinnedMessageIds)) {
+                    group.pinnedMessageIds = group.pinnedMessageIds.filter(id => id !== messageId);
+                    GroupCore.updateGroupInLists(group);
+                }
+            });
+        }
+
+        // P2 FIX: Poll closed — update UI
+        if (!window.__groupCoreListenersRegistered.has('p2:group:poll:closed')) {
+            window.__groupCoreListenersRegistered.add('p2:group:poll:closed');
+            window.addEventListener('kyn:group:poll:closed', function(evt) {
+                const { groupId, pollId } = evt.detail || {};
+                if (!groupId) return;
+                try {
+                    // Update any visible poll UI
+                    const pollEl = document.querySelector(`[data-poll-id="${pollId}"]`);
+                    if (pollEl) {
+                        pollEl.classList.add('poll-closed');
+                        const badge = pollEl.querySelector('.poll-status');
+                        if (badge) badge.textContent = 'Closed';
+                    }
+                    if (typeof showToast === 'function') showToast('📊 A poll has closed', 'info');
+                } catch (_) {}
+            });
+        }
+
+        // P2 FIX: Settings updated — sync moderation engine
+        if (!window.__groupCoreListenersRegistered.has('p2:group:settings:updated')) {
+            window.__groupCoreListenersRegistered.add('p2:group:settings:updated');
+            window.addEventListener('kyn:group:settings:updated', function(evt) {
+                const { groupId, settings } = evt.detail || {};
+                if (!groupId || !settings) return;
+                const group = GroupCore.getGroupById(groupId);
+                if (group) {
+                    Object.assign(group, settings);
+                    GroupCore.updateGroupInLists(group);
+                    // Re-sync moderation engine
+                    const modEng = window.__GroupModerationEngine;
+                    if (modEng?.syncFromGroup) modEng.syncFromGroup(group);
+                }
+            });
+        }
+
+        // P2 FIX: Group verified — update verified badge in UI
+        if (!window.__groupCoreListenersRegistered.has('p2:group:verified')) {
+            window.__groupCoreListenersRegistered.add('p2:group:verified');
+            window.addEventListener('kyn:group:verified', function(evt) {
+                const { groupId } = evt.detail || {};
+                if (!groupId) return;
+                const group = GroupCore.getGroupById(groupId);
+                if (group) {
+                    group.isVerified = true;
+                    GroupCore.updateGroupInLists(group);
+                }
+                if (String(groupId) === String(window._activeGroupId)) {
+                    const badge = document.querySelector('.group-verified-badge');
+                    if (badge) badge.style.display = 'inline-flex';
+                }
+            });
+        }
     }
     
     // ✅ ENHANCED: Handle real-time group member events
@@ -5260,6 +5359,14 @@ const openGroupChat = async function(groupData) {
             GroupCore.updateGroupInLists(resolvedGroup);
             GroupCore.saveGroups();
             updateGroupChatHeader(resolvedGroup, membersPayload);
+
+            // P1 FIX: Sync slow mode interval and posting rule from DB into client engine
+            try {
+                const modEngine = window.__GroupModerationEngine;
+                if (modEngine && typeof modEngine.syncFromGroup === 'function') {
+                    modEngine.syncFromGroup(resolvedGroup);
+                }
+            } catch (_) {}
         } catch (headerError) {}
         
         // FIX-024: Join the socket room BEFORE fetching message history.
@@ -5857,15 +5964,72 @@ const sendGroupMessage = async function() {
         queueGroupAction({ type: 'sendMessage', fn: sendGroupMessage });
         return;
     }
-    
+
+    // P1 FIX: Request push notification permission on first use (non-blocking)
+    if (window.PushNotificationService && Notification?.permission === 'default') {
+        window.PushNotificationService.requestPermission().catch(() => {});
+    }
+
     try {
         const chatInput = safeGetElement('#chatInput');
         const messageTopic = safeGetElement('#messageTopic');
         const sendBtn = safeGetElement('#chatSendBtn');
-        
+
         if (!currentChatGroup || !chatInput) return;
         if (sendBtn?.dataset.mode === 'mic' && !chatInput.value.trim()) {
-            safeGetElement('#groupAudioInput')?.click();
+            // P1 FIX: Use KynectaVoiceRecorder instead of file input
+            if (window.KynectaVoiceRecorder) {
+                try {
+                    const chatId = currentChatGroup?.chatId;
+                    if (!chatId) { safeGetElement('#groupAudioInput')?.click(); return; }
+
+                    // Temporarily override upload endpoint for group context
+                    const origBase = window.API_BASE_URL;
+                    const result = await window.KynectaVoiceRecorder.startRecording();
+                    if (!result) return; // cancelled
+
+                    // Build voice note message
+                    const voiceMsg = {
+                        groupId: currentChatGroup.id,
+                        senderId: session?.user?.uid || session?.user?.id,
+                        senderName: session?.user?.displayName || 'User',
+                        content: '',
+                        type: 'voice_note',
+                        mediaUrl: result.url,
+                        duration: result.duration,
+                        waveform: result.waveform,
+                        timestamp: new Date(),
+                        readBy: [session?.user?.uid || session?.user?.id],
+                        anonymous: isAnonymousMode,
+                    };
+
+                    // Upload to group messages endpoint if local blob
+                    if (result.local && result.url) {
+                        try {
+                            const ext = result.mimeType?.includes('ogg') ? 'ogg' : 'webm';
+                            const blobResp = await fetch(result.url);
+                            const blob = await blobResp.blob();
+                            const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: result.mimeType || 'audio/webm' });
+                            const form = new FormData();
+                            form.append('file', file);
+                            form.append('type', 'voice_note');
+                            form.append('duration', String(result.duration || 0));
+                            form.append('waveform', result.waveform || '');
+                            const uploadResp = await secureApiCall(`/media/upload`, { method: 'POST', body: form, silent: true });
+                            if (uploadResp?.data?.mediaUrl) voiceMsg.mediaUrl = uploadResp.data.mediaUrl;
+                        } catch (_) {}
+                    }
+
+                    const tempMsg = { ...voiceMsg, id: 'temp_' + Date.now() };
+                    addMessageToChat(tempMsg, true);
+                    sendGroupMessage(voiceMsg).catch(() => {});
+                } catch (err) {
+                    console.error('[GroupCore] Voice recording error:', err);
+                    safeGetElement('#groupAudioInput')?.click();
+                }
+            } else {
+                safeGetElement('#groupAudioInput')?.click();
+            }
             return;
         }
         if (!chatInput.value.trim()) return;
@@ -6413,6 +6577,33 @@ const saveGroupSettings = async function(groupData) {
                 anonymous: adminEnableAnonymous ? adminEnableAnonymous.checked : false
             }
         };
+
+        // P1 FIX: Also send moderation-critical fields to dedicated endpoint that persists them as DB columns
+        const adminSlowModeInput = safeGetElement('#adminSlowModeInterval');
+        const adminDisappearingTimerInput = safeGetElement('#adminDisappearingTimer');
+        const adminBlockedWordsInput = safeGetElement('#adminBlockedWords');
+        const modSettingsPayload = {
+            postingRule: (() => {
+                const rule = adminPostingMode ? adminPostingMode.value : 'open';
+                // Normalize: 'everyone' (legacy) → 'open'
+                return rule === 'everyone' ? 'open' : rule;
+            })(),
+        };
+        if (adminSlowModeInput) modSettingsPayload.slowModeInterval = parseInt(adminSlowModeInput.value) || 0;
+        if (adminDisappearingTimerInput) modSettingsPayload.disappearingTimer = parseInt(adminDisappearingTimerInput.value) || 0;
+        else if (adminDisappearingMessages) modSettingsPayload.disappearingTimer = adminDisappearingMessages.checked ? 86400 : 0;
+        if (adminBlockedWordsInput && adminBlockedWordsInput.value) {
+            modSettingsPayload.blockedWords = adminBlockedWordsInput.value.split(',').map(w => w.trim()).filter(Boolean);
+        }
+        if (adminPostingMode && adminPostingMode.value === 'scheduled') {
+            modSettingsPayload.scheduledPostingStart = adminPostingStart ? adminPostingStart.value : null;
+            modSettingsPayload.scheduledPostingEnd   = adminPostingEnd   ? adminPostingEnd.value   : null;
+        }
+        // Fire moderation settings endpoint (non-blocking, best-effort)
+        secureApiCall(`/groups/${groupData.id}/moderation-settings`, {
+            method: 'PUT', body: JSON.stringify(modSettingsPayload),
+            headers: { 'Content-Type': 'application/json' }
+        }).catch(() => {});
         
         const response = await GroupCore.updateGroup(groupData.id, settings);
         
@@ -8113,7 +8304,78 @@ function showGroupOptions(groupData) {
 }
 
 function downloadQRCode() {
-    try {} catch (error) {}
+    try {
+        const canvas = document.querySelector('#groupQRModal canvas');
+        if (!canvas) return;
+        const link = document.createElement('a');
+        link.download = 'group-invite-qr.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    } catch (error) {
+        console.error('[QR] downloadQRCode error:', error);
+    }
+}
+
+async function showGroupQRCode() {
+    try {
+        const group = currentChatGroup;
+        if (!group) return;
+
+        // Fetch the invite link QR data from backend
+        const res = await secureApiCall(`/groups/${group.id}/invite-link/qr`).catch(() => null);
+        const inviteUrl = res?.data?.inviteUrl || `${window.location.origin}/join?token=${group.inviteLink || group.id}`;
+
+        // Build modal
+        let modal = document.getElementById('groupQRModal');
+        if (modal) modal.remove();
+        modal = document.createElement('div');
+        modal.id = 'groupQRModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999';
+        modal.innerHTML = `
+          <div style="background:#fff;border-radius:20px;padding:24px;max-width:320px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <div style="font-weight:700;font-size:18px;margin-bottom:4px">Invite to ${group.name||'Group'}</div>
+            <div style="font-size:12px;color:#6b7280;margin-bottom:16px">Scan QR code to join</div>
+            <canvas id="groupQRCanvas" style="width:200px;height:200px;border-radius:12px"></canvas>
+            <div style="margin-top:12px;padding:8px 12px;background:#f3f4f6;border-radius:8px;font-size:11px;color:#374151;word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText('${inviteUrl}').then(()=>this.textContent='Copied!')">${inviteUrl}</div>
+            <div style="display:flex;gap:8px;margin-top:16px">
+              <button onclick="downloadQRCode()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#6366f1;color:#fff;font-weight:600;cursor:pointer">⬇ Save QR</button>
+              <button onclick="document.getElementById('groupQRModal').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#f3f4f6;color:#374151;font-weight:600;cursor:pointer">Close</button>
+            </div>
+          </div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+        // Generate QR code using qrcode-generator (lightweight, no external dep at runtime)
+        const canvas = document.getElementById('groupQRCanvas');
+        if (canvas) {
+            // Try qrcode lib if loaded, else use a simple fetch approach
+            if (typeof QRCode !== 'undefined') {
+                new QRCode(canvas, { text: inviteUrl, width: 200, height: 200, colorDark: '#111827', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+            } else {
+                // Load qrcode.js from CDN dynamically
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+                script.onload = () => {
+                    if (typeof QRCode !== 'undefined') {
+                        new QRCode(canvas, { text: inviteUrl, width: 200, height: 200, colorDark: '#111827', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+                    }
+                };
+                document.head.appendChild(script);
+                // Fallback: show invite URL as text
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.fillStyle = '#f3f4f6';
+                    ctx.fillRect(0, 0, 200, 200);
+                    ctx.fillStyle = '#374151';
+                    ctx.font = '12px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Loading QR...', 100, 100);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[QR] showGroupQRCode error:', error);
+    }
 }
 
 function addPollOption() {
@@ -8755,6 +9017,20 @@ export {
     updateCreateGroupPostingRulesUI
 };
 window.GroupCore = GroupCore;
+
+// P1 FIX: Install voice recorder on GroupCore so startRecording() works in group chat
+try {
+    if (window.KynectaVoiceRecorder) {
+        window.KynectaVoiceRecorder.install(GroupCore);
+    } else {
+        // VoiceRecorder loads after this module — install when ready
+        window.addEventListener('load', () => {
+            if (window.KynectaVoiceRecorder && !GroupCore.startRecording) {
+                window.KynectaVoiceRecorder.install(GroupCore);
+            }
+        });
+    }
+} catch (_) {}
 // =============================================
 // SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
 // =============================================

@@ -246,6 +246,38 @@
         }
       }, { passive: true });
 
+      // P2 FIX: @everyone notification — notify every member when admin uses @everyone
+      window.addEventListener('kyn:group:mention:everyone', e => {
+        const { groupId } = e.detail || {};
+        if (!groupId) return;
+        if (!this._dedup.isDuplicate(`everyone:${groupId}:${Date.now()}`)) {
+          this._showNotification('📣 Group Announcement', 'An admin posted an @everyone message', groupId);
+          this._unread.increment(`group:${groupId}`);
+        }
+      }, { passive: true });
+
+      // P2 FIX: Auto-mute notification
+      window.addEventListener('kyn:group:member:auto_muted', e => {
+        const { userId, groupId, until } = e.detail || {};
+        if (String(userId) === String(this._myUserId)) {
+          const untilTime = until ? new Date(until).toLocaleTimeString() : 'a short period';
+          this._showNotification('⚠️ Auto-muted', `You were auto-muted for flooding until ${untilTime}`, groupId);
+        }
+      }, { passive: true });
+
+      // P1 FIX: Pinned message notification
+      window.addEventListener('kyn:group:message:pinned', e => {
+        const { groupId, messageId } = e.detail || {};
+        if (!groupId) return;
+        this._showNotification('📌 Message Pinned', 'An admin pinned a message', groupId);
+      }, { passive: true });
+
+      // P2 FIX: Warning notification
+      window.addEventListener('kyn:group:member:warned', e => {
+        const { groupId, warnings, reason } = e.detail || {};
+        this._showNotification('⚠️ Warning Received', `You received a warning in this group (${warnings} total)${reason ? ': ' + reason : ''}`, groupId);
+      }, { passive: true });
+
       window.addEventListener('kyn:group:reaction', e => {
         const { messageId, userId, emoji, action } = e.detail || {};
         if (!messageId) return;

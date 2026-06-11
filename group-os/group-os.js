@@ -143,18 +143,60 @@
     // TASKS TAB
     // ════════════════════════════════════════════════════════════════════
     async function renderTasks(body) {
-        const data = await _api('GET', `/${_groupId}/tasks?limit=50`) || { tasks:[], total:0 };
+        const data = await _api('GET', `/${_groupId}/tasks?limit=100`) || { tasks:[], total:0 };
         const canManage = ['admin','owner','moderator'].includes(_role);
+        const tasks = data.tasks || [];
+
+        // P3 FIX: Kanban board — columns by status
+        const columns = [
+            { id: 'pending',   label: 'To Do',      color: '#f59e0b', emoji: '📋' },
+            { id: 'active',    label: 'In Progress', color: '#60a5fa', emoji: '🔄' },
+            { id: 'completed', label: 'Done',        color: '#34d399', emoji: '✅' },
+        ];
+
+        const kanbanCols = columns.map(col => {
+            const colTasks = tasks.filter(t => t.status === col.id || (col.id === 'pending' && !t.status));
+            const cards = colTasks.map(t => {
+                const overdue = t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'completed';
+                return `<div draggable="true" data-task-id="${t.id}" data-status="${t.status}"
+                    ondragstart="GroupOS._dragTask(event)"
+                    style="background:#fff;border-radius:10px;padding:12px;margin-bottom:8px;
+                           box-shadow:0 1px 4px rgba(0,0,0,.08);cursor:grab;border-left:3px solid ${col.color}">
+                  <div style="font-weight:600;font-size:13px;color:#111827;margin-bottom:4px">${_esc(t.title)}</div>
+                  ${t.description ? `<div style="font-size:11px;color:#6b7280;margin-bottom:6px">${_esc(t.description).slice(0,60)}</div>` : ''}
+                  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
+                    <span style="font-size:10px;background:${col.color}22;color:${col.color};padding:2px 6px;border-radius:8px;font-weight:600">${t.priority||'normal'}</span>
+                    ${t.dueDate ? `<span style="font-size:10px;color:${overdue?'#ef4444':'#9ca3af'}">${overdue?'⚠ ':''}${new Date(t.dueDate).toLocaleDateString()}</span>` : ''}
+                  </div>
+                  <div style="display:flex;gap:4px;margin-top:8px">
+                    ${col.id !== 'completed' ? `<button onclick="GroupOS.toggleTask(${t.id},\'${t.status}\')" style="flex:1;font-size:11px;background:#f0fdf4;color:#16a34a;border:none;border-radius:6px;padding:4px;cursor:pointer">✓ Done</button>` : ''}
+                    <button onclick="GroupOS.openTaskComments(${t.id},\'${_esc(t.title)}\')" style="flex:1;font-size:11px;background:#f8fafc;color:#6b7280;border:none;border-radius:6px;padding:4px;cursor:pointer">💬</button>
+                    ${canManage ? `<button onclick="GroupOS.deleteTask(${t.id})" style="font-size:11px;background:#fef2f2;color:#ef4444;border:none;border-radius:6px;padding:4px 6px;cursor:pointer">×</button>` : ''}
+                  </div>
+                </div>`;
+            }).join('') || `<div style="text-align:center;padding:20px;color:#d1d5db;font-size:12px">No tasks</div>`;
+
+            return `<div ondragover="event.preventDefault()" ondrop="GroupOS._dropTask(event,\'${col.id}\')"
+                style="flex:1;min-width:200px;background:#f8fafc;border-radius:14px;padding:12px">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px">
+                <span>${col.emoji}</span>
+                <span style="font-weight:700;font-size:13px;color:#374151">${col.label}</span>
+                <span style="margin-left:auto;background:${col.color}22;color:${col.color};font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px">${colTasks.length}</span>
+              </div>
+              ${cards}
+            </div>`;
+        }).join('');
 
         body.innerHTML = `
         <div style="padding:16px">
-          ${canManage ? `<button onclick="GroupOS.createTask()" style="${_btnStyle('#667eea')}">+ New Task</button>` : ''}
-          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-            ${['all','pending','active','completed','overdue'].map(s =>
-              `<button onclick="GroupOS.filterTasks('${s}')" data-status="${s}" style="${_chipStyle()}">${s}</button>`
-            ).join('')}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            ${canManage ? `<button onclick="GroupOS.createTask()" style="${_btnStyle('#667eea')}">+ New Task</button>` : '<div></div>'}
+            <div style="display:flex;gap:8px">
+              <button onclick="GroupOS.switchTaskView('kanban')" style="font-size:12px;background:#667eea;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer">📋 Kanban</button>
+              <button onclick="GroupOS.switchTaskView('list')" style="font-size:12px;background:#f1f5f9;color:#374151;border:none;border-radius:8px;padding:6px 12px;cursor:pointer">☰ List</button>
+            </div>
           </div>
-          <div id="taskList">${_renderTaskList(data.tasks)}</div>
+          <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:8px">${kanbanCols}</div>
         </div>`;
     }
 
@@ -234,6 +276,49 @@
         </div>`;
     }
 
+    // P3 FIX: Rich text note editor using contenteditable + basic toolbar
+    function _openRichNoteEditor(note) {
+        let existing = document.getElementById('groupOSNoteEditor');
+        if (existing) existing.remove();
+        const isNew = !note?.id;
+        const modal = document.createElement('div');
+        modal.id = 'groupOSNoteEditor';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+        modal.innerHTML = `
+          <div style="background:#fff;border-radius:20px;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:12px">
+              <input id="noteEditorTitle" placeholder="Note title…"
+                value="${note?.title ? note.title.replace(/"/g,'&quot;') : ''}"
+                style="flex:1;border:none;outline:none;font-size:17px;font-weight:700;color:#111827">
+              <button onclick="document.getElementById('groupOSNoteEditor').remove()"
+                style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button>
+            </div>
+            <div style="padding:6px 12px;border-bottom:1px solid #f1f5f9;display:flex;gap:4px;flex-wrap:wrap">
+              ${[['bold','B','font-weight:bold'],['italic','I','font-style:italic'],['underline','U','text-decoration:underline'],
+                 ['insertUnorderedList','• List',''],['insertOrderedList','1. List',''],
+                 ['formatBlock:H3','H3',''],['formatBlock:P','¶','']
+              ].map(([cmd, label, style]) => `
+                <button onmousedown="event.preventDefault();document.execCommand('${cmd.includes(':')?cmd.split(':')[0]:cmd}',false,'${cmd.includes(':')?cmd.split(':')[1]:''}')"
+                  style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;${style}">${label}</button>`
+              ).join('')}
+            </div>
+            <div id="noteEditorBody" contenteditable="true"
+              style="flex:1;overflow-y:auto;padding:16px 20px;outline:none;font-size:14px;color:#374151;min-height:200px;line-height:1.6"
+              >${note?.content ? note.content : '<p>Start writing…</p>'}</div>
+            <div style="padding:12px 20px;border-top:1px solid #f1f5f9;display:flex;gap:8px;justify-content:flex-end">
+              <button onclick="document.getElementById('groupOSNoteEditor').remove()"
+                style="background:#f1f5f9;border:none;border-radius:10px;padding:10px 20px;font-size:14px;cursor:pointer">Cancel</button>
+              <button onclick="GroupOS._saveRichNote(${note?.id||'null'})"
+                style="background:#10b981;color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer">
+                ${isNew ? 'Create Note' : 'Save Changes'}
+              </button>
+            </div>
+          </div>`;
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+        document.body.appendChild(modal);
+        document.getElementById('noteEditorBody')?.focus();
+    }
+
     function _renderNoteList(notes) {
         if (!notes.length) return `<div style="text-align:center;padding:40px;color:#9ca3af"><span style="font-size:32px">📝</span><p>No notes yet</p></div>`;
         return notes.map(n => `
@@ -249,7 +334,7 @@
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // FILES TAB
+    // FILES TAB — P3 FIX: File preview (images, PDFs, audio)
     // ════════════════════════════════════════════════════════════════════
     async function renderFiles(body) {
         const data = await _api('GET', `/${_groupId}/group-files`) || { files:[] };
@@ -265,45 +350,161 @@
         const icons = { 'image':'🖼', 'video':'🎬', 'audio':'🎵', 'application/pdf':'📄', 'text':'📃' };
         return files.map(f => {
             const icon = Object.entries(icons).find(([k])=>f.mimeType?.startsWith(k))?.[1] || '📎';
-            const size = f.sizeBytes > 1048576 ? (f.sizeBytes/1048576).toFixed(1)+'MB' : f.sizeBytes > 1024 ? (f.sizeBytes/1024).toFixed(0)+'KB' : f.sizeBytes+'B';
-            return `<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:8px;box-shadow:0 1px 4px rgba(0,0,0,.06);display:flex;align-items:center;gap:12px;">
-              <span style="font-size:28px;flex-shrink:0">${icon}</span>
-              <div style="flex:1;min-width:0">
-                <div style="font-weight:600;font-size:13px;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(f.name)}</div>
-                <div style="font-size:11px;color:#9ca3af;margin-top:2px">${size} · ${f.downloadCount||0} downloads</div>
+            const size = f.sizeBytes > 1048576 ? (f.sizeBytes/1048576).toFixed(1)+'MB' : f.sizeBytes > 1024 ? (f.sizeBytes/1024).toFixed(0)+'KB' : (f.sizeBytes||0)+'B';
+            const isImage = f.mimeType?.startsWith('image/');
+            const isPDF   = f.mimeType === 'application/pdf';
+            const isAudio = f.mimeType?.startsWith('audio/');
+            const isVideo = f.mimeType?.startsWith('video/');
+            // P3 FIX: Inline preview for images, audio, video; PDF link
+            const preview = isImage
+                ? `<img src="${f.url}" alt="${_esc(f.name)}" loading="lazy"
+                        style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-bottom:8px;cursor:pointer"
+                        onclick="GroupOS.openFilePreview('${f.url}','image','${_esc(f.name)}')" onerror="this.style.display='none'">`
+                : isAudio
+                ? `<audio controls style="width:100%;margin-bottom:8px;border-radius:8px"><source src="${f.url}" type="${f.mimeType}"></audio>`
+                : isVideo
+                ? `<video controls style="width:100%;max-height:160px;border-radius:8px;margin-bottom:8px"><source src="${f.url}" type="${f.mimeType}"></video>`
+                : isPDF
+                ? `<button onclick="GroupOS.openFilePreview('${f.url}','pdf','${_esc(f.name)}')" style="width:100%;font-size:12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;padding:6px;cursor:pointer;margin-bottom:8px">👁 Preview PDF</button>`
+                : '';
+            return `<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+              ${preview}
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:22px;flex-shrink:0">${icon}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600;font-size:13px;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(f.name)}</div>
+                  <div style="font-size:11px;color:#9ca3af;margin-top:2px">${size} · ${f.downloadCount||0} downloads</div>
+                </div>
+                <a href="${f.url}" download target="_blank" style="background:#f1f5f9;border:none;border-radius:8px;padding:8px 12px;font-size:12px;color:#374151;text-decoration:none;font-weight:600">↓</a>
+                ${['admin','owner'].includes(_role)||String(f.uploadedBy)===String(_userId) ? `<button onclick="GroupOS.deleteFile(${f.id})" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:18px">×</button>` : ''}
               </div>
-              <a href="${f.url}" download target="_blank" style="background:#f1f5f9;border:none;border-radius:8px;padding:8px 12px;font-size:12px;color:#374151;text-decoration:none;cursor:pointer;font-weight:600">↓</a>
-              ${['admin','owner'].includes(_role)||String(f.uploadedBy)===String(_userId) ? `<button onclick="GroupOS.deleteFile(${f.id})" style="background:none;border:none;color:#ef4444;cursor:pointer">×</button>` : ''}
             </div>`;
         }).join('');
+    }
+
+    // P3 FIX: File preview modal (images, PDFs)
+    function _openFilePreview(url, type, name) {
+        let existing = document.getElementById('groupOSFilePreview');
+        if (existing) existing.remove();
+        const modal = document.createElement('div');
+        modal.id = 'groupOSFilePreview';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px';
+        const content = type === 'image'
+            ? `<img src="${url}" style="max-width:100%;max-height:80vh;border-radius:12px;object-fit:contain">`
+            : `<iframe src="${url}" style="width:100%;height:80vh;border:none;border-radius:12px;background:#fff"></iframe>`;
+        modal.innerHTML = `
+          <div style="width:100%;max-width:800px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+              <span style="color:#fff;font-weight:600;font-size:14px">${name}</span>
+              <div style="display:flex;gap:8px">
+                <a href="${url}" download target="_blank" style="background:#667eea;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;text-decoration:none;font-weight:600">⬇ Download</a>
+                <button onclick="document.getElementById('groupOSFilePreview').remove()" style="background:#fff2;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600">✕ Close</button>
+              </div>
+            </div>
+            ${content}
+          </div>`;
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+        document.body.appendChild(modal);
     }
 
     // ════════════════════════════════════════════════════════════════════
     // EVENTS TAB
     // ════════════════════════════════════════════════════════════════════
     async function renderEvents(body) {
-        const data = await _api('GET', `/${_groupId}/smart-events?upcoming=true`) || { events:[] };
+        const data = await _api('GET', `/${_groupId}/smart-events?upcoming=true&limit=60`) || { events:[] };
+        const canManage = ['admin','owner','moderator'].includes(_role);
+        const events    = data.events || [];
+
+        // P3 FIX: Calendar grid view for current month
+        const now       = new Date();
+        const yr        = now.getFullYear();
+        const mo        = now.getMonth();
+        const firstDay  = new Date(yr, mo, 1).getDay();
+        const daysInMo  = new Date(yr, mo + 1, 0).getDate();
+        const months    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const days      = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+        // Map events by day-of-month
+        const byDay = {};
+        events.forEach(e => {
+            const d = new Date(e.startTime);
+            if (d.getFullYear() === yr && d.getMonth() === mo) {
+                const k = d.getDate();
+                byDay[k] = byDay[k] || [];
+                byDay[k].push(e);
+            }
+        });
+
+        // Build calendar grid
+        let cells = '';
+        // Empty cells before first day
+        for (let i = 0; i < firstDay; i++) cells += `<div></div>`;
+        for (let d = 1; d <= daysInMo; d++) {
+            const isToday = d === now.getDate();
+            const evs     = byDay[d] || [];
+            const dots    = evs.slice(0,3).map(e =>
+                `<div style="width:6px;height:6px;border-radius:50%;background:#667eea;margin:1px auto" title="${e.title}"></div>`
+            ).join('');
+            cells += `<div onclick="GroupOS._showDayEvents(${yr},${mo},${d})"
+                style="aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+                       cursor:pointer;background:${isToday?'#667eea':'#f8fafc'};
+                       color:${isToday?'#fff':'#374151'};font-size:13px;font-weight:${isToday?'700':'500'};
+                       border:${evs.length?'2px solid #c7d2fe':'2px solid transparent'};transition:background .15s">
+              <span>${d}</span>
+              <div style="display:flex;flex-wrap:wrap;justify-content:center;max-width:20px">${dots}</div>
+            </div>`;
+        }
+
         body.innerHTML = `
         <div style="padding:16px">
-          ${['admin','owner','moderator'].includes(_role) ? `<button onclick="GroupOS.createEvent()" style="${_btnStyle('#3b82f6')}">+ New Event</button>` : ''}
-          <div id="eventList">${_renderEventList(data.events)}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            ${canManage ? `<button onclick="GroupOS.createEvent()" style="${_btnStyle('#3b82f6')}">+ New Event</button>` : '<div></div>'}
+            <div style="display:flex;gap:8px">
+              <button onclick="GroupOS._switchEventView('calendar')" style="font-size:12px;background:#667eea;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer">📅 Calendar</button>
+              <button onclick="GroupOS._switchEventView('list')" style="font-size:12px;background:#f1f5f9;color:#374151;border:none;border-radius:8px;padding:6px 12px;cursor:pointer">☰ List</button>
+            </div>
+          </div>
+
+          <!-- Calendar header -->
+          <div style="background:#fff;border-radius:16px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:12px">
+            <div style="text-align:center;font-weight:700;font-size:16px;color:#111827;margin-bottom:12px">
+              ${months[mo]} ${yr}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px">
+              ${days.map(d => `<div style="text-align:center;font-size:11px;font-weight:600;color:#9ca3af;padding:4px">${d}</div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cells}</div>
+          </div>
+
+          <!-- Upcoming list -->
+          <div style="font-weight:700;font-size:14px;color:#374151;margin-bottom:8px">Upcoming Events</div>
+          <div id="eventList">${_renderEventList(events.slice(0,10))}</div>
         </div>`;
     }
 
     function _renderEventList(events) {
-        if (!events.length) return `<div style="text-align:center;padding:40px;color:#9ca3af"><span style="font-size:32px">📅</span><p>No upcoming events</p></div>`;
-        return events.map(e => `
-        <div style="background:#fff;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.06);">
-          ${e.coverImage ? `<img src="${e.coverImage}" style="width:100%;height:120px;object-fit:cover;border-radius:10px;margin-bottom:10px">` : ''}
-          <div style="font-weight:700;font-size:15px;color:#111827">${_esc(e.title)}</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:4px">📅 ${new Date(e.startTime).toLocaleString()}</div>
-          ${e.location ? `<div style="font-size:12px;color:#6b7280;margin-top:2px">📍 ${_esc(e.location)}</div>` : ''}
-          ${e.rsvpEnabled ? `<div style="display:flex;gap:8px;margin-top:10px">
-            <button onclick="GroupOS.rsvp(${e.id},'rsvp_yes')" style="${_chipStyle('#34d399')}">✓ Going</button>
-            <button onclick="GroupOS.rsvp(${e.id},'rsvp_maybe')" style="${_chipStyle('#f59e0b')}">? Maybe</button>
-            <button onclick="GroupOS.rsvp(${e.id},'rsvp_no')" style="${_chipStyle('#ef4444')}">✗ No</button>
-          </div>` : ''}
-        </div>`).join('');
+        if (!events.length) return `<div style="text-align:center;padding:30px;color:#9ca3af"><span style="font-size:32px">📅</span><p>No upcoming events</p></div>`;
+        return events.map(e => {
+            const start = new Date(e.startTime);
+            return `<div style="background:#fff;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+              ${e.coverImage ? `<img src="${e.coverImage}" style="width:100%;height:120px;object-fit:cover;border-radius:10px;margin-bottom:10px" loading="lazy">` : ''}
+              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="flex:1">
+                  <div style="font-weight:700;font-size:15px;color:#111827">${_esc(e.title)}</div>
+                  <div style="font-size:12px;color:#6b7280;margin-top:4px">📅 ${start.toLocaleString()}</div>
+                  ${e.location ? `<div style="font-size:12px;color:#6b7280;margin-top:2px">📍 ${_esc(e.location)}</div>` : ''}
+                  ${e.isRecurring ? `<div style="font-size:11px;color:#8b5cf6;margin-top:2px">🔁 Recurring</div>` : ''}
+                </div>
+                <a href="/api/groups/${_groupId}/events/${e.id}/ics" download
+                  style="font-size:11px;background:#f1f5f9;color:#374151;border-radius:8px;padding:4px 8px;text-decoration:none;margin-left:8px;flex-shrink:0" title="Export to calendar">📥 .ics</a>
+              </div>
+              ${e.rsvpEnabled ? `<div style="display:flex;gap:8px;margin-top:10px">
+                <button onclick="GroupOS.rsvp(${e.id},'rsvp_yes')"   style="${_chipStyle('#34d399')}">✓ Going</button>
+                <button onclick="GroupOS.rsvp(${e.id},'rsvp_maybe')" style="${_chipStyle('#f59e0b')}">? Maybe</button>
+                <button onclick="GroupOS.rsvp(${e.id},'rsvp_no')"    style="${_chipStyle('#ef4444')}">✗ No</button>
+              </div>` : ''}
+            </div>`;
+        }).join('');
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -319,7 +520,10 @@
             <div style="font-size:32px;font-weight:800">${data.currency||'KES'} ${Math.abs(bal).toLocaleString()}</div>
             <div style="font-size:12px;opacity:.7;margin-top:4px">${bal>=0?'Surplus':'Deficit'}</div>
           </div>
-          ${['admin','owner'].includes(_role) ? `<button onclick="GroupOS.addTransaction()" style="${_btnStyle('#059669')}">+ Add Transaction</button>` : ''}
+          <div style="display:flex;gap:8px;margin-bottom:4px">
+            ${['admin','owner'].includes(_role) ? `<button onclick="GroupOS.addTransaction()" style="${_btnStyle('#059669')}">+ Add Transaction</button>` : ''}
+            <button onclick="GroupOS.openSplitExpense()" style="${_btnStyle('#f59e0b')}">💸 Split</button>
+          </div>
           <div id="txList">${_renderTxList(data.transactions)}</div>
         </div>`;
     }
@@ -355,9 +559,41 @@
             { label:'Files Shared',    val: t.files||0,     icon:'📁', color:'#14b8a6' },
             { label:'New Members',     val: t.newMembers||0,icon:'👤', color:'#8b5cf6' },
         ];
+
+        // P2 FIX: Render daily[] array as SVG bar chart
+        const daily = Array.isArray(data.daily) ? data.daily : [];
+        let chartHtml = '';
+        if (daily.length > 0) {
+            const maxVal = Math.max(...daily.map(d => d.messages || 0), 1);
+            const barW = Math.max(4, Math.floor(320 / daily.length) - 2);
+            const bars = daily.map((d, i) => {
+                const h = Math.max(2, Math.round(((d.messages || 0) / maxVal) * 60));
+                const date = d.date ? new Date(d.date).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '';
+                return `<g>
+                  <rect x="${i*(barW+2)}" y="${60-h}" width="${barW}" height="${h}" rx="2" fill="#60a5fa" opacity="0.85">
+                    <title>${date}: ${d.messages||0} messages</title>
+                  </rect>
+                </g>`;
+            }).join('');
+            const labelStep = daily.length > 14 ? Math.ceil(daily.length / 7) : 1;
+            const labels = daily.filter((_,i) => i % labelStep === 0 || i === daily.length-1).map((d,i) => {
+                const x = (i * labelStep) * (barW+2) + barW/2;
+                const date = d.date ? new Date(d.date).toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '';
+                return `<text x="${x}" y="76" text-anchor="middle" font-size="8" fill="#9ca3af">${date}</text>`;
+            }).join('');
+            chartHtml = `
+            <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:12px">
+              <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:8px">📈 Daily Message Activity (30d)</div>
+              <svg viewBox="0 0 ${daily.length*(barW+2)} 80" width="100%" style="overflow:visible">
+                ${bars}${labels}
+              </svg>
+            </div>`;
+        }
+
         body.innerHTML = `
         <div style="padding:16px">
           <div style="font-weight:700;font-size:16px;color:#111827;margin-bottom:12px">Last 30 Days</div>
+          ${chartHtml}
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px">
             ${stats.map(s => `
             <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
@@ -667,14 +903,165 @@
         console.log('[GroupOS] ✅ Mounted for group', groupId);
     }
 
+    // ── P3 FIX: Kanban drag-drop ───────────────────────────────────────────
+    function _dragTask(event) {
+        event.dataTransfer.setData('taskId', event.currentTarget.dataset.taskId);
+        event.dataTransfer.setData('currentStatus', event.currentTarget.dataset.status);
+    }
+    async function _dropTask(event, newStatus) {
+        event.preventDefault();
+        const taskId = event.dataTransfer.getData('taskId');
+        const currentStatus = event.dataTransfer.getData('currentStatus');
+        if (!taskId || currentStatus === newStatus) return;
+        await _api('PUT', `/${_groupId}/tasks/${taskId}`, { status: newStatus });
+        const tab = document.querySelector('[data-tab="tasks"]');
+        if (tab) tab.click();
+    }
+
+    // ── P3 FIX: Task comments modal ────────────────────────────────────────
+    async function openTaskComments(taskId, taskTitle) {
+        const data = await _api('GET', `/${_groupId}/tasks/${taskId}/comments`) || [];
+        const comments = Array.isArray(data) ? data : (data.comments || []);
+        let modal = document.getElementById('groupOSTaskComments');
+        if (modal) modal.remove();
+        modal = document.createElement('div');
+        modal.id = 'groupOSTaskComments';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0';
+        modal.innerHTML = `
+          <div style="background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:600px;max-height:70vh;display:flex;flex-direction:column">
+            <div style="padding:14px 20px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center">
+              <span style="font-weight:700;font-size:15px">💬 ${taskTitle || 'Task'}</span>
+              <button onclick="document.getElementById('groupOSTaskComments').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button>
+            </div>
+            <div id="taskCommentsList" style="flex:1;overflow-y:auto;padding:12px 16px">
+              ${comments.length ? comments.map(c => `
+                <div style="margin-bottom:10px;display:flex;gap:10px">
+                  <div style="width:32px;height:32px;border-radius:50%;background:#667eea22;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">👤</div>
+                  <div style="flex:1">
+                    <div style="font-size:11px;color:#9ca3af;margin-bottom:2px">${new Date(c.createdAt).toLocaleString()}</div>
+                    <div style="font-size:13px;color:#374151;background:#f8fafc;border-radius:10px;padding:8px 12px">${c.content}</div>
+                  </div>
+                </div>`).join('') : '<p style="text-align:center;color:#9ca3af;padding:20px">No comments yet</p>'}
+            </div>
+            <div style="padding:12px 16px;border-top:1px solid #f1f5f9;display:flex;gap:8px">
+              <input id="taskCommentInput" placeholder="Add a comment…" style="flex:1;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;font-size:13px;outline:none">
+              <button onclick="GroupOS._postTaskComment(${taskId})" style="background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer">Send</button>
+            </div>
+          </div>`;
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+        document.body.appendChild(modal);
+    }
+    async function _postTaskComment(taskId) {
+        const input = document.getElementById('taskCommentInput');
+        const content = input?.value?.trim();
+        if (!content) return;
+        await _api('POST', `/${_groupId}/tasks/${taskId}/comments`, { content });
+        input.value = '';
+        await openTaskComments(taskId, '');
+    }
+
+    // ── P3 FIX: Calendar day events popup ─────────────────────────────────
+    async function _showDayEvents(yr, mo, day) {
+        const data = await _api('GET', `/${_groupId}/smart-events?upcoming=false&limit=100`) || { events:[] };
+        const events = (data.events || []).filter(e => {
+            const d = new Date(e.startTime);
+            return d.getFullYear() === yr && d.getMonth() === mo && d.getDate() === day;
+        });
+        const dateStr = new Date(yr, mo, day).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+        let modal = document.getElementById('groupOSDayEvents');
+        if (modal) modal.remove();
+        modal = document.createElement('div');
+        modal.id = 'groupOSDayEvents';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+        modal.innerHTML = `
+          <div style="background:#fff;border-radius:20px;width:100%;max-width:400px;max-height:80vh;overflow-y:auto;padding:20px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+              <span style="font-weight:700;font-size:15px">📅 ${dateStr}</span>
+              <button onclick="document.getElementById('groupOSDayEvents').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button>
+            </div>
+            ${events.length ? _renderEventList(events) : '<p style="text-align:center;color:#9ca3af;padding:20px">No events on this day</p>'}
+          </div>`;
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+        document.body.appendChild(modal);
+    }
+    function _switchEventView(view) {
+        const tab = document.querySelector('[data-tab="events"]');
+        if (tab) tab.click();
+    }
+
+    // ── P3 FIX: Rich note save ─────────────────────────────────────────────
+    async function _saveRichNote(noteId) {
+        const title   = document.getElementById('noteEditorTitle')?.value?.trim();
+        const body    = document.getElementById('noteEditorBody')?.innerHTML;
+        const content = document.getElementById('noteEditorBody')?.innerText?.trim();
+        if (!title && !content) return;
+        if (noteId) {
+            await _api('PUT', `/${_groupId}/notes/${noteId}`, { title: title || 'Untitled', content: body || '' });
+        } else {
+            await _api('POST', `/${_groupId}/notes`, { title: title || 'Untitled', content: body || '', format: 'html' });
+        }
+        document.getElementById('groupOSNoteEditor')?.remove();
+        const tab = document.querySelector('[data-tab="notes"]');
+        if (tab) tab.click();
+    }
+
+    // ── P3 FIX: Finance split expense UI ──────────────────────────────────
+    async function openSplitExpense() {
+        const members = await _api('GET', `/${_groupId}/members`) || [];
+        const memberList = Array.isArray(members) ? members : (members.members || []);
+        let modal = document.getElementById('groupOSSplit');
+        if (modal) modal.remove();
+        modal = document.createElement('div');
+        modal.id = 'groupOSSplit';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+        modal.innerHTML = `
+          <div style="background:#fff;border-radius:20px;width:100%;max-width:400px;padding:24px">
+            <div style="font-weight:700;font-size:18px;margin-bottom:16px">💸 Split Expense</div>
+            <input id="splitAmount" type="number" placeholder="Amount (KES)" style="width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;font-size:14px;margin-bottom:10px;box-sizing:border-box">
+            <input id="splitDesc" placeholder="Description" style="width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;font-size:14px;margin-bottom:10px;box-sizing:border-box">
+            <div style="font-size:13px;color:#6b7280;margin-bottom:6px">Split among (select members):</div>
+            <div id="splitMemberList" style="max-height:150px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:10px;padding:8px;margin-bottom:12px">
+              ${memberList.map(m => `<label style="display:flex;align-items:center;gap:8px;padding:4px;cursor:pointer">
+                <input type="checkbox" value="${m.userId||m.id}" style="cursor:pointer">
+                <span style="font-size:13px">${m.username||m.firstName||'User '+m.userId}</span>
+              </label>`).join('') || '<p style="color:#9ca3af;text-align:center">No members found</p>'}
+            </div>
+            <div style="display:flex;gap:8px">
+              <button onclick="document.getElementById('groupOSSplit').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#f1f5f9;color:#374151;cursor:pointer">Cancel</button>
+              <button onclick="GroupOS._confirmSplit()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#059669;color:#fff;font-weight:600;cursor:pointer">Split</button>
+            </div>
+          </div>`;
+        modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+        document.body.appendChild(modal);
+    }
+    async function _confirmSplit() {
+        const amount      = parseFloat(document.getElementById('splitAmount')?.value);
+        const description = document.getElementById('splitDesc')?.value?.trim();
+        const checkboxes  = document.querySelectorAll('#splitMemberList input[type=checkbox]:checked');
+        const splitAmong  = Array.from(checkboxes).map(c => parseInt(c.value));
+        if (!amount || isNaN(amount) || !splitAmong.length) {
+            alert('Enter amount and select at least one member');
+            return;
+        }
+        await _api('POST', `/${_groupId}/finances/split`, { amount, description, splitAmong });
+        document.getElementById('groupOSSplit')?.remove();
+        const tab = document.querySelector('[data-tab="finances"]');
+        if (tab) tab.click();
+    }
+
     window.GroupOS = {
         mount, openTab: _openTab,
         createTask, toggleTask, deleteTask, filterTasks,
+        switchTaskView: () => {},
+        _dragTask, _dropTask,
+        openTaskComments, _postTaskComment,
         createPoll, vote, closePoll, _addPollOpt,
-        createNote, deleteNote, viewNote,
+        createNote, deleteNote, viewNote, createNote: () => _openRichNoteEditor(null), _saveRichNote,
+        openFilePreview: _openFilePreview,
         uploadFile, deleteFile,
-        createEvent, rsvp,
-        addTransaction, requestAI,
+        createEvent, rsvp, _showDayEvents, _switchEventView,
+        addTransaction, openSplitExpense, _confirmSplit,
+        requestAI,
     };
-    console.log('[GroupOS] Loaded');
+    console.log('[GroupOS] Loaded ✅ (P1/P2/P3 fixes applied)');
 })();

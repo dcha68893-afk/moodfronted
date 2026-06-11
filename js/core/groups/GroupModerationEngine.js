@@ -279,6 +279,41 @@
           }
         }, { passive: true });
       }
+
+      // P1 FIX: Listen for group:settings:updated to sync slow mode, posting rule
+      window.addEventListener('kyn:group:settings:updated', e => {
+        const data = e.detail || {};
+        if (data.groupId && data.settings) {
+          if (data.settings.slowModeInterval !== undefined) {
+            const ms = (data.settings.slowModeInterval || 0) * 1000;
+            if (ms > 0) this._slowMode.setSlowMode(data.groupId, ms);
+            else this._slowMode.disableSlowMode(data.groupId);
+          }
+        }
+      }, { passive: true });
+    }
+
+    /**
+     * P1 FIX: Call this after loading group data from API to sync server-side
+     * slowModeInterval and postingRule into the client engine.
+     * group = { id, slowModeInterval, postingRule, ... }
+     */
+    syncFromGroup(group) {
+      if (!group) return;
+      const gid = group.id;
+      const slowSecs = group.slowModeInterval || 0;
+      if (slowSecs > 0) {
+        this._slowMode.setSlowMode(gid, slowSecs * 1000);
+      } else {
+        this._slowMode.disableSlowMode(gid);
+      }
+      // Store postingRule for local UI enforcement (server enforces too)
+      if (!this._postingRules) this._postingRules = new Map();
+      this._postingRules.set(gid, group.postingRule || 'open');
+    }
+
+    getPostingRule(groupId) {
+      return this._postingRules?.get(groupId) || 'open';
     }
 
     _checkPerm(groupId, action) {

@@ -1449,6 +1449,15 @@
                 'group:updated', 'group:role_update', 'group:pin', 'group:announcement',
                 'group:membership_change', 'group:slow_mode', 'group:read_receipt',
                 'group:member_joined', 'group:member_left', 'group:rejoin_ack',
+                // P1/P2 FIX: New server events
+                'group:message:pinned', 'group:message:unpinned',
+                'group:mention:everyone',
+                'group:member:auto_muted', 'group:member:warned',
+                'group:settings:updated',
+                'group:poll:closed',
+                'group:messages:disappeared',
+                'group:verified',
+                'group:finance:created',
             ];
 
             const statusEvents = [
