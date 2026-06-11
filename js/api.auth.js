@@ -3002,8 +3002,9 @@
             
             // ========== FALLBACK: Use direct fetch with dynamic base URL ==========
             if (!response) {
-                // Get base URL using centralized function
-                const baseUrl = _getBaseUrl();
+                // FIX: baseUrl already declared at top of function — reuse it, don't re-declare
+                // Redeclaring with const in the same function scope causes a SyntaxError in
+                // strict mode, which prevents fetchResponse from ever being defined.
                 const fullUrl = `${baseUrl}/api/auth/login`;
                 console.log('🔐 [AUTH] Making direct fetch to:', fullUrl);
                 
