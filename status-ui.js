@@ -4028,7 +4028,7 @@ function startCountdownTicker(statusId) {
             if (!result || !result.success || !result.data) { overlay.style.display = 'none'; return; }
             const d = result.data;
             if (d.finished) {
-                overlay.innerHTML = `<div class="countdown-sticker finished"><span>${d.label || 'Time's up!'}</span><span>🎉</span></div>`;
+                overlay.innerHTML = `<div class="countdown-sticker finished"><span>${d.label || 'Time\u2019s up!'}</span><span>🎉</span></div>`;
                 overlay.style.display = 'flex';
                 clearInterval(_countdownTimers.get(statusId));
                 _countdownTimers.delete(statusId);
@@ -8178,7 +8178,7 @@ window._switchFeedTab = async function(tab) {
             const list = document.getElementById('memoriesStatusList');
             if (!list) return;
             if (!statuses.length) {
-                list.innerHTML = '<div style="padding:32px;text-align:center;color:rgba(255,255,255,0.5);"><div style="font-size:40px;margin-bottom:8px;">📅</div><p>No memories yet — check back after you've posted for a year!</p></div>';
+                list.innerHTML = '<div style="padding:32px;text-align:center;color:rgba(255,255,255,0.5);"><div style="font-size:40px;margin-bottom:8px;">\U0001F4C5</div><p>No memories yet — check back after you\u2019ve posted for a year!</p></div>';
                 return;
             }
             list.innerHTML = `<p style="padding:12px 16px 4px;font-size:13px;font-weight:600;color:rgba(255,255,255,0.7);">On this day in the past</p>` +
