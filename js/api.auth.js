@@ -2878,9 +2878,9 @@
     console.log('🔐 [AUTH] Using centralized API request for login');
     
     try {
-        // Add timeout parameter - 30 seconds for login
+        // Add timeout parameter - 90 seconds for login (handles Render cold starts which can take 50-60s)
         const apiResponse = await window.api.request.post('/auth/login', payload, {
-            timeout: 30000,  // 30 seconds timeout for login
+            timeout: 90000,  // 90 seconds timeout for login
             retryCount: 2     // Allow retry on timeout
         });
                     console.log('🔐 [AUTH] Centralized API response:', apiResponse);
@@ -3012,7 +3012,7 @@ const controller = new AbortController();
 const timeoutId = setTimeout(() => {
     console.warn('🔐 [AUTH] Login request timeout, aborting...');
     controller.abort();
-}, 30000); // 30 second timeout
+}, 90000); // 90 second timeout — handles Render cold starts
 
 try {
     const fetchResponse = await fetch(fullUrl, {
@@ -3028,7 +3028,7 @@ try {
 } catch (fetchError) {
     clearTimeout(timeoutId);
     if (fetchError.name === 'AbortError') {
-        throw new Error('Login request timed out after 30 seconds');
+        throw new Error('Login request timed out after 90 seconds');
     }
     throw fetchError;
 }

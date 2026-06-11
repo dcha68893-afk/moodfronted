@@ -1239,12 +1239,12 @@ if (requiresAuth) {
             const requestPromise = (async () => {
                 const controller = createAbortController(requestId);
                 // Use request-specific timeout or default
-const requestTimeout = options.timeout || DEFAULT_TIMEOUT;
-const timeoutId = setTimeout(() => {
-    console.warn(`[API] ⏰ Request timeout after ${requestTimeout}ms: ${fullUrl}`);
-    controller.abort();
-    abortControllers.delete(requestId);
-}, requestTimeout);
+                const requestTimeout = options.timeout || DEFAULT_TIMEOUT;
+                const timeoutId = setTimeout(() => {
+                    console.warn(`[API] ⏰ Request timeout after ${requestTimeout}ms: ${fullUrl}`);
+                    controller.abort();
+                    abortControllers.delete(requestId);
+                }, requestTimeout);
                 
                 try {
                     const response = await fetch(fullUrl, {
