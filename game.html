@@ -260,6 +260,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 .prof-stat{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px;text-align:center;}
 .prof-stat .psv{font-family:'Rajdhani',sans-serif;font-size:20px;font-weight:700;color:var(--text);}
 .prof-stat .psl{font-size:10px;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-top:2px;}
+/* Reminder toggle switch */
+#reminderToggle:checked + #reminderToggleSlider{background:var(--gold,#f5c518);}
+#reminderToggleSlider::before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;
+  background:#fff;border-radius:50%;transition:.2s;}
+#reminderToggle:checked + #reminderToggleSlider::before{transform:translateX(20px);}
 
 /* ═══════════════════════════════════════════════════════
    SHOP MODAL
@@ -646,6 +651,44 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #tvLevelBanner .tlb-left{font-size:11px;color:#f5c518;font-weight:800;}
 #tvLevelBanner .tlb-right{font-size:11px;color:#888;font-weight:700;cursor:pointer;text-decoration:underline;}
 #tvSubjectTag{font-size:10px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:1px;}
+
+/* ── NENO WORDLE ──────────────────────────────────────────────────────────────*/
+#wordleGame{display:none;width:100%;height:100%;flex-direction:column;background:#0a1410;overflow:hidden;position:relative;}
+#wordleGame.show{display:flex;}
+#wdHud{display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(0,0,0,0.4);flex-shrink:0;}
+#wdContent{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:14px 10px;gap:14px;overflow:hidden;}
+#wdGrid{display:grid;grid-template-rows:repeat(6,1fr);gap:5px;}
+.wd-row{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;}
+.wd-cell{width:46px;height:46px;border:2px solid rgba(255,255,255,0.18);border-radius:8px;
+  display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;
+  color:#fff;text-transform:uppercase;transition:transform .15s, background .3s, border-color .3s;
+  background:rgba(255,255,255,0.03);}
+.wd-cell.filled{border-color:rgba(255,255,255,0.4);transform:scale(1.04);}
+.wd-cell.correct{background:#1abc9c;border-color:#1abc9c;color:#04201a;}
+.wd-cell.present{background:#f39c12;border-color:#f39c12;color:#2b1900;}
+.wd-cell.absent{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.08);color:#666;}
+.wd-cell.flip{animation:wdFlip .4s ease;}
+@keyframes wdFlip{0%{transform:rotateX(0)}50%{transform:rotateX(90deg)}100%{transform:rotateX(0)}}
+.wd-row.shake{animation:shake .35s;}
+#wdMsg{font-size:14px;font-weight:900;color:#1abc9c;min-height:20px;text-align:center;}
+#wdKeyboard{display:flex;flex-direction:column;gap:6px;width:100%;max-width:380px;}
+.wd-krow{display:flex;gap:5px;justify-content:center;}
+.wd-key{flex:1;max-width:34px;height:46px;border-radius:6px;border:none;
+  background:rgba(255,255,255,0.1);color:#fff;font-size:13px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  text-transform:uppercase;transition:background .2s;user-select:none;}
+.wd-key.wide{max-width:58px;font-size:11px;}
+.wd-key:active{background:rgba(255,255,255,0.25);}
+.wd-key.correct{background:#1abc9c;color:#04201a;}
+.wd-key.present{background:#f39c12;color:#2b1900;}
+.wd-key.absent{background:rgba(255,255,255,0.04);color:#555;}
+#wdOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.88);align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(8px);}
+#wdOverlay.show{display:flex;}
+#wdOverlayBox{background:linear-gradient(135deg,#0a2a22,#0a1410);border:2px solid #1abc9c;border-radius:22px;padding:28px 44px;text-align:center;box-shadow:0 0 60px rgba(26,188,156,0.3);max-width:320px;width:90%;}
+#wdOverlayBox .oi{font-size:60px;margin-bottom:6px;}
+#wdOverlayBox .ot{font-size:22px;font-weight:900;color:#1abc9c;margin-bottom:4px;letter-spacing:1px;}
+#wdOverlayBox .os{font-size:13px;color:#aaa;margin-bottom:16px;line-height:1.5;}
+#wdOverlayBox button{background:linear-gradient(135deg,#16a085,#1abc9c);border:none;border-radius:40px;padding:12px 30px;color:#04201a;font-weight:900;font-size:14px;cursor:pointer;letter-spacing:1px;}
 </style>
 </head>
 <body>
@@ -727,6 +770,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
         <div class="sub">Word Quiz</div>
         <div class="badge new-badge">NEW</div>
         <div class="card-score" id="triviaCardScore"></div>
+      </div>
+      <div class="hub-card" onclick="openGame('wordle')">
+        <span class="icon">🔤</span>
+        <div class="name">Neno Wordle</div>
+        <div class="sub">Guess the Word</div>
+        <div class="badge new-badge">NEW</div>
+        <div class="card-score" id="wordleCardScore"></div>
       </div>
     </div>
     <div id="statsRow">
@@ -869,6 +919,10 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
     <div id="crosswordGame">
       <div id="cwHud">
         <div class="hud-badge" style="background:linear-gradient(135deg,#8e44ad,#9b59b6)">CROSSWORD JAM</div>
+        <button id="cwLangBtn" onclick="cwToggleLanguage()" style="
+          background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+          border-radius:14px;padding:4px 10px;font-size:10px;font-weight:800;
+          color:#ddd;cursor:pointer;margin-left:6px;">🇬🇧 ENGLISH</button>
         <div class="spacer"></div>
         <div id="cwScore" class="hud-score">⭐ 0</div>
         <div id="cwLevel" class="hud-score" style="margin-left:4px">LV.1</div>
@@ -970,6 +1024,29 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
       </div>
     </div>
 
+    <!-- NENO WORDLE -->
+    <div id="wordleGame">
+      <div id="wdHud">
+        <div class="hud-badge" style="background:linear-gradient(135deg,#16a085,#1abc9c)">NENO WORDLE</div>
+        <div class="spacer"></div>
+        <div id="wdStreak" class="hud-score">🔥 0</div>
+        <div id="wdScore" class="hud-score" style="margin-left:4px">⭐ 0</div>
+      </div>
+      <div id="wdContent">
+        <div id="wdGrid"></div>
+        <div id="wdMsg"></div>
+        <div id="wdKeyboard"></div>
+      </div>
+      <div id="wdOverlay">
+        <div id="wdOverlayBox">
+          <div class="oi" id="wdOIcon">🎉</div>
+          <div class="ot" id="wdOTitle">You got it!</div>
+          <div class="os" id="wdOSub"></div>
+          <button id="wdOBtn" onclick="initWordle()">PLAY AGAIN →</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div><!-- end gameWrap -->
 </div><!-- end appRoot -->
@@ -1067,6 +1144,19 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
         <div class="prof-stat"><div class="psv" id="psGems">0</div><div class="psl">💎 Gems</div></div>
         <div class="prof-stat"><div class="psv" id="psLevel">1</div><div class="psl">Player Level</div></div>
         <div class="prof-stat"><div class="psv" id="psAch">0</div><div class="psl">🏆 Achievements</div></div>
+      </div>
+      <div style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;
+        background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+        border-radius:12px;padding:10px 14px;">
+        <div style="font-size:12px;color:#ccc;">
+          🔔 Daily Reward Reminders
+          <div style="font-size:10px;color:#777;margin-top:2px;">Get notified when your reward is ready</div>
+        </div>
+        <label style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0;">
+          <input type="checkbox" id="reminderToggle" onchange="toggleDailyReminders(this.checked)" style="opacity:0;width:0;height:0;">
+          <span id="reminderToggleSlider" style="position:absolute;cursor:pointer;inset:0;
+            background:rgba(255,255,255,0.15);border-radius:24px;transition:.2s;"></span>
+        </label>
       </div>
     </div>
   </div>
@@ -1181,6 +1271,7 @@ function psLoad() {
 // ─── Debounced save ────────────────────────────────────────────────────────
 let _saveTimer = null;
 function psSave() {
+  PS._savedAt = new Date().toISOString();
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(PS)); } catch(e){}
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => psSyncToServer(), 500);
@@ -1215,19 +1306,87 @@ async function psSyncFromServer() {
     if (!r.ok) return;
     const { progress } = await r.json();
     if (!progress) return;
-    // Use server data if it's newer than local
+
     const serverUpdated = progress.updatedAt ? new Date(progress.updatedAt).getTime() : 0;
     const localUpdated  = PS._savedAt ? new Date(PS._savedAt).getTime() : 0;
+
+    // Detect a meaningful conflict: both sides have unsynced progress that diverges
+    // (e.g. played offline on two devices, or local changes haven't been pushed yet)
+    const localXP  = PS.xp || 0;
+    const serverXP = progress.xp || 0;
+    const xpDiff = Math.abs(localXP - serverXP);
+    const significantConflict = xpDiff > 50 && localUpdated > 0 && serverUpdated > 0
+      && Math.abs(serverUpdated - localUpdated) < 5 * 60 * 1000 // both updated recently (within 5 min)
+      && localXP !== serverXP;
+
+    if (significantConflict) {
+      _showSyncConflictBanner(progress, localXP, serverXP);
+      return; // wait for user choice
+    }
+
+    // No conflict — use whichever is newer
     if (serverUpdated >= localUpdated) {
-      // Merge server data, preserving local name
       const localName = PS.name;
       Object.assign(PS, progress);
       PS.name = localName; // name comes from auth, not game server
+      PS._savedAt = progress.updatedAt;
       psApplyDefaults();
       try { localStorage.setItem(SAVE_KEY, JSON.stringify(PS)); } catch(_){}
       updatePlatformBar();
     }
   } catch(e) { /* offline */ }
+}
+
+// ─── SYNC CONFLICT RESOLUTION UI ─────────────────────────────────────────────
+function _showSyncConflictBanner(serverProgress, localXP, serverXP) {
+  if (document.getElementById('syncConflictBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'syncConflictBanner';
+  banner.style.cssText = `
+    position:fixed;top:60px;left:50%;transform:translateX(-50%);
+    background:linear-gradient(135deg,rgba(30,20,50,0.98),rgba(20,17,35,0.98));
+    border:1px solid var(--gold,#f5c518);border-radius:14px;padding:14px 16px;
+    z-index:10001;box-shadow:0 4px 24px rgba(0,0,0,0.6);
+    max-width:340px;width:calc(100% - 32px);
+  `;
+  banner.innerHTML = `
+    <div style="font-size:13px;font-weight:900;color:var(--gold,#f5c518);margin-bottom:6px;">
+      ⚠️ Progress conflict detected
+    </div>
+    <div style="font-size:11px;color:#bbb;margin-bottom:10px;line-height:1.5;">
+      You played on another device. Choose which progress to keep:<br>
+      📱 This device: <b style="color:#fff">${formatNum(localXP)} XP</b><br>
+      ☁️ Other device: <b style="color:#fff">${formatNum(serverXP)} XP</b>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button id="syncKeepLocal" style="flex:1;background:rgba(255,255,255,0.08);
+        border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:8px;
+        color:#fff;font-size:11px;font-weight:800;cursor:pointer;">📱 Keep This Device</button>
+      <button id="syncKeepServer" style="flex:1;background:linear-gradient(135deg,var(--gold,#f5c518),#e6a800);
+        border:none;border-radius:10px;padding:8px;
+        color:#111;font-size:11px;font-weight:800;cursor:pointer;">☁️ Keep Other Device</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+
+  document.getElementById('syncKeepLocal').onclick = () => {
+    // Push local state to server, overwriting it
+    PS._savedAt = new Date().toISOString();
+    psSyncToServer();
+    banner.remove();
+    showNotif('📱','Kept this device\'s progress');
+  };
+  document.getElementById('syncKeepServer').onclick = () => {
+    const localName = PS.name;
+    Object.assign(PS, serverProgress);
+    PS.name = localName;
+    PS._savedAt = serverProgress.updatedAt;
+    psApplyDefaults();
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(PS)); } catch(_){}
+    updatePlatformBar();
+    banner.remove();
+    showNotif('☁️','Loaded progress from other device');
+  };
 }
 
 // ─── XP / LEVELS ───────────────────────────────────────────────────────────
@@ -1266,10 +1425,35 @@ function spendCoins(n) {
   return true;
 }
 
+// ─── ANIMATED NUMBER COUNTER ──────────────────────────────────────────────────
+const _counterState = new WeakMap();
+function animateCounter(el, newVal) {
+  if (!el) return;
+  const oldVal = _counterState.get(el) ?? (parseInt((el.textContent||'0').replace(/[^\d]/g,''),10) || 0);
+  if (oldVal === newVal) { el.textContent = formatNum(newVal); return; }
+  _counterState.set(el, newVal);
+  const duration = 400;
+  const start = performance.now();
+  const diff = newVal - oldVal;
+  // Bump animation
+  el.style.transform = 'scale(1.15)';
+  el.style.transition = 'transform .15s ease';
+  setTimeout(()=>{ el.style.transform='scale(1)'; }, 150);
+  function step(now) {
+    const t = Math.min(1, (now-start)/duration);
+    const eased = 1 - Math.pow(1-t, 3); // ease-out cubic
+    const val = Math.round(oldVal + diff*eased);
+    el.textContent = formatNum(val);
+    if (t < 1 && _counterState.get(el) === newVal) requestAnimationFrame(step);
+    else el.textContent = formatNum(newVal);
+  }
+  requestAnimationFrame(step);
+}
+
 // ─── PLATFORM BAR ───────────────────────────────────────────────────────────
 function updatePlatformBar() {
-  document.getElementById('coinDisplay').textContent = formatNum(PS.coins);
-  document.getElementById('gemDisplay').textContent  = formatNum(PS.gems);
+  animateCounter(document.getElementById('coinDisplay'), PS.coins);
+  animateCounter(document.getElementById('gemDisplay'), PS.gems);
   document.getElementById('avatarEmoji').textContent = PS.avatar;
   document.getElementById('avatarName').textContent  = PS.name;
   const lvName = LEVEL_NAMES[Math.min(PS.level-1, LEVEL_NAMES.length-1)];
@@ -1652,7 +1836,102 @@ function closeModal(id){ document.getElementById(id).classList.remove('show'); }
 function openDailyModal(){ buildDailyCalendar(); openModal('dailyModal'); }
 function openAchModal(){ checkAchievements(); renderAchList(); openModal('achModal'); }
 function openLbModal(){ renderLb(); openModal('lbModal'); }
-function openProfileModal(){ updateAvatarGrid(); openModal('profileModal'); }
+function openProfileModal(){
+  updateAvatarGrid();
+  openModal('profileModal');
+  // Reflect current reminder permission state
+  const enabled = (Notification?.permission === 'granted') && (localStorage.getItem('game_reminders_enabled') !== 'false');
+  document.getElementById('reminderToggle').checked = enabled;
+}
+
+// ─── PUSH NOTIFICATION SUBSCRIPTION (Daily Reward Reminders) ────────────────
+async function toggleDailyReminders(enable) {
+  if (!enable) {
+    localStorage.setItem('game_reminders_enabled','false');
+    // Best-effort unsubscribe on server
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      const sub = await reg?.pushManager?.getSubscription();
+      const token = _getAuthToken();
+      if (sub && token && _API_BASE) {
+        await fetch(`${_API_BASE}/api/games/push/unsubscribe`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+      }
+    } catch(_){}
+    showNotif('🔕','Daily reminders turned off');
+    return;
+  }
+
+  // Enable: request permission + subscribe
+  try {
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      showNotif('❌','Push notifications not supported on this device');
+      document.getElementById('reminderToggle').checked = false;
+      return;
+    }
+    let perm = Notification.permission;
+    if (perm === 'default') perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      showNotif('🔕','Notification permission denied');
+      document.getElementById('reminderToggle').checked = false;
+      return;
+    }
+
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      // Fetch VAPID public key from backend
+      const token = _getAuthToken();
+      if (!token || !_API_BASE) {
+        showNotif('🔒','Sign in to enable reminders');
+        document.getElementById('reminderToggle').checked = false;
+        return;
+      }
+      const keyRes = await fetch(`${_API_BASE}/api/games/push/vapid-public-key`).catch(()=>null);
+      let vapidKey = null;
+      if (keyRes && keyRes.ok) {
+        const data = await keyRes.json();
+        vapidKey = data.key;
+      }
+      if (!vapidKey) {
+        showNotif('❌','Push notifications unavailable right now');
+        document.getElementById('reminderToggle').checked = false;
+        return;
+      }
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _urlB64ToUint8Array(vapidKey),
+      });
+    }
+
+    const token = _getAuthToken();
+    if (token && _API_BASE) {
+      await fetch(`${_API_BASE}/api/games/push/subscribe`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(sub.toJSON()),
+      });
+    }
+    localStorage.setItem('game_reminders_enabled','true');
+    showNotif('🔔','Daily reminders enabled!');
+  } catch(e) {
+    console.error('Push subscription error:', e);
+    showNotif('❌','Could not enable reminders');
+    document.getElementById('reminderToggle').checked = false;
+  }
+}
+
+function _urlB64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
 function openShopModal(){ renderShop(); openModal('shopModal'); }
 
 // Close modal on overlay click
@@ -1679,6 +1958,41 @@ function showNotif(icon, text) {
   _notifTimer = setTimeout(()=>p.classList.remove('show'), 2800);
 }
 
+// ─── CONFETTI BURST (CSS-based, for non-canvas games) ───────────────────────
+function confettiBurst() {
+  const colors = ['#f5c518','#e74c3c','#2ecc71','#3498db','#9b59b6','#1abc9c','#e67e22'];
+  const container = document.createElement('div');
+  container.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9997;overflow:hidden;';
+  for (let i=0;i<28;i++) {
+    const piece = document.createElement('div');
+    const size = 6+Math.random()*6;
+    const startX = 50 + (Math.random()-0.5)*30;
+    const drift = (Math.random()-0.5)*200;
+    const dur = 1.2 + Math.random()*0.8;
+    const rot = Math.random()*720-360;
+    piece.style.cssText = `
+      position:absolute;left:${startX}%;top:35%;width:${size}px;height:${size*0.6}px;
+      background:${colors[i%colors.length]};opacity:0.9;
+      transform:rotate(${Math.random()*360}deg);
+      animation:confettiFall ${dur}s ease-out forwards;
+      --drift:${drift}px; --rot:${rot}deg;
+    `;
+    container.appendChild(piece);
+  }
+  document.body.appendChild(container);
+  setTimeout(()=>container.remove(), 2200);
+}
+// Inject confetti keyframes once
+if (!document.getElementById('confettiKeyframes')) {
+  const style = document.createElement('style');
+  style.id = 'confettiKeyframes';
+  style.textContent = `@keyframes confettiFall{
+    0%{transform:translateY(0) translateX(0) rotate(0deg);opacity:1;}
+    100%{transform:translateY(60vh) translateX(var(--drift)) rotate(var(--rot));opacity:0;}
+  }`;
+  document.head.appendChild(style);
+}
+
 // ─── GAME REWARD HOOKS (called by games on milestones) ─────────────────────
 function onGamePlayed(gameId) {
   PS.totalGames++;
@@ -1693,6 +2007,8 @@ function onLevelCleared(gameId, score) {
   addXP(15 + Math.floor(score/200));
   checkAchievements();
   updatePlatformBar();
+  // Celebration for non-pool games (pool has its own canvas particle burst)
+  if (gameId !== 'pool') confettiBurst();
   // Show social actions after level clear
   showPostGameActions(gameId, score);
 }
@@ -1936,6 +2252,127 @@ psLoad();
 updatePlatformBar();
 buildDailyCalendar();
 
+// ─── TUTORIAL SYSTEM ─────────────────────────────────────────────────────────
+const TUTORIALS = {
+  pool: [
+    { title:'🎱 Pool Basics', body:'Drag the cue backwards to aim, then release to shoot. The longer you drag, the more power!' },
+    { title:'🎱 Pocketing Balls', body:'Sink all coloured balls before the white (cue) ball. Pocketing the cue ball is a scratch — avoid it!' },
+    { title:'🎱 Power Shot', body:'Hold the cue pressed for 1 second to charge a Power Shot — it glows gold when ready!' },
+    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Good luck!' },
+  ],
+  water: [
+    { title:'💧 Water Sort', body:'Tap a bottle to select it, then tap a destination to pour. You can only pour matching colours!' },
+    { title:'💧 Full Bottles', body:'A bottle is complete when it holds a single colour all the way to the top. Fill all bottles to win!' },
+    { title:'↩️ Undo', body:'Made a mistake? Tap Undo (top right). You get 5 undos per level.' },
+    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Have fun!' },
+  ],
+  block: [
+    { title:'🧩 Block Puzzle', body:'Drag pieces from the tray (bottom) onto the 10×10 grid. Pieces cannot overlap.' },
+    { title:'🧩 Clear Lines', body:'Fill a complete row OR column to clear it and score points. Clearing multiple at once earns a big bonus!' },
+    { title:'🎯 Reach the target', body:'Clear enough lines to reach the target shown in the HUD. The game ends when no piece fits.' },
+    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Think ahead!' },
+  ],
+  crossword: [
+    { title:'📖 Crossword Jam', body:'A clue and letters are revealed one at a time. Choose the correct word from 4 options.' },
+    { title:'📖 Score Points', body:'Longer words score more. Try not to skip — skipped words score nothing.' },
+    { title:'🌍 Kiswahili Mode', body:'Switch to Kiswahili crossword via the language button at the top of the game!' },
+    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Expand your vocabulary!' },
+  ],
+  trivia: [
+    { title:'🧠 Trivia Master', body:'Pick a subject and answer 10 questions per level. Answer fast — bonus points for speed!' },
+    { title:'🔥 Streak Bonus', body:'Answer consecutive questions correctly to build a streak. The higher your streak, the bigger the multiplier!' },
+    { title:'⏱️ Timer', body:'You have 20 seconds per question. The timer bar shrinks — watch it!' },
+    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Test your knowledge!' },
+  ],
+  wordle: [
+    { title:'🔤 Wordle Swahili', body:'Guess the hidden 5-letter word in 6 tries. Type a letter and hit ENTER to submit your guess.' },
+    { title:'🟩 Colour Clues', body:'🟩 Green = correct letter, right spot. 🟨 Yellow = right letter, wrong spot. ⬛ Grey = letter not in word.' },
+    { title:'📚 Kiswahili Words', body:'All words are common Kiswahili or English words used in East Africa. A new word every session!' },
+    { title:'🎯 Ready to play!', body:'Tap anywhere to start. Bahati njema (Good luck)!' },
+  ],
+};
+
+let _tutorialKey = null;
+let _tutorialStep = 0;
+let _tutorialCb = null;
+
+function showTutorial(gameKey, onDone) {
+  const seen = JSON.parse(localStorage.getItem('tutorials_seen')||'{}');
+  if (seen[gameKey]) { onDone && onDone(); return; }
+  _tutorialKey = gameKey;
+  _tutorialStep = 0;
+  _tutorialCb = onDone;
+  _renderTutorialStep();
+}
+
+function _renderTutorialStep() {
+  const steps = TUTORIALS[_tutorialKey] || [];
+  if (_tutorialStep >= steps.length) { _dismissTutorial(); return; }
+  const s = steps[_tutorialStep];
+  const total = steps.length;
+  let overlay = document.getElementById('tutorialOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'tutorialOverlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:20000;
+      display:flex;align-items:center;justify-content:center;
+      animation:fadeIn .2s ease;
+    `;
+    document.body.appendChild(overlay);
+  }
+  overlay.innerHTML = `
+    <div style="
+      background:linear-gradient(135deg,var(--bg3,#1a1535),var(--bg,#0e0b1e));
+      border:1.5px solid var(--gold,#f5c518);border-radius:20px;
+      padding:28px 24px;max-width:320px;width:calc(100%-40px);
+      text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.7);
+    ">
+      <div style="font-size:13px;color:rgba(245,197,24,0.6);margin-bottom:6px;font-family:Rajdhani,sans-serif;letter-spacing:2px;">
+        TUTORIAL ${_tutorialStep+1}/${total}
+      </div>
+      <div style="font-family:Rajdhani,sans-serif;font-size:22px;font-weight:900;color:var(--gold,#f5c518);margin-bottom:12px;">
+        ${s.title}
+      </div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.85);line-height:1.6;margin-bottom:20px;">
+        ${s.body}
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;">
+        <button onclick="_dismissTutorial()" style="
+          background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);
+          border-radius:20px;padding:8px 18px;color:#888;font-size:12px;cursor:pointer;">
+          Skip All
+        </button>
+        <button onclick="_tutorialNext()" style="
+          background:linear-gradient(135deg,var(--gold,#f5c518),#e6a800);
+          border:none;border-radius:20px;padding:8px 22px;
+          color:#111;font-weight:900;font-size:13px;cursor:pointer;min-width:90px;">
+          ${_tutorialStep < total-1 ? 'Next →' : 'Let\'s Go! 🎮'}
+        </button>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:6px;justify-content:center;">
+        ${steps.map((_,i)=>`<div style="width:${i===_tutorialStep?18:6}px;height:6px;border-radius:3px;background:${i===_tutorialStep?'var(--gold,#f5c518)':'rgba(255,255,255,0.2)'};transition:all .2s;"></div>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function _tutorialNext() {
+  AudioMgr.uiClick();
+  _tutorialStep++;
+  _renderTutorialStep();
+}
+
+function _dismissTutorial() {
+  const seen = JSON.parse(localStorage.getItem('tutorials_seen')||'{}');
+  seen[_tutorialKey] = true;
+  localStorage.setItem('tutorials_seen', JSON.stringify(seen));
+  const overlay = document.getElementById('tutorialOverlay');
+  if (overlay) overlay.remove();
+  _tutorialCb && _tutorialCb();
+  _tutorialCb = null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // HUB NAVIGATION
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1955,15 +2392,21 @@ function openGame(type) {
   document.getElementById('hub').style.display = 'none';
   document.getElementById('platformBar').classList.add('hidden');
   document.getElementById('gameWrap').classList.add('show');
-  ['pool','water','block','crossword','trivia'].forEach(g=>{
+  ['pool','water','block','crossword','trivia','wordle'].forEach(g=>{
     const el=document.getElementById(g+'Game');
     if(el) el.classList.remove('show');
   });
-  if (type === 'pool')      { document.getElementById('poolGame').classList.add('show');      initPool(); }
-  if (type === 'water')     { document.getElementById('waterGame').classList.add('show');     initWater(); }
-  if (type === 'block')     { document.getElementById('blockGame').classList.add('show');     initBlock(); }
-  if (type === 'crossword') { document.getElementById('crosswordGame').classList.add('show'); initCrossword(); }
-  if (type === 'trivia')    { document.getElementById('triviaGame').classList.add('show');    initTrivia(); }
+  const launchers = {
+    pool:      () => { document.getElementById('poolGame').classList.add('show');      initPool(); },
+    water:     () => { document.getElementById('waterGame').classList.add('show');     initWater(); },
+    block:     () => { document.getElementById('blockGame').classList.add('show');     initBlock(); },
+    crossword: () => { document.getElementById('crosswordGame').classList.add('show'); initCrossword(); },
+    trivia:    () => { document.getElementById('triviaGame').classList.add('show');    initTrivia(); },
+    wordle:    () => { document.getElementById('wordleGame').classList.add('show');    initWordle(); },
+  };
+  const launch = launchers[type];
+  if (!launch) return;
+  showTutorial(type, launch);
   onGamePlayed(type);
 }
 function goBack() {
@@ -2098,12 +2541,95 @@ const AudioMgr = (function(){
       playTone(f,'sine',0.12,0.15);
       setTimeout(()=>playTone(f*1.25,'sine',0.1,0.12),60);
     },
+    // Water Sort sounds
+    waterPour(){
+      if(muted) return;
+      playTone(600,'sine',0.18,0.12,0.16);
+      playTone(500,'sine',0.12,0.08,0.12);
+    },
+    waterComplete(){
+      if(muted) return;
+      [0,80,160,260,380].forEach((d,i)=>setTimeout(()=>
+        playTone([523,659,784,880,1047][i],'sine',0.22,0.22),d));
+    },
+    waterError(){
+      if(muted) return;
+      playTone(200,'sawtooth',0.15,0.12);
+      setTimeout(()=>playTone(160,'sawtooth',0.1,0.1),80);
+    },
+    waterSelect(){ if(muted) return; playTone(700,'sine',0.06,0.08); },
+    // Block puzzle sounds
+    blockPlace(){
+      if(muted) return;
+      playNoise(0.08,0.12,800,'bandpass');
+      playTone(300,'sine',0.06,0.07);
+    },
+    blockClear(lines){
+      if(muted) return;
+      const f=400+lines*100;
+      playTone(f,'sine',0.18,0.15);
+      setTimeout(()=>playTone(f*1.5,'sine',0.15,0.12),80);
+      if(lines>=2) setTimeout(()=>playTone(f*2,'sine',0.12,0.1),160);
+    },
+    blockGameOver(){
+      if(muted) return;
+      [0,120,240].forEach((d,i)=>setTimeout(()=>
+        playTone([300,220,160][i],'sawtooth',0.25,0.18),d));
+    },
+    // Crossword sounds
+    wordCorrect(){
+      if(muted) return;
+      playTone(660,'sine',0.15,0.15);
+      setTimeout(()=>playTone(880,'sine',0.12,0.12),80);
+    },
+    wordWrong(){ if(muted) return; playTone(250,'sawtooth',0.12,0.1); },
+    wordReveal(){ if(muted) return; playTone(440,'triangle',0.08,0.07); },
+    // Trivia sounds
+    triviaCorrect(){
+      if(muted) return;
+      playTone(800,'sine',0.12,0.12);
+      setTimeout(()=>playTone(1000,'sine',0.1,0.1),70);
+    },
+    triviaWrong(){
+      if(muted) return;
+      playTone(200,'sawtooth',0.14,0.12);
+      setTimeout(()=>playTone(160,'sawtooth',0.1,0.1),80);
+    },
+    triviaStreak(n){
+      if(muted) return;
+      const f=600+n*50;
+      playTone(f,'sine',0.1,0.1);
+      setTimeout(()=>playTone(f*1.2,'sine',0.09,0.09),60);
+    },
+    triviaTimeWarn(){ if(muted) return; playTone(400,'square',0.08,0.06); },
+    // Wordle sounds
+    wordleLetter(){ if(muted) return; playTone(500+Math.random()*200,'sine',0.04,0.04); },
+    wordleSubmit(){ if(muted) return; playNoise(0.07,0.08,600,'bandpass'); },
+    wordleCorrect(){
+      if(muted) return;
+      [0,60,120,180,240,300].forEach((d,i)=>setTimeout(()=>
+        playTone([523,587,659,698,784,880][i],'sine',0.15,0.14),d));
+    },
+    wordleFail(){
+      if(muted) return;
+      [0,100,200].forEach((d,i)=>setTimeout(()=>
+        playTone([300,250,200][i],'sawtooth',0.15,0.12),d));
+    },
     toggle(){
       muted=!muted;
       document.getElementById('muteBtn').textContent=muted?'🔇':'🔊';
     }
   };
 })();
+
+// ─── HAPTIC FEEDBACK ─────────────────────────────────────────────────────────
+const Haptic = {
+  light()  { try{ if(navigator.vibrate) navigator.vibrate(30);  }catch(_){} },
+  medium() { try{ if(navigator.vibrate) navigator.vibrate(60);  }catch(_){} },
+  heavy()  { try{ if(navigator.vibrate) navigator.vibrate(100); }catch(_){} },
+  success(){ try{ if(navigator.vibrate) navigator.vibrate([40,30,40]); }catch(_){} },
+  error()  { try{ if(navigator.vibrate) navigator.vibrate([80,40,80]); }catch(_){} },
+};
 
 // ────────────────────────────────────────────────────────────
 // PARTICLE MANAGER — Lightweight canvas particles
@@ -3893,6 +4419,8 @@ function waterTap(i){
   if(wSelected===-1){
     if(wBottles[i].contents.length===0) return;
     wSelected=i;
+    AudioMgr.waterSelect();
+    Haptic.light();
     document.getElementById('waterInstruction').textContent='Now tap the destination bottle';
   } else if(wSelected===i){
     wSelected=-1;
@@ -3902,6 +4430,11 @@ function waterTap(i){
       wHistory.push(JSON.parse(JSON.stringify(wBottles)));
       waterPour(wSelected,i);
       wMoves++; document.getElementById('waterMoves').textContent=wMoves;
+      AudioMgr.waterPour();
+      Haptic.light();
+    } else {
+      AudioMgr.waterError();
+      Haptic.error();
     }
     wSelected=-1;
     document.getElementById('waterInstruction').textContent='Tap a bottle to select, then tap destination';
@@ -3909,6 +4442,8 @@ function waterTap(i){
       if(wBottles.every(b=>b.contents.length===0||waterIsComplete(b))){
         document.getElementById('waterOSub').textContent='Level '+wLevel+' complete in '+wMoves+' moves!';
         document.getElementById('waterOverlay').classList.add('show');
+        AudioMgr.waterComplete();
+        Haptic.success();
         onLevelCleared('water', wLevel*200);
         wLevel++;
       }
@@ -4078,6 +4613,8 @@ function blkPlace(shape, startR, startC, colorIdx){
     if(r>=0&&r<BLK.ROWS&&c>=0&&c<BLK.COLS) blkBoard[r][c]=colorIdx;
   });
   blkScore += shape.length * 5;
+  AudioMgr.blockPlace();
+  Haptic.light();
   blkCheckClear();
   blkRenderBoard();
   blkUpdateHUD();
@@ -4104,6 +4641,9 @@ function blkCheckClear(){
   const bonus = total >= 2 ? total * total : 1;
   const pts = total * BLK.COLS * 10 * bonus;
   blkScore += pts; blkCleared += total;
+
+  AudioMgr.blockClear(total);
+  Haptic.medium();
 
   const msgs = ['Nice!','Great!','Awesome!','COMBO!','INSANE!'];
   blkShowMsg(msgs[Math.min(total-1, msgs.length-1)] + ' +'+pts);
@@ -4285,6 +4825,8 @@ function blkCheckGameOver(){
   });
   if(!anyFit){
     setTimeout(()=>{
+      AudioMgr.blockGameOver();
+      Haptic.heavy();
       document.getElementById('blkOIcon').textContent='😔';
       document.getElementById('blkOTitle').textContent='NO MOVES!';
       document.getElementById('blkOSub').textContent='Score: '+blkScore+' — Lines: '+blkCleared;
@@ -4296,12 +4838,15 @@ function blkCheckGameOver(){
 }
 
 function blkLevelClear(){
+  AudioMgr.stageClear();
+  Haptic.success();
   document.getElementById('blkOIcon').textContent='🏆';
   document.getElementById('blkOTitle').textContent='LEVEL CLEAR!';
   document.getElementById('blkOSub').textContent='Score: '+blkScore+' — Lines: '+blkCleared;
   document.getElementById('blkOBtn').textContent='NEXT LEVEL →';
   document.getElementById('blkOBtn').onclick=()=>initBlock(blkLevel+1);
   document.getElementById('blkOverlay').classList.add('show');
+  onLevelCleared('block', blkScore);
 }
 
 function blkUpdateHUD(){
@@ -5686,7 +6231,106 @@ const CW_WORD_BANK = [
   {word:'ZOMBIE',clue:'🧟 An undead creature'},
 ];
 
+// ── Kiswahili crossword word bank ────────────────────────────────────────────
+const CW_WORD_BANK_SW = [
+  // 3-letter
+  {word:'MWA',clue:'🌙 Mwanzo wa neno "mwana"'},
+  {word:'BAA',clue:'🍺 Sehemu ya kunywea pombe'},
+  {word:'CHA',clue:'🍵 Kinywaji cha asubuhi (mwanzo wa neno)'},
+  // 4-letter
+  {word:'NYUMBA',clue:'🏠 Mahali pa kuishi', _skip:true},
+  {word:'MAJI',clue:'💧 Kinywaji muhimu cha uhai'},
+  {word:'CHAI',clue:'☕ Kinywaji cha moto cha asubuhi'},
+  {word:'SAMA',clue:'🙏 Mwanzo wa "samahani"', _skip:true},
+  {word:'BABA',clue:'👨 Mzazi wa kiume'},
+  {word:'MAMA',clue:'👩 Mzazi wa kike'},
+  {word:'PAKA',clue:'🐱 Mnyama anayesema "miau"'},
+  {word:'KUKU',clue:'🐔 Ndege anayetaga mayai'},
+  {word:'SAMAKI',clue:'🐟 Anaishi majini', _skip:true},
+  {word:'NDIO',clue:'✅ Jibu la kukubali'},
+  {word:'HAPA',clue:'📍 Mahali hapa karibu'},
+  {word:'PESA',clue:'💰 Unayotumia kununua vitu'},
+  {word:'SHULE',clue:'🏫 Mahali pa kujifunzia'},
+  {word:'KITABU',clue:'📖 Una kurasa za kusoma', _skip:true},
+  {word:'KALAMU',clue:'🖊️ Inatumika kuandika', _skip:true},
+  {word:'MEZA',clue:'🪑 Samani ya kuwekea vitu'},
+  {word:'MLANGO',clue:'🚪 Unaingilia nyumbani', _skip:true},
+  {word:'DIRISHA',clue:'🪟 Sehemu ya kuangalia nje', _skip:true},
+  {word:'JUA',clue:'☀️ Hutoa nuru wakati wa mchana'},
+  {word:'MWEZI',clue:'🌙 Hutoka usiku angani', _skip:true},
+  {word:'NYOTA',clue:'⭐ Inang\'aa angani usiku', _skip:true},
+  {word:'MTOTO',clue:'👶 Binadamu mdogo', _skip:true},
+  {word:'RAFIKI',clue:'🤝 Mtu unayemtegemea', _skip:true},
+  {word:'UPENDO',clue:'❤️ Hisia ya kumpenda mtu', _skip:true},
+  {word:'AMANI',clue:'☮️ Hali ya utulivu, bila vita'},
+  {word:'UHURU',clue:'🕊️ Kutokuwa chini ya mtu'},
+  {word:'NCHI',clue:'🌍 Eneo lenye serikali yake'},
+  {word:'JIJI',clue:'🏙️ Mji mkubwa'},
+  {word:'BARABARA',clue:'🛣️ Njia ya magari', _skip:true},
+  {word:'GARI',clue:'🚗 Chombo cha usafiri chenye magurudumu'},
+  {word:'NDEGE',clue:'✈️ Inaruka angani / pia ni jina la kiumbe mwenye mabawa'},
+  {word:'SAFARI',clue:'🧳 Kusafiri kutoka sehemu moja kwenda nyingine', _skip:true},
+  {word:'CHAKULA',clue:'🍚 Unachokula', _skip:true},
+  {word:'UGALI',clue:'🍚 Chakula maarufu cha unga wa mahindi'},
+  {word:'SUKARI',clue:'🍬 Inafanya kitu kuwa kitamu', _skip:true},
+  {word:'CHUMVI',clue:'🧂 Inatia ladha kwenye chakula', _skip:true},
+  {word:'MAFUTA',clue:'🛢️ Hutumika kupikia', _skip:true},
+  {word:'MWALIMU',clue:'👩‍🏫 Anafundisha shuleni', _skip:true},
+  {word:'DAKTARI',clue:'👨‍⚕️ Anatibu wagonjwa', _skip:true},
+  {word:'KAZI',clue:'💼 Unayoifanya ili kupata pesa'},
+  {word:'PENDA',clue:'💕 Kuwa na hisia za upendo'},
+  {word:'TAKA',clue:'🙋 Kuhitaji au kuhitajika kwa kitu'},
+  {word:'JINA',clue:'📛 Unaitwa nani?'},
+  {word:'UMRI',clue:'🎂 Miaka uliyo nayo'},
+  {word:'KAZI',clue:'💼 Shughuli ya kuingiza kipato'},
+  {word:'NGUVU',clue:'💪 Uwezo wa kufanya kazi nzito'},
+  {word:'HARAKA',clue:'⚡ Bila kuchelewa'},
+  {word:'POLE',clue:'🤗 Neno la kutuliza mtu mwenye shida'},
+  {word:'KARIBU',clue:'👋 Neno la kukaribisha', _skip:true},
+  {word:'ASANTE',clue:'🙏 Neno la shukrani', _skip:true},
+  {word:'HABARI',clue:'📰 Salamu ya kawaida / pia maana ya taarifa', _skip:true},
+  {word:'JAMBO',clue:'👋 Salamu maarufu ya Kiswahili'},
+  {word:'TAFADHALI',clue:'🙏 Neno la heshima unapoomba kitu', _skip:true},
+  {word:'KESHO',clue:'📅 Siku baada ya leo'},
+  {word:'LEO',clue:'📅 Siku ya sasa'},
+  {word:'JANA',clue:'📅 Siku iliyopita'},
+  {word:'WIKI',clue:'📅 Siku saba'},
+  {word:'MWAKA',clue:'📅 Miezi kumi na miwili'},
+  {word:'SIKU',clue:'📅 Saa ishirini na nne'},
+  {word:'MOTO',clue:'🔥 Unaowaka, una joto kali'},
+  {word:'BARIDI',clue:'❄️ Hali ya hewa yenye joto kidogo', _skip:true},
+  {word:'KUBWA',clue:'📏 Kinyume cha "kidogo"'},
+  {word:'NDOGO',clue:'📏 Kinyume cha "kubwa"'},
+  {word:'NZURI',clue:'😊 Inayopendeza, ya kuvutia'},
+  {word:'MBAYA',clue:'😞 Kinyume cha "nzuri"'},
+  {word:'SAWA',clue:'👍 Vizuri, hakuna shida'},
+  {word:'TENA',clue:'🔁 Mara nyingine'},
+  {word:'SASA',clue:'⏰ Wakati huu, papo hapo'},
+  {word:'WAPI',clue:'❓ Swali la mahali'},
+  {word:'NANI',clue:'❓ Swali la mtu'},
+  {word:'NINI',clue:'❓ Swali la kitu'},
+  {word:'VIPI',clue:'❓ Swali la jinsi'},
+];
+
+// Filter out long Kiswahili words for now (simple grid generator handles 3-7 letters best)
+const CW_BANK_SW_FILTERED = CW_WORD_BANK_SW.filter(w => w.word.length <= 7 && !w._skip)
+  .concat(CW_WORD_BANK_SW.filter(w => w._skip).map(w=>({word:w.word.slice(0,7), clue:w.clue})).filter(w=>w.word.length>=3));
+
+let cwLanguage = 'en'; // 'en' | 'sw'
+function cwToggleLanguage(){
+  cwLanguage = cwLanguage === 'en' ? 'sw' : 'en';
+  AudioMgr.uiClick();
+  cwLevelIdx = 0;
+  cwScore = 0;
+  document.getElementById('cwScore').textContent='⭐ 0';
+  document.getElementById('cwLangBtn').textContent = cwLanguage==='sw' ? '🌍 KISWAHILI' : '🇬🇧 ENGLISH';
+  initCrossword();
+}
+
 // ── Procedural crossword level generator ─────────────────────────────────────
+function _cwActiveBank(){
+  return cwLanguage === 'sw' ? CW_BANK_SW_FILTERED : CW_WORD_BANK;
+}
 function cwGenerateLevel(levelIdx) {
   const targetCount = Math.min(4 + Math.floor(levelIdx / 2), 7);
   const minLen = levelIdx < 3 ? 3 : levelIdx < 6 ? 4 : 5;
@@ -5781,7 +6425,7 @@ function cwGenerateLevel(levelIdx) {
 
   // Run up to 8 attempts with different random shuffles (no recursion)
   for (let attempt = 0; attempt < 8; attempt++) {
-    const eligible = CW_WORD_BANK
+    const eligible = _cwActiveBank()
       .filter(w => w.word.length >= minLen && w.word.length <= maxLen)
       .sort(() => Math.random() - 0.5);
 
@@ -5801,7 +6445,7 @@ function cwGenerateLevel(levelIdx) {
   }
 
   // Hard fallback: guaranteed 3-word L-shape from fixed words
-  const fb = CW_WORD_BANK.filter(w => w.word.length >= 3 && w.word.length <= 5);
+  const fb = _cwActiveBank().filter(w => w.word.length >= 3 && w.word.length <= 5);
   const [a, b, c] = fb.sort(() => Math.random() - 0.5);
   // Find a common letter between a and b
   let placed = [{ word: a.word, clue: a.clue, dir: 'H', row: 0, col: 0 }];
@@ -5817,7 +6461,7 @@ let cwWords=[], cwGrid=[], cwRows=0, cwCols=0;
 
 function cwPickDecoys(correctWord, count){
   const targetLen = correctWord.length;
-  const candidates = CW_WORD_BANK
+  const candidates = _cwActiveBank()
     .filter(e => e.word !== correctWord && Math.abs(e.word.length - targetLen) <= 1)
     .sort(() => Math.random() - 0.5);
   const chosen = [];
@@ -5826,7 +6470,7 @@ function cwPickDecoys(correctWord, count){
     if(!chosen.includes(e.word)) chosen.push(e.word);
   }
   while(chosen.length < count){
-    const rnd = CW_WORD_BANK[Math.floor(Math.random()*CW_WORD_BANK.length)];
+    const rnd = _cwActiveBank()[Math.floor(Math.random()*_cwActiveBank().length)];
     if(rnd.word !== correctWord && !chosen.includes(rnd.word)) chosen.push(rnd.word);
   }
   return chosen;
@@ -5939,6 +6583,8 @@ function cwChoiceAnswer(chosen, correct, clickedBtn, choicesEl, revealEl){
     cwFoundWords.push(cwCurrentWord);
     const pts=correct.length*10;
     cwScore+=pts;
+    AudioMgr.wordCorrect();
+    Haptic.success();
     document.getElementById('cwScore').textContent='⭐ '+cwScore;
     document.getElementById('cwMsg').textContent=`✅ Correct! +${pts} pts`;
     cwRenderGrid();
@@ -5956,6 +6602,8 @@ function cwChoiceAnswer(chosen, correct, clickedBtn, choicesEl, revealEl){
     });
     revealEl.textContent=correct.split('').join('  ');
     revealEl.style.color='#e74c3c';
+    AudioMgr.wordWrong();
+    Haptic.error();
     document.getElementById('cwMsg').textContent='❌ Wrong! The answer was '+correct;
     document.getElementById('cwMsg').style.color='#e74c3c';
     setTimeout(()=>{
@@ -5973,6 +6621,7 @@ function cwChoiceAnswer(chosen, correct, clickedBtn, choicesEl, revealEl){
 }
 
 function cwSkip(){
+  AudioMgr.uiClick();
   document.getElementById('cwMsg').textContent='⏭ Skipped';
   setTimeout(()=>{
     document.getElementById('cwMsg').textContent='';
@@ -5983,9 +6632,12 @@ function cwSkip(){
 }
 
 function cwLevelComplete(){
+  AudioMgr.stageClear();
+  Haptic.success();
   document.getElementById('cwOTitle').textContent='Level '+(cwLevelIdx+1)+' Complete!';
   document.getElementById('cwOSub').textContent='Score: '+cwScore+' pts — Endless levels!';
   document.getElementById('cwOverlay').classList.add('show');
+  onLevelCleared('crossword', cwScore);
   cwLevelIdx++;
 }
 
@@ -6036,6 +6688,27 @@ maths: [
   {q:'Simplify: (3x²y)(2xy²)',opts:['5x²y²','6x²y³','6x³y³','5x³y²'],a:2,lvl:5},
   {q:'A car travels 180km in 2.5 hours. What is its average speed?',opts:['60km/h','68km/h','72km/h','80km/h'],a:2,lvl:5},
   {q:'What is 2⁵ ÷ 2² in index form?',opts:['2²','2³','2⁷','2¹⁰'],a:1,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'Solve: 2x² - 8 = 0',opts:['x=±1','x=±2','x=±4','x=±8'],a:1,lvl:6},
+  {q:'What is the LCM of 8 and 12?',opts:['16','24','32','48'],a:1,lvl:6},
+  {q:'Convert 0.625 to a fraction in simplest form',opts:['5/8','3/4','5/9','7/8'],a:0,lvl:6},
+  {q:'What is the sum of interior angles of a hexagon?',opts:['540°','720°','900°','1080°'],a:1,lvl:6},
+  {q:'If sin θ = 0.5, what is θ (0°-90°)?',opts:['30°','45°','60°','90°'],a:0,lvl:6},
+  {q:'What is the median of: 4, 8, 2, 10, 6?',opts:['4','6','8','10'],a:1,lvl:7},
+  {q:'A bag has 5 red and 3 blue balls. What is P(blue)?',opts:['3/8','5/8','3/5','1/3'],a:0,lvl:7},
+  {q:'Simplify: √50',opts:['5√2','2√5','10√5','25√2'],a:0,lvl:7},
+  {q:'What is the gradient of the line y = 3x - 4?',opts:['-4','3','4','-3'],a:1,lvl:7},
+  {q:'Solve for x: log₂(x) = 5',opts:['10','25','32','64'],a:2,lvl:7},
+  {q:'What is the volume of a cylinder with r=3, h=7? (π≈22/7)',opts:['198','297','396','594'],a:0,lvl:8},
+  {q:'Factorise: x² - 9',opts:['(x-3)(x+3)','(x-9)(x+1)','(x-3)²','(x+9)(x-1)'],a:0,lvl:8},
+  {q:'What is 7! (7 factorial)?',opts:['49','720','5040','40320'],a:2,lvl:8},
+  {q:'A train travels at 90km/h for 40 minutes. Distance covered?',opts:['36km','45km','54km','60km'],a:3,lvl:8},
+  {q:'What is the inverse of f(x) = 2x + 3?',opts:['(x-3)/2','(x+3)/2','2x-3','(x-2)/3'],a:0,lvl:8},
+  {q:'Simplify: (2x³)² ÷ x²',opts:['2x⁴','4x⁴','2x⁶','4x⁶'],a:1,lvl:9},
+  {q:'What is the area of a sector with radius 7 and angle 90°? (π≈22/7)',opts:['38.5','77','154','22'],a:0,lvl:9},
+  {q:'Solve the simultaneous equations: x+y=10, x-y=2',opts:['x=6,y=4','x=4,y=6','x=8,y=2','x=5,y=5'],a:0,lvl:9},
+  {q:'What is the standard deviation measure used for?',opts:['Central tendency','Spread of data','Probability','Ratio comparison'],a:1,lvl:9},
+  {q:'Convert 3/8 to a percentage',opts:['37.5%','30%','35%','40%'],a:0,lvl:9},
 ],
 
 english: [
@@ -6069,6 +6742,27 @@ english: [
   {q:'What is the correct plural of "criterion"?',opts:['Criterions','Criterias','Criteria','Criteriums'],a:2,lvl:5},
   {q:'UBIQUITOUS means:',opts:['Rare and unusual','Present everywhere','Very expensive','Extremely old'],a:1,lvl:5},
   {q:'Identify the dangling modifier: ',opts:['"Walking to school, the rain started."','"She is tall."','"He ran fast."','"We ate lunch."'],a:0,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'Which word means "to make something less severe"?',opts:['Aggravate','Mitigate','Instigate','Elevate'],a:1,lvl:6},
+  {q:'Choose the correctly punctuated sentence',opts:['"Its a nice day."','"It\'s a nice day."','"Its\' a nice day."','"Its a nice, day."'],a:1,lvl:6},
+  {q:'What type of clause is "because it was raining"?',opts:['Independent','Subordinate','Relative','Noun'],a:1,lvl:6},
+  {q:'Which word is a synonym for "Resilient"?',opts:['Fragile','Tough','Weak','Timid'],a:1,lvl:6},
+  {q:'What is the past perfect tense of "go"?',opts:['Went','Gone','Had gone','Has gone'],a:2,lvl:6},
+  {q:'Which sentence uses the subjunctive mood correctly?',opts:['"If I was rich..."','"If I were rich..."','"If I am rich..."','"If I be rich..."'],a:1,lvl:7},
+  {q:'EPHEMERAL means:',opts:['Lasting forever','Short-lived','Very strong','Extremely loud'],a:1,lvl:7},
+  {q:'Identify the figure of speech: "Time is money"',opts:['Simile','Metaphor','Personification','Hyperbole'],a:1,lvl:7},
+  {q:'Which is the correct form: "Neither of the answers ___ correct"',opts:['are','is','were','have been'],a:1,lvl:7},
+  {q:'What does "CACOPHONY" mean?',opts:['Pleasant sound','Harsh, jarring sound','Total silence','A type of poem'],a:1,lvl:7},
+  {q:'Which sentence contains an oxymoron?',opts:['"Deafening silence"','"Bright sunshine"','"Cold winter"','"Fast runner"'],a:0,lvl:8},
+  {q:'What is the function of a gerund?',opts:['Acts as an adjective','Acts as a noun','Acts as an adverb','Acts as a preposition'],a:1,lvl:8},
+  {q:'PERFUNCTORY means:',opts:['Done with great care','Done as a routine, with little interest','Extremely thorough','Highly creative'],a:1,lvl:8},
+  {q:'Which is an example of a rhetorical question?',opts:['"What time is it?"','"Isn\'t it obvious?"','"Where do you live?"','"How old are you?"'],a:1,lvl:8},
+  {q:'Choose the sentence with correct subject-verb agreement',opts:['"The team are winning."','"The team is winning."','"The team were winning."','"The team be winning."'],a:1,lvl:8},
+  {q:'What literary device is "The wind whispered through the trees"?',opts:['Simile','Personification','Alliteration','Irony'],a:1,lvl:9},
+  {q:'MAGNANIMOUS means:',opts:['Generous and forgiving','Selfish and cruel','Very small','Extremely angry'],a:0,lvl:9},
+  {q:'Which is the passive voice of "The chef cooked the meal"?',opts:['"The meal cooks the chef"','"The meal was cooked by the chef"','"The chef cooks the meal"','"Cooking the meal, the chef..."'],a:1,lvl:9},
+  {q:'What is an antonym for "Verbose"?',opts:['Wordy','Concise','Loud','Eloquent'],a:1,lvl:9},
+  {q:'Identify the type of irony: A fire station burns down',opts:['Verbal irony','Dramatic irony','Situational irony','No irony'],a:2,lvl:9},
 ],
 
 kiswahili: [
@@ -6102,6 +6796,27 @@ kiswahili: [
   {q:'Neno "utamaduni" linamaanisha:',opts:['Desturi na mila','Biashara ya zamani','Chakula cha asili','Lugha ya kigeni'],a:0,lvl:5},
   {q:'Viungo vya sentensi ni:',opts:['Nomino na kitenzi','Kitenzi na kielezi','Kishazi na sentensi','Sehemu zote za sentensi'],a:0,lvl:5},
   {q:'Msimbo wa lugha ni:',opts:['Kuzungumza na watu','Kutumia ishara na alama','Kuandika barua','Kusoma vitabu'],a:1,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'"Hodari" ni:',opts:['Aina ya nomino','Kivumishi','Kielezi','Kiunganishi'],a:1,lvl:6},
+  {q:'Kinyume cha "kuingia" ni:',opts:['Kuingiza','Kutoka','Kupita','Kufika'],a:1,lvl:6},
+  {q:'Methali "Haba na haba hujaza kibaba" inamaanisha:',opts:['Pole pole huleta mafanikio makubwa','Haraka haraka haina baraka','Kuku havunjwa manyoya','Asiyesikia la mkuu huvunjika guu'],a:0,lvl:6},
+  {q:'Wingi wa "kitabu" ni:',opts:['Vitabu','Matabu','Kitabus','Vikitabu'],a:0,lvl:6},
+  {q:'"Ng\'ombe" ni mfano wa:',opts:['Nomino za pekee','Nomino za jamii','Nomino za wanyama','Nomino za dhahania'],a:2,lvl:6},
+  {q:'Sentensi "Mtoto huyu ni mzuri sana" ina kivumishi gani?',opts:['Mtoto','Huyu','Mzuri','Sana'],a:2,lvl:7},
+  {q:'Kiambishi "wa-" katika "wanafunzi" kinaonyesha:',opts:['Umoja','Wingi','Wakati','Hali'],a:1,lvl:7},
+  {q:'Mfano wa tashbihi ni:',opts:['"Yeye ni simba"','"Yeye ni jasiri kama simba"','"Simba aliyeruka"','"Simba alicheka"'],a:1,lvl:7},
+  {q:'Methali "Mtaka cha mvunguni sharti ainame" inafundisha:',opts:['Bidii inahitajika kupata mafanikio','Ulafi si jambo jema','Heshima ni muhimu','Subira huvuta heri'],a:0,lvl:7},
+  {q:'"Ingawa" ni aina gani ya neno?',opts:['Nomino','Kiunganishi','Kivumishi','Kielezi'],a:1,lvl:7},
+  {q:'"Mwalimu anafundisha" - "anafundisha" ni:',opts:['Nomino','Kitenzi','Kivumishi','Kielezi'],a:1,lvl:8},
+  {q:'Sentensi yenye usemi wa taarifa ni:',opts:['"Asha alisema, \'Nimefika\'"','"Asha alisema kuwa amefika"','"Asha! Umefika?"','"Je, Asha amefika?"'],a:1,lvl:8},
+  {q:'Neno "kupendeza" ni:',opts:['Nomino','Kitenzi-jina','Kivumishi','Kiwakilishi'],a:1,lvl:8},
+  {q:'Kifungu "kwa sababu" kinaonyesha uhusiano gani?',opts:['Wakati','Sababu','Mahali','Hali'],a:1,lvl:8},
+  {q:'Methali "Asiyefunzwa na mamaye hufunzwa na ulimwengu" inafundisha nini?',opts:['Mazingira hufundisha pia','Mama ni muhimu','Ulimwengu ni mkubwa','Elimu haina maana'],a:0,lvl:8},
+  {q:'"Kiti hiki ni cha mwalimu" - "cha" ni:',opts:['Kivumishi cha pekee','Kiunganishi','Kionyeshi cha umiliki','Kielezi'],a:2,lvl:9},
+  {q:'Sentensi changamano ina:',opts:['Kishazi kimoja','Vishazi viwili au zaidi','Hakuna kishazi','Maneno matatu tu'],a:1,lvl:9},
+  {q:'Methali "Mwenye macho haambiwi tazama" inamaanisha:',opts:['Mtu mwenye uwezo haitaji kuelekezwa','Macho ni muhimu','Kuangalia ni vibaya','Watu wote ni vipofu'],a:0,lvl:9},
+  {q:'"-po", "-ko", "-mo" ni:',opts:['Viambishi vya wakati','Viambishi vya mahali','Viambishi vya nafsi','Viambishi vya hali'],a:1,lvl:9},
+  {q:'Kazi ya kiunganishi ni:',opts:['Kuonyesha hisia','Kuunganisha maneno au sentensi','Kuonyesha mahali','Kuonyesha idadi'],a:1,lvl:9},
 ],
 
 science: [
@@ -6135,6 +6850,27 @@ science: [
   {q:'Which blood type is the universal donor?',opts:['A','B','AB','O negative'],a:3,lvl:5},
   {q:'Mitosis results in how many daughter cells?',opts:['1','2','3','4'],a:1,lvl:5},
   {q:'The unit of electric resistance is:',opts:['Volt','Ampere','Ohm','Watt'],a:2,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'What type of bond involves sharing of electrons?',opts:['Ionic','Covalent','Metallic','Hydrogen'],a:1,lvl:6},
+  {q:'Which organelle is the "powerhouse of the cell"?',opts:['Nucleus','Ribosome','Mitochondria','Golgi body'],a:2,lvl:6},
+  {q:'Newton\'s third law states that:',opts:['Objects in motion stay in motion','For every action there is an equal and opposite reaction','Force = mass × acceleration','Energy cannot be created or destroyed'],a:1,lvl:6},
+  {q:'What is the pH of a neutral solution?',opts:['0','7','14','1'],a:1,lvl:6},
+  {q:'Which gas makes up about 78% of the atmosphere?',opts:['Oxygen','Carbon dioxide','Nitrogen','Argon'],a:2,lvl:6},
+  {q:'What is the process by which plants lose water vapor?',opts:['Respiration','Transpiration','Photosynthesis','Germination'],a:1,lvl:7},
+  {q:'Which law states that pressure and volume are inversely related at constant temperature?',opts:['Charles\'s Law','Boyle\'s Law','Gay-Lussac\'s Law','Avogadro\'s Law'],a:1,lvl:7},
+  {q:'What is the function of red blood cells?',opts:['Fight infection','Carry oxygen','Clot blood','Produce hormones'],a:1,lvl:7},
+  {q:'The chemical formula for table salt is:',opts:['NaCl','KCl','CaCl₂','NaOH'],a:0,lvl:7},
+  {q:'What type of energy is stored in chemical bonds?',opts:['Kinetic','Potential','Thermal','Nuclear'],a:1,lvl:7},
+  {q:'What is the SI unit of frequency?',opts:['Watt','Hertz','Joule','Newton'],a:1,lvl:8},
+  {q:'Which structure controls what enters and leaves a cell?',opts:['Cell wall','Cell membrane','Nucleus','Cytoplasm'],a:1,lvl:8},
+  {q:'What is the main function of the kidneys?',opts:['Pump blood','Filter waste from blood','Digest food','Produce hormones only'],a:1,lvl:8},
+  {q:'In a series circuit, current is:',opts:['Different at every point','The same throughout','Doubled at the resistor','Zero'],a:1,lvl:8},
+  {q:'What is an isotope?',opts:['An element with different number of protons','Atoms of the same element with different neutrons','A type of compound','A charged particle'],a:1,lvl:8},
+  {q:'Which hormone regulates blood sugar?',opts:['Adrenaline','Insulin','Thyroxine','Testosterone'],a:1,lvl:9},
+  {q:'What is the speed of light in a vacuum (approx)?',opts:['3×10⁵ m/s','3×10⁶ m/s','3×10⁸ m/s','3×10¹⁰ m/s'],a:2,lvl:9},
+  {q:'Which type of rock forms from cooled magma?',opts:['Sedimentary','Igneous','Metamorphic','Organic'],a:1,lvl:9},
+  {q:'What is the role of enzymes in the body?',opts:['Transport oxygen','Speed up chemical reactions','Store genetic information','Provide structure'],a:1,lvl:9},
+  {q:'What is the chemical formula for glucose?',opts:['C₆H₁₂O₆','C₂H₅OH','CO₂','CH₄'],a:0,lvl:9},
 ],
 
 social: [
@@ -6168,6 +6904,27 @@ social: [
   {q:'Which document protects human rights in Kenya?',opts:['Treaty of Westphalia','The Constitution of Kenya 2010','Universal Declaration','African Charter'],a:1,lvl:5},
   {q:'IGAD stands for:',opts:['International Group of African Development','Intergovernmental Authority on Development','Investment Group Africa Developed','International Governance Authority'],a:1,lvl:5},
   {q:'What is the significance of the equator passing through Kenya?',opts:['Kenya has no seasons','Kenya receives equal day and night throughout year','Kenya is very cold','Kenya only has one time zone'],a:1,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'Who was the first President of Tanzania?',opts:['Julius Nyerere','Jomo Kenyatta','Idi Amin','Kenneth Kaunda'],a:0,lvl:6},
+  {q:'What is the main purpose of the United Nations?',opts:['Promote one religion','Maintain international peace and cooperation','Control global trade only','Replace national governments'],a:1,lvl:6},
+  {q:'Which Kenyan community is mainly associated with pastoralism in the north?',opts:['Kikuyu','Turkana','Luo','Mijikenda'],a:1,lvl:6},
+  {q:'What is devolution as used in the Kenyan constitution?',opts:['Centralizing all power in Nairobi','Transfer of power to county governments','Abolishing local government','Foreign rule'],a:1,lvl:6},
+  {q:'The Mau Mau uprising was primarily against:',opts:['German colonial rule','British colonial rule','Italian rule','Portuguese rule'],a:1,lvl:6},
+  {q:'What is the longest river in Africa?',opts:['Congo River','Niger River','Nile River','Zambezi River'],a:2,lvl:7},
+  {q:'Which trade bloc does Kenya belong to alongside Uganda and Tanzania?',opts:['ECOWAS','SADC','EAC','COMESA only'],a:2,lvl:7},
+  {q:'What does GDP stand for?',opts:['General Development Plan','Gross Domestic Product','Government Development Programme','Global Data Processing'],a:1,lvl:7},
+  {q:'Who chairs the cabinet in Kenya\'s system of government?',opts:['Chief Justice','Speaker of Parliament','The President','The Attorney General'],a:2,lvl:7},
+  {q:'What is desertification?',opts:['Formation of new oceans','Land becoming desert due to drought/poor land use','Growth of forests','Melting of glaciers'],a:1,lvl:7},
+  {q:'Which African country was never formally colonized?',opts:['Kenya','Ethiopia','Nigeria','Tanzania'],a:1,lvl:8},
+  {q:'What is the role of the judiciary?',opts:['Make laws','Interpret and apply the law','Implement government policy','Collect taxes'],a:1,lvl:8},
+  {q:'What is a major cause of rural-urban migration?',opts:['Better job opportunities in cities','More farmland in cities','Cooler climate in cities','Lower population in cities'],a:0,lvl:8},
+  {q:'The African Union headquarters is located in:',opts:['Nairobi, Kenya','Addis Ababa, Ethiopia','Cairo, Egypt','Pretoria, South Africa'],a:1,lvl:8},
+  {q:'What economic system is based on private ownership and free markets?',opts:['Communism','Socialism','Capitalism','Feudalism'],a:2,lvl:8},
+  {q:'Who is credited with leading Ghana to independence in 1957?',opts:['Nelson Mandela','Kwame Nkrumah','Patrice Lumumba','Robert Mugabe'],a:1,lvl:9},
+  {q:'What is the term for a government with absolute power held by one ruler?',opts:['Democracy','Oligarchy','Autocracy','Federation'],a:2,lvl:9},
+  {q:'Which body is responsible for resolving electoral disputes in Kenya?',opts:['Parliament','The Judiciary','IEBC only','The Executive'],a:1,lvl:9},
+  {q:'What is the term for the movement of people from one country to settle in another?',opts:['Migration','Urbanization','Globalization','Colonization'],a:0,lvl:9},
+  {q:'Which Great Lake borders Kenya, Uganda, and Tanzania?',opts:['Lake Turkana','Lake Victoria','Lake Tanganyika','Lake Malawi'],a:1,lvl:9},
 ],
 
 it: [
@@ -6201,6 +6958,27 @@ it: [
   {q:'Encryption is used to:',opts:['Speed up data transfer','Convert data into unreadable format for security','Delete files permanently','Compress large files'],a:1,lvl:5},
   {q:'What is "open source" software?',opts:['Software that costs money','Software with publicly available source code','Software only for businesses','Software with no bugs'],a:1,lvl:5},
   {q:'What is the hexadecimal value of decimal 255?',opts:['EF','FE','FF','F0'],a:2,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'What does "API" stand for?',opts:['Application Programming Interface','Automated Program Installer','Advanced Processing Index','Application Process Integration'],a:0,lvl:6},
+  {q:'Which data structure uses LIFO (Last In First Out)?',opts:['Queue','Stack','Array','Linked list'],a:1,lvl:6},
+  {q:'What does HTTPS add to HTTP?',opts:['Faster speed','Encryption/security via SSL/TLS','Larger bandwidth','More storage'],a:1,lvl:6},
+  {q:'What is the binary equivalent of decimal 10?',opts:['1010','1100','1001','1110'],a:0,lvl:6},
+  {q:'Which of these is a NoSQL database?',opts:['MySQL','PostgreSQL','MongoDB','Oracle DB'],a:2,lvl:6},
+  {q:'What is the purpose of a firewall?',opts:['Speed up internet','Monitor and control network traffic for security','Store passwords','Generate reports'],a:1,lvl:7},
+  {q:'In programming, what is a "loop"?',opts:['A type of variable','A block of code that repeats','An error message','A type of file'],a:1,lvl:7},
+  {q:'What does "GUI" stand for?',opts:['General User Information','Graphical User Interface','Global Unified Interface','Gateway User Identity'],a:1,lvl:7},
+  {q:'Which protocol is used to send emails?',opts:['FTP','SMTP','HTTP','SSH'],a:1,lvl:7},
+  {q:'What is the time complexity of binary search?',opts:['O(n)','O(n²)','O(log n)','O(1)'],a:2,lvl:7},
+  {q:'What is "cloud computing"?',opts:['Computing using weather data','Delivery of computing services over the internet','A type of virus','Offline data storage only'],a:1,lvl:8},
+  {q:'Which language is primarily used for styling web pages?',opts:['HTML','CSS','Python','SQL'],a:1,lvl:8},
+  {q:'What does "RAM" stand for?',opts:['Read Access Memory','Random Access Memory','Run Application Memory','Rapid Access Module'],a:1,lvl:8},
+  {q:'What is a "variable" in programming?',opts:['A fixed value that never changes','A named storage location for data','A type of error','A hardware component'],a:1,lvl:8},
+  {q:'What is phishing?',opts:['A type of programming language','A fraudulent attempt to obtain sensitive information','A method of data compression','A network protocol'],a:1,lvl:8},
+  {q:'What is the function of an operating system?',opts:['Only browse the internet','Manage hardware and software resources','Only play games','Only edit documents'],a:1,lvl:9},
+  {q:'Which of these is an example of version control software?',opts:['Photoshop','Git','Excel','Chrome'],a:1,lvl:9},
+  {q:'What does "IoT" stand for?',opts:['Internet of Things','Index of Technology','Input Output Terminal','Integration of Tasks'],a:0,lvl:9},
+  {q:'What is the purpose of an algorithm?',opts:['To store data permanently','A step-by-step procedure to solve a problem','To design graphics','To connect to WiFi'],a:1,lvl:9},
+  {q:'Which symbol is commonly used for comments in Python?',opts:['//','#','<!--','**'],a:1,lvl:9},
 ],
 
 others: [
@@ -6234,6 +7012,27 @@ others: [
   {q:'Who was the first human to orbit the Earth?',opts:['Neil Armstrong','Buzz Aldrin','Yuri Gagarin','Alan Shepard'],a:2,lvl:5},
   {q:'What is the most spoken language in Africa?',opts:['English','Arabic','French','Swahili'],a:1,lvl:5},
   {q:'How many time zones does Russia span?',opts:['7','9','11','13'],a:2,lvl:5},
+  // Level 6-9 (advanced)
+  {q:'Which planet has the most moons in our solar system?',opts:['Jupiter','Saturn','Uranus','Neptune'],a:1,lvl:6},
+  {q:'What is the smallest country in the world by area?',opts:['Monaco','San Marino','Vatican City','Liechtenstein'],a:2,lvl:6},
+  {q:'Who painted the ceiling of the Sistine Chapel?',opts:['Leonardo da Vinci','Michelangelo','Raphael','Donatello'],a:1,lvl:6},
+  {q:'What is the currency of Japan?',opts:['Won','Yuan','Yen','Ringgit'],a:2,lvl:6},
+  {q:'Which animal is known as the "Ship of the Desert"?',opts:['Horse','Camel','Donkey','Llama'],a:1,lvl:6},
+  {q:'What is the tallest mountain in Africa?',opts:['Mount Kenya','Mount Kilimanjaro','Mount Elgon','Atlas Mountains'],a:1,lvl:7},
+  {q:'Which instrument measures atmospheric pressure?',opts:['Thermometer','Barometer','Hygrometer','Anemometer'],a:1,lvl:7},
+  {q:'Who wrote the play "Romeo and Juliet"?',opts:['Charles Dickens','William Shakespeare','Mark Twain','Jane Austen'],a:1,lvl:7},
+  {q:'What is the largest desert in the world?',opts:['Sahara Desert','Gobi Desert','Antarctic Desert','Arabian Desert'],a:2,lvl:7},
+  {q:'Which sport is associated with Wimbledon?',opts:['Football','Tennis','Cricket','Rugby'],a:1,lvl:7},
+  {q:'What is the chemical name for "laughing gas"?',opts:['Carbon dioxide','Nitrous oxide','Methane','Helium'],a:1,lvl:8},
+  {q:'Which African country is known as "the Pearl of Africa"?',opts:['Kenya','Uganda','Tanzania','Rwanda'],a:1,lvl:8},
+  {q:'What is the longest-running animated TV show in the US?',opts:['South Park','Family Guy','The Simpsons','SpongeBob SquarePants'],a:2,lvl:8},
+  {q:'Which gas do plants absorb from the atmosphere for photosynthesis?',opts:['Oxygen','Nitrogen','Carbon dioxide','Hydrogen'],a:2,lvl:8},
+  {q:'What is the name of the galaxy that contains our solar system?',opts:['Andromeda','Milky Way','Whirlpool','Triangulum'],a:1,lvl:8},
+  {q:'Who developed the theory of relativity?',opts:['Isaac Newton','Albert Einstein','Galileo Galilei','Stephen Hawking'],a:1,lvl:9},
+  {q:'What is the world\'s longest river by most measurements?',opts:['Amazon River','Nile River','Yangtze River','Mississippi River'],a:1,lvl:9},
+  {q:'Which African country has three capital cities?',opts:['South Africa','Kenya','Nigeria','Egypt'],a:0,lvl:9},
+  {q:'What is the hardest natural substance on Earth?',opts:['Gold','Iron','Diamond','Quartz'],a:2,lvl:9},
+  {q:'Which ancient civilization built the pyramids of Giza?',opts:['Romans','Greeks','Egyptians','Mesopotamians'],a:2,lvl:9},
 ],
 
 };
@@ -6366,8 +7165,9 @@ function tvStartLevel(){
 
 function tvBuildQueue(){
   const bank = TV_BANKS[tvSubject];
+  const maxBankLvl = Math.max(...bank.map(q=>q.lvl));
   // Pick questions appropriate for current level (allow ±1 level range, widening pool)
-  const maxLvl = Math.min(tvLevel + 1, 5);
+  const maxLvl = Math.min(tvLevel + 1, maxBankLvl);
   const minLvl = Math.max(1, tvLevel - 1);
   let eligible = bank.filter((q,i)=>{
     const lvlOk = q.lvl >= minLvl && q.lvl <= maxLvl;
@@ -6422,10 +7222,13 @@ function tvShowQuestion(){
     tvTimeLeft--;
     const fill=document.getElementById('tvTimerFill');
     if(fill) fill.style.width=((tvTimeLeft/20)*100)+'%';
+    if(tvTimeLeft<=5 && tvTimeLeft>0) AudioMgr.triviaTimeWarn();
     if(tvTimeLeft<=0){
       clearInterval(tvTimerInterval);
       if(!tvAnswered){
         tvAnswered=true; tvStreak=0;
+        AudioMgr.triviaWrong();
+        Haptic.error();
         document.getElementById('tvStreak').textContent='🔥 0';
         document.getElementById('tvFeedback').textContent='⏱️ Time\'s up! Correct: '+q.opts[q.a];
         document.getElementById('tvFeedback').style.color='#e74c3c';
@@ -6451,6 +7254,9 @@ function tvAnswer(idx,btn){
     btn.classList.add('correct');
     const bonus=Math.ceil(tvTimeLeft/20*100) + tvLevel*10;
     tvScore+=bonus; tvStreak++;
+    AudioMgr.triviaCorrect();
+    if(tvStreak>1) AudioMgr.triviaStreak(tvStreak);
+    Haptic.success();
     document.getElementById('tvScore').textContent='⭐ '+tvScore;
     document.getElementById('tvStreak').textContent='🔥 '+tvStreak;
     document.getElementById('tvFeedback').textContent=`✅ Correct! +${bonus} pts${tvStreak>1?' 🔥×'+tvStreak:''}`;
@@ -6459,6 +7265,8 @@ function tvAnswer(idx,btn){
     btn.classList.add('wrong');
     optEl.querySelectorAll('.tv-option')[q.a].classList.add('correct');
     tvStreak=0;
+    AudioMgr.triviaWrong();
+    Haptic.error();
     document.getElementById('tvStreak').textContent='🔥 0';
     document.getElementById('tvFeedback').textContent='❌ Wrong! Correct: '+q.opts[q.a];
     document.getElementById('tvFeedback').style.color='#e74c3c';
@@ -6507,6 +7315,222 @@ function tvRestartSubject(){
   document.getElementById('tvScore').textContent='⭐ 0';
   document.getElementById('tvStreak').textContent='🔥 0';
   tvStartLevel();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NENO WORDLE — Kiswahili / English 5-letter word guessing game
+// ═══════════════════════════════════════════════════════════════════════════
+const WD_WORDS = [
+  // Kiswahili 5-letter words (common East African vocabulary)
+  'CHAKU','DUNIA','HABAR','IMANI','JIRAN','KALAM','LUGHA','MACHO','NDEGE','PESAA',
+  'RAFIK','SAFAR','TUMAI','UMOJA','WAZAZ','AMANI','BARUA','DAFTA','ELIMU','FAMIL',
+  'GHARI','HEKAL','JAMHU','KAZIM','LIMAU','MAJID','NCHIN','OFISI','PEMBE','QALAM',
+  // English 5-letter words used commonly
+  'BREAD','CHAIR','DANCE','EARTH','FLAME','GRAPE','HOUSE','IVORY','JOKER','KNIFE',
+  'LEMON','MONEY','NIGHT','OCEAN','PLANT','QUEEN','RIVER','STONE','TIGER','UNCLE',
+  'VOICE','WATER','XENON','YOUTH','ZEBRA','BRAVE','CLOUD','DREAM','EAGLE','FRESH',
+];
+
+let wdAnswer='', wdRow=0, wdCol=0, wdGuesses=[], wdGameOver=false;
+let wdScore=0, wdStreak=0;
+
+function _wdLoadStats(){
+  try{
+    const s=JSON.parse(localStorage.getItem('wordle_stats')||'{}');
+    wdScore = s.score||0; wdStreak = s.streak||0;
+  }catch(_){ wdScore=0; wdStreak=0; }
+}
+function _wdSaveStats(){
+  try{ localStorage.setItem('wordle_stats', JSON.stringify({score:wdScore, streak:wdStreak})); }catch(_){}
+}
+
+function initWordle(){
+  _wdLoadStats();
+  // Pick a word — daily-seeded so all players get the same word per day (like real Wordle)
+  const dayNum = Math.floor(Date.now() / 86400000);
+  wdAnswer = WD_WORDS[dayNum % WD_WORDS.length];
+  wdRow=0; wdCol=0; wdGuesses=[]; wdGameOver=false;
+  document.getElementById('wdScore').textContent='⭐ '+wdScore;
+  document.getElementById('wdStreak').textContent='🔥 '+wdStreak;
+  document.getElementById('wdMsg').textContent='';
+  document.getElementById('wdOverlay').classList.remove('show');
+  wdRenderGrid();
+  wdRenderKeyboard();
+  // Keyboard input listener
+  const handler = (e) => {
+    if (wdGameOver) return;
+    const k = e.key.toUpperCase();
+    if (k==='ENTER') wdSubmit();
+    else if (k==='BACKSPACE') wdBackspace();
+    else if (/^[A-Z]$/.test(k) && k.length===1) wdType(k);
+  };
+  _addGameListener(document, 'keydown', handler);
+}
+
+function wdRenderGrid(){
+  const grid=document.getElementById('wdGrid');
+  grid.innerHTML='';
+  for(let r=0;r<6;r++){
+    const row=document.createElement('div');
+    row.className='wd-row';
+    row.id='wdRow'+r;
+    for(let c=0;c<5;c++){
+      const cell=document.createElement('div');
+      cell.className='wd-cell';
+      cell.id=`wdCell${r}_${c}`;
+      const guess=wdGuesses[r];
+      if(guess){
+        cell.textContent=guess.letters[c];
+        cell.classList.add(guess.states[c]);
+      } else if(r===wdRow && c<wdCol){
+        cell.textContent=_wdCurrent[c]||'';
+        cell.classList.add('filled');
+      }
+      row.appendChild(cell);
+    }
+    grid.appendChild(row);
+  }
+}
+
+let _wdCurrent=[];
+
+function wdRenderKeyboard(){
+  const kb=document.getElementById('wdKeyboard');
+  kb.innerHTML='';
+  const rows=['QWERTYUIOP','ASDFGHJKL','ZXCVBNM'];
+  // Compute letter states from all guesses
+  const letterState={};
+  wdGuesses.forEach(g=>{
+    g.letters.forEach((l,i)=>{
+      const st=g.states[i];
+      const rank={absent:0,present:1,correct:2};
+      if(!letterState[l] || rank[st]>rank[letterState[l]]) letterState[l]=st;
+    });
+  });
+  rows.forEach((r,ri)=>{
+    const rowEl=document.createElement('div');
+    rowEl.className='wd-krow';
+    if(ri===2){
+      const enter=document.createElement('button');
+      enter.className='wd-key wide';
+      enter.textContent='ENTER';
+      enter.onclick=()=>wdSubmit();
+      rowEl.appendChild(enter);
+    }
+    r.split('').forEach(letter=>{
+      const key=document.createElement('button');
+      key.className='wd-key'+(letterState[letter]?(' '+letterState[letter]):'');
+      key.textContent=letter;
+      key.onclick=()=>wdType(letter);
+      rowEl.appendChild(key);
+    });
+    if(ri===2){
+      const back=document.createElement('button');
+      back.className='wd-key wide';
+      back.textContent='⌫';
+      back.onclick=()=>wdBackspace();
+      rowEl.appendChild(back);
+    }
+    kb.appendChild(rowEl);
+  });
+}
+
+function wdType(letter){
+  if(wdGameOver || wdCol>=5) return;
+  _wdCurrent[wdCol]=letter;
+  wdCol++;
+  AudioMgr.wordleLetter();
+  Haptic.light();
+  wdRenderGrid();
+}
+
+function wdBackspace(){
+  if(wdGameOver || wdCol<=0) return;
+  wdCol--;
+  _wdCurrent[wdCol]='';
+  wdRenderGrid();
+}
+
+function wdSubmit(){
+  if(wdGameOver || wdCol<5) {
+    if(wdCol<5){
+      const row=document.getElementById('wdRow'+wdRow);
+      row.classList.add('shake');
+      setTimeout(()=>row.classList.remove('shake'),400);
+      document.getElementById('wdMsg').textContent='Not enough letters';
+      AudioMgr.wordWrong();
+    }
+    return;
+  }
+  const guess = _wdCurrent.join('');
+  AudioMgr.wordleSubmit();
+  Haptic.medium();
+
+  // Compute letter states (Wordle algorithm w/ duplicate handling)
+  const states=new Array(5).fill('absent');
+  const answerArr=wdAnswer.split('');
+  const guessArr=guess.split('');
+  const used=new Array(5).fill(false);
+  // First pass: correct
+  for(let i=0;i<5;i++){
+    if(guessArr[i]===answerArr[i]){ states[i]='correct'; used[i]=true; }
+  }
+  // Second pass: present
+  for(let i=0;i<5;i++){
+    if(states[i]==='correct') continue;
+    const idx=answerArr.findIndex((l,j)=>l===guessArr[i] && !used[j]);
+    if(idx!==-1){ states[i]='present'; used[idx]=true; }
+  }
+
+  wdGuesses.push({letters:guessArr, states});
+  wdRow++; wdCol=0; _wdCurrent=[];
+  wdRenderGrid();
+  wdRenderKeyboard();
+
+  // Flip animation
+  for(let c=0;c<5;c++){
+    setTimeout(()=>{
+      const el=document.getElementById(`wdCell${wdRow-1}_${c}`);
+      if(el) el.classList.add('flip');
+    }, c*80);
+  }
+
+  if(guess===wdAnswer){
+    wdGameOver=true;
+    wdScore += (7-wdRow)*20;
+    wdStreak++;
+    _wdSaveStats();
+    document.getElementById('wdScore').textContent='⭐ '+wdScore;
+    document.getElementById('wdStreak').textContent='🔥 '+wdStreak;
+    setTimeout(()=>{
+      AudioMgr.wordleCorrect();
+      Haptic.success();
+      confettiBurst();
+      document.getElementById('wdOIcon').textContent=['🤩','🎉','😄','👏','🙂','😅'][wdRow-1]||'🎉';
+      document.getElementById('wdOTitle').textContent='Solved in '+wdRow+'/6!';
+      document.getElementById('wdOSub').textContent='The word was '+wdAnswer+'. Streak: 🔥'+wdStreak;
+      document.getElementById('wdOBtn').textContent='Come back tomorrow!';
+      document.getElementById('wdOBtn').onclick=()=>{ document.getElementById('wdOverlay').classList.remove('show'); };
+      document.getElementById('wdOverlay').classList.add('show');
+      onLevelCleared('wordle', wdScore);
+      addCoins(20+wdStreak*5, 'Wordle Win');
+    }, 600);
+  } else if(wdRow>=6){
+    wdGameOver=true;
+    wdStreak=0;
+    _wdSaveStats();
+    document.getElementById('wdStreak').textContent='🔥 0';
+    setTimeout(()=>{
+      AudioMgr.wordleFail();
+      Haptic.error();
+      document.getElementById('wdOIcon').textContent='😔';
+      document.getElementById('wdOTitle').textContent='So close!';
+      document.getElementById('wdOSub').textContent='The word was '+wdAnswer;
+      document.getElementById('wdOBtn').textContent='Come back tomorrow!';
+      document.getElementById('wdOBtn').onclick=()=>{ document.getElementById('wdOverlay').classList.remove('show'); };
+      document.getElementById('wdOverlay').classList.add('show');
+    }, 600);
+  }
 }
 </script>
 </body>

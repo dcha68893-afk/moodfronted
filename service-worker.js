@@ -836,6 +836,18 @@ self.addEventListener('push', function(event) {
         options.body = data.senderName ? `${data.senderName}: ${options.body}` : options.body;
     }
 
+    // Game daily-reward / streak reminders
+    if (data.type === 'daily_reward') {
+        options.tag  = 'game-daily-reward';
+        options.icon = data.icon || '/icons/moodchat-192.png';
+        options.data = { url: '/game.html' };
+        options.requireInteraction = false;
+    }
+    if (data.type === 'game_challenge') {
+        options.tag  = 'game-challenge-' + (data.challengeId || '');
+        options.data = { url: '/game.html' };
+    }
+
     event.waitUntil(
         self.registration.showNotification(title, options)
     );
@@ -853,7 +865,7 @@ self.addEventListener('notificationclick', function(event) {
             // Focus existing open tab if found
             for (var i = 0; i < clientList.length; i++) {
                 var client = clientList[i];
-                if (client.url.includes('/chat.html') && 'focus' in client) {
+                if (client.url.includes(targetUrl) && 'focus' in client) {
                     return client.focus();
                 }
             }

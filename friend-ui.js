@@ -3382,6 +3382,16 @@ function createFriendItemElement(friendData, type, instantMode = false) {
         if (isBusiness) badgesHtml += '<span class="business-badge"><i class="fas fa-briefcase"></i> Business</span>';
         if (isPinned) badgesHtml += '<span class="temp-friend-badge"><i class="fas fa-thumbtack"></i> Pinned</span>';
         if (isMuted) badgesHtml += '<span class="temp-friend-badge"><i class="fas fa-volume-mute"></i> Muted</span>';
+        // P3 FIX: Snoozed + Restricted badges
+        const isSnoozed    = friendData?.snoozed || (friendData?.snoozedUntil && new Date(friendData.snoozedUntil) > new Date());
+        const isRestricted = friendData?.isRestricted || false;
+        if (isSnoozed)    badgesHtml += '<span class="temp-friend-badge" style="background:rgba(255,165,0,.1);color:#c07000;"><i class="fas fa-bell-slash"></i> Snoozed</span>';
+        if (isRestricted) badgesHtml += '<span class="temp-friend-badge" style="background:rgba(229,62,62,.1);color:#c53030;"><i class="fas fa-user-lock"></i> Restricted</span>';
+        // P2 FIX: Best Friends badge based on closenessLevel from server
+        const closeness = friendData?.closenessLevel || 0;
+        if (closeness >= 7) badgesHtml += '<span class="temp-friend-badge" style="background:rgba(255,193,7,.15);color:#b8860b;"><i class="fas fa-star"></i> Best Friend</span>';
+        // P2 FIX: Shared groups count badge (data comes from suggestions API)
+        if (friendData?.sharedGroupCount > 0) badgesHtml += `<span class="temp-friend-badge" style="background:rgba(72,187,120,.1);color:#276749;"><i class="fas fa-users"></i> ${friendData.sharedGroupCount} common group${friendData.sharedGroupCount > 1 ? 's' : ''}</span>`;
 
         let categoryBadgeHtml = '';
         if (isPinned) {
@@ -3417,6 +3427,9 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                 </button>
             `;
         } else if (type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary') {
+            // P2/P3 FIX: Add snooze, restrict, report to the more-options dropdown
+            const isSnoozed    = friendData?.snoozed    || (friendData?.snoozedUntil && new Date(friendData.snoozedUntil) > new Date());
+            const isRestricted = friendData?.isRestricted || false;
             actionsHtml = `
                 <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
                     <i class="fas fa-comments"></i>
@@ -3424,9 +3437,25 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                 <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
                     <i class="fas fa-phone"></i>
                 </button>
-                <button class="friend-action-btn" data-action="more" title="More options">
-                    <i class="fas fa-ellipsis-v"></i>
-                </button>
+                <div class="friend-more-menu-wrapper" style="position:relative;">
+                    <button class="friend-action-btn" data-action="more" title="More options">
+                        <i class="fas fa-ellipsis-v"></i>
+                    </button>
+                    <div class="friend-more-dropdown" style="display:none;position:absolute;right:0;top:100%;background:var(--surface-elevated,#fff);border:1px solid var(--border-color,#e0e0e0);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:100;min-width:160px;padding:4px 0;">
+                        <button class="friend-dropdown-item" data-action="snooze" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;text-align:left;">
+                            <i class="fas fa-bell-slash" style="width:16px;opacity:.7;"></i>
+                            ${isSnoozed ? 'Unsnooze' : 'Snooze (7 days)'}
+                        </button>
+                        <button class="friend-dropdown-item" data-action="restrict" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;text-align:left;">
+                            <i class="fas fa-user-lock" style="width:16px;opacity:.7;"></i>
+                            ${isRestricted ? 'Unrestrict' : 'Restrict'}
+                        </button>
+                        <button class="friend-dropdown-item" data-action="report" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
+                            <i class="fas fa-flag" style="width:16px;opacity:.7;"></i>
+                            Report
+                        </button>
+                    </div>
+                </div>
             `;
         }
 
@@ -3494,13 +3523,57 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                 } else if (action === 'add') {
                     sendFriendRequest(userId);
                 } else if (action === 'more') {
-                    showFriendOptions(friendData);
+                    // P2/P3 FIX: toggle dropdown instead of old modal
+                    const wrapper = btn.closest('.friend-more-menu-wrapper');
+                    const dropdown = wrapper?.querySelector('.friend-more-dropdown');
+                    if (dropdown) {
+                        const isOpen = dropdown.style.display !== 'none';
+                        // Close all other dropdowns first
+                        document.querySelectorAll('.friend-more-dropdown').forEach(d => d.style.display = 'none');
+                        dropdown.style.display = isOpen ? 'none' : 'block';
+                        if (!isOpen) {
+                            const closeHandler = (ev) => {
+                                if (!wrapper.contains(ev.target)) {
+                                    dropdown.style.display = 'none';
+                                    document.removeEventListener('click', closeHandler, true);
+                                }
+                            };
+                            setTimeout(() => document.addEventListener('click', closeHandler, true), 10);
+                        }
+                    } else {
+                        showFriendOptions(friendData);
+                    }
+                } else if (action === 'snooze') {
+                    // P3 FIX: snooze / unsnooze
+                    const fid = btn.dataset.friendId;
+                    const isSnoozed = friendData?.snoozed || (friendData?.snoozedUntil && new Date(friendData.snoozedUntil) > new Date());
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    if (isSnoozed) {
+                        window.FriendCoreAPI?.unsnoozeFriend?.(fid);
+                    } else {
+                        window.FriendCoreAPI?.snoozeFriend?.(fid, 7);
+                    }
+                } else if (action === 'restrict') {
+                    // P3 FIX: restrict / unrestrict
+                    const fid = btn.dataset.friendId;
+                    const isRestricted = friendData?.isRestricted || false;
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    if (isRestricted) {
+                        window.FriendCoreAPI?.unrestrictFriend?.(fid);
+                    } else {
+                        window.FriendCoreAPI?.restrictFriend?.(fid);
+                    }
+                } else if (action === 'report') {
+                    // P2 FIX: show report modal
+                    const fid = btn.dataset.friendId;
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    showReportModal(fid, friendData?.displayName || friendData?.username || '');
                 } else {
                     logUI(`Unknown action: ${action}`);
                 }
             });
         });
-        
+
         const mutualFriendsElement = friendItem.querySelector('.mutual-friends');
         if (mutualFriendsElement) {
             mutualFriendsElement.addEventListener('click', (e) => {
@@ -4547,6 +4620,51 @@ export const showFriendRequestProfile = function(requestData) {
 // =============================================
 // [11] FRIEND OPTIONS AND MANAGEMENT FUNCTIONS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
+
+// P2 FIX: Report modal — frontend showed "Report" but the function was missing.
+export function showReportModal(friendId, displayName) {
+    // Remove any existing report modal
+    const existing = document.getElementById('friendReportModal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'friendReportModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:var(--surface,#fff);border-radius:16px;padding:24px;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2);">
+            <h3 style="margin:0 0 8px;font-size:17px;">Report ${escapeHtml(displayName || 'user')}</h3>
+            <p style="margin:0 0 16px;font-size:13px;opacity:.7;">Select a reason. Your report is anonymous.</p>
+            <div id="reportReasonGroup" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+                ${['Spam or scam','Harassment or bullying','Fake account','Inappropriate content','Other'].map(r =>
+                    `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;">
+                        <input type="radio" name="reportReason" value="${r}" style="accent-color:var(--primary,#6c5ce7);">
+                        ${escapeHtml(r)}
+                    </label>`
+                ).join('')}
+            </div>
+            <textarea id="reportDescription" placeholder="Additional details (optional)" maxlength="500"
+                style="width:100%;border:1px solid var(--border-color,#e0e0e0);border-radius:8px;padding:10px;font-size:13px;resize:vertical;min-height:70px;box-sizing:border-box;margin-bottom:16px;"></textarea>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button id="cancelReportBtn" style="padding:10px 18px;border:1px solid var(--border-color,#e0e0e0);background:none;border-radius:8px;cursor:pointer;font-size:14px;">Cancel</button>
+                <button id="submitReportBtn" style="padding:10px 18px;background:#e53e3e;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Submit Report</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#cancelReportBtn').onclick = () => modal.remove();
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+    modal.querySelector('#submitReportBtn').onclick = async () => {
+        const reasonEl = modal.querySelector('input[name="reportReason"]:checked');
+        if (!reasonEl) { showNotification('Please select a reason', 'warning'); return; }
+        const reason      = reasonEl.value;
+        const description = modal.querySelector('#reportDescription').value.trim();
+        modal.querySelector('#submitReportBtn').textContent = 'Submitting…';
+        modal.querySelector('#submitReportBtn').disabled = true;
+        await window.FriendCoreAPI?.reportFriend?.(friendId, reason, description);
+        modal.remove();
+    };
+}
 
 export const showFriendOptions = function(friendData) {
     if (!isUIActive()) {

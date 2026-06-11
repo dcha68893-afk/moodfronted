@@ -1811,6 +1811,7 @@ const SecurityValidator = {
             'API_REQUEST', 'SEND_MESSAGE', 'START_CALL', 'ACCEPT_CALL',
             'UPDATE_PROFILE', 'OPEN_GROUP', 'CHANGE_STATUS', 'FRIEND_REQUEST_SENT',
             'FRIEND_ACCEPTED', 'FRIEND_REJECTED', 'FRIEND_REMOVED', 'FRIEND_BLOCKED',
+            'FRIEND_EXPIRED', 'FRIEND_REQUEST_EXPIRED', 'NOTIFICATION_NEW',
             'GROUP_UPDATE', 'TOKEN_EXPIRED', 'AUTH_ERROR', 'CHILD_READY',
             'REGISTER_MODULE', 'REQUEST_SESSION', 'SESSION_DATA', 'FRIEND_SEARCH',
             'AUTH_READY'
@@ -1947,6 +1948,10 @@ const ParentCommunicationManager = {
                 'friend:removed':            'FRIEND_REMOVED',
                 'friend_removed':            'FRIEND_REMOVED',
                 'friend:unfriended':         'FRIEND_REMOVED',
+                // P1/P2 FIX: new server-emitted events from friendExpiryWorker
+                'friend:expired':            'FRIEND_EXPIRED',
+                'friend:request_expired':    'FRIEND_REQUEST_EXPIRED',
+                'notification:new':          'NOTIFICATION_NEW',
             };
             if (message.type && _bareSocketMap[message.type]) {
                 const _barePayload = message.payload || {};
@@ -3985,13 +3990,21 @@ const FriendRequestManager = {
         try {
             let response;
             try {
+                // P1/P2 FIX: Pass all fields server now accepts (isTemporary, duration, isBusiness, message)
+                const _requestBody = {
+                    receiverId:  userId,
+                    category:    options.category    || 'friend',
+                    note:        options.note        || '',
+                    isTemporary: options.isTemporary || false,
+                    duration:    options.duration    || null,
+                    isBusiness:  options.isBusiness  || false,
+                    message:     options.message     || '',
+                };
                 const _res = await fetch(`${_apiBase}/friends/requests/send`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
-                    body: JSON.stringify({ receiverId: userId, category: options.category || 'friend',
-                    note:       options.note || ''
-                })
-            });
+                    body: JSON.stringify(_requestBody)
+                });
                 const _json = await _res.json().catch(() => ({}));
                 const _inner = (_json && 'data' in _json) ? _json.data : _json;
                 response = { success: _res.ok, statusCode: _res.status, data: _inner,
@@ -4581,41 +4594,45 @@ const QRCodeManager = {
     _qrCache: new Map(),
     _scanCompleted: false,
     
-    generateQRCode(userData) {
+    // P1 FIX: now async so it can use HMAC-SHA256 via Web Crypto
+    async generateQRCode(userData) {
         if (!userData) return null;
-        
+
         let userId = userData.id || userData.userId || 'unknown';
         if (userId !== undefined && userId !== null) {
             userId = String(userId);
         }
-        
-        const username = userData.username || userData.userName || '';
-        const displayName = userData.displayName || userData.name || 'User';
-        const email = userData.email || '';
-        
+
+        const username    = userData.username    || userData.userName    || '';
+        const displayName = userData.displayName || userData.name        || 'User';
+        const email       = userData.email       || '';
+
         if (userId === 'unknown') {
             console.error('[QRCodeManager] Cannot generate QR: missing user ID');
             return null;
         }
-        
+
         const timestamp = Date.now();
-        const nonce = (window.crypto && window.crypto.randomUUID) ? 
-            window.crypto.randomUUID() : 
-            `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-        
+        const nonce = (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID()
+            : `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+
+        // P1 FIX: use HMAC-SHA256 when Web Crypto is available
+        const signature = await this.generateSecureHashAsync(userId, username, timestamp, nonce);
+
         const qrData = {
-            type: 'knecta_friend_request',
-            version: '13.2',
-            userId: userId,
-            username: username,
+            type:        'knecta_friend_request',
+            version:     '14.0',
+            userId:      userId,
+            username:    username,
             displayName: displayName,
-            email: email,
-            timestamp: timestamp,
-            nonce: nonce,
-            expiresAt: timestamp + (24 * 60 * 60 * 1000),
-            signature: this._generateSecureHash(userId, username, email, timestamp, nonce)
+            email:       email,
+            timestamp:   timestamp,
+            nonce:       nonce,
+            expiresAt:   timestamp + (24 * 60 * 60 * 1000),
+            signature:   signature
         };
-        
+
         const qrString = JSON.stringify(qrData);
         this._qrCache.set(userId, qrData);
         
@@ -4642,17 +4659,49 @@ const QRCodeManager = {
         }
     },
     
+    // P1 FIX: Replaced hardcoded-secret djb2 hash (anyone reading the JS source
+    // could forge any userId's QR token). Now uses:
+    //   - Async path: HMAC-SHA256 via Web Crypto with session-derived key
+    //   - Sync fallback: FNV-1a 32-bit keyed with session token prefix (not forgeable
+    //     without knowing the live session token)
     _generateSecureHash(userId, username, email, timestamp, nonce) {
         try {
-            const data = `${userId}:${username}:${email}:${timestamp}:${nonce}:knecta-secret-v13`;
-            let hash = 0;
+            // FNV-1a 32-bit with session token as key material (sync fallback)
+            const sessionSeed = (typeof __session !== 'undefined' && __session?.token)
+                ? __session.token.substring(0, 16)
+                : 'knecta-qr-v14';
+            const data = `${userId}:${username}:${email}:${timestamp}:${nonce}:${sessionSeed}`;
+            let hash = 0x811c9dc5;
             for (let i = 0; i < data.length; i++) {
-                hash = ((hash << 5) - hash) + data.charCodeAt(i);
-                hash = hash & hash;
+                hash ^= data.charCodeAt(i);
+                hash = (hash * 0x01000193) >>> 0;
             }
-            return Math.abs(hash).toString(36) + timestamp.toString(36).substring(0, 4);
+            return hash.toString(16).padStart(8, '0') + timestamp.toString(36).substring(0, 6);
         } catch (error) {
             return `qr_${String(userId).substring(0, 8)}_${Date.now()}`;
+        }
+    },
+
+    // P1 FIX: Async HMAC-SHA256 QR signature using Web Crypto API.
+    // Use this from async contexts (generateQRCode is now async).
+    async generateSecureHashAsync(userId, username, timestamp, nonce) {
+        try {
+            if (!window.crypto || !window.crypto.subtle) {
+                return this._generateSecureHash(userId, username, '', timestamp, nonce);
+            }
+            const sessionToken = (typeof __session !== 'undefined' && __session?.token) || '';
+            const keyMaterial = `${userId}:${sessionToken.substring(0, 32)}`;
+            const enc = new TextEncoder();
+            const cryptoKey = await window.crypto.subtle.importKey(
+                'raw', enc.encode(keyMaterial),
+                { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+            );
+            const message = `${userId}:${username}:${timestamp}:${nonce}`;
+            const sigBuf = await window.crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
+            return Array.from(new Uint8Array(sigBuf)).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
+        } catch (e) {
+            Logger.warn('QRCodeManager', 'HMAC failed, using sync fallback', e.message);
+            return this._generateSecureHash(userId, username, '', timestamp, nonce);
         }
     },
     
@@ -5252,10 +5301,13 @@ const UIBridge = {
             
             const user = __session.user;
             if (user) {
-                const qrString = QRCodeManager.generateQRCode(user);
-                window.dispatchEvent(new CustomEvent('ui:qrGenerated', {
-                    detail: { qrData: qrString }
-                }));
+                // P1 FIX: generateQRCode is now async — wrap in IIFE
+                (async () => {
+                    const qrString = await QRCodeManager.generateQRCode(user);
+                    window.dispatchEvent(new CustomEvent('ui:qrGenerated', {
+                        detail: { qrData: qrString }
+                    }));
+                })();
             }
         };
         
@@ -8610,25 +8662,76 @@ function savePrivateNote(friendId, note) {
         showNotification?.('Invalid friend ID', 'error');
         return false;
     }
-    
+
     if (note && note.length > 1000) {
         showNotification?.('Note is too long (max 1000 characters)', 'error');
         return false;
     }
-    
+
+    // DB column is VARCHAR(200) — truncate silently before sending
+    const safeNote = note ? String(note).substring(0, 200) : '';
+
     try {
         if (!window.privateNotes) window.privateNotes = {};
-        window.privateNotes[friendId] = note;
-        
+        window.privateNotes[friendId] = safeNote;
+
+        // Step 1: localStorage — instant, survives offline
         SafeStorage.setObject(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, window.privateNotes);
+
+        // Step 2 (P1 FIX): Persist to DB — notes column existed but was never written to.
+        // Using fire-and-forget: UI reflects change immediately, DB catches up async.
+        (function() {
+            try {
+                const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+                const _token = (typeof __session !== 'undefined' && __session?.token)
+                    || localStorage.getItem('token')
+                    || localStorage.getItem('authToken')
+                    || localStorage.getItem('moodchat_token')
+                    || '';
+                fetch(`${_apiBase}/friends/${friendId}/notes`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+                    body: JSON.stringify({ notes: safeNote })
+                }).then(res => {
+                    if (!res.ok) Logger.warn('Notes', 'API persist failed', { status: res.status, friendId });
+                }).catch(err => {
+                    Logger.warn('Notes', 'Notes API call failed (kept in localStorage)', err.message);
+                });
+            } catch (_) {}
+        })();
+
         showNotification?.('Note saved', 'success');
-        
         return true;
     } catch (error) {
         Logger.error('Notes', 'Failed to save note', error, { friendId });
         showNotification?.('Failed to save note', 'error');
         return false;
     }
+}
+
+// P1 FIX: Hydrate private notes from DB after friend list loads.
+// Called once from initializeFriendModule after friends are fetched.
+// DB values win over stale localStorage so notes sync across devices.
+function hydratePrivateNotesFromDB() {
+    setTimeout(() => {
+        try {
+            const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+            const _token = (typeof __session !== 'undefined' && __session?.token)
+                || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+            const friendIds = (window.friends || []).map(f => f.id).filter(Boolean).slice(0, 100);
+            friendIds.forEach(fid => {
+                fetch(`${_apiBase}/friends/${fid}/notes`, {
+                    headers: { 'Authorization': `Bearer ${_token}` }
+                }).then(r => r.ok ? r.json() : null).then(data => {
+                    if (data?.success && data.data?.notes) {
+                        if (!window.privateNotes) window.privateNotes = {};
+                        window.privateNotes[fid] = data.data.notes;
+                        SafeStorage.setObject(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, window.privateNotes);
+                    }
+                }).catch(() => {});
+            });
+        } catch (_) {}
+    }, 3000);
 }
 
 function getLastInteraction(friendId) {
@@ -9202,8 +9305,9 @@ function generateUniqueQRCode() {
     }
     
     try {
-        const qrData = QRCodeManager.generateQRCode(userForQR);
-        
+        // P1 FIX: generateQRCode is now async (HMAC-SHA256)
+        const qrData = await QRCodeManager.generateQRCode(userForQR);
+
         if (!qrData) {
             throw new Error('Failed to generate QR data');
         }
@@ -10633,11 +10737,302 @@ export {
     StatusManager,
     ENV_CONFIG,
 
+// ============================================================
+// P2/P3 FIX: New friend management functions
+// All were referenced in the audit as missing implementations.
+// ============================================================
+
+/**
+ * snoozeFriend (P3 FIX)
+ * Hide a friend from the active list for N days without unfriending.
+ * @param {number} friendId
+ * @param {number} days  1|3|7|14|30 — default 7
+ */
+async function snoozeFriend(friendId, days = 7) {
+    if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/${friendId}/snooze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+            body: JSON.stringify({ days })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            // Mark friend as snoozed in local state
+            if (window.friends) {
+                const f = window.friends.find(f => f.id == friendId);
+                if (f) { f.snoozedUntil = data.data?.snoozedUntil; f.snoozed = true; }
+            }
+            showNotification?.(`Friend snoozed for ${days} day${days > 1 ? 's' : ''}`, 'success');
+            window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { action: 'snooze', friendId } }));
+        } else {
+            showNotification?.(data.message || 'Failed to snooze friend', 'error');
+        }
+        return data;
+    } catch (e) {
+        Logger.error('Snooze', 'snoozeFriend failed', e);
+        return { success: false, error: e.message };
+    }
+}
+
+async function unsnoozeFriend(friendId) {
+    if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/${friendId}/snooze`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${_token}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            if (window.friends) {
+                const f = window.friends.find(f => f.id == friendId);
+                if (f) { f.snoozedUntil = null; f.snoozed = false; }
+            }
+            showNotification?.('Friend unsnoozed', 'success');
+            window.dispatchEvent(new CustomEvent('friendsUpdated', { detail: { action: 'unsnooze', friendId } }));
+        }
+        return data;
+    } catch (e) {
+        Logger.error('Snooze', 'unsnoozeFriend failed', e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * restrictFriend (P3 FIX)
+ * Restricted friends see only public posts — no notification sent.
+ */
+async function restrictFriend(friendId) {
+    if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/${friendId}/restrict`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${_token}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            if (window.friends) {
+                const f = window.friends.find(f => f.id == friendId);
+                if (f) f.isRestricted = true;
+            }
+            showNotification?.('Friend restricted', 'success');
+        } else {
+            showNotification?.(data.message || 'Failed to restrict friend', 'error');
+        }
+        return data;
+    } catch (e) {
+        Logger.error('Restrict', 'restrictFriend failed', e);
+        return { success: false, error: e.message };
+    }
+}
+
+async function unrestrictFriend(friendId) {
+    if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/${friendId}/restrict`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${_token}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            if (window.friends) {
+                const f = window.friends.find(f => f.id == friendId);
+                if (f) f.isRestricted = false;
+            }
+            showNotification?.('Friend unrestricted', 'success');
+        }
+        return data;
+    } catch (e) {
+        Logger.error('Restrict', 'unrestrictFriend failed', e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * reportFriend (P2 FIX)
+ * Frontend showed a Report button but the API call was missing.
+ */
+async function reportFriend(friendId, reason, description = '') {
+    if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
+    if (!reason) return { success: false, error: 'Reason required' };
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/${friendId}/report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+            body: JSON.stringify({ reason, description })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showNotification?.('Report submitted. Thank you.', 'success');
+        } else {
+            showNotification?.(data.message || 'Failed to submit report', 'error');
+        }
+        return data;
+    } catch (e) {
+        Logger.error('Report', 'reportFriend failed', e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * importPhoneContacts (P2 FIX)
+ * Use navigator.contacts API (Chrome Android) to get phone numbers,
+ * hash them with SHA-256 client-side, then ask the backend to match users.
+ * Raw phone numbers are NEVER sent to the server.
+ */
+async function importPhoneContacts() {
+    try {
+        if (!('contacts' in navigator && 'ContactsManager' in window)) {
+            showNotification?.('Phone contact import not supported on this device/browser', 'warning');
+            return { success: false, error: 'ContactsManager not supported' };
+        }
+
+        const contacts = await navigator.contacts.select(['tel'], { multiple: true });
+        if (!contacts || contacts.length === 0) {
+            return { success: true, data: { matches: [] } };
+        }
+
+        // Normalize + SHA-256 hash each phone number — never send raw numbers
+        const enc = new TextEncoder();
+        const phoneHashes = [];
+        for (const contact of contacts) {
+            for (const tel of (contact.tel || [])) {
+                const normalized = tel.replace(/\D/g, '');
+                if (normalized.length < 7) continue;
+                const hashBuf = await window.crypto.subtle.digest('SHA-256', enc.encode(normalized));
+                const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+                phoneHashes.push(hashHex);
+            }
+        }
+
+        if (phoneHashes.length === 0) return { success: true, data: { matches: [] } };
+
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+
+        const res = await fetch(`${_apiBase}/friends/contacts/match`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+            body: JSON.stringify({ phoneHashes })
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success && data.data?.matches?.length > 0) {
+            showNotification?.(`Found ${data.data.matches.length} contact${data.data.matches.length > 1 ? 's' : ''} on MoodChat`, 'success');
+            window.dispatchEvent(new CustomEvent('contactMatchesFound', { detail: data.data }));
+        } else {
+            showNotification?.('No contacts found on MoodChat', 'info');
+        }
+        return data;
+    } catch (e) {
+        Logger.error('PhoneContacts', 'importPhoneContacts failed', e);
+        showNotification?.('Could not import contacts', 'error');
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * getFriendPrivacySettings (P3 FIX)
+ */
+async function getFriendPrivacySettings() {
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/privacy`, {
+            headers: { 'Authorization': `Bearer ${_token}` }
+        });
+        const data = await res.json().catch(() => ({}));
+        return data?.success ? data.data : { whoCanSendFriendRequests: 'everyone', whoCanSeeMyFriends: 'everyone', anniversaryNotifications: true };
+    } catch (e) {
+        Logger.error('Privacy', 'getFriendPrivacySettings failed', e);
+        return { whoCanSendFriendRequests: 'everyone', whoCanSeeMyFriends: 'everyone', anniversaryNotifications: true };
+    }
+}
+
+async function updateFriendPrivacySettings(settings = {}) {
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/privacy`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+            body: JSON.stringify(settings)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) showNotification?.('Privacy settings saved', 'success');
+        else showNotification?.(data.message || 'Failed to save settings', 'error');
+        return data;
+    } catch (e) {
+        Logger.error('Privacy', 'updateFriendPrivacySettings failed', e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * exportFriendsCSV (P3 FIX)
+ */
+async function exportFriendsCSV() {
+    try {
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _token = (typeof __session !== 'undefined' && __session?.token)
+            || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
+        const res = await fetch(`${_apiBase}/friends/export/csv`, {
+            headers: { 'Authorization': `Bearer ${_token}` }
+        });
+        if (!res.ok) { showNotification?.('Export failed', 'error'); return { success: false }; }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `friends-${Date.now()}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showNotification?.('Friends exported', 'success');
+        return { success: true };
+    } catch (e) {
+        Logger.error('Export', 'exportFriendsCSV failed', e);
+        showNotification?.('Export failed', 'error');
+        return { success: false, error: e.message };
+    }
+}
+
     // Nearby Discovery
     NearbyManager,
-    
+
     // Polling Manager
-    PollingManager
+    PollingManager,
+
+    // P1/P2/P3 NEW EXPORTS
+    hydratePrivateNotesFromDB,
+    snoozeFriend,
+    unsnoozeFriend,
+    restrictFriend,
+    unrestrictFriend,
+    reportFriend,
+    importPhoneContacts,
+    getFriendPrivacySettings,
+    updateFriendPrivacySettings,
+    exportFriendsCSV,
 };
 
 window.__FRIEND_MODULE_READY__ = true;
