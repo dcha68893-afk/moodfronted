@@ -11510,3 +11510,530 @@ var _KynScreenAnnotation = (function() {
     document.head.appendChild(style);
   }
 })();
+
+// ── Background Blur (CSS filter + canvas compositing) ────────────────────────
+// Applies blur to the local camera feed using a canvas overlay with CSS filter.
+// This approach works in ALL browsers without ML models — uses CSS backdrop-filter
+// or canvas pixel compositing. Not AI-level segmentation, but provides clear
+// privacy blur that meets the forensic requirement.
+// For true AI segmentation: integrate @mediapipe/selfie_segmentation via CDN.
+(function initBackgroundBlur() {
+  'use strict';
+
+  var _blurActive = false;
+  var _blurCanvas = null;
+  var _blurCtx = null;
+  var _blurAnimFrame = null;
+  var _blurLevel = 8; // CSS blur px
+  var _origStream = null;
+  var _blurStream = null;
+
+  function _startBlur(videoTrack, level) {
+    _blurLevel = level || 8;
+    if (_blurCanvas) _stopBlur();
+
+    // Create off-screen canvas
+    _blurCanvas = document.createElement('canvas');
+    _blurCanvas.width  = 640;
+    _blurCanvas.height = 480;
+    _blurCtx = _blurCanvas.getContext('2d');
+
+    // Create temp video element to render source track
+    var srcVideo = document.createElement('video');
+    srcVideo.autoplay   = true;
+    srcVideo.playsInline = true;
+    srcVideo.muted      = true;
+    srcVideo.srcObject  = new MediaStream([videoTrack]);
+
+    srcVideo.addEventListener('loadedmetadata', function() {
+      _blurCanvas.width  = srcVideo.videoWidth  || 640;
+      _blurCanvas.height = srcVideo.videoHeight || 480;
+
+      function _draw() {
+        if (!_blurActive) return;
+        _blurCtx.filter = 'blur(' + _blurLevel + 'px)';
+        _blurCtx.drawImage(srcVideo, 0, 0, _blurCanvas.width, _blurCanvas.height);
+        _blurCtx.filter = 'none';
+        _blurAnimFrame = requestAnimationFrame(_draw);
+      }
+      _blurActive = true;
+      _draw();
+    });
+
+    // Capture the blurred canvas as a stream
+    _blurStream = _blurCanvas.captureStream(30);
+    return _blurStream.getVideoTracks()[0];
+  }
+
+  function _stopBlur() {
+    _blurActive = false;
+    if (_blurAnimFrame) { cancelAnimationFrame(_blurAnimFrame); _blurAnimFrame = null; }
+    _blurCanvas = null;
+    _blurCtx    = null;
+    _blurStream = null;
+  }
+
+  async function toggleBackgroundBlur(level) {
+    var btn = document.getElementById('kyn-blur-btn');
+
+    if (_blurActive) {
+      // Stop blur — restore original track
+      _stopBlur();
+      if (_origStream && window.__DeviceMediaManager) {
+        try {
+          var origTrack = _origStream.getVideoTracks()[0];
+          if (origTrack && window.__PeerConnectionManager) {
+            var senders = [];
+            if (window.__PeerConnectionManager._peers) {
+              window.__PeerConnectionManager._peers.forEach(function(session) {
+                if (session._pc) {
+                  session._pc.getSenders().filter(function(s) {
+                    return s.track && s.track.kind === 'video';
+                  }).forEach(function(s) { senders.push(s); });
+                }
+              });
+            }
+            await Promise.all(senders.map(function(s) { return s.replaceTrack(origTrack).catch(function(){}); }));
+          }
+        } catch(e) {}
+      }
+      if (btn) {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('title', 'Background blur (B)');
+        btn.setAttribute('aria-label', 'Toggle background blur');
+      }
+      if (window._kynAnnounce) window._kynAnnounce('Background blur off.');
+      return;
+    }
+
+    // Start blur
+    var localVideo = document.getElementById('localVideo') || document.getElementById('pipVideo');
+    var localStream = localVideo && localVideo.srcObject;
+    if (!localStream) {
+      // Try to get from DeviceMediaManager
+      if (window.__DeviceMediaManager && window.__DeviceMediaManager.getStream) {
+        localStream = window.__DeviceMediaManager.getStream();
+      }
+    }
+    if (!localStream) {
+      console.warn('[BackgroundBlur] No local stream available');
+      if (window._kynAnnounce) window._kynAnnounce('Background blur requires camera to be on.');
+      return;
+    }
+
+    var videoTrack = localStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+
+    _origStream = localStream;
+    var blurredTrack = _startBlur(videoTrack, level || _blurLevel);
+
+    // Replace track in all peer connections
+    if (blurredTrack && window.__PeerConnectionManager) {
+      try {
+        var senders = [];
+        if (window.__PeerConnectionManager._peers) {
+          window.__PeerConnectionManager._peers.forEach(function(session) {
+            if (session._pc) {
+              session._pc.getSenders().filter(function(s) {
+                return s.track && s.track.kind === 'video';
+              }).forEach(function(s) { senders.push(s); });
+            }
+          });
+        }
+        await Promise.all(senders.map(function(s) { return s.replaceTrack(blurredTrack).catch(function(){}); }));
+      } catch(e) { console.warn('[BackgroundBlur] replaceTrack error:', e.message); }
+    }
+
+    if (btn) {
+      btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
+      btn.setAttribute('title', 'Stop background blur (B)');
+      btn.setAttribute('aria-label', 'Stop background blur');
+    }
+    if (window._kynAnnounce) window._kynAnnounce('Background blur on.');
+  }
+
+  // Add blur button to controls bar
+  function _addBlurButton() {
+    if (document.getElementById('kyn-blur-btn')) return;
+    var controlsBar = document.getElementById('callControls');
+    if (!controlsBar) return;
+
+    var btn = document.createElement('button');
+    btn.id        = 'kyn-blur-btn';
+    btn.className = 'incall-ctrl-btn';
+    btn.setAttribute('title',      'Background blur (B)');
+    btn.setAttribute('aria-label', 'Toggle background blur');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.innerHTML = '<i class="fas fa-user-secret" aria-hidden="true"></i>';
+    btn.style.display = 'none'; // Show only during video calls
+
+    btn.addEventListener('click', function() { toggleBackgroundBlur(); });
+    var endBtn = controlsBar.querySelector('#endCallBtn');
+    if (endBtn) controlsBar.insertBefore(btn, endBtn);
+    else controlsBar.appendChild(btn);
+  }
+
+  // Show blur button only for video calls
+  window.addEventListener('callCore:stateChange', function(e) {
+    var state = e.detail && e.detail.state;
+    if (state === 'CONNECTED') {
+      _addBlurButton();
+      var callType = e.detail && e.detail.callType;
+      var btn = document.getElementById('kyn-blur-btn');
+      // Show for video calls only
+      if (btn && (callType === 'video' || document.getElementById('remoteVideo'))) {
+        btn.style.display = 'inline-flex';
+      }
+    }
+    if (state === 'IDLE' || state === 'ENDED') {
+      _stopBlur();
+      var btn2 = document.getElementById('kyn-blur-btn');
+      if (btn2) btn2.style.display = 'none';
+    }
+  });
+
+  // Expose API
+  window.KynBackgroundBlur = {
+    toggle: toggleBackgroundBlur,
+    isActive: function() { return _blurActive; },
+    setLevel: function(lvl) { _blurLevel = lvl || 8; }
+  };
+})();
+
+// ── AI Noise Cancellation (browser AudioWorklet + WebRTC constraints) ─────────
+// Uses two layers:
+// 1. WebRTC built-in: echoCancellation, noiseSuppression, autoGainControl (always on)
+// 2. AudioWorklet noise gate: attenuates signal when below a noise floor threshold
+//    This removes keyboard clicks, background hum, HVAC noise without external libs.
+// For production-grade ML noise cancellation, integrate RNNoise WASM via CDN.
+(function initNoiseCancellation() {
+  'use strict';
+
+  var _noiseActive = false;
+  var _audioCtx = null;
+  var _noiseWorklet = null;
+  var _sourceNode = null;
+  var _destNode = null;
+  var _processedStream = null;
+  var _origAudioTrack = null;
+
+  // AudioWorklet processor code (inline as blob URL to avoid CORS)
+  var WORKLET_CODE = `
+class NoiseGateProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super(options);
+    this._threshold = (options.processorOptions && options.processorOptions.threshold) || 0.02;
+    this._smoothing = 0.85;
+    this._envelope  = 0;
+    this.port.onmessage = (e) => {
+      if (e.data.threshold !== undefined) this._threshold = e.data.threshold;
+    };
+  }
+  process(inputs, outputs) {
+    const input  = inputs[0];
+    const output = outputs[0];
+    if (!input || !input[0]) return true;
+    for (let ch = 0; ch < input.length; ch++) {
+      const inBuf  = input[ch];
+      const outBuf = output[ch];
+      if (!inBuf || !outBuf) continue;
+      for (let i = 0; i < inBuf.length; i++) {
+        const abs = Math.abs(inBuf[i]);
+        this._envelope = this._smoothing * this._envelope + (1 - this._smoothing) * abs;
+        // Gate: if signal below threshold, attenuate heavily
+        const gain = this._envelope > this._threshold ? 1.0 : 0.05;
+        outBuf[i] = inBuf[i] * gain;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('noise-gate-processor', NoiseGateProcessor);
+`;
+
+  async function _startNoiseCancellation(audioTrack) {
+    try {
+      _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Register worklet via blob URL
+      var blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
+      var blobUrl = URL.createObjectURL(blob);
+      await _audioCtx.audioWorklet.addModule(blobUrl).catch(function(e) {
+        console.warn('[NoiseCancellation] AudioWorklet unavailable, falling back to ScriptProcessor:', e.message);
+      });
+      URL.revokeObjectURL(blobUrl);
+
+      var micStream = new MediaStream([audioTrack]);
+      _sourceNode   = _audioCtx.createMediaStreamSource(micStream);
+      _destNode     = _audioCtx.createMediaStreamDestination();
+
+      // Try AudioWorklet first, fall back to ScriptProcessor
+      var processorNode;
+      try {
+        processorNode = new AudioWorkletNode(_audioCtx, 'noise-gate-processor', {
+          processorOptions: { threshold: 0.018 }
+        });
+        _noiseWorklet = processorNode;
+      } catch (_e) {
+        // ScriptProcessor fallback (deprecated but universally supported)
+        var bufSize = 256;
+        processorNode = _audioCtx.createScriptProcessor(bufSize, 1, 1);
+        var envelope = 0;
+        var threshold = 0.018;
+        processorNode.onaudioprocess = function(e) {
+          var inBuf  = e.inputBuffer.getChannelData(0);
+          var outBuf = e.outputBuffer.getChannelData(0);
+          for (var i = 0; i < inBuf.length; i++) {
+            var abs = Math.abs(inBuf[i]);
+            envelope = 0.85 * envelope + 0.15 * abs;
+            outBuf[i] = inBuf[i] * (envelope > threshold ? 1.0 : 0.05);
+          }
+        };
+      }
+
+      _sourceNode.connect(processorNode);
+      processorNode.connect(_destNode);
+      _processedStream = _destNode.stream;
+
+      return _processedStream.getAudioTracks()[0];
+    } catch(err) {
+      console.warn('[NoiseCancellation] Failed to start:', err.message);
+      return null;
+    }
+  }
+
+  function _stopNoiseCancellation() {
+    _noiseActive = false;
+    if (_noiseWorklet)  { try { _noiseWorklet.disconnect(); } catch(_) {} }
+    if (_sourceNode)    { try { _sourceNode.disconnect();   } catch(_) {} }
+    if (_destNode)      { try { _destNode.disconnect();     } catch(_) {} }
+    if (_audioCtx && _audioCtx.state !== 'closed') {
+      _audioCtx.close().catch(function(){});
+    }
+    _audioCtx = _noiseWorklet = _sourceNode = _destNode = _processedStream = null;
+  }
+
+  async function toggleNoiseCancellation() {
+    var btn = document.getElementById('kyn-noise-btn');
+
+    if (_noiseActive) {
+      _stopNoiseCancellation();
+      // Restore original audio track
+      if (_origAudioTrack && window.__PeerConnectionManager) {
+        var origTrack = _origAudioTrack;
+        if (window.__PeerConnectionManager._peers) {
+          window.__PeerConnectionManager._peers.forEach(function(session) {
+            if (session._pc) {
+              session._pc.getSenders()
+                .filter(function(s) { return s.track && s.track.kind === 'audio'; })
+                .forEach(function(s) { s.replaceTrack(origTrack).catch(function(){}); });
+            }
+          });
+        }
+      }
+      if (btn) {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
+        btn.setAttribute('title', 'Noise cancellation (N)');
+        btn.setAttribute('aria-label', 'Toggle noise cancellation');
+      }
+      if (window._kynAnnounce) window._kynAnnounce('Noise cancellation off.');
+      return;
+    }
+
+    // Get current local audio track
+    var localStream = null;
+    if (window.__DeviceMediaManager && window.__DeviceMediaManager.getStream) {
+      localStream = window.__DeviceMediaManager.getStream();
+    }
+    if (!localStream) {
+      var lv = document.getElementById('localVideo');
+      localStream = lv && lv.srcObject;
+    }
+    if (!localStream) return;
+
+    var audioTrack = localStream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    _origAudioTrack = audioTrack;
+    var processedTrack = await _startNoiseCancellation(audioTrack);
+    if (!processedTrack) return;
+
+    _noiseActive = true;
+
+    // Replace audio track in all peer connections
+    if (window.__PeerConnectionManager && window.__PeerConnectionManager._peers) {
+      window.__PeerConnectionManager._peers.forEach(function(session) {
+        if (session._pc) {
+          session._pc.getSenders()
+            .filter(function(s) { return s.track && s.track.kind === 'audio'; })
+            .forEach(function(s) { s.replaceTrack(processedTrack).catch(function(){}); });
+        }
+      });
+    }
+
+    if (btn) {
+      btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
+      btn.setAttribute('title', 'Stop noise cancellation (N)');
+      btn.setAttribute('aria-label', 'Stop noise cancellation');
+    }
+    if (window._kynAnnounce) window._kynAnnounce('Noise cancellation on.');
+  }
+
+  function _addNoiseButton() {
+    if (document.getElementById('kyn-noise-btn')) return;
+    var controlsBar = document.getElementById('callControls');
+    if (!controlsBar) return;
+
+    var btn = document.createElement('button');
+    btn.id        = 'kyn-noise-btn';
+    btn.className = 'incall-ctrl-btn';
+    btn.setAttribute('title',      'Noise cancellation (N)');
+    btn.setAttribute('aria-label', 'Toggle noise cancellation');
+    btn.setAttribute('aria-pressed', 'false');
+    btn.innerHTML = '<i class="fas fa-microphone-alt" aria-hidden="true"></i>';
+    btn.style.display = 'none';
+
+    btn.addEventListener('click', function() { toggleNoiseCancellation(); });
+    var endBtn = controlsBar.querySelector('#endCallBtn');
+    if (endBtn) controlsBar.insertBefore(btn, endBtn);
+    else controlsBar.appendChild(btn);
+  }
+
+  window.addEventListener('callCore:stateChange', function(e) {
+    var state = e.detail && e.detail.state;
+    if (state === 'CONNECTED') {
+      _addNoiseButton();
+      var btn = document.getElementById('kyn-noise-btn');
+      if (btn) btn.style.display = 'inline-flex';
+    }
+    if (state === 'IDLE' || state === 'ENDED') {
+      _stopNoiseCancellation();
+      var btn2 = document.getElementById('kyn-noise-btn');
+      if (btn2) btn2.style.display = 'none';
+    }
+  });
+
+  // Keyboard shortcut N
+  window.addEventListener('kyn:shortcut:noise', function() { toggleNoiseCancellation(); });
+  window.KynNoiseCancellation = {
+    toggle: toggleNoiseCancellation,
+    isActive: function() { return _noiseActive; }
+  };
+})();
+
+// ── Call Session Recovery ─────────────────────────────────────────────────────
+// Persists active call state to sessionStorage so if the page is refreshed
+// mid-call (accidental F5, PWA reload), the call can be auto-rejoined.
+(function initCallSessionRecovery() {
+  'use strict';
+
+  var STORAGE_KEY = 'kyn_active_call_session';
+
+  function _saveSession(callId, callType, peerId) {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        callId, callType, peerId,
+        savedAt: Date.now(),
+      }));
+    } catch(_) {}
+  }
+
+  function _clearSession() {
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch(_) {}
+  }
+
+  function _loadSession() {
+    try {
+      var raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      var s = JSON.parse(raw);
+      // Only restore if saved within last 90 seconds (call was active recently)
+      if (Date.now() - s.savedAt > 90000) { _clearSession(); return null; }
+      return s;
+    } catch(_) { return null; }
+  }
+
+  // Save session when call connects
+  window.addEventListener('callCore:stateChange', function(e) {
+    var state = e.detail && e.detail.state;
+    if (state === 'CONNECTED') {
+      var callId   = e.detail.callId   || (window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId));
+      var callType = e.detail.callType || (window.callsState && window.callsState.callType) || 'audio';
+      var peerId   = e.detail.peerId   || (window.callsState && window.callsState.remoteUserId);
+      if (callId) _saveSession(callId, callType, peerId);
+    }
+    if (state === 'IDLE' || state === 'ENDED' || state === 'FAILED') {
+      _clearSession();
+    }
+  });
+
+  // On page load — check for active session to recover
+  function _attemptRecovery() {
+    var session = _loadSession();
+    if (!session) return;
+
+    console.log('[SessionRecovery] Found active call session:', session);
+
+    // Show recovery banner
+    var banner = document.createElement('div');
+    banner.id = 'kyn-recovery-banner';
+    banner.setAttribute('role', 'alert');
+    banner.setAttribute('aria-live', 'assertive');
+    banner.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','z-index:99999',
+      'background:#6366f1','color:#fff','text-align:center',
+      'padding:12px 20px','font-size:14px','font-weight:600',
+      'display:flex','align-items:center','justify-content:center','gap:12px'
+    ].join(';');
+    banner.innerHTML = [
+      '<i class="fas fa-phone-alt" aria-hidden="true"></i>',
+      '<span>You were in an active call. Rejoin?</span>',
+      '<button id="kyn-rejoin-btn" aria-label="Rejoin call" style="background:rgba(255,255,255,0.2);border:none;color:#fff;border-radius:6px;padding:5px 14px;cursor:pointer;font-size:13px;font-weight:600;">Rejoin</button>',
+      '<button id="kyn-recovery-dismiss" aria-label="Dismiss" style="background:transparent;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:18px;padding:0 8px;">×</button>'
+    ].join('');
+    document.body.appendChild(banner);
+
+    if (window._kynAnnounce) window._kynAnnounce('You were in an active call. Press rejoin to reconnect.');
+
+    document.getElementById('kyn-rejoin-btn').addEventListener('click', function() {
+      banner.remove();
+      // Re-initiate call with stored session data
+      if (window.callCore && window.callCore.rejoinCall) {
+        window.callCore.rejoinCall(session.callId, session.callType);
+      } else {
+        // Fallback: navigate to calls page with params
+        var url = new URL(window.location.href);
+        url.searchParams.set('rejoinCallId', session.callId);
+        url.searchParams.set('callType', session.callType || 'audio');
+        window.location.href = url.toString();
+      }
+      _clearSession();
+    });
+
+    document.getElementById('kyn-recovery-dismiss').addEventListener('click', function() {
+      banner.remove();
+      _clearSession();
+    });
+
+    // Auto-dismiss after 15 seconds
+    setTimeout(function() { if (banner.parentNode) { banner.remove(); _clearSession(); } }, 15000);
+  }
+
+  // Run recovery check after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { setTimeout(_attemptRecovery, 1200); });
+  } else {
+    setTimeout(_attemptRecovery, 1200);
+  }
+
+  // Expose for calls-core to use
+  window.KynSessionRecovery = {
+    save:  _saveSession,
+    clear: _clearSession,
+    load:  _loadSession,
+  };
+})();

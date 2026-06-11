@@ -5472,6 +5472,14 @@ window.__CALLS_IFRAME__ = {
         e.preventDefault();
         const capBtn = document.getElementById('captionsBtn');
         if (capBtn) capBtn.click();
+      } else if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        const blurBtn = document.getElementById('kyn-blur-btn');
+        if (blurBtn) blurBtn.click();
+      } else if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        const noiseBtn = document.getElementById('kyn-noise-btn');
+        if (noiseBtn) noiseBtn.click();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         const endBtn = document.getElementById('endCallBtn') || document.getElementById('hangupBtn');

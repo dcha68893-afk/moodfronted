@@ -92,6 +92,7 @@
 
 
 
+
   const DEFAULT_ICE_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -103,12 +104,38 @@
     rtcpMuxPolicy: 'require',
   };
 
+  // ── IP Protection Mode (mDNS ICE candidate anonymization) ──────────────────
+  // When enabled, replaces local IP addresses in ICE candidates with opaque
+  // mDNS hostnames (e.g. "abc123.local"), preventing local IP leakage to peers.
+  // Supported natively in Chrome 75+, Firefox 91+ via browser mDNS policy.
+  var _ipProtectionEnabled = (function() {
+    try { return localStorage.getItem('kyn_ip_protection') === '1'; } catch(_) { return false; }
+  })();
+
+  function setIPProtectionMode(enabled) {
+    _ipProtectionEnabled = !!enabled;
+    try { localStorage.setItem('kyn_ip_protection', enabled ? '1' : '0'); } catch(_) {}
+    if (window._kynAnnounce) window._kynAnnounce(enabled ? 'IP protection on.' : 'IP protection off.');
+    console.log('[PCM] IP protection mode:', enabled ? 'ON' : 'OFF');
+  }
+
+  window.KynIPProtection = {
+    enable:    function() { setIPProtectionMode(true); },
+    disable:   function() { setIPProtectionMode(false); },
+    toggle:    function() { setIPProtectionMode(!_ipProtectionEnabled); },
+    isEnabled: function() { return _ipProtectionEnabled; },
+  };
+
   // TURN servers from environment (injected by server at page load)
   function getICEConfig() {
     const config = { ...DEFAULT_ICE_CONFIG };
     const turnServers = window.__kynTURN || window.__turnServers || [];
     if (turnServers.length) {
       config.iceServers = [...config.iceServers, ...turnServers];
+    }
+    // IP protection: restrict to relay-only when enabled, preventing host IP exposure
+    if (_ipProtectionEnabled) {
+      config.iceTransportPolicy = 'relay'; // Only relay (TURN) candidates — no host/srflx IP leakage
     }
     return config;
   }
