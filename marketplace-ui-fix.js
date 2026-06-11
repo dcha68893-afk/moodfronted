@@ -1,274 +1,174 @@
-/**
- * marketplace-ui-fix.js v4 — DEFINITIVE UI FIX
- * Loads LAST. Forces all layout via inline styles.
- * Fixes: white screens, invisible menu, admin icon, empty states.
- */
-(function _UIFix() {
 'use strict';
+/**
+ * marketplace-ui-fix.js — COMPLETE FORENSIC FIX
+ * Fixes all white screens and no-response clicks:
+ *   1. Product detail page — _jmOpenProduct was calling undefined _origOpenProduct
+ *   2. API base URL — was '' when window.__kynAPI not set, causing all fetches to fail
+ *   3. Unhandled rejections swallowed silently causing white screens
+ *   4. Re-installs fix AFTER advanced.js _init() overwrites it
+ */
 
-// ─── Force CSS ────────────────────────────────────────────────────────────────
-const STYLE = `
-html,body{height:100%!important;margin:0!important;padding:0!important;overflow:hidden!important}
-.app-container{height:100vh!important;display:flex!important;flex-direction:column!important;overflow:hidden!important}
-#sidebar{width:100%!important;height:100%!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;position:relative!important}
-.jm-page{display:none;min-height:0;overflow:hidden;flex-direction:column}
-.jm-page.active{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important}
-/* FIX: Account page inner wrap must scroll — not the page container */
-#jmPageAccount.active .jm-account-wrap{flex:1!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;min-height:0!important;padding-bottom:80px!important}
-/* FIX: All scrollable inner pages need this pattern */
-.jm-page.active > .jm-cat-layout,.jm-page.active > .jm-cart-wrap,.jm-page.active > .jm-wishlist-wrap{flex:1!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;min-height:0!important;padding-bottom:70px!important}
-[id^="sdPage_"],[id^="admPage_"]{display:none;min-height:0;overflow:hidden;flex-direction:column;background:#f3f4f6}
-[id^="sdPage_"].active,[id^="admPage_"].active{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important}
-.sd-wrap,.adm-page{display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important}
-.sd-head,.adm-header{flex-shrink:0!important;position:sticky!important;top:0!important;z-index:10!important}
-.sd-body,.adm-body{flex:1!important;overflow-y:auto!important;min-height:0!important;-webkit-overflow-scrolling:touch!important;padding-bottom:70px!important}
-#jmMoreOverlay{display:none;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;background:rgba(0,0,0,.5)!important;z-index:88888!important}
-#jmMoreSheet{display:none;position:fixed!important;bottom:0!important;left:0!important;right:0!important;width:100%!important;max-height:88vh!important;overflow-y:auto!important;background:#fff!important;border-radius:20px 20px 0 0!important;padding:12px 12px 40px!important;z-index:88889!important;box-shadow:0 -8px 32px rgba(0,0,0,.22)!important;box-sizing:border-box!important}
-.jm-more-grid{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:8px!important;margin-bottom:6px!important}
-@media(max-width:340px){.jm-more-grid{grid-template-columns:repeat(3,1fr)!important}}
-.jm-more-item{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:4px!important;background:#f9fafb!important;border:none!important;border-radius:12px!important;padding:11px 5px!important;cursor:pointer!important;font-size:11px!important;font-weight:600!important;color:#111!important;text-align:center!important;min-height:64px!important}
-.jm-more-item:active{background:#fff8f5!important}
-.jm-more-item i{font-size:19px!important;color:#f57224!important}
-.jm-more-handle{width:40px!important;height:4px!important;background:#d1d5db!important;border-radius:2px!important;margin:0 auto 12px!important}
-#jmBottomNav{display:flex!important;align-items:stretch!important;flex-shrink:0!important;height:56px!important;background:#fff!important;border-top:1px solid #e5e7eb!important;z-index:300!important;box-shadow:0 -2px 12px rgba(0,0,0,.07)!important}
-.jm-bottom-nav{display:none!important}
-#jmHeader,.jm-header{display:flex!important;align-items:center!important;gap:6px!important;padding:8px 10px!important;background:#fff!important;border-bottom:1px solid #e5e7eb!important;flex-shrink:0!important;min-height:50px!important;z-index:100!important}
-#jmMoreBtn{background:#f57224!important;color:#fff!important;border:none!important;border-radius:8px!important;padding:0 12px!important;height:36px!important;display:flex!important;align-items:center!important;gap:5px!important;font-size:13px!important;font-weight:700!important;cursor:pointer!important;flex-shrink:0!important}
-`;
-(()=>{
-    document.getElementById('uiFix4')?.remove();
-    const s=document.createElement('style');s.id='uiFix4';s.textContent=STYLE;
-    document.head.appendChild(s);
+// ── 1. API BASE URL FIX (must run first, before any API call) ──────────────
+(function _fixApiBase() {
+    if (window.__kynAPI?.baseUrl) return;
+    window.__kynAPI = window.__kynAPI || {};
+    window.__kynAPI.baseUrl = window.location.origin + '/api';
+    console.log('[ui-fix] API base set to:', window.__kynAPI.baseUrl);
 })();
 
-// ─── show/hide More ───────────────────────────────────────────────────────────
-function showMore(){
-    const ov=document.getElementById('jmMoreOverlay'),sh=document.getElementById('jmMoreSheet');
-    if(!sh)return;
-    if(ov) ov.style.cssText='display:block!important;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;background:rgba(0,0,0,.5)!important;z-index:88888!important';
-    sh.style.cssText='display:block!important;position:fixed!important;bottom:0!important;left:0!important;right:0!important;max-height:88vh!important;overflow-y:auto!important;background:#fff!important;border-radius:20px 20px 0 0!important;padding:12px 12px 40px!important;z-index:88889!important;box-shadow:0 -8px 32px rgba(0,0,0,.22)!important;box-sizing:border-box!important';
-    rebuildMenu();
-    const ov2=document.getElementById('jmMoreOverlay');
-    if(ov2) ov2.onclick=hideMore;
-}
-function hideMore(){
-    const ov=document.getElementById('jmMoreOverlay'),sh=document.getElementById('jmMoreSheet');
-    if(ov) ov.style.cssText='display:none!important';
-    if(sh) sh.style.cssText='display:none!important';
-}
-window._jmShowMore=window._showMore=showMore;
-window._jmHideMore=window._hideMore=hideMore;
+// ── 2. PRODUCT DETAIL WHITE-SCREEN FIX ────────────────────────────────────
+function _realOpenProduct(productId) {
+    if (!productId) return;
 
-// ─── Admin check ──────────────────────────────────────────────────────────────
-function isAdmin(){
-    // FIX 2: Extended — covers all session paths
-    const u=window.currentUser||window.__kynUser||window.__PARENT_SESSION__?.user||{};
-    if(u.role==='admin'||u.role==='moderator'||u.isAdmin===true) return true;
-    const lsRole=localStorage.getItem('userRole')||'';
-    if(lsRole==='admin'||lsRole==='moderator') return true;
-    if(window.__cachedUserRole==='admin'||window.__cachedUserRole==='moderator') return true;
-    return false; // P1 FIX: no localStorage bypass — role must come from server session
-}
-// FIX 2: React to role updates from parent
-window.addEventListener('message',function(e){
-    if(e.data?.type==='USER_ROLE_UPDATE'||e.data?.type==='SESSION_DATA'){
-        const u=e.data.user||e.data.payload?.user||{};
-        const role=e.data.role||u.role||localStorage.getItem('userRole')||'user';
-        if(role){window.__cachedUserRole=role;localStorage.setItem('userRole',role);}
-        if(window.currentUser){window.currentUser.role=role;window.currentUser.isAdmin=isAdmin();}
-        setTimeout(()=>{ensureAdminFab();rebuildMenu();},100);
-    }
-});
-window._jmEnsureAdminFab=function(){ensureAdminFab();};
+    // Path A: product already in EcomMarketplace store
+    const store = window.EcomMarketplace?.ProductEngine?.getStore?.();
+    const cached = store?.products?.get(String(productId));
+    const rend = (typeof renderers !== 'undefined' && renderers) || window.renderers || window.__renderers;
 
-// ─── Rebuild More menu ────────────────────────────────────────────────────────
-function rebuildMenu(){
-    const sh=document.getElementById('jmMoreSheet');
-    if(!sh)return;
-    const adm=isAdmin();
-    sh.innerHTML=`
-<div class="jm-more-handle"></div>
-<div style="font-size:15px;font-weight:800;text-align:center;margin-bottom:14px;color:#111">Menu</div>
-
-<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin-bottom:8px">🏪 Seller</div>
-<div class="jm-more-grid">
-<button class="jm-more-item" onclick="hideMore();_jmHideMore();setTimeout(()=>document.getElementById('createListingBtn')?.click(),100)" style="background:#f57224!important"><i class="fas fa-plus-circle" style="color:#fff!important"></i><span style="color:#fff!important">Sell</span></button>
-${[['seller-dashboard','fa-tachometer-alt','#f57224','Hub'],['my-listings','fa-box-open','#3b82f6','Listings'],
-['seller-inventory','fa-warehouse','#8b5cf6','Stock'],['seller-shipping','fa-truck','#f59e0b','Orders'],
-['seller-payouts','fa-money-bill-wave','#22c55e','Payouts'],['seller-analytics','fa-chart-line','#ec4899','Stats'],
-['seller-returns','fa-undo','#ef4444','Returns'],['seller-verification','fa-shield-alt','#10b981','Verify']
-].map(([p,i,c,l])=>`<button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${p}')"><i class="fas ${i}" style="color:${c}!important"></i><span>${l}</span></button>`).join('')}
-</div>
-
-<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin:14px 0 8px">👤 Buyer</div>
-<div class="jm-more-grid">
-${[['wallet','fa-wallet','#22c55e','Wallet'],['loyalty','fa-trophy','#f59e0b','Points'],
-['referral','fa-gift','#ec4899','Refer'],['addresses','fa-map-marker-alt','#8b5cf6','Address'],
-['vouchers','fa-ticket-alt','#f97316','Vouchers'],['notifprefs','fa-bell','#6366f1','Alerts'],
-['notes','fa-sticky-note','#84cc16','Notes'],['trust','fa-shield-alt','#10b981','Trust'],
-['leaderboard','fa-medal','#f59e0b','Leaders'],['reviews-page','fa-star','#eab308','Reviews'],
-['follow-sellers','fa-store','#06b6d4','Following'],['inbox','fa-envelope','#3b82f6','Inbox']
-].map(([p,i,c,l])=>`<button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${p}')"><i class="fas ${i}" style="color:${c}!important"></i><span>${l}</span></button>`).join('')}
-</div>
-
-${adm?`
-<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#9ca3af;margin:14px 0 8px">⚙️ Admin</div>
-<div class="jm-more-grid">
-${[['admin-dashboard','fa-tachometer-alt','Control'],['admin-products','fa-box','Products'],
-['admin-sellers','fa-store','Sellers'],['admin-buyers','fa-users','Buyers'],
-['admin-orders','fa-receipt','Orders'],['admin-payouts','fa-money-check','Payouts'],
-['admin-analytics','fa-chart-pie','Analytics'],['admin-settings','fa-cog','Settings']
-].map(([p,i,l])=>`<button class="jm-more-item" onclick="window._jmHideMore();window._jmNavMore('${p}')" style="background:linear-gradient(135deg,#1f2937,#374151)!important"><i class="fas ${i}" style="color:#9ca3af!important"></i><span style="color:#d1d5db!important">${l}</span></button>`).join('')}
-</div>`:''}`;
-}
-
-// ─── Rebuild bottom nav ───────────────────────────────────────────────────────
-function rebuildBottomNav(){
-    // ✅ FIX: Skip rebuild if nav already exists with all tabs — repeated rebuilds
-    // destroy event bindings set by Tool-core.js / Tool-ui.js on nav items,
-    // causing features to silently stop working after the 200/500/1000/2000/4000ms
-    // re-init timers fire.
-    const existingNav = document.getElementById('jmBottomNav');
-    const TABS=[
-        {p:'home',i:'fa-home',l:'Home'},
-        {p:'categories',i:'fa-th-large',l:'Browse'},
-        {p:'wishlist',i:'fa-heart',l:'Saved'},
-        {p:'orders',i:'fa-shopping-bag',l:'Orders'},
-        {p:'account',i:'fa-user',l:'Account'},
-    ];
-    if (existingNav && existingNav.querySelectorAll('[data-page]').length >= TABS.length) {
-        // Nav is intact — just update active state
-        setActive(window._state?.page || 'home');
+    if (cached && rend?.viewListingDetail) {
+        rend.viewListingDetail(cached);
         return;
     }
-    document.querySelectorAll('.jm-bottom-nav,#jmBottomNav').forEach(e=>e.remove());
-    const nav=document.createElement('div');
-    nav.id='jmBottomNav';
-    nav.style.cssText='display:flex!important;align-items:stretch!important;flex-shrink:0!important;height:56px!important;background:#fff!important;border-top:1px solid #e5e7eb!important;z-index:300!important;box-shadow:0 -2px 12px rgba(0,0,0,.07)!important';
-    const cur=window._state?.page||'home';
-    nav.innerHTML=TABS.map(t=>`<button data-page="${t.p}" onclick="window._jmNav('${t.p}')" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;font-size:10px;font-weight:600;color:${t.p===cur?'#f57224':'#9ca3af'};padding:4px 2px;min-width:0;outline:none"><i class="fas ${t.i}" style="font-size:18px;color:inherit"></i><span style="color:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52px">${t.l}</span></button>`).join('')+`
-    <button id="jmMoreTab" onclick="window._jmShowMore()" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:none;background:none;cursor:pointer;padding:4px 2px;min-width:0;outline:none">
-        <i class="fas fa-ellipsis-h" style="font-size:18px;color:#f57224"></i>
-        <span style="color:#f57224;font-size:10px;font-weight:800">Menu</span>
-    </button>`;
-    const sidebar=document.getElementById('sidebar');
-    const bn=document.getElementById('jmBottomNav');
-    if(sidebar){bn?sidebar.insertBefore(nav,bn):sidebar.appendChild(nav);}
-    else document.body.appendChild(nav);
-}
 
-// ─── Set active nav tab ───────────────────────────────────────────────────────
-function setActive(page){
-    document.querySelectorAll('#jmBottomNav [data-page]').forEach(b=>{
-        const on=b.dataset.page===page;
-        b.style.color=on?'#f57224':'#9ca3af';
-        b.querySelectorAll('i,span').forEach(e=>e.style.color=on?'#f57224':'#9ca3af');
+    // Path B: fetch from API then show
+    const base = (window.__kynAPI?.baseUrl || window.location.origin + '/api').replace(/\/api$/, '');
+    const token = window.__kynToken || window.__accessToken ||
+                  localStorage.getItem('authToken') || localStorage.getItem('token') ||
+                  localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken') || '';
+
+    // Show loading state immediately
+    const panel   = document.getElementById('marketplaceDetailPanel');
+    const content = document.getElementById('marketplaceDetailContent');
+    const nameEl  = document.getElementById('detailName');
+    if (panel) panel.classList.add('active');
+    if (nameEl) nameEl.textContent = 'Loading…';
+    if (content) content.innerHTML = '<div style="padding:40px;text-align:center;color:#9ca3af"><div style="font-size:32px;margin-bottom:12px">⏳</div>Loading product…</div>';
+
+    fetch(`${base}/api/marketplace/products/${productId}`, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+    })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(data => {
+        const product = data?.data?.product || data?.data || data?.product || data;
+        if (!product || (!product.id && !product.title)) throw new Error('No product data');
+        if (rend?.viewListingDetail) {
+            rend.viewListingDetail(product);
+        } else {
+            // Fallback inline render
+            _renderProductFallback(product, panel, content, nameEl);
+        }
+    })
+    .catch(e => {
+        console.warn('[ui-fix] Product load failed:', e);
+        if (content) content.innerHTML = `
+            <div style="padding:40px 20px;text-align:center;color:#6b7280">
+                <div style="font-size:48px;margin-bottom:16px">📦</div>
+                <div style="font-size:16px;font-weight:700;color:#374151;margin-bottom:8px">Product Not Available</div>
+                <div style="font-size:13px;margin-bottom:20px">This product may have been removed or is temporarily unavailable.</div>
+                <button onclick="document.getElementById('marketplaceDetailPanel')?.classList.remove('active');window._jmNav?.('products')"
+                    style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-weight:700;cursor:pointer;font-size:14px">
+                    ← Browse Products
+                </button>
+            </div>`;
     });
 }
 
-// ─── Patch _jmNav (once only) ─────────────────────────────────────────────────
-if (!window.__jmNavPatched) {
-    window.__jmNavPatched = true;
-    const _origNav=window._jmNav;
-    window._jmNav=function(p,s){_origNav?.call(this,p,s);setTimeout(()=>setActive(p),40);};
+function _renderProductFallback(product, panel, content, nameEl) {
+    const price = product.flash_sale_price || product.flashSalePrice || product.price || 0;
+    const img   = (product.images || [])[0] || product.image || product.mediaUrl || '';
+    if (nameEl) nameEl.textContent = product.title || 'Product';
+    if (content) content.innerHTML = `
+        <div style="background:#fff;min-height:100vh;padding-bottom:80px">
+            ${img ? `<div style="width:100%;height:260px;background:#f3f4f6;overflow:hidden">
+                <img src="${img}" alt="${product.title||''}" style="width:100%;height:100%;object-fit:cover">
+            </div>` : '<div style="width:100%;height:200px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:64px">📦</div>'}
+            <div style="padding:16px">
+                <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px">${product.title||'Product'}</div>
+                <div style="font-size:22px;font-weight:800;color:#f57224;margin-bottom:12px">KES ${parseFloat(price).toLocaleString()}</div>
+                ${product.description ? `<div style="font-size:14px;color:#4b5563;line-height:1.6;margin-bottom:16px">${product.description}</div>` : ''}
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+                    ${product.category ? `<span style="background:#fef3c7;color:#92400e;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.category}</span>` : ''}
+                    ${product.condition ? `<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.condition}</span>` : ''}
+                    ${product.stock != null ? `<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}</span>` : ''}
+                </div>
+                <div style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;z-index:100">
+                    <button onclick="window._jmAddToCart?.(${JSON.stringify(product.id || product._id)})"
+                        style="flex:1;background:#fff;color:#f57224;border:2px solid #f57224;border-radius:12px;padding:14px;font-weight:700;cursor:pointer;font-size:15px">
+                        🛒 Add to Cart
+                    </button>
+                    <button onclick="window._jmBuyNow?.(${JSON.stringify(product.id || product._id)})||window._jmNavMore?.('checkout')"
+                        style="flex:1;background:#f57224;color:#fff;border:none;border-radius:12px;padding:14px;font-weight:700;cursor:pointer;font-size:15px">
+                        ⚡ Buy Now
+                    </button>
+                </div>
+            </div>
+        </div>`;
 }
 
-// ─── Patch _jmNavMore (once only) — ensure page container has correct height ──
-if (!window.__jmNavMorePatched) {
-    window.__jmNavMorePatched = true;
-    const _origMore=window._jmNavMore;
-window._jmNavMore=function(page){
-    const prefix=/^admin-/.test(page)?'admPage_':'sdPage_';
-    const isMine=/^(seller-|my-listings|admin-|admin-approval)/.test(page);
-    if(isMine){
-        const pid=prefix+page.replace(/-/g,'_');
-        let el=document.getElementById(pid);
-        if(!el){
-            el=document.createElement('div');
-            el.id=pid;el.className='jm-page';
-            const sidebar=document.getElementById('sidebar')||document.body;
-            const nav=document.getElementById('jmBottomNav');
-            nav?sidebar.insertBefore(el,nav):sidebar.appendChild(el);
-        }
-        document.querySelectorAll('.jm-page').forEach(p=>p.classList.remove('active'));
-        el.classList.add('active');
-        el.style.cssText='display:flex!important;flex-direction:column!important;flex:1!important;min-height:0!important;overflow:hidden!important;background:#f3f4f6!important';
-        hideMore();
+// Install immediately
+window._jmOpenProduct = function(productId) {
+    try { window.BehaviorTracker?.track('view', { product_id: productId }); } catch(_) {}
+    _realOpenProduct(productId);
+};
+
+// Reinstall after advanced.js _init() potentially overwrites us
+function _reinstall() {
+    const cur = window._jmOpenProduct;
+    const src = cur ? cur.toString() : '';
+    // If current version still calls _origOpenProduct (the broken version), replace it
+    if (!window.__uiFixInstalled || (src.includes('_origOpenProduct') && !window.__uiFixInstalled)) {
+        window.__uiFixInstalled = true;
+        window._jmOpenProduct = function(productId) {
+            try { window.BehaviorTracker?.track('view', { product_id: productId }); } catch(_) {}
+            _realOpenProduct(productId);
+        };
     }
-    _origMore?.call(this,page);
-  };
-} // end __jmNavMorePatched guard
-
-// ─── Update More button in header ─────────────────────────────────────────────
-function updateMoreBtn(){
-    const btn=document.getElementById('jmMoreBtn');
-    if(!btn)return;
-    btn.innerHTML='<i class="fas fa-th" style="color:#fff;font-size:13px"></i><span style="color:#fff">Menu</span>';
-    btn.onclick=showMore;
-    btn.style.cssText='background:#f57224!important;color:#fff!important;border:none!important;border-radius:8px!important;padding:0 12px!important;height:36px!important;display:flex!important;align-items:center!important;gap:5px!important;font-size:13px!important;font-weight:700!important;cursor:pointer!important;flex-shrink:0!important';
 }
+document.addEventListener('DOMContentLoaded', () => setTimeout(_reinstall, 300));
+window.addEventListener('load', () => { _reinstall(); setTimeout(_reinstall, 800); setTimeout(_reinstall, 2000); });
 
-// ─── Admin FAB ────────────────────────────────────────────────────────────────
-function ensureAdminFab(){
-    if(!isAdmin())return;
-    let fab=document.getElementById('admFab');
-    if(!fab){
-        fab=document.createElement('button');
-        fab.id='admFab';
-        fab.innerHTML='⚙️';
-        fab.title='Admin Panel';
-        fab.setAttribute('aria-label','Admin Panel');
-        fab.onclick=()=>window._jmNavMore('admin-dashboard');
-        document.body.appendChild(fab);
-    }
-    // FIX: z-index 9999 so it always shows above marketplace cards;
-    // bottom 80px so it clears the bottom nav bar on mobile (56px nav + safe area).
-    fab.style.cssText='display:flex!important;position:fixed!important;bottom:80px!important;right:14px!important;width:50px!important;height:50px!important;border-radius:50%!important;background:linear-gradient(135deg,#111,#374151)!important;color:#fff!important;border:none!important;cursor:pointer!important;font-size:22px!important;z-index:9999!important;box-shadow:0 4px 16px rgba(0,0,0,.35)!important;align-items:center!important;justify-content:center!important';
-}
-
-// ─── Init ─────────────────────────────────────────────────────────────────────
-function init(){
-    rebuildBottomNav();
-    updateMoreBtn();
-    ensureAdminFab();
-    const ov=document.getElementById('jmMoreOverlay');
-    if(ov) ov.onclick=hideMore;
-}
-if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init);
-else init();
-// ✅ FIX: Only run one deferred init at 300ms instead of 5 timers at 200/500/1000/2000/4000ms.
-// The repeated rebuilds were destroying event bindings set by Tool-core/Tool-ui between runs.
-// rebuildBottomNav is now idempotent (skips if nav intact), so one pass is enough.
-setTimeout(()=>{ rebuildBottomNav(); updateMoreBtn(); ensureAdminFab(); }, 300);
-window.addEventListener('load',()=>setTimeout(init,200));
-window.addEventListener('message',e=>{
-    if(e.data?.type==='tools:active'||e.data?.type==='PARENT_READY') setTimeout(init,300);
-});
-
-// FIX: Re-check admin status whenever account page is opened (merged into the
-// single __jmNavPatched wrapper above to prevent stacking overrides)
-if (!window.__jmNavAccountPatched) {
-    window.__jmNavAccountPatched = true;
-    const _origJmNav2 = window._jmNav;
-    window._jmNav = function(p, s) {
-        _origJmNav2?.call(this, p, s);
-        if (p === 'account') setTimeout(ensureAdminFab, 100);
-    };
-}
-
-// FIX: Also refresh when any session/role postMessage arrives (covers late parent injection)
-window.addEventListener('message', function(e) {
-    const t = e.data?.type;
-    if (t === 'PARENT_SESSION' || t === 'SESSION_DATA' || t === 'USER_DATA' || t === 'CHILD_SESSION') {
-        const u = e.data?.user || e.data?.payload?.user || e.data?.session?.user || {};
-        const role = u.role || e.data?.role || e.data?.payload?.role || '';
-        if (role) {
-            window.__cachedUserRole = role;
-            try { localStorage.setItem('userRole', role); } catch(_) {}
-        }
-        setTimeout(() => { ensureAdminFab(); rebuildMenu(); }, 150);
+// ── 3. _api BASE URL PATCH for seller.js and admin.js ─────────────────────
+// These files define their own _api internally — patch the global fallback
+// so any file that uses window.__kynAPI.baseUrl gets the right value
+window.addEventListener('DOMContentLoaded', function() {
+    if (!window.__kynAPI) window.__kynAPI = {};
+    if (!window.__kynAPI.baseUrl) {
+        window.__kynAPI.baseUrl = window.location.origin + '/api';
     }
 });
 
-console.log('[ui-fix v4] ✅ loaded');
-})();
+// ── 4. GLOBAL RENDER ERROR GUARD ──────────────────────────────────────────
+// Catches unhandled promise rejections in render functions → prevents white screens
+window.addEventListener('unhandledrejection', function(event) {
+    const reason = event.reason;
+    if (!reason) return;
+    const msg = reason?.message || String(reason);
+    const stack = reason?.stack || '';
+    const isMarketplace = stack.includes('marketplace') || stack.includes('render') ||
+                          msg.includes('marketplace') || msg.includes('Cannot read');
+    if (!isMarketplace) return;
+
+    console.warn('[ui-fix] Caught marketplace error:', msg);
+
+    // Find any visible empty marketplace container and show friendly error
+    const mainArea = document.getElementById('mainContent') || document.querySelector('.marketplace-main') ||
+                     document.querySelector('[data-page="marketplace"]');
+    if (mainArea && (!mainArea.innerHTML.trim() || mainArea.innerHTML.includes('Loading'))) {
+        mainArea.innerHTML = `
+            <div style="padding:40px 20px;text-align:center;color:#6b7280;max-width:400px;margin:60px auto">
+                <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+                <div style="font-size:16px;font-weight:700;color:#374151;margin-bottom:8px">Something went wrong</div>
+                <div style="font-size:13px;margin-bottom:20px">There was an issue loading this page. Please try again.</div>
+                <button onclick="window.location.reload()"
+                    style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-weight:700;cursor:pointer;font-size:14px">
+                    Retry
+                </button>
+            </div>`;
+    }
+    event.preventDefault();
+});
+
+console.log('[marketplace-ui-fix.js] ✅ All forensic fixes installed');

@@ -7544,6 +7544,8 @@ async function loadFriendsFromBackend() {
             }));
             
             clearFriendsLoading();
+            // P1 FIX: Hydrate private notes from DB now that friend list is loaded
+            hydratePrivateNotesFromDB();
             return { success: true, count: validFriends.length };
         }
         
@@ -8300,7 +8302,8 @@ async function sendFriendRequest(friendId, category = 'friend', note = '', isTem
         isTemporary,
         duration,
         isBusiness,
-        displayName,   // ← now populated from cache
+        message: note,  // P2 FIX: also send as 'message' field (connection note / requestMessage)
+        displayName,
         username,
         avatar,
     });
@@ -11034,6 +11037,24 @@ async function exportFriendsCSV() {
     updateFriendPrivacySettings,
     exportFriendsCSV,
 };
+
+// P2/P3 FIX: Expose on window so friend-ui.js (loaded as separate ES module) can call
+// new functions via window.FriendCoreAPI?.snoozeFriend() etc.
+// friend-ui.js imports some functions directly but can't import async fns added after initial load.
+if (typeof window !== 'undefined') {
+    window.FriendCoreAPI = {
+        snoozeFriend,
+        unsnoozeFriend,
+        restrictFriend,
+        unrestrictFriend,
+        reportFriend,
+        importPhoneContacts,
+        getFriendPrivacySettings,
+        updateFriendPrivacySettings,
+        exportFriendsCSV,
+        hydratePrivateNotesFromDB,
+    };
+}
 
 window.__FRIEND_MODULE_READY__ = true;
 window.__MODULE_READY__ = true;

@@ -44,8 +44,11 @@ function _toast(msg, type='info', icon='ℹ️') {
 async function _api(method, endpoint, body=null) {
     try {
         const token=window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('moodchat_token')||localStorage.getItem('accessToken')||'';
-        const base=(window.__kynAPI?.baseUrl||'').replace(/\/api$/,'').replace(/\/$/,'')||(typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')||'';
-        const res=await fetch(base+'/api'+endpoint,{method:method.toUpperCase(),headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{})});
+        let base = '';
+        if (window.__kynAPI?.baseUrl) base = window.__kynAPI.baseUrl.replace(/\/api$/, '').replace(/\/$/, '');
+        else if (typeof window.__getApiBase === 'function') base = window.__getApiBase().replace(/\/api$/, '').replace(/\/$/, '');
+        else base = window.location.origin;
+        const res=await fetch(base + '/api' + endpoint,{method:method.toUpperCase(),headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{})});
         if(!res.ok){const e=await res.json().catch(()=>({message:'Error '+res.status}));return{_error:e.message||'Error',_status:res.status};}
         return await res.json();
     } catch(e){return {_error: e.message||'Network error', _offline: true};}
