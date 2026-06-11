@@ -2117,7 +2117,9 @@ const renderers = {
                     ${origPrc>price ? `<span class="jm-card-oldprice">${fmt(origPrc)}</span>` : ''}
                 </div>
                 ${delivFee===0 ? '<div class="jm-card-delivery">Free delivery</div>' : (delivFee>0 ? `<div style="font-size:10px;color:#6b7280">+ ${fmt(delivFee)} delivery</div>` : '')}
-                ${stock!==null&&stock>0&&stock<=5 ? `<div class="jm-card-stock-warn">Only ${stock} left!</div>` : ''}
+                ${stock!==null&&stock>0&&stock<=5 ? `<div class="jm-card-stock-warn">🔥 Only ${stock} left!</div>` : ''}
+                ${listing.is_flash_sale||listing.isFlashSale ? `<div style="font-size:10px;color:#ef4444;font-weight:700;margin-bottom:3px">⚡ FLASH DEAL${listing.flash_sale_end||listing.flashSaleEnd?` · <span class="jm-countdown" data-end="${escapeHtml(String(listing.flash_sale_end||listing.flashSaleEnd||''))}"></span>`:''}</div>` : ''}
+                ${listing.seller_verified||listing.sellerVerified ? `<div style="font-size:10px;color:#2563eb;font-weight:600;margin-bottom:3px">✔ Verified Seller</div>` : ''}
                 ${inStock
                     ? `<button class="jm-add-cart-btn${inCart?' in-cart':''}" data-id="${listing.id}" onclick="event.stopPropagation()">
                           ${inCart ? '✓ In Cart' : 'Add To Cart'}`
@@ -7178,3 +7180,64 @@ window.addEventListener('message', (e) => {
 });
 
 })(); // end _JumiaMPEngine
+// ── FLASH COUNTDOWN TIMERS ────────────────────────────────────────────────────
+// Ticks every second and updates all .jm-countdown[data-end] spans on the page
+(function _initCountdowns() {
+    function _tick() {
+        document.querySelectorAll('.jm-countdown[data-end]').forEach(el => {
+            const end = new Date(el.dataset.end).getTime();
+            if (!end || isNaN(end)) { el.textContent = ''; return; }
+            const diff = Math.max(0, end - Date.now());
+            if (diff === 0) { el.textContent = 'Ended'; el.closest('[data-listing-id]')?.querySelector('.jm-card-discount-badge')?.remove(); return; }
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            el.textContent = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        });
+    }
+    setInterval(_tick, 1000);
+    _tick();
+})();
+
+// ── NOTIFICATION BELL BADGE ───────────────────────────────────────────────────
+// Listens for marketplace socket events emitted by the backend and bumps the badge
+(function _initNotifBell() {
+    let _unread = 0;
+
+    function _bump(delta = 1) {
+        _unread = Math.max(0, _unread + delta);
+        const badge = document.getElementById('jmNotifBadge');
+        if (!badge) return;
+        badge.textContent = _unread > 99 ? '99+' : String(_unread);
+        badge.classList.toggle('visible', _unread > 0);
+    }
+
+    function _clear() {
+        _unread = 0;
+        const badge = document.getElementById('jmNotifBadge');
+        if (badge) { badge.textContent = '0'; badge.classList.remove('visible'); }
+    }
+
+    // Listen on socket bridge events from parent (postMessage)
+    window.addEventListener('message', (ev) => {
+        try {
+            const d = ev.data;
+            if (!d || typeof d !== 'object') return;
+            const notifEvents = [
+                'order:created','order:status_changed','product:approved','product:rejected',
+                'refund:approved','refund:rejected','kyc:approved','kyc:rejected','payout:disbursed',
+            ];
+            if (notifEvents.includes(d.type) || notifEvents.includes(d.event)) _bump(1);
+        } catch (_) {}
+    });
+
+    // Clear badge when user opens notifications panel
+    const _origNavMore = window._jmNavMore;
+    window._jmNavMore = function(page, ...args) {
+        if (page === 'notifprefs') _clear();
+        if (_origNavMore) _origNavMore(page, ...args);
+    };
+
+    window._jmUpdateNotifBadge = _bump;
+    window._jmClearNotifBadge  = _clear;
+})();

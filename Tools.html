@@ -1315,6 +1315,12 @@
         color: #111111 !important;
         border-color: #e5e7eb !important;
     }
+    /* ── Notification bell badge ────────────────────────────────────── */
+    #jmNotifBadge { display:none; }
+    #jmNotifBadge.visible { display:flex !important; }
+    .jm-card-stock-warn { color:#ef4444; font-size:10px; font-weight:700; margin-bottom:3px; }
+    /* ── Flash countdown on cards ───────────────────────────────────── */
+    .jm-countdown { font-variant-numeric:tabular-nums; }
     </style>
 <script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
@@ -1340,6 +1346,11 @@
                 <button class="jm-icon-btn" id="jmCartBtn" onclick="window._jmNav('cart')">
                     <i class="fas fa-shopping-cart"></i>
                     <span class="jm-cart-badge" id="jmCartBadge" style="display:none">0</span>
+                </button>
+                <!-- Notification bell -->
+                <button class="jm-icon-btn" id="jmNotifBtn" onclick="window._jmNavMore('notifprefs')" title="Notifications" style="position:relative">
+                    <i class="fas fa-bell"></i>
+                    <span class="jm-notif-badge" id="jmNotifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#ef4444;color:#fff;border-radius:50%;width:16px;height:16px;font-size:9px;font-weight:700;display:none;align-items:center;justify-content:center;line-height:1">0</span>
                 </button>
                 <!-- More / Menu button — orange pill so always visible -->
                 <button id="jmMoreBtn" onclick="window._jmShowMore()" title="More options" style="background:#f57224;color:#fff;border:none;border-radius:8px;padding:0 12px;height:36px;display:flex;align-items:center;gap:5px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">

@@ -3875,8 +3875,9 @@
                     firstName: cachedUser?.firstName || '',
                     lastName: cachedUser?.lastName || '',
                     // FIX 1: Always propagate role & isAdmin to iframes via SESSION_DATA
-                    role: cachedUser?.role || window.__cachedUserRole || localStorage.getItem('userRole') || 'user',
-                    isAdmin: cachedUser?.isAdmin === true || cachedUser?.role === 'admin' || cachedUser?.role === 'moderator' || window.__cachedUserRole === 'admin' || localStorage.getItem('userRole') === 'admin'
+                    role: cachedUser?.role || window.__cachedUserRole || 'user',
+                    // P1 FIX: isAdmin must come from server-verified session only — not localStorage
+                    isAdmin: cachedUser?.isAdmin === true || cachedUser?.role === 'admin' || cachedUser?.role === 'moderator' || window.__cachedUserRole === 'admin'
                 };
 
                 const sessionData = {
@@ -7330,13 +7331,9 @@ window.__groupHdrHide = hideGroupHeader;
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
 
 <!-- Kynecta Feature Modules: server-sync, link preview, voice recorder -->
-<script src="js/e2e-encryption.js" defer></script>
 <script src="js/chat-sync.js" defer></script>
 <script src="js/link-preview.js" defer></script>
 <script src="js/voice-recorder.js" defer></script>
-<script src="js/virtual-scroll.js" defer></script>
-<script src="js/push-manager.js" defer></script>
-<script src="js/backup-manager.js" defer></script>
 
 <!-- PWA Install Banner + Instant Update -->
 <script>
