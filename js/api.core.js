@@ -6861,6 +6861,15 @@ try {
     apiCore = {
         ...ApiGateway,
         
+        // Bug 4 fix: expose BACKEND_BASE_URL so api.request.js can read it
+        // (api.request.js line 2288: _BACKEND_BASE_URL = apiCore.BACKEND_BASE_URL)
+        get BACKEND_BASE_URL() {
+            return getBaseUrl ? getBaseUrl() : ACTIVE_BASE_URL;
+        },
+        get BASE_API_URL() {
+            return getBaseUrl ? getBaseUrl() : ACTIVE_BASE_URL;
+        },
+        
         iframe: {
             send: sendToIframe,
             broadcast: broadcastToParent,

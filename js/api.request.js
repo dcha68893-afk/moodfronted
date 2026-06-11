@@ -511,7 +511,7 @@
             
             // 🔥 CRITICAL: For protected endpoints, token MUST exist
             if (!isPublic && !token) {
-                console.error("[API] ❌ Protected endpoint without token:", normalizedUrl);
+                console.error("[API] ❌ Protected endpoint without token:`, normalizedUrl);
                 const error = new Error('UNAUTHORIZED');
                 error.status = 401;
                 error.isAuthError = true;
@@ -523,7 +523,7 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => request(method, url, options),
-                    `${normalizedMethod} ${url}`,
+                    \`${normalizedMethod} ${url}\`,
                     url
                 );
             }
@@ -535,7 +535,7 @@
             const retryCount = trackRequestStart(normalizedUrl, functionName);
             
             if (retryCount > _safetyState.maxRetriesPerRequest) {
-                console.warn("[API] ⏳ Max retries reached for ${normalizedUrl}");
+                console.warn(`[API] ⏳ Max retries reached for ${normalizedUrl}`);
                 trackRequestEnd(normalizedUrl, functionName, false);
                 throw new Error('Max retries reached');
             }
@@ -546,7 +546,7 @@
             };
             
             if (!isPublic && token) {
-                headers['Authorization'] = `Bearer ${token}`;
+                headers['Authorization'] = \`Bearer ${token}\`;
             }
             
             const fetchOptions = {
@@ -571,7 +571,7 @@
                     try {
                         JSON.parse(options.body);
                     } catch (e) {
-                        console.warn("[API] ⏳ Body appears to be string but not valid JSON:", options.body);
+                        console.warn(`[API] ⏳ Body appears to be string but not valid JSON:`, options.body);
                     }
                 } else {
                     fetchOptions.body = String(options.body);
@@ -606,7 +606,7 @@
             const controller = new AbortController();
             const timeoutId = setTimeout(() => {
                 controller.abort();
-                logRequest(requestId, `⏳ Request timeout after ${_requestState.requestTimeout}ms`);
+                logRequest(requestId, \`⏳ Request timeout after ${_requestState.requestTimeout}ms\`);
             }, _requestState.requestTimeout);
             fetchOptions.signal = controller.signal;
             
@@ -639,7 +639,7 @@
                 }
                 
                 if (response.status === 401) {
-                    console.error("[API] ❌ Unauthorized request:", fullUrl);
+                    console.error(`[API] ❌ Unauthorized request:`, fullUrl);
                     trackRequestEnd(normalizedUrl, functionName, false);
                     const error = new Error(result.message || 'UNAUTHORIZED');
                     error.status = 401;
@@ -649,7 +649,7 @@
                 }
                 
                 trackRequestEnd(normalizedUrl, functionName, false);
-                trackError(normalizedUrl, functionName, `http_${response.status}`);
+                trackError(normalizedUrl, functionName, \`http_${response.status}\`);
                 return result;
             }
             
@@ -661,7 +661,7 @@
             const errorCount = trackError(normalizeEndpoint(url), functionName, error.name || 'request_error');
             
             if (shouldLogError(normalizeEndpoint(url), 'request_error')) {
-                console.error("[API] ❌ Request error for ${url}:", error.message);
+                console.error(`[API] ❌ Request error for ${url}:", error.message);
             }
             
             throw error;
@@ -677,7 +677,7 @@
         
         try {
             if (!url || typeof url !== 'string') {
-                console.error("[API] ❌ api.get() called with invalid URL:", url);
+                console.error("[API] ❌ api.get() called with invalid URL:`, url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
@@ -686,7 +686,7 @@
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(url, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedUrl}\`);
                 await waitForSessionReady();
             }
             
@@ -694,7 +694,7 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => apiGet(url, options),
-                    `GET ${url}`,
+                    \`GET ${url}\`,
                     url
                 );
             }
@@ -708,11 +708,11 @@
             trackRequestStart(normalizedUrl, functionName);
             
             try {
-                const cacheKey = `get_${normalizedUrl}`;
+                const cacheKey = \`get_${normalizedUrl}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                    console.log("[API] ✅ Returning cached data for: ${normalizedUrl}");
+                    console.log(`[API] ✅ Returning cached data for: ${normalizedUrl}");
                     trackRequestEnd(normalizedUrl, functionName, true);
                     return {
                         ok: true,
@@ -733,7 +733,7 @@
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'get_failed')) {
-                        console.error("[API] ❌ GET request failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ GET request failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -741,7 +741,7 @@
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ Request failed, returning cached data for: ${normalizedUrl}");
+                        console.log(`[API] ✅ Request failed, returning cached data for: ${normalizedUrl}`);
                         trackRequestEnd(normalizedUrl, functionName, false);
                         return {
                             ok: true,
@@ -782,14 +782,14 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'get_error');
                 
                 if (shouldLogError(normalizedUrl, 'get_error')) {
-                    console.error("[API] ❌ api.get() error for ${normalizedUrl}:", error.message);
+                    console.error(`[API] ❌ api.get() error for ${normalizedUrl}:`, error.message);
                 }
                 
                 const cacheKey = `get_${normalizeEndpoint(url)}`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ Error occurred, returning cached data for: ${normalizeEndpoint(url)}");
+                    console.log(`[API] ✅ Error occurred, returning cached data for: ${normalizeEndpoint(url)}`);
                     return {
                         ok: true,
                         success: true,
@@ -828,7 +828,7 @@
         
         try {
             if (!url || typeof url !== 'string') {
-                console.error("[API] ❌ api.post() called with invalid URL:", url);
+                console.error("[API] ❌ api.post() called with invalid URL:`, url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
@@ -837,7 +837,7 @@
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(url, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedUrl}\`);
                 await waitForSessionReady();
             }
             
@@ -845,7 +845,7 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => apiPost(url, data, options),
-                    `POST ${url}`,
+                    \`POST ${url}\`,
                     url
                 );
             }
@@ -893,7 +893,7 @@
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'post_failed')) {
-                        console.error("[API] ❌ POST request failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ POST request failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -911,7 +911,7 @@
                     }
                     
                     trackRequestEnd(normalizedUrl, functionName, false);
-                    trackError(normalizedUrl, functionName, `post_failed_${result.status}`);
+                    trackError(normalizedUrl, functionName, \`post_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -923,7 +923,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'post_error');
                 
                 if (shouldLogError(normalizedUrl, 'post_error')) {
-                    console.error("[API] ❌ api.post() error for ${normalizedUrl}:", error.message);
+                    console.error(`[API] ❌ api.post() error for ${normalizedUrl}:", error.message);
                 }
                 
                 const errorObj = {
@@ -951,7 +951,7 @@
         
         try {
             if (!url || typeof url !== 'string') {
-                console.error("[API] ❌ api.put() called with invalid URL:", url);
+                console.error("[API] ❌ api.put() called with invalid URL:`, url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
@@ -960,7 +960,7 @@
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(url, 'PUT');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedUrl}\`);
                 await waitForSessionReady();
             }
             
@@ -968,7 +968,7 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => apiPut(url, data, options),
-                    `PUT ${url}`,
+                    \`PUT ${url}\`,
                     url
                 );
             }
@@ -1005,7 +1005,7 @@
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'put_failed')) {
-                        console.error("[API] ❌ PUT request failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ PUT request failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -1023,7 +1023,7 @@
                     }
                     
                     trackRequestEnd(normalizedUrl, functionName, false);
-                    trackError(normalizedUrl, functionName, `put_failed_${result.status}`);
+                    trackError(normalizedUrl, functionName, \`put_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -1035,7 +1035,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'put_error');
                 
                 if (shouldLogError(normalizedUrl, 'put_error')) {
-                    console.error("[API] ❌ api.put() error for ${normalizedUrl}:", error.message);
+                    console.error(`[API] ❌ api.put() error for ${normalizedUrl}:", error.message);
                 }
                 
                 const errorObj = {
@@ -1063,7 +1063,7 @@
         
         try {
             if (!url || typeof url !== 'string') {
-                console.error("[API] ❌ api.delete() called with invalid URL:", url);
+                console.error("[API] ❌ api.delete() called with invalid URL:`, url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
@@ -1072,7 +1072,7 @@
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(url, 'DELETE');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedUrl}\`);
                 await waitForSessionReady();
             }
             
@@ -1080,7 +1080,7 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => apiDelete(url, options),
-                    `DELETE ${url}`,
+                    \`DELETE ${url}\`,
                     url
                 );
             }
@@ -1101,7 +1101,7 @@
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'delete_failed')) {
-                        console.error("[API] ❌ DELETE request failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ DELETE request failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -1119,7 +1119,7 @@
                     }
                     
                     trackRequestEnd(normalizedUrl, functionName, false);
-                    trackError(normalizedUrl, functionName, `delete_failed_${result.status}`);
+                    trackError(normalizedUrl, functionName, \`delete_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -1131,7 +1131,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'delete_error');
                 
                 if (shouldLogError(normalizedUrl, 'delete_error')) {
-                    console.error("[API] ❌ api.delete() error for ${normalizedUrl}:", error.message);
+                    console.error(`[API] ❌ api.delete() error for ${normalizedUrl}:", error.message);
                 }
                 
                 const errorObj = {
@@ -1159,7 +1159,7 @@
         
         try {
             if (!url || typeof url !== 'string') {
-                console.error("[API] ❌ api.upload() called with invalid URL:", url);
+                console.error("[API] ❌ api.upload() called with invalid URL:`, url);
                 return getSafeDefaultResponse(url || 'unknown', functionName, new Error('Invalid URL'));
             }
             
@@ -1168,7 +1168,7 @@
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(url, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedUrl}\`);
                 await waitForSessionReady();
             }
             
@@ -1176,7 +1176,7 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => apiUpload(url, data, options),
-                    `UPLOAD ${url}`,
+                    \`UPLOAD ${url}\`,
                     url
                 );
             }
@@ -1235,7 +1235,7 @@
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedUrl, 'upload_failed')) {
-                        console.error("[API] ❌ Upload request failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ Upload request failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -1253,7 +1253,7 @@
                     }
                     
                     trackRequestEnd(normalizedUrl, functionName, false);
-                    trackError(normalizedUrl, functionName, `upload_failed_${result.status}`);
+                    trackError(normalizedUrl, functionName, \`upload_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -1265,7 +1265,7 @@
                 const errorCount = trackError(normalizedUrl, functionName, 'upload_error');
                 
                 if (shouldLogError(normalizedUrl, 'upload_error')) {
-                    console.error("[API] ❌ api.upload() error for ${normalizedUrl}:", error.message);
+                    console.error(`[API] ❌ api.upload() error for ${normalizedUrl}:", error.message);
                 }
                 
                 const errorObj = {
@@ -1283,7 +1283,7 @@
             }
             
         } catch (error) {
-            console.error("[API] ❌ api.upload() critical error:", error);
+            console.error("[API] ❌ api.upload() critical error:`, error);
             return getSafeDefaultResponse(url || 'unknown', functionName, error);
         }
     }
@@ -1319,7 +1319,7 @@
                 
                 const isPublic = isPublicEndpointCheck(normalizedUrl);
                 if (authToken && !isPublic) {
-                    xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+                    xhr.setRequestHeader('Authorization', \`Bearer ${authToken}\`);
                 }
                 
                 if (options.onProgress) {
@@ -1351,7 +1351,7 @@
                     
                     if (!result.success) {
                         result.message = data.message || data.error || xhr.statusText;
-                        trackError(normalizedUrl, functionName, `xhr_failed_${xhr.status}`);
+                        trackError(normalizedUrl, functionName, \`xhr_failed_${xhr.status}\`);
                     }
                     
                     trackRequestEnd(normalizedUrl, functionName, result.success);
@@ -1379,7 +1379,7 @@
                 xhr.send(formData);
                 
             } catch (error) {
-                console.error("[API] ❌ xhrUpload error:", error);
+                console.error(`[API] ❌ xhrUpload error:", error);
                 resolve(getSafeDefaultResponse(url || 'unknown', 'xhrUpload', error));
             }
         });
@@ -1474,7 +1474,7 @@
             }
             
         } catch (error) {
-            console.error("[API] ❌ api.healthCheck() critical error:", error);
+            console.error("[API] ❌ api.healthCheck() critical error:`, error);
             return getSafeDefaultResponse('/health', functionName, error);
         }
     }
@@ -1492,7 +1492,7 @@
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, options.method || 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -1501,12 +1501,12 @@
             }
             
             const retryCount = trackRequestStart(normalizedEndpoint, functionName);
-            const requestId = `${options.method || 'GET'}_${normalizedEndpoint}_${Date.now()}`;
+            const requestId = \`${options.method || 'GET'}_${normalizedEndpoint}_${Date.now()}\`;
             
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => enhancedSecureFetch(endpoint, options),
-                    `${options.method || 'GET'} ${endpoint}`,
+                    \`${options.method || 'GET'} ${endpoint}\`,
                     endpoint
                 );
             }
@@ -1521,13 +1521,13 @@
             for (let attempt = 1; attempt <= maxRetries; attempt++) {
                 try {
                     if (retryCount > _safetyState.maxRetriesPerRequest) {
-                        console.warn("[API] ⏳ Max retries reached for ${normalizedEndpoint}");
+                        console.warn(`[API] ⏳ Max retries reached for ${normalizedEndpoint}");
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return getSafeDefaultResponse(normalizedEndpoint, functionName, new Error('Max retries reached'));
                     }
                     
                     if (attempt > 1) {
-                        console.log("[API] ⏳ Retry attempt ${attempt}/${maxRetries} for ${normalizedEndpoint}");
+                        console.log(`[API] ⏳ Retry attempt ${attempt}/${maxRetries} for ${normalizedEndpoint}`);
                     }
                     
                     const trustedOptions = {
@@ -1540,14 +1540,14 @@
                     
                     if (result.success) {
                         if (attempt > 1) {
-                            console.log("[API] ✅ Request succeeded on attempt ${attempt}: ${normalizedEndpoint}");
+                            console.log(`[API] ✅ Request succeeded on attempt ${attempt}: ${normalizedEndpoint}`);
                         }
                         trackRequestEnd(normalizedEndpoint, functionName, true);
                         return result;
                     }
                     
                     if (result.status === 401) {
-                        console.warn("[API] ⏳ Auth error (401) for ${normalizedEndpoint}, not retrying");
+                        console.warn(`[API] ⏳ Auth error (401) for ${normalizedEndpoint}, not retrying`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         trackError(normalizedEndpoint, functionName, 'auth_error');
                         return result;
@@ -1557,7 +1557,7 @@
                         const retryAfter = result.headers?.['retry-after'] || result.headers?.['Retry-After'];
                         if (retryAfter && attempt < maxRetries) {
                             const delay = parseInt(retryAfter) * 1000 || retryDelay;
-                            console.log("[API] ⏳ Rate limited, waiting ${delay}ms before retry");
+                            console.log(`[API] ⏳ Rate limited, waiting ${delay}ms before retry`);
                             await new Promise(resolve => setTimeout(resolve, delay));
                             continue;
                         }
@@ -1565,7 +1565,7 @@
                     
                     if (result.status >= 500 && shouldRetry && attempt < maxRetries) {
                         const delay = retryDelay * Math.pow(2, attempt - 1);
-                        console.log("[API] ⏳ Server error ${result.status}, retrying in ${delay}ms");
+                        console.log(`[API] ⏳ Server error ${result.status}, retrying in ${delay}ms`);
                         await new Promise(resolve => setTimeout(resolve, delay));
                         lastError = result;
                         continue;
@@ -1577,13 +1577,13 @@
                     
                 } catch (error) {
                     if (shouldLogError(normalizedEndpoint, 'attempt_failed')) {
-                        console.error("[API] ❌ Attempt ${attempt} failed for ${normalizedEndpoint}:", error.message);
+                        console.error(`[API] ❌ Attempt ${attempt} failed for ${normalizedEndpoint}:`, error.message);
                     }
                     lastError = error;
                     
                     if (shouldRetry && attempt < maxRetries) {
                         const delay = retryDelay * Math.pow(2, attempt - 1);
-                        console.log("[API] ⏳ Network error, retrying in ${delay}ms");
+                        console.log(`[API] ⏳ Network error, retrying in ${delay}ms`);
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     }
@@ -1596,7 +1596,7 @@
             const errorCount = trackError(normalizedEndpoint, functionName, 'all_retries_failed');
             
             if (shouldLogError(normalizedEndpoint, 'all_retries_failed')) {
-                console.error("[API] ❌ All ${maxRetries} attempts failed for ${normalizedEndpoint} (total errors: ${errorCount})");
+                console.error(`[API] ❌ All ${maxRetries} attempts failed for ${normalizedEndpoint} (total errors: ${errorCount})`);
             }
             
             return {
@@ -1750,8 +1750,8 @@
             return JSON.stringify(payload);
             
         } catch (error) {
-            console.error("[API] ❌ Failed to serialize payload:", error, payload);
-            throw new Error(`Failed to serialize payload to JSON: ${error.message}`);
+            console.error("[API] ❌ Failed to serialize payload:`, error, payload);
+            throw new Error(\`Failed to serialize payload to JSON: ${error.message}\`);
         }
     }
     
@@ -1764,12 +1764,12 @@
         
         if (isPublic) {
             if (!_gatewayState.gates.bootstrapReady) {
-                logRequest(requestId, `⏳ Blocked: Waiting for bootstrap gate`);
+                logRequest(requestId, \`⏳ Blocked: Waiting for bootstrap gate\`);
                 return false;
             }
             
             if (!_gatewayState.gates.backendResolved) {
-                logRequest(requestId, `⏳ Blocked: Waiting for backend gate`);
+                logRequest(requestId, \`⏳ Blocked: Waiting for backend gate\`);
                 return false;
             }
             
@@ -1787,7 +1787,7 @@
         if (!_gatewayState.gates.sessionReady) missingGates.push('session');
         
         if (missingGates.length > 0) {
-            logRequest(requestId, `⏳ Blocked: Waiting for gates: ${missingGates.join(', ')}`);
+            logRequest(requestId, \`⏳ Blocked: Waiting for gates: ${missingGates.join(', ')}\`);
             
             if (_gatewayState.initialization.steps.queueActivated) {
                 return false;
@@ -1799,8 +1799,8 @@
     
     function queueRequest(requestFn, description, endpoint) {
         if (_gatewayState.queue.requests.length >= _gatewayState.queue.maxQueueSize) {
-            console.warn("[API] ⏳ Request queue full, dropping request");
-            return Promise.reject(new Error("Request queue full"));
+            console.warn(`[API] ⏳ Request queue full, dropping request");
+            return Promise.reject(new Error("Request queue full`));
         }
         
         const queueItem = {
@@ -1820,7 +1820,7 @@
         queueItem.promise = promise;
         _gatewayState.queue.requests.push(queueItem);
         
-        logRequest(queueItem.id, `⏳ Queued: ${description} (${endpoint})`);
+        logRequest(queueItem.id, \`⏳ Queued: ${description} (${endpoint})\`);
         
         return promise;
     }
@@ -1831,7 +1831,7 @@
         }
         
         _gatewayState.queue.isFlushing = true;
-        logRequest('QUEUE_FLUSH', `⏳ Flushing ${_gatewayState.queue.requests.length} queued requests`);
+        logRequest('QUEUE_FLUSH', \`⏳ Flushing ${_gatewayState.queue.requests.length} queued requests\`);
         
         const promises = _gatewayState.queue.requests.map(async (item) => {
             try {
@@ -1857,7 +1857,7 @@
             (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : 
             'no-body';
         
-        return `${method}:${endpoint}:${bodyHash}`;
+        return \`${method}:${endpoint}:${bodyHash}\`;
     }
     
     function shouldDeduplicateRequest(dedupeKey, requestId) {
@@ -1869,7 +1869,7 @@
         if (lastRequestTime) {
             const timeSinceLast = Date.now() - lastRequestTime;
             if (timeSinceLast < _gatewayState.deduplication.dedupeWindow) {
-                logRequest(requestId, `⏳ Deduplicated: Recent duplicate within ${timeSinceLast}ms`);
+                logRequest(requestId, \`⏳ Deduplicated: Recent duplicate within ${timeSinceLast}ms\`);
                 return true;
             }
         }
@@ -1930,7 +1930,7 @@
     function generateRequestId(endpoint, method) {
         const timestamp = Date.now();
         const random = Math.random().toString(36).substring(2, 8);
-        return `${method}_${timestamp}_${random}`;
+        return \`${method}_${timestamp}_${random}\`;
     }
     
     function buildFullUrl(normalizedEndpoint) {
@@ -1940,16 +1940,16 @@
         
         if (_gatewayState.backend.resolved) {
             if (normalizedEndpoint.startsWith('/api')) {
-                return `${_gatewayState.backend.origin}${normalizedEndpoint}`;
+                return \`${_gatewayState.backend.origin}${normalizedEndpoint}\`;
             }
-            return `${_gatewayState.backend.baseUrl}${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}`;
+            return \`${_gatewayState.backend.baseUrl}${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}\`;
         }
         
         const origin = window.location.origin;
         if (normalizedEndpoint.startsWith('/api')) {
-            return `${origin}${normalizedEndpoint}`;
+            return \`${origin}${normalizedEndpoint}\`;
         }
-        return `${origin}/api${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}`;
+        return \`${origin}/api${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}\`;
     }
     
     function logRequest(requestId, message) {
@@ -1966,7 +1966,7 @@
             }
         }
         
-        console.log("[API]", `[${requestId}] ${message}`);
+        console.log(`[API]`, \`[${requestId}] ${message}\`);
         
         _gatewayState.logging.loggedRequests.add(requestId);
         _gatewayState.logging.lastLogTimes.set(requestId, Date.now());
@@ -2098,14 +2098,14 @@
                 
                 if (!window._blockedFetchLogs.has(urlKey)) {
                     window._blockedFetchLogs.add(urlKey);
-                    console.warn("[API] ⏳ Direct fetch to ${urlKey} - use api.request() instead");
+                    console.warn(`[API] ⏳ Direct fetch to ${urlKey} - use api.request() instead`);
                     
                     if (window._blockedFetchLogs.size > 50) {
                         window._blockedFetchLogs.clear();
                     }
                 }
                 
-                return Promise.reject(new Error(`Direct fetch blocked: use api.request() for ${url}`));
+                return Promise.reject(new Error(\`Direct fetch blocked: use api.request() for ${url}\`));
             }
             
             return originalFetch.apply(this, args);
@@ -2114,7 +2114,7 @@
         window.__originalFetch = originalFetch;
         
         window._FETCH_BLOCKED_ = true;
-        console.log("[API] ✅ Direct fetch() calls filtered for API endpoints (HEAD allowed, trusted modules allowed)");
+        console.log(`[API] ✅ Direct fetch() calls filtered for API endpoints (HEAD allowed, trusted modules allowed)");
     }
     
     function monitorPolling() {
@@ -2133,7 +2133,7 @@
                 callbackStr.includes('api.request');
             
             if (hasApiCall && delay < 30000) {
-                console.warn("[API] ⏳ SetInterval polling detected: ${delay}ms interval");
+                console.warn(`[API] ⏳ SetInterval polling detected: ${delay}ms interval`);
                 
                 pollingIntervals.set(intervalId, {
                     callback: callbackStr.substring(0, 100),
@@ -2172,7 +2172,7 @@
         
         setInterval(() => {
             if (_gatewayState.errorHandler.errorCount > _gatewayState.errorHandler.maxErrorsBeforePause) {
-                console.error("[API] ❌ Too many errors (${_gatewayState.errorHandler.errorCount}), pausing gateway");
+                console.error(`[API] ❌ Too many errors (${_gatewayState.errorHandler.errorCount}), pausing gateway`);
                 _gatewayState.errorHandler.isPaused = true;
                 
                 try {
@@ -2196,7 +2196,7 @@
         
         if (_safetyState.activeRequests.size >= _safetyState.maxConcurrentRequests) {
             if (shouldLogError(endpointKey, 'concurrent_limit')) {
-                console.warn("[API] ⏳ Too many concurrent requests (${_safetyState.activeRequests.size}), delaying: ${endpointKey}");
+                console.warn(`[API] ⏳ Too many concurrent requests (${_safetyState.activeRequests.size}), delaying: ${endpointKey}`);
             }
             return false;
         }
@@ -2204,7 +2204,7 @@
         const errorCount = _safetyState.errorCounts.get(endpointKey) || 0;
         if (errorCount >= _safetyState.maxErrorsPerEndpoint) {
             if (shouldLogError(endpointKey, 'error_limit')) {
-                console.warn("[API] ⏳ Error limit reached for ${endpointKey}, blocking further requests");
+                console.warn(`[API] ⏳ Error limit reached for ${endpointKey}, blocking further requests`);
             }
             return false;
         }
@@ -2320,7 +2320,7 @@
             _requestState.initialized = true;
             
         } catch (error) {
-            console.error("[API] ❌ Failed to initialize dependencies:", error);
+            console.error("[API] ❌ Failed to initialize dependencies:`, error);
             _secureApiFetch = createFallbackSecureFetch();
             _getUserToken = getAuthToken;
             _apiCache = {
@@ -2353,13 +2353,13 @@
             if (!checkDependencyGates(requestId, normalizedUrl)) {
                 return queueRequest(
                     () => secureApiFetch(url, options),
-                    `${options.method || 'GET'} ${url}`,
+                    \`${options.method || 'GET'} ${url}\`,
                     url
                 );
             }
             
             if (!isPublic && !isSessionReady()) {
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedUrl}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedUrl}\`);
                 await waitForSessionReady();
             }
             
@@ -2371,7 +2371,7 @@
             
             try {
                 if (retryCount > _safetyState.maxRetriesPerRequest) {
-                    console.warn("[API] ⏳ Max retries reached for ${normalizedUrl}");
+                    console.warn(`[API] ⏳ Max retries reached for ${normalizedUrl}`);
                     trackRequestEnd(normalizedUrl, functionName, false);
                     return getSafeDefaultResponse(normalizedUrl, functionName, new Error('Max retries reached'));
                 }
@@ -2388,7 +2388,7 @@
                 };
                 
                 if (!isPublic && token) {
-                    headers['Authorization'] = `Bearer ${token}`;
+                    headers['Authorization'] = \`Bearer ${token}\`;
                 }
                 
                 const fetchOptions = {
@@ -2413,7 +2413,7 @@
                         try {
                             JSON.parse(options.body);
                         } catch (e) {
-                            console.warn("[API] ⏳ Body appears to be string but not valid JSON:", options.body);
+                            console.warn(`[API] ⏳ Body appears to be string but not valid JSON:`, options.body);
                         }
                     } else {
                         fetchOptions.body = String(options.body);
@@ -2439,7 +2439,7 @@
                 const controller = new AbortController();
 const timeoutToUse = options.timeout || _requestState.requestTimeout;
 const timeoutId = setTimeout(() => {
-    console.warn(`[API-REQUEST] Timeout after ${timeoutToUse}ms: ${fullUrl}`);
+    console.warn(\`[API-REQUEST] Timeout after ${timeoutToUse}ms: ${fullUrl}\`);
     controller.abort();
 }, timeoutToUse);
 fetchOptions.signal = controller.signal;
@@ -2477,7 +2477,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedUrl, functionName, error.name || 'fetch_error');
                 
                 if (shouldLogError(normalizedUrl, 'fetch_error')) {
-                    console.error("[API] ❌ Fetch error for ${normalizedUrl} (attempt ${errorCount}):", error.message);
+                    console.error(`[API] ❌ Fetch error for ${normalizedUrl} (attempt ${errorCount}):`, error.message);
                 }
                 
                 return getSafeDefaultResponse(normalizedUrl, functionName, error);
@@ -2499,7 +2499,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -2507,7 +2507,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getMessages(),
-                    `GET messages`,
+                    \`GET messages\`,
                     endpoint
                 );
             }
@@ -2518,11 +2518,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached messages");
+                console.log(`[API] ✅ Returning cached messages");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -2541,7 +2541,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_messages_failed')) {
-                        console.error("[API] ❌ getMessages failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getMessages failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -2549,7 +2549,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getMessages failed, returning cached data");
+                        console.log("[API] ✅ getMessages failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -2575,7 +2575,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_messages_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_messages_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -2591,14 +2591,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_messages_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_messages_error')) {
-                    console.error("[API] ❌ getMessages error:", error.message);
+                    console.error(`[API] ❌ getMessages error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getMessages error, returning cached data");
+                    console.log(`[API] ✅ getMessages error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2636,7 +2636,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!messageId) {
-                console.error("[API] ❌ getMessageById called without messageId");
+                console.error("[API] ❌ getMessageById called without messageId`);
                 return {
                     ok: false,
                     success: false,
@@ -2648,13 +2648,13 @@ fetchOptions.signal = controller.signal;
                 };
             }
             
-            const endpoint = `/messages/${encodeURIComponent(messageId)}`;
+            const endpoint = \`/messages/${encodeURIComponent(messageId)}\`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -2662,7 +2662,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getMessageById(messageId),
-                    `GET message ${messageId}`,
+                    \`GET message ${messageId}\`,
                     endpoint
                 );
             }
@@ -2673,11 +2673,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached message ${messageId}");
+                console.log(`[API] ✅ Returning cached message ${messageId}");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -2696,7 +2696,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_message_by_id_failed')) {
-                        console.error("[API] ❌ getMessageById failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getMessageById failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -2731,14 +2731,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_message_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_message_by_id_error')) {
-                    console.error("[API] ❌ getMessageById error:", error.message);
+                    console.error("[API] ❌ getMessageById error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getMessageById error, returning cached data");
+                    console.log(`[API] ✅ getMessageById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -2793,7 +2793,7 @@ fetchOptions.signal = controller.signal;
             
             // Validate required fields
             if (!messageData.content && !messageData.chatId && !messageData.receiverId) {
-                console.error("[API] ❌ sendMessage missing required fields");
+                console.error("[API] ❌ sendMessage missing required fields`);
                 return {
                     ok: false,
                     success: false,
@@ -2810,7 +2810,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -2818,7 +2818,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => sendMessage(messageData),
-                    `POST message`,
+                    \`POST message\`,
                     endpoint
                 );
             }
@@ -2853,7 +2853,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'send_message_failed')) {
-                        console.error("[API] ❌ sendMessage failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ sendMessage failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -2872,12 +2872,12 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `send_message_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`send_message_failed_${result.status}\`);
                     return result;
                 }
                 
                 if (_apiCache) {
-                    _apiCache.delete(`get_${normalizedEndpoint}`);
+                    _apiCache.delete(\`get_${normalizedEndpoint}\`);
                 }
                 
                 trackRequestEnd(normalizedEndpoint, functionName, true);
@@ -2888,7 +2888,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'send_message_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'send_message_error')) {
-                    console.error("[API] ❌ sendMessage error:", error.message);
+                    console.error(`[API] ❌ sendMessage error:", error.message);
                 }
                 
                 const errorObj = {
@@ -2906,7 +2906,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ sendMessage critical error:", error);
+            console.error("[API] ❌ sendMessage critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -2921,7 +2921,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -2929,7 +2929,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getFriends(),
-                    `GET friends`,
+                    \`GET friends\`,
                     endpoint
                 );
             }
@@ -2940,11 +2940,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached friends");
+                console.log(`[API] ✅ Returning cached friends");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -2963,7 +2963,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_friends_failed')) {
-                        console.error("[API] ❌ getFriends failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getFriends failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -2971,7 +2971,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getFriends failed, returning cached data");
+                        console.log("[API] ✅ getFriends failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -2997,7 +2997,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_friends_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_friends_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3013,7 +3013,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_friends_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_friends_error')) {
-                    console.error("[API] ❌ getFriends error:", error.message);
+                    console.error(`[API] ❌ getFriends error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -3057,7 +3057,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!userId) {
-                console.error("[API] ❌ addFriend called without userId");
+                console.error("[API] ❌ addFriend called without userId`);
                 return {
                     ok: false,
                     success: false,
@@ -3074,7 +3074,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3082,7 +3082,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => addFriend(userId),
-                    `POST add friend ${userId}`,
+                    \`POST add friend ${userId}\`,
                     endpoint
                 );
             }
@@ -3101,7 +3101,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'add_friend_failed')) {
-                        console.error("[API] ❌ addFriend failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ addFriend failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3120,7 +3120,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `add_friend_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`add_friend_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3138,7 +3138,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'add_friend_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'add_friend_error')) {
-                    console.error("[API] ❌ addFriend error:", error.message);
+                    console.error(`[API] ❌ addFriend error:", error.message);
                 }
                 
                 const errorObj = {
@@ -3156,7 +3156,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ addFriend critical error:", error);
+            console.error("[API] ❌ addFriend critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3164,11 +3164,11 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: acceptFriendRequest
     async function acceptFriendRequest(requestId) {
         const functionName = 'acceptFriendRequest';
-        const endpoint = `/friends/requests/${requestId}/accept`;
+        const endpoint = \`/friends/requests/${requestId}/accept\`;
         
         try {
             if (!requestId) {
-                console.error("[API] ❌ acceptFriendRequest called without requestId");
+                console.error(`[API] ❌ acceptFriendRequest called without requestId`);
                 return {
                     ok: false,
                     success: false,
@@ -3185,7 +3185,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const reqId = generateRequestId(endpoint, 'POST');
-                logRequest(reqId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(reqId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3193,7 +3193,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(reqId, normalizedEndpoint)) {
                 return queueRequest(
                     () => acceptFriendRequest(requestId),
-                    `POST accept friend request ${requestId}`,
+                    \`POST accept friend request ${requestId}\`,
                     endpoint
                 );
             }
@@ -3209,7 +3209,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'accept_friend_request_failed')) {
-                        console.error("[API] ❌ acceptFriendRequest failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ acceptFriendRequest failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3217,7 +3217,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `accept_friend_request_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`accept_friend_request_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3234,7 +3234,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'accept_friend_request_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'accept_friend_request_error')) {
-                    console.error("[API] ❌ acceptFriendRequest error:", error.message);
+                    console.error(`[API] ❌ acceptFriendRequest error:", error.message);
                 }
                 
                 const errorObj = {
@@ -3252,7 +3252,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ acceptFriendRequest critical error:", error);
+            console.error("[API] ❌ acceptFriendRequest critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3260,11 +3260,11 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: rejectFriendRequest
     async function rejectFriendRequest(requestId) {
         const functionName = 'rejectFriendRequest';
-        const endpoint = `/friends/requests/${requestId}/reject`;
+        const endpoint = \`/friends/requests/${requestId}/reject\`;
         
         try {
             if (!requestId) {
-                console.error("[API] ❌ rejectFriendRequest called without requestId");
+                console.error(`[API] ❌ rejectFriendRequest called without requestId`);
                 return {
                     ok: false,
                     success: false,
@@ -3281,7 +3281,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const reqId = generateRequestId(endpoint, 'POST');
-                logRequest(reqId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(reqId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3289,7 +3289,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(reqId, normalizedEndpoint)) {
                 return queueRequest(
                     () => rejectFriendRequest(requestId),
-                    `POST reject friend request ${requestId}`,
+                    \`POST reject friend request ${requestId}\`,
                     endpoint
                 );
             }
@@ -3305,7 +3305,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'reject_friend_request_failed')) {
-                        console.error("[API] ❌ rejectFriendRequest failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ rejectFriendRequest failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3313,7 +3313,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `reject_friend_request_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`reject_friend_request_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3329,7 +3329,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'reject_friend_request_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'reject_friend_request_error')) {
-                    console.error("[API] ❌ rejectFriendRequest error:", error.message);
+                    console.error(`[API] ❌ rejectFriendRequest error:", error.message);
                 }
                 
                 const errorObj = {
@@ -3347,7 +3347,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ rejectFriendRequest critical error:", error);
+            console.error("[API] ❌ rejectFriendRequest critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3363,7 +3363,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3371,7 +3371,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getIncomingFriendRequests(),
-                    `GET incoming friend requests`,
+                    \`GET incoming friend requests\`,
                     endpoint
                 );
             }
@@ -3382,11 +3382,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached incoming friend requests");
+                console.log(`[API] ✅ Returning cached incoming friend requests");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -3405,7 +3405,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_incoming_requests_failed')) {
-                        console.error("[API] ❌ getIncomingFriendRequests failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getIncomingFriendRequests failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3413,7 +3413,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getIncomingFriendRequests failed, returning cached data");
+                        console.log("[API] ✅ getIncomingFriendRequests failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3428,7 +3428,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_incoming_requests_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_incoming_requests_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3444,7 +3444,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_incoming_requests_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_incoming_requests_error')) {
-                    console.error("[API] ❌ getIncomingFriendRequests error:", error.message);
+                    console.error(`[API] ❌ getIncomingFriendRequests error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -3476,7 +3476,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getIncomingFriendRequests critical error:", error);
+            console.error("[API] ❌ getIncomingFriendRequests critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3492,7 +3492,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3500,7 +3500,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getSentFriendRequests(),
-                    `GET sent friend requests`,
+                    \`GET sent friend requests\`,
                     endpoint
                 );
             }
@@ -3511,11 +3511,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached sent friend requests");
+                console.log(`[API] ✅ Returning cached sent friend requests");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -3534,7 +3534,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_sent_requests_failed')) {
-                        console.error("[API] ❌ getSentFriendRequests failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getSentFriendRequests failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3542,7 +3542,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getSentFriendRequests failed, returning cached data");
+                        console.log("[API] ✅ getSentFriendRequests failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3557,7 +3557,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_sent_requests_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_sent_requests_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3573,7 +3573,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_sent_requests_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_sent_requests_error')) {
-                    console.error("[API] ❌ getSentFriendRequests error:", error.message);
+                    console.error(`[API] ❌ getSentFriendRequests error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -3605,7 +3605,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getSentFriendRequests critical error:", error);
+            console.error("[API] ❌ getSentFriendRequests critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3621,7 +3621,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3629,7 +3629,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getChats(),
-                    `GET chats`,
+                    \`GET chats\`,
                     endpoint
                 );
             }
@@ -3640,11 +3640,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached chats");
+                console.log(`[API] ✅ Returning cached chats");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -3663,7 +3663,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_chats_failed')) {
-                        console.error("[API] ❌ getChats failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getChats failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3671,7 +3671,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getChats failed, returning cached data");
+                        console.log("[API] ✅ getChats failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3686,7 +3686,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_chats_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_chats_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3702,7 +3702,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_chats_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_chats_error')) {
-                    console.error("[API] ❌ getChats error:", error.message);
+                    console.error(`[API] ❌ getChats error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -3746,7 +3746,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!userId) {
-                console.error("[API] ❌ startDirectChat called without userId");
+                console.error("[API] ❌ startDirectChat called without userId`);
                 return {
                     ok: false,
                     success: false,
@@ -3763,7 +3763,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3771,7 +3771,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => startDirectChat(userId),
-                    `POST start direct chat with ${userId}`,
+                    \`POST start direct chat with ${userId}\`,
                     endpoint
                 );
             }
@@ -3790,7 +3790,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'start_direct_chat_failed')) {
-                        console.error("[API] ❌ startDirectChat failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ startDirectChat failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3798,7 +3798,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `start_direct_chat_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`start_direct_chat_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3814,7 +3814,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'start_direct_chat_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'start_direct_chat_error')) {
-                    console.error("[API] ❌ startDirectChat error:", error.message);
+                    console.error(`[API] ❌ startDirectChat error:", error.message);
                 }
                 
                 const errorObj = {
@@ -3832,7 +3832,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ startDirectChat critical error:", error);
+            console.error("[API] ❌ startDirectChat critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -3848,7 +3848,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3856,7 +3856,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getUnreadCounts(),
-                    `GET unread counts`,
+                    \`GET unread counts\`,
                     endpoint
                 );
             }
@@ -3867,11 +3867,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached unread counts");
+                console.log(`[API] ✅ Returning cached unread counts");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -3890,7 +3890,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_unread_counts_failed')) {
-                        console.error("[API] ❌ getUnreadCounts failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getUnreadCounts failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -3898,7 +3898,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getUnreadCounts failed, returning cached data");
+                        console.log("[API] ✅ getUnreadCounts failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -3913,7 +3913,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_unread_counts_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_unread_counts_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -3929,7 +3929,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_unread_counts_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_unread_counts_error')) {
-                    console.error("[API] ❌ getUnreadCounts error:", error.message);
+                    console.error(`[API] ❌ getUnreadCounts error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -3973,7 +3973,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!chatId) {
-                console.error("[API] ❌ markMessagesRead called without chatId");
+                console.error("[API] ❌ markMessagesRead called without chatId`);
                 return {
                     ok: false,
                     success: false,
@@ -3990,7 +3990,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -3998,7 +3998,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => markMessagesRead(chatId, messageIds),
-                    `POST mark messages read in chat ${chatId}`,
+                    \`POST mark messages read in chat ${chatId}\`,
                     endpoint
                 );
             }
@@ -4021,7 +4021,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'mark_messages_read_failed')) {
-                        console.error("[API] ❌ markMessagesRead failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ markMessagesRead failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4029,7 +4029,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `mark_messages_read_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`mark_messages_read_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4045,7 +4045,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'mark_messages_read_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'mark_messages_read_error')) {
-                    console.error("[API] ❌ markMessagesRead error:", error.message);
+                    console.error(`[API] ❌ markMessagesRead error:", error.message);
                 }
                 
                 const errorObj = {
@@ -4063,7 +4063,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ markMessagesRead critical error:", error);
+            console.error("[API] ❌ markMessagesRead critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4071,11 +4071,11 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: blockFriend
     async function blockFriend(userId) {
         const functionName = 'blockFriend';
-        const endpoint = `/friends/${userId}/block`;
+        const endpoint = \`/friends/${userId}/block\`;
         
         try {
             if (!userId) {
-                console.error("[API] ❌ blockFriend called without userId");
+                console.error(`[API] ❌ blockFriend called without userId`);
                 return {
                     ok: false,
                     success: false,
@@ -4092,7 +4092,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4100,7 +4100,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => blockFriend(userId),
-                    `POST block friend ${userId}`,
+                    \`POST block friend ${userId}\`,
                     endpoint
                 );
             }
@@ -4116,7 +4116,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'block_friend_failed')) {
-                        console.error("[API] ❌ blockFriend failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ blockFriend failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4124,7 +4124,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `block_friend_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`block_friend_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4140,7 +4140,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'block_friend_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'block_friend_error')) {
-                    console.error("[API] ❌ blockFriend error:", error.message);
+                    console.error(`[API] ❌ blockFriend error:", error.message);
                 }
                 
                 const errorObj = {
@@ -4158,7 +4158,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ blockFriend critical error:", error);
+            console.error("[API] ❌ blockFriend critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4166,11 +4166,11 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: unblockFriend
     async function unblockFriend(userId) {
         const functionName = 'unblockFriend';
-        const endpoint = `/friends/${userId}/unblock`;
+        const endpoint = \`/friends/${userId}/unblock\`;
         
         try {
             if (!userId) {
-                console.error("[API] ❌ unblockFriend called without userId");
+                console.error(`[API] ❌ unblockFriend called without userId`);
                 return {
                     ok: false,
                     success: false,
@@ -4187,7 +4187,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4195,7 +4195,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => unblockFriend(userId),
-                    `POST unblock friend ${userId}`,
+                    \`POST unblock friend ${userId}\`,
                     endpoint
                 );
             }
@@ -4211,7 +4211,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'unblock_friend_failed')) {
-                        console.error("[API] ❌ unblockFriend failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ unblockFriend failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4219,7 +4219,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `unblock_friend_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`unblock_friend_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4235,7 +4235,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'unblock_friend_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'unblock_friend_error')) {
-                    console.error("[API] ❌ unblockFriend error:", error.message);
+                    console.error(`[API] ❌ unblockFriend error:", error.message);
                 }
                 
                 const errorObj = {
@@ -4253,7 +4253,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ unblockFriend critical error:", error);
+            console.error("[API] ❌ unblockFriend critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4261,11 +4261,11 @@ fetchOptions.signal = controller.signal;
     // 🔧 NEW: unfriend
     async function unfriend(userId) {
         const functionName = 'unfriend';
-        const endpoint = `/friends/${userId}`;
+        const endpoint = \`/friends/${userId}\`;
         
         try {
             if (!userId) {
-                console.error("[API] ❌ unfriend called without userId");
+                console.error(`[API] ❌ unfriend called without userId`);
                 return {
                     ok: false,
                     success: false,
@@ -4282,7 +4282,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'DELETE');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4290,7 +4290,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => unfriend(userId),
-                    `DELETE unfriend ${userId}`,
+                    \`DELETE unfriend ${userId}\`,
                     endpoint
                 );
             }
@@ -4306,7 +4306,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'unfriend_failed')) {
-                        console.error("[API] ❌ unfriend failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ unfriend failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4314,7 +4314,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `unfriend_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`unfriend_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4330,7 +4330,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'unfriend_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'unfriend_error')) {
-                    console.error("[API] ❌ unfriend error:", error.message);
+                    console.error(`[API] ❌ unfriend error:", error.message);
                 }
                 
                 const errorObj = {
@@ -4348,7 +4348,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ unfriend critical error:", error);
+            console.error("[API] ❌ unfriend critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4363,7 +4363,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4371,7 +4371,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getGroups(),
-                    `GET groups`,
+                    \`GET groups\`,
                     endpoint
                 );
             }
@@ -4382,11 +4382,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached groups");
+                console.log(`[API] ✅ Returning cached groups");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -4405,7 +4405,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_groups_failed')) {
-                        console.error("[API] ❌ getGroups failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getGroups failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4413,7 +4413,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getGroups failed, returning cached data");
+                        console.log("[API] ✅ getGroups failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4439,7 +4439,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_groups_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_groups_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4455,14 +4455,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_groups_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_groups_error')) {
-                    console.error("[API] ❌ getGroups error:", error.message);
+                    console.error(`[API] ❌ getGroups error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getGroups error, returning cached data");
+                    console.log(`[API] ✅ getGroups error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4501,7 +4501,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!groupId) {
-                console.error("[API] ❌ getGroupById called without groupId");
+                console.error("[API] ❌ getGroupById called without groupId`);
                 return {
                     ok: false,
                     success: false,
@@ -4513,13 +4513,13 @@ fetchOptions.signal = controller.signal;
                 };
             }
             
-            const endpoint = `/groups/${encodeURIComponent(groupId)}`;
+            const endpoint = \`/groups/${encodeURIComponent(groupId)}\`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4527,7 +4527,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getGroupById(groupId),
-                    `GET group ${groupId}`,
+                    \`GET group ${groupId}\`,
                     endpoint
                 );
             }
@@ -4538,11 +4538,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached group ${groupId}");
+                console.log(`[API] ✅ Returning cached group ${groupId}");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -4561,7 +4561,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_group_by_id_failed')) {
-                        console.error("[API] ❌ getGroupById failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getGroupById failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4596,14 +4596,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_group_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_group_by_id_error')) {
-                    console.error("[API] ❌ getGroupById error:", error.message);
+                    console.error("[API] ❌ getGroupById error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getGroupById error, returning cached data");
+                    console.log(`[API] ✅ getGroupById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -4643,7 +4643,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!groupData) {
-                console.error("[API] ❌ createGroup called without groupData");
+                console.error("[API] ❌ createGroup called without groupData`);
                 return {
                     ok: false,
                     success: false,
@@ -4660,7 +4660,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4668,7 +4668,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => createGroup(groupData),
-                    `POST create group`,
+                    \`POST create group\`,
                     endpoint
                 );
             }
@@ -4687,7 +4687,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'create_group_failed')) {
-                        console.error("[API] ❌ createGroup failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ createGroup failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4706,7 +4706,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `create_group_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`create_group_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4722,7 +4722,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'create_group_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'create_group_error')) {
-                    console.error("[API] ❌ createGroup error:", error.message);
+                    console.error(`[API] ❌ createGroup error:", error.message);
                 }
                 
                 const errorObj = {
@@ -4740,7 +4740,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ createGroup critical error:", error);
+            console.error("[API] ❌ createGroup critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -4755,7 +4755,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4763,7 +4763,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getStatuses(),
-                    `GET statuses`,
+                    \`GET statuses\`,
                     endpoint
                 );
             }
@@ -4774,11 +4774,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached statuses");
+                console.log(`[API] ✅ Returning cached statuses");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -4798,7 +4798,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_statuses_failed')) {
-                        console.error("[API] ❌ getStatuses failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getStatuses failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4806,7 +4806,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getStatuses failed, returning cached data");
+                        console.log("[API] ✅ getStatuses failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -4832,7 +4832,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_statuses_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_statuses_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -4848,7 +4848,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_statuses_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_statuses_error')) {
-                    console.error("[API] ❌ getStatuses error:", error.message);
+                    console.error(`[API] ❌ getStatuses error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -4890,7 +4890,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!statusId) {
-                console.error("[API] ❌ getStatus called without statusId");
+                console.error("[API] ❌ getStatus called without statusId`);
                 return {
                     ok: false,
                     success: false,
@@ -4902,13 +4902,13 @@ fetchOptions.signal = controller.signal;
                 };
             }
             
-            const endpoint = `/status/${encodeURIComponent(statusId)}`;
+            const endpoint = \`/status/${encodeURIComponent(statusId)}\`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -4916,7 +4916,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getStatus(statusId),
-                    `GET status ${statusId}`,
+                    \`GET status ${statusId}\`,
                     endpoint
                 );
             }
@@ -4927,11 +4927,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached status ${statusId}");
+                console.log(`[API] ✅ Returning cached status ${statusId}");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -4950,7 +4950,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_status_failed')) {
-                        console.error("[API] ❌ getStatus failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getStatus failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -4985,14 +4985,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_status_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_status_error')) {
-                    console.error("[API] ❌ getStatus error:", error.message);
+                    console.error("[API] ❌ getStatus error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getStatus error, returning cached data");
+                    console.log(`[API] ✅ getStatus error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -5032,7 +5032,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!statusData) {
-                console.error("[API] ❌ createStatus called without statusData");
+                console.error("[API] ❌ createStatus called without statusData`);
                 return {
                     ok: false,
                     success: false,
@@ -5049,7 +5049,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5057,7 +5057,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => createStatus(statusData),
-                    `POST create status`,
+                    \`POST create status\`,
                     endpoint
                 );
             }
@@ -5076,7 +5076,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'create_status_failed')) {
-                        console.error("[API] ❌ createStatus failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ createStatus failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -5095,7 +5095,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `create_status_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`create_status_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -5111,7 +5111,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'create_status_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'create_status_error')) {
-                    console.error("[API] ❌ createStatus error:", error.message);
+                    console.error(`[API] ❌ createStatus error:", error.message);
                 }
                 
                 const errorObj = {
@@ -5129,7 +5129,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ createStatus critical error:", error);
+            console.error("[API] ❌ createStatus critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -5144,7 +5144,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5152,7 +5152,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getCalls(),
-                    `GET calls`,
+                    \`GET calls\`,
                     endpoint
                 );
             }
@@ -5163,11 +5163,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached calls");
+                console.log(`[API] ✅ Returning cached calls");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -5186,7 +5186,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_calls_failed')) {
-                        console.error("[API] ❌ getCalls failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getCalls failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -5194,7 +5194,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getCalls failed, returning cached data");
+                        console.log("[API] ✅ getCalls failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -5220,7 +5220,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_calls_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_calls_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -5236,14 +5236,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_calls_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_calls_error')) {
-                    console.error("[API] ❌ getCalls error:", error.message);
+                    console.error(`[API] ❌ getCalls error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getCalls error, returning cached data");
+                    console.log(`[API] ✅ getCalls error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -5283,7 +5283,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!callData) {
-                console.error("[API] ❌ startCall called without callData");
+                console.error("[API] ❌ startCall called without callData`);
                 return {
                     ok: false,
                     success: false,
@@ -5300,7 +5300,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5308,7 +5308,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => startCall(callData),
-                    `POST start call`,
+                    \`POST start call\`,
                     endpoint
                 );
             }
@@ -5327,7 +5327,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'start_call_failed')) {
-                        console.error("[API] ❌ startCall failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ startCall failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -5346,7 +5346,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `start_call_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`start_call_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -5362,7 +5362,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'start_call_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'start_call_error')) {
-                    console.error("[API] ❌ startCall error:", error.message);
+                    console.error(`[API] ❌ startCall error:", error.message);
                 }
                 
                 const errorObj = {
@@ -5380,7 +5380,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ startCall critical error:", error);
+            console.error("[API] ❌ startCall critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -5395,7 +5395,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5403,7 +5403,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getSettings(),
-                    `GET settings`,
+                    \`GET settings\`,
                     endpoint
                 );
             }
@@ -5414,11 +5414,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached settings");
+                console.log(`[API] ✅ Returning cached settings");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -5437,7 +5437,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_settings_failed')) {
-                        console.error("[API] ❌ getSettings failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getSettings failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -5445,7 +5445,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getSettings failed, returning cached data");
+                        console.log("[API] ✅ getSettings failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -5471,7 +5471,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_settings_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_settings_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -5485,7 +5485,7 @@ fetchOptions.signal = controller.signal;
                         try {
                             await getNotifications();
                             await getUserPreferences();
-                            console.log("[API] ✅ Background settings update completed");
+                            console.log(`[API] ✅ Background settings update completed");
                         } catch (bgError) {
                             console.log("[API] ⏳ Background settings update failed:", bgError.message);
                         }
@@ -5532,7 +5532,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getSettings critical error:", error);
+            console.error("[API] ❌ getSettings critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -5558,7 +5558,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5566,7 +5566,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getFeatures(),
-                    `GET features`,
+                    \`GET features\`,
                     endpoint
                 ).then(result => {
                     if (result && result.ok === false && result.safetyBlocked) {
@@ -5611,11 +5611,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached features");
+                console.log(`[API] ✅ Returning cached features");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -5634,7 +5634,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_features_failed')) {
-                        console.warn("[API] ⏳ getFeatures failed: ${result.status} - ${result.message}, using cached or default");
+                        console.warn(`[API] ⏳ getFeatures failed: ${result.status} - ${result.message}, using cached or default`);
                     }
                     
                     if (!result.data) {
@@ -5642,7 +5642,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getFeatures failed, returning cached data");
+                        console.log("[API] ✅ getFeatures failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -5657,7 +5657,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_features_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_features_failed_${result.status}\`);
                     return {
                         ok: true,
                         success: true,
@@ -5682,7 +5682,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_features_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_features_error')) {
-                    console.error("[API] ❌ getFeatures error:", error.message);
+                    console.error(`[API] ❌ getFeatures error:", error.message);
                 }
                 
                 if (cachedData) {
@@ -5744,7 +5744,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!settingsData) {
-                console.error("[API] ❌ updateSettings called without settingsData");
+                console.error("[API] ❌ updateSettings called without settingsData`);
                 return {
                     ok: false,
                     success: false,
@@ -5761,7 +5761,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'PUT');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5769,7 +5769,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => updateSettings(settingsData),
-                    `PUT update settings`,
+                    \`PUT update settings\`,
                     endpoint
                 );
             }
@@ -5788,7 +5788,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'update_settings_failed')) {
-                        console.error("[API] ❌ updateSettings failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ updateSettings failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -5807,12 +5807,12 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `update_settings_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`update_settings_failed_${result.status}\`);
                     return result;
                 }
                 
                 if (result.success && result.data && _apiCache) {
-                    _apiCache.set(`get_${normalizeEndpoint('/settings')}`, result.data);
+                    _apiCache.set(\`get_${normalizeEndpoint('/settings')}\`, result.data);
                 }
                 
                 trackRequestEnd(normalizedEndpoint, functionName, true);
@@ -5823,7 +5823,7 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'update_settings_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'update_settings_error')) {
-                    console.error("[API] ❌ updateSettings error:", error.message);
+                    console.error(`[API] ❌ updateSettings error:", error.message);
                 }
                 
                 const errorObj = {
@@ -5841,7 +5841,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ updateSettings critical error:", error);
+            console.error("[API] ❌ updateSettings critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -5856,7 +5856,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -5864,7 +5864,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getTools(),
-                    `GET tools`,
+                    \`GET tools\`,
                     endpoint
                 );
             }
@@ -5875,11 +5875,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached tools");
+                console.log(`[API] ✅ Returning cached tools");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -5898,7 +5898,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_tools_failed')) {
-                        console.error("[API] ❌ getTools failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getTools failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -5906,7 +5906,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getTools failed, returning cached data");
+                        console.log("[API] ✅ getTools failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -5932,7 +5932,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_tools_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_tools_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -5948,14 +5948,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_tools_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_tools_error')) {
-                    console.error("[API] ❌ getTools error:", error.message);
+                    console.error(`[API] ❌ getTools error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getTools error, returning cached data");
+                    console.log(`[API] ✅ getTools error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -5984,7 +5984,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getTools critical error:", error);
+            console.error("[API] ❌ getTools critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -5999,7 +5999,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -6007,7 +6007,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getUsers(),
-                    `GET users`,
+                    \`GET users\`,
                     endpoint
                 );
             }
@@ -6018,11 +6018,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached users");
+                console.log(`[API] ✅ Returning cached users");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -6041,7 +6041,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_users_failed')) {
-                        console.error("[API] ❌ getUsers failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getUsers failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -6049,7 +6049,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getUsers failed, returning cached data");
+                        console.log("[API] ✅ getUsers failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -6075,7 +6075,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_users_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_users_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -6091,14 +6091,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_users_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_users_error')) {
-                    console.error("[API] ❌ getUsers error:", error.message);
+                    console.error(`[API] ❌ getUsers error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getUsers error, returning cached data");
+                    console.log(`[API] ✅ getUsers error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -6137,7 +6137,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!userId) {
-                console.error("[API] ❌ getUserById called without userId");
+                console.error("[API] ❌ getUserById called without userId`);
                 return {
                     ok: false,
                     success: false,
@@ -6149,13 +6149,13 @@ fetchOptions.signal = controller.signal;
                 };
             }
             
-            const endpoint = `/users/${encodeURIComponent(userId)}`;
+            const endpoint = \`/users/${encodeURIComponent(userId)}\`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -6163,7 +6163,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getUserById(userId),
-                    `GET user ${userId}`,
+                    \`GET user ${userId}\`,
                     endpoint
                 );
             }
@@ -6174,11 +6174,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached user ${userId}");
+                console.log(`[API] ✅ Returning cached user ${userId}");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -6197,7 +6197,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_user_by_id_failed')) {
-                        console.error("[API] ❌ getUserById failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getUserById failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -6232,14 +6232,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_user_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_user_by_id_error')) {
-                    console.error("[API] ❌ getUserById error:", error.message);
+                    console.error("[API] ❌ getUserById error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getUserById error, returning cached data");
+                    console.log(`[API] ✅ getUserById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -6278,7 +6278,7 @@ fetchOptions.signal = controller.signal;
         
         try {
             if (!chatId) {
-                console.error("[API] ❌ getChatById called without chatId");
+                console.error("[API] ❌ getChatById called without chatId`);
                 return {
                     ok: false,
                     success: false,
@@ -6290,13 +6290,13 @@ fetchOptions.signal = controller.signal;
                 };
             }
             
-            const endpoint = `/chats/${encodeURIComponent(chatId)}`;
+            const endpoint = \`/chats/${encodeURIComponent(chatId)}\`;
             const normalizedEndpoint = normalizeEndpoint(endpoint);
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -6304,7 +6304,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getChatById(chatId),
-                    `GET chat ${chatId}`,
+                    \`GET chat ${chatId}\`,
                     endpoint
                 );
             }
@@ -6315,11 +6315,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached chat ${chatId}");
+                console.log(`[API] ✅ Returning cached chat ${chatId}");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -6338,7 +6338,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_chat_by_id_failed')) {
-                        console.error("[API] ❌ getChatById failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getChatById failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -6373,14 +6373,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_chat_by_id_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_chat_by_id_error')) {
-                    console.error("[API] ❌ getChatById error:", error.message);
+                    console.error("[API] ❌ getChatById error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getChatById error, returning cached data");
+                    console.log(`[API] ✅ getChatById error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -6409,7 +6409,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getChatById critical error:", error);
+            console.error("[API] ❌ getChatById critical error:`, error);
             return getSafeDefaultResponse('/chats/:id', functionName, error);
         }
     }
@@ -6424,7 +6424,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -6432,7 +6432,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getContacts(),
-                    `GET contacts`,
+                    \`GET contacts\`,
                     endpoint
                 );
             }
@@ -6443,11 +6443,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached contacts");
+                console.log(`[API] ✅ Returning cached contacts");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -6466,7 +6466,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_contacts_failed')) {
-                        console.error("[API] ❌ getContacts failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getContacts failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -6474,7 +6474,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getContacts failed, returning cached data");
+                        console.log("[API] ✅ getContacts failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -6500,7 +6500,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_contacts_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_contacts_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -6516,14 +6516,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_contacts_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_contacts_error')) {
-                    console.error("[API] ❌ getContacts error:", error.message);
+                    console.error(`[API] ❌ getContacts error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getContacts error, returning cached data");
+                    console.log(`[API] ✅ getContacts error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -6552,7 +6552,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getContacts critical error:", error);
+            console.error("[API] ❌ getContacts critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -6567,7 +6567,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -6575,7 +6575,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getNotifications(),
-                    `GET notifications`,
+                    \`GET notifications\`,
                     endpoint
                 );
             }
@@ -6586,11 +6586,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached notifications");
+                console.log(`[API] ✅ Returning cached notifications");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -6609,7 +6609,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_notifications_failed')) {
-                        console.error("[API] ❌ getNotifications failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getNotifications failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -6617,7 +6617,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getNotifications failed, returning cached data");
+                        console.log("[API] ✅ getNotifications failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -6643,7 +6643,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_notifications_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_notifications_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -6659,14 +6659,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_notifications_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_notifications_error')) {
-                    console.error("[API] ❌ getNotifications error:", error.message);
+                    console.error(`[API] ❌ getNotifications error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getNotifications error, returning cached data");
+                    console.log(`[API] ✅ getNotifications error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -6695,7 +6695,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] ❌ getNotifications critical error:", error);
+            console.error("[API] ❌ getNotifications critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -6710,7 +6710,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'GET');
-                logRequest(requestId, `⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`⏳ Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -6718,7 +6718,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => getUserPreferences(),
-                    `GET user preferences`,
+                    \`GET user preferences\`,
                     endpoint
                 );
             }
@@ -6729,11 +6729,11 @@ fetchOptions.signal = controller.signal;
             
             trackRequestStart(normalizedEndpoint, functionName);
             
-            const cacheKey = `get_${normalizedEndpoint}`;
+            const cacheKey = \`get_${normalizedEndpoint}\`;
             const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
             
             if (cachedData && window.AppNetwork && !window.AppNetwork.isOnline) {
-                console.log("[API] ✅ Returning cached user preferences");
+                console.log(`[API] ✅ Returning cached user preferences");
                 trackRequestEnd(normalizedEndpoint, functionName, true);
                 return {
                     ok: true,
@@ -6752,7 +6752,7 @@ fetchOptions.signal = controller.signal;
                 
                 if (!result.success) {
                     if (shouldLogError(normalizedEndpoint, 'get_user_preferences_failed')) {
-                        console.error("[API] ❌ getUserPreferences failed: ${result.status} - ${result.message}");
+                        console.error(`[API] ❌ getUserPreferences failed: ${result.status} - ${result.message}`);
                     }
                     
                     if (!result.data) {
@@ -6760,7 +6760,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     if (cachedData) {
-                        console.log("[API] ✅ getUserPreferences failed, returning cached data");
+                        console.log("[API] ✅ getUserPreferences failed, returning cached data`);
                         trackRequestEnd(normalizedEndpoint, functionName, false);
                         return {
                             ok: true,
@@ -6786,7 +6786,7 @@ fetchOptions.signal = controller.signal;
                     }
                     
                     trackRequestEnd(normalizedEndpoint, functionName, false);
-                    trackError(normalizedEndpoint, functionName, `get_user_preferences_failed_${result.status}`);
+                    trackError(normalizedEndpoint, functionName, \`get_user_preferences_failed_${result.status}\`);
                     return result;
                 }
                 
@@ -6802,14 +6802,14 @@ fetchOptions.signal = controller.signal;
                 const errorCount = trackError(normalizedEndpoint, functionName, 'get_user_preferences_error');
                 
                 if (shouldLogError(normalizedEndpoint, 'get_user_preferences_error')) {
-                    console.error("[API] ❌ getUserPreferences error:", error.message);
+                    console.error(`[API] ❌ getUserPreferences error:`, error.message);
                 }
                 
-                const cacheKey = `get_${normalizedEndpoint}`;
+                const cacheKey = \`get_${normalizedEndpoint}\`;
                 const cachedData = _apiCache ? _apiCache.get(cacheKey) : null;
                 
                 if (cachedData) {
-                    console.log("[API] ✅ getUserPreferences error, returning cached data");
+                    console.log(`[API] ✅ getUserPreferences error, returning cached data");
                     return {
                         ok: true,
                         success: true,
@@ -6851,7 +6851,7 @@ fetchOptions.signal = controller.signal;
             const isPublic = isPublicEndpointCheck(normalizedEndpoint);
             
             if (shouldLogError(normalizedEndpoint, 'request_call')) {
-                console.log("[API] ⏳ Request normalized: ${endpoint} → ${normalizedEndpoint}");
+                console.log(`[API] ⏳ Request normalized: ${endpoint} → ${normalizedEndpoint}`);
             }
             
             const requestId = generateRequestId(endpoint, options.method || 'GET');
@@ -6880,7 +6880,7 @@ fetchOptions.signal = controller.signal;
             
             if (isPublic || isPublicEndpointFlag || isStatus || isAuth) {
                 if (shouldLogError(normalizedEndpoint, 'public_endpoint')) {
-                    console.log("[API] ⏳ PUBLIC/AUTH/STATUS endpoint - executing immediately: ${normalizedEndpoint}");
+                    console.log(`[API] ⏳ PUBLIC/AUTH/STATUS endpoint - executing immediately: ${normalizedEndpoint}`);
                 }
                 const result = await enhancedSecureFetch(endpoint, options);
                 trackRequestEnd(normalizedEndpoint, functionName, result.success);
@@ -6891,7 +6891,7 @@ fetchOptions.signal = controller.signal;
             const token = getAuthToken();
             
             if (requiresAuth && !token && _apiRequestQueue && !_apiRequestQueue.isLoginComplete()) {
-                console.log("[API] ⏳ Delaying protected endpoint until login complete: ${normalizedEndpoint}");
+                console.log(`[API] ⏳ Delaying protected endpoint until login complete: ${normalizedEndpoint}`);
                 
                 const result = await _apiRequestQueue.addRequest(
                     () => enhancedSecureFetch(endpoint, options),
@@ -6912,7 +6912,7 @@ fetchOptions.signal = controller.signal;
             const errorCount = trackError(normalizeEndpoint(endpoint || 'unknown'), functionName, 'request_error');
             
             if (shouldLogError(normalizeEndpoint(endpoint || 'unknown'), 'request_error')) {
-                console.error("[API] ❌ request function error for ${endpoint}:", error.message);
+                console.error(`[API] ❌ request function error for ${endpoint}:`, error.message);
             }
             
             return getSafeDefaultResponse(endpoint || 'unknown', functionName, error);
@@ -6952,7 +6952,7 @@ fetchOptions.signal = controller.signal;
             testCases.forEach(([input, expected]) => {
                 const result = normalizeEndpoint(input);
                 const pass = result === expected;
-                console.log(`  ${pass ? '✅' : '❌'} "${input}" → "${result}" ${pass ? '' : `(expected: "${expected}")`}`);
+                console.log(`  ${pass ? '✅' : '❌'} `${input}` → `${result}` ${pass ? '' : `(expected: `${expected}`)`}`);
             });
         } catch (error) {
             console.error("[API] ❌ testNormalization failed:", error);
@@ -6982,7 +6982,7 @@ fetchOptions.signal = controller.signal;
                     if (window.location.hostname === 'localhost' || 
                         window.location.hostname === '127.0.0.1' ||
                         window.location.hostname === '') {
-                        console.warn("[API] ⏳ Development mode detected, using current origin");
+                        console.warn("[API] ⏳ Development mode detected, using current origin`);
                         return window.location.origin;
                     }
                     return null;
@@ -6997,18 +6997,18 @@ fetchOptions.signal = controller.signal;
                     const result = detectionStrategies[i]();
                     if (result && typeof result === 'string' && result.trim()) {
                         resolvedOrigin = result.trim();
-                        resolvedBy = `strategy_${i + 1}`;
+                        resolvedBy = \`strategy_${i + 1}\`;
                         break;
                     }
                 } catch (error) {}
             }
             
             if (!resolvedOrigin) {
-                throw new Error("Cannot resolve backend origin");
+                throw new Error(`Cannot resolve backend origin");
             }
             
             if (!resolvedOrigin.startsWith('http://') && !resolvedOrigin.startsWith('https://')) {
-                console.warn("[API] ⏳ Backend origin missing protocol, assuming https://${resolvedOrigin}");
+                console.warn(`[API] ⏳ Backend origin missing protocol, assuming https://${resolvedOrigin}`);
                 resolvedOrigin = `https://${resolvedOrigin}`;
             }
             
@@ -7027,7 +7027,7 @@ fetchOptions.signal = controller.signal;
             _gatewayState.gates.backendResolved = true;
             _gatewayState.initialization.steps.backendResolved = true;
             
-            console.log("[API] ✅ Backend resolved: ${resolvedOrigin} (via ${resolvedBy})");
+            console.log(`[API] ✅ Backend resolved: ${resolvedOrigin} (via ${resolvedBy})`);
             
             return resolvedOrigin;
             
@@ -7035,12 +7035,12 @@ fetchOptions.signal = controller.signal;
             _gatewayState.backend.detectionAttempts++;
             
             if (_gatewayState.backend.detectionAttempts >= _gatewayState.backend.maxDetectionAttempts) {
-                console.error("[API] ❌ Failed to resolve backend origin after multiple attempts");
+                console.error("[API] ❌ Failed to resolve backend origin after multiple attempts`);
                 _gatewayState.errorHandler.isPaused = true;
-                throw new Error(`Backend resolution failed: ${error.message}`);
+                throw new Error(\`Backend resolution failed: ${error.message}\`);
             }
             
-            console.warn("[API] ⏳ Backend resolution failed (attempt ${_gatewayState.backend.detectionAttempts}), retrying...");
+            console.warn(`[API] ⏳ Backend resolution failed (attempt ${_gatewayState.backend.detectionAttempts}), retrying...");
             
             return new Promise(resolve => {
                 setTimeout(() => {
@@ -7054,28 +7054,51 @@ fetchOptions.signal = controller.signal;
         return new Promise((resolve) => {
             const maxWaitTime = 30000;
             
+            // Fast path: resolve immediately if already bootstrapped
+            const isAlreadyComplete = 
+                (window.AppState && window.AppState.bootstrapComplete) ||
+                (window.__APP_BOOTSTRAP_COMPLETE__) ||
+                (document.readyState === 'complete' && window.__API_CORE_LOADED_V24);
+
+            if (isAlreadyComplete) {
+                _gatewayState.gates.bootstrapReady = true;
+                _gatewayState.initialization.steps.bootstrapWaited = true;
+                console.log("[API] ✅ Bootstrap ready (immediate)`);
+                resolve(true);
+                return;
+            }
+
+            let resolved = false;
+            const markReady = (source) => {
+                if (resolved) return;
+                resolved = true;
+                _gatewayState.gates.bootstrapReady = true;
+                _gatewayState.initialization.steps.bootstrapWaited = true;
+                console.log(\`[API] ✅ Bootstrap ready (${source})\`);
+                resolve(true);
+            };
+
+            // Primary fast path: listen for the event dispatched by app.core.bootstrap.js
+            window.addEventListener('moodchat-bootstrap-complete', () => markReady('event'), { once: true });
+
             const checkBootstrap = () => {
                 const isBootstrapComplete = 
                     (window.AppState && window.AppState.bootstrapComplete) ||
                     (window.__APP_BOOTSTRAP_COMPLETE__) ||
                     (document.readyState === 'complete' && window.__API_CORE_LOADED_V24);                
                 if (isBootstrapComplete) {
-                    _gatewayState.gates.bootstrapReady = true;
-                    _gatewayState.initialization.steps.bootstrapWaited = true;
-                    console.log("[API] ✅ Bootstrap ready");
-                    resolve(true);
+                    markReady('poll');
                     return;
                 }
                 
                 if (_gatewayState.initialization.started && 
                     Date.now() - _gatewayState.initialization.started > maxWaitTime) {
-                    console.warn("[API] ⏳ Bootstrap timeout, proceeding anyway");
-                    _gatewayState.gates.bootstrapReady = true;
-                    resolve(true);
+                    console.warn(`[API] ⏳ Bootstrap timeout, proceeding anyway");
+                    markReady('timeout');
                     return;
                 }
                 
-                setTimeout(checkBootstrap, 100);
+                if (!resolved) setTimeout(checkBootstrap, 100);
             };
             
             checkBootstrap();
@@ -7181,7 +7204,7 @@ fetchOptions.signal = controller.signal;
             activateRequestQueue();
             emitApiReady();
         } catch (error) {
-            console.error("[API] ❌ Gateway initialization failed:", error);
+            console.error("[API] ❌ Gateway initialization failed:`, error);
             _gatewayState.gates.apiReady = true;
         }
     }
@@ -7193,11 +7216,11 @@ fetchOptions.signal = controller.signal;
     // Delete message API function
     async function deleteMessage(messageId, deleteForEveryone = false) {
         const functionName = 'deleteMessage';
-        const endpoint = `/api/messages/${messageId}`;
+        const endpoint = \`/api/messages/${messageId}\`;
         
         try {
             if (!messageId) {
-                console.error("[API] deleteMessage called without messageId");
+                console.error(`[API] deleteMessage called without messageId`);
                 return {
                     ok: false,
                     success: false,
@@ -7214,7 +7237,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'DELETE');
-                logRequest(requestId, `Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -7222,7 +7245,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => deleteMessage(messageId, deleteForEveryone),
-                    `DELETE message ${messageId}`,
+                    \`DELETE message ${messageId}\`,
                     endpoint
                 );
             }
@@ -7241,7 +7264,7 @@ fetchOptions.signal = controller.signal;
             
             if (result.success) {
                 if (shouldLogSuccess(normalizedEndpoint, 'delete_message_success')) {
-                    console.log(`[API] deleteMessage successful: ${messageId}`);
+                    console.log(\`[API] deleteMessage successful: ${messageId}\`);
                 }
                 return {
                     ok: true,
@@ -7253,7 +7276,7 @@ fetchOptions.signal = controller.signal;
                 };
             } else {
                 if (shouldLogError(normalizedEndpoint, 'delete_message_failed')) {
-                    console.error(`[API] deleteMessage failed: ${result.status} - ${result.message}`);
+                    console.error(\`[API] deleteMessage failed: ${result.status} - ${result.message}\`);
                 }
                 
                 const errorObj = {
@@ -7269,7 +7292,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] deleteMessage critical error:", error);
+            console.error(`[API] deleteMessage critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -7277,11 +7300,11 @@ fetchOptions.signal = controller.signal;
     // Edit message API function
     async function editMessage(messageId, content) {
         const functionName = 'editMessage';
-        const endpoint = `/api/messages/${messageId}`;
+        const endpoint = \`/api/messages/${messageId}\`;
         
         try {
             if (!messageId || !content) {
-                console.error("[API] editMessage called without messageId or content");
+                console.error(`[API] editMessage called without messageId or content`);
                 return {
                     ok: false,
                     success: false,
@@ -7298,7 +7321,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'PATCH');
-                logRequest(requestId, `Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -7306,7 +7329,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => editMessage(messageId, content),
-                    `PATCH message ${messageId}`,
+                    \`PATCH message ${messageId}\`,
                     endpoint
                 );
             }
@@ -7323,7 +7346,7 @@ fetchOptions.signal = controller.signal;
             
             if (result.success) {
                 if (shouldLogSuccess(normalizedEndpoint, 'edit_message_success')) {
-                    console.log(`[API] editMessage successful: ${messageId}`);
+                    console.log(\`[API] editMessage successful: ${messageId}\`);
                 }
                 return {
                     ok: true,
@@ -7335,7 +7358,7 @@ fetchOptions.signal = controller.signal;
                 };
             } else {
                 if (shouldLogError(normalizedEndpoint, 'edit_message_failed')) {
-                    console.error(`[API] editMessage failed: ${result.status} - ${result.message}`);
+                    console.error(\`[API] editMessage failed: ${result.status} - ${result.message}\`);
                 }
                 
                 const errorObj = {
@@ -7351,7 +7374,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] editMessage critical error:", error);
+            console.error(`[API] editMessage critical error:`, error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
@@ -7359,11 +7382,11 @@ fetchOptions.signal = controller.signal;
     // Add reaction API function
     async function addReaction(messageId, emoji) {
         const functionName = 'addReaction';
-        const endpoint = `/api/messages/${messageId}/react`;
+        const endpoint = \`/api/messages/${messageId}/react\`;
         
         try {
             if (!messageId || !emoji) {
-                console.error("[API] addReaction called without messageId or emoji");
+                console.error(`[API] addReaction called without messageId or emoji`);
                 return {
                     ok: false,
                     success: false,
@@ -7380,7 +7403,7 @@ fetchOptions.signal = controller.signal;
             
             if (!isPublic && !isSessionReady()) {
                 const requestId = generateRequestId(endpoint, 'POST');
-                logRequest(requestId, `Protected endpoint waiting for session ready: ${normalizedEndpoint}`);
+                logRequest(requestId, \`Protected endpoint waiting for session ready: ${normalizedEndpoint}\`);
                 await waitForSessionReady();
             }
             
@@ -7388,7 +7411,7 @@ fetchOptions.signal = controller.signal;
             if (!checkDependencyGates(requestId, normalizedEndpoint)) {
                 return queueRequest(
                     () => addReaction(messageId, emoji),
-                    `POST reaction to message ${messageId}`,
+                    \`POST reaction to message ${messageId}\`,
                     endpoint
                 );
             }
@@ -7405,7 +7428,7 @@ fetchOptions.signal = controller.signal;
             
             if (result.success) {
                 if (shouldLogSuccess(normalizedEndpoint, 'add_reaction_success')) {
-                    console.log(`[API] addReaction successful: ${messageId} ${emoji}`);
+                    console.log(\`[API] addReaction successful: ${messageId} ${emoji}\`);
                 }
                 return {
                     ok: true,
@@ -7417,7 +7440,7 @@ fetchOptions.signal = controller.signal;
                 };
             } else {
                 if (shouldLogError(normalizedEndpoint, 'add_reaction_failed')) {
-                    console.error(`[API] addReaction failed: ${result.status} - ${result.message}`);
+                    console.error(\`[API] addReaction failed: ${result.status} - ${result.message}\`);
                 }
                 
                 const errorObj = {
@@ -7433,7 +7456,7 @@ fetchOptions.signal = controller.signal;
             }
             
         } catch (error) {
-            console.error("[API] addReaction critical error:", error);
+            console.error(`[API] addReaction critical error:", error);
             return getSafeDefaultResponse(endpoint, functionName, error);
         }
     }
