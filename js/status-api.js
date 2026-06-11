@@ -802,6 +802,160 @@ class StatusAPI {
         } catch (e) { return { success: false, statuses: [] }; }
     }
 
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P2 FIX: Draft CRUD — dedicated status_drafts table
+    // ─────────────────────────────────────────────────────────────────────────
+    async saveDraft(draftData) {
+        try {
+            const payload = {
+                content:  draftData.text || draftData.content || draftData.question || '',
+                type:     draftData.type || 'text',
+                mediaUrl: draftData.mediaUrl || null,
+                moodType: draftData.mood   || draftData.moodType || null,
+                privacy:  draftData.privacy || 'friends',
+                metadata: {
+                    background:  draftData.background  || null,
+                    caption:     draftData.caption      || null,
+                    pollOptions: draftData.options      || draftData.pollOptions || null,
+                    intent:      draftData.intent       || null,
+                    category:    draftData.category     || null,
+                },
+            };
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+                body: JSON.stringify(payload),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async getDrafts() {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, drafts: [] }; }
+    }
+
+    async deleteDraft(draftId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts/${draftId}`), {
+                method: 'DELETE', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    async publishDraft(draftId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/drafts/${draftId}/publish`), {
+                method: 'POST', headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, error: e.message }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: Story templates
+    // ─────────────────────────────────────────────────────────────────────────
+    async getTemplates(tag) {
+        try {
+            const url = tag ? `${this.baseURL}/templates?tag=${encodeURIComponent(tag)}` : `${this.baseURL}/templates`;
+            const r = await this._fetch(this.resolveUrl(url));
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, templates: [] }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: Countdown live data
+    // ─────────────────────────────────────────────────────────────────────────
+    async getCountdown(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/countdown`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, finished: true }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: Algorithm-ranked public feed
+    // ─────────────────────────────────────────────────────────────────────────
+    async getRankedFeed(limit = 20, offset = 0) {
+        try {
+            const r = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/public?ranked=1&limit=${limit}&offset=${offset}`),
+                { headers: this.getAuthHeaders() }
+            );
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, statuses: [] }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: Profile-visit tracking from story views
+    // ─────────────────────────────────────────────────────────────────────────
+    async getViewerProfiles(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/${statusId}/viewers/profiles`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false, viewers: [] }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: On This Day memories feed
+    // ─────────────────────────────────────────────────────────────────────────
+    async getMemories() {
+        // The backend pushes notifications for On This Day.
+        // This client method fetches the user's own statuses from
+        // the same calendar day in previous years for the "Memories" tab.
+        try {
+            const now = new Date();
+            const month = now.getMonth() + 1; // 1-indexed
+            const day   = now.getDate();
+            const r = await this._fetch(
+                this.resolveUrl(`${this.baseURL}/my?month=${month}&day=${day}&limit=10`),
+                { headers: this.getAuthHeaders() }
+            );
+            const result = await this._parseJSON(r);
+            // Filter to only statuses from previous years
+            const statuses = (result.data?.statuses || []).filter(s => {
+                const created = new Date(s.createdAt);
+                return created.getFullYear() < now.getFullYear();
+            });
+            return { success: true, data: { statuses } };
+        } catch (e) { return { success: false, data: { statuses: [] } }; }
+    }
+
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: Per-status analytics
+    // ─────────────────────────────────────────────────────────────────────────
+    async getStatusAnalytics(statusId) {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/stats/${statusId}`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false }; }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P3 FIX: Creator analytics dashboard
+    // ─────────────────────────────────────────────────────────────────────────
+    async getAnalyticsDashboard(period = '7d') {
+        try {
+            const r = await this._fetch(this.resolveUrl(`${this.baseURL}/analytics/dashboard?period=${period}`), {
+                headers: this.getAuthHeaders(),
+            });
+            return this._parseJSON(r);
+        } catch (e) { return { success: false }; }
+    }
+
 } // end class StatusAPI
 
 // Singleton

@@ -3865,6 +3865,22 @@ function loadViewerContent(statusData) {
     // P2 FIX: Render question overlay (or hide if not question type)
     if (window._renderQuestionOverlay) window._renderQuestionOverlay(sanitized);
 
+    // P3 FIX: Render music overlay
+    if (window._renderMusicOverlay) window._renderMusicOverlay(sanitized);
+
+    // P3 FIX: Start/stop countdown ticker
+    const prevStatus = window.currentViewerStatus;
+    if (prevStatus && prevStatus.id !== sanitized.id) {
+        if (window._stopCountdownTicker) window._stopCountdownTicker(prevStatus.id);
+    }
+    const hasCd = sanitized.metadata && sanitized.metadata.countdown && sanitized.metadata.countdown.targetDate;
+    if (hasCd) {
+        if (window._startCountdownTicker) window._startCountdownTicker(sanitized.id);
+    } else {
+        const cdOverlay = document.getElementById('statusCountdownOverlay');
+        if (cdOverlay) cdOverlay.style.display = 'none';
+    }
+
     // Only rebuild progress if NOT already built by showStatusGroupViewer
     // (showStatusGroupViewer calls _buildProgressSegments before loadViewerContent)
     if (progressIndicators && !document.getElementById('progressSegments')) {
@@ -3952,6 +3968,101 @@ function renderQuestionOverlay(statusData) {
     }
 }
 window._renderQuestionOverlay = renderQuestionOverlay;
+
+// P3 FIX: Load and render story templates in create modal
+async function loadStatusTemplates() {
+    const container = document.getElementById('statusTemplatesContainer');
+    if (!container) return;
+    try {
+        const api = window.StatusAPI;
+        if (!api || !api.getTemplates) return;
+        const result = await api.getTemplates();
+        const templates = result && result.data && result.data.templates ? result.data.templates : [];
+        if (!templates.length) return;
+        container.innerHTML = templates.map(t => `
+            <div class="status-template-card" data-template-id="${t.id}"
+                 style="background:${t.background};color:${t.textColor};font-family:${t.fontFamily}"
+                 onclick="window._applyStatusTemplate && window._applyStatusTemplate(${JSON.stringify(t).replace(/"/g, '&quot;')})">
+                <span class="template-icon">${t.icon}</span>
+                <span class="template-name">${t.name}</span>
+            </div>
+        `).join('');
+        container.style.display = 'flex';
+    } catch (_) {}
+}
+window._loadStatusTemplates = loadStatusTemplates;
+
+// P3 FIX: Apply a template to the current text status editor
+window._applyStatusTemplate = function(template) {
+    // Set background
+    const bgOptions = document.querySelectorAll('.background-option');
+    bgOptions.forEach(b => b.classList.remove('selected'));
+    // Store template in a temp var to apply on submit
+    window._activeTemplate = template;
+    // Apply preview style to text editor
+    const textSlide = document.querySelector('.create-status-preview, #textStatusPreview, .text-status-slide');
+    if (textSlide) {
+        textSlide.style.background    = template.background;
+        textSlide.style.color         = template.textColor;
+        textSlide.style.fontFamily    = template.fontFamily;
+    }
+    // Mark selected
+    document.querySelectorAll('.status-template-card').forEach(c => c.classList.remove('active'));
+    const card = document.querySelector(`.status-template-card[data-template-id="${template.id}"]`);
+    if (card) card.classList.add('active');
+    showNotification(`Template "${template.name}" applied`, 'success');
+};
+
+// P3 FIX: Countdown sticker — live countdown ticker in viewer
+const _countdownTimers = new Map();
+function startCountdownTicker(statusId) {
+    if (_countdownTimers.has(statusId)) return; // already running
+    const overlay = document.getElementById('statusCountdownOverlay');
+    if (!overlay) return;
+
+    async function tick() {
+        try {
+            const api = window.StatusAPI;
+            if (!api || !api.getCountdown) return;
+            const result = await api.getCountdown(statusId);
+            if (!result || !result.success || !result.data) { overlay.style.display = 'none'; return; }
+            const d = result.data;
+            if (d.finished) {
+                overlay.innerHTML = `<div class="countdown-sticker finished"><span>${d.label || 'Time's up!'}</span><span>🎉</span></div>`;
+                overlay.style.display = 'flex';
+                clearInterval(_countdownTimers.get(statusId));
+                _countdownTimers.delete(statusId);
+                return;
+            }
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div class="countdown-sticker">
+                    ${d.label ? `<p class="countdown-label">${d.label}</p>` : ''}
+                    <div class="countdown-units">
+                        <div class="cu"><span class="cu-val">${d.formatted.days}</span><span class="cu-lbl">days</span></div>
+                        <div class="cu"><span class="cu-val">${String(d.formatted.hours).padStart(2,'0')}</span><span class="cu-lbl">hrs</span></div>
+                        <div class="cu"><span class="cu-val">${String(d.formatted.minutes).padStart(2,'0')}</span><span class="cu-lbl">min</span></div>
+                        <div class="cu"><span class="cu-val">${String(d.formatted.seconds).padStart(2,'0')}</span><span class="cu-lbl">sec</span></div>
+                    </div>
+                </div>`;
+        } catch(_) {}
+    }
+
+    tick(); // immediate
+    const timer = setInterval(tick, 1000);
+    _countdownTimers.set(statusId, timer);
+}
+
+function stopCountdownTicker(statusId) {
+    if (_countdownTimers.has(statusId)) {
+        clearInterval(_countdownTimers.get(statusId));
+        _countdownTimers.delete(statusId);
+    }
+    const overlay = document.getElementById('statusCountdownOverlay');
+    if (overlay) overlay.style.display = 'none';
+}
+window._startCountdownTicker = startCountdownTicker;
+window._stopCountdownTicker  = stopCountdownTicker;
 
 // P2 FIX: Question answer submit
 window._handleQuestionAnswer = async function() {
@@ -4231,6 +4342,18 @@ function stopAutoAdvance() {
 
 function closeViewer() {
     _clearSlideTimer();
+
+    // P3 FIX: Stop music + countdown when viewer closes
+    try {
+        const player = document.getElementById('statusMusicPlayer');
+        if (player) { player.pause(); player.src = ''; }
+        const musicOverlay = document.getElementById('statusMusicOverlay');
+        if (musicOverlay) musicOverlay.style.display = 'none';
+        if (window._stopCountdownTicker && window.currentViewerStatus) {
+            window._stopCountdownTicker(window.currentViewerStatus.id);
+        }
+    } catch(_) {}
+
     currentViewerGroup = [];
     currentViewerSlot  = 0;
     const viewer = UIElements.statusViewerPanel || document.querySelector('.status-viewer-panel');
@@ -6113,17 +6236,21 @@ async function handlePostStatus() {
         // This means status creation works even when the module is not yet ACTIVE.
         // ─────────────────────────────────────────────────────────────────────────
 
+        // P2/P3 FIX: Merge sticker data (mentions, link, countdown, alt text, template, hashtags)
+        const stickerData = window._collectStickerData ? window._collectStickerData() : {};
+        Object.assign(statusData, stickerData);
+
         // P1 FIX: Offline path — queue immediately
         if (!navigator.onLine) {
             if (window.StatusCache) await window.StatusCache.addToSyncQueue(statusData);
             response = { success: true, queued: true, offline: true };
-        } else if (statusData._mediaFile) {
-            // P1 FIX: Direct multipart upload — bypasses postMessage chain so file
-            // binary can be sent as FormData directly to the backend
+        } else if (statusData._mediaFile || window._pendingDrawingFile) {
+            // P1/P3 FIX: Direct multipart upload for captured media OR drawing canvas export
+            const mediaFile = statusData._mediaFile || window._pendingDrawingFile;
+            window._pendingDrawingFile = null;
             showNotification('Uploading media…', 'info');
             const api = window.StatusAPI;
-            const mediaFile = statusData._mediaFile;
-            delete statusData._mediaFile; // remove before serialising
+            delete statusData._mediaFile;
             response = await api.createStatusWithFile(statusData, mediaFile);
         } else {
             // Try core postStatus() first — it uses the postMessage bridge which
@@ -6295,28 +6422,26 @@ function handleSaveDraft() {
     if (mood) draftData.mood = mood;
     if (category) draftData.category = category;
     draftData.id = 'draft_' + Date.now();
-    try {
-        const core = getCore();
-        if (core && core.saveDraft) {
-            core.saveDraft(draftData);
-        } else {
-            // Fallback: store in local drafts array and localStorage
+    // P2 FIX: save to dedicated backend draft table via API
+    const api = window.StatusAPI;
+    (async () => {
+        let saved = false;
+        if (api && api.saveDraft) {
+            try {
+                const result = await api.saveDraft(draftData);
+                saved = result && result.success;
+            } catch(_) {}
+        }
+        if (!saved) {
+            // Fallback localStorage
             if (!Array.isArray(drafts)) drafts = [];
             drafts.unshift(draftData);
             try { localStorage.setItem('status_drafts', JSON.stringify(drafts)); } catch(e) {}
         }
-        showNotification('Draft saved successfully', 'success');
+        showNotification('Draft saved', 'success');
         const modal = UIElements.createStatusModal || document.getElementById('createStatusModal');
         if (modal) modal.classList.remove('active');
-    } catch (error) {
-        // Fallback even on exception
-        if (!Array.isArray(drafts)) drafts = [];
-        drafts.unshift(draftData);
-        showNotification('Draft saved locally', 'success');
-        const modal = UIElements.createStatusModal || document.getElementById('createStatusModal');
-        if (modal) modal.classList.remove('active');
-        UILogger.error('Draft', 'Failed to save draft to core', error);
-    }
+    })();
 }
 
 async function handleConfirmSchedule() {
@@ -7958,7 +8083,643 @@ if (typeof window !== 'undefined') {
         window.handleCreateStatusClick = handleCreateStatusClick;
         window.closeModal = closeModal;
         window.closeNotification = closeNotification;
-        window.handlePostStatus = handlePostStatus;
+        
+// ═══════════════════════════════════════════════════════════════════
+// P3 FIX: Feed tab switcher — Friends / Discover (Ranked) / Memories
+// ═══════════════════════════════════════════════════════════════════
+let _activeFeedTab = 'friends';
+let _rankedLoaded  = false;
+let _memoriesLoaded = false;
+
+window._switchFeedTab = async function(tab) {
+    if (_activeFeedTab === tab) return;
+    _activeFeedTab = tab;
+
+    // Update tab button styles
+    document.querySelectorAll('.sft-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.feed === tab);
+    });
+
+    // Show/hide sections
+    const sections = {
+        friends:  ['allStatusSection', 'viewedStatusSection', 'recentUpdatesLabel', 'viewedUpdatesLabel'],
+        ranked:   ['rankedStatusSection'],
+        memories: ['memoriesStatusSection'],
+    };
+    const allSections = ['allStatusSection', 'viewedStatusSection', 'rankedStatusSection',
+                         'memoriesStatusSection', 'recentUpdatesLabel', 'viewedUpdatesLabel'];
+
+    allSections.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+
+    (sections[tab] || []).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = '';
+    });
+
+    // Lazy-load ranked feed
+    if (tab === 'ranked' && !_rankedLoaded) {
+        _rankedLoaded = true;
+        try {
+            const api = window.StatusAPI;
+            if (!api || !api.getRankedFeed) return;
+            const result = await api.getRankedFeed(30, 0);
+            const statuses = (result && result.data && result.data.statuses) || [];
+            const list = document.getElementById('rankedStatusList');
+            if (!list) return;
+            if (!statuses.length) {
+                list.innerHTML = '<p style="padding:20px;text-align:center;color:rgba(255,255,255,0.5);">No public statuses yet.</p>';
+                return;
+            }
+            // Reuse existing renderStatusRow / createStatusItem from the page
+            list.innerHTML = statuses.map(s => {
+                const avatar = s.user && s.user.avatar ? `background-image:url(${s.user.avatar})` : '';
+                const name   = (s.user && (s.user.displayName || s.user.username)) || 'Unknown';
+                const time   = s.createdAt ? timeSince(new Date(s.createdAt)) : '';
+                const icon   = s.type === 'image' ? '🖼️' : s.type === 'video' ? '🎥' : s.type === 'poll' ? '📊' : '💬';
+                return `<div class="sw-contact-row status-row" data-status-id="${s.id}"
+                              onclick="window._openRankedStatus && window._openRankedStatus('${s.id}')">
+                    <div class="sw-avatar status-ring ${s.isPinned ? 'pinned-ring' : ''}" style="${avatar}">
+                        ${!avatar ? name.charAt(0).toUpperCase() : ''}
+                    </div>
+                    <div class="sw-contact-info">
+                        <div class="sw-contact-name">${UISanitizer ? UISanitizer.sanitizeHTML(name) : name} ${s.isPinned ? '📌' : ''}</div>
+                        <div class="sw-contact-status">${icon} ${s.content ? (s.content.slice(0,60) + (s.content.length > 60 ? '…' : '')) : ''}</div>
+                    </div>
+                    <div class="sw-time">${time}</div>
+                </div>`;
+            }).join('');
+
+            // Open ranked status in viewer on click
+            window._openRankedStatus = async function(statusId) {
+                try {
+                    const api = window.StatusAPI;
+                    if (!api) return;
+                    const res = await api.getStatus(statusId);
+                    const s = res && res.data && res.data.status;
+                    if (s && typeof showSingleStatus === 'function') showSingleStatus(s);
+                } catch(_) {}
+            };
+        } catch(err) {
+            console.warn('[status-ui] Ranked feed error:', err.message);
+        }
+    }
+
+    // Lazy-load memories feed
+    if (tab === 'memories' && !_memoriesLoaded) {
+        _memoriesLoaded = true;
+        try {
+            const api = window.StatusAPI;
+            if (!api || !api.getMemories) return;
+            const result = await api.getMemories();
+            const statuses = (result && result.data && result.data.statuses) || [];
+            const list = document.getElementById('memoriesStatusList');
+            if (!list) return;
+            if (!statuses.length) {
+                list.innerHTML = '<div style="padding:32px;text-align:center;color:rgba(255,255,255,0.5);"><div style="font-size:40px;margin-bottom:8px;">📅</div><p>No memories yet — check back after you've posted for a year!</p></div>';
+                return;
+            }
+            list.innerHTML = `<p style="padding:12px 16px 4px;font-size:13px;font-weight:600;color:rgba(255,255,255,0.7);">On this day in the past</p>` +
+                statuses.map(s => {
+                    const year = new Date(s.createdAt).getFullYear();
+                    const now  = new Date().getFullYear();
+                    const ago  = now - year;
+                    const avatar = s.user && s.user.avatar ? `background-image:url(${s.user.avatar})` : '';
+                    const name   = (s.user && (s.user.displayName || s.user.username)) || 'You';
+                    return `<div class="sw-contact-row status-row memory-row" data-status-id="${s.id}">
+                        <div class="sw-avatar" style="${avatar}">${!avatar ? name.charAt(0).toUpperCase() : ''}</div>
+                        <div class="sw-contact-info">
+                            <div class="sw-contact-name">${ago} year${ago !== 1 ? 's' : ''} ago — ${year}</div>
+                            <div class="sw-contact-status">${s.content ? s.content.slice(0,60) : s.type}</div>
+                        </div>
+                        <button class="re-share-btn" onclick="window._reShareMemory && window._reShareMemory('${s.id}')" style="background:#00a884;border:none;border-radius:20px;padding:6px 12px;color:#fff;font-size:12px;cursor:pointer;">Re-share</button>
+                    </div>`;
+                }).join('');
+
+            // Re-share a memory status
+            window._reShareMemory = async function(statusId) {
+                try {
+                    const api = window.StatusAPI;
+                    if (!api) return;
+                    const res = await api.getStatus(statusId);
+                    const s = res && res.data && res.data.status;
+                    if (!s) return;
+                    // Pre-fill create modal
+                    const captionInput = document.getElementById('statusTextInput') || document.getElementById('statusText');
+                    if (captionInput) captionInput.value = s.content || '';
+                    const modal = document.getElementById('createStatusModal');
+                    if (modal) modal.classList.add('active');
+                    showNotification('Memory loaded — edit and post!', 'success');
+                } catch(_) {}
+            };
+        } catch(err) {
+            console.warn('[status-ui] Memories feed error:', err.message);
+        }
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════════
+// P2/P3 FIX: Sticker system — Mention, Link, Countdown, Alt Text
+// ═══════════════════════════════════════════════════════════════════
+const _mentionedUsers = []; // array of {userId, username, displayName}
+
+// Mention search
+window._searchMentions = async function(query) {
+    const suggestions = document.getElementById('mentionSuggestions');
+    if (!suggestions) return;
+    if (!query || query.trim().length < 1) { suggestions.style.display = 'none'; return; }
+
+    try {
+        const api = window.StatusAPI;
+        // Use getFriends or searchUsers
+        let users = [];
+        if (api && api.searchUsers) {
+            const r = await api.searchUsers(query.trim());
+            users = (r && r.data && r.data.users) || (r && r.users) || [];
+        } else {
+            // Fallback: filter from already-loaded friends list
+            const allAvatars = document.querySelectorAll('.sw-contact-row .sw-contact-name');
+            users = Array.from(allAvatars).map(el => ({ displayName: el.textContent })).filter(u =>
+                u.displayName.toLowerCase().includes(query.toLowerCase())
+            ).slice(0, 5);
+        }
+
+        if (!users.length) { suggestions.style.display = 'none'; return; }
+
+        suggestions.innerHTML = users.slice(0, 6).map(u => {
+            const name = u.displayName || u.username || 'User';
+            const uid  = u.id || u.userId || '';
+            return `<div class="mention-suggestion-item" onclick="window._addMention(${JSON.stringify({userId:uid, displayName:name, username:u.username||name})})"
+                         style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#e9edef;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <div style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:12px;">${name.charAt(0).toUpperCase()}</div>
+                        <span>${name}</span>
+                    </div>`;
+        }).join('');
+        suggestions.style.display = 'block';
+    } catch(_) {
+        suggestions.style.display = 'none';
+    }
+};
+
+window._addMention = function(user) {
+    // Avoid duplicates
+    if (_mentionedUsers.some(u => String(u.userId) === String(user.userId))) return;
+    _mentionedUsers.push(user);
+
+    const tags = document.getElementById('mentionTags');
+    if (tags) {
+        const tag = document.createElement('div');
+        tag.className = 'mention-tag';
+        tag.dataset.uid = user.userId;
+        tag.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:rgba(0,168,132,0.2);border:1px solid rgba(0,168,132,0.4);border-radius:20px;padding:4px 10px;font-size:12px;color:#fff;';
+        tag.innerHTML = `@${user.displayName || user.username} <span onclick="window._removeMention('${user.userId}')" style="cursor:pointer;opacity:0.7;font-size:14px;">&times;</span>`;
+        tags.appendChild(tag);
+    }
+    // Clear search
+    const input = document.getElementById('mentionSearchInput');
+    const suggestions = document.getElementById('mentionSuggestions');
+    if (input) input.value = '';
+    if (suggestions) suggestions.style.display = 'none';
+};
+
+window._removeMention = function(userId) {
+    const idx = _mentionedUsers.findIndex(u => String(u.userId) === String(userId));
+    if (idx > -1) _mentionedUsers.splice(idx, 1);
+    const tag = document.querySelector(`.mention-tag[data-uid="${userId}"]`);
+    if (tag) tag.remove();
+};
+
+// Collect all sticker values before status POST
+function collectStickerData() {
+    const data = {};
+
+    // Mentions
+    if (_mentionedUsers.length > 0) {
+        data.mentions = _mentionedUsers.map(u => ({ userId: u.userId, displayName: u.displayName }));
+    }
+
+    // Link sticker
+    const linkUrl   = (document.getElementById('linkUrlInput')   || {}).value;
+    const linkLabel = (document.getElementById('linkLabelInput') || {}).value;
+    if (linkUrl && linkUrl.trim()) {
+        data.linkUrl   = linkUrl.trim();
+        data.linkLabel = linkLabel.trim() || 'Visit';
+    }
+
+    // Countdown sticker
+    const cdTarget = (document.getElementById('countdownTargetDate') || {}).value;
+    const cdLabel  = (document.getElementById('countdownLabel')      || {}).value;
+    if (cdTarget) {
+        data.countdown      = cdTarget;
+        data.countdownLabel = cdLabel.trim() || '';
+    }
+
+    // Alt text (shown for media tab)
+    const altText = (document.getElementById('altTextInput') || {}).value;
+    if (altText && altText.trim()) {
+        data.altText = altText.trim();
+    }
+
+    // Active template
+    if (window._activeTemplate) {
+        data.background = window._activeTemplate.background;
+        data.textColor  = window._activeTemplate.textColor;
+        data.fontFamily = window._activeTemplate.fontFamily;
+        data.templateId = window._activeTemplate.id;
+    }
+
+    // Hashtags — auto-extract from content
+    const contentEl = document.getElementById('textStatusInput') || document.getElementById('statusText');
+    if (contentEl) {
+        const tags = (contentEl.value.match(/#([\w]+)/g) || []).map(t => t.replace('#', ''));
+        if (tags.length) data.hashtags = tags;
+    }
+
+    return data;
+}
+window._collectStickerData = collectStickerData;
+
+// Reset sticker state after successful post
+function resetStickerState() {
+    _mentionedUsers.length = 0;
+    const tags = document.getElementById('mentionTags');
+    if (tags) tags.innerHTML = '';
+    const input = document.getElementById('mentionSearchInput');
+    if (input) input.value = '';
+    const linkUrl = document.getElementById('linkUrlInput');
+    if (linkUrl) linkUrl.value = '';
+    const linkLabel = document.getElementById('linkLabelInput');
+    if (linkLabel) linkLabel.value = '';
+    const cdTarget = document.getElementById('countdownTargetDate');
+    if (cdTarget) cdTarget.value = '';
+    const cdLabel = document.getElementById('countdownLabel');
+    if (cdLabel) cdLabel.value = '';
+    const altText = document.getElementById('altTextInput');
+    if (altText) altText.value = '';
+    window._activeTemplate = null;
+}
+window._resetStickerState = resetStickerState;
+
+// Show alt text field when media tab is active
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.create-status-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            const altSection = document.getElementById('altTextSection');
+            if (altSection) altSection.style.display = (tab === 'media') ? 'block' : 'none';
+        });
+    });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════
+// P3 FIX: GIF sticker — GIPHY search (uses public beta API key)
+// ═══════════════════════════════════════════════════════════════════
+let _selectedGifUrl = null;
+const GIPHY_KEY = window.GIPHY_API_KEY || 'dc6zaTOxFJmzC'; // public beta key (limited)
+
+window._searchGifs = async function() {
+    const input = document.getElementById('gifSearchInput');
+    const results = document.getElementById('gifResults');
+    if (!input || !results) return;
+    const q = input.value.trim();
+    if (!q) return;
+
+    results.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:rgba(255,255,255,0.5);padding:8px;"></i>';
+    try {
+        const url = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(q)}&limit=12&rating=pg`;
+        const resp = await fetch(url);
+        const data = await resp.json();
+        const gifs = (data && data.data) || [];
+
+        if (!gifs.length) {
+            results.innerHTML = '<p style="color:rgba(255,255,255,0.4);font-size:12px;padding:4px;">No GIFs found.</p>';
+            return;
+        }
+
+        results.innerHTML = gifs.map(g => {
+            const preview = g.images && g.images.fixed_height_small && g.images.fixed_height_small.url;
+            const full    = g.images && g.images.downsized && g.images.downsized.url;
+            if (!preview || !full) return '';
+            return `<img src="${preview}" data-full="${full}" alt="${g.title}"
+                         title="Click to select"
+                         style="height:80px;border-radius:8px;cursor:pointer;border:2px solid transparent;object-fit:cover;"
+                         onclick="window._selectGif('${full}', this)">`;
+        }).join('');
+    } catch(err) {
+        results.innerHTML = '<p style="color:rgba(255,99,71,0.8);font-size:12px;padding:4px;">GIF search failed. Check your connection.</p>';
+        console.warn('[status-ui] GIF search error:', err.message);
+    }
+};
+
+window._selectGif = function(url, imgEl) {
+    _selectedGifUrl = url;
+    // Highlight selected
+    document.querySelectorAll('#gifResults img').forEach(i => i.style.borderColor = 'transparent');
+    imgEl.style.borderColor = '#00a884';
+    const note = document.getElementById('gifSelected');
+    if (note) note.style.display = 'block';
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// P3 FIX: Music overlay — collect from inputs
+// ═══════════════════════════════════════════════════════════════════
+function collectMusicData() {
+    const title  = (document.getElementById('musicTrackTitle')  || {}).value || '';
+    const artist = (document.getElementById('musicTrackArtist') || {}).value || '';
+    const url    = (document.getElementById('musicTrackUrl')    || {}).value || '';
+    if (!title.trim() && !url.trim()) return null;
+    return { title: title.trim(), artist: artist.trim(), url: url.trim() };
+}
+
+// Reset GIF + music on post
+const _origResetSticker = window._resetStickerState;
+window._resetStickerState = function() {
+    if (_origResetSticker) _origResetSticker();
+    _selectedGifUrl = null;
+    const gifInput = document.getElementById('gifSearchInput');
+    const gifResults = document.getElementById('gifResults');
+    const gifNote  = document.getElementById('gifSelected');
+    if (gifInput)   gifInput.value = '';
+    if (gifResults) gifResults.innerHTML = '';
+    if (gifNote)    gifNote.style.display = 'none';
+    ['musicTrackTitle','musicTrackArtist','musicTrackUrl'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+};
+
+// Augment collectStickerData with GIF + music
+const _origCollect = window._collectStickerData;
+window._collectStickerData = function() {
+    const base = _origCollect ? _origCollect() : {};
+
+    // GIF
+    if (_selectedGifUrl) {
+        base.mediaUrl  = _selectedGifUrl;
+        base.mediaType = 'gif';
+        base.type      = 'image'; // backend treats as image
+    }
+
+    // Music
+    const music = collectMusicData();
+    if (music) base.musicTrack = music;
+
+    return base;
+};
+
+
+// ═══════════════════════════════════════════════════════════════════
+// P3 FIX: Drawing / Doodle canvas
+// ═══════════════════════════════════════════════════════════════════
+let _canvasHistory = [];
+let _isDrawing = false;
+let _lastX = 0, _lastY = 0;
+
+window._initDrawingCanvas = function() {
+    const canvas = document.getElementById('statusDrawCanvas');
+    if (!canvas || canvas._initialized) return;
+    canvas._initialized = true;
+    const ctx = canvas.getContext('2d');
+
+    // High-DPI fix
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width  = rect.width  * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, rect.width, rect.height);
+
+    function getPos(e) {
+        const r = canvas.getBoundingClientRect();
+        const touch = e.touches ? e.touches[0] : e;
+        return [(touch.clientX - r.left) * dpr, (touch.clientY - r.top) * dpr];
+    }
+
+    function saveHistory() {
+        _canvasHistory.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        if (_canvasHistory.length > 30) _canvasHistory.shift();
+    }
+
+    function startDraw(e) {
+        e.preventDefault();
+        saveHistory();
+        _isDrawing = true;
+        [_lastX, _lastY] = getPos(e);
+    }
+
+    function draw(e) {
+        e.preventDefault();
+        if (!_isDrawing) return;
+        const color = (document.getElementById('drawColor') || {}).value || '#ffffff';
+        const size  = parseInt((document.getElementById('drawSize') || {}).value || 8, 10);
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = size / dpr;
+        ctx.lineCap     = 'round';
+        ctx.lineJoin    = 'round';
+        const [x, y] = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(_lastX / dpr, _lastY / dpr);
+        ctx.lineTo(x / dpr, y / dpr);
+        ctx.stroke();
+        [_lastX, _lastY] = [x, y];
+    }
+
+    function stopDraw(e) { _isDrawing = false; }
+
+    canvas.addEventListener('mousedown',  startDraw);
+    canvas.addEventListener('mousemove',  draw);
+    canvas.addEventListener('mouseup',    stopDraw);
+    canvas.addEventListener('mouseleave', stopDraw);
+    canvas.addEventListener('touchstart', startDraw, { passive: false });
+    canvas.addEventListener('touchmove',  draw,      { passive: false });
+    canvas.addEventListener('touchend',   stopDraw);
+};
+
+window._clearCanvas = function() {
+    const canvas = document.getElementById('statusDrawCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    _canvasHistory = [];
+};
+
+window._undoCanvas = function() {
+    if (!_canvasHistory.length) return;
+    const canvas = document.getElementById('statusDrawCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const prev = _canvasHistory.pop();
+    ctx.putImageData(prev, 0, 0);
+};
+
+window._saveCanvasAsMedia = function() {
+    const canvas = document.getElementById('statusDrawCanvas');
+    if (!canvas) return;
+    canvas.toBlob(blob => {
+        if (!blob) return;
+        const file = new File([blob], 'drawing-' + Date.now() + '.png', { type: 'image/png' });
+        // Preview the drawing in media tab
+        const preview = document.getElementById('mediaPreviewContainer') || document.getElementById('mediaPreview');
+        if (preview) {
+            const url = URL.createObjectURL(blob);
+            preview.innerHTML = `<img src="${url}" style="max-width:100%;border-radius:10px;" alt="Drawing">`;
+            preview.style.display = 'block';
+        }
+        // Store file for upload path
+        window._pendingDrawingFile = file;
+        // Switch to media tab to confirm
+        const mediaTab = document.querySelector('.create-status-tab[data-tab="media"]');
+        if (mediaTab) mediaTab.click();
+        showNotification('Drawing ready — post from Media tab', 'success');
+    }, 'image/png');
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// P3 FIX: Music overlay renderer in story viewer
+// ═══════════════════════════════════════════════════════════════════
+function renderMusicOverlay(statusData) {
+    const overlay  = document.getElementById('statusMusicOverlay');
+    const titleEl  = document.getElementById('musicOverlayTitle');
+    const artistEl = document.getElementById('musicOverlayArtist');
+    const player   = document.getElementById('statusMusicPlayer');
+    const playBtn  = document.getElementById('musicPlayPauseBtn');
+    if (!overlay) return;
+
+    const meta = statusData && statusData.metadata;
+    const track = meta && meta.musicTrack;
+
+    if (track && (track.title || track.url)) {
+        if (titleEl)  titleEl.textContent  = track.title  || 'Unknown Track';
+        if (artistEl) artistEl.textContent = track.artist || '';
+        if (player && track.url) {
+            player.src = track.url;
+            player.play().catch(() => {}); // auto-play (may be blocked by browser)
+        }
+        if (playBtn) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+        overlay.style.display = 'flex';
+    } else {
+        if (player) { player.pause(); player.src = ''; }
+        overlay.style.display = 'none';
+    }
+}
+window._renderMusicOverlay = renderMusicOverlay;
+
+window._toggleStatusMusic = function() {
+    const player  = document.getElementById('statusMusicPlayer');
+    const playBtn = document.getElementById('musicPlayPauseBtn');
+    if (!player) return;
+    if (player.paused) {
+        player.play().catch(() => {});
+        if (playBtn) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+    } else {
+        player.pause();
+        if (playBtn) playBtn.innerHTML = '<i class="fas fa-play"></i>';
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════════
+// P3 FIX: Creator Analytics Bottom Sheet
+// ═══════════════════════════════════════════════════════════════════
+window._showStatusAnalytics = async function() {
+    const sheet   = document.getElementById('statusAnalyticsSheet');
+    const backdrop = document.getElementById('statusAnalyticsBackdrop');
+    const content = document.getElementById('statusAnalyticsContent');
+    if (!sheet || !content) return;
+
+    sheet.style.display   = 'block';
+    if (backdrop) backdrop.style.display = 'block';
+    content.innerHTML = '<div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin" style="color:#a78bfa;font-size:24px;"></i></div>';
+
+    const statusId = window.currentViewerStatus && window.currentViewerStatus.id;
+    if (!statusId) {
+        content.innerHTML = '<p style="text-align:center;color:rgba(255,255,255,0.5);">No status selected.</p>';
+        return;
+    }
+
+    try {
+        const api = window.StatusAPI;
+        if (!api || !api.getStatusAnalytics) {
+            content.innerHTML = '<p style="color:rgba(255,255,255,0.5);">Analytics not available.</p>';
+            return;
+        }
+        const result = await api.getStatusAnalytics(statusId);
+        if (!result || !result.success) {
+            content.innerHTML = '<p style="color:rgba(255,99,71,0.8);">Failed to load analytics.</p>';
+            return;
+        }
+        const d = result.data;
+        const m = d.metrics || {};
+        const engColor = parseFloat(m.engagementRate) > 5 ? '#00a884' : parseFloat(m.engagementRate) > 2 ? '#f9c74f' : '#ff6b6b';
+
+        content.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+                ${[
+                    ['👁 Views',    m.views,    '#4cc9f0'],
+                    ['❤️ Likes',    m.likes,    '#ff6b6b'],
+                    ['💬 Comments', m.comments, '#a78bfa'],
+                    ['↗️ Shares',   m.shares,   '#00a884'],
+                ].map(([label, val, color]) => `
+                    <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:14px;text-align:center;">
+                        <div style="font-size:22px;font-weight:800;color:${color};">${val || 0}</div>
+                        <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:4px;">${label}</div>
+                    </div>`).join('')}
+            </div>
+            <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+                <span style="font-size:13px;color:rgba(255,255,255,0.7);">Engagement rate</span>
+                <span style="font-size:18px;font-weight:800;color:${engColor};">${m.engagementRate || '0.0%'}</span>
+            </div>
+            ${d.pollStats ? `
+            <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px;">
+                <p style="font-size:12px;font-weight:600;color:#a78bfa;margin-bottom:8px;">📊 Poll Results</p>
+                ${(d.pollStats.options || []).map(o => {
+                    const pct = d.pollStats.totalVotes > 0 ? Math.round((o.votes || 0) / d.pollStats.totalVotes * 100) : 0;
+                    return `<div style="margin-bottom:6px;">
+                        <div style="display:flex;justify-content:space-between;font-size:12px;color:#e9edef;margin-bottom:3px;">
+                            <span>${o.text}</span><span>${pct}% (${o.votes || 0})</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:6px;">
+                            <div style="background:#a78bfa;width:${pct}%;height:100%;border-radius:4px;transition:width .4s;"></div>
+                        </div>
+                    </div>`;
+                }).join('')}
+                <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px;">${d.pollStats.voterCount} voter${d.pollStats.voterCount !== 1 ? 's' : ''} · ${d.pollStats.totalVotes} total votes</p>
+            </div>` : ''}
+            ${d.questionStats ? `
+            <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px;">
+                <p style="font-size:12px;font-weight:600;color:#a78bfa;margin-bottom:6px;">❓ Question: ${d.questionStats.questionText || ''}</p>
+                <p style="font-size:13px;color:#e9edef;">${d.questionStats.answersCount} answer${d.questionStats.answersCount !== 1 ? 's' : ''}</p>
+                ${(d.questionStats.answers || []).slice(0, 5).map(a => `<div style="background:rgba(255,255,255,0.06);border-radius:8px;padding:8px;margin-top:6px;font-size:12px;color:#e9edef;">${a.text}</div>`).join('')}
+            </div>` : ''}
+            ${d.actionClickStats ? `
+            <div style="background:rgba(255,255,255,0.06);border-radius:14px;padding:14px;margin-bottom:12px;">
+                <p style="font-size:12px;font-weight:600;color:#a78bfa;margin-bottom:8px;">🔗 Action Button Clicks: ${d.actionClickStats.totalClicks}</p>
+                ${Object.entries(d.actionClickStats.byButton || {}).map(([k, v]) =>
+                    `<div style="display:flex;justify-content:space-between;font-size:12px;color:#e9edef;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <span>${k}</span><span style="color:#00a884;font-weight:700;">${v}</span>
+                    </div>`
+                ).join('')}
+            </div>` : ''}
+            <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 12px;">
+                <p style="font-size:11px;color:rgba(255,255,255,0.4);">
+                    Posted ${d.createdAt ? new Date(d.createdAt).toLocaleDateString() : 'recently'} &nbsp;·&nbsp; Type: ${d.type || 'text'}
+                    ${d.isPinned ? '&nbsp;·&nbsp; 📌 Pinned' : ''}
+                </p>
+            </div>
+        `;
+    } catch(err) {
+        content.innerHTML = `<p style="color:rgba(255,99,71,0.8);">Error: ${err.message}</p>`;
+        console.warn('[status-ui] Analytics error:', err);
+    }
+};
+
+window.handlePostStatus = handlePostStatus;
         window.handleSaveDraft = handleSaveDraft;
         window.handleScheduleClick = handleScheduleClick;
         window.handleConfirmSchedule = handleConfirmSchedule;

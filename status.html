@@ -2503,6 +2503,8 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 <button class="create-status-tab active" data-tab="text">Text</button>
                 <button class="create-status-tab" data-tab="media">Media</button>
                 <button class="create-status-tab" data-tab="poll">Poll</button>
+                <button class="create-status-tab" data-tab="templates" onclick="window._loadStatusTemplates && window._loadStatusTemplates()">Templates</button>
+                <button class="create-status-tab" data-tab="draw" onclick="window._initDrawingCanvas && window._initDrawingCanvas()">Draw</button>
                 <button class="create-status-tab" data-tab="settings">Settings</button>
             </div>
             
@@ -2538,10 +2540,85 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                             <!-- Background options will be loaded here -->
                         </div>
                     </div>
+
+                    <!-- P2 FIX: Mention sticker -->
+                    <div class="sticker-section" id="mentionStickerSection">
+                        <div class="metadata-title">
+                            <i class="fas fa-at"></i>
+                            <span>Mention someone</span>
+                        </div>
+                        <div class="mention-input-row">
+                            <input type="text" id="mentionSearchInput" placeholder="Search friends to mention…"
+                                   oninput="window._searchMentions && window._searchMentions(this.value)"
+                                   autocomplete="off" style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;">
+                            <div id="mentionSuggestions" style="display:none;background:rgba(20,20,30,0.98);border-radius:10px;margin-top:4px;overflow:hidden;border:1px solid rgba(255,255,255,0.12);"></div>
+                        </div>
+                        <div id="mentionTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-height:0;"></div>
+                    </div>
+
+                    <!-- P3 FIX: Link sticker / CTA -->
+                    <div class="sticker-section" id="linkStickerSection">
+                        <div class="metadata-title">
+                            <i class="fas fa-link"></i>
+                            <span>Add a link (optional)</span>
+                        </div>
+                        <input type="url" id="linkUrlInput" placeholder="https://…" style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;margin-bottom:6px;">
+                        <input type="text" id="linkLabelInput" placeholder="Button label (e.g. Learn More)" style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;">
+                    </div>
+
+                    <!-- P3 FIX: Countdown sticker creator -->
+                    <div class="sticker-section" id="countdownStickerSection">
+                        <div class="metadata-title">
+                            <i class="fas fa-hourglass-half"></i>
+                            <span>Countdown sticker (optional)</span>
+                        </div>
+                        <input type="datetime-local" id="countdownTargetDate"
+                               style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;margin-bottom:6px;">
+                        <input type="text" id="countdownLabel" placeholder="Countdown label (e.g. Event starts!)"
+                               style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;">
+                    </div>
+
+                    <!-- P2 FIX: Alt text for accessibility -->
+                    <div class="sticker-section" id="altTextSection" style="display:none;">
+                        <div class="metadata-title">
+                            <i class="fas fa-universal-access"></i>
+                            <span>Alt text (accessibility)</span>
+                        </div>
+                        <input type="text" id="altTextInput" placeholder="Describe your image for screen readers…" maxlength="300"
+                               style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;">
+                    </div>
                 </div>
                 
                 <!-- Media Status Tab -->
                 <div class="create-status-tab-content" id="mediaTab">
+
+                    <!-- P3 FIX: GIF sticker search -->
+                    <div class="sticker-section" style="margin-bottom:12px;">
+                        <div class="metadata-title"><i class="fas fa-film"></i><span>Add a GIF</span></div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="text" id="gifSearchInput" placeholder="Search GIPHY…" maxlength="60"
+                                   style="flex:1;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;">
+                            <button onclick="window._searchGifs && window._searchGifs()"
+                                    style="background:#00a884;border:none;border-radius:10px;padding:8px 14px;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;">
+                                <i class="fas fa-search"></i> Search
+                            </button>
+                        </div>
+                        <div id="gifResults" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:150px;overflow-y:auto;"></div>
+                        <p id="gifSelected" style="font-size:11px;color:#00a884;margin-top:4px;display:none;"><i class="fas fa-check-circle"></i> GIF selected</p>
+                    </div>
+
+                    <!-- P3 FIX: Music/audio overlay -->
+                    <div class="sticker-section" style="margin-bottom:12px;">
+                        <div class="metadata-title"><i class="fas fa-music"></i><span>Music overlay (optional)</span></div>
+                        <input type="text" id="musicTrackTitle" placeholder="Track title"
+                               style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;margin-bottom:6px;">
+                        <input type="text" id="musicTrackArtist" placeholder="Artist name"
+                               style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;margin-bottom:6px;">
+                        <input type="url" id="musicTrackUrl" placeholder="Audio URL (mp3/ogg) or Spotify link"
+                               style="width:100%;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-size:13px;outline:none;">
+                        <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Viewers will see and hear this track while watching your status.</p>
+                    </div>
+
                     <div class="media-upload-container" id="mediaUploadArea">
                         <div class="media-upload-icon">
                             <i class="fas fa-cloud-upload-alt"></i>
@@ -2594,6 +2671,30 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 </div>
                 
                 <!-- Settings Tab -->
+                <!-- P3 FIX: Drawing/doodle canvas tab -->
+                <div class="create-status-tab-content" id="drawTab">
+                    <div class="draw-toolbar" id="drawToolbar">
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0 10px;">
+                            <label style="font-size:12px;color:rgba(255,255,255,0.7);">Color:</label>
+                            <input type="color" id="drawColor" value="#ffffff" style="width:32px;height:32px;border:none;border-radius:6px;cursor:pointer;background:none;">
+                            <label style="font-size:12px;color:rgba(255,255,255,0.7);">Size:</label>
+                            <input type="range" id="drawSize" min="2" max="40" value="8" style="width:80px;">
+                            <button onclick="window._clearCanvas && window._clearCanvas()" style="background:rgba(255,100,100,0.2);border:1px solid rgba(255,100,100,0.4);border-radius:8px;color:#fff;padding:6px 12px;cursor:pointer;font-size:12px;">Clear</button>
+                            <button onclick="window._undoCanvas && window._undoCanvas()" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:#fff;padding:6px 12px;cursor:pointer;font-size:12px;">Undo</button>
+                            <button onclick="window._saveCanvasAsMedia && window._saveCanvasAsMedia()" style="background:#00a884;border:none;border-radius:8px;color:#fff;padding:6px 14px;cursor:pointer;font-size:12px;">Use drawing</button>
+                        </div>
+                    </div>
+                    <canvas id="statusDrawCanvas" width="320" height="320"
+                            style="width:100%;border-radius:12px;background:#1a1a2e;cursor:crosshair;touch-action:none;display:block;"></canvas>
+                </div>
+
+                <!-- P3 FIX: Templates tab -->
+                <div class="create-status-tab-content" id="templatesTab">
+                    <div class="tab-section-label" style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.7);padding:8px 0 10px;">Choose a template</div>
+                    <div class="status-templates-grid" id="statusTemplatesContainer" style="display:flex;flex-wrap:wrap;gap:10px;padding:4px 0;"></div>
+                    <p style="font-size:11px;color:rgba(255,255,255,0.4);padding:8px 0 0;">Templates style your text status. Type your message in the Text tab.</p>
+                </div>
+
                 <div class="create-status-tab-content" id="settingsTab">
                     <!-- Hidden input for selected intent -->
                     <input type="hidden" id="selectedIntent" value="">
@@ -3232,9 +3333,36 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 <div id="myStatusIndicator" style="display:none;"></div>
             </div>
 
+            <!-- P3 FIX: Feed filter tabs -->
+            <div class="status-feed-tabs" id="statusFeedTabs">
+                <button class="sft-btn active" data-feed="friends" onclick="window._switchFeedTab && window._switchFeedTab('friends')">
+                    <i class="fas fa-user-friends"></i> Friends
+                </button>
+                <button class="sft-btn" data-feed="ranked" onclick="window._switchFeedTab && window._switchFeedTab('ranked')">
+                    <i class="fas fa-fire"></i> Discover
+                </button>
+                <button class="sft-btn" data-feed="memories" onclick="window._switchFeedTab && window._switchFeedTab('memories')">
+                    <i class="fas fa-clock"></i> Memories
+                </button>
+            </div>
+
             <!-- scrollable status feed -->
             <div class="status-list" style="overflow-y:auto;flex:1;">
               <div class="status-list-content">
+
+                <!-- P3 FIX: Ranked/Discover feed section -->
+                <div class="statuses-section" id="rankedStatusSection" style="display:none;">
+                    <div class="statuses-list" id="rankedStatusList">
+                        <div class="enhanced-loading"><i class="fas fa-spinner fa-spin"></i><p>Loading…</p></div>
+                    </div>
+                </div>
+
+                <!-- P3 FIX: Memories feed section -->
+                <div class="statuses-section" id="memoriesStatusSection" style="display:none;">
+                    <div class="statuses-list" id="memoriesStatusList">
+                        <div class="enhanced-loading"><i class="fas fa-spinner fa-spin"></i><p>Loading memories…</p></div>
+                    </div>
+                </div>
 
                 <!-- ── RECENT UPDATES (unviewed friend statuses) ── -->
                 <div class="sw-section-label" id="recentUpdatesLabel" style="display:none;">Recent updates</div>
@@ -3317,6 +3445,25 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                 <!-- Action buttons will be loaded here -->
             </div>
 
+            <!-- P3 FIX: Countdown sticker overlay -->
+            <div class="status-countdown-overlay" id="statusCountdownOverlay" style="display:none;"></div>
+
+            <!-- P3 FIX: Music overlay — shows track info while viewing status -->
+            <div class="status-music-overlay" id="statusMusicOverlay" style="display:none;">
+                <div class="music-pill">
+                    <i class="fas fa-music music-note-spin"></i>
+                    <div class="music-info">
+                        <span class="music-title" id="musicOverlayTitle"></span>
+                        <span class="music-artist" id="musicOverlayArtist"></span>
+                    </div>
+                    <audio id="statusMusicPlayer" preload="none" loop style="display:none;"></audio>
+                    <button id="musicPlayPauseBtn" onclick="window._toggleStatusMusic && window._toggleStatusMusic()"
+                            style="background:none;border:none;color:#fff;font-size:16px;cursor:pointer;padding:4px;">
+                        <i class="fas fa-play"></i>
+                    </button>
+                </div>
+            </div>
+
             <!-- P2 FIX: Poll overlay for poll-type statuses -->
             <div class="status-poll-overlay" id="statusPollOverlay" style="display:none;">
                 <!-- Poll options will be rendered here -->
@@ -3346,6 +3493,10 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                     </div>
                     <!-- Edit/Delete revealed on hold -->
                     <div class="owner-action-btns" id="ownerActionBtns" style="display:none;">
+                        <button id="analyticsStatusBtn" title="Analytics" onclick="window._showStatusAnalytics && window._showStatusAnalytics()"
+                                style="background:rgba(167,139,250,0.2);border:1px solid rgba(167,139,250,0.4);border-radius:8px;color:#a78bfa;padding:6px 10px;cursor:pointer;font-size:13px;">
+                            <i class="fas fa-chart-bar"></i>
+                        </button>
                         <button id="editStatusBtn" title="Edit"><i class="fas fa-edit"></i></button>
                         <button id="deleteStatusBtn" class="delete-btn" title="Delete"><i class="fas fa-trash"></i></button>
                     </div>
@@ -3978,5 +4129,23 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
 ════════════════════════════════════════════════════════════════════════ -->
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
 <script src="/pwa-manager.js" defer></script>
+
+<!-- P3 FIX: Status analytics bottom sheet -->
+<div id="statusAnalyticsSheet" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;
+     background:rgba(15,15,25,0.97);backdrop-filter:blur(20px);border-radius:24px 24px 0 0;
+     padding:20px;max-height:70vh;overflow-y:auto;box-shadow:0 -4px 30px rgba(0,0,0,0.5);
+     border-top:1.5px solid rgba(255,255,255,0.1);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <h3 style="color:#fff;font-size:16px;font-weight:700;margin:0;"><i class="fas fa-chart-bar" style="color:#a78bfa;margin-right:8px;"></i>Status Analytics</h3>
+        <button onclick="document.getElementById('statusAnalyticsSheet').style.display='none'"
+                style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:30px;height:30px;color:#fff;cursor:pointer;font-size:15px;">✕</button>
+    </div>
+    <div id="statusAnalyticsContent" style="color:#e9edef;">
+        <div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin" style="color:#a78bfa;font-size:24px;"></i></div>
+    </div>
+</div>
+<div id="statusAnalyticsBackdrop" onclick="document.getElementById('statusAnalyticsSheet').style.display='none';this.style.display='none';"
+     style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.5);"></div>
+
 </body>
 </html>
