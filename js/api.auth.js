@@ -3033,8 +3033,7 @@ try {
     throw fetchError;
 }
                 
-                console.log('🔐 [AUTH] Direct fetch response status:', fetchResponse.status);
-                response = fetchResponse;
+                console.log('🔐 [AUTH] Direct fetch response status:', response.status);
             }
             
             // Parse response
