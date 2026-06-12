@@ -3794,18 +3794,38 @@ try {
                     );
                     
                     if (response.success && response.data) {
-                        const userData = JSON.stringify(response.data);
-                        _safeStorageSet('USER_DATA', userData);
-                        window.currentUser = response.data;
+                        // PHASE15 FIX: api.request.post() wraps raw JSON body in result.data.
+                        // So if backend returns { success, user, data: userObj } then
+                        // response.data = { success, user, data: userObj }.
+                        // We need to extract the actual user object from one of:
+                        //   response.data.user   — flat user (new /me format)
+                        //   response.data.data.user — old nested { data: { user: {} } }
+                        //   response.data.data   — if data IS the user object
+                        //   response.data        — fallback if it already has .id
+                        const rawData = response.data;
+                        let userData =
+                            (rawData.user && rawData.user.id)         ? rawData.user :         // { user: {id,...} }
+                            (rawData.data && rawData.data.id)         ? rawData.data :         // { data: {id,...} }
+                            (rawData.data && rawData.data.user && rawData.data.user.id) ? rawData.data.user : // { data: { user: {id,...} } }
+                            (rawData.id)                              ? rawData :              // flat { id,... }
+                            null;
+
+                        if (!userData) {
+                            console.warn('[AUTH] /me response shape unrecognised — raw:', JSON.stringify(rawData).substring(0, 200));
+                            userData = rawData; // best-effort fallback
+                        }
+
+                        _safeStorageSet('USER_DATA', JSON.stringify(userData));
+                        window.currentUser = userData;
                         
                         // Update unified storage
                         const unified = _loadPersistedAuthData();
                         if (unified) {
-                            unified.user = response.data;
-                            _persistAuthData(unified.token, response.data, unified.refreshToken, unified.expiresIn);
+                            unified.user = userData;
+                            _persistAuthData(unified.token, userData, unified.refreshToken, unified.expiresIn);
                         }
                         
-                        return response.data;
+                        return userData;
                     }
                 }
             }
