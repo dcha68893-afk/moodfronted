@@ -2838,400 +2838,221 @@
      * PUBLIC: Login with credentials - ENHANCED TOKEN EXTRACTION & FIXED BASE URL
      */
    async function login(...args) {
-    console.log('🔐 [AUTH] Login attempt - ENHANCED TOKEN EXTRACTION');
-    
-    // ADD THIS at the very beginning of the function
-    // Check if we're in production and log the backend URL
+    console.log('🔐 [AUTH] Login attempt');
+
+    const operation = 'login';
     const baseUrl = _getBaseUrl();
     console.log(`🔐 [AUTH] Using backend URL: ${baseUrl}`);
-    
-    const operation = 'login';
-    
-    try {
-            // Wait for api.core to be ready
-            const coreReady = await _waitForApiCore();
-            if (!coreReady) {
-                console.warn('⚠️ [AUTH] api.core not ready, but continuing with direct fetch');
-            }
-            
-            // Normalize payload from various formats
-            const normalized = _normalizeLoginPayload(args);
-            console.log('🔧 [AUTH] Normalized login data:', normalized);
-            
-            // Validate normalized payload
-            const validation = _validateLoginPayload(normalized);
-            if (!validation.valid) {
-                return {
-                    success: false,
-                    error: validation.error,
-                    code: validation.code,
-                    message: validation.error
-                };
-            }
-            
-            const payload = validation.payload;
-            console.log('🔧 [AUTH] Final login payload:', payload);
-            
-            // ========== CRITICAL FIX: Use centralized API request if available ==========
-            let response;
-            if (window.api && window.api.request && window.api.request.post) {
-    console.log('🔐 [AUTH] Using centralized API request for login');
-    
-    try {
-        // Add timeout parameter - 90 seconds for login (handles Render cold starts which can take 50-60s)
-        const apiResponse = await window.api.request.post('/auth/login', payload, {
-            timeout: 90000,  // 90 seconds timeout for login
-            retryCount: 2     // Allow retry on timeout
-        });
-                    console.log('🔐 [AUTH] Centralized API response:', apiResponse);
-                    
-                    // Check if response indicates success
-                    if (apiResponse.success && (apiResponse.data || apiResponse.token)) {
-                        const data = apiResponse.data || apiResponse;
-                        const token = _extractTokenFromResponse(data);
-                        
-                        if (token) {
-                            console.log('✅ [AUTH] Token extracted from centralized response');
-                            
-                            // Extract user data
-                            let user = data.user || data.data?.user || data.data;
-                            if (!user && token) {
-                                user = {
-                                    email: normalized.identifier.includes('@') ? normalized.identifier : null,
-                                    username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
-                                    id: 'user_' + Date.now()
-                                };
-                            }
-                            
-                            const refreshToken = data.refreshToken || data.data?.refreshToken || null;
-                            const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
-                            
-                            // Persist auth data
-                            const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
-                            if (!persisted) {
-                                console.error('❌ [AUTH] Failed to persist auth data');
-                                return {
-                                    success: false,
-                                    error: 'Failed to store authentication data',
-                                    code: 'STORAGE_ERROR'
-                                };
-                            }
-                            
-                            // CRITICAL: Also save to authStorage for compatibility
-                            if (window.AuthStorage && window.AuthStorage.saveSession) {
-                                try {
-                                    window.AuthStorage.saveSession({
-                                        token: token,
-                                        refreshToken: refreshToken,
-                                        user: user,
-                                        expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
-                                    });
-                                    console.log('✅ [AUTH] Session saved to authStorage');
-                                } catch (storageError) {
-                                    console.warn('⚠️ [AUTH] Failed to save to authStorage:', storageError.message);
-                                }
-                            }
-                            
-                            // CRITICAL: Set login timestamp to prevent background validation flicker
-                            window.__LAST_LOGIN_TIME__ = Date.now();
-                            console.log(' [AUTH] Login timestamp set for flicker prevention');
-                            
-                            // CRITICAL FIX: Store to exact keys required by session manager
-                            // PHASE14 FIX: Write ALL token keys so chat.html, socket, and sync manager all find the token
-                            localStorage.setItem("auth_token", token);
-                            localStorage.setItem("authToken", token);
-                            localStorage.setItem("accessToken", token);
-                            localStorage.setItem("moodchat_token", token);
-                            localStorage.setItem("auth_user", JSON.stringify(user));
-                            console.log(' [AUTH] Session stored to auth_token, authToken, accessToken, moodchat_token and auth_user keys');
-                            
-                            setUserToken(token, expiresIn);
-                            
-                            if (refreshToken) {
-                                _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
-                            }
-                            
-                            if (user) {
-                                window.currentUser = user;
-                            }
-                            
-                            _initCrossTabSync();
-                            _initIframeSync();
-                            
-                            _emitEvent('login', { user, token });
-                            
-                            try {
-                                window.dispatchEvent(new CustomEvent('user-logged-in', {
-                                    detail: { user, token, timestamp: Date.now(), source: 'api.auth.js' }
-                                }));
-                                window.dispatchEvent(new CustomEvent('auth:token:ready', { detail: { token, timestamp: Date.now() } }));
-                                window.dispatchEvent(new CustomEvent('session:ready', { detail: { token, user, timestamp: Date.now() } }));
-                            } catch (error) {}
-                            
-                            return {
-                                success: true,
-                                user: user,
-                                token: token,
-                                expiresIn: expiresIn,
-                                message: 'Login successful'
-                            };
-                        }
-                    }
-                    
-                    // If centralized API returned failure, use response data for error
-                    if (!apiResponse.success) {
-                        response = {
-                            ok: false,
-                            status: apiResponse.status || 401,
-                            json: async () => ({ message: apiResponse.message || 'Login failed' })
-                        };
-                    } else {
-                        // If no token but success, treat as failure
-                        response = {
-                            ok: false,
-                            status: 401,
-                            json: async () => ({ message: 'No token received from server' })
-                        };
-                    }
-                } catch (error) {
-                    console.error('🔐 [AUTH] Centralized API request error:', error);
-                    // Fall through to direct fetch
-                    response = null;
-                }
-            }
-            
-            // ========== FALLBACK: Use direct fetch with dynamic base URL ==========
-            if (!response) {
-                // FIX: baseUrl already declared at top of function — reuse it, don't re-declare
-                // Redeclaring with const in the same function scope causes a SyntaxError in
-                // strict mode, which prevents fetchResponse from ever being defined.
-                const fullUrl = `${baseUrl}/api/auth/login`;
-                console.log('🔐 [AUTH] Making direct fetch to:', fullUrl);
-                
-                // Create abort controller for timeout
-const controller = new AbortController();
-const timeoutId = setTimeout(() => {
-    console.warn('🔐 [AUTH] Login request timeout, aborting...');
-    controller.abort();
-}, 90000); // 90 second timeout — handles Render cold starts
 
-try {
-    const fetchResponse = await fetch(fullUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    response = fetchResponse;
-} catch (fetchError) {
-    clearTimeout(timeoutId);
-    if (fetchError.name === 'AbortError') {
-        throw new Error('Login request timed out after 90 seconds');
-    }
-    throw fetchError;
-}
-                
-                console.log('🔐 [AUTH] Direct fetch response status:', response.status);
+    try {
+        // Normalize + validate payload (accepts (identifier, password), {identifier, password}, etc.)
+        const normalized = _normalizeLoginPayload(args);
+        const validation = _validateLoginPayload(normalized);
+        if (!validation.valid) {
+            return {
+                success: false,
+                error: validation.error,
+                code: validation.code,
+                message: validation.error
+            };
+        }
+
+        const payload = validation.payload;
+        console.log('🔧 [AUTH] Login identifier:', payload.identifier);
+
+        const fullUrl = `${baseUrl}/api/auth/login`;
+        console.log('🔐 [AUTH] POST', fullUrl);
+
+        // Single fetch with timeout (Render free-tier cold starts can take 50-60s)
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.warn('🔐 [AUTH] Login request timeout, aborting...');
+            controller.abort();
+        }, 90000);
+
+        let response;
+        let rawText;
+        try {
+            response = await fetch(fullUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            // CRITICAL: read the body ONCE as text, regardless of content-type.
+            // Previously this called response.json() first and, on parse failure,
+            // called response.text() on the SAME response — which throws
+            // "Failed to execute 'text' on 'Response': body stream already read"
+            // and masked the real error (e.g. a non-JSON 404 page).
+            rawText = await response.text();
+        } catch (fetchError) {
+            if (fetchError.name === 'AbortError') {
+                throw new Error('Login request timed out after 90 seconds');
             }
-            
-            // Parse response
-            let data;
+            throw fetchError;
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        console.log('🔐 [AUTH] Response status:', response.status);
+
+        // Parse as JSON if possible; otherwise keep the raw text for diagnostics
+        let data;
+        try {
+            data = rawText ? JSON.parse(rawText) : {};
+        } catch (parseError) {
+            console.error('🔐 [AUTH] Non-JSON response body:', String(rawText).slice(0, 300));
+            data = { message: rawText || `HTTP ${response.status}` };
+        }
+
+        if (!response.ok) {
+            let code = 'LOGIN_FAILED';
+            if (response.status === 401) code = 'INVALID_CREDENTIALS';
+            else if (response.status === 404) code = 'ENDPOINT_NOT_FOUND';
+            else if (response.status >= 500) code = 'SERVER_ERROR';
+
+            return {
+                success: false,
+                error: data.message || `Login failed (HTTP ${response.status})`,
+                code,
+                status: response.status,
+                message: data.message || 'Invalid email/username or password',
+                payload: { identifier: payload.identifier }
+            };
+        }
+
+        // ===== Token extraction =====
+        const token = _extractTokenFromResponse(data);
+        if (!token) {
+            console.error('❌ [AUTH] No token found in response:', data);
+            return {
+                success: false,
+                error: 'Login failed - no token received from server',
+                code: 'NO_TOKEN',
+                status: response.status,
+                message: 'Authentication succeeded but no token was provided',
+                payload: { identifier: payload.identifier },
+                data
+            };
+        }
+
+        const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+
+        let user = data.user || data.data?.user || data.data;
+        if (!user) {
+            console.warn('⚠️ [AUTH] No user object in response, deriving minimal user from identifier');
+            user = {
+                email: normalized.identifier.includes('@') ? normalized.identifier : null,
+                username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
+                id: 'user_' + Date.now()
+            };
+        }
+
+        const refreshToken = data.refreshToken || data.data?.refreshToken || null;
+
+        // ===== Persist session (unified storage helper) =====
+        const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
+        if (!persisted) {
+            console.error('❌ [AUTH] Failed to persist auth data');
+            return {
+                success: false,
+                error: 'Failed to store authentication data',
+                code: 'STORAGE_ERROR',
+                status: 500,
+                message: 'Authentication succeeded but data could not be stored'
+            };
+        }
+
+        // Compatibility mirror into AuthStorage, if present
+        if (window.AuthStorage && window.AuthStorage.saveSession) {
             try {
-                data = await response.json();
-                console.log('🔐 [AUTH] Response data:', data);
-            } catch (e) {
-                const text = await response.text();
-                console.error('🔐 [AUTH] Error response text:', text);
-                data = { message: text || 'Login failed' };
-            }
-            
-            // Check if response is OK
-            if (!response.ok) {
-                return {
-                    success: false,
-                    error: data.message || 'Login failed',
-                    code: response.status === 401 ? 'INVALID_CREDENTIALS' : 'LOGIN_FAILED',
-                    status: response.status,
-                    message: data.message || 'Invalid email/username or password',
-                    payload: payload
-                };
-            }
-            
-            // ========== CRITICAL FIX: ENHANCED TOKEN EXTRACTION ==========
-            const token = _extractTokenFromResponse(data);
-            
-            if (token) {
-                const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
-                
-                console.log('✅ [AUTH] Token extracted successfully:', token.substring(0, 20) + '...');
-                
-                // Extract user data from various possible locations
-                let user = data.user || data.data?.user || data.data;
-                
-                // If user is still not found but we have a token, create minimal user
-                if (!user && token) {
-                    console.warn('⚠️ [AUTH] No user data in response, creating minimal user from identifier');
-                    user = {
-                        email: normalized.identifier.includes('@') ? normalized.identifier : null,
-                        username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
-                        id: 'user_' + Date.now()
-                    };
-                }
-                
-                const refreshToken = data.refreshToken || data.data?.refreshToken || null;
-                
-                // CRITICAL: Persist auth data to unified storage
-                const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
-                
-                if (!persisted) {
-                    console.error('❌ [AUTH] Failed to persist auth data');
-                    return {
-                        success: false,
-                        error: 'Failed to store authentication data',
-                        code: 'STORAGE_ERROR',
-                        status: 500,
-                        message: 'Authentication succeeded but data could not be stored'
-                    };
-                }
-                
-                // CRITICAL: Also save to authStorage for compatibility
-                if (window.AuthStorage && window.AuthStorage.saveSession) {
-                    try {
-                        window.AuthStorage.saveSession({
-                            token: token,
-                            refreshToken: refreshToken,
-                            user: user,
-                            expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
-                        });
-                        console.log('✅ [AUTH] Session saved to authStorage (fallback path)');
-                    } catch (storageError) {
-                        console.warn('⚠️ [AUTH] Failed to save to authStorage (fallback path):', storageError.message);
-                    }
-                }
-                
-                // CRITICAL: Set login timestamp to prevent background validation flicker
-                window.__LAST_LOGIN_TIME__ = Date.now();
-                console.log(' [AUTH] Login timestamp set for flicker prevention (fallback path)');
-                
-                // CRITICAL FIX: Store to exact keys required by session manager
-                // PHASE14 FIX: Write ALL token keys so chat.html, socket, and sync manager all find the token
-                localStorage.setItem("auth_token", token);
-                localStorage.setItem("authToken", token);
-                localStorage.setItem("accessToken", token);
-                localStorage.setItem("moodchat_token", token);
-                localStorage.setItem("auth_user", JSON.stringify(user));
-                console.log(' [AUTH] Session stored to auth_token, authToken, accessToken, moodchat_token and auth_user keys (fallback path)');
-                
-                // Store tokens with enhanced method
-                const tokenStored = setUserToken(token, expiresIn);
-                
-                if (!tokenStored) {
-                    console.error(' [AUTH] Failed to store token');
-                    console.error('❌ [AUTH] Failed to store token');
-                    return {
-                        success: false,
-                        error: 'Failed to store authentication token',
-                        code: 'TOKEN_STORAGE_ERROR',
-                        status: 500,
-                        message: 'Authentication succeeded but token could not be stored'
-                    };
-                }
-                
-                if (refreshToken) {
-                    _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
-                    console.log('✅ [AUTH] Refresh token stored');
-                }
-                
-                // Store user data in legacy locations
-                if (user) {
-                    const userData = JSON.stringify(user);
-                    _safeStorageSet('USER_DATA', userData);
-                    window.currentUser = user;
-                    console.log('✅ [AUTH] User data stored');
-                }
-                
-                // Initialize synchronization
-                _initCrossTabSync();
-                _initIframeSync();
-                
-                // Dispatch login event with token
-                _emitEvent('login', {
-                    user: user,
-                    token: token,
-                    timestamp: new Date().toISOString(),
-                    payloadType: args.length > 1 ? 'legacy-args' : 'object',
-                    backendPayload: payload
+                window.AuthStorage.saveSession({
+                    token,
+                    refreshToken,
+                    user,
+                    expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
                 });
-                
-                try {
-                    window.dispatchEvent(new CustomEvent('user-logged-in', {
-                        detail: {
-                            user: user,
-                            token: token,
-                            timestamp: new Date().toISOString(),
-                            source: 'api.auth.js',
-                            version: VERSION,
-                            payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                        }
-                    }));
-                    
-                    // Dispatch token-ready event for other modules
-                    window.dispatchEvent(new CustomEvent('auth:token:ready', {
-                        detail: {
-                            token: token,
-                            timestamp: Date.now()
-                        }
-                    }));
-                    
-                    // Dispatch session-ready event for sync manager
-                    window.dispatchEvent(new CustomEvent('session:ready', {
-                        detail: {
-                            token: token,
-                            user: user,
-                            timestamp: Date.now()
-                        }
-                    }));
-                } catch (error) {
-                    console.warn('⚠️ [AUTH] Failed to dispatch login events:', error);
-                }
-                
-                console.log('✅ [AUTH] Login successful with token storage');
-                
-                // Return success with token and user
-                return {
-                    success: true,
-                    user: user,
-                    token: token,
-                    expiresIn: expiresIn,
-                    message: 'Login successful',
-                    payloadType: args.length > 1 ? 'legacy-args' : 'object',
-                    identifierUsed: normalized.identifier
-                };
-            } else {
-                console.error('❌ [AUTH] No token found in response:', data);
-                return {
-                    success: false,
-                    error: 'Login failed - no token received from server',
-                    code: 'NO_TOKEN',
-                    status: response.status,
-                    message: 'Authentication succeeded but no token was provided',
-                    payload: payload,
-                    data: data
-                };
+            } catch (storageError) {
+                console.warn('⚠️ [AUTH] Failed to save to authStorage:', storageError.message);
             }
-       
-                } catch (error) {
+        }
+
+        // Prevent background validation flicker right after login
+        window.__LAST_LOGIN_TIME__ = Date.now();
+
+        // Legacy/compat keys consumed by chat.html, sockets, sync manager, etc.
+        localStorage.setItem('auth_token', token);
+        localStorage.setItem('authToken', token);
+        localStorage.setItem('accessToken', token);
+        localStorage.setItem('moodchat_token', token);
+        localStorage.setItem('auth_user', JSON.stringify(user));
+
+        const tokenStored = setUserToken(token, expiresIn);
+        if (!tokenStored) {
+            console.error('❌ [AUTH] Failed to store token');
+            return {
+                success: false,
+                error: 'Failed to store authentication token',
+                code: 'TOKEN_STORAGE_ERROR',
+                status: 500,
+                message: 'Authentication succeeded but token could not be stored'
+            };
+        }
+
+        if (refreshToken) {
+            _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+        }
+
+        _safeStorageSet('USER_DATA', JSON.stringify(user));
+        window.currentUser = user;
+
+        _initCrossTabSync();
+        _initIframeSync();
+
+        _emitEvent('login', {
+            user,
+            token,
+            timestamp: new Date().toISOString(),
+            payloadType: args.length > 1 ? 'legacy-args' : 'object',
+            backendPayload: { identifier: payload.identifier }
+        });
+
+        try {
+            window.dispatchEvent(new CustomEvent('user-logged-in', {
+                detail: {
+                    user, token,
+                    timestamp: new Date().toISOString(),
+                    source: 'api.auth.js',
+                    version: VERSION,
+                    payloadType: args.length > 1 ? 'legacy-args' : 'object'
+                }
+            }));
+            window.dispatchEvent(new CustomEvent('auth:token:ready', { detail: { token, timestamp: Date.now() } }));
+            window.dispatchEvent(new CustomEvent('session:ready', { detail: { token, user, timestamp: Date.now() } }));
+        } catch (dispatchError) {
+            console.warn('⚠️ [AUTH] Failed to dispatch login events:', dispatchError);
+        }
+
+        console.log('✅ [AUTH] Login successful with token storage');
+
+        return {
+            success: true,
+            user,
+            token,
+            expiresIn,
+            message: 'Login successful',
+            payloadType: args.length > 1 ? 'legacy-args' : 'object',
+            identifierUsed: normalized.identifier
+        };
+
+    } catch (error) {
         _safeLogError('LOGIN', 'Login error', {
-            error: error.message || error.error,
+            error: error.message || String(error),
             argsCount: args.length,
-            baseUrl: _getBaseUrl()  // ADD THIS LINE - log the base URL
+            baseUrl
         }, false, operation);
-        
-        // ADD THIS: Check for CORS/network errors
-        if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
+
+        if (error.message === 'Failed to fetch' || (error.message && error.message.includes('NetworkError'))) {
             return {
                 success: false,
                 error: 'Cannot connect to authentication server',
@@ -3241,14 +3062,14 @@ try {
                 isCorsError: true
             };
         }
-        
+
         return {
             success: false,
             error: error.error || error.message || 'Login failed',
             code: error.code || 'NETWORK_ERROR',
             message: error.message || error.error || 'Unable to connect to authentication service',
             status: error.status || 0,
-            args: args
+            args
         };
     }
 }
