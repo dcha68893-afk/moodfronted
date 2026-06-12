@@ -8454,10 +8454,6 @@ function blockGroup() {
     try {} catch (error) {}
 }
 
-function showGroupQRCode() {
-    try {} catch (error) {}
-}
-
 function copyInviteLink() {
     try {
         const inviteLinkInput = safeGetElement('#inviteLinkInput');

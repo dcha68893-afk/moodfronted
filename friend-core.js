@@ -9218,7 +9218,7 @@ function toggleFlash() {
     showNotification?.(flashOn ? 'Flash on' : 'Flash off', 'info');
 }
 
-function generateUniqueQRCode() {
+async function generateUniqueQRCode() {
     if (!assertActive('generateUniqueQRCode')) {
         const container = document.getElementById('qrCodeContainer');
         if (container) {

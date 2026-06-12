@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com";</script>
 <script>
 // ✅ CRITICAL SW UPDATE CHECK — runs FIRST, before any other JS loads.
 // If a new service worker is waiting (installed but not yet active), force it
@@ -5594,6 +5595,7 @@ window.__CALLS_IFRAME__ = {
 })();
 
 // Raise Hand button wiring
+(function() {
   var _handRaised = false;
   function _wireHand() {
     var btn = document.getElementById('raiseHandBtn');
