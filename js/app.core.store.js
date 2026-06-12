@@ -80,7 +80,7 @@
             privacy: {},
             accentColor: '#4F46E5',
             reduceMotion: false,
-            syncEnabled: false
+            syncEnabled: true
         },
         ui: {
             currentPage: 'messages', modals: {}, loading: {}, notifications: []

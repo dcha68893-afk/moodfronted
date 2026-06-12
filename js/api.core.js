@@ -1661,9 +1661,14 @@ patch = async function(endpoint, data = {}) {
     }
 };
 
-del = async function(endpoint) {
+del = async function(endpoint, body) {
     try {
-        return await guardedRequest(endpoint, { method: 'DELETE' });
+        const opts = { method: 'DELETE' };
+        if (body) {
+            opts.body    = JSON.stringify(body);
+            opts.headers = { 'Content-Type': 'application/json' };
+        }
+        return await guardedRequest(endpoint, opts);
     } catch (error) {
         return normalizeResponse(error, true);
     }
@@ -5528,8 +5533,9 @@ SAIC.initialize();
         return post('/api/users/change-password', { currentPassword, newPassword });
     };
     
-    deleteAccount = async function() {
-        return del('/api/users/delete-account');
+    deleteAccount = async function(confirmation, password) {
+        // P1 FIX: password mandatory; correct endpoint
+        return del('/api/settings/account', { confirmation, password });
     };
     
     // ============================================================================

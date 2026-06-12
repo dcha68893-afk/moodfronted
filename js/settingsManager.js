@@ -147,7 +147,7 @@
                     lowBandwidth: false,
                     debugMode: false,
                     dataSaver: false,
-                    syncEnabled: false   // ← cloud sync toggle lives here
+                    syncEnabled: true    // cloud sync enabled by default
                 }
             };
 
