@@ -3629,9 +3629,20 @@ try {
             // This means a user who closes and reopens the app after their JWT
             // expired will be seamlessly kept logged in via the refresh token —
             // they will NEVER be redirected to the login page due to expiry alone.
-            if (unifiedAuth.expiresIn && unifiedAuth.timestamp) {
-                const expiryTime = unifiedAuth.timestamp + unifiedAuth.expiresIn;
-                const isExpired = Date.now() > expiryTime;
+            // AUTH-X FIX: Prefer the absolute expiresAt timestamp written by _persistAuthData()
+            // over the recomputed timestamp+expiresIn approach. The old code computed
+            // (timestamp + expiresIn) which breaks when expiresIn is a duration in seconds
+            // (e.g. 86400) vs milliseconds (86400000) — an easy mismatch. expiresAt is
+            // always an absolute epoch-ms value so no arithmetic is needed.
+            const expiryMs = unifiedAuth.expiresAt
+                || (unifiedAuth.expiresIn && unifiedAuth.timestamp
+                    ? unifiedAuth.timestamp + (unifiedAuth.expiresIn > 100000
+                        ? unifiedAuth.expiresIn          // ms duration
+                        : unifiedAuth.expiresIn * 1000)  // seconds duration
+                    : null);
+
+            if (expiryMs) {
+                const isExpired = Date.now() > expiryMs;
                 if (isExpired) {
                     console.log('[AUTH] Stored token expired locally — attempting silent background refresh');
                     try {
