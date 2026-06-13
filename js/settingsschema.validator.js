@@ -23,7 +23,7 @@
         userId:     { validate: v => v === null || is.str(v) || typeof v === 'number', required: false, default: null },
         theme:      { validate: is.oneOf('light','dark','system'), required: true, default: 'light' },
         language:   { validate: v => is.str(v) && v.length >= 2, required: true, default: 'en' },
-        syncEnabled:{ validate: is.bool, required: true, default: true },
+        syncEnabled:{ validate: is.bool, required: true, default: true  },
         updatedAt:  { validate: v => v === null || is.str(v), required: false, default: null },
 
         'notifications':          { validate: is.obj, required: true, default: {} },

@@ -1572,6 +1572,8 @@
             confirmPassword: null,
             name: null,
             avatar: null,
+            // P3 FIX (Forensic Audit): "Privacy policy acceptance on registration"
+            acceptPrivacyPolicy: false,
             _source: 'unknown',
             _debug: {
                 argsCount: args.length,
@@ -1675,6 +1677,11 @@
                 }
             }
             
+            // P3 FIX (Forensic Audit): pass through acceptPrivacyPolicy if provided
+            if (input.acceptPrivacyPolicy === true || input.acceptPrivacyPolicy === 'true') {
+                normalized.acceptPrivacyPolicy = true;
+            }
+
             if (input.user !== undefined && input.user !== null && !normalized.email && !normalized.username) {
                 const userValue = String(input.user).trim();
                 if (userValue.includes('@')) {
@@ -1747,7 +1754,9 @@
                 username: normalized.username,
                 password: normalized.password,
                 ...(normalized.name && { name: normalized.name }),
-                ...(normalized.avatar && { avatar: normalized.avatar })
+                ...(normalized.avatar && { avatar: normalized.avatar }),
+                // P3 FIX (Forensic Audit): pass through privacy policy acceptance
+                ...(normalized.acceptPrivacyPolicy && { acceptPrivacyPolicy: true })
             }
         };
     }

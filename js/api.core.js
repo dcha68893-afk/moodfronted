@@ -5534,7 +5534,7 @@ SAIC.initialize();
     };
     
     deleteAccount = async function(confirmation, password) {
-        // P1 FIX: password mandatory; correct endpoint
+        // P1 AUDIT FIX: password mandatory, correct endpoint
         return del('/api/settings/account', { confirmation, password });
     };
     

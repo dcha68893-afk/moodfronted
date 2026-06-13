@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com";</script>
 <script>
 // Suppress iframe sandbox warnings (usually from extensions)
 (function() {
@@ -3078,363 +3077,279 @@
     })();
     </script>
 
-<script src="back-nav.js"></script>
-<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
-  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
-  DO NOT move above existing scripts.
-════════════════════════════════════════════════════════════════════════ -->
-<script type="module" src="/js/core/phase6.bootstrap.js"></script>
-<script src="/pwa-manager.js" defer></script>
 
-<!-- ═══ P1 Settings Audit Fixes — Blocked Users / Account Deletion / 2FA / syncEnabled ═══ -->
+<!-- ═══ P1 Settings Audit Fixes: Blocked Users / Account Deletion / 2FA / syncEnabled ═══ -->
 <script>
 (function () {
   'use strict';
 
-  /* ── Utilities ──────────────────────────────────────────────────────────── */
-  function getToken() {
+  /* ── helpers ──────────────────────────────────────────────────────────────── */
+  function tok() {
     return localStorage.getItem('authToken') || localStorage.getItem('token') ||
            sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
   }
-  async function api(method, path, body) {
-    const _base = (window.API_BASE_URL || window.BACKEND_URL || '').replace(/\/+$/, '');
-    const _url  = path.startsWith('http') ? path : _base + path;
-    const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() } };
-    if (body) opts.body = JSON.stringify(body);
-    try {
-      const r = await fetch(_url, opts);
-      return r.json();
-    } catch (e) { return { status: 'error', message: 'Network error' }; }
+  async function api(method, url, body) {
+    const o = { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok() } };
+    if (body) o.body = JSON.stringify(body);
+    try { const r = await fetch(url, o); return r.json(); }
+    catch (e) { return { status: 'error', message: 'Network error' }; }
   }
   function toast(msg, type) {
-    if (window.showToast)            { window.showToast(msg, type); return; }
-    if (window.KynectaToast?.show)   { window.KynectaToast.show(msg, type); return; }
-    if (window.Toastify)             { window.Toastify({ text: msg, duration: 3000 }).showToast(); return; }
+    if (window.showToast)          return window.showToast(msg, type);
+    if (window.KynectaToast?.show) return window.KynectaToast.show(msg, type);
     console.log('[Toast]', type, msg);
   }
+  function el(id) { return document.getElementById(id); }
 
-  /* ════════════════════════════════════════════════════════════════════════
-   * 1. BLOCKED USERS — real API + unblock buttons
-   * ════════════════════════════════════════════════════════════════════════ */
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 1. BLOCKED USERS — real API, Unblock buttons
+   * ══════════════════════════════════════════════════════════════════════════*/
   async function loadBlockedUsers() {
-    const list = document.getElementById('blockedUsersList');
+    const list = el('blockedUsersList');
     if (!list) return;
-    list.innerHTML = '<p style="padding:16px;color:var(--text-secondary,#888);">Loading…</p>';
+    list.innerHTML = '<p style="padding:16px;color:var(--text-secondary,#888)">Loading…</p>';
     try {
-      const data = await api('GET', '/api/friends/blocked');
-      const users = data.data?.blockedUsers || data.blockedUsers || [];
+      const d = await api('GET', '/api/friends/blocked');
+      const users = d.data?.blockedUsers || d.blockedUsers || [];
       if (!users.length) {
-        list.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-secondary,#888);">No blocked users</p>';
+        list.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-secondary,#888)">No blocked users</p>';
         return;
       }
       list.innerHTML = users.map(u => `
-        <div class="blocked-user-item" style="display:flex;align-items:center;padding:12px 0;border-bottom:1px solid var(--border,#2a2a3e);">
-          <img src="${u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.username||'U') + '&background=random&color=fff'}"
-               style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;">
-          <div style="flex:1;margin:0 12px;overflow:hidden;">
-            <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.username || 'Unknown'}</div>
-            <div style="font-size:12px;color:var(--text-secondary,#888);">${(u.firstName||'')+' '+(u.lastName||'')}</div>
+        <div class="blocked-user-item" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border,#2a2a3e)">
+          <img src="${u.avatar||'https://ui-avatars.com/api/?name='+encodeURIComponent(u.username||'U')+'&background=random&color=fff'}"
+               style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.username||'Unknown'}</div>
+            <div style="font-size:12px;color:var(--text-secondary,#888)">${(u.firstName||'')+' '+(u.lastName||'')}</div>
           </div>
-          <button data-uid="${u.id}"
-                  style="padding:6px 14px;border-radius:8px;border:1px solid var(--accent,#4F46E5);
-                         background:transparent;color:var(--accent,#4F46E5);cursor:pointer;font-size:13px;white-space:nowrap;">
-            Unblock
-          </button>
+          <button data-uid="${u.id}" style="padding:6px 14px;border-radius:8px;border:1px solid var(--accent,#4F46E5);background:transparent;color:var(--accent,#4F46E5);cursor:pointer;font-size:13px;white-space:nowrap">Unblock</button>
         </div>`).join('');
 
       list.querySelectorAll('[data-uid]').forEach(btn => {
         btn.addEventListener('click', async function () {
           const uid = this.dataset.uid;
           this.disabled = true; this.textContent = '…';
-          const res = await api('POST', '/api/friends/' + uid + '/unblock');
-          if (res.status === 'success' || res.success) {
-            this.closest('[style]').remove();
+          const r = await api('POST', '/api/friends/' + uid + '/unblock');
+          if (r.status === 'success' || r.success) {
+            this.closest('.blocked-user-item') || this.parentElement.parentElement;
+            this.closest('[style]')?.remove();
             toast('User unblocked', 'success');
-            if (!list.querySelector('[data-uid]')) {
-              list.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-secondary,#888);">No blocked users</p>';
-            }
+            if (!list.querySelector('[data-uid]'))
+              list.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-secondary,#888)">No blocked users</p>';
           } else {
-            toast(res.message || 'Failed to unblock', 'error');
+            toast(r.message || 'Failed', 'error');
             this.disabled = false; this.textContent = 'Unblock';
           }
         });
       });
     } catch (e) {
-      list.innerHTML = '<p style="padding:16px;color:var(--text-secondary,#888);">Failed to load</p>';
+      list.innerHTML = '<p style="padding:16px;color:var(--text-secondary,#888)">Failed to load</p>';
     }
   }
 
-  // Hook: observe the blockedUsersModal becoming visible
   function watchBlockedModal() {
-    const modal = document.getElementById('blockedUsersModal');
+    const modal = el('blockedUsersModal');
     if (!modal) return;
-    const obs = new MutationObserver(() => {
-      const vis = modal.classList.contains('active') ||
-                  modal.style.display === 'flex' ||
-                  modal.style.display === 'block';
-      if (vis) loadBlockedUsers();
-    });
-    obs.observe(modal, { attributes: true, attributeFilter: ['class', 'style'] });
+    new MutationObserver(() => {
+      if (modal.classList.contains('active') || modal.style.display === 'flex' || modal.style.display === 'block')
+        loadBlockedUsers();
+    }).observe(modal, { attributes: true, attributeFilter: ['class', 'style'] });
   }
 
-  /* ════════════════════════════════════════════════════════════════════════
-   * 2. ACCOUNT DELETION — mandatory password + confirmation dialog
-   * ════════════════════════════════════════════════════════════════════════ */
-  function interceptDeleteAccountButtons() {
-    document.querySelectorAll('[id*="deleteAccount"],[id*="delete-account"],[data-action="delete-account"],[data-section="danger"] button').forEach(el => {
-      if (el._p1patched) return;
-      el._p1patched = true;
-      // Only intercept buttons that look like delete account triggers
-      const text = (el.textContent || '').toLowerCase();
-      if (!text.includes('delete') && !el.id.toLowerCase().includes('delete')) return;
-      el.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation();
-        showDeleteDialog();
-      });
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 2. ACCOUNT DELETION — mandatory password + typed confirmation
+   * ══════════════════════════════════════════════════════════════════════════*/
+  function patchDeleteButtons() {
+    document.querySelectorAll('button, a').forEach(btn => {
+      if (btn._p1del) return;
+      const t = (btn.textContent || '').toLowerCase();
+      const id = (btn.id || '').toLowerCase();
+      if (!((t.includes('delete') && t.includes('account')) || id.includes('deleteaccount') || id.includes('delete-account'))) return;
+      btn._p1del = true;
+      btn.addEventListener('click', e => { e.preventDefault(); e.stopImmediatePropagation(); showDeleteDialog(); }, true);
     });
   }
 
   function showDeleteDialog() {
-    document.getElementById('__p1del')?.remove();
+    el('__p1del')?.remove();
     const d = document.createElement('div');
     d.id = '__p1del';
-    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px;';
+    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px';
     d.innerHTML = `
-      <div style="background:var(--surface,#1e1e2e);border-radius:16px;padding:28px;width:100%;max-width:400px;
-                  box-shadow:0 20px 60px rgba(0,0,0,.5);color:var(--text-primary,#fff);">
-        <h3 style="margin:0 0 6px;font-size:18px;color:#ef4444;">⚠️ Delete Account</h3>
-        <p style="font-size:13px;color:var(--text-secondary,#aaa);margin:0 0 20px;">
-          Permanent. All data will be erased immediately.
-        </p>
-        <label style="font-size:13px;display:block;margin-bottom:6px;">Type <strong>delete my account</strong>:</label>
+      <div style="background:var(--surface,#1e1e2e);border-radius:16px;padding:28px;width:100%;max-width:400px;color:var(--text-primary,#fff);box-shadow:0 20px 60px rgba(0,0,0,.5)">
+        <h3 style="margin:0 0 6px;color:#ef4444;font-size:18px">⚠️ Delete Account</h3>
+        <p style="font-size:13px;color:var(--text-secondary,#aaa);margin:0 0 20px">This is permanent. All data will be erased immediately.</p>
+        <label style="font-size:13px;display:block;margin-bottom:6px">Type <strong>delete my account</strong>:</label>
         <input id="__p1delc" type="text" placeholder="delete my account"
-               style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;
-                      border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);
-                      font-size:14px;margin-bottom:12px;">
-        <label style="font-size:13px;display:block;margin-bottom:6px;">Your password:</label>
+               style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:12px">
+        <label style="font-size:13px;display:block;margin-bottom:6px">Your password:</label>
         <input id="__p1delp" type="password" placeholder="Password"
-               style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;
-                      border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);
-                      font-size:14px;margin-bottom:20px;">
-        <div style="display:flex;gap:10px;justify-content:flex-end;">
-          <button id="__p1delcancel"
-                  style="padding:10px 18px;border-radius:8px;border:1px solid #444;
-                         background:transparent;color:var(--text-primary,#fff);cursor:pointer;">Cancel</button>
-          <button id="__p1delconfirm"
-                  style="padding:10px 18px;border-radius:8px;border:none;
-                         background:#ef4444;color:#fff;cursor:pointer;font-weight:600;">Delete My Account</button>
+               style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:20px">
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button id="__p1delcancel" style="padding:10px 18px;border-radius:8px;border:1px solid #444;background:transparent;color:var(--text-primary,#fff);cursor:pointer">Cancel</button>
+          <button id="__p1delgo" style="padding:10px 18px;border-radius:8px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:600">Delete My Account</button>
         </div>
-        <p id="__p1delerr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none;"></p>
+        <p id="__p1delerr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none"></p>
       </div>`;
     document.body.appendChild(d);
-    d.querySelector('#__p1delcancel').onclick = () => d.remove();
+    el('__p1delcancel').onclick = () => d.remove();
     d.addEventListener('click', e => { if (e.target === d) d.remove(); });
-    d.querySelector('#__p1delconfirm').onclick = async function () {
-      const conf = d.querySelector('#__p1delc').value.trim().toLowerCase();
-      const pass = d.querySelector('#__p1delp').value;
-      const err  = d.querySelector('#__p1delerr');
+    el('__p1delgo').onclick = async function () {
+      const conf = el('__p1delc').value.trim().toLowerCase();
+      const pass = el('__p1delp').value;
+      const err  = el('__p1delerr');
       err.style.display = 'none';
-      if (conf !== 'delete my account') { err.textContent = 'Type "delete my account" exactly.'; err.style.display = 'block'; return; }
-      if (!pass) { err.textContent = 'Password is required.'; err.style.display = 'block'; return; }
+      if (conf !== 'delete my account') { err.textContent = 'Type "delete my account" exactly.'; err.style.display='block'; return; }
+      if (!pass)                         { err.textContent = 'Password is required.';              err.style.display='block'; return; }
       this.disabled = true; this.textContent = 'Deleting…';
-      const res = await api('DELETE', '/api/settings/account', { confirmation: conf, password: pass });
-      if (res.status === 'success') {
-        d.remove();
-        toast('Account deleted. Logging out…', 'success');
+      const r = await api('DELETE', '/api/settings/account', { confirmation: conf, password: pass });
+      if (r.status === 'success') {
+        d.remove(); toast('Account deleted. Logging out…', 'success');
         setTimeout(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/auth.html'; }, 2000);
       } else {
-        err.textContent = res.message || 'Failed — check your password.';
-        err.style.display = 'block';
+        err.textContent = r.message || 'Failed — check your password.'; err.style.display = 'block';
         this.disabled = false; this.textContent = 'Delete My Account';
       }
     };
   }
 
-  /* ════════════════════════════════════════════════════════════════════════
-   * 3. 2FA TOTP — inject panel into Security section
-   * ════════════════════════════════════════════════════════════════════════ */
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 3. 2FA TOTP — full setup / verify / disable panel
+   * ══════════════════════════════════════════════════════════════════════════*/
   function inject2FAPanel() {
-    if (document.getElementById('__p12fa')) return;
-
-    // Find the security section content area
+    if (el('__p12fa')) return;
+    // Find best anchor: security section content, or near change-password modal
     const anchor = document.querySelector('[data-content="security"],[id*="security"][class*="content"],[id*="security"][class*="panel"]')
-                || document.getElementById('changePasswordModal')?.parentElement
-                || document.querySelector('.settings-content');
+                || el('changePasswordModal')
+                || document.querySelector('.settings-main,.settings-content,.content-area');
     if (!anchor) return;
 
-    const panel = document.createElement('div');
-    panel.id = '__p12fa';
-    panel.style.cssText = 'margin:24px 0;';
-    panel.innerHTML = `
-      <div style="background:var(--surface,#1e1e2e);border-radius:14px;padding:20px;
-                  border:1px solid var(--border,#2a2a3e);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    const div = document.createElement('div');
+    div.id = '__p12fa';
+    div.innerHTML = `
+      <div style="background:var(--surface,#1e1e2e);border-radius:14px;padding:20px;border:1px solid var(--border,#2a2a3e);margin:24px 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
           <div>
-            <div style="font-weight:600;font-size:15px;">Two-Factor Authentication (2FA)</div>
-            <div style="font-size:12px;color:var(--text-secondary,#aaa);margin-top:3px;">
-              TOTP authenticator app support (Google Authenticator, Authy)
-            </div>
+            <div style="font-weight:600;font-size:15px">Two-Factor Authentication (2FA)</div>
+            <div style="font-size:12px;color:var(--text-secondary,#aaa);margin-top:3px">TOTP — Google Authenticator, Authy, etc.</div>
           </div>
-          <span id="__p12faStatus"
-                style="font-size:11px;padding:3px 10px;border-radius:20px;background:#3a3a4e;color:#aaa;">
-            Loading…
-          </span>
+          <span id="__p12faStatus" style="font-size:11px;padding:3px 10px;border-radius:20px;background:#3a3a4e;color:#aaa">Loading…</span>
         </div>
-        <button id="__p12faBtn"
-                style="padding:10px 20px;border-radius:10px;border:none;background:var(--accent,#4F46E5);
-                       color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
-          Set Up 2FA
-        </button>
+        <button id="__p12faBtn" style="padding:10px 20px;border-radius:10px;border:none;background:var(--accent,#4F46E5);color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Set Up 2FA</button>
 
-        <!-- Setup flow -->
-        <div id="__p12faSetup" style="display:none;margin-top:18px;">
-          <p style="font-size:13px;color:var(--text-secondary,#aaa);margin:0 0 12px;">
-            Scan with your authenticator app:
-          </p>
-          <div style="text-align:center;margin-bottom:14px;">
-            <img id="__p12faQR" src="" alt="QR Code"
-                 style="max-width:180px;border-radius:8px;background:#fff;padding:6px;">
+        <div id="__p12faSetup" style="display:none;margin-top:18px">
+          <p style="font-size:13px;color:var(--text-secondary,#aaa);margin:0 0 12px">Scan with your authenticator app:</p>
+          <div style="text-align:center;margin-bottom:14px">
+            <img id="__p12faQR" src="" alt="QR" style="max-width:180px;border-radius:8px;background:#fff;padding:6px">
           </div>
-          <p style="font-size:11px;color:var(--text-secondary,#aaa);margin:0 0 10px;word-break:break-all;">
-            Manual secret: <code id="__p12faSecret"></code>
-          </p>
-          <div id="__p12faCodes" style="display:none;margin-bottom:14px;padding:12px;
-               background:var(--input-bg,#2a2a3e);border-radius:8px;">
-            <p style="font-size:12px;font-weight:600;color:#f59e0b;margin:0 0 8px;">
-              ⚠️ Save these backup codes — shown once only:
-            </p>
-            <div id="__p12faCodesGrid"
-                 style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-family:monospace;font-size:12px;"></div>
+          <p style="font-size:11px;color:var(--text-secondary,#aaa);margin:0 0 10px;word-break:break-all">Manual secret: <code id="__p12faSecret"></code></p>
+          <div id="__p12faCodes" style="display:none;padding:12px;background:var(--input-bg,#2a2a3e);border-radius:8px;margin-bottom:14px">
+            <p style="font-size:12px;font-weight:600;color:#f59e0b;margin:0 0 8px">⚠️ Save these backup codes — shown once only:</p>
+            <div id="__p12faCodesGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-family:monospace;font-size:12px"></div>
           </div>
-          <input id="__p12faToken" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code"
-                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;
-                        background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);
-                        font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px;">
-          <button id="__p12faVerify"
-                  style="padding:10px 20px;border-radius:10px;border:none;background:#22c55e;
-                         color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
-            Activate 2FA
-          </button>
+          <input id="__p12faTok" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code"
+                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px">
+          <button id="__p12faVerify" style="padding:10px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Activate 2FA</button>
         </div>
 
-        <!-- Disable flow -->
-        <div id="__p12faDisable" style="display:none;margin-top:18px;">
+        <div id="__p12faDisable" style="display:none;margin-top:18px">
           <input id="__p12faDisPass" type="password" placeholder="Your password"
-                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;
-                        background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:10px;">
+                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:10px">
           <input id="__p12faDisTok" type="text" inputmode="numeric" maxlength="6" placeholder="TOTP code"
-                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;
-                        background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);
-                        font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px;">
-          <button id="__p12faDisBtn"
-                  style="padding:10px 20px;border-radius:10px;border:none;background:#ef4444;
-                         color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
-            Disable 2FA
-          </button>
+                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px">
+          <button id="__p12faDisBtn" style="padding:10px 20px;border-radius:10px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Disable 2FA</button>
         </div>
-
-        <p id="__p12faErr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none;"></p>
+        <p id="__p12faErr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none"></p>
       </div>`;
 
-    anchor.prepend(panel);
+    // Insert before the anchor element so it appears at top of security section
+    anchor.insertAdjacentElement('beforebegin', div);
+
     load2FAStatus();
-    wire2FAEvents();
+    wire2FA();
   }
 
   async function load2FAStatus() {
-    const statusEl = document.getElementById('__p12faStatus');
-    const btn      = document.getElementById('__p12faBtn');
-    if (!statusEl) return;
+    const status = el('__p12faStatus'), btn = el('__p12faBtn');
+    if (!status) return;
     try {
-      const res = await api('GET', '/api/settings/2fa/status');
-      const on  = res.data?.mfaEnabled === true;
-      statusEl.textContent     = on ? '✓ Enabled' : 'Disabled';
-      statusEl.style.background = on ? '#14532d' : '#3a3a4e';
-      statusEl.style.color      = on ? '#86efac' : '#aaa';
-      if (btn) { btn.textContent = on ? 'Manage 2FA' : 'Set Up 2FA'; }
-      const dis = document.getElementById('__p12faDisable');
-      const set = document.getElementById('__p12faSetup');
-      if (dis) dis.style.display = on ? 'block' : 'none';
-      if (set && on) set.style.display = 'none';
-    } catch (e) {
-      if (statusEl) statusEl.textContent = 'Unknown';
-    }
+      const r = await api('GET', '/api/settings/2fa/status');
+      const on = r.data?.mfaEnabled === true;
+      status.textContent = on ? '✓ Enabled' : 'Disabled';
+      status.style.background = on ? '#14532d' : '#3a3a4e';
+      status.style.color = on ? '#86efac' : '#aaa';
+      if (btn) btn.textContent = on ? 'Manage 2FA' : 'Set Up 2FA';
+      if (el('__p12faDisable')) el('__p12faDisable').style.display = on ? 'block' : 'none';
+      if (el('__p12faSetup') && on) el('__p12faSetup').style.display = 'none';
+    } catch { if (status) status.textContent = 'Unknown'; }
   }
 
-  function wire2FAEvents() {
-    document.getElementById('__p12faBtn')?.addEventListener('click', async function () {
-      const statusEl = document.getElementById('__p12faStatus');
-      const on = statusEl?.textContent?.includes('Enabled');
-      if (on) {
-        document.getElementById('__p12faDisable').style.display = 'block';
-        document.getElementById('__p12faSetup').style.display   = 'none';
-        return;
-      }
+  function wire2FA() {
+    el('__p12faBtn')?.addEventListener('click', async function () {
+      const on = el('__p12faStatus')?.textContent?.includes('Enabled');
+      if (on) { el('__p12faDisable').style.display = 'block'; el('__p12faSetup').style.display = 'none'; return; }
       this.disabled = true; this.textContent = 'Generating…';
       try {
-        const res = await api('POST', '/api/settings/2fa/setup');
-        if (res.status !== 'success') { show2FAErr(res.message); return; }
-        document.getElementById('__p12faQR').src             = res.data.qrCode;
-        document.getElementById('__p12faSecret').textContent = res.data.secret;
-        document.getElementById('__p12faSetup').style.display = 'block';
-        const grid = document.getElementById('__p12faCodesGrid');
-        const codesDiv = document.getElementById('__p12faCodes');
-        if (res.data.backupCodes && grid) {
-          grid.innerHTML = res.data.backupCodes.map(c => `<span style="padding:3px 6px;background:rgba(255,255,255,.06);border-radius:4px;">${c}</span>`).join('');
-          codesDiv.style.display = 'block';
+        const r = await api('POST', '/api/settings/2fa/setup');
+        if (r.status !== 'success') { show2FAErr(r.message); return; }
+        el('__p12faQR').src = r.data.qrCode;
+        el('__p12faSecret').textContent = r.data.secret;
+        el('__p12faSetup').style.display = 'block';
+        if (r.data.backupCodes) {
+          el('__p12faCodesGrid').innerHTML = r.data.backupCodes.map(c =>
+            `<span style="padding:3px 6px;background:rgba(255,255,255,.06);border-radius:4px">${c}</span>`).join('');
+          el('__p12faCodes').style.display = 'block';
         }
-      } catch (e) { show2FAErr('Failed to set up 2FA'); }
+      } catch (e) { show2FAErr('Setup failed'); }
       finally { this.disabled = false; this.textContent = 'Set Up 2FA'; }
     });
 
-    document.getElementById('__p12faVerify')?.addEventListener('click', async function () {
-      const token = document.getElementById('__p12faToken').value.trim();
+    el('__p12faVerify')?.addEventListener('click', async function () {
+      const token = el('__p12faTok').value.trim();
       if (!token) { show2FAErr('Enter the 6-digit code'); return; }
       this.disabled = true; this.textContent = 'Verifying…';
-      const res = await api('POST', '/api/settings/2fa/verify', { token });
-      if (res.status === 'success') {
-        toast('2FA enabled!', 'success');
-        document.getElementById('__p12faSetup').style.display = 'none';
+      const r = await api('POST', '/api/settings/2fa/verify', { token });
+      if (r.status === 'success') {
+        toast('2FA enabled! ✓', 'success');
+        el('__p12faSetup').style.display = 'none';
         load2FAStatus();
-      } else {
-        show2FAErr(res.message || 'Invalid code');
-      }
+      } else show2FAErr(r.message || 'Invalid code');
       this.disabled = false; this.textContent = 'Activate 2FA';
     });
 
-    document.getElementById('__p12faDisBtn')?.addEventListener('click', async function () {
-      const password = document.getElementById('__p12faDisPass').value;
-      const token    = document.getElementById('__p12faDisTok').value.trim();
-      if (!password || !token) { show2FAErr('Password and code required'); return; }
+    el('__p12faDisBtn')?.addEventListener('click', async function () {
+      const pass = el('__p12faDisPass').value, token = el('__p12faDisTok').value.trim();
+      if (!pass || !token) { show2FAErr('Password and code required'); return; }
       this.disabled = true; this.textContent = 'Disabling…';
-      const res = await api('POST', '/api/settings/2fa/disable', { password, token });
-      if (res.status === 'success') {
+      const r = await api('POST', '/api/settings/2fa/disable', { password: pass, token });
+      if (r.status === 'success') {
         toast('2FA disabled', 'success');
-        document.getElementById('__p12faDisable').style.display = 'none';
+        el('__p12faDisable').style.display = 'none';
         load2FAStatus();
-      } else { show2FAErr(res.message || 'Failed'); }
+      } else show2FAErr(r.message || 'Failed');
       this.disabled = false; this.textContent = 'Disable 2FA';
     });
   }
 
   function show2FAErr(msg) {
-    const el = document.getElementById('__p12faErr');
-    if (el) { el.textContent = msg; el.style.display = 'block'; setTimeout(() => el.style.display = 'none', 5000); }
+    const e = el('__p12faErr');
+    if (e) { e.textContent = msg; e.style.display = 'block'; setTimeout(() => e.style.display = 'none', 5000); }
   }
 
-  /* ════════════════════════════════════════════════════════════════════════
-   * 4. syncEnabled — migrate stale localStorage caches to true
-   * ════════════════════════════════════════════════════════════════════════ */
-  function patchSyncEnabled() {
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 4. syncEnabled cache migration — fix stale false in localStorage
+   * ══════════════════════════════════════════════════════════════════════════*/
+  function patchSyncCache() {
     ['userSettings','settings','kynecta_settings','mood_settings','moodchat_settings'].forEach(k => {
       try {
         const raw = localStorage.getItem(k);
         if (!raw) return;
         const obj = JSON.parse(raw);
         let changed = false;
-        if (obj.syncEnabled === false)                    { obj.syncEnabled = true; changed = true; }
-        if (obj.advanced?.syncEnabled === false)          { obj.advanced.syncEnabled = true; changed = true; }
-        if (obj.advancedSettings?.syncEnabled === false)  { obj.advancedSettings.syncEnabled = true; changed = true; }
+        if (obj.syncEnabled === false)                   { obj.syncEnabled = true; changed = true; }
+        if (obj.advanced?.syncEnabled === false)         { obj.advanced.syncEnabled = true; changed = true; }
+        if (obj.advancedSettings?.syncEnabled === false) { obj.advancedSettings.syncEnabled = true; changed = true; }
         if (changed) localStorage.setItem(k, JSON.stringify(obj));
       } catch (_) {}
     });
@@ -3442,25 +3357,29 @@
 
   /* ── Bootstrap ─────────────────────────────────────────────────────────── */
   function init() {
-    patchSyncEnabled();
+    patchSyncCache();
     watchBlockedModal();
-    interceptDeleteAccountButtons();
+    patchDeleteButtons();
     inject2FAPanel();
-
-    // Re-run patches when DOM is mutated (settings-core re-renders sections dynamically)
+    // Re-run when settings-core re-renders sections dynamically
     new MutationObserver(() => {
-      interceptDeleteAccountButtons();
+      patchDeleteButtons();
       inject2FAPanel();
     }).observe(document.body, { childList: true, subtree: true });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  document.readyState === 'loading'
+    ? document.addEventListener('DOMContentLoaded', init)
+    : init();
 })();
 </script>
 
+<script src="back-nav.js"></script>
+<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/js/core/phase6.bootstrap.js"></script>
+<script src="/pwa-manager.js" defer></script>
 </body>
 </html>

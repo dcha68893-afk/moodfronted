@@ -2224,9 +2224,13 @@ let loginError = null;
 
 try {
     // Race between login and a timeout
+    // FIX: raised from 30s to 95s — must exceed api.auth.js's internal 90s
+    // fetch timeout (sized for Render free-tier cold starts), otherwise this
+    // outer race always wins first and aborts a request that was about to
+    // succeed.
     const loginPromise = this._apiAuthProxy.login(email, password, { source: 'auth_gateway' });
     const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Login timeout after 30 seconds')), 30000);
+        setTimeout(() => reject(new Error('Login timeout after 95 seconds')), 95000);
     });
     
     loginResponse = await Promise.race([loginPromise, timeoutPromise]);
