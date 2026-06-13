@@ -10739,6 +10739,7 @@ export {
     // StatusManager and ENV_CONFIG
     StatusManager,
     ENV_CONFIG,
+};
 
 // ============================================================
 // P2/P3 FIX: New friend management functions
@@ -11025,7 +11026,8 @@ async function exportFriendsCSV() {
     // Polling Manager
     PollingManager,
 
-    // P1/P2/P3 NEW EXPORTS
+// P1/P2/P3 NEW EXPORTS — merge into friendCore after async functions are defined
+Object.assign(friendCore, {
     hydratePrivateNotesFromDB,
     snoozeFriend,
     unsnoozeFriend,
@@ -11036,7 +11038,7 @@ async function exportFriendsCSV() {
     getFriendPrivacySettings,
     updateFriendPrivacySettings,
     exportFriendsCSV,
-};
+});
 
 // P2/P3 FIX: Expose on window so friend-ui.js (loaded as separate ES module) can call
 // new functions via window.FriendCoreAPI?.snoozeFriend() etc.

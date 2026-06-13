@@ -399,7 +399,7 @@
     // Pull deletions from server to stay in sync
     async syncFromServer(since = 0) {
       try {
-        const base = window.__getApiBase?.() || '';
+        const base = (window.API_BASE_URL || window.BACKEND_URL || window.__getApiBase?.() || '').replace(/\/+$/, '');
 
         // FIX-AUDIT-4: Resolve auth token from multiple sources across iframes
         // __kynToken is set in Tool-core.js but not in messages/calls/group iframes
@@ -454,7 +454,7 @@
     if (now < _deletionCB.openUntil) return;       // circuit open — skip
     _deletionCB.inFlight = true;
     try {
-      const base = window.__getApiBase?.() || '';
+      const base = (window.API_BASE_URL || window.BACKEND_URL || window.__getApiBase?.() || '').replace(/\/+$/, '');
       const _token = window.__kynToken
         || window.AppStorage?.get?.('authToken')
         || window.AppStorage?.get?.('token')

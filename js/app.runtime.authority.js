@@ -413,6 +413,10 @@
     }
 
     async function fetchJson(url, options = {}) {
+        if (url.startsWith('/')) {
+            const _b = (window.API_BASE_URL || window.BACKEND_URL || '').replace(/\/+$/, '');
+            if (_b) url = _b + url;
+        }
         const response = await fetch(url, {
             credentials: 'include',
             cache: 'no-store',
