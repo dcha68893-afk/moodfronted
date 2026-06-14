@@ -22,6 +22,25 @@
     return;
   }
 
+  // FIX: window.__getApiBase() can be undefined at the time this module's
+  // deletion-sync runs (depending on load order / iframe context), causing
+  // `${base}/deletions` to become a bare '/deletions' — a root-relative path
+  // that resolves against the CURRENT PAGE's origin (e.g.
+  // moodfronted.onrender.com/deletions, 404) instead of the backend API
+  // (moodchat-fy56.onrender.com/api/deletions). This mirrors
+  // NetworkIntelligenceManager.js's safe fallback so deletion sync always
+  // targets the backend, with /api included.
+  function _resolveApiBase() {
+    try {
+      const fromHelper = window.__getApiBase?.();
+      if (fromHelper) return fromHelper.replace(/\/+$/, '');
+    } catch (_) {}
+    if (window.__kynAPI && window.__kynAPI.baseUrl) {
+      return window.__kynAPI.baseUrl.replace(/\/+$/, '');
+    }
+    return 'https://moodchat-fy56.onrender.com/api';
+  }
+
   // ─── CacheInvalidationManager ────────────────────────────────────────────────
 
   class CacheInvalidationManager {
@@ -399,7 +418,7 @@
     // Pull deletions from server to stay in sync
     async syncFromServer(since = 0) {
       try {
-        const base = (window.API_BASE_URL || window.BACKEND_URL || window.__getApiBase?.() || '').replace(/\/+$/, '');
+        const base = _resolveApiBase();
 
         // FIX-AUDIT-4: Resolve auth token from multiple sources across iframes
         // __kynToken is set in Tool-core.js but not in messages/calls/group iframes
@@ -454,7 +473,7 @@
     if (now < _deletionCB.openUntil) return;       // circuit open — skip
     _deletionCB.inFlight = true;
     try {
-      const base = (window.API_BASE_URL || window.BACKEND_URL || window.__getApiBase?.() || '').replace(/\/+$/, '');
+      const base = _resolveApiBase();
       const _token = window.__kynToken
         || window.AppStorage?.get?.('authToken')
         || window.AppStorage?.get?.('token')

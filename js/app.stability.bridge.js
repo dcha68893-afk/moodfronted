@@ -15,6 +15,11 @@
             return url;
         }
 
+        // Skip already-absolute URLs (http/https/ws/wss) — don't touch them
+        if (/^https?:\/\/|^wss?:\/\//.test(url)) {
+            return url;
+        }
+
         let normalizedUrl = url;
 
         normalizedUrl = normalizedUrl.replace(/^\/api\/marketplace\b/, '/api/tools/marketplace');
@@ -25,6 +30,7 @@
         normalizedUrl = normalizedUrl.replace(/^\/api\/friends\/user\/([^/?#]+)(.*)$/i, '/api/friends/$1$2');
         normalizedUrl = normalizedUrl.replace(/^\/api\/groups\/invites\/pending\b/i, '/api/groups/invitations?status=pending');
         normalizedUrl = normalizedUrl.replace(/^\/api\/events\b/i, '/api/groups/events');
+        normalizedUrl = normalizedUrl.replace(/^\/api\/settings\/2fa\b/i, '/api/2fa');
 
         if (/^\/api\/groups\/[^/]+\/members$/i.test(normalizedUrl) && String(method || 'GET').toUpperCase() === 'POST') {
             let body = data;
@@ -37,6 +43,18 @@
             if (userId) {
                 normalizedUrl += `/${encodeURIComponent(userId)}`;
             }
+        }
+
+        // FIX: relative /api/* paths (no host prefix) resolve against the
+        // current page origin (moodfronted.onrender.com) instead of the
+        // backend. Prepend the backend origin so inline scripts in calls.html,
+        // marketplace-advanced.js, etc. that use bare '/api/...' paths work.
+        // Applied AFTER all path rewrites above so the regex anchors (^) still work.
+        if (normalizedUrl.startsWith('/api/') || normalizedUrl.startsWith('/socket.io/')) {
+            const apiOrigin = (typeof window !== 'undefined' && window.__getApiOrigin)
+                ? window.__getApiOrigin()
+                : 'https://moodchat-fy56.onrender.com';
+            normalizedUrl = apiOrigin + normalizedUrl;
         }
 
         return normalizedUrl;

@@ -9218,6 +9218,11 @@ function toggleFlash() {
     showNotification?.(flashOn ? 'Flash on' : 'Flash off', 'info');
 }
 
+// FIX: function contains `await QRCodeManager.generateQRCode(...)` below
+// but was declared non-async — this is a SyntaxError ("Unexpected reserved
+// word") that aborts the entire friend-core.js module on load. All call
+// sites (setTimeout, onclick, fire-and-forget) don't depend on the return
+// value, so marking this async is safe.
 async function generateUniqueQRCode() {
     if (!assertActive('generateUniqueQRCode')) {
         const container = document.getElementById('qrCodeContainer');
@@ -10502,244 +10507,6 @@ const NearbyManager = {
     }
 };
 
-export {
-    // Core State
-    currentUser,
-    userData,
-    friends,
-    contacts,
-    friendRequests,
-    sentRequests,
-    temporaryFriends,
-    pinnedFriends,
-    mutedFriends,
-    selectedFriend,
-    currentCategoryFilter,
-    currentSearchTerm,
-    isMobile,
-    mutualFriendsCache,
-    groups,
-    allUsers,
-    cameraStream,
-    currentCamera,
-    flashOn,
-    apiReady,
-    scanningActive,
-    isInitialized,
-    initializationStarted,
-    backgroundSyncInterval,
-    isAuthReady,
-    backgroundTasksStarted,
-    cacheLoaded,
-    friendCategories,
-    LOCAL_STORAGE_KEYS,
-    dataSource,
-    featureFlags,
-
-    // KYN Protocol State
-    kynState,
-    DiagnosticsAgent,
-    IframeEnvironment,
-    CompatibilityBridge,
-    MessageBus,
-    NavigationGuard,
-    UIFailsafe,
-    SandboxDetector,
-    SafeStorage,
-    HeartbeatClient,
-    ReliabilityLayer,
-    IframeSessionClient,
-    IframeTransport,
-    TransportAgent,
-
-    // Core Systems
-    ParentCoordinator,
-    KnectaAuth,
-    Logger,
-    ResourceManager,
-    SecurityManager,
-    ErrorHandler,
-    SafetyGuards,
-
-    // Initialization
-    initialize,
-    initializeParentChildCommunication,
-    loadCachedDataInstantly,
-    startParallelDataLoading,
-    updateUIWithUserData,
-    updateDataSourceIndicator,
-    initializeMainFunctionality,
-    showAuthError,
-    hideAuthError,
-    showReconnectionState,
-    hideReconnectionState,
-
-    // API Functions
-    getValidToken,
-    getCurrentUser,
-    authorizedRequest,
-
-    // Friend Request Management
-    sendFriendRequest,
-    acceptFriendRequestOnline,
-    declineFriendRequest,
-    cancelFriendRequest,
-
-    // Data Loading
-    loadFriendsFromBackend,
-    loadFriendRequestsFromBackend,
-    loadSentRequestsFromBackend,
-    loadPinnedFriendsFromBackend,
-    loadMutedFriendsFromBackend,
-    loadContactsFromBackend,
-    loadGroupsFromBackend,
-    fetchAllUsersFromBackend,
-    saveFriendsToLocalStorage,
-
-    // Friend Management
-    togglePinFriend,
-    toggleMuteFriend,
-    savePrivateNote,
-    getLastInteraction,
-    removeFriend,
-    blockUser,
-
-    // QR & Camera
-    startCameraScanner,
-    stopCameraScanner,
-    toggleCamera,
-    toggleFlash,
-    generateUniqueQRCode,
-    validateQRCodeData,
-
-    // Mutual Friends
-    showMutualFriends,
-
-    // Navigation & UI
-    showNotification,
-    navigateToChat,
-    navigateToCall,
-    simulateContactSync,
-
-    // Utilities
-    escapeHtml,
-    formatTimeAgo,
-    formatDate,
-    getTrustScoreClass,
-    checkMobile,
-
-    // V6 State
-    V6,
-
-    // Lifecycle
-    LifecycleStateMachine,
-    LIFECYCLE_STATES,
-    __session,
-    parentReadyReceived,
-    authReadyReceived,
-    childReadySent,
-    assertActive,
-    onModuleActive,
-    transitionTo,
-    currentState,
-    sendChildReady,
-    handleParentReady,
-    handleAuthReady,
-    requestQueue,
-    flushRequestQueue,
-    isAuthenticated,
-
-    // Core controllers
-    ParentCommunicationManager,
-    MessageDispatcher,
-    SessionManager,
-    SecurityValidator,
-    UIBridge,
-
-    // V6 compatibility
-    V6_STATES,
-
-    // Friend management internals
-    FriendCacheManager,
-    FriendRequestManager,
-    FriendSearchEngine,
-    QRCodeManager,
-    GroupParticipationManager,
-    OfflineFirstFriends,
-    saveFriendLocal,
-
-    // State and promises
-    TokenPromise,
-    ModuleRegistrationManager,
-    MessageTracker,
-    IdempotentTracker,
-
-    // Additional utility functions
-    generateMessageId,
-    importedGenerateMessageId,
-    validateFriendId,
-    validateFriendData,
-    timeoutPromise,
-    withTimeout,
-    syncWithApiCore,
-    apiCallWithRetry,
-    verifySession,
-    APIGateway,
-    handleFriendSelection,
-    getFriendsForMessaging,
-    getFriendsForCalling,
-    getFriendsForGroup,
-    updateCurrentSection,
-    updateFriendCounts,
-    showFriendDetails,
-    renderFriendsListInstantly,
-    addFriendItem,
-    addFriendItemInstant,
-    renderContacts,
-    renderFriends,
-    renderFriendRequests,
-    renderSentRequests,
-    addFriendRequestItem,
-    handleFriendAction,
-    handleRequestAction,
-    filterFriendsByCategory,
-    searchFriendsLegacy,
-    setCurrentCategoryFilter,
-    setCurrentSearchTerm,
-    renderAllUsersList,
-    loadFriendDetails,
-    showFriendRequestProfile,
-    showFriendOptions,
-    viewChatHistory,
-    viewCallHistory,
-    showChangeCategoryModal,
-    renderTemporaryFriends,
-    renderPinnedFriends,
-    renderMutedFriends,
-    showStartChatModal,
-    setupEventListeners,
-    initializeOriginalFunctionality,
-
-    // Additional search and group functions
-    searchFriends,
-    searchFriendsByLetter,
-    addFriendToGroup,
-    removeFriendFromGroup,
-    getGroupMembers,
-
-    // Compatibility exports
-    HandshakeClient,
-    RecoveryManagerV6,
-    StartupGovernor,
-
-    // Namespaces
-    KYN,
-    friendCore,
-
-    // StatusManager and ENV_CONFIG
-    StatusManager,
-    ENV_CONFIG,
-};
 
 // ============================================================
 // P2/P3 FIX: New friend management functions
@@ -11020,14 +10787,251 @@ async function exportFriendsCSV() {
     }
 }
 
+export {
+    // Core State
+    currentUser,
+    userData,
+    friends,
+    contacts,
+    friendRequests,
+    sentRequests,
+    temporaryFriends,
+    pinnedFriends,
+    mutedFriends,
+    selectedFriend,
+    currentCategoryFilter,
+    currentSearchTerm,
+    isMobile,
+    mutualFriendsCache,
+    groups,
+    allUsers,
+    cameraStream,
+    currentCamera,
+    flashOn,
+    apiReady,
+    scanningActive,
+    isInitialized,
+    initializationStarted,
+    backgroundSyncInterval,
+    isAuthReady,
+    backgroundTasksStarted,
+    cacheLoaded,
+    friendCategories,
+    LOCAL_STORAGE_KEYS,
+    dataSource,
+    featureFlags,
+
+    // KYN Protocol State
+    kynState,
+    DiagnosticsAgent,
+    IframeEnvironment,
+    CompatibilityBridge,
+    MessageBus,
+    NavigationGuard,
+    UIFailsafe,
+    SandboxDetector,
+    SafeStorage,
+    HeartbeatClient,
+    ReliabilityLayer,
+    IframeSessionClient,
+    IframeTransport,
+    TransportAgent,
+
+    // Core Systems
+    ParentCoordinator,
+    KnectaAuth,
+    Logger,
+    ResourceManager,
+    SecurityManager,
+    ErrorHandler,
+    SafetyGuards,
+
+    // Initialization
+    initialize,
+    initializeParentChildCommunication,
+    loadCachedDataInstantly,
+    startParallelDataLoading,
+    updateUIWithUserData,
+    updateDataSourceIndicator,
+    initializeMainFunctionality,
+    showAuthError,
+    hideAuthError,
+    showReconnectionState,
+    hideReconnectionState,
+
+    // API Functions
+    getValidToken,
+    getCurrentUser,
+    authorizedRequest,
+
+    // Friend Request Management
+    sendFriendRequest,
+    acceptFriendRequestOnline,
+    declineFriendRequest,
+    cancelFriendRequest,
+
+    // Data Loading
+    loadFriendsFromBackend,
+    loadFriendRequestsFromBackend,
+    loadSentRequestsFromBackend,
+    loadPinnedFriendsFromBackend,
+    loadMutedFriendsFromBackend,
+    loadContactsFromBackend,
+    loadGroupsFromBackend,
+    fetchAllUsersFromBackend,
+    saveFriendsToLocalStorage,
+
+    // Friend Management
+    togglePinFriend,
+    toggleMuteFriend,
+    savePrivateNote,
+    getLastInteraction,
+    removeFriend,
+    blockUser,
+
+    // QR & Camera
+    startCameraScanner,
+    stopCameraScanner,
+    toggleCamera,
+    toggleFlash,
+    generateUniqueQRCode,
+    validateQRCodeData,
+
+    // Mutual Friends
+    showMutualFriends,
+
+    // Navigation & UI
+    showNotification,
+    navigateToChat,
+    navigateToCall,
+    simulateContactSync,
+
+    // Utilities
+    escapeHtml,
+    formatTimeAgo,
+    formatDate,
+    getTrustScoreClass,
+    checkMobile,
+
+    // V6 State
+    V6,
+
+    // Lifecycle
+    LifecycleStateMachine,
+    LIFECYCLE_STATES,
+    __session,
+    parentReadyReceived,
+    authReadyReceived,
+    childReadySent,
+    assertActive,
+    onModuleActive,
+    transitionTo,
+    currentState,
+    sendChildReady,
+    handleParentReady,
+    handleAuthReady,
+    requestQueue,
+    flushRequestQueue,
+    isAuthenticated,
+
+    // Core controllers
+    ParentCommunicationManager,
+    MessageDispatcher,
+    SessionManager,
+    SecurityValidator,
+    UIBridge,
+
+    // V6 compatibility
+    V6_STATES,
+
+    // Friend management internals
+    FriendCacheManager,
+    FriendRequestManager,
+    FriendSearchEngine,
+    QRCodeManager,
+    GroupParticipationManager,
+    OfflineFirstFriends,
+    saveFriendLocal,
+
+    // State and promises
+    TokenPromise,
+    ModuleRegistrationManager,
+    MessageTracker,
+    IdempotentTracker,
+
+    // Additional utility functions
+    generateMessageId,
+    importedGenerateMessageId,
+    validateFriendId,
+    validateFriendData,
+    timeoutPromise,
+    withTimeout,
+    syncWithApiCore,
+    apiCallWithRetry,
+    verifySession,
+    APIGateway,
+    handleFriendSelection,
+    getFriendsForMessaging,
+    getFriendsForCalling,
+    getFriendsForGroup,
+    updateCurrentSection,
+    updateFriendCounts,
+    showFriendDetails,
+    renderFriendsListInstantly,
+    addFriendItem,
+    addFriendItemInstant,
+    renderContacts,
+    renderFriends,
+    renderFriendRequests,
+    renderSentRequests,
+    addFriendRequestItem,
+    handleFriendAction,
+    handleRequestAction,
+    filterFriendsByCategory,
+    searchFriendsLegacy,
+    setCurrentCategoryFilter,
+    setCurrentSearchTerm,
+    renderAllUsersList,
+    loadFriendDetails,
+    showFriendRequestProfile,
+    showFriendOptions,
+    viewChatHistory,
+    viewCallHistory,
+    showChangeCategoryModal,
+    renderTemporaryFriends,
+    renderPinnedFriends,
+    renderMutedFriends,
+    showStartChatModal,
+    setupEventListeners,
+    initializeOriginalFunctionality,
+
+    // Additional search and group functions
+    searchFriends,
+    searchFriendsByLetter,
+    addFriendToGroup,
+    removeFriendFromGroup,
+    getGroupMembers,
+
+    // Compatibility exports
+    HandshakeClient,
+    RecoveryManagerV6,
+    StartupGovernor,
+
+    // Namespaces
+    KYN,
+    friendCore,
+
+    // StatusManager and ENV_CONFIG
+    StatusManager,
+    ENV_CONFIG,
+
     // Nearby Discovery
     NearbyManager,
 
     // Polling Manager
     PollingManager,
 
-// P1/P2/P3 NEW EXPORTS — merge into friendCore after async functions are defined
-Object.assign(friendCore, {
+    // P1/P2/P3 NEW EXPORTS
     hydratePrivateNotesFromDB,
     snoozeFriend,
     unsnoozeFriend,
@@ -11038,7 +11042,7 @@ Object.assign(friendCore, {
     getFriendPrivacySettings,
     updateFriendPrivacySettings,
     exportFriendsCSV,
-});
+};
 
 // P2/P3 FIX: Expose on window so friend-ui.js (loaded as separate ES module) can call
 // new functions via window.FriendCoreAPI?.snoozeFriend() etc.
