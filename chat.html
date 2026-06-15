@@ -6062,7 +6062,18 @@
 
                 // Dedup log: only log incoming_call once per callId
                 const _fwdIncomingLogged = new Set();
+                // Track page-load time to reject stale replayed calls
+                const _pageLoadTime = Date.now();
                 function _fwdIncoming(callData) {
+                    // ── STALE CALL GUARD: reject call events from before page loaded ──
+                    // Without this, reconnect replays the last call:incoming, re-ringing
+                    // the user for a call that already ended.
+                    const callTs = callData.timestamp || callData.ts || callData.startedAt || 0;
+                    const callAge = callTs ? (Date.now() - Number(callTs)) : 0;
+                    if (callTs && callAge > 30000) {
+                        console.log('[Parent] ⚠️ Stale call ignored (age=' + Math.round(callAge/1000) + 's) callId=' + (callData.callId || callData.id));
+                        return;
+                    }
                     const payload = {
                         ...callData,
                         callerName:   callData.callerName   || (callData.caller && callData.caller.username) || callData.fromUserName || 'Unknown',

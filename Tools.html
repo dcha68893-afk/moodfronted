@@ -37,6 +37,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Marketplace | Knecta Chat</title>
+    <!-- CRITICAL: Set API base BEFORE any marketplace script runs so hardcoded fallbacks are never used -->
+    <script>
+        window.__kynAPI = window.__kynAPI || {};
+        if (!window.__kynAPI.baseUrl) {
+            window.__kynAPI.baseUrl = window.location.origin + '/api';
+        }
+    </script>
     
     <!-- Font Awesome -->
     <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">

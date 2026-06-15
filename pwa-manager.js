@@ -97,13 +97,20 @@
 
     navigator.serviceWorker.addEventListener('message', function (event) {
         if (event.data && event.data.type === 'SW_UPDATED') {
-            console.log('[pwa-manager] SW_UPDATED received — version:', event.data.version);
-            // Only show banner if this is a real update (had a previous SW controlling)
-            if (_hadControllerOnLoad) {
+            var newVersion = event.data.version || '';
+            var lastVersion = localStorage.getItem('_sw_last_version') || '';
+            console.log('[pwa-manager] SW_UPDATED received — version:', newVersion, 'last known:', lastVersion);
+            // Only show banner if:
+            //   (a) there was already a controller before this page load (not first install), AND
+            //   (b) the version actually changed (not a same-version re-activate on reload)
+            if (_hadControllerOnLoad && newVersion && newVersion !== lastVersion) {
+                localStorage.setItem('_sw_last_version', newVersion);
                 _showUpdateBanner();
             } else {
-                console.log('[pwa-manager] First install — suppressing update banner');
-                _hadControllerOnLoad = true; // future SW_UPDATED messages are real updates
+                // Record current version so future updates can compare
+                if (newVersion) localStorage.setItem('_sw_last_version', newVersion);
+                console.log('[pwa-manager] Suppressing update banner (first install or same version)');
+                _hadControllerOnLoad = true;
             }
         }
         if (event.data && event.data.type === 'CACHE_CLEARED') {
