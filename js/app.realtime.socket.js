@@ -463,8 +463,19 @@
 
             const socketOptions = {
                 transports: ['polling', 'websocket'], // polling first — establishes session even if WS upgrade blocked on Render, then auto-upgrades
-                timeout: SOCKET_CONFIG.connectionTimeout,
-                reconnection: false  // we manage reconnection ourselves
+                // ── FIX: 30s was too short for 1KB/s connections where the polling
+                // handshake itself can take 20-40s. Bumped to 45s so slow links get
+                // a real chance to complete the handshake instead of erroring out
+                // before the first byte even arrives.
+                timeout: Math.max(SOCKET_CONFIG.connectionTimeout, 45000),
+                reconnection: false,  // we manage reconnection ourselves
+                // ── FIX: Enable per-message compression so payloads on slow links
+                // (1KB/s) take far less time to transmit. Default Socket.IO server
+                // config must also have perMessageDeflate enabled (see backend fix).
+                perMessageDeflate: { threshold: 256 },
+                // ── FIX: Lower polling chunk size doesn't apply client-side, but
+                // forcing base64=false avoids extra encoding overhead on slow links.
+                forceBase64: false
             };
 
             // ── FIX #4: Pass token in BOTH auth and query for max compatibility ──

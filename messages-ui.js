@@ -11383,7 +11383,10 @@ Type: ${message.type || 'text'}`;
 
             
 
-            if (checkCount > 60) {
+            // FIX: 60 checks * 50ms = 3000ms was far too short on slow (1KB/s)
+            // links or Render cold starts, where session data can legitimately
+            // take 15-20s to arrive. Raised to match sessionSync.timeout (20s).
+            if (checkCount > 400) {
 
                 if (UIFailsafe.hasValidSession()) {
 

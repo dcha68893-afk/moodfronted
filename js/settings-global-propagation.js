@@ -296,7 +296,13 @@
                 const pending = Object.entries(_broadcastPending);
                 _broadcastPending = {};
                 // Only broadcast from parent frame — iframes must not re-broadcast
-                if (global.parent && global.parent !== global) return;
+                // ── FIX: This early return left _isBroadcasting permanently stuck at
+                // `true` for any iframe, because the reset at the bottom of this
+                // function never ran. After the FIRST settings change made inside
+                // any module iframe, every subsequent change in that iframe would
+                // see _isBroadcasting === true and silently no-op — meaning
+                // "settings not applying" got worse the longer the session ran.
+                if (global.parent && global.parent !== global) { _isBroadcasting = false; return; }
                 const frames = document.querySelectorAll('iframe');
                 pending.forEach(([t, d]) => {
                     frames.forEach(f => {

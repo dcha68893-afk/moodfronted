@@ -630,8 +630,8 @@ if (typeof APP_CONFIG === 'undefined') {
     // Session synchronization settings
     sessionSync: {
       enabled: true,
-      timeout: 5000,
-      retryAttempts: 3,
+      timeout: 20000, // FIX: was 5000 — too short for 1KB/s links / cold starts
+      retryAttempts: 5,
       broadcastToIframes: true,
       validateBeforePropagation: true
     },

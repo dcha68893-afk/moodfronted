@@ -462,6 +462,7 @@ function populateFriendsInCreateModal() {
 // loads the current user's own statuses.
 let _friendFetchPending = false;
 let _friendFetchLast    = 0;
+let _friendFetchRetryCount = 0;
 async function _fetchFriendStatusesDirect() {
     const now = Date.now();
     if (_friendFetchPending) return;
@@ -483,6 +484,7 @@ async function _fetchFriendStatusesDirect() {
             && api.getTimeline) {
             statResult = await api.getTimeline({ limit: 100 });
         }
+        _friendFetchRetryCount = 0; // success path reached — clear any prior failure streak
 
         let fetched = (statResult && (statResult.statuses || statResult.data || []));
         if (Array.isArray(fetched)) {
@@ -533,6 +535,23 @@ async function _fetchFriendStatusesDirect() {
         }
     } catch (e) {
         console.warn('[status-ui] _fetchFriendStatusesDirect error:', e);
+        // ── FIX: A single failure (common during Render cold-start or on slow
+        // links) used to leave the status list empty forever — the only way
+        // out was a full page reload. Retry with backoff up to 3 times instead
+        // of silently giving up after the first network error.
+        _friendFetchRetryCount = (_friendFetchRetryCount || 0) + 1;
+        if (_friendFetchRetryCount <= 3) {
+            const retryDelay = 3000 * _friendFetchRetryCount; // 3s, 6s, 9s
+            console.log(`[status-ui] Retrying friend statuses fetch in ${retryDelay}ms (attempt ${_friendFetchRetryCount}/3)`);
+            setTimeout(() => {
+                _friendFetchLast = 0; // bypass debounce for the retry
+                _fetchFriendStatusesDirect();
+            }, retryDelay);
+        } else {
+            _friendFetchRetryCount = 0;
+            renderStatusListInstantlyUI(); // clear spinner, show empty state as last resort
+        }
+        return;
     } finally {
         _friendFetchPending = false;
     }

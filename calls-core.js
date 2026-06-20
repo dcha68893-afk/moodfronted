@@ -16450,11 +16450,17 @@ _clearStaleCallState: function() {
 
             });
 
-
+            var _staleReturnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
 
             resetCallState();
 
-
+            // ── FIX: Without this, a stale/frozen call screen cleaned up after
+            // 120s left the user stuck looking at a dead call UI with no nav.
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleReturnTarget, timestamp: Date.now() }, '*');
+                }
+            } catch (_e) {}
 
         }
 
@@ -16498,11 +16504,15 @@ _clearStaleCallState: function() {
 
             });
 
-
+            var _staleInitReturnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
 
             resetCallState();
 
-
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleInitReturnTarget, timestamp: Date.now() }, '*');
+                }
+            } catch (_e) {}
 
         }
 
@@ -17992,9 +18002,18 @@ initiateCall: async function(callType, participants = []) {
 
 
 
+                    var _rejReturnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
+
                     resetCallState();
 
-
+                    // ── FIX: rejectCall() never told the parent to navigate back —
+                    // the receiver declining an incoming call was left stuck on
+                    // whatever screen happened to be showing.
+                    try {
+                        if (window.parent && window.parent !== window) {
+                            window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _rejReturnTarget, timestamp: Date.now() }, '*');
+                        }
+                    } catch (_e) {}
 
                 }
 
@@ -18244,6 +18263,13 @@ endCall: async function(callId, options = {}) {
 
 
 
+        // ── FIX: Capture the return target BEFORE resetCallState() wipes it.
+        // endCall() never sent POST_CALL_RESTORE — the only function that did
+        // (clearActiveCall) was dead code, never called from anywhere. This is
+        // why the caller/receiver never navigated back to their origin page
+        // after hanging up; the screen just sat in the calls module forever.
+        var _ecReturnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
+
         // CRITICAL: Reset ALL call state variables
 
 
@@ -18285,6 +18311,14 @@ endCall: async function(callId, options = {}) {
 
 
         callsState.signalingState = 'new';
+
+        // ── FIX: Now actually tell the parent to navigate back to where this
+        // user was before the call started/was received.
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _ecReturnTarget, timestamp: Date.now() }, '*');
+            }
+        } catch (_e) {}
 
 
 
@@ -27950,6 +27984,16 @@ _escapeHtml: function(text) {
 
     function handleIncomingCall(callData) {
 
+        // ── FIX: Capture the receiver's origin page (tagged by chat.html as
+        // _receiverReturnTo) so that after this call ends, POST_CALL_RESTORE
+        // navigates back to where the receiver actually was — not always
+        // 'conversations'/'messages'. Only set once per call (first message wins).
+        try {
+            if (callData && callData._receiverReturnTo && !callsState.pendingCallReturnTo) {
+                callsState.pendingCallReturnTo = callData._receiverReturnTo;
+            }
+        } catch (_e) {}
+
         // ── Multi-tab guard: only the leader tab handles incoming calls ────────
         // Other tabs suppress the UI but keep the call record for history.
         if (typeof _isActiveCallTab === 'function' && !_isActiveCallTab()) {
@@ -29262,9 +29306,20 @@ _escapeHtml: function(text) {
 
 
 
+        // ── FIX: This is the remote-hangup path (other party ended the call via
+        // WebSocket). The comment above said "go idle then navigate back" but
+        // resetCallState() wiped pendingCallReturnTo without ever telling the
+        // parent to navigate — so whichever side received this event (caller
+        // if receiver hung up, or vice versa) was left stuck on the call screen.
+        var _hceReturnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
+
         resetCallState();
 
-
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _hceReturnTarget, timestamp: Date.now() }, '*');
+            }
+        } catch (_e) {}
 
         notifyListeners('call_ended', callData);
 

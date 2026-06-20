@@ -2058,8 +2058,11 @@
 
         sessionSync: {
           enabled: true,
-          timeout: 5000,
-          retryAttempts: 3,
+          // FIX: 5000ms too short on slow (1KB/s) links / Render cold starts —
+          // session data could still be in-flight when this deadline hits,
+          // causing modules to silently fail with "0 users loaded".
+          timeout: 20000,
+          retryAttempts: 5,
           broadcastToIframes: true,
           validateBeforePropagation: true,
         },
@@ -2104,7 +2107,7 @@
       if (typeof APP_CONFIG.sessionSync === "undefined") {
         APP_CONFIG.sessionSync = {
           enabled: true,
-          timeout: 5000,
+          timeout: 20000, // FIX: was 5000 — too short for slow links/cold starts
         };
         console.log("✅ Added session synchronization configuration");
       }

@@ -29,14 +29,19 @@
 
     /* ── Install banner ─────────────────────────────────────────────────── */
     var _deferredPrompt = null;
+    var _installAutoHideTimer = null;
+    var _installReshowTimer = null;
 
-    window.addEventListener('beforeinstallprompt', function (e) {
-        e.preventDefault();
-        _deferredPrompt = e;
+    var INSTALL_VISIBLE_MS  = 10 * 1000;        // show for 10 seconds
+    var INSTALL_RESHOW_MS   = 2 * 60 * 60 * 1000; // re-show after 2 hours if still in app
 
-        // Respect 3-day cooldown after dismiss
-        var ts = parseInt(localStorage.getItem('pwa_dismissed_ts') || '0', 10);
-        if (Date.now() - ts < 3 * 86400000) return;
+    function _isAppInstalled() {
+        return isStandalone() || localStorage.getItem('pwa_installed') === '1';
+    }
+
+    function _renderInstallBanner() {
+        if (_isAppInstalled()) return; // never show once installed
+        if (document.getElementById('pwaInstallBanner')) return; // already showing
 
         _inject('pwaInstallBanner',
             '<div id="pwaInstallInner" style="' +
@@ -46,7 +51,8 @@
             'padding:14px 16px;display:flex;align-items:center;gap:12px;' +
             'font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;' +
             'animation:_pwaSlideUp .35s cubic-bezier(.4,0,.2,1)">' +
-            '<style>@keyframes _pwaSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>' +
+            '<style>@keyframes _pwaSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}' +
+            '@keyframes _pwaSlideDownOut{from{transform:translateY(0)}to{transform:translateY(100%)}}</style>' +
             '<img src="/moodchat-192.png" style="width:46px;height:46px;border-radius:12px;flex-shrink:0;object-fit:cover" onerror="this.style.display=\'none\'">' +
             '<div style="flex:1;min-width:0">' +
             '  <div style="font-weight:800;font-size:14px;color:#111;line-height:1.2">Install MoodChat</div>' +
@@ -56,16 +62,67 @@
             '<button onclick="window._pwaDismissInstall()" style="background:none;border:none;color:#9ca3af;font-size:24px;line-height:1;cursor:pointer;padding:2px 6px;flex-shrink:0;touch-action:manipulation">&times;</button>' +
             '</div>'
         );
+
+        // ── FIX: auto-hide after 10s instead of staying up indefinitely.
+        // If the user neither installed nor explicitly dismissed it, this is
+        // a soft auto-hide (not a "no thanks") — so it can reappear later.
+        clearTimeout(_installAutoHideTimer);
+        _installAutoHideTimer = setTimeout(function () {
+            var inner = document.getElementById('pwaInstallInner');
+            if (inner) inner.style.animation = '_pwaSlideDownOut .3s cubic-bezier(.4,0,.2,1) forwards';
+            setTimeout(function () {
+                var b = document.getElementById('pwaInstallBanner');
+                if (b) b.remove();
+            }, 300);
+        }, INSTALL_VISIBLE_MS);
+
+        _scheduleReshow();
+    }
+
+    // ── FIX: Re-show every 2 hours while the user is still actively in the
+    // app and hasn't installed or permanently dismissed the banner.
+    function _scheduleReshow() {
+        clearTimeout(_installReshowTimer);
+        if (_isAppInstalled()) return;
+        if (localStorage.getItem('pwa_dismissed_permanently') === '1') return;
+        _installReshowTimer = setTimeout(function () {
+            if (_isAppInstalled()) return;
+            if (localStorage.getItem('pwa_dismissed_permanently') === '1') return;
+            if (document.visibilityState === 'visible' && !document.hidden) {
+                _renderInstallBanner();
+            } else {
+                // App is backgrounded — try again in 2 hours rather than firing
+                // a banner nobody will see.
+                _scheduleReshow();
+            }
+        }, INSTALL_RESHOW_MS);
+    }
+
+    window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        _deferredPrompt = e;
+
+        if (_isAppInstalled()) return;
+        if (localStorage.getItem('pwa_dismissed_permanently') === '1') return;
+
+        _renderInstallBanner();
     });
 
     window._pwaDoInstall = async function () {
         if (!_deferredPrompt) return;
+        clearTimeout(_installAutoHideTimer);
+        clearTimeout(_installReshowTimer);
         try {
             _deferredPrompt.prompt();
             var result = await _deferredPrompt.userChoice;
             _deferredPrompt = null;
             if (result.outcome === 'accepted') {
-                localStorage.removeItem('pwa_dismissed_ts');
+                localStorage.setItem('pwa_installed', '1');
+                localStorage.removeItem('pwa_dismissed_permanently');
+            } else {
+                // User saw the native prompt and declined — try again in 2hrs,
+                // same as a soft auto-hide, not a permanent dismissal.
+                _scheduleReshow();
             }
         } catch (err) {
             console.warn('[pwa-manager] install prompt error:', err);
@@ -75,14 +132,22 @@
     };
 
     window._pwaDismissInstall = function () {
+        // ── FIX: Tapping the X is an explicit "no" — stop nagging entirely,
+        // unlike the 10s auto-hide which is allowed to come back in 2hrs.
+        clearTimeout(_installAutoHideTimer);
+        clearTimeout(_installReshowTimer);
         var b = document.getElementById('pwaInstallBanner');
         if (b) b.remove();
-        localStorage.setItem('pwa_dismissed_ts', String(Date.now()));
+        localStorage.setItem('pwa_dismissed_permanently', '1');
     };
 
     window.addEventListener('appinstalled', function () {
+        clearTimeout(_installAutoHideTimer);
+        clearTimeout(_installReshowTimer);
         var b = document.getElementById('pwaInstallBanner');
         if (b) b.remove();
+        localStorage.setItem('pwa_installed', '1');
+        localStorage.removeItem('pwa_dismissed_permanently');
         localStorage.removeItem('pwa_dismissed_ts');
         console.log('[pwa-manager] App installed ✅');
     });
@@ -102,14 +167,20 @@
             console.log('[pwa-manager] SW_UPDATED received — version:', newVersion, 'last known:', lastVersion);
             // Only show banner if:
             //   (a) there was already a controller before this page load (not first install), AND
-            //   (b) the version actually changed (not a same-version re-activate on reload)
-            if (_hadControllerOnLoad && newVersion && newVersion !== lastVersion) {
+            //   (b) the version actually changed (not a same-version re-activate on reload), AND
+            //   (c) we haven't already shown a banner in the last 60s (covers
+            //       the case where _skipAndBanner already showed one for this
+            //       same update moments earlier).
+            var _lastShown = parseInt(localStorage.getItem('_update_banner_shown_at') || '0', 10);
+            var _recentlyShown = (Date.now() - _lastShown) < 60000;
+            if (_hadControllerOnLoad && newVersion && newVersion !== lastVersion && !_recentlyShown) {
                 localStorage.setItem('_sw_last_version', newVersion);
+                localStorage.setItem('_update_banner_shown_at', String(Date.now()));
                 _showUpdateBanner();
             } else {
                 // Record current version so future updates can compare
                 if (newVersion) localStorage.setItem('_sw_last_version', newVersion);
-                console.log('[pwa-manager] Suppressing update banner (first install or same version)');
+                console.log('[pwa-manager] Suppressing update banner (first install, same version, or shown recently)');
                 _hadControllerOnLoad = true;
             }
         }
@@ -123,9 +194,19 @@
         function _skipAndBanner(sw) {
             if (!sw) return;
             sw.postMessage({ type: 'SKIP_WAITING' });
-            // Only show banner if there was already a controller (real update, not first install)
-            if (_hadControllerOnLoad) {
-                _showUpdateBanner();
+            // ── FIX: This previously showed the banner on every call based only
+            // on _hadControllerOnLoad, with no version check. 5-minute polling
+            // (for installed PWAs) could re-detect the same waiting SW and show
+            // the banner repeatedly for a version the user already saw.
+            // We don't know the new SW's version string here yet (it arrives via
+            // SW_UPDATED postMessage after activation), so just suppress a
+            // duplicate banner if one is already showing or was shown recently.
+            if (_hadControllerOnLoad && !document.getElementById('pwaUpdateBanner')) {
+                var lastShown = parseInt(localStorage.getItem('_update_banner_shown_at') || '0', 10);
+                if (Date.now() - lastShown > 60000) { // don't re-show within 60s
+                    localStorage.setItem('_update_banner_shown_at', String(Date.now()));
+                    _showUpdateBanner();
+                }
             }
             _hadControllerOnLoad = true;
         }

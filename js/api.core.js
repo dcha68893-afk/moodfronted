@@ -3043,7 +3043,7 @@ refreshTokenIfNeeded = async function() {
                     },
                     body: JSON.stringify({ refreshToken }),
                     credentials: 'include',
-                    signal: AbortSignal.timeout(10000) // 10 second timeout
+                    signal: AbortSignal.timeout(45000) // FIX: was 10000 — too short for 1KB/s links or Render cold start
                 });
                 
                 let data = null;

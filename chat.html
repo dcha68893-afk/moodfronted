@@ -2261,6 +2261,9 @@
 
                 const _appVisible = document.visibilityState === 'visible' && !document.hidden;
                 const _onCallsPage = (window.__currentPage === 'calls');
+                // ── FIX: Always tag the receiver's current page, even when backgrounded,
+                // so calls-core.js knows where to navigate back to after the call ends.
+                callData._receiverReturnTo = window.__currentPage || 'messages';
 
                 // Hidden / backgrounded app: show only the OS notification, never force-open the call page.
                 if (!_appVisible) {
@@ -2286,6 +2289,11 @@
                     window.__callInitiatedAt = Date.now(); // used by 5s recency guard
                     window.__callDispatchedAt = Date.now(); // suppress stale CALL_FORCE_ENDED echoes for 15s
                     window.__lastActivePage = window.__currentPage || 'messages';
+                    // ── FIX: Tag the receiver's current page onto callData so calls-core.js
+                    // (running in the iframe) can store it as pendingCallReturnTo. Without
+                    // this, the receiver always returns to 'messages' after the call ends,
+                    // regardless of where they actually were (friends, group, calls, etc).
+                    callData._receiverReturnTo = window.__currentPage || 'messages';
                     banner.style.display = 'none';
                     // ── FIX: callsContent visibility — .hidden sets visibility:hidden
                     // which hides the iframe even with call-screen-active fullscreen CSS.
@@ -7244,6 +7252,15 @@ window.addEventListener('message', function (e) {
 
     // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ────────────────────────
     if (d.type === 'POST_CALL_RESTORE') {
+        // ── FIX: A single hangup can trigger this from both the local endCall()
+        // path AND a remote call:ended echo. Dedup within 1.5s so we don't fire
+        // navigateToPage() twice for the same hangup.
+        var _pcrNow = Date.now();
+        if (window.__lastPostCallRestoreAt && (_pcrNow - window.__lastPostCallRestoreAt) < 1500) {
+            return;
+        }
+        window.__lastPostCallRestoreAt = _pcrNow;
+
         // Remove call-screen body classes so sidebar/nav reappear
         document.body.classList.remove('call-screen-active', 'in-call-active');
         // Navigate to the page the user was on before the call
