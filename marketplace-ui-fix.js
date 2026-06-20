@@ -9,10 +9,38 @@
  */
 
 // ── 1. API BASE URL FIX (must run first, before any API call) ──────────────
+// FIX-MARKETPLACE-URL: window.location.origin here is the FRONTEND host
+// (moodfronted.onrender.com). The API lives on a DIFFERENT host
+// (moodchat-fy56.onrender.com). Falling back to window.location.origin + '/api'
+// silently pointed every marketplace fetch at the frontend's own domain,
+// which has no /api routes — corrupting all marketplace calls (listings,
+// wishlist, categories, spotlight, etc. all failed with 404/fetch errors).
+// js/api.core.js is the canonical source of truth for the backend host
+// (it has real environment detection: localhost vs render vs custom domain).
+// This resolver mirrors that fallback chain instead of guessing from the
+// current page's own origin.
+function _resolveMoodChatApiBase() {
+    // Prefer whatever api.core.js already computed, if it has run.
+    if (window.__kynAPI?.baseUrl && !window.__kynAPI.baseUrl.includes(window.location.host)) {
+        return window.__kynAPI.baseUrl;
+    }
+    if (window.API_BASE_URL) return window.API_BASE_URL;
+    if (window.__API_CORE__?.baseUrl) return window.__API_CORE__.baseUrl;
+
+    // Local/dev: same host, different port pattern used elsewhere in this app.
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1') {
+        return `${window.location.protocol}//${host}:4000/api`;
+    }
+
+    // Production fallback: the known backend host, NOT window.location.origin.
+    return 'https://moodchat-fy56.onrender.com/api';
+}
+
 (function _fixApiBase() {
-    if (window.__kynAPI?.baseUrl) return;
+    if (window.__kynAPI?.baseUrl && !window.__kynAPI.baseUrl.includes(window.location.host)) return;
     window.__kynAPI = window.__kynAPI || {};
-    window.__kynAPI.baseUrl = window.location.origin + '/api';
+    window.__kynAPI.baseUrl = _resolveMoodChatApiBase();
     console.log('[ui-fix] API base set to:', window.__kynAPI.baseUrl);
 })();
 
@@ -31,7 +59,7 @@ function _realOpenProduct(productId) {
     }
 
     // Path B: fetch from API then show
-    const base = (window.__kynAPI?.baseUrl || window.location.origin + '/api').replace(/\/api$/, '');
+    const base = (window.__kynAPI?.baseUrl || _resolveMoodChatApiBase()).replace(/\/api$/, '');
     const token = window.__kynToken || window.__accessToken ||
                   localStorage.getItem('authToken') || localStorage.getItem('token') ||
                   localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken') || '';
@@ -135,8 +163,8 @@ window.addEventListener('load', () => { _reinstall(); setTimeout(_reinstall, 800
 // so any file that uses window.__kynAPI.baseUrl gets the right value
 window.addEventListener('DOMContentLoaded', function() {
     if (!window.__kynAPI) window.__kynAPI = {};
-    if (!window.__kynAPI.baseUrl) {
-        window.__kynAPI.baseUrl = window.location.origin + '/api';
+    if (!window.__kynAPI.baseUrl || window.__kynAPI.baseUrl.includes(window.location.host)) {
+        window.__kynAPI.baseUrl = _resolveMoodChatApiBase();
     }
 });
 

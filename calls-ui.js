@@ -253,7 +253,6 @@ function showCallingScreenViaPatch(callInfo) {
             e.preventDefault();
             if (window.callCore && window.callCore.endCall) window.callCore.endCall();
             // Safe call: showIdleScreen may not be hoisted yet in some execution contexts
-            // force=true: this is an explicit user cancel — must bypass the active-call guard.
             if (typeof showIdleScreen === 'function') {
                 showIdleScreen(true);
             } else if (typeof window.showIdleScreen === 'function') {
@@ -681,34 +680,22 @@ const GlobalCallHistory = {
 window.showCallingScreen = showCallingScreen;
 window.startCallWithUser = startCallWithUser;
 
-function showIdleScreen(force = false) {
-    // FIX: showIdleScreen() is THE function responsible for clearing call-active
-    // state and hiding the calling/in-call/incoming screens. Every caller of
-    // this function is, by definition, in an end-of-call cleanup path (user
-    // cancelled, call ended, permission denied, no answer, declined, etc).
-    // The guard below previously fired unconditionally and read window.__callActive
-    // / UIState.callActive / the very classList.contains('active') flags this
-    // function exists to clear — so calling showIdleScreen() right after ending
-    // a call (while those flags/classes were still in their "call active" state
-    // from a moment ago) caused the function to immediately bail out via
-    // "showIdleScreen suppressed -- call active" and never run its cleanup body.
-    // That left the calling/in-call screen visible and the app stuck instead of
-    // navigating back to the chat the user came from.
-    //
-    // force=true bypasses this guard entirely. All known end-of-call cleanup
-    // call sites in this file now pass force=true. The guard still applies
-    // (force=false, the default) for any other/incidental caller that wants
-    // the old "don't interrupt an active call" safety behavior.
+function showIdleScreen(force) {
+    // FIX-STUCK-IDLE: when a call ends/is cancelled, callingScreen/inCallScreen
+    // still carry the 'active' class at the moment this function is first
+    // invoked (they're cleared further down in THIS function), so the old
+    // guard below always matched and suppressed itself on every legitimate
+    // call-end, leaving the UI stuck on the calling/in-call screen.
+    // `force` lets call-end paths bypass the guard explicitly; the guard is
+    // still used to protect against unrelated/incoming-call races.
     if (!force && (window.__callActive ||
         window.__callEndedNavigating ||
         (window.UIState && (window.UIState.callActive || window.UIState.callState === 'calling' || window.UIState.callState === 'ringing' || window.UIState.callState === 'connecting' || window.UIState.callState === 'connected')) ||
-        (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active')) ||
-        (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
-        (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active')))) {
+        (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active')))) {
         console.log('[UI] showIdleScreen suppressed -- call active');
         return;
     }
-    console.log('[UI] showIdleScreen' + (force ? ' (forced)' : ''));
+    console.log('[UI] showIdleScreen');
     window.showIdleScreen = showIdleScreen;
 
     // ── Stop timers ──
@@ -5601,14 +5588,9 @@ handleContactItemClick: function(e) {
                 if (_callingScr) { _callingScr.classList.remove('active'); _callingScr.style.display = ''; }
                 if (_inCallScr)  { _inCallScr.classList.remove('active');  _inCallScr.style.display = ''; }
                 document.body.classList.remove('call-active', 'call-connected');
-                // Show idle only after parent nav has had time to hide this iframe.
-                // force=true: this is deliberate end-of-call cleanup. __callEndedNavigating
-                // was set true above specifically to suppress accidental showIdleScreen()
-                // calls during the 350ms navigation delay — but it stays true for up to
-                // 3000ms, so this 1500ms timeout was itself getting suppressed by the very
-                // flag set a few lines earlier, leaving the call screen stuck visible.
+                // Show idle only after parent nav has had time to hide this iframe
                 setTimeout(function() {
-                    if (typeof showIdleScreen === 'function') {
+                    if (!window.__callActive && typeof showIdleScreen === 'function') {
                         showIdleScreen(true);
                     }
                 }, 1500);
