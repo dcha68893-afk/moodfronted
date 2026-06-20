@@ -10703,41 +10703,78 @@ Type: ${message.type || 'text'}`;
 
 
 
-        if (core && typeof core.openConversation === 'function') {
+        if (core && typeof core.openChatWithUser === 'function') {
 
-            console.log('[MessageUI] Using core.openConversation');
+            // FIX: previously this block called core.openConversation(numericUserId, ...)
+            // directly whenever no existing conversation was found. openConversation()
+            // treats its first argument as a chat/conversation id with no userId
+            // resolution step, so the raw userId (e.g. 2) was stored as the active
+            // chat's id and later sent to the backend as `chatId` in POST /messages,
+            // causing "403 Access denied to this chat" because userId 2 is not a
+            // real chat the sender is a participant of.
+            //
+            // core.openChatWithUser() is the correct resolver already implemented in
+            // messages-core.js: it calls ConversationManager.createConversation() to
+            // get-or-create the REAL backend conversation for this pair of users, then
+            // opens that real conversation id. It also handles the existing-conversation
+            // case internally, so the old (always-dead, since core.findExistingConversation
+            // was never defined) findExisting branch is no longer needed here.
+            console.log('[MessageUI] Using core.openChatWithUser (resolves real chatId before opening)');
 
-            
-
-            // ✅ FIXED: Check for existing conversation if findExisting is true
-
-            if (findExisting && typeof core.findExistingConversation === 'function') {
-
-                const existingConv = core.findExistingConversation(numericUserId);
-
-                if (existingConv) {
-
-                    console.log('[MessageUI] Found existing conversation:', existingConv.id);
-
-                    // FIX Bug5: pass name so header never shows Loading...
-                    core.openConversation(existingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-
-                } else {
-
-                    console.log('[MessageUI] No existing conversation found, creating new one');
-
+            core.openChatWithUser(numericUserId, resolvedName, resolvedAvatar).then((res) => {
+                if (!res || res.success === false) {
+                    console.warn('[MessageUI] openChatWithUser did not resolve a conversation, falling back to openConversation with userId', res);
+                    if (typeof core.openConversation === 'function') {
+                        core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
+                    }
+                }
+            }).catch((err) => {
+                console.warn('[MessageUI] openChatWithUser threw, falling back to openConversation with userId', err);
+                if (typeof core.openConversation === 'function') {
                     core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
+                }
+            });
 
+            setTimeout(() => {
+                const _nameEl2b = document.getElementById('chatFriendName');
+                if (_nameEl2b && _nameEl2b.textContent !== resolvedName) _nameEl2b.textContent = resolvedName;
+
+                const statusElB = document.getElementById('chatStatusText');
+                if (statusElB) {
+                    const _core2b = getMessagesCore();
+                    let _realOnlineB = false;
+                    if (_core2b && _core2b.FriendManager) {
+                        const _fB = _core2b.FriendManager.getFriend(numericUserId)
+                                || _core2b.FriendManager.getFriend(String(numericUserId));
+                        if (_fB) _realOnlineB = !!(_fB.online || _fB.status === 'online');
+                    }
+                    statusElB.textContent = _realOnlineB ? 'Active now' : 'Offline';
                 }
 
-            } else {
+                const indicatorElB = document.getElementById('chatStatusIndicator');
+                if (indicatorElB) {
+                    const _isNowOnlineB = document.getElementById('chatStatusText')?.textContent === 'Active now';
+                    indicatorElB.className = `chat-status ${_isNowOnlineB ? 'online' : 'offline'}`;
+                }
 
-                // FIX Bug5: pass name so header never shows Loading...
-                core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
+                const messagesContainerB = document.getElementById('messagesContainer');
+                if (messagesContainerB && messagesContainerB.innerHTML.includes('loading-chat')) {
+                    messagesContainerB.innerHTML = `
+                        <div class="empty-chat">
+                            <i class="fas fa-comment-dots empty-chat-icon"></i>
+                            <div class="empty-chat-title">No messages yet</div>
+                            <div class="empty-chat-message">Type your first message below to start the conversation with ${resolvedName}</div>
+                        </div>
+                    `;
+                }
+            }, 100);
 
-            }
+            return;
 
-            
+        } else if (core && typeof core.openConversation === 'function') {
+
+            console.log('[MessageUI] core.openChatWithUser unavailable — falling back to core.openConversation with userId (may cause chatId/userId mismatch)');
+            core.openConversation(numericUserId, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
 
             setTimeout(() => {
 

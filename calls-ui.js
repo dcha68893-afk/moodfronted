@@ -253,10 +253,11 @@ function showCallingScreenViaPatch(callInfo) {
             e.preventDefault();
             if (window.callCore && window.callCore.endCall) window.callCore.endCall();
             // Safe call: showIdleScreen may not be hoisted yet in some execution contexts
+            // force=true: this is an explicit user cancel — must bypass the active-call guard.
             if (typeof showIdleScreen === 'function') {
-                showIdleScreen();
+                showIdleScreen(true);
             } else if (typeof window.showIdleScreen === 'function') {
-                window.showIdleScreen();
+                window.showIdleScreen(true);
             } else {
                 // Fallback: manually hide calling screen and show idle
                 const _cs = document.getElementById('callingScreen');
@@ -412,14 +413,14 @@ const GlobalCallHistory = {
         if (!hasPermissions) {
             console.log('[Calls UI] Permission denied');
             showNotificationInCalls('Microphone access is required for calls', 'error');
-            showIdleScreen();
+            showIdleScreen(true);
             return;
         }
         console.log('[Calls UI] Permissions granted');
     } catch (permError) {
         console.error('[Calls UI] Permission error:', permError);
         showNotificationInCalls('Cannot access microphone. Please check permissions.', 'error');
-        showIdleScreen();
+        showIdleScreen(true);
         return;
     }
     
@@ -459,7 +460,7 @@ const GlobalCallHistory = {
                     if (window.callCore && window.callCore.endCall) {
                         window.callCore.endCall();
                     }
-                    showIdleScreen();
+                    showIdleScreen(true);
                     showNotificationInCalls('Call ended - no answer after 3 minutes', 'info');
                 }
             }
@@ -535,7 +536,7 @@ const GlobalCallHistory = {
         // Wait a moment then go back to idle
         setTimeout(() => {
             if (ringTimer) clearInterval(ringTimer);
-            showIdleScreen();
+            showIdleScreen(true);
         }, 2000);
     }
 }
@@ -645,7 +646,7 @@ const GlobalCallHistory = {
                 if (window.callCore && window.callCore.endCall) {
                     window.callCore.endCall();
                 }
-                showIdleScreen();
+                showIdleScreen(true);
                 showNotificationInCalls('Call cancelled', 'info');
             };
         }
@@ -680,17 +681,34 @@ const GlobalCallHistory = {
 window.showCallingScreen = showCallingScreen;
 window.startCallWithUser = startCallWithUser;
 
-function showIdleScreen() {
-    if (window.__callActive ||
+function showIdleScreen(force = false) {
+    // FIX: showIdleScreen() is THE function responsible for clearing call-active
+    // state and hiding the calling/in-call/incoming screens. Every caller of
+    // this function is, by definition, in an end-of-call cleanup path (user
+    // cancelled, call ended, permission denied, no answer, declined, etc).
+    // The guard below previously fired unconditionally and read window.__callActive
+    // / UIState.callActive / the very classList.contains('active') flags this
+    // function exists to clear — so calling showIdleScreen() right after ending
+    // a call (while those flags/classes were still in their "call active" state
+    // from a moment ago) caused the function to immediately bail out via
+    // "showIdleScreen suppressed -- call active" and never run its cleanup body.
+    // That left the calling/in-call screen visible and the app stuck instead of
+    // navigating back to the chat the user came from.
+    //
+    // force=true bypasses this guard entirely. All known end-of-call cleanup
+    // call sites in this file now pass force=true. The guard still applies
+    // (force=false, the default) for any other/incidental caller that wants
+    // the old "don't interrupt an active call" safety behavior.
+    if (!force && (window.__callActive ||
         window.__callEndedNavigating ||
         (window.UIState && (window.UIState.callActive || window.UIState.callState === 'calling' || window.UIState.callState === 'ringing' || window.UIState.callState === 'connecting' || window.UIState.callState === 'connected')) ||
         (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active')) ||
         (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
-        (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active'))) {
+        (document.getElementById('callingScreen') && document.getElementById('callingScreen').classList.contains('active')))) {
         console.log('[UI] showIdleScreen suppressed -- call active');
         return;
     }
-    console.log('[UI] showIdleScreen');
+    console.log('[UI] showIdleScreen' + (force ? ' (forced)' : ''));
     window.showIdleScreen = showIdleScreen;
 
     // ── Stop timers ──
@@ -5384,8 +5402,8 @@ handleContactItemClick: function(e) {
                 // Call endCallScreens if available (CallOverlayManager reset)
                 if (typeof window.endCallScreens === 'function') { try { window.endCallScreens(); } catch(_) {} }
                 // Always show idleScreen so next call has a clean starting point
-                if (typeof showIdleScreen === 'function') { try { showIdleScreen(); } catch(_) {} }
-                else if (typeof window.showIdleScreen === 'function') { try { window.showIdleScreen(); } catch(_) {} }
+                if (typeof showIdleScreen === 'function') { try { showIdleScreen(true); } catch(_) {} }
+                else if (typeof window.showIdleScreen === 'function') { try { window.showIdleScreen(true); } catch(_) {} }
                 else {
                     var idle = document.getElementById('idleScreen');
                     if (idle) { idle.classList.add('active'); idle.style.setProperty('display','block','important'); }
@@ -5583,10 +5601,15 @@ handleContactItemClick: function(e) {
                 if (_callingScr) { _callingScr.classList.remove('active'); _callingScr.style.display = ''; }
                 if (_inCallScr)  { _inCallScr.classList.remove('active');  _inCallScr.style.display = ''; }
                 document.body.classList.remove('call-active', 'call-connected');
-                // Show idle only after parent nav has had time to hide this iframe
+                // Show idle only after parent nav has had time to hide this iframe.
+                // force=true: this is deliberate end-of-call cleanup. __callEndedNavigating
+                // was set true above specifically to suppress accidental showIdleScreen()
+                // calls during the 350ms navigation delay — but it stays true for up to
+                // 3000ms, so this 1500ms timeout was itself getting suppressed by the very
+                // flag set a few lines earlier, leaving the call screen stuck visible.
                 setTimeout(function() {
-                    if (!window.__callActive && typeof showIdleScreen === 'function') {
-                        showIdleScreen();
+                    if (typeof showIdleScreen === 'function') {
+                        showIdleScreen(true);
                     }
                 }, 1500);
                 UIState.currentView = 'sidebar';
@@ -8414,7 +8437,7 @@ declineIncomingCall: async function() {
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
     if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _dr=(window.__callOriginReturnTo&&window.__callOriginReturnTo!=='calls')?window.__callOriginReturnTo:'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
-    showIdleScreen();
+    showIdleScreen(true);
     showNotification('Call declined', 'info');
 
     setTimeout(() => UIEventHandlers.refreshCallHistoryAfterCall && UIEventHandlers.refreshCallHistoryAfterCall(), 800);
