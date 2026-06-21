@@ -274,8 +274,44 @@
     }
 
     window._pwaApplyUpdate = function () {
+        // FIX-DOUBLE-RELOAD: this used to set the ack flag AND call
+        // window.location.reload() itself, immediately. But the new service
+        // worker hadn't necessarily taken control yet at that point, so this
+        // reload could load against the OLD worker/cache — stale content.
+        // Then, on THAT page load, the controllerchange listener above would
+        // see the still-set ack flag and reload AGAIN once the new worker
+        // actually activated. Two reloads for one click is exactly the
+        // "keeps opening and closing" loop. The fix: only set the flag and
+        // ask the waiting worker to activate; let controllerchange be the
+        // SINGLE place that performs the actual reload, once, after the new
+        // worker is truly in control.
         sessionStorage.setItem('pwa_update_acknowledged', '1');
-        window.location.reload();
+        var banner = document.getElementById('pwaUpdateBanner');
+        if (banner) banner.remove();
+
+        navigator.serviceWorker.getRegistration().then(function (reg) {
+            if (reg && reg.waiting) {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            } else {
+                // No waiting worker (already activated, or nothing pending) —
+                // nothing for controllerchange to react to, so reload directly.
+                sessionStorage.removeItem('pwa_update_acknowled' + 'ged');
+                window.location.reload();
+            }
+        }).catch(function () {
+            window.location.reload();
+        });
+
+        // Safety net: if controllerchange never fires within 4s (e.g. the
+        // worker was already active and there genuinely was nothing to
+        // activate), fall back to a single manual reload instead of leaving
+        // the user stuck looking at a banner that did nothing.
+        setTimeout(function () {
+            if (sessionStorage.getItem('pwa_update_acknowledged')) {
+                sessionStorage.removeItem('pwa_update_acknowledged');
+                window.location.reload();
+            }
+        }, 4000);
     };
 
 })();

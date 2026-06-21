@@ -7331,7 +7331,19 @@ window.__groupHdrHide = hideGroupHeader;
 </script>
 
     <script>
-  // Keep backend alive — ping every 14 minutes (Render sleeps after 15)
+  // FIX-KEEPALIVE: 14 minutes left almost no margin against Render's
+  // 15-minute idle-sleep window — a single slow tick (network hiccup, tab
+  // throttled in background, a missed timer due to heavy main-thread work)
+  // was enough to let the dyno sleep mid-session. When it slept, the live
+  // Socket.IO connection died from under the user (the "transport close" /
+  // "xhr poll error" reconnect storms), which is what broke real-time
+  // delivery for calls, messages, and status until the dyno cold-started
+  // back up tens of seconds later.
+  //
+  // Pinging every 4 minutes gives roughly 4x margin, so a few missed/slow
+  // ticks in a row are needed before the dyno could ever go idle — and a
+  // background-tab/throttled-timer slip (common on mobile) won't single-
+  // handedly cause it anymore.
   function keepBackendAwake() {
     fetch('https://moodchat-fy56.onrender.com/api/health', {
       method: 'GET',
@@ -7341,9 +7353,21 @@ window.__groupHdrHide = hideGroupHeader;
     .catch(e => console.warn('[KeepAlive] Ping failed:', e.message));
   }
 
-  // Ping immediately on load, then every 14 minutes
+  // Ping immediately on load, then every 4 minutes.
   keepBackendAwake();
-  setInterval(keepBackendAwake, 14 * 60 * 1000);
+  setInterval(keepBackendAwake, 4 * 60 * 1000);
+
+  // FIX-KEEPALIVE-2: also ping immediately whenever the tab regains
+  // visibility/focus after being backgrounded — this is exactly the
+  // scenario (phone screen off, tab switched away) where setInterval
+  // timers get throttled or paused by the browser, letting the dyno sleep
+  // even with a short interval configured.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      keepBackendAwake();
+    }
+  });
+  window.addEventListener('focus', keepBackendAwake);
 </script>
 
     <!-- Mic Recording Bar (shared with group module) -->
