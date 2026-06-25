@@ -2223,6 +2223,24 @@
                                 }
                             }
                             window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+                            // FIX-E2E-WIRING: js/e2e-encryption.js (KynectaE2E) needs the
+                            // plaintext password to derive the key that wraps/unwraps the
+                            // user's private encryption key, but it only ever runs inside
+                            // whichever IFRAME currently has it loaded (message.html,
+                            // group.html, etc.) — never here in index.html where login
+                            // actually happens. Each of those iframes is a SEPARATE window
+                            // object, so a single same-window event can't reach all of them,
+                            // and they don't all load at once (group.html only loads when
+                            // the user opens the Groups tab, which could be long after
+                            // message.html already consumed-and-deleted a one-shot key in
+                            // an earlier version of this fix — that was the bug).
+                            //
+                            // sessionStorage entry persists for the WHOLE TAB SESSION
+                            // (not deleted after first read) so any iframe that boots at
+                            // any point can independently call KynectaE2E.init(password).
+                            // Cleared on explicit logout (see logout handler) rather than
+                            // after one use.
+                            try { sessionStorage.setItem('kyn_e2e_pw_session', password); } catch (_) {}
                             setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
                         } else {
                             const errorMsg = response?.message || response?.data?.message || 'Invalid email or password. Please check your credentials.';

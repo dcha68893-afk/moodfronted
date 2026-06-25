@@ -2805,6 +2805,11 @@
             _safeStorageRemove('authUser');
             _safeStorageRemove('moodchat_auth_user');
             _safeStorageRemove('userData');
+            // FIX-E2E-WIRING: clear the password handoff (see index.html login
+            // success handler) on logout — it should never outlive the
+            // session that needed it.
+            try { sessionStorage.removeItem('kyn_e2e_pw_session'); } catch (_) {}
+            try { window.KynectaE2E?.clearKeys?.(); } catch (_) {}
             
             _moduleState.refreshAttempts = 0;
             _moduleState.sessionValidationPromise = null;

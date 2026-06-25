@@ -57,6 +57,27 @@
                 const serverMessages = await this._fetchServerMessages(chatId, since, options.limit || 100);
                 if (!serverMessages || serverMessages.length === 0) return;
 
+                // FIX-E2E-WIRING: decrypt history fetched via REST. The
+                // realtime path (ingestIncomingMessage above) already
+                // decrypts socket-delivered messages before they reach local
+                // storage — this is the other ingestion path (messages
+                // pulled in bulk on chat open / periodic sync), which was
+                // writing raw ciphertext envelopes straight into IndexedDB
+                // untouched.
+                if (window.KynectaE2E) {
+                    for (const m of serverMessages) {
+                        if (m && m.type === 'text' && m.content && (m.senderId || (m.sender && m.sender.id))) {
+                            try {
+                                m.content = await window.KynectaE2E.decryptFromChat(
+                                    m.content,
+                                    chatId,
+                                    m.senderId || m.sender.id
+                                );
+                            } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
+                        }
+                    }
+                }
+
                 // Merge: server meta wins, local data preserved if unconfirmed
                 await localStore.mergeServerMessages(chatId, serverMessages);
                 await localStore.setSyncMeta(`last_sync_${chatId}`, Date.now());
@@ -139,18 +160,44 @@
 
             // New message from server — store locally
             const _chatIdStr = String(chatId || rawMessage.chatId || rawMessage.conversationId || '');
+
+            // FIX-E2E-WIRING: decrypt HERE, the actual persistence point —
+            // this function is what writes content into IndexedDB via
+            // localStore.saveMessage() below. Decrypting only in a caller's
+            // local variable would leave the PERSISTED copy as ciphertext,
+            // so the message would render correctly once from the live
+            // socket event but revert to showing the raw envelope on next
+            // reload, once it's read back from local storage instead.
+            let _content = rawMessage.content || rawMessage.text || '';
+            const _senderIdForDecrypt = rawMessage.senderId || rawMessage.sender?.id;
+            if ((rawMessage.type || 'text') === 'text' && _content && _senderIdForDecrypt && window.KynectaE2E) {
+                try {
+                    _content = await window.KynectaE2E.decryptFromChat(_content, _chatIdStr, _senderIdForDecrypt);
+                } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
+            }
+
             const saved = await localStore.saveMessage({
                 serverId:    String(rawMessage.id),
                 chatId:      _chatIdStr,
                 conversationId: _chatIdStr,
-                senderId:    rawMessage.senderId || rawMessage.sender?.id,
-                content:     rawMessage.content || rawMessage.text || '',
+                senderId:    _senderIdForDecrypt,
+                content:     _content,
                 type:        rawMessage.type || 'text',
                 sender:      rawMessage.sender || null,
                 status:      'delivered',
                 createdAt:   rawMessage.createdAt || rawMessage.timestamp || Date.now(),
                 isLocalOnly: false,
-                syncVersion: 2
+                syncVersion: 2,
+                // FIX-ATTACHMENT-PERSISTENCE: these were missing here too —
+                // even with the backend now returning them, they'd vanish on
+                // reload if this function (the actual IndexedDB writer)
+                // didn't also save them.
+                attachment:  rawMessage.attachment || null,
+                mediaUrl:    rawMessage.mediaUrl || rawMessage.fileUrl || null,
+                fileUrl:     rawMessage.fileUrl || rawMessage.mediaUrl || null,
+                fileName:    rawMessage.fileName || rawMessage.attachment?.name || null,
+                encrypted:   !!rawMessage.encrypted,
+                originalMimeType: rawMessage.originalMimeType || null
             });
 
             this._stats.messagesIngested++;

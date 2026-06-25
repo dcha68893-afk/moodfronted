@@ -133,6 +133,37 @@
   let _myPubKeyB64 = null;  // base64 SPKI
   let _myKeyId     = null;
   let _enabled     = false;
+  // GROUP ENCRYPTION: a CryptoKey derived once per session (during init,
+  // from the same password) and cached in memory, used to encrypt Sender
+  // Keys before they're written to localStorage. Re-deriving via PBKDF2
+  // (310,000 iterations) on every single Sender Key read/write — as the
+  // 1:1 private-key wrapping functions above do — would be both slow and
+  // require holding onto the plaintext password long after init() returns,
+  // which this module deliberately avoids. Caching one derived key for the
+  // session gives the same at-rest protection with neither downside.
+  let _localWrapKey = null;
+  const LOCAL_WRAP_SALT_KEY = 'kyn_e2e_local_wrap_salt_v1';
+
+  async function _getOrCreateLocalWrapKey(password) {
+    if (_localWrapKey) return _localWrapKey;
+    let saltB64 = localStorage.getItem(LOCAL_WRAP_SALT_KEY);
+    let salt;
+    if (saltB64) {
+      salt = unb64(saltB64);
+    } else {
+      salt = global.crypto.getRandomValues(new Uint8Array(32));
+      localStorage.setItem(LOCAL_WRAP_SALT_KEY, b64(salt));
+    }
+    const pwKey = await subtle.importKey('raw', str2buf(password), 'PBKDF2', false, ['deriveKey']);
+    _localWrapKey = await subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' },
+      pwKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+    return _localWrapKey;
+  }
 
   // ── Init: load or generate keys ───────────────────────────────────────────
   async function init(password) {
@@ -140,6 +171,10 @@
       console.warn('[E2E] WebCrypto not available — encryption disabled');
       return false;
     }
+
+    // GROUP ENCRYPTION: derive the local-storage wrap key now, while the
+    // password is available, regardless of which branch below runs.
+    await _getOrCreateLocalWrapKey(password).catch(e => console.warn('[E2E] Local wrap key derivation failed:', e.message));
 
     const stored = localStorage.getItem(STORE_KEY);
     if (stored) {
@@ -277,6 +312,109 @@
     return subtle.decrypt({ name: 'AES-GCM', iv: unb64(envelope.iv), tagLength: 128 }, aesKey, unb64(envelope.ct));
   }
 
+  // ── GROUP ENCRYPTION: Sender Keys ──────────────────────────────────────────
+  // 1:1 chat encryption above derives a shared AES key per (sender,recipient)
+  // pair via ECDH — that doesn't scale to groups (one ciphertext encrypted
+  // N times for N members leaks group size and is wasteful). Group messages
+  // instead use the Sender Keys model (same approach Signal/WhatsApp use):
+  // each member generates their OWN random AES-256 key for a given group,
+  // distributes it to every other current member ONCE (each copy wrapped
+  // using the existing 1:1 ECDH channel to that specific recipient — no new
+  // key-exchange primitive needed), and then encrypts every group message
+  // they send with that one key, broadcasting a single ciphertext. See
+  // backend src/routes/groupEncryption.js for the distribution/storage API.
+
+  // Generate a brand-new random Sender Key for a group. Returns the raw
+  // CryptoKey (kept in memory / IndexedDB by the caller) AND its raw bytes
+  // exported as base64, since callers need the raw bytes to re-import it
+  // later (CryptoKey objects themselves can't be stored directly).
+  async function generateSenderKey() {
+    const key = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    const raw = await subtle.exportKey('raw', key);
+    return { key, rawB64: b64(raw) };
+  }
+
+  // Re-import a Sender Key from its raw base64 bytes (e.g. after fetching/
+  // decrypting one distributed by another member, or reloading your own
+  // from local storage).
+  async function importSenderKey(rawB64) {
+    return subtle.importKey('raw', unb64(rawB64), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+  }
+
+  // Wrap (encrypt) a Sender Key's raw bytes so ONLY recipientUserId can
+  // read it — reuses the exact same ECDH shared-secret + HKDF derivation
+  // as 1:1 message encryption, just keyed by a fixed context string
+  // instead of a chatId, since Sender Key distribution isn't tied to any
+  // particular 1:1 conversation between the two users.
+  async function encryptSenderKeyFor(senderKeyRawB64, recipientUserId) {
+    if (!_enabled || !_myPrivKey) throw new Error('E2E not initialized');
+    const recipient = await _getRecipientPublicKey(recipientUserId);
+    if (!recipient) throw new Error('Recipient has no registered public key');
+
+    const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
+    const wrappingKey = await _hkdf(sharedBits, 'group-sender-key-wrap');
+    const env = await _aesEncrypt(senderKeyRawB64, wrappingKey);
+    return JSON.stringify({ v: 1, kid: _myKeyId, iv: env.iv, ct: env.ct });
+  }
+
+  // Inverse of encryptSenderKeyFor — recovers another member's Sender Key
+  // raw bytes from the envelope they distributed to you, given their
+  // userId (to look up THEIR public key, mirroring decryptFromChat).
+  async function decryptSenderKeyFrom(envelopeStr, ownerUserId) {
+    if (!_enabled || !_myPrivKey) throw new Error('E2E not initialized');
+    let envelope;
+    try { envelope = JSON.parse(envelopeStr); } catch (_) { throw new Error('Malformed sender key envelope'); }
+    if (!envelope || envelope.v !== 1) throw new Error('Unrecognized sender key envelope version');
+
+    const owner = await _getRecipientPublicKey(ownerUserId);
+    if (!owner) throw new Error('Sender key owner has no registered public key');
+
+    const sharedBits = await _computeSharedBits(_myPrivKey, owner.key);
+    const wrappingKey = await _hkdf(sharedBits, 'group-sender-key-wrap');
+    return _aesDecrypt(envelope, wrappingKey); // returns the raw base64 Sender Key bytes
+  }
+
+  // Encrypt a group message using an already-imported Sender Key
+  // (CryptoKey). No ECDH involved here — the symmetric key IS the shared
+  // secret, already established via Sender Key distribution.
+  async function encryptGroupMessage(plaintext, senderKey, keyGeneration) {
+    const env = await _aesEncrypt(plaintext, senderKey);
+    return JSON.stringify({ v: 1, gen: keyGeneration, iv: env.iv, ct: env.ct });
+  }
+
+  // Decrypt a group message given the matching Sender Key (caller is
+  // responsible for selecting the right owner's key by senderId before
+  // calling this — see js/groupEncryption.client.js).
+  async function decryptGroupMessage(encContent, senderKey) {
+    if (!encContent || typeof encContent !== 'string') return encContent;
+    let envelope;
+    try { envelope = JSON.parse(encContent); } catch (_) { return encContent; }
+    if (!envelope || envelope.v !== 1) return encContent; // plaintext / not our envelope shape
+    try {
+      return await _aesDecrypt(envelope, senderKey);
+    } catch (e) {
+      return '[Decryption failed]';
+    }
+  }
+
+  // Encrypt arbitrary string data (used for Sender Keys) at rest before
+  // writing to localStorage, using the session-cached wrap key derived in
+  // init(). Returns null (caller should fall back to not persisting) if
+  // the wrap key isn't available — e.g. called before init() ever ran.
+  async function wrapForLocalStorage(plaintextB64) {
+    if (!_localWrapKey) return null;
+    const iv = global.crypto.getRandomValues(new Uint8Array(12));
+    const ct = await subtle.encrypt({ name: 'AES-GCM', iv }, _localWrapKey, unb64(plaintextB64));
+    return JSON.stringify({ iv: b64(iv), ct: b64(ct) });
+  }
+
+  async function unwrapFromLocalStorage(wrappedJson) {
+    if (!_localWrapKey) throw new Error('Local wrap key not available — call init() first');
+    const obj = JSON.parse(wrappedJson);
+    const pt = await subtle.decrypt({ name: 'AES-GCM', iv: unb64(obj.iv) }, _localWrapKey, unb64(obj.ct));
+    return b64(pt);
+  }
+
   // ── Auto-init on login event ──────────────────────────────────────────────
   window.addEventListener('kyn:loggedIn', async (e) => {
     const password = e.detail?.password;
@@ -291,6 +429,15 @@
     encryptAttachment,
     decryptAttachment,
     getSafetyNumbers,
+    // Group encryption (Sender Keys)
+    generateSenderKey,
+    importSenderKey,
+    encryptSenderKeyFor,
+    decryptSenderKeyFrom,
+    encryptGroupMessage,
+    decryptGroupMessage,
+    wrapForLocalStorage,
+    unwrapFromLocalStorage,
     get enabled() { return _enabled; },
     get publicKey() { return _myPubKeyB64; },
     get keyId() { return _myKeyId; },

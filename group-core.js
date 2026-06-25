@@ -1657,11 +1657,20 @@ handleSettingsChange(message) {
         }
     },
     
-    handleGroupMessage(message) {
+    async handleGroupMessage(message) {
         const payload = message.payload || {};
         
         if (payload.groupId && payload.message) {
             const { groupId, message: messageData } = payload;
+
+            // FIX-GROUP-ENCRYPTION: decrypt before this message is ever
+            // stored or rendered — mirrors the 1:1 chat decrypt-at-the-
+            // actual-write-point fix from an earlier round. Mutates
+            // messageData.content in place; safe no-op if the message
+            // isn't marked encrypted in its metadata.
+            if (window.KynectaGroupE2E) {
+                await window.KynectaGroupE2E.decryptIncoming(groupId, messageData).catch(() => {});
+            }
             
             // Update GroupCore
             if (GroupCore) {
@@ -3016,17 +3025,49 @@ const GroupCore = {
         }
         
         debugLog('Sending group message via apiRequest');
-        
+
+        // FIX-GROUP-ENCRYPTION: encrypt with this group's Sender Key before
+        // it ever leaves the browser. window.KynectaGroupE2E (js/groupEncryption.client.js)
+        // handles generating/distributing a key if we don't have one yet for
+        // this group, and safely falls back to plaintext if E2E isn't active
+        // (e.g. KynectaE2E hasn't initialized) — anonymous posts always stay
+        // plaintext for now, since "anonymous" + "encrypted" interact in a
+        // way (who do you even distribute the key to/from?) that needs its
+        // own design, out of scope for this round.
+        let outgoingContent = content;
+        let encMeta = { encrypted: false };
+        if (!anonymous && window.KynectaGroupE2E) {
+            try {
+                encMeta = await window.KynectaGroupE2E.encryptOutgoing(groupId, content);
+                outgoingContent = encMeta.content;
+            } catch (e) {
+                debugLog('Group encryption failed, sending as plaintext:', e.message);
+            }
+        }
+
         try {
             const response = await apiRequest(`/groups/${groupId}/messages`, 'POST', {
                 groupId,
-                content,
+                content: outgoingContent,
                 topic,
-                anonymous
+                anonymous,
+                metadata: {
+                    encrypted: !!encMeta.encrypted,
+                    keyGeneration: encMeta.keyGeneration || null,
+                }
             });
             
             if (response && response.success && response.data) {
                 const messageData = response.data;
+                // FIX-GROUP-ENCRYPTION: messageData.content here is whatever
+                // the server echoed back — i.e. still the ciphertext we just
+                // sent, if this message was encrypted. We already have the
+                // real plaintext right here (the original `content` param),
+                // so just use that directly instead of wastefully decrypting
+                // our own message back out.
+                if (encMeta.encrypted) {
+                    messageData.content = content;
+                }
                 this.saveGroupMessages(groupId, [messageData]);
                 this.emit('group:message-sent', { groupId, message: messageData });
                 debugLog('Message sent');
@@ -3057,6 +3098,16 @@ const GroupCore = {
             
             if (response && response.success && response.data) {
                 const messages = response.data;
+
+                // FIX-GROUP-ENCRYPTION: decrypt the whole history batch
+                // before it's cached or rendered — mirrors the 1:1 chat
+                // syncChat() fix from an earlier round. One sender-key
+                // fetch for the entire batch (not per-message) via
+                // decryptIncomingBatch.
+                if (window.KynectaGroupE2E) {
+                    await window.KynectaGroupE2E.decryptIncomingBatch(groupId, messages).catch(() => {});
+                }
+
                 this.groupMessages[groupId] = messages;
                 
                 try {

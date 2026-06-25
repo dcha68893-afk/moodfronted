@@ -2948,6 +2948,7 @@ try {
             
             const isPending = typeof conversationId === 'string' && conversationId.startsWith('pending_');
             let requestBody = {};
+            let _recipientUserIdForEncryption = null;
             
             if (isPending) {
                 const pendingConv = this._conversationsMap.get(conversationId);
@@ -2955,6 +2956,7 @@ try {
                     throw new Error('Invalid pending conversation: missing receiverId');
                 }
                 console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
+                _recipientUserIdForEncryption = pendingConv.pendingReceiverId;
                 requestBody = {
                     receiverId: pendingConv.pendingReceiverId,
                     localId: options.localId || options.id || null,
@@ -2966,6 +2968,8 @@ try {
                 };
             } else {
                 console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
+                const _conv = this._conversationsMap.get(conversationId);
+                _recipientUserIdForEncryption = _conv?.friendId || _conv?.otherParticipant?.id || null;
                 requestBody = {
                     chatId: conversationId,
                     localId: options.localId || options.id || null,
@@ -2975,6 +2979,19 @@ try {
                     replyToId: options.replyToId || options.replyTo,
                     mentions: options.mentions
                 };
+            }
+
+            // ── FIX-E2E-WIRING: encrypt before transport, never store plaintext ──
+            if (requestBody.type === 'text' && typeof content === 'string' && _recipientUserIdForEncryption && window.KynectaE2E) {
+                try {
+                    requestBody.content = await window.KynectaE2E.encryptForChat(
+                        content,
+                        conversationId,
+                        _recipientUserIdForEncryption
+                    );
+                } catch (e) {
+                    console.warn('[ChatManager] E2E encryption failed, sending as plaintext:', e?.message);
+                }
             }
 
             // ── PHASE10: HybridTransportRuntime — THE canonical transport path ──────
@@ -6716,7 +6733,18 @@ try {
                     status: message.status || 'delivered',
                     conversationId: chatId,
                     chatId: chatId,
-                    isLocalOnly: false
+                    isLocalOnly: false,
+                    // FIX-ATTACHMENT-PERSISTENCE: these were missing entirely
+                    // from this normalization step, so even after the backend
+                    // started correctly returning them, every attachment got
+                    // silently dropped right here before ever reaching the
+                    // render templates in messages-ui.js.
+                    attachment: message.attachment || null,
+                    mediaUrl: message.mediaUrl || message.fileUrl || null,
+                    fileUrl: message.fileUrl || message.mediaUrl || null,
+                    fileName: message.fileName || message.attachment?.name || null,
+                    encrypted: !!message.encrypted,
+                    originalMimeType: message.originalMimeType || null
                 };
 
                 if (window.KynectaSyncEngine?.ingestIncomingMessage) {

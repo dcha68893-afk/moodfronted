@@ -1649,6 +1649,40 @@
     <script type="module" src="messages-core.js"></script>
     <script type="module" src="messages-ui.js?v=3"></script>
     <script src="js/e2e-encryption.js" defer></script>
+    <script defer>
+        // FIX-E2E-WIRING: js/e2e-encryption.js only activates via a
+        // 'kyn:loggedIn' window event that nothing in this codebase actually
+        // dispatches — and even if something did, this iframe is a
+        // different window than index.html where login happens, so a
+        // same-window CustomEvent could never reach it anyway. Call
+        // KynectaE2E.init() directly using the password index.html stashed
+        // in sessionStorage under 'kyn_e2e_pw_session' for exactly this
+        // purpose. Unlike an earlier version of this fix, the key is NOT
+        // deleted after reading here — group.html (and potentially other
+        // iframes) independently need to read the same key whenever THEY
+        // load, which may be long after this iframe already consumed it
+        // once. It's cleared on explicit logout instead (js/api.auth.js
+        // _performLogout).
+        (function () {
+            function tryInitE2E() {
+                if (!window.KynectaE2E) {
+                    return setTimeout(tryInitE2E, 150);
+                }
+                if (window.KynectaE2E.enabled) return; // already initialized this session
+
+                let pw = null;
+                try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
+                if (!pw) return; // not logged in this session, or password not available
+
+                window.KynectaE2E.init(pw).then(function (ok) {
+                    if (ok) console.log('[message.html] ✅ E2E encryption initialized');
+                }).catch(function (e) {
+                    console.warn('[message.html] E2E init failed:', e && e.message);
+                });
+            }
+            tryInitE2E();
+        })();
+    </script>
     <script src="js/voice-recorder.js" defer></script>
     <script src="js/link-preview.js" defer></script>
     <script src="js/chat-sync.js" defer></script>

@@ -30,6 +30,39 @@
 </script>
     <!-- CRITICAL: Safety layer must load before module scripts -->
     <script src="/js/kynecta.safety.layer.js"></script>
+    <!-- FIX-GROUP-ENCRYPTION: this file's _handle/renderMsgs functions call
+         window.KynectaGroupE2E.decryptIncoming(Batch) — neither this script
+         nor its dependency js/e2e-encryption.js were ever loaded here before,
+         so those calls would always have silently no-op'd and rendered raw
+         ciphertext. js/e2e-encryption.js must load first since
+         groupEncryption.client.js calls window.KynectaE2E directly. -->
+    <script src="js/e2e-encryption.js"></script>
+    <script src="js/groupEncryption.client.js"></script>
+    <script>
+        // FIX-E2E-WIRING: same as message.html's identical block — this is
+        // a SEPARATE iframe/window, so KynectaE2E must be independently
+        // init()'d here too, reading the same persistent (not single-use)
+        // session key index.html wrote on login.
+        (function () {
+            function tryInitE2E() {
+                if (!window.KynectaE2E) {
+                    return setTimeout(tryInitE2E, 150);
+                }
+                if (window.KynectaE2E.enabled) return;
+
+                let pw = null;
+                try { pw = sessionStorage.getItem('kyn_e2e_pw_session'); } catch (_) {}
+                if (!pw) return;
+
+                window.KynectaE2E.init(pw).then(function (ok) {
+                    if (ok) console.log('[group.html] ✅ E2E encryption initialized');
+                }).catch(function (e) {
+                    console.warn('[group.html] E2E init failed:', e && e.message);
+                });
+            }
+            tryInitE2E();
+        })();
+    </script>
     <link rel="manifest" href="../manifest.json">
     <meta name="theme-color" content="#4F46E5">
     <link rel="icon" href="../icons/moodchat-192.png">
@@ -2310,7 +2343,25 @@ function loadMsgs(gid){
 function renderMsgs(box,msgs){
     box.innerHTML='';
     if(!msgs||!msgs.length){box.innerHTML='<div data-empty="1" style="text-align:center;padding:40px;color:var(--text-secondary)"><i class="fas fa-comments" style="font-size:36px;opacity:.3"></i><p style="margin-top:10px;font-size:14px">No messages yet. Say hello! \ud83d\udc4b</p></div>';return;}
-    var me=myId();msgs.forEach(function(m){appendBubble(box,m,me);});scrollBot();
+    var me=myId();
+    /* FIX-GROUP-ENCRYPTION: this is a SEPARATE, independent group-chat
+       implementation from group-core.js (different file, different render
+       path, own direct API calls) -- discovered while wiring group message
+       encryption; group-core.js's fixes do not cover this path at all.
+       Decrypt the whole batch (covers both the instant-cached render in
+       loadMsgs() and the fresh-fetch render, since both call this same
+       function) before appending bubbles. window.KynectaGroupE2E may not
+       be loaded in this iframe yet on first paint -- falls through to
+       rendering ciphertext-as-text in that rare case rather than blocking
+       the whole render loop, same fail-open philosophy as the rest of this
+       app's E2E wiring. */
+    var gid = window.__gcCurGroup && window.__gcCurGroup.id;
+    var renderAll = function(){ msgs.forEach(function(m){appendBubble(box,m,me);}); scrollBot(); };
+    if (gid && window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncomingBatch === 'function') {
+        window.KynectaGroupE2E.decryptIncomingBatch(gid, msgs).then(renderAll).catch(renderAll);
+    } else {
+        renderAll();
+    }
 }
 
 /* ─── appendBubble ────────────────────────────────────────────── */
@@ -2434,6 +2485,13 @@ function hookRT(){
         var box=document.getElementById('chatMessages');if(!box)return;var me=myId();
         var sid=String(msg.senderId||msg.userId||(msg.sender&&msg.sender.id)||'');
         if(sid===me&&msg.id){if(box._seen&&box._seen.has(String(msg.id)))return;var tmp=box.querySelector('[data-tmp]');if(tmp){tmp.removeAttribute('data-tmp');tmp.dataset.mid=String(msg.id);if(box._seen)box._seen.add(String(msg.id));var t2=tmp.querySelector('.message-time');if(t2)t2.textContent=fmt(msg.createdAt||msg.created_at||new Date().toISOString());return;}}
+        /* FIX-GROUP-ENCRYPTION: same gap as renderMsgs above -- this is the
+           realtime single-message path in this separate implementation.
+           Decrypt msg.content in place before appendBubble ever sees it. */
+        if (gid && msg && msg.metadata && msg.metadata.encrypted && window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncoming === 'function') {
+            window.KynectaGroupE2E.decryptIncoming(gid, msg).then(function(){ appendBubble(box,msg,me);scrollBot(); }).catch(function(){ appendBubble(box,msg,me);scrollBot(); });
+            return;
+        }
         appendBubble(box,msg,me);scrollBot();
     }
     g.on('group:message-received',function(p){_handle(p&&p.groupId,p&&p.message);});
