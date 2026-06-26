@@ -2950,6 +2950,9 @@
             this.messageTemplates.set('gif',        this._createGifMessageTemplate);
             this.messageTemplates.set('view_once',  this._createViewOnceMessageTemplate);
 
+            // ── Phase 2: new message types ───────────────────────────────────
+            this.messageTemplates.set('sticker',    this._createStickerMessageTemplate);
+
         },
 
 
@@ -4107,6 +4110,37 @@
                         <div class="message-meta">
                             <span class="message-time">${time}</span>
                             ${isSent ? `<i class="fas fa-check message-status-icon"></i>` : ''}
+                        </div>
+                    </div>
+                    ${reactions}
+                </div>`;
+        },
+
+        // ── Phase 2: Sticker message template ─────────────────────────
+        _createStickerMessageTemplate(message, currentUser) {
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            const isSent = String(message.senderId) === String(currentUserId);
+            const time = core?.formatTime
+                ? core.formatTime(message.createdAt || message.timestamp)
+                : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            const reactions = this._renderReactions(message.reactions);
+
+            let stickerHtml;
+            if (window.kynStickerPicker?.renderStickerBubble) {
+                stickerHtml = window.kynStickerPicker.renderStickerBubble(message);
+            } else {
+                const meta = message.metadata || {};
+                stickerHtml = `<div class="msg-sticker" style="font-size:72px;line-height:1">${meta.stickerEmoji || '😊'}</div>`;
+            }
+
+            return `
+                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}" style="background:transparent;border:none;padding:4px;">
+                        ${stickerHtml}
+                        <div class="message-meta" style="padding:0 2px;">
+                            <span class="message-time">${time}</span>
                         </div>
                     </div>
                     ${reactions}
@@ -7069,6 +7103,19 @@
 
             const core = getMessagesCore();
 
+            // Phase 2: Submit to backend directly
+            const apiBase = window.API_BASE_URL || '';
+            const tok = localStorage.getItem('accessToken') || localStorage.getItem('token') || '';
+            const reasonMap = {
+                'Spam or scam': 'spam', 'Harassment or bullying': 'harassment',
+                'Hate speech': 'hate_speech', 'Misleading information': 'misinformation',
+                'Inappropriate content': 'sexual_content', 'Other': 'other'
+            };
+            fetch(`${apiBase}/api/messages/${message.id}/report`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason: reasonMap[reason] || 'other', details: detail })
+            }).catch(() => {});
             if (core && core.reportMessage) core.reportMessage(message.id, reason + (detail ? ': ' + detail : ''));
 
             showNotificationInMessages('Report submitted. Thank you.', 'success');
