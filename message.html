@@ -1,8 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
-
 <script>
 // ✅ CRITICAL SW UPDATE CHECK — runs FIRST, before any other JS loads.
 (function() {
@@ -1688,6 +1686,12 @@
     <script src="js/voice-recorder.js" defer></script>
     <script src="js/link-preview.js" defer></script>
     <script src="js/chat-sync.js" defer></script>
+    <!-- Phase 1 features -->
+    <script src="js/gif-picker.js" defer></script>
+    <script src="js/view-once.js" defer></script>
+    <script src="js/swipe-reply.js" defer></script>
+    <script src="js/dm-poll.js" defer></script>
+    <script src="js/last-seen-privacy.js" defer></script>
     <script src="js/virtual-scroll.js" defer></script>
     <script src="js/push-manager.js" defer></script>
     <script src="js/backup-manager.js" defer></script>
@@ -2201,6 +2205,41 @@
             checkSessionStorageForPendingChat();
         });
         
+        // Also listen for core ready event to process any pending chat
+        window.addEventListener('messagesCoreReady', function() {
+            console.log('[Message HTML] Core ready, checking for pending chat again');
+            checkSessionStorageForPendingChat();
+        });
+
+        // ── Phase 1: Bridge kyn:sendMessage custom events → messages-core ─────
+        // gif-picker.js and dm-poll.js fire this event to send without needing
+        // direct access to the module-scoped messagesCore instance.
+        window.addEventListener('kyn:sendMessage', function(e) {
+            const detail = e.detail || {};
+            const core = window.messagesCore || window.__messagesCore;
+            if (!core) {
+                console.warn('[Phase1] kyn:sendMessage fired but messagesCore not ready');
+                return;
+            }
+            // Inject metadata into the next send
+            if (detail.metadata) {
+                window.__pendingMsgMeta = Object.assign(window.__pendingMsgMeta || {}, detail.metadata);
+            }
+            // Use core sendMessage if available, otherwise trigger synthetic send
+            if (typeof core.sendMessage === 'function') {
+                core.sendMessage({
+                    content:  detail.content  || '',
+                    type:     detail.type     || 'text',
+                    metadata: detail.metadata || {},
+                });
+            } else if (typeof core.sendTextMessage === 'function') {
+                core.sendTextMessage(detail.content || '', {
+                    type:     detail.type     || 'text',
+                    metadata: detail.metadata || {},
+                });
+            }
+        });
+
         console.log(`[Message HTML] Parent communication initialized. Environment: ${environment}, Host: ${hostname}`);
     })();
     </script>

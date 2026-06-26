@@ -2946,6 +2946,10 @@
 
             this.messageTemplates.set('video_call', this._createCallMessageTemplate);
 
+            // ── Phase 1: new message types ───────────────────────────────────
+            this.messageTemplates.set('gif',        this._createGifMessageTemplate);
+            this.messageTemplates.set('view_once',  this._createViewOnceMessageTemplate);
+
         },
 
 
@@ -4043,6 +4047,71 @@
         },
 
 
+
+        // ── Phase 1: GIF message template ─────────────────────────────────
+        _createGifMessageTemplate(message, currentUser) {
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            const isSent = String(message.senderId) === String(currentUserId);
+            const time = core?.formatTime
+                ? core.formatTime(message.createdAt || message.timestamp)
+                : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            const reactions = this._renderReactions(message.reactions);
+
+            // Delegate rendering to gif-picker.js if loaded, otherwise inline fallback
+            let gifHtml;
+            if (window.kynGifPicker?.renderGifBubble) {
+                gifHtml = window.kynGifPicker.renderGifBubble(message);
+            } else {
+                const meta = message.metadata || {};
+                const url  = meta.gifUrl || meta.gifFullUrl || message.content;
+                gifHtml = `<div class="msg-gif-container"><img src="${url}" alt="GIF" loading="lazy" style="max-width:240px;border-radius:10px;display:block;"/><span style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.55);color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;">GIF</span></div>`;
+            }
+
+            return `
+                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}" style="padding:4px;background:transparent;border:none;">
+                        ${gifHtml}
+                        <div class="message-meta" style="padding:0 4px 2px;">
+                            <span class="message-time">${time}</span>
+                            ${isSent ? `<i class="fas fa-check message-status-icon"></i>` : ''}
+                        </div>
+                    </div>
+                    ${reactions}
+                </div>`;
+        },
+
+        // ── Phase 1: View-once message template ───────────────────────────
+        _createViewOnceMessageTemplate(message, currentUser) {
+            const core = getMessagesCore();
+            const currentUserId = core?.getCurrentUserId?.() || getCurrentUserId();
+            const isSent = String(message.senderId) === String(currentUserId);
+            const time = core?.formatTime
+                ? core.formatTime(message.createdAt || message.timestamp)
+                : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
+            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            const reactions = this._renderReactions(message.reactions);
+
+            let voHtml;
+            if (window.kynViewOnce?.renderViewOnceBubble) {
+                voHtml = window.kynViewOnce.renderViewOnceBubble(message, isSent);
+            } else {
+                voHtml = `<div style="padding:10px 14px;border:1px dashed #7c3aed;border-radius:12px;color:#fff;font-size:13px;">📷 View once</div>`;
+            }
+
+            return `
+                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}">
+                        ${voHtml}
+                        <div class="message-meta">
+                            <span class="message-time">${time}</span>
+                            ${isSent ? `<i class="fas fa-check message-status-icon"></i>` : ''}
+                        </div>
+                    </div>
+                    ${reactions}
+                </div>`;
+        },
 
         _createNoteMessageTemplate(message, currentUser) {
 
@@ -5338,9 +5407,14 @@
 
                 case 'poll':
 
-                    if (core) attachment = core.createPoll?.();
+                    // Phase 1: Use dm-poll.js modal (works in DMs + groups)
+                    if (window.kynDmPoll?.openModal) {
+                        window.kynDmPoll.openModal();
+                    } else if (core) {
+                        attachment = core.createPoll?.();
+                    }
 
-                    break;
+                    return; // modal handles send itself
 
                 case 'note':
 
