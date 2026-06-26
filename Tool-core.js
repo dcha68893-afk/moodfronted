@@ -3993,6 +3993,11 @@ function resolveToolsApiUrl(url) {
         window.parent?.__API_CORE?.getBaseUrl?.() ||
         window.parent?.api?.env?.getBaseUrl?.() ||
         window.parent?.__getApiBase?.() ||
+        // FIXED: Check canonical API_BASE_URL vars before falling back to origin
+        (window.API_BASE_URL ? window.API_BASE_URL + '/api' : null) ||
+        (window.__kynAPI?.baseUrl) ||
+        (window.parent?.API_BASE_URL ? window.parent.API_BASE_URL + '/api' : null) ||
+        (window.parent?.__kynAPI?.baseUrl) ||
         '/api';
 
     const base = String(rawBase).replace(/\/+$/, '').replace(/\/api\/?$/, '/api');

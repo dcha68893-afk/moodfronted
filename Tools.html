@@ -39,10 +39,10 @@
     <title>Marketplace | Knecta Chat</title>
     <!-- CRITICAL: Set API base BEFORE any marketplace script runs so hardcoded fallbacks are never used -->
     <script>
+        // CRITICAL: Always point to backend, never to frontend origin
+        window.API_BASE_URL = "https://moodchat-fy56.onrender.com";
         window.__kynAPI = window.__kynAPI || {};
-        if (!window.__kynAPI.baseUrl) {
-            window.__kynAPI.baseUrl = window.location.origin + '/api';
-        }
+        window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";
     </script>
     
     <!-- Font Awesome -->
