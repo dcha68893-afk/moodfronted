@@ -40,6 +40,12 @@
          groupEncryption.client.js calls window.KynectaE2E directly. -->
     <script src="js/e2e-encryption.js"></script>
     <script src="js/groupEncryption.client.js"></script>
+    <!-- Phase 3: Security -->
+    <script src="js/e2e-encryption.js" defer></script>
+    <script src="js/double-ratchet.js" defer></script>
+    <script src="js/safety-numbers.js" defer></script>
+    <!-- Phase 4: Sealed Groups -->
+    <script src="js/sealed-groups.js" defer></script>
     <script>
         // FIX-E2E-WIRING: same as message.html's identical block — this is
         // a SEPARATE iframe/window, so KynectaE2E must be independently
