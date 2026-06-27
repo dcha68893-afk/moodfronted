@@ -634,10 +634,12 @@ body {
 }
 
 /* Status icons on sent messages */
-.message.sent .message-status {
-    color: #53bdeb;
-    font-size: 12px;
-}
+/* FIX-2: Blue ticks ONLY for read status */
+.message.sent .message-status { color: #8696a0; font-size: 12px; }
+.message.sent .message-status.status-sending  { color: #8696a0 !important; }
+.message.sent .message-status.status-sent     { color: #8696a0 !important; }
+.message.sent .message-status.status-delivered{ color: #8696a0 !important; }
+.message.sent .message-status.status-read     { color: #53bdeb !important; }
 
 /* Failed messages */
 .message.sent.message-failed .message-bubble {

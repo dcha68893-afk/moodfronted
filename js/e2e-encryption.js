@@ -422,9 +422,45 @@
   });
 
   // ── Public API ────────────────────────────────────────────────────────────
+
+  // BATCH 2: Expose getSharedBits for ratchet bootstrap
+  async function getSharedBits(chatId, otherUserId) {
+    if (!_myPrivKey) return null;
+    try {
+      const recipientId = otherUserId || chatId;
+      const recipient = await _getRecipientPublicKey(String(recipientId));
+      if (!recipient) return null;
+      return _computeSharedBits(_myPrivKey, recipient.key);
+    } catch(e) { return null; }
+  }
+
+  // Wrap encryptForChat to use ratchet when available
+  const _origEncrypt = encryptForChat;
+  async function encryptForChatWithRatchet(plaintext, chatId, recipientId) {
+    if (window.KynectaRatchet && _enabled) {
+      try {
+        const bits = await getSharedBits(chatId, recipientId);
+        if (bits) { try { await window.KynectaRatchet.init(chatId, bits); } catch(_){} }
+        return await window.KynectaRatchet.encrypt(chatId, plaintext);
+      } catch(e) { console.warn('[E2E] Ratchet encrypt failed, falling back:', e.message); }
+    }
+    return _origEncrypt(plaintext, chatId);
+  }
+
+  // Wrap decryptForChat to handle both v:1 and v:2 envelopes
+  const _origDecrypt = decryptForChat;
+  async function decryptForChatWithRatchet(envelopeStr, chatId, senderUserId) {
+    if (window.KynectaRatchet && window.KynectaRatchet.isRatchetEnvelope && window.KynectaRatchet.isRatchetEnvelope(envelopeStr)) {
+      try { return await window.KynectaRatchet.decrypt(chatId, envelopeStr, senderUserId); }
+      catch(e) { return '🔒 [Decryption failed]'; }
+    }
+    return _origDecrypt(envelopeStr, chatId, senderUserId);
+  }
+
   global.KynectaE2E = {
     init,
-    encryptForChat,
+    encryptForChat: encryptForChatWithRatchet,
+    encryptForChatV1: _origEncrypt,
     decryptFromChat,
     encryptAttachment,
     decryptAttachment,

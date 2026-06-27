@@ -2052,7 +2052,7 @@ try {
             } catch (e) {}
         },
         
-        _handleMessageReceive: function(data) {
+        _handleMessageReceive: async function(data) {
             const message = data.payload || data;
             
             if (!message || !message.id) {
@@ -2082,9 +2082,33 @@ try {
             }
             
             Logger.info('ParentConnectionManager', `Message received: ${message.id}`);
+            // ── FIX-1: E2E DECRYPT ON RECEIVE ────────────────────────────────────
+            let decryptedContent = message.content;
+            if (
+                message.type === 'text' &&
+                typeof message.content === 'string' &&
+                window.KynectaE2E &&
+                typeof window.KynectaE2E.decryptForChat === 'function'
+            ) {
+                try {
+                    const _parsed = (() => { try { return JSON.parse(message.content); } catch (_) { return null; } })();
+                    if (_parsed && (_parsed.v === 1 || _parsed.v === 2) && _parsed.ct) {
+                        const chatId   = message.chatId || message.conversationId || '';
+                        const senderId = String(message.senderId || '');
+                        decryptedContent = await window.KynectaE2E.decryptForChat(message.content, chatId, senderId);
+                    }
+                } catch (_decErr) {
+                    console.warn('[E2E] Decrypt failed:', _decErr?.message);
+                    if (typeof decryptedContent === 'string' && decryptedContent.startsWith('{"v":')) {
+                        decryptedContent = '🔒 [Encrypted message — key not available]';
+                    }
+                }
+            }
+            // ── END FIX-1 ────────────────────────────────────────────────────────
             
             const normalizedMessage = {
                 ...message,
+                content: decryptedContent, // FIX-1: decrypted
                 status: message.status || 'delivered',
                 conversationId: message.chatId || message.conversationId,
                 chatId: message.chatId || message.conversationId,

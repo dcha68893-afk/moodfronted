@@ -1375,9 +1375,25 @@
                     <button class="chat-action-btn" id="videoCallBtn" title="Video Call">
                         <i class="fas fa-video"></i>
                     </button>
-                    <button class="chat-action-btn" id="chatOptionsBtn" title="Options">
+                    <div style="position:relative;">
+                      <button class="chat-action-btn" id="chatOptionsBtn" title="Options">
                         <i class="fas fa-ellipsis-v"></i>
-                    </button>
+                      </button>
+                      <div id="chatOptionsMenu" style="display:none;position:absolute;right:0;top:100%;background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15);min-width:220px;z-index:1000;overflow:hidden;">
+                        <button class="chat-menu-item" id="menuContactInfo"    style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-user"        style="width:18px;color:#667eea;"></i> Contact info</button>
+                        <button class="chat-menu-item" id="menuSearchChat"     style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-search"      style="width:18px;color:#667eea;"></i> Search messages</button>
+                        <button class="chat-menu-item" id="menuDisappearing"   style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-clock"       style="width:18px;color:#667eea;"></i> Disappearing messages</button>
+                        <button class="chat-menu-item" data-action="wallpaper" style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-image"       style="width:18px;color:#f59e0b;"></i> Wallpaper</button>
+                        <button class="chat-menu-item" id="menuStarredMessages" style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-star"        style="width:18px;color:#f59e0b;"></i> Starred messages</button>
+                        <button class="chat-menu-item" id="menuSafetyNumbers"  data-action="safety-numbers" style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-shield-alt" style="width:18px;color:#667eea;"></i> Safety number</button>
+                        <hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">
+                        <button class="chat-menu-item" data-action="privacy-settings"  style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-user-shield" style="width:18px;color:#667eea;"></i> Privacy</button>
+                        <button class="chat-menu-item" data-action="linked-devices"    style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-laptop"      style="width:18px;color:#667eea;"></i> Linked devices</button>
+                        <button class="chat-menu-item" id="menuMuteChat"       style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#333;"><i class="fas fa-bell-slash"  style="width:18px;color:#8696a0;"></i> Mute notifications</button>
+                        <hr style="margin:4px 0;border:none;border-top:1px solid #f0f0f0;">
+                        <button class="chat-menu-item" id="menuClearChat" style="display:flex;align-items:center;gap:12px;width:100%;padding:13px 16px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53935;"><i class="fas fa-trash" style="width:18px;"></i> Clear chat</button>
+                      </div>
+                    </div>
                 </div>
             </div>
             
@@ -2267,5 +2283,82 @@
 <script type="module" src="/js/core/phase6.bootstrap.js"></script>
 
 <script src="js/phase15.delivery.patch.js"></script>
+<script>
+/* ═══ BATCH 1 UX FEATURES ═══════════════════════════════════════════ */
+(function(){
+  'use strict';
+  // ── Options dropdown ──────────────────────────────────────────────
+  var optBtn  = document.getElementById('chatOptionsBtn');
+  var optMenu = document.getElementById('chatOptionsMenu');
+  if(optBtn && optMenu){
+    optBtn.addEventListener('click', function(e){ e.stopPropagation(); optMenu.style.display = optMenu.style.display==='block'?'none':'block'; });
+    document.addEventListener('click', function(){ if(optMenu) optMenu.style.display='none'; });
+  }
+  // ── In-chat search ────────────────────────────────────────────────
+  var menuSearch = document.getElementById('menuSearchChat');
+  if(menuSearch) menuSearch.addEventListener('click', function(){
+    if(optMenu) optMenu.style.display='none';
+    var q = prompt('Search messages:'); if(!q) return;
+    document.querySelectorAll('.message-text, .message-bubble p').forEach(function(el){
+      if(el.textContent.toLowerCase().includes(q.toLowerCase())){
+        el.closest('[data-message-id]')?.scrollIntoView({behavior:'smooth',block:'center'});
+      }
+    });
+  });
+  // ── Contact info panel ────────────────────────────────────────────
+  var menuCI = document.getElementById('menuContactInfo');
+  if(menuCI) menuCI.addEventListener('click', function(){
+    if(optMenu) optMenu.style.display='none';
+    var name = document.getElementById('chatFriendName')?.textContent || 'Contact';
+    alert('Contact: ' + name + '
+
+Full contact info panel loads from moodchat-final.patch.js');
+  });
+  // ── Disappearing messages ─────────────────────────────────────────
+  var menuDis = document.getElementById('menuDisappearing');
+  if(menuDis) menuDis.addEventListener('click', function(){
+    if(optMenu) optMenu.style.display='none';
+    var dur = prompt('Set disappearing timer:
+0 = Off
+3600 = 1 hour
+86400 = 24 hours
+604800 = 7 days
+7776000 = 90 days','0');
+    if(dur===null) return;
+    var chatId = window.__activeChatId;
+    if(!chatId){ alert('No active chat'); return; }
+    var token = window.authToken || sessionStorage.getItem('kynecta_auth_token') || localStorage.getItem('authToken') || '';
+    fetch((window.API_BASE_URL||'')+'/api/messages/disappearing',{
+      method:'POST', headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify({chatId:chatId, duration:parseInt(dur)||0})
+    }).then(function(r){ return r.json(); }).then(function(d){ console.log('[disappearing]',d); }).catch(console.warn);
+  });
+  // ── Starred messages ──────────────────────────────────────────────
+  var menuStar = document.getElementById('menuStarredMessages');
+  if(menuStar) menuStar.addEventListener('click', function(){
+    if(optMenu) optMenu.style.display='none';
+    if(window.openStarredMessages) window.openStarredMessages();
+  });
+  // ── Safety numbers ────────────────────────────────────────────────
+  var menuSafe = document.getElementById('menuSafetyNumbers');
+  if(menuSafe) menuSafe.addEventListener('click', function(){
+    if(optMenu) optMenu.style.display='none';
+    if(window.openSafetyNumbers) window.openSafetyNumbers(window.__activeContactId, window.__activeContactName);
+  });
+  // ── Mic button toggle (show when input empty) ─────────────────────
+  var micBtn   = document.getElementById('micBtn');
+  var sendBtn  = document.getElementById('sendButton');
+  var msgInput = document.getElementById('messageInput');
+  function syncMicSend(){
+    if(!micBtn||!sendBtn) return;
+    var hasText = msgInput && msgInput.value.trim().length > 0;
+    micBtn.style.display  = hasText ? 'none' : 'inline-flex';
+  }
+  if(msgInput) msgInput.addEventListener('input', syncMicSend);
+  if(micBtn && sendBtn) setTimeout(syncMicSend, 600);
+  // ── Options dropdown close on scroll ─────────────────────────────
+  document.addEventListener('scroll', function(){ if(optMenu) optMenu.style.display='none'; }, true);
+})();
+</script>
 </body>
 </html>

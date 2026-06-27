@@ -17175,11 +17175,19 @@ initiateCall: async function(callType, participants = []) {
 
         const isGroupCall = Array.isArray(participants) && participants.length > 1;
 
-
-
-        
-
-
+        // BATCH 2: Fire event so groupcall-mesh.patch.js creates per-participant RTCPeerConnections
+        if (isGroupCall) {
+            setTimeout(function() {
+                try {
+                    document.dispatchEvent(new CustomEvent('calls:groupCallStarted', {
+                        detail: { callId: callId, participants: participants,
+                                  localStream: callsState.localStream || null,
+                                  iceServers: (callsState.pcConfig && callsState.pcConfig.iceServers)
+                                              || [{ urls: 'stun:stun.l.google.com:19302' }] }
+                    }));
+                } catch(_){}
+            }, 500);
+        }
 
         logCall(MODULE, 'Sending CALL_INITIATE to parent', { callId, callType, participants, isGroupCall });
 

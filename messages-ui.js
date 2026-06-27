@@ -3224,7 +3224,8 @@
                                             (status === 'read' || status === 'delivered') ? 'fa-check-double' : 'fa-check';
 
                             statusIcon.className = `fas ${iconClass}`;
-                            statusIcon.style.color = status === 'read' ? '#53bdeb' : '';
+                            statusIcon.style.color = ''; // FIX-2: let CSS class control colour
+                            if (statusSpan) statusSpan.className = `message-status status-${status}`;
 
                         }
 
@@ -3584,7 +3585,7 @@
 
                             ${editedIndicator}
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -3651,7 +3652,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -3717,7 +3718,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -3791,7 +3792,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -3871,7 +3872,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -3937,7 +3938,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -4035,7 +4036,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
@@ -4199,7 +4200,7 @@
 
                             <span class="message-time">${time}</span>
 
-                            ${isSent ? `<span class="message-status"><i class="fas ${statusIcon}"></i></span>` : ''}
+                            ${isSent ? `<span class="message-status status-${status}"><i class="fas ${statusIcon}"></i></span>` : ''}
 
                         </div>
 
