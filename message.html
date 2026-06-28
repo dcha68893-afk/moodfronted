@@ -1695,7 +1695,7 @@
     <!-- Phase 2 features -->
     <script src="js/sticker-picker.js" defer></script>
     <script src="js/message-select.js" defer></script>
-    <!-- Phase 3: Security (Double Ratchet + Safety Numbers) -->
+    <!-- Phase 3: Security -->
     <script src="js/e2e-encryption.js" defer></script>
     <script src="js/double-ratchet.js" defer></script>
     <script src="js/safety-numbers.js" defer></script>
@@ -2233,16 +2233,47 @@
                 window.__pendingMsgMeta = Object.assign(window.__pendingMsgMeta || {}, detail.metadata);
             }
             // Use core sendMessage if available, otherwise trigger synthetic send
+            // FIX BUG-1: correct call signature is sendMessage(content, options)
+            const _content  = detail.content  || '';
+            const _type     = detail.type     || 'text';
+            const _metadata = detail.metadata || {};
             if (typeof core.sendMessage === 'function') {
-                core.sendMessage({
-                    content:  detail.content  || '',
-                    type:     detail.type     || 'text',
-                    metadata: detail.metadata || {},
+                core.sendMessage(_content, {
+                    type:     _type,
+                    metadata: _metadata,
                 });
             } else if (typeof core.sendTextMessage === 'function') {
-                core.sendTextMessage(detail.content || '', {
-                    type:     detail.type     || 'text',
-                    metadata: detail.metadata || {},
+                core.sendTextMessage(_content, {
+                    type:     _type,
+                    metadata: _metadata,
+                });
+            }
+        });
+
+        // FIX BUG-9: bridge messagesUI.setReply to window so swipe-reply.js can call it
+        // messagesUI is a module-scoped object — expose setReply via postMessage proxy
+        window.addEventListener('kyn:replyToMessage', function(e) {
+            const message = e.detail?.message || e.detail;
+            if (!message) return;
+            // Try direct call first
+            if (window.messagesUI && typeof window.messagesUI.setReplyToMessage === 'function') {
+                window.messagesUI.setReplyToMessage(message);
+                return;
+            }
+            // Fallback: manually populate the reply indicator
+            const indicator = document.getElementById('replyIndicator');
+            const replyText = document.getElementById('replyToText');
+            if (indicator && replyText) {
+                replyText.textContent = (message.content || '').substring(0, 60) || '📎 Media';
+                indicator.style.display = 'flex';
+                window.replyToMessage = message;
+            }
+            const cancelBtn = document.getElementById('cancelReplyBtn');
+            if (cancelBtn && !cancelBtn._kynBridged) {
+                cancelBtn._kynBridged = true;
+                cancelBtn.addEventListener('click', function() {
+                    if (indicator) indicator.style.display = 'none';
+                    window.replyToMessage = null;
                 });
             }
         });
