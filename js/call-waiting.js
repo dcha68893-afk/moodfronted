@@ -176,7 +176,7 @@
     }
 
     // Signal remote party
-    const socket = global.__socket || global.socket;
+    const socket = window.KynectaRealtime?._socket;
     if (socket && _activeCall?.callId) {
       socket.emit('call:hold', { callId: _activeCall.callId });
     }
@@ -202,7 +202,7 @@
       }
     }
 
-    const socket = global.__socket || global.socket;
+    const socket = window.KynectaRealtime?._socket;
     if (socket && _activeCall?.callId) {
       socket.emit('call:unhold', { callId: _activeCall.callId });
     }
@@ -337,7 +337,7 @@
   }
 
   function _declineWaitingCall(callData) {
-    const socket = global.__socket || global.socket;
+    const socket = window.KynectaRealtime?._socket;
     if (socket) socket.emit('call:decline', { callId: callData.callId });
   }
 
@@ -365,7 +365,7 @@
 
   // ── Hook Socket.IO events ──────────────────────────────────────────────────
   function _hookSocket() {
-    const socket = global.__socket || global.socket;
+    const socket = window.KynectaRealtime?._socket;
     if (!socket) { setTimeout(_hookSocket, 1500); return; }
 
     socket.on('call:hold',   () => _handleRemoteHold(true));

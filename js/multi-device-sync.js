@@ -119,7 +119,7 @@
 
   // ── Apply synced data to in-memory state ───────────────────────────────────
   function _applyChats(chats) {
-    const core = global.messagesCore || global.__messagesCore;
+    const core = window.MessagesCore;
     if (!core?.ChatManager) return;
 
     chats.forEach(chat => {
@@ -180,7 +180,7 @@
 
   // ── Socket.IO: receive sync events from other devices ─────────────────────
   function _hookSocket() {
-    const socket = global.__socket || global.socket;
+    const socket = window.KynectaRealtime?._socket;
     if (!socket) { setTimeout(_hookSocket, 1500); return; }
 
     // When another device of the same user sends a message, we receive it here

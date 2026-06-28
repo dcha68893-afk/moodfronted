@@ -415,32 +415,37 @@
   // This upgrades 1:1 DM encryption to use Double Ratchet automatically
   function _patchKynectaE2E() {
     if (!global.KynectaE2E) return;
+    if (global.KynectaE2E._drPatched) return;
+    global.KynectaE2E._drPatched = true;
 
-    // Store originals for fallback
     const _origEncrypt = global.KynectaE2E.encryptForChat.bind(global.KynectaE2E);
     const _origDecrypt = global.KynectaE2E.decryptFromChat.bind(global.KynectaE2E);
 
+    // Wrap encrypt: if a DR session exists use it, else fall through to ECDH
     global.KynectaE2E.encryptForChat = async function (plaintext, chatId, recipientUserId) {
       try {
-        if (global.KynectaE2E.enabled && global.KynectaE2E._privKey) {
+        if (global.KynectaE2E.enabled) {
           const hasSess = await hasSession(chatId);
           if (hasSess) {
-            const ct = await encrypt(chatId, plaintext, global.KynectaE2E._privKey);
+            // encrypt() uses _loadState which uses KynectaE2E.unwrapFromLocalStorage
+            // — no need to pass private key directly
+            const ct = await encrypt(chatId, plaintext, null);
             if (ct) return ct;
           }
         }
       } catch (e) {
-        console.warn('[DR] encrypt error, falling back to static ECDH:', e.message);
+        console.warn('[DR] encrypt error, falling back:', e.message);
       }
       return _origEncrypt(plaintext, chatId, recipientUserId);
     };
 
+    // Wrap decrypt: detect v2 envelope and use DR, else fall through to ECDH
     global.KynectaE2E.decryptFromChat = async function (ciphertext, chatId, senderUserId) {
       try {
         let parsed;
         try { parsed = JSON.parse(ciphertext); } catch { return ciphertext; }
         if (parsed?.v === DR_VERSION && global.KynectaE2E.enabled) {
-          return await decrypt(chatId, ciphertext, null, global.KynectaE2E._privKey);
+          return await decrypt(chatId, ciphertext, null, null);
         }
       } catch (e) {
         console.warn('[DR] decrypt error, falling back:', e.message);
@@ -448,7 +453,7 @@
       return _origDecrypt(ciphertext, chatId, senderUserId);
     };
 
-    console.log('[DR] ✅ KynectaE2E upgraded to Double Ratchet');
+    console.log('[DR] ✅ KynectaE2E patched with Double Ratchet');
   }
 
   // ── Public API ───────────────────────────────────────────────────────────────

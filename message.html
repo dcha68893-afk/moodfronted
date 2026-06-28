@@ -2237,30 +2237,29 @@
                 window.__pendingMsgMeta = Object.assign(window.__pendingMsgMeta || {}, detail.metadata);
             }
             // Use core sendMessage if available, otherwise trigger synthetic send
-            // FIX: correct signature is sendMessage(content, options)
-            const _c = detail.content || '';
-            const _t = detail.type || 'text';
-            const _m = detail.metadata || {};
+            // FIX BUG-1: core.sendMessage(content, options) — two args
+            const _mc = detail.content || '';
+            const _mt = detail.type || 'text';
+            const _mm = detail.metadata || {};
             if (typeof core.sendMessage === 'function') {
-                core.sendMessage(_c, { type: _t, metadata: _m });
+                core.sendMessage(_mc, { type: _mt, metadata: _mm });
             } else if (typeof core.sendTextMessage === 'function') {
-                core.sendTextMessage(_c, { type: _t, metadata: _m });
+                core.sendTextMessage(_mc, { type: _mt, metadata: _mm });
             }
         });
 
-        // Bridge kyn:replyToMessage for swipe-reply.js
+        // FIX BUG-9: bridge kyn:replyToMessage → messagesUI.setReplyToMessage
         window.addEventListener('kyn:replyToMessage', function(e) {
             const message = e.detail?.message || e.detail;
             if (!message) return;
             if (window.messagesUI && typeof window.messagesUI.setReplyToMessage === 'function') {
                 window.messagesUI.setReplyToMessage(message); return;
             }
-            const indicator = document.getElementById('replyIndicator');
-            const replyText = document.getElementById('replyToText');
-            if (indicator && replyText) {
-                replyText.textContent = (message.content || '').substring(0, 60) || '📎 Media';
-                indicator.style.display = 'flex';
-                window.replyToMessage = message;
+            const ind = document.getElementById('replyIndicator');
+            const txt = document.getElementById('replyToText');
+            if (ind && txt) {
+                txt.textContent = (message.content || '').substring(0, 60) || '📎 Media';
+                ind.style.display = 'flex'; window.replyToMessage = message;
             }
         });
 
