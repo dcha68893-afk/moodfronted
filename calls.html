@@ -3553,8 +3553,6 @@ window.__CALLS_IFRAME__ = {
     <!-- Application modules (ES6 modules) - loaded in correct order -->
     <script type="module" src="calls-core.js"></script>
     <script type="module" src="calls-ui.js"></script>
-    <!-- BATCH 2: group call mesh -->
-    <script src="groupcall-mesh.patch.js" defer></script>
     <script src="js/call-recording-notice.js" defer></script>
     <script src="js/adaptive-bitrate.js" defer></script>
     <script>
@@ -5765,5 +5763,7 @@ window.__CALLS_IFRAME__ = {
   else { _wireCaptions(); }
 })();
 </script>
+    <!-- Remaining call features: hold, waiting, adaptive bitrate -->
+    <script src="js/call-waiting.js" defer></script>
 </body>
 </html>
