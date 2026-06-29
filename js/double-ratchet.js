@@ -413,6 +413,25 @@
 
   // ── Monkey-patch KynectaE2E when both modules are loaded ────────────────────
   // This upgrades 1:1 DM encryption to use Double Ratchet automatically
+  //
+  // FIX-DR-WIRING: this patch previously never actually activated. Two bugs:
+  //  1. Nothing anywhere in the codebase ever called initSend(), so
+  //     hasSession() was always false on the sender's side and encryptForChat
+  //     fell straight back to the legacy static-ECDH path every time —
+  //     forward secrecy was never actually in effect despite the log message
+  //     below claiming otherwise.
+  //  2. decryptFromChat called decrypt(chatId, ciphertext, null, null) — i.e.
+  //     always passed null for both the sender's identity public key AND our
+  //     own identity private key. The very first message in any session
+  //     bootstraps via initRecv(), which immediately does ECDH on those two
+  //     null values and throws, so even if something HAD sent a v2 envelope,
+  //     decrypting it would always fail and silently fall back to the legacy
+  //     decrypter (which can't parse a v2 envelope either).
+  // Both are fixed below using the identity-key getters js/e2e-encryption.js
+  // now exposes. This also reuses the SAME stable per-pair context as the
+  // static-ECDH fix above (KynectaE2E.getEncryptionContext) instead of the
+  // raw chatId, for the same reason: a brand-new chat's first message is
+  // encrypted before the real chatId exists.
   function _patchKynectaE2E() {
     if (!global.KynectaE2E) return;
     if (global.KynectaE2E._drPatched) return;
@@ -421,15 +440,22 @@
     const _origEncrypt = global.KynectaE2E.encryptForChat.bind(global.KynectaE2E);
     const _origDecrypt = global.KynectaE2E.decryptFromChat.bind(global.KynectaE2E);
 
-    // Wrap encrypt: if a DR session exists use it, else fall through to ECDH
+    // Wrap encrypt: bootstrap a session on first use, then use DR going forward
     global.KynectaE2E.encryptForChat = async function (plaintext, chatId, recipientUserId) {
       try {
-        if (global.KynectaE2E.enabled) {
-          const hasSess = await hasSession(chatId);
+        if (global.KynectaE2E.enabled && recipientUserId) {
+          const ctx = global.KynectaE2E.getEncryptionContext(chatId, recipientUserId);
+          let hasSess = await hasSession(ctx);
+          if (!hasSess) {
+            const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
+            const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(recipientUserId);
+            if (myPriv && theirPub) {
+              await initSend(ctx, myPriv, theirPub);
+              hasSess = true;
+            }
+          }
           if (hasSess) {
-            // encrypt() uses _loadState which uses KynectaE2E.unwrapFromLocalStorage
-            // — no need to pass private key directly
-            const ct = await encrypt(chatId, plaintext, null);
+            const ct = await encrypt(ctx, plaintext, null);
             if (ct) return ct;
           }
         }
@@ -444,8 +470,11 @@
       try {
         let parsed;
         try { parsed = JSON.parse(ciphertext); } catch { return ciphertext; }
-        if (parsed?.v === DR_VERSION && global.KynectaE2E.enabled) {
-          return await decrypt(chatId, ciphertext, null, null);
+        if (parsed?.v === DR_VERSION && global.KynectaE2E.enabled && senderUserId) {
+          const ctx = global.KynectaE2E.getEncryptionContext(chatId, senderUserId);
+          const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
+          const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(senderUserId);
+          return await decrypt(ctx, ciphertext, theirPub, myPriv);
         }
       } catch (e) {
         console.warn('[DR] decrypt error, falling back:', e.message);

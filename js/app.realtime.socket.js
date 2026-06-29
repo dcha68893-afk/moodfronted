@@ -1469,6 +1469,16 @@
                 'group:messages:disappeared',
                 'group:verified',
                 'group:finance:created',
+                // FIX-GROUP-E2E-ROTATION: backend (groupMembersService.js,
+                // routes/groupEncryption.js) emits these on member removal and
+                // on sender-key distribution, but nothing registered a socket
+                // listener for them — js/groupEncryption.client.js's
+                // KynectaRealtime.on('group:rotation_required'/'group:
+                // sender_key_distributed') handlers were therefore unreachable,
+                // so a removed member's old key was never rotated away from,
+                // and newly-distributed keys weren't pulled in until the next
+                // message happened to arrive.
+                'group:rotation_required', 'group:sender_key_distributed',
             ];
 
             const statusEvents = [

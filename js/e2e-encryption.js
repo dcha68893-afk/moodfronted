@@ -116,6 +116,54 @@
     return subtle.deriveBits({ name: 'ECDH', public: theirPubKey }, myPrivKey, 256);
   }
 
+  // ── FIX-E2E-CHATID: stable per-pair encryption context ────────────────────
+  // Root cause: encryptForChat/decryptFromChat fed the conversation's chatId
+  // straight into HKDF's info parameter. For the very FIRST message of a
+  // brand-new chat, the sender doesn't have a real chatId yet — messages-core.js
+  // uses a local placeholder like "pending_<receiverId>" until the backend's
+  // response creates the real (autoincrement integer) row. The receiver,
+  // though, always gets the real chatId from the server's socket payload.
+  // Sender and receiver therefore derived DIFFERENT AES keys for that first
+  // message, and it could never be decrypted.
+  //
+  // Fix: derive the HKDF context from the sorted pair of user ids instead.
+  // Both sides always know their own id and the other party's id — before
+  // the chat row exists, after it exists, doesn't matter — so this string is
+  // identical on both ends for every message in the conversation, including
+  // the first one. The original chatId is kept ONLY as a last-resort fallback
+  // (so this never throws) and as a legacy fallback on decrypt (see below).
+  function _myUserId() {
+    try {
+      if (window.SessionManager?.getCurrentUserId) {
+        const id = window.SessionManager.getCurrentUserId();
+        if (id) return String(id);
+      }
+    } catch (_) {}
+    try {
+      if (window.MessagesCore?.getCurrentUserId) {
+        const id = window.MessagesCore.getCurrentUserId();
+        if (id) return String(id);
+      }
+    } catch (_) {}
+    if (window.currentUserId) return String(window.currentUserId);
+    if (window.__PARENT_SESSION__?.userId) return String(window.__PARENT_SESSION__.userId);
+    try {
+      const raw = localStorage.getItem('kynecta_auth');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const id = parsed?.user?.id || parsed?.userId;
+        if (id) return String(id);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  function _chatContext(chatId, otherUserId) {
+    const me = _myUserId();
+    if (me && otherUserId) return [String(me), String(otherUserId)].sort().join(':');
+    return String(chatId); // fallback — should rarely happen once logged in
+  }
+
   // ── AES-256-GCM encrypt/decrypt ───────────────────────────────────────────
   async function _aesEncrypt(plaintext, aesKey) {
     const iv  = global.crypto.getRandomValues(new Uint8Array(12));
@@ -247,7 +295,7 @@
     if (!recipient) return plaintext;
 
     const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
-    const aesKey     = await _hkdf(sharedBits, chatId);
+    const aesKey     = await _hkdf(sharedBits, _chatContext(chatId, recipientUserId));
     const env        = await _aesEncrypt(plaintext, aesKey);
 
     return JSON.stringify({ v: 1, kid: _myKeyId, iv: env.iv, ct: env.ct });
@@ -267,12 +315,22 @@
     const sender = await _getRecipientPublicKey(senderUserId);
     if (!sender) return '[Encrypted — sender key not found]';
 
+    const sharedBits = await _computeSharedBits(_myPrivKey, sender.key);
+
+    // FIX-E2E-CHATID: try the stable per-pair context first (current scheme,
+    // used by encryptForChat above). Fall back to the legacy literal-chatId
+    // context for any message encrypted before this fix was deployed, so
+    // existing history already at rest stays readable.
     try {
-      const sharedBits = await _computeSharedBits(_myPrivKey, sender.key);
-      const aesKey     = await _hkdf(sharedBits, chatId);
+      const aesKey = await _hkdf(sharedBits, _chatContext(chatId, senderUserId));
       return await _aesDecrypt(envelope, aesKey);
-    } catch (e) {
-      return '[Decryption failed]';
+    } catch (_) {
+      try {
+        const legacyKey = await _hkdf(sharedBits, String(chatId));
+        return await _aesDecrypt(envelope, legacyKey);
+      } catch (e) {
+        return '[Decryption failed]';
+      }
     }
   }
 
@@ -297,7 +355,7 @@
     const recipient = await _getRecipientPublicKey(recipientUserId);
     if (!recipient) return null;
     const sharedBits = await _computeSharedBits(_myPrivKey, recipient.key);
-    const aesKey     = await _hkdf(sharedBits, chatId);
+    const aesKey     = await _hkdf(sharedBits, _chatContext(chatId, recipientUserId));
     const iv         = global.crypto.getRandomValues(new Uint8Array(12));
     const ct         = await subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, aesKey, arrayBuffer);
     return { iv: b64(iv), ct: b64(ct) };
@@ -308,8 +366,13 @@
     const sender = await _getRecipientPublicKey(senderUserId);
     if (!sender) return null;
     const sharedBits = await _computeSharedBits(_myPrivKey, sender.key);
-    const aesKey     = await _hkdf(sharedBits, chatId);
-    return subtle.decrypt({ name: 'AES-GCM', iv: unb64(envelope.iv), tagLength: 128 }, aesKey, unb64(envelope.ct));
+    try {
+      const aesKey = await _hkdf(sharedBits, _chatContext(chatId, senderUserId));
+      return subtle.decrypt({ name: 'AES-GCM', iv: unb64(envelope.iv), tagLength: 128 }, aesKey, unb64(envelope.ct));
+    } catch (_) {
+      const legacyKey = await _hkdf(sharedBits, String(chatId));
+      return subtle.decrypt({ name: 'AES-GCM', iv: unb64(envelope.iv), tagLength: 128 }, legacyKey, unb64(envelope.ct));
+    }
   }
 
   // ── GROUP ENCRYPTION: Sender Keys ──────────────────────────────────────────
@@ -423,44 +486,9 @@
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  // BATCH 2: Expose getSharedBits for ratchet bootstrap
-  async function getSharedBits(chatId, otherUserId) {
-    if (!_myPrivKey) return null;
-    try {
-      const recipientId = otherUserId || chatId;
-      const recipient = await _getRecipientPublicKey(String(recipientId));
-      if (!recipient) return null;
-      return _computeSharedBits(_myPrivKey, recipient.key);
-    } catch(e) { return null; }
-  }
-
-  // Wrap encryptForChat to use ratchet when available
-  const _origEncrypt = encryptForChat;
-  async function encryptForChatWithRatchet(plaintext, chatId, recipientId) {
-    if (window.KynectaRatchet && _enabled) {
-      try {
-        const bits = await getSharedBits(chatId, recipientId);
-        if (bits) { try { await window.KynectaRatchet.init(chatId, bits); } catch(_){} }
-        return await window.KynectaRatchet.encrypt(chatId, plaintext);
-      } catch(e) { console.warn('[E2E] Ratchet encrypt failed, falling back:', e.message); }
-    }
-    return _origEncrypt(plaintext, chatId);
-  }
-
-  // Wrap decryptForChat to handle both v:1 and v:2 envelopes
-  const _origDecrypt = decryptForChat;
-  async function decryptForChatWithRatchet(envelopeStr, chatId, senderUserId) {
-    if (window.KynectaRatchet && window.KynectaRatchet.isRatchetEnvelope && window.KynectaRatchet.isRatchetEnvelope(envelopeStr)) {
-      try { return await window.KynectaRatchet.decrypt(chatId, envelopeStr, senderUserId); }
-      catch(e) { return '🔒 [Decryption failed]'; }
-    }
-    return _origDecrypt(envelopeStr, chatId, senderUserId);
-  }
-
   global.KynectaE2E = {
     init,
-    encryptForChat: encryptForChatWithRatchet,
-    encryptForChatV1: _origEncrypt,
+    encryptForChat,
     decryptFromChat,
     encryptAttachment,
     decryptAttachment,
@@ -474,6 +502,13 @@
     decryptGroupMessage,
     wrapForLocalStorage,
     unwrapFromLocalStorage,
+    // Exposed for js/double-ratchet.js — identity key material needed to
+    // bootstrap a ratchet session (X3DH-style handshake) on first contact.
+    getMyIdentityPrivateKey()    { return _myPrivKey; },
+    getIdentityPublicKeyB64(userId) {
+      return _getRecipientPublicKey(userId).then(r => r?.key ? exportPublicKey({ publicKey: r.key }) : null);
+    },
+    getEncryptionContext: _chatContext,
     get enabled() { return _enabled; },
     get publicKey() { return _myPubKeyB64; },
     get keyId() { return _myKeyId; },
@@ -483,6 +518,11 @@
       PUB_CACHE.clear();
     },
   };
+
+  // Let modules that depend on KynectaE2E (e.g. js/double-ratchet.js) know
+  // it's ready, instead of relying purely on their own polling/setTimeout
+  // fallbacks.
+  try { document.dispatchEvent(new CustomEvent('kyn:e2eReady')); } catch (_) {}
 
   console.log('[KynectaE2E] ✅ Loaded — WebCrypto:', !!subtle);
 

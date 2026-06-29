@@ -41,7 +41,14 @@
     <script src="js/e2e-encryption.js"></script>
     <script src="js/groupEncryption.client.js"></script>
     <!-- Phase 3+4: Security & Sealed Groups -->
-    <script src="js/e2e-encryption.js" defer></script>
+    <!-- FIX-E2E-DUPLICATE-LOAD: js/e2e-encryption.js used to be loaded AGAIN
+         here (deferred), on top of the synchronous load above. That second
+         load silently replaced window.KynectaE2E with a fresh, uninitialized
+         object, discarding whatever the synchronous load + groupEncryption
+         .client.js had already set up. js/groupEncryption.client.js always
+         looks up window.KynectaE2E fresh at call time (not via a captured
+         reference), so this only worked by luck of timing rather than by
+         design — removed. -->
     <script src="js/double-ratchet.js" defer></script>
     <script src="js/safety-numbers.js" defer></script>
     <script src="js/sealed-groups.js" defer></script>
