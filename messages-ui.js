@@ -22,6 +22,20 @@
 
     'use strict';
 
+    // FIX-AUDIT: Guaranteed local HTML escape — does NOT depend on `core` being
+    // loaded. The caption rendering paths below previously did
+    // `core?.escapeHtml ? core.escapeHtml(x) : x` — if core was unavailable for
+    // any reason (load order race, module failure), this silently fell through
+    // to raw unescaped content, a stored XSS vector. _safeEscapeHtml always
+    // escapes regardless of core's load state.
+    function _safeEscapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        return String(text).replace(/[&<>"'`=\/]/g, (ch) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
+            "'": '&#39;', '/': '&#x2F;', '`': '&#x60;', '=': '&#x3D;'
+        })[ch] || ch);
+    }
+
 
 
     // =============================================
@@ -3648,7 +3662,7 @@
 
                         </div>
 
-                        ${message.content && message.type === 'image' && message.content !== (message.mediaUrl||message.fileUrl) ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.content) : message.content}</div>` : ''}
+                        ${message.content && message.type === 'image' && message.content !== (message.mediaUrl||message.fileUrl) ? `<div class="message-caption">${_safeEscapeHtml(message.content)}</div>` : ''}
 
                         <div class="message-meta">
 
@@ -3714,7 +3728,7 @@
 
                         </div>
 
-                        ${message.content && message.content !== (message.mediaUrl||message.fileUrl) ? `<div class="message-caption">${core?.escapeHtml ? core.escapeHtml(message.content) : message.content}</div>` : ''}
+                        ${message.content && message.content !== (message.mediaUrl||message.fileUrl) ? `<div class="message-caption">${_safeEscapeHtml(message.content)}</div>` : ''}
 
                         <div class="message-meta">
 
@@ -4577,11 +4591,11 @@
 
                 const _words = _rawLast.split(/\s+/).filter(Boolean);
 
-                const lastMsgDisplay = _words.length > 8
+                const lastMsgDisplay = _safeEscapeHtml(_words.length > 8
 
                     ? _words.slice(0, 8).join(' ') + '...'
 
-                    : _rawLast;
+                    : _rawLast);
 
                 
 

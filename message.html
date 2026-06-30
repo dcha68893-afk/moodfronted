@@ -1409,7 +1409,7 @@
                 <div class="typing-text" id="typingText">is typing...</div>
             </div>
             
-            <div class="messages-container" id="messagesContainer">
+            <div class="messages-container" id="messagesContainer" role="log" aria-live="polite" aria-relevant="additions" aria-label="Message conversation">
                 <!-- Messages will be loaded here -->
                 <div class="empty-chat">
                     <i class="fas fa-comments empty-chat-icon"></i>
@@ -1648,22 +1648,7 @@
     <script src="/js/services.message.js"></script>
     <script type="module" src="messages-core.js"></script>
     <script type="module" src="messages-ui.js?v=3"></script>
-    <script src="js/voice-recorder.js" defer></script>
-    <script src="js/link-preview.js" defer></script>
-    <script src="js/chat-sync.js" defer></script>
-    <!-- Phase 1 features -->
-    <script src="js/gif-picker.js" defer></script>
-    <script src="js/view-once.js" defer></script>
-    <script src="js/swipe-reply.js" defer></script>
-    <script src="js/dm-poll.js" defer></script>
-    <script src="js/last-seen-privacy.js" defer></script>
-    <!-- Phase 2 features -->
-    <script src="js/sticker-picker.js" defer></script>
-    <script src="js/message-select.js" defer></script>
-    <!-- Phase 3: Security -->
     <script src="js/e2e-encryption.js" defer></script>
-    <script src="js/double-ratchet.js" defer></script>
-    <script src="js/safety-numbers.js" defer></script>
     <script defer>
         // FIX-E2E-WIRING: js/e2e-encryption.js only activates via a
         // 'kyn:loggedIn' window event that nothing in this codebase actually
@@ -1678,18 +1663,6 @@
         // load, which may be long after this iframe already consumed it
         // once. It's cleared on explicit logout instead (js/api.auth.js
         // _performLogout).
-        //
-        // FIX-E2E-DUPLICATE-LOAD: js/e2e-encryption.js used to be loaded
-        // TWICE on this page (once right here, once again further down,
-        // immediately before double-ratchet.js). The second load silently
-        // replaced window.KynectaE2E with a brand-new, uninitialized object,
-        // discarding whatever this init script had already set up on the
-        // first one — relying entirely on this block's setTimeout retry
-        // happening to fire *after* that second load finished. That's no
-        // longer how this works (e2e-encryption.js now loads exactly once,
-        // right above), but the retry loop below is left in place as a
-        // harmless safety net in case this script ever runs before
-        // e2e-encryption.js for some other reason (e.g. network ordering).
         (function () {
             function tryInitE2E() {
                 if (!window.KynectaE2E) {
@@ -1710,6 +1683,22 @@
             tryInitE2E();
         })();
     </script>
+    <script src="js/voice-recorder.js" defer></script>
+    <script src="js/link-preview.js" defer></script>
+    <script src="js/chat-sync.js" defer></script>
+    <!-- Phase 1 features -->
+    <script src="js/gif-picker.js" defer></script>
+    <script src="js/view-once.js" defer></script>
+    <script src="js/swipe-reply.js" defer></script>
+    <script src="js/dm-poll.js" defer></script>
+    <script src="js/last-seen-privacy.js" defer></script>
+    <!-- Phase 2 features -->
+    <script src="js/sticker-picker.js" defer></script>
+    <script src="js/message-select.js" defer></script>
+    <!-- Phase 3: Security -->
+    <script src="js/e2e-encryption.js" defer></script>
+    <script src="js/double-ratchet.js" defer></script>
+    <script src="js/safety-numbers.js" defer></script>
     <!-- Remaining features -->
     <script src="js/voice-waveform.js" defer></script>
     <script src="js/message-search.js" defer></script>

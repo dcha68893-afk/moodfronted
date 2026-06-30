@@ -218,18 +218,33 @@
     const processedMessageIds = _makePersistentSet('kyn_processed_msg_ids', 500);
     const sentMessageIds      = _makePersistentSet('kyn_sent_msg_ids', 200);
 
-    // FIX Bug 6: Clear processedMessageIds when the page becomes visible again.
-    // If a message arrived while this iframe was hidden (user on another tab/page),
-    // its ID was stored in sessionStorage. When the user returns, the dedup set
-    // would silently drop the message. Clearing on visibility-restore ensures
-    // any queued/pending messages are re-processed and shown.
+    // FIX Bug 6 (FIX-AUDIT hardened): On visibility-restore, instead of wiping the
+    // entire dedup set (which let an already-rendered message be duplicated if
+    // redelivered after reconnect), reseed the set from message IDs currently
+    // present in the DOM. Anything already on screen stays protected; anything
+    // that arrived while hidden and was never rendered passes through normally.
     (function _installVisibilityResetForDedup() {
+        const _reseedFromDom = () => {
+            try {
+                const container = document.getElementById('messagesContainer');
+                if (!container) { processedMessageIds.clear(); return; }
+                const renderedIds = Array.from(container.querySelectorAll('[data-message-id]'))
+                    .map(el => el.getAttribute('data-message-id'))
+                    .filter(Boolean);
+                processedMessageIds.clear();
+                renderedIds.forEach(id => processedMessageIds.add(id));
+            } catch (_) {
+                // If DOM isn't available for any reason, fall back to the old
+                // behavior rather than throwing.
+                processedMessageIds.clear();
+            }
+        };
         const _clearOnVisible = () => {
             if (document.visibilityState === 'visible') {
                 // Only clear if we've been hidden for more than 2 seconds to avoid
                 // clearing during brief focus losses (e.g. clicking a link)
                 if (window._kynLastHiddenAt && Date.now() - window._kynLastHiddenAt > 2000) {
-                    processedMessageIds.clear();
+                    _reseedFromDom();
                 }
             } else {
                 window._kynLastHiddenAt = Date.now();
@@ -239,7 +254,7 @@
         // Also clear on postMessage PAGE_FOCUS (parent fires this when switching back to messages tab)
         window.addEventListener('message', (evt) => {
             if (evt.data && (evt.data.type === 'PAGE_FOCUS' || evt.data.type === 'MODULE_FOCUSED')) {
-                processedMessageIds.clear();
+                _reseedFromDom();
             }
         });
     })();
