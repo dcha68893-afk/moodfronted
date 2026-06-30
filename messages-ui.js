@@ -3531,11 +3531,13 @@
                 const rContent = rd.content || rd.text || '';
                 const rSender = rd.senderName || (rd.sender && rd.sender.username) || '';
                 const rPreview = rContent.length > 60 ? rContent.substring(0, 60) + '\u2026' : rContent;
-                const rId = String(rd.id || rd.messageId || '');
-                replyIndicator = '<div class="reply-quote" onclick="window.messagesUI&&window.messagesUI.scrollToMessage&&window.messagesUI.scrollToMessage(\'' + rId + '\')">' +
+                const rId = String(rd.id || rd.messageId || '').replace(/[^0-9]/g, ''); // numeric-only, no injection
+                // FIX-XSS: escape user-controlled strings before innerHTML injection
+                const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+                replyIndicator = '<div class="reply-quote" onclick="window.messagesUI&&window.messagesUI.scrollToMessage&&window.messagesUI.scrollToMessage(\'' + _esc(rId) + '\')">' +
                     '<div class="reply-quote-bar"></div><div class="reply-quote-body">' +
-                    (rSender ? '<span class="reply-quote-sender">' + rSender + '</span>' : '') +
-                    '<span class="reply-quote-text">' + (rPreview || '\uD83D\uDCCE Media') + '</span>' +
+                    (rSender ? '<span class="reply-quote-sender">' + _esc(rSender) + '</span>' : '') +
+                    '<span class="reply-quote-text">' + (_esc(rPreview) || '\uD83D\uDCCE Media') + '</span>' +
                     '</div></div>';
             }
 
