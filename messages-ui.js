@@ -3373,16 +3373,26 @@
             const isSameConversation = prevChatId && prevChatId === currentChatId;
 
             if (isSameConversation && normalizedMessages.length > 0) {
-                // Find which messages are already rendered
+                // Find which messages are already rendered.
+                // FIX-AUDIT: also include IDs trimmed by the DOM-windowing module
+                // (see end of file) — those messages are still "known/rendered"
+                // from the user's perspective, just detached from the DOM for
+                // performance. Without this, a trimmed message would look "new"
+                // here and get re-appended as a visual duplicate when restored.
+                const _trimmedIds = (typeof window._kynGetTrimmedIds === 'function') ? window._kynGetTrimmedIds() : null;
                 const renderedIds = new Set(
                     Array.from(container.querySelectorAll('[data-message-id]'))
                         .map(el => el.dataset.messageId)
                 );
+                if (_trimmedIds) _trimmedIds.forEach(id => renderedIds.add(id));
                 const newMessages = normalizedMessages.filter(m =>
                     m.id && !renderedIds.has(String(m.id))
                 );
-                // Only do full re-render if message order changed or messages were deleted
-                const containerMsgCount = container.querySelectorAll('[data-message-id]').length;
+                // Only do full re-render if message order changed or messages were deleted.
+                // FIX-AUDIT: containerMsgCount must include trimmed-but-known messages too,
+                // otherwise windowing would make this number artificially low and could
+                // spuriously trigger fullReRenderNeeded once enough bubbles are trimmed.
+                const containerMsgCount = container.querySelectorAll('[data-message-id]').length + (_trimmedIds ? _trimmedIds.size : 0);
                 const fullReRenderNeeded = containerMsgCount > normalizedMessages.length;
 
                 if (!fullReRenderNeeded && newMessages.length > 0) {
@@ -13947,4 +13957,209 @@ Type: ${message.type || 'text'}`;
     window._kynAppendMessage = _appendMessageBubbleDirect;
 
     console.log('[KynPatch v4.0] ✅ Message visibility patch installed');
+})();
+
+// =============================================================================
+// FIX-AUDIT (MSG-UI-007): DOM windowing for large chats
+// =============================================================================
+// Problem: renderMessages()/_renderMessageBatches() above keep every rendered
+// message bubble permanently attached to the DOM. In a chat with 1,000+
+// messages this means 1,000+ live DOM nodes with images/avatars/event
+// listeners, causing visible jank (forced reflow, slow paint) every time a
+// new message is appended, plus unbounded memory growth over a long session.
+//
+// Fix approach: rather than rewriting renderMessages (which has carefully
+// tuned smart-append, DOM-recovery-merge, and signature-caching logic that
+// works correctly today), this module runs alongside it as a passive
+// MutationObserver. Once the number of attached message bubbles exceeds
+// MAX_RENDERED, it detaches the oldest (topmost, scrolled-away) bubbles and
+// replaces them with a single fixed-height spacer div that preserves total
+// scroll height — so the scrollbar size and the user's visual scroll
+// position do not jump. If the user scrolls back up near the top of the
+// spacer, the trimmed bubbles are restored from an in-memory cache before
+// the spacer comes into view, so scrolling up to read history is seamless.
+//
+// This module never deletes message data — only DOM nodes. The underlying
+// message store (ChatManager._messagesMap, IndexedDB, etc.) is untouched,
+// so re-rendering, search, and dedup logic continue to work exactly as
+// before.
+(function() {
+    'use strict';
+
+    const MAX_RENDERED   = 150;  // keep at most this many bubbles attached at once
+    const TRIM_BATCH      = 50;   // how many oldest bubbles to detach per trim pass
+    const RESTORE_MARGIN  = 600;  // px from top of spacer before triggering restore
+
+    let _windowing = {
+        container: null,
+        spacer: null,
+        trimmedCache: [], // { id, html, height } in chronological order (oldest first)
+        observing: false,
+    };
+
+    function _getContainer() {
+        return document.getElementById('messagesContainer');
+    }
+
+    function _ensureSpacer(container) {
+        let spacer = container.querySelector('.kyn-dom-window-spacer');
+        if (!spacer) {
+            spacer = document.createElement('div');
+            spacer.className = 'kyn-dom-window-spacer';
+            spacer.style.cssText = 'width:100%;flex-shrink:0;';
+            spacer.setAttribute('aria-hidden', 'true');
+        }
+        return spacer;
+    }
+
+    function _trimIfNeeded() {
+        const container = _getContainer();
+        if (!container) return;
+
+        // Don't interfere with passive/loading/empty states or while a full
+        // re-render is in flight (those clear innerHTML themselves anyway).
+        const bubbles = container.querySelectorAll(':scope > [data-message-id]');
+        if (bubbles.length <= MAX_RENDERED) return;
+
+        const toTrim = Math.min(TRIM_BATCH, bubbles.length - MAX_RENDERED);
+        if (toTrim <= 0) return;
+
+        // Don't trim if user is currently scrolled near the top — they're
+        // actively reading old messages, trimming under them would be jarring.
+        if (container.scrollTop < RESTORE_MARGIN) return;
+
+        let spacer = container.querySelector('.kyn-dom-window-spacer');
+        let removedHeight = spacer ? (parseFloat(spacer.style.height) || 0) : 0;
+        const newlyTrimmed = [];
+
+        for (let i = 0; i < toTrim; i++) {
+            const el = bubbles[i];
+            if (!el || !el.isConnected) continue;
+            // Skip date separators directly preceding — keep them attached to
+            // avoid orphaning a separator with no messages under it; simplest
+            // safe rule is to only trim actual message bubbles, separators
+            // collapse naturally since they have no data-message-id and are
+            // left in place (negligible DOM cost, ~1 node per day).
+            const rect = el.getBoundingClientRect();
+            removedHeight += rect.height;
+            newlyTrimmed.push({
+                id: el.dataset.messageId,
+                html: el.outerHTML,
+                height: rect.height,
+            });
+            el.remove();
+        }
+
+        if (newlyTrimmed.length === 0) return;
+
+        _windowing.trimmedCache = _windowing.trimmedCache.concat(newlyTrimmed);
+
+        spacer = _ensureSpacer(container);
+        spacer.style.height = `${removedHeight}px`;
+        if (!spacer.isConnected) {
+            container.insertBefore(spacer, container.firstChild);
+        }
+        _windowing.spacer = spacer;
+        _windowing.container = container;
+    }
+
+    function _restoreIfNearTop() {
+        const container = _windowing.container || _getContainer();
+        const spacer = _windowing.spacer;
+        if (!container || !spacer || !spacer.isConnected) return;
+        if (_windowing.trimmedCache.length === 0) return;
+
+        if (container.scrollTop > RESTORE_MARGIN) return;
+
+        // Restore everything in the cache at once — simplest correct behavior.
+        // For extremely large histories this could be chunked, but a single
+        // restore pass is still far cheaper than never trimming at all.
+        const prevScrollHeight = container.scrollHeight;
+        const frag = document.createDocumentFragment();
+        _windowing.trimmedCache.forEach(item => {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = item.html;
+            const restored = tmp.firstElementChild;
+            if (restored) frag.appendChild(restored);
+        });
+
+        container.insertBefore(frag, spacer);
+        spacer.remove();
+        _windowing.spacer = null;
+        _windowing.trimmedCache = [];
+
+        // Preserve scroll position relative to content that was just inserted above
+        const heightDelta = container.scrollHeight - prevScrollHeight;
+        container.scrollTop += heightDelta;
+    }
+
+    function _installScrollWatcher(container) {
+        if (container._kynWindowScrollBound) return;
+        container._kynWindowScrollBound = true;
+        let debounce = null;
+        container.addEventListener('scroll', () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(_restoreIfNearTop, 80);
+        }, { passive: true });
+    }
+
+    function _installObserver() {
+        const container = _getContainer();
+        if (!container || _windowing.observing) return;
+
+        _installScrollWatcher(container);
+
+        const mo = new MutationObserver((mutations) => {
+            // FIX-AUDIT: if the container was fully cleared (chat switch / full
+            // re-render via container.innerHTML = ''), our cached spacer/trimmed
+            // IDs are now stale and refer to a different chat's messages — wipe
+            // them so the next render's dedup check doesn't see phantom IDs.
+            const wasCleared = mutations.some(m =>
+                m.removedNodes && m.removedNodes.length > 0 &&
+                !container.contains(_windowing.spacer)
+            );
+            if (wasCleared && _windowing.trimmedCache.length > 0) {
+                _windowing.trimmedCache = [];
+                _windowing.spacer = null;
+            }
+
+            // Debounce trim checks so we don't run on every single node add
+            // during a batch render (_renderMessageBatches appends in chunks).
+            clearTimeout(_windowing._trimDebounce);
+            _windowing._trimDebounce = setTimeout(_trimIfNeeded, 250);
+        });
+        mo.observe(container, { childList: true });
+        _windowing.observing = true;
+        _windowing.container = container;
+    }
+
+    // FIX-AUDIT: expose trimmed IDs so renderMessages' smart-append dedup check
+    // (see FIX-029 above in this file) can treat trimmed-but-known messages as
+    // already rendered rather than re-appending them as duplicates.
+    window._kynGetTrimmedIds = function() {
+        return new Set(_windowing.trimmedCache.map(item => String(item.id)));
+    };
+
+    // The messagesContainer element can be recreated when chats are switched
+    // (some code paths do container.innerHTML = '' then rebuild children, but
+    // others may replace the element itself), so periodically confirm we're
+    // still observing the live container and reset cached state on chat switch.
+    let _lastContainerRef = null;
+    setInterval(() => {
+        const container = _getContainer();
+        if (!container) return;
+        if (container !== _lastContainerRef) {
+            _lastContainerRef = container;
+            _windowing = { container: null, spacer: null, trimmedCache: [], observing: false };
+            _installObserver();
+        }
+    }, 2000);
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _installObserver);
+    } else {
+        _installObserver();
+    }
+
+    console.log('[KynPatch] ✅ DOM windowing installed for large-chat performance');
 })();
