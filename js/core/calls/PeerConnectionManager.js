@@ -510,6 +510,29 @@
     constructor() {
       this._peers     = new Map();   // peerId:callId → PeerSession
       this._started   = false;
+      // FIX-DUP-SIGNAL: incoming signals can reach handleSignal() via more
+      // than one path (window 'kyn:webrtc:signal' CustomEvent AND the
+      // KynectaEventBus 'SOCKET_EVENT' relay both fire for the same socket
+      // message in some iframe/postMessage routing configurations). A
+      // duplicate offer/answer applied twice throws InvalidStateError on
+      // the RTCPeerConnection and a duplicate ICE candidate can confuse the
+      // ICE agent. This map records a short-lived fingerprint of each
+      // signal so duplicates are dropped before they reach the session.
+      this._recentSignals = new Map(); // fingerprint → timestamp
+    }
+
+    _isDuplicateSignal(peerId, callId, signal) {
+      const now = Date.now();
+      for (const [fp, ts] of this._recentSignals) {
+        if (now - ts > 4000) this._recentSignals.delete(fp);
+      }
+      const body = signal.type === 'candidate'
+        ? JSON.stringify(signal.candidate || '')
+        : (signal.sdp || '');
+      const fingerprint = `${peerId}:${callId}:${signal.type}:${body}`;
+      if (this._recentSignals.has(fingerprint)) return true;
+      this._recentSignals.set(fingerprint, now);
+      return false;
     }
 
     start() {
@@ -548,6 +571,10 @@
       const session = this.getSession(peerId, callId);
       if (!session) {
         console.warn(`[PeerConn] No session for signal: peer=${peerId} call=${callId}`);
+        return;
+      }
+      if (this._isDuplicateSignal(peerId, callId, signal)) {
+        console.warn(`[PeerConn] Dropped duplicate ${signal.type} signal: peer=${peerId} call=${callId}`);
         return;
       }
       await session.handleSignal(signal);
