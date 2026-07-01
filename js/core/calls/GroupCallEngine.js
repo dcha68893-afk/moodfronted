@@ -391,10 +391,56 @@
       const participant = new Participant(userId, displayName, false);
       this._participants.set(userId, participant);
 
+      await this._connectToParticipant(userId, displayName, /* isInitiator */ true);
+      this._notify('participant:joined', { userId, displayName });
+      console.log(`[GroupCall] Participant joined: ${userId}`);
+    }
+
+    // FIX-MISSING-HANDLER (CRITICAL): the server sends
+    // 'group:call:current_participants' to a NEW joiner immediately after
+    // they join, listing everyone already in the call. There was no
+    // listener for this event at all, so a new joiner never created a
+    // PeerConnection session for any existing participant.
+    //
+    // Concretely, this meant group calls did not work for ANY call with 2+
+    // people: when participant B joins after A, the server tells A about B
+    // ('participant_joined') and A creates an initiator session and sends
+    // B an SDP offer. But B never created a (non-initiator) session for A
+    // — because nothing handled 'current_participants' — so
+    // PeerConnectionManager.handleSignal() found no session for A's offer
+    // and silently dropped it ("No session for signal" warning). A's
+    // RTCPeerConnection stayed stuck in 'have-local-offer' forever and no
+    // media ever connected. The bug was invisible in the UI because the
+    // call screen itself rendered fine — only the underlying WebRTC
+    // connection was dead.
+    //
+    // Fix: handle the event by creating a non-initiator session for each
+    // existing participant (isInitiator=false — we wait for their offer,
+    // matching the initiator side they already create via
+    // _onParticipantJoined). This mirrors the connection symmetrically so
+    // both directions of the mesh are actually wired up.
+    async _onCurrentParticipants(data) {
+      const list = Array.isArray(data?.participants) ? data.participants : [];
+      for (const p of list) {
+        const userId = String(p.userId);
+        if (userId === this._localUserId || this._participants.has(userId)) continue;
+
+        const displayName = p.displayName || `User ${userId}`;
+        const participant = new Participant(userId, displayName, false);
+        this._participants.set(userId, participant);
+
+        await this._connectToParticipant(userId, displayName, /* isInitiator */ false);
+        this._notify('participant:joined', { userId, displayName });
+        console.log(`[GroupCall] Connected to existing participant: ${userId}`);
+      }
+    }
+
+    async _connectToParticipant(userId, displayName, isInitiator) {
+      const participant = this._participants.get(userId);
       try {
         const localStream = window.__DeviceMediaManager.getLocalStream();
         const peerSession = await window.__PeerConnectionManager.createSession(
-          userId, this._callId, true, localStream
+          userId, this._callId, isInitiator, localStream
         );
 
         peerSession.onEvent(({ event, ...evData }) => {
@@ -412,9 +458,6 @@
             this._layout.updateIndicators(userId, { quality: 'POOR' });
           }
         });
-
-        this._notify('participant:joined', { userId, displayName });
-        console.log(`[GroupCall] Participant joined: ${userId}`);
       } catch (err) {
         console.warn(`[GroupCall] Failed to connect to ${userId}:`, err.message);
       }
@@ -467,6 +510,14 @@
       });
       window.addEventListener('kyn:group:call:participant_update', e => {
         this._onParticipantUpdate(e.detail || {});
+      });
+
+      // FIX-MISSING-HANDLER (CRITICAL): see _onCurrentParticipants() above —
+      // without this, new joiners never connected to anyone already in the
+      // call. The server emits this once, right after 'group:call:join' is
+      // acknowledged.
+      window.addEventListener('kyn:group:call:current_participants', e => {
+        this._onCurrentParticipants(e.detail || {});
       });
 
       // Host commands directed at us

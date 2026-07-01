@@ -1084,7 +1084,21 @@
                 // closed one side. Now every call-related event is forwarded in both
                 // colon (call:accepted) and underscore (call_accepted) forms so all
                 // listener patterns in calls-core.js and calls-ui.js are satisfied.
-                if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice')) {
+                //
+                // FIX-GROUP-CALL-IFRAME (CRITICAL): this condition only matched events
+                // starting with 'call', 'webrtc', or 'ice' — so 'group:call:*' events
+                // (participant_joined, participant_left, current_participants,
+                // participant_update, muted_by_host, hand_raised, hand_lowered,
+                // lower_hand) were NEVER forwarded into the calls.html iframe at all.
+                // calls.html is loaded as <iframe src="calls.html"> inside chat.html,
+                // and GroupCallEngine.js (which runs inside that iframe) only listens
+                // via window.addEventListener('kyn:group:call:...'), which is only
+                // populated by this fan-out block. Net effect: group calls were
+                // completely non-functional in the normal (iframe) usage path — no
+                // participant-joined/left/state events ever reached the call UI or
+                // GroupCallEngine, regardless of the 'current_participants' handler
+                // fix in GroupCallEngine.js itself.
+                if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice') || evType.startsWith('group:call') || evType.startsWith('group_call')) {
                     try {
                         var _callAllFrames = document.querySelectorAll('iframe');
                         var _colonForm = evType.indexOf('_') !== -1 ? evType.replace(/_/g, ':') : evType;
@@ -1431,6 +1445,24 @@
                 'call:webrtc_offer', 'call:webrtc_answer',
                 'call:ice_candidate', 'call_ice_candidate', 'ice_candidate',
                 'call:receiver_offline', 'call:no_answer', 'call:receiver_ack',
+                // FIX-GROUP-CALL-REGISTRATION (CRITICAL): CallSignalingService.js on the
+                // backend emits all of these for group calls (group:call:join handler
+                // emits 'group:call:participant_joined'/'group:call:current_participants',
+                // group:call:leave emits 'group:call:participant_left', etc.) but none of
+                // them were ever in this allEvents list. socket.on() was therefore never
+                // called for them at all — the events were dropped by the Socket.IO
+                // client before any routing/forwarding logic could run, regardless of
+                // any iframe-forwarding or GroupCallEngine listener fixes downstream.
+                // This was the actual root cause of group calls being non-functional:
+                // not just a missing handler in GroupCallEngine.js, but the events never
+                // reaching JavaScript at all.
+                'group:call:join', 'group:call:leave',
+                'group:call:participant_joined', 'group:call:participant_left',
+                'group:call:current_participants', 'group:call:participant_update',
+                'group:call:mute_participant', 'group:call:remove_participant',
+                'group:call:muted_by_host', 'group:call:removed_by_host',
+                'group:call:hand_raised', 'group:call:hand_lowered', 'group:call:lower_hand',
+                'call:reconnect',
             ];
 
             // FIX: friend events were missing — without these the socket never
