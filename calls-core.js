@@ -37572,6 +37572,30 @@ clearActiveCall: function() {
                 notifyListeners('call_dedup_rejected', d);
             }},
 
+            // FEAT-01 FIX: call:busy was dispatched by server but had no
+            // registered CustomEvent listener, so handleCallBusy was only
+            // reachable via postMessage (not the WebSocket path). Register it
+            // here so the outgoing call UI resets immediately on busy signal.
+            { event: 'kyn:call:busy',      fn: (d) => handleCallBusy(d) },
+            { event: 'kyn:call_busy',      fn: (d) => handleCallBusy(d) },
+            // FEAT-01: call:waiting lets the callee UI show "Tap to switch" banner
+            { event: 'kyn:call:waiting',   fn: (d) => { notifyListeners('call_waiting', d); } },
+            { event: 'kyn:call_waiting',   fn: (d) => { notifyListeners('call_waiting', d); } },
+
+            // FEAT-02 FIX: this device is a second logged-in device. The user
+            // accepted the call on their other device. Dismiss the incoming
+            // call ring UI here without doing anything else (the other device
+            // owns the actual WebRTC session).
+            { event: 'kyn:call:accepted_elsewhere', fn: (d) => {
+                logInfo && logInfo(MODULE, 'Call accepted on another device — dismissing ring', d);
+                const _callId = d && d.callId;
+                // Use handleCallRejected to reset the incoming call UI cleanly
+                // (it clears the ringing overlay, stops ringtone, resets state)
+                // but we pass reason='accepted_elsewhere' so the UX copy differs.
+                handleCallRejected({ ...d, reason: 'accepted_elsewhere' });
+                notifyListeners('call_accepted_elsewhere', d);
+            }},
+
 
 
             { event: 'kyn:call:cancelled',   fn: (d) => handleCallEnded(d) },

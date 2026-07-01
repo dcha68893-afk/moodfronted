@@ -1447,6 +1447,10 @@
                 'call:receiver_offline', 'call:no_answer', 'call:receiver_ack',
                 // C-09 FIX: dedup rejection feedback from server
                 'call:dedup_rejected',
+                // FEAT-01: call waiting and busy signals
+                'call:busy', 'call_busy', 'call:waiting', 'call_waiting',
+                // FEAT-02: multi-device — dismiss ring on non-answering devices
+                'call:accepted_elsewhere',
                 // FIX-GROUP-CALL-REGISTRATION (CRITICAL): CallSignalingService.js on the
                 // backend emits all of these for group calls (group:call:join handler
                 // emits 'group:call:participant_joined'/'group:call:current_participants',
