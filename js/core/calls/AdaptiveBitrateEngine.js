@@ -146,6 +146,33 @@
       // Network restoration recovery
       window.addEventListener('online', () => this._onNetworkRestored());
 
+      // C-10 FIX: WiFi → mobile-data (or vice-versa) transitions do NOT fire
+      // 'offline'/'online' events — navigator.onLine stays true throughout.
+      // The RTCPeerConnection fails silently: ICE candidates cached for the
+      // old interface are no longer valid, so the connection degrades and
+      // eventually enters 'disconnected'/'failed' (handled by
+      // PeerConnectionManager.oniceconnectionstatechange). But on some
+      // devices the connection state never transitions to 'failed' before
+      // the ICE timeout, leaving the call alive with no audio. Listening to
+      // navigator.connection 'change' gives us an early signal to trigger an
+      // ICE restart before the timeout fires, reducing the dead-audio window
+      // from ~30s (ICE timeout) to ~1.5s (debounce below).
+      if (navigator.connection) {
+        navigator.connection.addEventListener('change', () => {
+          const active = window.__CallStateMachine?.getActive();
+          if (!active) return;
+          const type = navigator.connection.effectiveType || navigator.connection.type || 'unknown';
+          console.log(`[CallRecovery] Network type changed to ${type} — scheduling ICE restart`);
+          // Debounce: the change event fires before the new network path is
+          // fully established; wait 1.5 s before restarting ICE.
+          clearTimeout(this._netChangeTimer);
+          this._netChangeTimer = setTimeout(() => {
+            this._triggerICERestart(active);
+            this._notify('recovery:network_type_changed', { callId: active.callId, type });
+          }, 1500);
+        });
+      }
+
       const bus = window.KynectaEventBus;
       if (bus) {
         bus.on('SOCKET_CONNECTED', () => this._onSocketReconnected());

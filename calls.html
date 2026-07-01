@@ -4959,6 +4959,28 @@ window.__CALLS_IFRAME__ = {
                 localStorage.setItem('cached_call_history', JSON.stringify({ calls: calls, savedAt: Date.now() }));
             } catch(_) {}
 
+            // M-03 FIX: mark all visible missed calls as read automatically
+            // when history is rendered. Previously the POST /api/calls/missed/read
+            // endpoint existed but was never called — missed call badge never
+            // cleared. We call it here (best-effort, non-blocking) so the badge
+            // resets as soon as the user opens call history.
+            (function _markMissedCallsRead() {
+                if (loading) return;
+                var missedIds = calls
+                    .filter(function(c) { return c && c.id && (c.type === 'missed' || c.status === 'missed' || c.missed); })
+                    .map(function(c) { return c.id; });
+                if (!missedIds.length) return;
+                var tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                var base = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
+                           (window.config && window.config.apiUrl) || '';
+                if (!tok) return;
+                fetch((base || '') + '/api/calls/missed/read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+                    body: JSON.stringify({ callIds: missedIds }),
+                }).catch(function() {}); // fully non-blocking — badge clears optimistically
+            })();
+
             var targets = ['allCallsList', 'recentCallsList', 'missedCallsList'];
             targets.forEach(function(listId) {
                 var el = document.getElementById(listId);

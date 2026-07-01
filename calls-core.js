@@ -28911,7 +28911,30 @@ _escapeHtml: function(text) {
 
             console.log('[CallsCore] ℹ️ CALL ACCEPTED received on receiver side — waiting for caller offer');
 
-
+            // C-08 FIX: For GROUP calls the receiver also needs to join the
+            // signaling mesh immediately on accept, because the caller-side
+            // 1:1 WebRTCManager path only opens one connection (to the first
+            // acceptor). GroupCallEngine.joinGroupCall() builds the N-way mesh
+            // correctly for every participant regardless of caller/callee role.
+            if (callData && (callData.isGroupCall || callData.type === 'group')) {
+                const _gce = window.__GroupCallEngine || window.GroupCall;
+                if (_gce && typeof _gce.joinGroupCall === 'function') {
+                    const _gcCallId   = callData.callId || callsState.activeCallId;
+                    const _gcGroupId  = callData.groupId || _gcCallId;
+                    const _gcLocalUid = String(
+                        (callsState.session && callsState.session.userId) ||
+                        (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId) || ''
+                    );
+                    if (_gcCallId && _gcLocalUid) {
+                        console.log('[CallsCore] 🔀 GROUP CALL — receiver joining mesh via GroupCallEngine', _gcCallId);
+                        _gce.joinGroupCall(_gcGroupId, _gcCallId, _gcLocalUid, {
+                            callType: callData.callType || callData.type || 'audio',
+                        }).catch(function(e) {
+                            console.warn('[CallsCore] GroupCallEngine.joinGroupCall (receiver) failed:', e.message);
+                        });
+                    }
+                }
+            }
 
             return;
 
@@ -28920,6 +28943,33 @@ _escapeHtml: function(text) {
         }
 
 
+
+        // C-08 FIX (CALLER SIDE): when this is a group call, the caller must
+        // join the mesh engine rather than opening a single 1:1 WebRTC
+        // connection. Previously every group call fell through to
+        // WebRTCManager.createOffer() which only opens one PeerConnection
+        // (to whoever accepted first) and ignores all other participants.
+        // GroupCallEngine.joinGroupCall() builds the correct N-way mesh.
+        if (callData && (callData.isGroupCall || callData.type === 'group') && isCaller) {
+            var _gce2 = window.__GroupCallEngine || window.GroupCall;
+            if (_gce2 && typeof _gce2.joinGroupCall === 'function') {
+                var _gcCallId2   = callData.callId || callsState.activeCallId || callsState.serverCallId;
+                var _gcGroupId2  = callData.groupId || _gcCallId2;
+                var _gcLocalUid2 = String(currentUserId || '');
+                if (_gcCallId2 && _gcLocalUid2) {
+                    console.log('[CallsCore] 🔀 GROUP CALL — caller joining mesh via GroupCallEngine', _gcCallId2);
+                    _gce2.joinGroupCall(_gcGroupId2, _gcCallId2, _gcLocalUid2, {
+                        callType: callData.callType || callData.type || 'audio',
+                    }).catch(function(e) {
+                        console.warn('[CallsCore] GroupCallEngine.joinGroupCall (caller) failed:', e.message);
+                    });
+                    return; // GroupCallEngine handles all WebRTC from here
+                }
+            }
+            // GroupCallEngine not available — fall through to single-peer path
+            // (degraded but better than silent failure)
+            console.warn('[CallsCore] GroupCallEngine not available for group call — degrading to single-peer');
+        }
 
         if (WebRTCManager._peerConnection && callsState.callActive) {
 
@@ -37511,6 +37561,16 @@ clearActiveCall: function() {
 
 
             { event: 'kyn:call_rejected',    fn: (d) => handleCallRejected(d) },
+
+            // C-09 FIX: server-side dedup window blocked the call:initiate;
+            // treat it identically to a rejection so the outgoing-call UI
+            // resets to idle and the user sees a toast rather than staying
+            // stuck on the calling screen forever.
+            { event: 'kyn:call:dedup_rejected', fn: (d) => {
+                logWarn(MODULE, 'call:initiate rate-limited by server', d);
+                handleCallRejected({ ...d, reason: 'rate_limited' });
+                notifyListeners('call_dedup_rejected', d);
+            }},
 
 
 

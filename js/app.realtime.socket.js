@@ -1445,6 +1445,8 @@
                 'call:webrtc_offer', 'call:webrtc_answer',
                 'call:ice_candidate', 'call_ice_candidate', 'ice_candidate',
                 'call:receiver_offline', 'call:no_answer', 'call:receiver_ack',
+                // C-09 FIX: dedup rejection feedback from server
+                'call:dedup_rejected',
                 // FIX-GROUP-CALL-REGISTRATION (CRITICAL): CallSignalingService.js on the
                 // backend emits all of these for group calls (group:call:join handler
                 // emits 'group:call:participant_joined'/'group:call:current_participants',
