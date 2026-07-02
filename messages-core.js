@@ -1084,6 +1084,25 @@ try {
         ChatManager._conversations.unshift(conversation);
         ChatManager._conversationsMap.set(conversation.id, conversation);
         ChatManager._saveToCache();
+
+        // BUG-009 FIX: _notifySubscribers() was missing — the sidebar never re-rendered
+        // when a new conversation was created by an incoming message:new from an unknown chatId.
+        // The conversation was in the data store but invisible until a manual refresh.
+        try { ChatManager._notifySubscribers(); } catch (_) {}
+
+        // BUG-007b FIX: The conversation entry above is built optimistically from the
+        // incoming message payload — it may be missing the correct chat name, avatar, or
+        // participant data (especially when the sender is not in the receiver's friends list).
+        // Trigger an async background fetch to replace the placeholder with authoritative
+        // server-side data. Debounced (200ms) so multiple rapid inbound messages on the
+        // same new chat don't trigger N parallel fetches.
+        if (!ChatManager._upsertFetchDebounce) {
+            ChatManager._upsertFetchDebounce = setTimeout(() => {
+                ChatManager._upsertFetchDebounce = null;
+                ChatManager.fetchConversations().catch(() => {});
+            }, 200);
+        }
+
         return conversation;
     }
 
@@ -3154,6 +3173,16 @@ try {
                     };
                     this.replacePendingConversation(conversationId, normalizedConv);
                     result.chatId = realChatId;
+
+                    // BUG-007 FIX: Trigger a background fetchConversations so the sidebar
+                    // shows the new real chat with correct server-side data. replacePendingConversation
+                    // updates the in-memory store immediately (so UI renders the chat), then this
+                    // async refresh overwrites with the authoritative server version (with correct
+                    // participant info, unread counts, etc.). The setTimeout ensures the return path
+                    // completes first — so the caller's UI update isn't delayed by the fetch.
+                    setTimeout(() => {
+                        ChatManager.fetchConversations().catch(() => {});
+                    }, 300);
                 }
             }
             
@@ -7110,6 +7139,16 @@ try {
         _bindKynectaRealtime();
         window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: true });
 
+        // BUG-006 FIX: Guard document.addEventListener calls with a module-level flag.
+        // Previously these registered unconditionally every time setupRealtimeMessageListener
+        // ran (which happens on every initMessageModule call — visibility change, focus
+        // restore, reconnect). Each call stacked another set of handlers, causing each
+        // incoming message to fire handleRealtimePayload N times (N = number of inits).
+        // processedMessageIds deduped the final store write, but still did N full
+        // evaluations of the handler including N dedup lookups + N setTimeout cleanups.
+        if (!window.__kynDocListenersBound) {
+            window.__kynDocListenersBound = true;
+
         // NOTE: window 'kyn:message:received' listener intentionally removed —
         // message.html previously dispatched both document:message:new AND
         // window:kyn:message:received for the same payload, causing handleRealtimePayload
@@ -7133,6 +7172,8 @@ try {
         document.addEventListener('message:reaction', function(evt) {
             if (evt.detail) handleRealtimePayload('message:reaction', evt.detail);
         });
+
+        } // end if !window.__kynDocListenersBound
     }   // end setupRealtimeMessageListener
 
     // ✅ FIX 3: Expose direct entry points for app_realtime_socket.js.
