@@ -76,8 +76,23 @@ window.__CALLS_IFRAME__ = {
     var _declineIntervalId    = null;
     var _autoDeclineTimeoutId = null;
     var _currentScreen        = 'idle';
+    // Prevent duplicate navigation: track in-flight screen transitions
+    var _screenTransitionLock = false;
+    var _pendingScreen        = null;
 
     window.showScreen = function(screenName) {
+        // NAVIGATION FIX: Prevent duplicate screen transitions
+        if (_currentScreen === screenName && screenName !== 'idle') {
+            return; // Already on this screen, skip
+        }
+        // Prevent stacked screens: if a transition is in-flight, queue it
+        if (_screenTransitionLock && screenName !== 'idle') {
+            _pendingScreen = screenName;
+            return;
+        }
+        _screenTransitionLock = true;
+        _currentScreen = screenName;
+
         var idle      = document.getElementById('idleScreen');
         var calling   = document.getElementById('callingScreen');
         var inCall    = document.getElementById('inCallScreen');
@@ -145,9 +160,17 @@ window.__CALLS_IFRAME__ = {
                     window.UIState.callState === 'connected' ||
                     window.UIState.callState === 'incoming'
                 ))) {
+                _screenTransitionLock = false;
                 return;
             }
             _endCallScreens();
+        }
+        // Release lock and process any pending transition
+        _screenTransitionLock = false;
+        if (_pendingScreen && _pendingScreen !== _currentScreen) {
+            var _next = _pendingScreen;
+            _pendingScreen = null;
+            setTimeout(function() { window.showScreen(_next); }, 0);
         }
     };
 
@@ -3550,6 +3573,14 @@ window.__CALLS_IFRAME__ = {
     <script src="callRetry.engine.js"></script>
     <script src="callOverlay.manager.js"></script>
     <script src="/js/app.stability.bridge.js"></script>
+    <!-- Call State Machine & Central Manager — must load before calls-core -->
+    <script src="/js/core/calls/CallStateMachine.js"></script>
+    <script src="/js/core/calls/PeerConnectionManager.js"></script>
+    <script src="/js/core/calls/DeviceMediaManager.js"></script>
+    <script src="/js/core/calls/WebRTCSessionOrchestrator.js"></script>
+    <script src="/js/core/calls/AdaptiveBitrateEngine.js"></script>
+    <script src="/js/core/calls/GroupCallEngine.js"></script>
+    <script src="/js/core/calls/CallManager.js"></script>
     <!-- Application modules (ES6 modules) - loaded in correct order -->
     <script type="module" src="calls-core.js"></script>
     <script type="module" src="calls-ui.js"></script>
@@ -5788,5 +5819,173 @@ window.__CALLS_IFRAME__ = {
     <!-- Remaining call features -->
     <script src="js/call-waiting.js" defer></script>
     <script src="js/adaptive-bitrate.js" defer></script>
+<!-- ═══════════════════════════════════════════════════════════════════════
+     CallManager UI Bridge
+     Connects CallManager state events to calls.html UI elements.
+     This is the single wiring point — no other script should duplicate this.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  'use strict';
+
+  function _bridge() {
+    var cm = window.__CallManager;
+    var cs = window.CALL_STATE;
+    if (!cm || !cs) { setTimeout(_bridge, 100); return; }
+
+    // ── State → UI mapping ─────────────────────────────────────────────────
+    window.addEventListener('kyn:call:ui_route', function (e) {
+      var state = (e.detail || {}).state;
+      var session = cm.getSession();
+      if (!state) return;
+
+      // Update peer name displays
+      if (session && session.peerName) {
+        ['#callingContactName','#incomingCallerName','#callWithName','#callPeerName',
+         '.call-peer-name','[data-call-peer-name]'].forEach(function(sel) {
+          document.querySelectorAll(sel).forEach(function(el) {
+            el.textContent = session.peerName;
+          });
+        });
+      }
+
+      // Bottom nav visibility
+      var isActive = [cs.OUTGOING, cs.INCOMING, cs.CONNECTING, cs.NEGOTIATING,
+                      cs.CONNECTED_AUDIO, cs.CONNECTED_VIDEO, cs.SCREEN_SHARING,
+                      cs.RECONNECTING, cs.HOLD, cs.MUTED].includes(state);
+      var bottomNav = document.getElementById('bottomNav') ||
+                      document.querySelector('.bottom-nav,[data-bottom-nav]');
+      if (bottomNav) {
+        bottomNav.style.setProperty('display', isActive ? 'none' : '', 'important');
+      }
+    });
+
+    // ── Terminal message display ───────────────────────────────────────────
+    window.addEventListener('kyn:call:terminal_message', function (e) {
+      var msg  = (e.detail || {}).message;
+      var type = (e.detail || {}).type;
+      if (!msg) return;
+      // Show brief overlay then return to idle
+      var overlay = document.getElementById('callStatusOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'callStatusOverlay';
+        overlay.style.cssText = [
+          'position:fixed','inset:0','background:rgba(0,0,0,0.75)',
+          'color:#fff','display:flex','align-items:center','justify-content:center',
+          'font-size:18px','font-weight:700','z-index:99999',
+          'flex-direction:column','gap:8px','pointer-events:none'
+        ].join(';');
+        document.body.appendChild(overlay);
+      }
+      overlay.innerHTML = '<div>' + msg + '</div>';
+      overlay.style.display = 'flex';
+      clearTimeout(overlay._tid);
+      overlay._tid = setTimeout(function () {
+        overlay.style.display = 'none';
+        overlay.innerHTML = '';
+      }, 2200);
+    });
+
+    // ── Reconnecting indicator ────────────────────────────────────────────
+    window.addEventListener('kyn:call:reconnecting', function (e) {
+      var visible = !!(e.detail || {}).visible;
+      var ind = document.getElementById('reconnectingIndicator') ||
+                document.querySelector('.reconnecting-indicator');
+      if (!ind) {
+        ind = document.createElement('div');
+        ind.id = 'reconnectingIndicator';
+        ind.style.cssText = [
+          'position:fixed','top:16px','left:50%','transform:translateX(-50%)',
+          'background:#f59e0b','color:#000','font-weight:700','font-size:13px',
+          'padding:6px 16px','border-radius:20px','z-index:9998',
+          'display:none'
+        ].join(';');
+        ind.textContent = '⟳ Reconnecting…';
+        document.body.appendChild(ind);
+      }
+      ind.style.display = visible ? 'block' : 'none';
+    });
+
+    // ── Call timer display ─────────────────────────────────────────────────
+    window.addEventListener('kyn:call:tick', function (e) {
+      var dur = (e.detail || {}).duration;
+      if (!dur) return;
+      ['#callTimer','#callDuration','.call-timer','[data-call-timer]'].forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) { el.textContent = dur; });
+      });
+    });
+
+    // ── Mute / video state reflection ─────────────────────────────────────
+    window.addEventListener('kyn:call:mute_changed', function (e) {
+      var muted = !!(e.detail || {}).muted;
+      ['#muteBtn','.mute-btn','[data-mute-btn]'].forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.classList.toggle('active', muted);
+          el.setAttribute('aria-pressed', String(muted));
+          var icon = el.querySelector('i');
+          if (icon) {
+            icon.className = muted ? 'fas fa-microphone-slash' : 'fas fa-microphone';
+          }
+        });
+      });
+    });
+
+    window.addEventListener('kyn:call:video_changed', function (e) {
+      var enabled = !!(e.detail || {}).enabled;
+      ['#videoBtn','.video-btn','[data-video-btn]'].forEach(function(sel) {
+        document.querySelectorAll(sel).forEach(function(el) {
+          el.classList.toggle('active', !enabled); // active = video off
+          el.setAttribute('aria-pressed', String(!enabled));
+        });
+      });
+    });
+
+    // ── Peer stream → video element ───────────────────────────────────────
+    window.addEventListener('kyn:call:peer_stream', function (e) {
+      var stream = (e.detail || {}).stream;
+      if (!stream) return;
+      var remoteVid = document.getElementById('remoteVideo') ||
+                      document.querySelector('video[data-remote]');
+      if (remoteVid) {
+        remoteVid.srcObject = stream;
+        remoteVid.play().catch(function(){});
+      }
+    });
+
+    // ── Cleanup complete → reset all UI ──────────────────────────────────
+    window.addEventListener('kyn:call:cleanup_complete', function () {
+      if (typeof window.showScreen === 'function') window.showScreen('idle');
+      document.body.classList.remove('call-active');
+      var localVid = document.getElementById('localVideo');
+      if (localVid) { localVid.srcObject = null; }
+      var remoteVid = document.getElementById('remoteVideo');
+      if (remoteVid) { remoteVid.srcObject = null; }
+    });
+
+    // ── Expose quick-action helpers to call controls ─────────────────────
+    window.kynCallAction = {
+      mute:             function() { return cm.toggleMute(); },
+      video:            function() { return cm.toggleVideo(); },
+      switchCamera:     function() { return cm.switchCamera(); },
+      speaker:          function(on) { cm.setSpeaker(on); },
+      startScreenShare: function() { return cm.startScreenShare(); },
+      stopScreenShare:  function() { return cm.stopScreenShare(); },
+      end:              function() { cm.endCall(); },
+      accept:           function() { cm.acceptCall(); },
+      reject:           function() { cm.rejectCall(); },
+      cancel:           function() { cm.cancelCall(); },
+    };
+
+    console.log('[CallManager Bridge] ✅ Wired to calls.html UI');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _bridge);
+  } else {
+    setTimeout(_bridge, 50);
+  }
+})();
+</script>
 </body>
 </html>
