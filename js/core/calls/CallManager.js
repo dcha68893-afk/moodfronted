@@ -732,6 +732,7 @@
 
     _startCallTimer(callId) {
       this._stopCallTimer();
+      let _heartbeatCount = 0;
       this._callTimer = setInterval(() => {
         const session = this._sm?.getSession(callId);
         if (!session || session.isTerminal()) { this._stopCallTimer(); return; }
@@ -740,6 +741,12 @@
         // Update timer displays
         const timerEls = document.querySelectorAll('.call-timer, #callTimer, [data-call-timer]');
         timerEls.forEach(el => { el.textContent = dur; });
+        // Emit heartbeat every 30 seconds
+        _heartbeatCount++;
+        if (_heartbeatCount % 30 === 0) {
+          _dispatch('kyn:call:emit_heartbeat', { callId });
+          _postToParent('CALL_HEARTBEAT', { callId, ts: Date.now() });
+        }
       }, 1000);
     }
 

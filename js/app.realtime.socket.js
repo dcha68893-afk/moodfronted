@@ -1469,6 +1469,8 @@
                 'group:call:muted_by_host', 'group:call:removed_by_host',
                 'group:call:hand_raised', 'group:call:hand_lowered', 'group:call:lower_hand',
                 'call:reconnect',
+                // Heartbeat, presence, offline recovery
+                'call:heartbeat_ack', 'call:presence_update', 'call:resync_response',
             ];
 
             // FIX: friend events were missing — without these the socket never

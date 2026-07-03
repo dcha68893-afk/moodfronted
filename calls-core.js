@@ -4873,11 +4873,74 @@ function applySession(sessionData) {
 
     };
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // CALLMANAGER BRIDGE — Single Source of Truth Integration
+    //
+    // Intercepts every write to callsState.callState / callsState.callActive
+    // and syncs them to the central CallManager / CallStateMachine so both
+    // systems stay consistent without a full rewrite of this file.
+    //
+    // Legacy state → CALL_STATE mapping:
+    //   idle / ended / failed / rejected / missed / busy / timeout → terminal
+    //   initiating / initiated → OUTGOING
+    //   incoming → INCOMING   |  ringing → RINGING
+    //   connecting / starting → CONNECTING
+    //   connected / in-call → CONNECTED_AUDIO (CallManager upgrades to VIDEO)
+    //   reconnecting → RECONNECTING
+    // ══════════════════════════════════════════════════════════════════════════
+    (function _installCallManagerBridge() {
+        var _legacyToCS = {
+            idle: 'IDLE', initiating: 'OUTGOING', initiated: 'OUTGOING',
+            incoming: 'INCOMING', ringing: 'RINGING',
+            connecting: 'CONNECTING', starting: 'CONNECTING', negotiating: 'NEGOTIATING',
+            connected: 'CONNECTED_AUDIO', 'in-call': 'CONNECTED_AUDIO',
+            reconnecting: 'RECONNECTING', failed: 'FAILED', ended: 'ENDED',
+            rejected: 'REJECTED', missed: 'MISSED', busy: 'BUSY', timeout: 'TIMEOUT',
+        };
 
+        var _rawCallState  = callsState.callState;
+        var _rawCallActive = callsState.callActive;
 
-    
+        Object.defineProperty(callsState, 'callState', {
+            get: function() { return _rawCallState; },
+            set: function(v) {
+                if (_rawCallState === v) return;
+                _rawCallState = v;
+                try {
+                    var sm = window.__CallStateMachine;
+                    var CS = window.CALL_STATE;
+                    if (!sm || !CS) return;
+                    var target = CS[_legacyToCS[v] || ''];
+                    if (!target) return;
+                    var callId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+                    if (!callId) return;
+                    var session = sm.getSession(callId);
+                    if (!session || session.isTerminal() || session.state === target) return;
+                    sm.transition(callId, target);
+                } catch (_) {}
+            },
+            enumerable: true, configurable: true
+        });
 
+        Object.defineProperty(callsState, 'callActive', {
+            get: function() { return _rawCallActive; },
+            set: function(v) {
+                _rawCallActive = v;
+                if (!v) {
+                    try {
+                        var cm = window.__CallManager;
+                        if (cm && typeof cm._stopCallTimer === 'function') cm._stopCallTimer();
+                    } catch (_) {}
+                }
+            },
+            enumerable: true, configurable: true
+        });
+    })();
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // OUTGOING CALL BRIDGE — ensure CallManager session created on initiate
+    // ══════════════════════════════════════════════════════════════════════════
+    var _cmTimerDelegated = false;
 
     // ==================== CLEAN LOGGING SYSTEM ====================
 
@@ -14526,6 +14589,17 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
     callsState.callState = 'initiating';
 
+    // CALLMANAGER BRIDGE: create CM session for outgoing call
+    try {
+        var _smOut = window.__CallStateMachine;
+        var _CSOut = window.CALL_STATE;
+        if (_smOut && _CSOut && callId) {
+            if (!_smOut.getSession(callId)) {
+                _smOut.createSession(callId, callType || 'audio', null, true);
+                _smOut.transition(callId, _CSOut.OUTGOING);
+            }
+        }
+    } catch(_outBE) {}
 
 
     
@@ -14629,6 +14703,21 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
     function resetCallState() {
+    // CALLMANAGER BRIDGE: notify CM to clean up before we reset local state
+    try {
+        var _cmReset = window.__CallManager;
+        if (_cmReset) {
+            var _resetId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+            if (_resetId) {
+                var _resetSession = window.__CallStateMachine && window.__CallStateMachine.getSession(_resetId);
+                if (_resetSession && !_resetSession.isTerminal()) {
+                    _cmReset.endCall(_resetId, 'reset');
+                }
+            }
+            if (typeof _cmReset._stopCallTimer === 'function') _cmReset._stopCallTimer();
+            _cmTimerDelegated = false;
+        }
+    } catch(_crErr) {}
     callsState.callActive = false;
     callsState.callState = 'idle';
     callsState.activeCallId = null;
@@ -28271,6 +28360,19 @@ _escapeHtml: function(text) {
         callsState.callState = 'incoming';
 
 
+        // CALLMANAGER BRIDGE: create CM session for incoming call
+        try {
+            var _smInc = window.__CallStateMachine;
+            var _CSInc = window.CALL_STATE;
+            if (_smInc && _CSInc) {
+                var _incId = callsState.activeCallId;
+                if (_incId && !_smInc.getSession(_incId)) {
+                    _smInc.createSession(_incId, (callData && callData.callType) || 'audio', (callData && callData.callerId), false);
+                    _smInc.transition(_incId, _CSInc.INCOMING);
+                    if (callData && callData.callerName) { var _is = _smInc.getSession(_incId); if(_is) _is.peerName = callData.callerName; }
+                }
+            }
+        } catch(_incBE) {}
 
         callsState.activeCallId = callData.callId || callData.id || callsState.activeCallId;  // ← CRITICAL: Set activeCallId for incoming calls
 
@@ -29134,6 +29236,26 @@ _escapeHtml: function(text) {
 
 
         callsState.callStartTime = callsState.callStartTime || Date.now();
+
+        // CALLMANAGER BRIDGE: delegate connected event so CM owns the timer
+        try {
+            var _cm2 = window.__CallManager;
+            var _sm2 = window.__CallStateMachine;
+            var _CS2 = window.CALL_STATE;
+            if (_cm2 && _sm2 && _CS2) {
+                var _cid2 = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+                if (_cid2) {
+                    if (!_sm2.getSession(_cid2)) {
+                        _sm2.createSession(_cid2, callsState.callType || 'audio', null, !!callsState._isCaller);
+                        _sm2.transition(_cid2, _CS2.OUTGOING);
+                        _sm2.transition(_cid2, _CS2.CONNECTING);
+                    }
+                    var _isVid2 = !!(callsState.callType === 'video');
+                    _cm2.onConnected(_cid2, _isVid2);
+                    _cmTimerDelegated = true;
+                }
+            }
+        } catch(_be2) {}
 
 
 
