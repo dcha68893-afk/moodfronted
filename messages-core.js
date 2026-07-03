@@ -6718,28 +6718,48 @@ try {
                 _realtimeProcessedIds.add(_dedupKey);
                 setTimeout(function() { _realtimeProcessedIds.delete(_dedupKey); }, 8000);
 
-                // FIXED ECHO PREVENTION:
-                // Only suppress if senderId === myId AND we have proof this is OUR sent copy:
-                //   a) _safeLocalId present (optimistic message echoed back with localId), OR
-                //   b) serverId is tracked in kynecta_sent_ids_v8 (set when message:sent fires).
-                // Without this guard, User A's messages to User B were suppressed on User B's
-                // side whenever B happened to be user 3 and A was also user 3 (same test account),
-                // or when SessionManager.getUserId() returned null and the comparison was skipped.
+                // FIXED ECHO PREVENTION (strengthened):
+                // When senderId === myId, this socket payload is from broadcastToChat()
+                // echoing back to the sender's own socket (which is in the chat room).
+                // The backend fix removes broadcastToChat for message:new, but we keep
+                // this guard as defense-in-depth against any remaining echo paths.
                 const _realtimeCurrentUserId = (SessionManager && SessionManager.getUserId && SessionManager.getUserId()) ||
                     (window.__PARENT_SESSION__ && (window.__PARENT_SESSION__.userId || (window.__PARENT_SESSION__.user && window.__PARENT_SESSION__.user.id))) ||
                     null;
                 const _realtimeSenderId = message.senderId || (message.sender && message.sender.id);
                 if (_realtimeSenderId && _realtimeCurrentUserId &&
                     String(_realtimeSenderId) === String(_realtimeCurrentUserId)) {
-                    // Confirm it's our echo — not just any message from us
+
+                    // Check 1: localId-based matching (most reliable when clientLocalId was set)
                     const _hasLocalMarker = !!(_safeLocalId || message.localId || message.requestId);
+
+                    // Check 2: serverId in sent-log (set by message:sent handler)
                     const _inSentLog = (function() {
                         if (!_safeId) return false;
                         try { return JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]').includes(_safeId); }
                         catch(_) { return false; }
                     })();
-                    if (_hasLocalMarker || _inSentLog) {
-                        // Definitely our own echo — update status only
+
+                    // Check 3 (NEW): serverId exists in _optimisticMessages values (sent this session)
+                    // This catches the case where clientLocalId was null so localId is absent,
+                    // and message:sent hasn't fired yet so kynecta_sent_ids_v8 is empty.
+                    const _inOptimistic = (function() {
+                        if (!MessageHandler || !MessageHandler._optimisticMessages) return false;
+                        // Check if any optimistic message matches by chatId + approximate content
+                        for (const [, optMsg] of MessageHandler._optimisticMessages) {
+                            if (String(optMsg.chatId || '') === chatId &&
+                                (optMsg.content || '').trim() === (message.content || '').trim()) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    })();
+
+                    // Check 4 (NEW): _messagesMap already has this serverId (duplicate scenario)
+                    const _alreadyInMap = _safeId && ChatManager._messagesMap && ChatManager._messagesMap.has(_safeId);
+
+                    if (_hasLocalMarker || _inSentLog || _inOptimistic || _alreadyInMap) {
+                        // Definitely our own echo — update status only, never append
                         const _echoLocalId = _safeLocalId || message.localId || null;
                         const _echoServerId = _safeId || null;
                         if (ChatManager && ChatManager.updateMessageStatus) {
@@ -6749,7 +6769,7 @@ try {
                                 { serverId: _echoServerId, localId: _echoLocalId }
                             );
                         }
-                        // Also track serverId for future echo prevention
+                        // Track serverId for future echo prevention
                         if (_echoServerId) {
                             try {
                                 const _sl = JSON.parse(localStorage.getItem('kynecta_sent_ids_v8') || '[]');
@@ -6758,8 +6778,8 @@ try {
                         }
                         return;
                     }
-                    // No proof it's our echo — fall through and render normally.
-                    // This handles the case where server strips localId from the echo.
+                    // If none of the above matched, this is a message we sent from ANOTHER device/tab.
+                    // Fall through and add it normally so it appears in the current session.
                 }
 
                 // FIX: always numeric ms — ISO strings compare as NaN in sort
