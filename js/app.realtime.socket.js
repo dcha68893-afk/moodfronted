@@ -1471,6 +1471,10 @@
                 'call:reconnect',
                 // Heartbeat, presence, offline recovery
                 'call:heartbeat_ack', 'call:presence_update', 'call:resync_response',
+                // In-call chat
+                'call:chat_message', 'call:chat_message_ack',
+                // Screen share notifications
+                'call:screen_share_started', 'call:screen_share_stopped',
             ];
 
             // FIX: friend events were missing — without these the socket never

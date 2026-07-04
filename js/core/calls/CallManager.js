@@ -438,6 +438,14 @@
         if (this._session) this._session.isScreenSharing = true;
         this._sm.transition(this._callId, window.CALL_STATE.SCREEN_SHARING);
         this._routeUI(window.CALL_STATE.SCREEN_SHARING);
+        // Notify all other participants via socket so they switch their UI
+        // FIX: previously the screen track was sent via WebRTC (replaceTrack)
+        // but remote participants had no signal to switch from avatar to
+        // full-screen display. This event triggers that switch.
+        _dispatch('kyn:call:emit_socket', {
+          event: 'call:screen_share_started',
+          data: { callId: this._callId },
+        });
         _dispatch('kyn:call:screen_share_started', { callId: this._callId });
         _log('Screen sharing started');
       } catch (e) {
@@ -451,6 +459,12 @@
       if (!session) return;
       if (this._session) this._session.isScreenSharing = false;
       const hasVideo = session.isVideoEnabled;
+      // Notify participants screen share ended
+      _dispatch('kyn:call:emit_socket', {
+        event: 'call:screen_share_stopped',
+        data: { callId: this._callId },
+      });
+      _dispatch('kyn:call:screen_share_stopped', { callId: this._callId });
       // Restore camera track
       try {
         if (this._localStream) {

@@ -7251,7 +7251,11 @@ window.addEventListener('message', function (e) {
     }
 
     // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ────────────────────────
-    if (d.type === 'POST_CALL_RESTORE') {
+    if (d.type === 'POST_CALL_RESTORE' || d.type === 'CALL_ENDED_RETURN') {
+        // FIX-NAV-RESTORE: CALL_ENDED_RETURN was sent by _onCallEnded but never
+        // handled here — so call-screen-active was never removed and the bottom
+        // nav never came back. Treat it identically to POST_CALL_RESTORE.
+        d.returnTo = d.returnTo || d.origin || 'messages';
         // ── FIX: A single hangup can trigger this from both the local endCall()
         // path AND a remote call:ended echo. Dedup within 1.5s so we don't fire
         // navigateToPage() twice for the same hangup.

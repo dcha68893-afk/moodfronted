@@ -28918,10 +28918,34 @@ _escapeHtml: function(text) {
     // Show success notification
 
 
-
-    const userName = callData.calleeName || callData.participants?.[0] || 'user';
-
-
+    // FIX-NAME: resolve callee display name for the calling screen.
+    // Server returns callerName (our own name), not the callee's name.
+    // Read from UIState.pendingCallUser (set by calls-ui.js before initiation)
+    // or from window.__activePeerName (set by __dispatchCallToIframe in chat.html
+    // frame — but that is the parent frame's window, so read it via sessionStorage
+    // which IS shared between parent and iframe on same origin).
+    let _resolvedCalleeName = callData.calleeName
+        || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+        || window.__activePeerName;
+    // sessionStorage is same-origin shared across frames
+    if (!_resolvedCalleeName) {
+        try {
+            const _pendingCall = JSON.parse(sessionStorage.getItem('pending_call') || '{}');
+            _resolvedCalleeName = _pendingCall.userName || _pendingCall.name || '';
+        } catch(_) {}
+    }
+    _resolvedCalleeName = _resolvedCalleeName || 'User';
+    // Update calling screen name element if it still shows a placeholder
+    try {
+        ['callingName','callingContactName'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && (!el.textContent || el.textContent === 'User' || el.textContent === 'Calling...' || el.textContent === '')) {
+                el.textContent = _resolvedCalleeName;
+            }
+        });
+    } catch(_ne) {}
+    window.__activePeerName = _resolvedCalleeName;
+    _showCallNotification(`${callData.callType === 'video' ? 'Video' : 'Voice'} call started with ${_resolvedCalleeName}`, 'success');
 
     _showCallNotification(`Voice call started with ${userName}`, 'success');
 

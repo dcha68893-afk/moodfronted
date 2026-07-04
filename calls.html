@@ -4849,21 +4849,60 @@ window.__CALLS_IFRAME__ = {
             data = data || {};
             var reason = data.reason || data.status || data.type || 'ended';
             var callId = data.callId || data.id || null;
-
-            // ✅ STALE-EVENT PROTECTION:
-            // Ignore CALL_ENDED that arrives within 5s of dispatching a NEW call
-            // AND the ended callId doesn't match the current active callId
+            // Stale event protection
             var msSinceDispatch = Date.now() - _callDispatchedAt;
-            var currentActiveId = (window.callsState && window.callsState.activeCallId)
-                               || (window.UIState && window.UIState.activeCallId)
-                               || null;
-            var isStaleEcho = _callDispatchedAt > 0 && msSinceDispatch < 5000
-                && (callId === null || callId === _lastCallEndedId
-                    || (currentActiveId && callId && callId !== currentActiveId));
-            if (isStaleEcho) {
-                _log('Stale CALL_ENDED ignored (', msSinceDispatch, 'ms since dispatch, callId:', callId, ')');
-                return;
+            var currentActiveId = (window.callsState && window.callsState.activeCallId) || (window.UIState && window.UIState.activeCallId) || null;
+            var isStaleEcho = _callDispatchedAt > 0 && msSinceDispatch < 5000 && (callId === null || callId === _lastCallEndedId || (currentActiveId && callId && callId !== currentActiveId));
+            if (isStaleEcho) { _log('Stale CALL_ENDED ignored (', msSinceDispatch, 'ms since dispatch, callId:', callId, ')'); return; }
+            if (callId && callId === _lastCallEndedId && Date.now() - _callEndedAt < 2000) return;
+            _lastCallEndedId = callId;
+            _callEndedAt = Date.now();
+            _log('Call ended:', reason);
+            window.__callEndedNavigating = true;
+            setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
+            _stopRingtones();
+            // Stop all media immediately
+            try { if (window.UIState && window.UIState.localStream) { window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} }); window.UIState.localStream = null; } } catch(e) {}
+            // Reset state
+            window.__callActive = false;
+            window._currentIncomingCallId = null;
+            try { sessionStorage.removeItem('kyn_incoming_call_id'); sessionStorage.removeItem('kyn_incoming_caller'); } catch(_) {}
+            if (window.callsState) { window.callsState.callActive = false; window.callsState.callState = 'idle'; window.callsState.activeCallId = null; }
+            if (window.UIState) { window.UIState.callActive = false; window.UIState.callState = 'idle'; }
+            // FIX-DARK-SCREEN: clear screens IMMEDIATELY before sending parent message
+            if (typeof window.endCallScreens === 'function') window.endCallScreens();
+            else {
+                ['callingScreen','inCallScreen'].forEach(function(id) { var el = document.getElementById(id); if (el) { el.classList.remove('active'); el.style.cssText = 'display:none!important'; } });
+                var _m2 = document.getElementById('incomingCallModal'); if (_m2) { _m2.classList.remove('active'); _m2.style.cssText = 'display:none!important'; }
+                if (typeof window._stopDeclineTimer === 'function') window._stopDeclineTimer();
             }
+            document.body.classList.remove('call-active','call-connected');
+            // FIX-NAV-RESTORE: send POST_CALL_RESTORE (chat.html handles this to
+            // remove call-screen-active and restore bottom nav). The old code sent
+            // CALL_ENDED_RETURN which chat.html does NOT handle — so nav stayed hidden.
+            var _returnTo = window._callOrigin || window.__pendingCallReturnTo || 'calls';
+            _sendToParent('POST_CALL_RESTORE', { returnTo: _returnTo, reason: reason, callId: callId });
+            _sendToParent('CALL_ENDED_RETURN', { origin: _returnTo }); // legacy compat
+            // FIX-CALL-RECORD: record correct call status
+            (function() {
+                try {
+                    var tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                    if (!tok || !callId) return;
+                    var status = 'completed';
+                    if (reason === 'missed' || reason === 'no_answer' || reason === 'timeout') status = 'missed';
+                    else if (reason === 'rejected' || reason === 'declined') status = 'rejected';
+                    else if (reason === 'cancelled' || reason === 'cancel') status = 'cancelled';
+                    else if (reason === 'failed' || reason === 'error') status = 'failed';
+                    var duration = _callConnectedAt > 0 ? Math.floor((Date.now() - _callConnectedAt) / 1000) : 0;
+                    fetch('/api/calls/' + callId + '/end', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+                        body: JSON.stringify({ status: status, duration: duration, reason: reason })
+                    }).catch(function() {});
+                } catch(_re) {}
+            })();
+            if (typeof window.showScreen === 'function') window.showScreen('idle');
+        }
 
             // Deduplicate same callId within 2s
             if (callId && callId === _lastCallEndedId &&
@@ -4905,14 +4944,43 @@ window.__CALLS_IFRAME__ = {
             }
 
             switch (t) {
+                // ── FIX-OUTGOING-SCREEN: OPEN_CALL_WITH_USER was missing entirely
+                // from this switch. The parent sends this message to trigger an
+                // outgoing call. Without this case, the calling screen never showed.
+                case 'OPEN_CALL_WITH_USER':
+                    window.__callActive = true;
+                    if (window.UIState) window.UIState.callActive = true;
+                    // FIX-NAME: userName MUST come from pay (the postMessage payload)
+                    // — window.__activePeerName is set on the PARENT frame's window,
+                    // NOT the iframe's window, so it is always undefined here.
+                    var _ocwuName = pay.userName || pay.name || pay.callerName || pay.calleeName || '';
+                    if (_ocwuName) window.__activePeerName = _ocwuName;
+                    _showCallingNow({
+                        userName:   _ocwuName || 'Loading...',
+                        callType:   pay.callType || pay.type || 'voice',
+                        userAvatar: pay.userAvatar || pay.avatar || null,
+                        userId:     pay.userId
+                    });
+                    // Forward to calls-ui as CustomEvent so initiateCallWithPendingUser fires
+                    try {
+                        window.dispatchEvent(new CustomEvent('OPEN_CALL_WITH_USER', { detail: pay }));
+                    } catch(_) {}
+                    break;
+
                 case 'CALL_INITIATED':
                     // ✅ FIX: Set flag before showing screen
                     window.__callActive = true;
                     if (window.UIState) window.UIState.callActive = true;
+                    // FIX-NAME: pay.userName comes from the postMessage payload
+                    // which IS set correctly in __dispatchCallToIframe. Use it directly
+                    // rather than falling back to window.__activePeerName (parent frame).
+                    var _ciName = pay.userName || pay.calleeName || pay.receiverName
+                                  || pay.callerName || pay.name || '';
+                    if (_ciName) window.__activePeerName = _ciName;
                     _showCallingNow({
-                        userName:   pay.calleeName || pay.receiverName || pay.userName || window.__activePeerName || 'User',
+                        userName:   _ciName || 'Calling...',
                         callType:   pay.callType || pay.type || (window.UIState && window.UIState.callType) || 'voice',
-                        userAvatar: pay.userAvatar || window.__activePeerAvatar || null
+                        userAvatar: pay.userAvatar || pay.avatar || null
                     });
                     break;
 
@@ -4933,12 +5001,18 @@ window.__CALLS_IFRAME__ = {
                     window.__callAcceptedHandled = 0;
                     _stopRingtones();
                     _callConnectedAt = Date.now();
+                    // FIX-NAME: prefer payload fields, fall back to __activePeerName
+                    // (which WAS set inside this iframe at call start — NOT parent frame).
+                    var _caName = pay.callerName || pay.calleeName || pay.userName
+                                  || pay.name || window.__activePeerName
+                                  || window.__incomingCallerName || '';
                     window.transitionToInCall({
-                        userName:   pay.callerName || pay.calleeName || pay.userName
-                                    || window.__activePeerName || window.__incomingCallerName || 'User',
+                        userName:   _caName || 'Connected',
                         callType:   pay.callType || window.__activePeerType
                                     || (window.UIState && window.UIState.callType) || 'voice',
-                        userAvatar: pay.callerAvatar || window.__activePeerAvatar || window.__incomingCallerAvatar || null
+                        userAvatar: pay.callerAvatar || pay.userAvatar
+                                    || window.__activePeerAvatar
+                                    || window.__incomingCallerAvatar || null
                     });
                     break;
 
@@ -5820,7 +5894,363 @@ window.__CALLS_IFRAME__ = {
     <script src="js/call-waiting.js" defer></script>
     <script src="js/adaptive-bitrate.js" defer></script>
 <!-- ═══════════════════════════════════════════════════════════════════════
-     CallManager UI Bridge
+     IN-CALL CHAT, SCREEN SHARE NOTIFICATION, HAND RAISE NAME FIX
+     All features that were structured but non-functional.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<style>
+/* In-call chat panel */
+#inCallChatPanel {
+  position: fixed; right: 0; top: 0; bottom: 0; width: 300px;
+  background: #1a1a2e; border-left: 1px solid rgba(255,255,255,0.1);
+  display: none; flex-direction: column; z-index: 9000;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+#inCallChatPanel.open { display: flex; }
+#inCallChatHeader {
+  padding: 14px 16px; font-weight: 700; color: #fff;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: space-between;
+}
+#inCallChatMessages {
+  flex: 1; overflow-y: auto; padding: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.incall-chat-msg {
+  max-width: 85%; padding: 8px 12px; border-radius: 14px;
+  font-size: 13px; line-height: 1.45; word-break: break-word;
+}
+.incall-chat-msg.mine {
+  align-self: flex-end; background: #6366f1; color: #fff; border-bottom-right-radius: 4px;
+}
+.incall-chat-msg.theirs {
+  align-self: flex-start; background: rgba(255,255,255,0.12); color: #f0f0f0; border-bottom-left-radius: 4px;
+}
+.incall-chat-msg .msg-sender { font-size: 10px; opacity: 0.65; margin-bottom: 2px; }
+#inCallChatInputRow {
+  padding: 10px 12px; border-top: 1px solid rgba(255,255,255,0.1);
+  display: flex; gap: 8px; align-items: center;
+}
+#inCallChatInput {
+  flex: 1; background: rgba(255,255,255,0.1); border: none; border-radius: 20px;
+  padding: 8px 14px; color: #fff; font-size: 13px; outline: none;
+}
+#inCallChatInput::placeholder { color: rgba(255,255,255,0.4); }
+#inCallChatSend {
+  background: #6366f1; border: none; border-radius: 50%;
+  width: 34px; height: 34px; color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+/* Screen share indicator */
+#screenShareBanner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #7c3aed; color: #fff; text-align: center;
+  padding: 8px; font-size: 13px; font-weight: 600;
+  display: none;
+}
+/* Chat unread badge on chat button */
+#chatToggleBtn { position: relative; }
+#chatUnreadBadge {
+  position: absolute; top: -4px; right: -4px;
+  background: #ef4444; color: #fff; border-radius: 50%;
+  width: 16px; height: 16px; font-size: 10px; font-weight: 700;
+  display: none; align-items: center; justify-content: center;
+}
+</style>
+
+<!-- In-call chat panel -->
+<div id="inCallChatPanel" aria-label="In-call chat" role="complementary">
+  <div id="inCallChatHeader">
+    <span>💬 Chat</span>
+    <button id="inCallChatClose" style="background:none;border:none;color:#fff;font-size:20px;cursor:pointer;padding:0 4px;"
+            aria-label="Close chat">×</button>
+  </div>
+  <div id="inCallChatMessages" role="log" aria-live="polite" aria-label="Chat messages"></div>
+  <div id="inCallChatInputRow">
+    <input id="inCallChatInput" type="text" placeholder="Message everyone…"
+           maxlength="2000" autocomplete="off" aria-label="Chat message"/>
+    <button id="inCallChatSend" aria-label="Send message">
+      <i class="fas fa-paper-plane" style="font-size:13px;"></i>
+    </button>
+  </div>
+</div>
+
+<!-- Screen share banner -->
+<div id="screenShareBanner" role="status" aria-live="polite"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   IN-CALL CHAT
+   Sends via socket (call:chat_message) and receives same event.
+   Renders in the side panel, updates unread badge when panel is closed.
+   ══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var _chatOpen   = false;
+  var _unread     = 0;
+  var _myUserId   = null;
+  var _myName     = null;
+  var _participants = {}; // userId → displayName
+
+  function _getMyId() {
+    if (_myUserId) return _myUserId;
+    try {
+      var s = window.callCore && window.callCore._state && window.callCore._state.session;
+      if (!s) s = window.__CHILD_SESSION__ || (window.callsState && window.callsState.session);
+      if (s) { _myUserId = String(s.userId || s.id || ''); _myName = s.displayName || s.username || 'Me'; }
+    } catch (_) {}
+    return _myUserId;
+  }
+
+  function _getSocket() {
+    return (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket || null;
+  }
+
+  function _getCallId() {
+    return (window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId)) ||
+           (window.__CallManager && window.__CallManager.getCallId()) || null;
+  }
+
+  function _openChat()  { _chatOpen = true;  document.getElementById('inCallChatPanel').classList.add('open'); _unread = 0; _updateBadge(); }
+  function _closeChat() { _chatOpen = false; document.getElementById('inCallChatPanel').classList.remove('open'); }
+
+  function _updateBadge() {
+    var badge = document.getElementById('chatUnreadBadge');
+    if (!badge) return;
+    badge.textContent = _unread;
+    badge.style.display = (_unread > 0 && !_chatOpen) ? 'flex' : 'none';
+  }
+
+  function _appendMessage(msg, isMine) {
+    var container = document.getElementById('inCallChatMessages');
+    if (!container) return;
+    var div = document.createElement('div');
+    div.className = 'incall-chat-msg ' + (isMine ? 'mine' : 'theirs');
+    var senderName = isMine ? (_myName || 'Me') : (_participants[msg.senderId] || ('User ' + msg.senderId));
+    if (!isMine) {
+      var senderEl = document.createElement('div');
+      senderEl.className = 'msg-sender';
+      senderEl.textContent = senderName;
+      div.appendChild(senderEl);
+    }
+    var textEl = document.createElement('div');
+    textEl.textContent = msg.message;
+    div.appendChild(textEl);
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    if (!_chatOpen && !isMine) { _unread++; _updateBadge(); }
+  }
+
+  function _sendMessage() {
+    var input   = document.getElementById('inCallChatInput');
+    var message = input && input.value.trim();
+    if (!message) return;
+    var callId  = _getCallId();
+    var myId    = _getMyId();
+    var sock    = _getSocket();
+    if (!callId) { console.warn('[InCallChat] No active callId'); return; }
+    var payload = { callId: callId, message: message, senderId: myId, timestamp: Date.now() };
+    // Optimistic local render
+    _appendMessage(payload, true);
+    if (input) input.value = '';
+    // Send via socket
+    if (sock && sock.connected) {
+      sock.emit('call:chat_message', payload);
+    } else {
+      // Fallback: postMessage to parent (iframe case)
+      window.parent && window.parent.postMessage({ type: 'CALL_CHAT_MESSAGE', payload: payload }, '*');
+    }
+  }
+
+  // ── Wire UI ──────────────────────────────────────────────────────────────
+  function _wire() {
+    // Chat toggle button — add to controls bar dynamically if not present
+    var chatBtn = document.getElementById('chatToggleBtn');
+    if (!chatBtn) {
+      chatBtn = document.createElement('button');
+      chatBtn.id = 'chatToggleBtn';
+      chatBtn.className = 'incall-ctrl-btn';
+      chatBtn.title = 'Chat (C)';
+      chatBtn.setAttribute('aria-label', 'Toggle chat');
+      chatBtn.innerHTML = '<i class="fas fa-comment-dots"></i><div id="chatUnreadBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:700;align-items:center;justify-content:center;"></div>';
+      chatBtn.style.position = 'relative';
+      var ctrl = document.querySelector('.incall-controls, #inCallControls, .call-controls');
+      if (ctrl) ctrl.appendChild(chatBtn);
+    }
+    chatBtn.addEventListener('click', function () {
+      _chatOpen ? _closeChat() : _openChat();
+    });
+
+    var closeBtn = document.getElementById('inCallChatClose');
+    if (closeBtn) closeBtn.addEventListener('click', _closeChat);
+
+    var sendBtn = document.getElementById('inCallChatSend');
+    if (sendBtn) sendBtn.addEventListener('click', _sendMessage);
+
+    var inputEl = document.getElementById('inCallChatInput');
+    if (inputEl) {
+      inputEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _sendMessage(); }
+      });
+    }
+
+    // Keyboard shortcut C
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'c' || e.key === 'C') {
+        var active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        _chatOpen ? _closeChat() : _openChat();
+      }
+    });
+
+    // ── Receive messages via socket event (bridged via kyn: CustomEvent) ──
+    window.addEventListener('kyn:call:chat_message', function (e) {
+      var msg = e.detail || {};
+      var myId = _getMyId();
+      var isMine = String(msg.senderId) === String(myId);
+      if (!isMine) _appendMessage(msg, false); // own echo via ack only
+    });
+    // Also direct socket attachment
+    var _tryHookSocket = function () {
+      var sock = _getSocket();
+      if (!sock) { setTimeout(_tryHookSocket, 1000); return; }
+      if (sock._inCallChatHooked) return;
+      sock._inCallChatHooked = true;
+      sock.on('call:chat_message', function (msg) {
+        var myId = _getMyId();
+        if (String(msg.senderId) === String(myId)) return; // skip own
+        window.dispatchEvent(new CustomEvent('kyn:call:chat_message', { detail: msg }));
+      });
+      sock.on('call:chat_message_ack', function (msg) {
+        // Server ack — message was delivered; already rendered optimistically
+      });
+    };
+    _tryHookSocket();
+
+    // ── Participant name resolution for hand raise toasts ─────────────────
+    window.addEventListener('kyn:group:call:participant_joined', function (e) {
+      var d = e.detail || {};
+      if (d.userId && d.displayName) _participants[String(d.userId)] = d.displayName;
+    });
+    window.addEventListener('kyn:group:call:current_participants', function (e) {
+      var parts = (e.detail || {}).participants || [];
+      parts.forEach(function (p) {
+        if (p.userId && p.displayName) _participants[String(p.userId)] = p.displayName;
+      });
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _wire);
+  } else {
+    setTimeout(_wire, 50);
+  }
+})();
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HAND RAISE — Show participant NAME in toast (not just "A participant")
+   ══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  var _names = {};
+  window.addEventListener('kyn:group:call:participant_joined', function (e) {
+    var d = e.detail || {}; if (d.userId && d.displayName) _names[String(d.userId)] = d.displayName;
+  });
+  window.addEventListener('kyn:group:call:current_participants', function (e) {
+    ((e.detail || {}).participants || []).forEach(function (p) {
+      if (p.userId && p.displayName) _names[String(p.userId)] = p.displayName;
+    });
+  });
+  // Override the existing hand-raise toast to use the name
+  window.addEventListener('kyn:group:call:hand_raised', function (e) {
+    var uid  = e.detail && e.detail.userId;
+    var name = (uid && _names[String(uid)]) || (uid ? 'User ' + uid : 'A participant');
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#1e1e2e;color:#fff;padding:10px 18px;border-radius:10px;z-index:99999;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;display:flex;align-items:center;gap:8px;';
+    toast.innerHTML = '<span style="font-size:20px;">✋</span><span><strong>' + name + '</strong> raised their hand</span>';
+    document.body.appendChild(toast);
+    setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4000);
+  }, true); // capture = true so this fires before the old handler
+})();
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SCREEN SHARE — Show banner + switch remote view when someone shares
+   ══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  function _showBanner(name) {
+    var banner = document.getElementById('screenShareBanner');
+    if (!banner) return;
+    banner.textContent = (name || 'A participant') + ' is sharing their screen';
+    banner.style.display = 'block';
+    // Expand remote video to full-screen mode
+    var remoteVid = document.getElementById('remoteVideo');
+    if (remoteVid) {
+      remoteVid.style.display = 'block';
+      remoteVid.style.objectFit = 'contain'; // contain to show full screen, not cropped
+      remoteVid.style.background = '#000';
+    }
+    var avatarWrap = document.getElementById('incallAvatarWrap');
+    if (avatarWrap) avatarWrap.style.display = 'none';
+  }
+  function _hideBanner() {
+    var banner = document.getElementById('screenShareBanner');
+    if (banner) banner.style.display = 'none';
+    var remoteVid = document.getElementById('remoteVideo');
+    if (remoteVid) remoteVid.style.objectFit = 'cover'; // restore normal camera crop
+  }
+
+  var _names = {};
+  window.addEventListener('kyn:group:call:participant_joined', function (e) {
+    var d = e.detail || {}; if (d.userId && d.displayName) _names[String(d.userId)] = d.displayName;
+  });
+  window.addEventListener('kyn:group:call:current_participants', function (e) {
+    ((e.detail || {}).participants || []).forEach(function (p) {
+      if (p.userId && p.displayName) _names[String(p.userId)] = p.displayName;
+    });
+  });
+
+  window.addEventListener('kyn:call:screen_share_started', function (e) {
+    var uid  = (e.detail || {}).userId;
+    var name = (uid && _names[String(uid)]) || null;
+    _showBanner(name);
+  });
+  window.addEventListener('kyn:call:screen_share_stopped', function () { _hideBanner(); });
+
+  // Also hook the socket events directly (for remote participants receiving notification)
+  var _tryHook = function () {
+    var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
+    if (!sock) { setTimeout(_tryHook, 1000); return; }
+    if (sock._screenShareHooked) return;
+    sock._screenShareHooked = true;
+    sock.on('call:screen_share_started', function (d) {
+      var uid  = (d || {}).userId;
+      var name = (uid && _names[String(uid)]) || null;
+      _showBanner(name);
+      window.dispatchEvent(new CustomEvent('kyn:call:screen_share_started', { detail: d || {} }));
+    });
+    sock.on('call:screen_share_stopped', function () {
+      _hideBanner();
+      window.dispatchEvent(new CustomEvent('kyn:call:screen_share_stopped', {}));
+    });
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _tryHook);
+  } else {
+    setTimeout(_tryHook, 100);
+  }
+
+  // Emit socket event when CallManager starts/stops screen share
+  window.addEventListener('kyn:call:emit_socket', function (e) {
+    var d    = e.detail || {};
+    var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
+    if (!sock || !sock.connected) return;
+    if (d.event && d.data) sock.emit(d.event, d.data);
+  });
+})();
+</script>
+</body>
+</html>
      Connects CallManager state events to calls.html UI elements.
      This is the single wiring point — no other script should duplicate this.
      ═══════════════════════════════════════════════════════════════════════ -->
