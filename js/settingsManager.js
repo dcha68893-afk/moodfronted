@@ -498,7 +498,10 @@
         }
 
         applyNotificationSetting(key, value) {
-            document.documentElement.setAttribute('data-notification-' + key, value.toString());
+            // ✅ FIX: findChanges() can emit value=undefined when a key is removed
+            // between old/new settings — guard before .toString() instead of throwing
+            // and aborting the whole storage-sync batch.
+            document.documentElement.setAttribute('data-notification-' + key, value == null ? '' : value.toString());
             if (key === 'doNotDisturb') {
                 document.documentElement.classList.toggle('do-not-disturb', !!value);
             }
@@ -513,7 +516,8 @@
         }
 
         applyPrivacySetting(key, value) {
-            document.documentElement.setAttribute('data-privacy-' + key, value.toString());
+            // ✅ FIX: same undefined-value guard as applyNotificationSetting above.
+            document.documentElement.setAttribute('data-privacy-' + key, value == null ? '' : value.toString());
             if (key === 'whoCanAddMe')  this.updateFriendRequestUI(value);
             if (key === 'moodVisibility') this.updateMoodVisibilityUI(value);
         }

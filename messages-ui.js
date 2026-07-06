@@ -13817,7 +13817,7 @@ Type: ${message.type || 'text'}`;
         }, 2000);
     });
 
-    _uiLog('[KynPatch v3.0] ✅ All runtime patches installed');
+    if (window.__MESSAGES_DEBUG__) console.log('[KynPatch v3.0] ✅ All runtime patches installed');
 })();
 
 
