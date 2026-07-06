@@ -34,20 +34,27 @@
 
             window.KynectaCallRetry = this;
 
-            // ── Network-aware retry: cancel on disconnect, re-trigger on reconnect ──
-            window.addEventListener('kyn:wsDisconnected', () => {
-                if (this._active) {
-                    log('WebSocket disconnected — pausing retry timer');
-                    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-                }
-            });
+            // FIX-DEAD-EVENT: 'kyn:wsDisconnected'/'kyn:wsConnected' were never
+            // dispatched anywhere in the codebase — this pause/resume logic was
+            // dead code. The real socket lifecycle events are SOCKET_CONNECTED /
+            // SOCKET_DISCONNECTED on window.KynectaEventBus (emitted by
+            // app.realtime.socket.js on every real connect/disconnect cycle).
+            const bus = window.KynectaEventBus;
+            if (bus) {
+                bus.on('SOCKET_DISCONNECTED', () => {
+                    if (this._active) {
+                        log('Socket disconnected — pausing retry timer');
+                        if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+                    }
+                });
 
-            window.addEventListener('kyn:wsConnected', () => {
-                if (this._active && this._task && !this._timer) {
-                    log('WebSocket reconnected — resuming retry');
-                    this._scheduleNext('network_restored');
-                }
-            });
+                bus.on('SOCKET_CONNECTED', () => {
+                    if (this._active && this._task && !this._timer) {
+                        log('Socket reconnected — resuming retry');
+                        this._scheduleNext('network_restored');
+                    }
+                });
+            }
 
             window.addEventListener('online', () => {
                 if (this._active && this._task && !this._timer) {

@@ -655,6 +655,27 @@
             this._authenticated = true;
             this._state = CONNECTION_STATE.AUTHENTICATED;
             this._emitStateChange();
+
+            // FIX-CALL-RECOVERY: app.runtime.authority.js emits SOCKET_CONNECTED
+            // exactly once, at initial boot, based on whether the FIRST connection
+            // attempt succeeded. It never fires again. But 16+ subsystems across the
+            // app — including WebRTCSessionOrchestrator and AdaptiveBitrateEngine,
+            // which restore call signaling and re-adapt call quality after a
+            // reconnect — all listen for this exact event on every reconnect, not
+            // just boot. That meant a mid-call backend blip (Render sleep/restart,
+            // brief network drop) would reconnect the socket but never notify those
+            // subsystems, silently breaking call recovery. This is the actual,
+            // single source of truth for every real connect cycle (not just the
+            // first), so it's emitted from here on every successful (re)connect.
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit('SOCKET_CONNECTED', {
+                    userId: this._getUserId(),
+                    timestamp: Date.now(),
+                    reconnect: this._reconnectCountSinceBoot > 0
+                });
+            }
+            this._reconnectCountSinceBoot = (this._reconnectCountSinceBoot || 0) + 1;
+
             this._resolveConnectPromise();
             this._processQueue();
             this._registerMessageBridgeListeners();
@@ -872,6 +893,17 @@
 
             this._state = CONNECTION_STATE.RECONNECTING;
             this._emitStateChange();
+
+            // FIX-CALL-RECOVERY: matching counterpart to the SOCKET_CONNECTED fix
+            // above — subsystems (e.g. WebRTCSessionOrchestrator) need to know a
+            // real disconnect happened, not just infer it from the next reconnect.
+            if (window.KynectaEventBus) {
+                window.KynectaEventBus.emit('SOCKET_DISCONNECTED', {
+                    reason: (event && event.reason) || 'connection_lost',
+                    timestamp: Date.now()
+                });
+            }
+
             this._scheduleReconnect();
         }
 
@@ -1401,14 +1433,32 @@
         }
 
         _scheduleReconnect() {
-            if (this._reconnectAttempts >= SOCKET_CONFIG.reconnectAttempts) {
-                console.warn('[Realtime] Max reconnect attempts reached — stopping');
-                this._state = CONNECTION_STATE.DEGRADED;
-                this._emitStateChange();
+            this._clearReconnectTimer();
+
+            // FIX-WAKE: Backends on sleeping infra (e.g. Render free tier) can take
+            // far longer than our normal backoff ceiling to wake up — a stalled
+            // deploy, a slow migration, or a dyno that was fully spun down for hours.
+            // We must NEVER stop trying permanently (that requires a manual refresh,
+            // which real messaging apps never require). Once we exhaust the normal
+            // exponential-backoff attempts, drop into an indefinite slow-poll mode:
+            // keep retrying at a fixed interval forever, just less aggressively.
+            const exhausted = this._reconnectAttempts >= SOCKET_CONFIG.reconnectAttempts;
+
+            if (exhausted) {
+                if (this._state !== CONNECTION_STATE.DEGRADED) {
+                    console.warn('[Realtime] Max fast-reconnect attempts reached — switching to indefinite slow-poll (backend may still be waking up)');
+                    this._state = CONNECTION_STATE.DEGRADED;
+                    this._emitStateChange();
+                }
+
+                const slowPollDelay = SOCKET_CONFIG.reconnectMaxDelay; // e.g. 60s, forever
+                this._reconnectTimer = setTimeout(() => {
+                    // Don't increment _reconnectAttempts further — stay in slow-poll
+                    // mode until a connection actually succeeds (which resets it to 0).
+                    this._connectInternal();
+                }, slowPollDelay);
                 return;
             }
-
-            this._clearReconnectTimer();
 
             const delay = Math.min(
                 SOCKET_CONFIG.reconnectBaseDelay * Math.pow(2, this._reconnectAttempts),

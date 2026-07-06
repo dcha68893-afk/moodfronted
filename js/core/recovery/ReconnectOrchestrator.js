@@ -351,9 +351,18 @@
       console.log(`[Reconnect] Retry in ${delay}ms (attempt ${this._backoff.attempts})`);
 
       this._timer = setTimeout(() => {
-        const socket = window.KynectaRealtime?._socket;
-        if (socket && !socket.connected) {
-          socket.connect();
+        // FIX-WAKE: Use the public reconnect API, not the raw socket. The raw
+        // `_socket` reference gets nulled and rebuilt by app.realtime.socket.js
+        // on every real reconnect cycle, so calling `_socket.connect()` directly
+        // can silently no-op if `_socket` is currently null (e.g. right after a
+        // DEGRADED episode). `KynectaRealtime.connect()` always routes through
+        // the manager's own connection logic (token attach + socket rebuild).
+        const rt = window.KynectaRealtime;
+        if (rt && typeof rt.connect === 'function') {
+          const socket = rt._socket;
+          if (!socket || !socket.connected) {
+            rt.connect().catch(() => {});
+          }
         }
       }, delay);
     }

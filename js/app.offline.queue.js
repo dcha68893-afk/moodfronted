@@ -495,7 +495,27 @@
   if (!window.__OfflineMessageQueue || !window.__OfflineMessageQueue._sendHandlerWired) {
     window.__OfflineMessageQueue = offlineQueue;  // HybridTransportRuntime alias
   }
-  window.KynectaMsgQueue = offlineQueue;  // messages-core alias
+  // FIX-QUEUE-COLLISION (message loss bug): This used to unconditionally set
+  // window.KynectaMsgQueue = offlineQueue, clobbering the dedicated message
+  // queue from messageQueue.manager.js whenever both scripts load on the same
+  // page (as they do in chat.html, in that order).
+  //
+  // Real-world impact this was causing: messages-core.js calls
+  // window.KynectaMsgQueue.enqueue(msgObject) to queue an outgoing message
+  // when offline. Because msgObject.type is the MESSAGE's content type
+  // ("text"/"image"/etc), not the queue-operation type "message", it fell
+  // through this generic queue's default branch into _processGeneric(), which
+  // POSTs to /api/offline/process — a stub endpoint that acknowledges success
+  // (results.processed++) without ever actually creating/sending the message.
+  // The client saw "success", removed the item from the queue, and the
+  // message was gone — never delivered, no error surfaced to the user.
+  //
+  // Fix: only use this generic queue as the KynectaMsgQueue fallback when no
+  // dedicated message queue has already registered itself (matches the same
+  // guard pattern already used above for window.__OfflineMessageQueue).
+  if (!window.KynectaMsgQueue) {
+    window.KynectaMsgQueue = offlineQueue;  // messages-core alias (fallback only)
+  }
 
 
   console.log('[OfflineQueue] ✅ Ready (offline-first v2.1)');
