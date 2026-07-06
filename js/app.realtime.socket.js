@@ -238,7 +238,7 @@
             this._setupNetworkMonitoring();
 
             window.KynectaRealtime = this;
-            console.log('[Realtime] ✅ Socket.IO compatible manager initialized (v3.1.0)');
+            if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Socket.IO compatible manager initialized (v3.1.0)');
         }
 
         connect(token = null) {
@@ -272,7 +272,7 @@
 
                 // ── FIX #3: Debug log before connection ───────────────────────
                 if (this._sessionToken) {
-                    console.log('[Realtime] 🔑 Connecting with token (first 20 chars):',
+                    if (SOCKET_CONFIG.debug) console.log('[Realtime] 🔑 Connecting with token (first 20 chars):',
                         this._sessionToken.substring(0, 20) + '...',
                         'length:', this._sessionToken.length);
                 } else {
@@ -458,7 +458,7 @@
             const socketUrl = getBackendBaseUrl();
 
             if (!this._hasEverConnected || this._reconnectAttempts === 0 || this._reconnectAttempts % 5 === 0) {
-                console.log('[Realtime] Connecting Socket.IO to', socketUrl);
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] Connecting Socket.IO to', socketUrl);
             }
 
             const socketOptions = {
@@ -492,7 +492,7 @@
 
             this._socket.on('connect', () => {
                 if (this._lastConnectLogState !== 'connected') {
-                    console.log('[Realtime] ✅ Socket.IO connected successfully, sid:', this._socket.id);
+                    if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Socket.IO connected, sid:', this._socket.id);
                     this._lastConnectLogState = 'connected';
                 }
                 this._onSocketIOConnect();
@@ -537,7 +537,7 @@
                 // are added (Set already contains them) → all real-time events silently drop.
                 this._registeredSocketListeners.clear();
                 if (this._lastConnectLogState !== 'disconnected') {
-                    console.log('[Realtime] Socket.IO disconnected:', reason);
+                    if (SOCKET_CONFIG.debug) console.log('[Realtime] Socket.IO disconnected:', reason);
                     this._lastConnectLogState = 'disconnected';
                 }
                 // Don't reconnect on server-forced auth disconnects
@@ -570,7 +570,7 @@
             });
 
             this._socket.on('authenticated', (data) => {
-                console.log('[Realtime] ✅ Server confirmed authentication:', data);
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Server confirmed authentication:', data);
                 // FIX-CALL-DELIVERY: Re-join user rooms on authenticated confirmation.
                 // The connect-time join_user_room may fire before the server middleware
                 // has finished auth, so the join silently fails.  Re-joining here (after
@@ -582,7 +582,7 @@
                         this._socket.emit('join_user_room', { userId: myId });
                         this._socket.emit('join', { room: 'user:' + idStr });
                         this._socket.emit('join', { room: 'user_' + idStr });
-                        console.log('[Realtime] ✅ Re-joined user rooms after auth confirmation, userId:', myId);
+                        if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Re-joined user rooms after auth confirmation, userId:', myId);
                     }
                 } catch (_authJoinErr) {}
             });
@@ -645,7 +645,7 @@
                 const myId = this._getUserId();
                 if (myId && this._socket && typeof this._socket.emit === 'function') {
                     this._socket.emit('join_user_room', { userId: myId });
-                    console.log('[Realtime] ✅ Emitted join_user_room for userId:', myId);
+                    if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Emitted join_user_room for userId:', myId);
                 }
             } catch (_jrErr) {}
         }
@@ -710,7 +710,7 @@
 
             if (!this._lastWebSocketOpenLogAt || Date.now() - this._lastWebSocketOpenLogAt > 8000) {
                 this._lastWebSocketOpenLogAt = Date.now();
-                console.log('[Realtime] Opening raw WebSocket fallback', wsUrl.replace(/token=[^&]+/, 'token=***'));
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] Opening raw WebSocket fallback', wsUrl.replace(/token=[^&]+/, 'token=***'));
             }
 
             this._socket = new WebSocket(wsUrl);
@@ -736,7 +736,7 @@
 
             if (!this._hasEverConnected) {
                 this._hasEverConnected = true;
-                console.log('[Realtime] ✅ WebSocket OPEN');
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ WebSocket OPEN');
             }
 
             this._state = CONNECTION_STATE.CONNECTED;
@@ -901,11 +901,11 @@
 
                 if (!this._degradedRecoveryTimer) {
                     const recoveryDelay = 60000; // wait 60s before attempting recovery
-                    console.log(`[Realtime] DEGRADED — will attempt recovery in ${recoveryDelay / 1000}s`);
+                    if (SOCKET_CONFIG.debug) console.log(`[Realtime] DEGRADED — will attempt recovery in ${recoveryDelay / 1000}s`);
                     this._degradedRecoveryTimer = setTimeout(() => {
                         this._degradedRecoveryTimer = null;
                         if (this._state === CONNECTION_STATE.DEGRADED && navigator.onLine) {
-                            console.log('[Realtime] Auto-recovering from DEGRADED...');
+                            if (SOCKET_CONFIG.debug) console.log('[Realtime] Auto-recovering from DEGRADED...');
                             this._reconnectAttempts = 0;
                             this._consecutiveErrors = 0;
                             this._connectInternal();
@@ -1084,21 +1084,7 @@
                 // closed one side. Now every call-related event is forwarded in both
                 // colon (call:accepted) and underscore (call_accepted) forms so all
                 // listener patterns in calls-core.js and calls-ui.js are satisfied.
-                //
-                // FIX-GROUP-CALL-IFRAME (CRITICAL): this condition only matched events
-                // starting with 'call', 'webrtc', or 'ice' — so 'group:call:*' events
-                // (participant_joined, participant_left, current_participants,
-                // participant_update, muted_by_host, hand_raised, hand_lowered,
-                // lower_hand) were NEVER forwarded into the calls.html iframe at all.
-                // calls.html is loaded as <iframe src="calls.html"> inside chat.html,
-                // and GroupCallEngine.js (which runs inside that iframe) only listens
-                // via window.addEventListener('kyn:group:call:...'), which is only
-                // populated by this fan-out block. Net effect: group calls were
-                // completely non-functional in the normal (iframe) usage path — no
-                // participant-joined/left/state events ever reached the call UI or
-                // GroupCallEngine, regardless of the 'current_participants' handler
-                // fix in GroupCallEngine.js itself.
-                if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice') || evType.startsWith('group:call') || evType.startsWith('group_call')) {
+                if (evType.startsWith('call') || evType.startsWith('webrtc') || evType.startsWith('ice')) {
                     try {
                         var _callAllFrames = document.querySelectorAll('iframe');
                         var _colonForm = evType.indexOf('_') !== -1 ? evType.replace(/_/g, ':') : evType;
@@ -1445,36 +1431,6 @@
                 'call:webrtc_offer', 'call:webrtc_answer',
                 'call:ice_candidate', 'call_ice_candidate', 'ice_candidate',
                 'call:receiver_offline', 'call:no_answer', 'call:receiver_ack',
-                // C-09 FIX: dedup rejection feedback from server
-                'call:dedup_rejected',
-                // FEAT-01: call waiting and busy signals
-                'call:busy', 'call_busy', 'call:waiting', 'call_waiting',
-                // FEAT-02: multi-device — dismiss ring on non-answering devices
-                'call:accepted_elsewhere',
-                // FIX-GROUP-CALL-REGISTRATION (CRITICAL): CallSignalingService.js on the
-                // backend emits all of these for group calls (group:call:join handler
-                // emits 'group:call:participant_joined'/'group:call:current_participants',
-                // group:call:leave emits 'group:call:participant_left', etc.) but none of
-                // them were ever in this allEvents list. socket.on() was therefore never
-                // called for them at all — the events were dropped by the Socket.IO
-                // client before any routing/forwarding logic could run, regardless of
-                // any iframe-forwarding or GroupCallEngine listener fixes downstream.
-                // This was the actual root cause of group calls being non-functional:
-                // not just a missing handler in GroupCallEngine.js, but the events never
-                // reaching JavaScript at all.
-                'group:call:join', 'group:call:leave',
-                'group:call:participant_joined', 'group:call:participant_left',
-                'group:call:current_participants', 'group:call:participant_update',
-                'group:call:mute_participant', 'group:call:remove_participant',
-                'group:call:muted_by_host', 'group:call:removed_by_host',
-                'group:call:hand_raised', 'group:call:hand_lowered', 'group:call:lower_hand',
-                'call:reconnect',
-                // Heartbeat, presence, offline recovery
-                'call:heartbeat_ack', 'call:presence_update', 'call:resync_response',
-                // In-call chat
-                'call:chat_message', 'call:chat_message_ack',
-                // Screen share notifications
-                'call:screen_share_started', 'call:screen_share_stopped',
             ];
 
             // FIX: friend events were missing — without these the socket never
@@ -1513,16 +1469,6 @@
                 'group:messages:disappeared',
                 'group:verified',
                 'group:finance:created',
-                // FIX-GROUP-E2E-ROTATION: backend (groupMembersService.js,
-                // routes/groupEncryption.js) emits these on member removal and
-                // on sender-key distribution, but nothing registered a socket
-                // listener for them — js/groupEncryption.client.js's
-                // KynectaRealtime.on('group:rotation_required'/'group:
-                // sender_key_distributed') handlers were therefore unreachable,
-                // so a removed member's old key was never rotated away from,
-                // and newly-distributed keys weren't pulled in until the next
-                // message happened to arrive.
-                'group:rotation_required', 'group:sender_key_distributed',
             ];
 
             const statusEvents = [

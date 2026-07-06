@@ -1814,7 +1814,7 @@
             if (!iframeId) return;
             const iframe = document.getElementById(iframeId);
             if (!iframe || !iframe.contentWindow) return;
-            console.log('[IframeQueue] Flushing', queue.length, 'queued events to:', moduleName);
+            _chatLog('[IframeQueue] Flushing', queue.length, 'queued events to:', moduleName);
             queue.forEach(msg => { try { iframe.contentWindow.postMessage(msg, '*'); } catch(_) {} });
             _iframeQueue.delete(moduleName);
         }
@@ -2371,7 +2371,7 @@
         function registerModule(moduleName) {
             if (moduleName && !moduleRegistry.has(moduleName)) {
                 moduleRegistry.add(moduleName);
-                console.log(`📝 Module registered: ${moduleName} (Total: ${moduleRegistry.size})`);
+                _chatLog(`📝 Module registered: ${moduleName} (Total: ${moduleRegistry.size})`);
             }
         }
 
@@ -2830,7 +2830,7 @@
         }
 
         function navigateToPage(page, options = {}) {
-            console.log('[Navigation] navigateToPage called with:', page, options);
+            _chatLog('[Navigation] navigateToPage called with:', page, options);
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
@@ -2852,23 +2852,23 @@
                 }
                 window.__lastActivePage = window.__currentPage || 'messages';
                 window.__currentPage = page;
-                console.log('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
+                _chatLog('[Navigation] Page changed from', window.__lastActivePage, 'to', page);
             }
             updateHeaderContext(page);
             updateHeaderActions(page);
             
-            console.log('[Navigation] Hiding all iframe containers...');
+            _chatLog('[Navigation] Hiding all iframe containers...');
             document.querySelectorAll('.iframe-container').forEach(c => {
-                console.log('[Navigation] Hiding:', c.id, 'current classes:', c.className);
+                _chatLog('[Navigation] Hiding:', c.id, 'current classes:', c.className);
                 c.classList.add('hidden');
             });
             
             const target = document.getElementById(`${page}Content`);
-            console.log('[Navigation] Target element:', target, 'for page:', page);
+            _chatLog('[Navigation] Target element:', target, 'for page:', page);
             if (target) {
-                console.log('[Navigation] Target before removing hidden:', target.className);
+                _chatLog('[Navigation] Target before removing hidden:', target.className);
                 target.classList.remove('hidden');
-                console.log('[Navigation] Target after removing hidden:', target.className);
+                _chatLog('[Navigation] Target after removing hidden:', target.className);
             } else {
                 console.error('[Navigation] Target element not found for page:', page);
             }
@@ -2991,16 +2991,16 @@
 
         // Wait for DOM to be ready before attaching event listeners
         function attachNavigationListeners() {
-            console.log('[Navigation] Attaching navigation listeners...');
+            _chatLog('[Navigation] Attaching navigation listeners...');
             
             // Navigation click handlers
             const navElements = document.querySelectorAll('.nav-icon, .mobile-nav-icon');
-            console.log('[Navigation] Found navigation elements:', navElements.length);
+            _chatLog('[Navigation] Found navigation elements:', navElements.length);
             
             navElements.forEach((btn, index) => {
-                console.log(`[Navigation] Setting up listener for element ${index}:`, btn.dataset.page, btn.className);
+                _chatLog(`[Navigation] Setting up listener for element ${index}:`, btn.dataset.page, btn.className);
                 btn.addEventListener('click', (e) => {
-                    console.log('[Navigation] Navigation element clicked:', btn.dataset.page);
+                    _chatLog('[Navigation] Navigation element clicked:', btn.dataset.page);
                     e.preventDefault();
                     if (btn.dataset.page) navigateToPage(btn.dataset.page);
                 });
@@ -3341,7 +3341,7 @@
 
             if (window.AppStorage) {
                 window.__kynParentReady = true;
-                console.log('[chat.html] ✅ AppStorage ready, __kynParentReady = true');
+                _chatLog('[chat.html] ✅ AppStorage ready, __kynParentReady = true');
             } else {
                 console.error('[chat.html] ❌ AppStorage missing after safety layer load');
             }
@@ -3637,13 +3637,13 @@
                         // Validate current token
                         const validation = window.validateToken(currentToken);
                         if (!validation.valid) {
-                            console.log('[Parent] Token invalid, attempting refresh...');
+                            _chatLog('[Parent] Token invalid, attempting refresh...');
                             const refreshResult = await window.refreshTokenIfNeeded();
                             if (refreshResult.success) {
                                 currentToken = refreshResult.token;
-                                console.log('[Parent] Token refreshed successfully');
+                                _chatLog('[Parent] Token refreshed successfully');
                             } else if (refreshResult.requiresReauth) {
-                                console.log('[Parent] Token refresh requires reauthentication');
+                                _chatLog('[Parent] Token refresh requires reauthentication');
                                 return { success: false, error: 'Token expired and requires reauthentication', statusCode: 401, data: null };
                             }
                         }
@@ -3682,11 +3682,11 @@
 
                 // Handle 401 Unauthorized with token refresh
                 if (response.status === 401 && window.refreshTokenIfNeeded && window.validateToken) {
-                    console.log('[Parent] 401 response, attempting token refresh...');
+                    _chatLog('[Parent] 401 response, attempting token refresh...');
                     try {
                         const refreshResult = await window.refreshTokenIfNeeded();
                         if (refreshResult.success) {
-                            console.log('[Parent] Token refreshed, retrying request...');
+                            _chatLog('[Parent] Token refreshed, retrying request...');
                             // Retry with new token
                             headers['Authorization'] = `Bearer ${refreshResult.token}`;
                             const retryOptions = { method, headers, credentials: 'include' };
@@ -3699,7 +3699,7 @@
                             if (contentType.includes('application/json')) responseData = await response.json();
                             else responseData = { message: await response.text() || 'Request completed' };
                         } else if (refreshResult.requiresReauth) {
-                            console.log('[Parent] Token refresh requires reauthentication');
+                            _chatLog('[Parent] Token refresh requires reauthentication');
                             return { success: false, error: 'Token expired and requires reauthentication', statusCode: 401, data: responseData };
                         }
                     } catch (refreshErr) {
@@ -4216,7 +4216,7 @@
                                 parsed.token = newToken;
                                 localStorage.setItem('kynecta_auth', JSON.stringify(parsed));
                             }
-                            console.log('[Parent] ✅ Token refreshed successfully');
+                            _chatLog('[Parent] ✅ Token refreshed successfully');
                             updateSessionCache();
                             setTimeout(() => sendToAllModulesIfNeeded(true), 100);
                             return true;
@@ -4318,7 +4318,7 @@
                                 method: 'POST',
                                 headers: { 'Authorization': `Bearer ${token}` }
                             });
-                            console.log('[Parent] Call ended via API (non-ws source)');
+                            _chatLog('[Parent] Call ended via API (non-ws source)');
                         } catch(e) { console.warn('[Parent] Failed to POST /calls/end:', e); }
                     }
                     // ── CRITICAL FIX: Broadcast CALL_ENDED to ALL iframes so
@@ -4376,7 +4376,7 @@
                 
                 // Handle ws-bridge sourced events - dismiss banner but DON'T POST to /calls/:id/end
                 if (data.type === 'CALL_ENDED' && data.source === 'ws-bridge') {
-                    console.log('[Parent] CALL_ENDED from ws-bridge - broadcasting to all iframes');
+                    _chatLog('[Parent] CALL_ENDED from ws-bridge - broadcasting to all iframes');
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
@@ -4428,7 +4428,7 @@
                 // CALL ANSWERED HANDLER
                 // ==================================================================
                 if (data.type === 'CALL_ANSWERED' || data.type === 'CALL_ACCEPTED') {
-                    console.log('[Parent] Call answered - dismissing banner, broadcasting CALL_ACCEPTED to ALL iframes');
+                    _chatLog('[Parent] Call answered - dismissing banner, broadcasting CALL_ACCEPTED to ALL iframes');
                     hideGlobalBanner();
                     window.__activeCallInProgress = true;
                     document.body.classList.add('call-screen-active');
@@ -4455,7 +4455,7 @@
                 // CALL REJECTED HANDLER
                 // ==================================================================
                 if (data.type === 'CALL_REJECTED') {
-                    console.log('[Parent] Call rejected - dismissing banner');
+                    _chatLog('[Parent] Call rejected - dismissing banner');
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
@@ -4466,7 +4466,7 @@
                 // CALL FORCE ENDED HANDLER - unified
                 // ==================================================================
                 function handleForceEnded(callData, source) {
-                    console.log('[Parent] Force ended call - dismissing banner, source:', source);
+                    _chatLog('[Parent] Force ended call - dismissing banner, source:', source);
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
@@ -4493,7 +4493,7 @@
                         console.warn('[Parent] call_force_ended alias ignored — call dispatched only', Math.round(_sinceDispatchFE2/1000)+'s ago (stale echo)');
                         return;
                     }
-                    console.log('[Parent] Force end alias received:', data.type);
+                    _chatLog('[Parent] Force end alias received:', data.type);
                     handleForceEnded(data.payload, 'alias');
                     return;
                 }
@@ -4502,7 +4502,7 @@
                 // CALL NAVIGATION HANDLER - CRITICAL FIX FOR CALL SCREEN
                 // ==================================================================
                 if (data.type === 'NAVIGATE_TO_CALLS_FOR_CALL') {
-                    console.log('[Parent] Navigation request for call:', data.payload);
+                    _chatLog('[Parent] Navigation request for call:', data.payload);
                     
                     // CRITICAL: Set __activeCallInProgress BEFORE navigating
                     window.__activeCallInProgress = true;
@@ -4516,7 +4516,7 @@
                     var _navCC = document.getElementById('callsContent');
                     if (_navCC) _navCC.classList.remove('hidden');
                     
-                    console.log('[Parent] callsContent visible:', document.getElementById('callsContent')?.className);
+                    _chatLog('[Parent] callsContent visible:', document.getElementById('callsContent')?.className);
                     return;
                 }
                 
@@ -4524,7 +4524,7 @@
                 // CALL CANCELLED HANDLER
                 // ==================================================================
                 if (data.type === 'CALL_CANCELLED' || data.type === 'call:cancelled') {
-                    console.log('[Parent] Call cancelled - dismissing banner');
+                    _chatLog('[Parent] Call cancelled - dismissing banner');
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
@@ -4544,7 +4544,7 @@
                         callerAvatar: raw.callerAvatar || (raw.caller && raw.caller.avatar)   || null,
                         callType:     raw.callType     || raw.type || 'voice',
                     };
-                    console.log('[Parent] 📞 CALL_INCOMING postMessage — callerName:', callData.callerName);
+                    _chatLog('[Parent] 📞 CALL_INCOMING postMessage — callerName:', callData.callerName);
                     // Delegate entirely to showIncomingCallBanner which handles
                     // navigation, fullscreen, delayed iframe postMessage, and banner
                     if (window.showIncomingCallBanner) {
@@ -4633,7 +4633,7 @@
                                 resultData = await res.json().catch(()=>({}));
                                 if (res.ok || res.status === 200) {
                                     success = true;
-                                    console.log('[Parent] Call accept result OK via:', endpoint);
+                                    _chatLog('[Parent] Call accept result OK via:', endpoint);
                                     break;
                                 }
                                 if (res.status !== 404) break; // Non-404 error — stop trying
@@ -4644,7 +4644,7 @@
                             try {
                                 window.wsService.emit('call:accepted', { callId, timestamp: Date.now() });
                                 success = true;
-                                console.log('[Parent] Call accept signaled via WebSocket fallback');
+                                _chatLog('[Parent] Call accept signaled via WebSocket fallback');
                             } catch(e) {}
                         }
                     }
@@ -4674,7 +4674,7 @@
                                 headers: { 'Authorization': `Bearer ${token}` }
                             });
                             success = res.ok;
-                            console.log('[Parent] Call reject result:', success);
+                            _chatLog('[Parent] Call reject result:', success);
                         } catch(e) { console.warn('[Parent] CALL_REJECT error:', e); }
                     }
                     if (event.source) {
@@ -4710,7 +4710,7 @@
 
                 function __dispatchCallToIframe(userId, userName, callType, returnTo, chatUserId, source, extraCtx) {
                     if (__isCallDuplicate(userId)) {
-                        console.log('[Parent] ⏭ Duplicate call dispatch suppressed');
+                        _chatLog('[Parent] ⏭ Duplicate call dispatch suppressed');
                         return;
                     }
                     window.__callDispatchLock = { ts: Date.now(), userId: String(userId) };
@@ -4728,7 +4728,7 @@
                     window.__callReturnContext = ctx;
                     try { sessionStorage.setItem('call_return_ctx', JSON.stringify(ctx)); } catch(e) {}
 
-                    console.log('[Parent] Dispatching call → user=' + userName + '(' + userId + ') type=' + callType + ' returnTo=' + returnTo);
+                    _chatLog('[Parent] Dispatching call → user=' + userName + '(' + userId + ') type=' + callType + ' returnTo=' + returnTo);
 
                     // ✅ FIX: Set ALL call flags BEFORE navigation so the iframe's
                     // IntersectionObserver/_onIframeVisible sees callActive=true and
@@ -4792,7 +4792,7 @@
 
                 // Receiver-side missed call recording — fired by calls-core when 3-min timeout expires
                 if (data.type === 'RECORD_MISSED_CALL') {
-                    console.log('[Parent] Recording receiver-side missed call:', data.payload);
+                    _chatLog('[Parent] Recording receiver-side missed call:', data.payload);
                     // Forward to calls iframe to add to recent-calls list as missed
                     const callsIframe = document.getElementById('callsIframe');
                     if (callsIframe && callsIframe.contentWindow) {
@@ -4850,7 +4850,7 @@
                     const returnTo = ctx?.returnTo
                         || window.__lastActivePage
                         || 'messages';
-                    console.log('[Parent] Call ended → returnTo=' + returnTo);
+                    _chatLog('[Parent] Call ended → returnTo=' + returnTo);
 
                     // CRITICAL: Clear session dispatch cache so the next navigateToPage
                     // ALWAYS sends a fresh token — prevents hasToken:false rejection in modules
@@ -5570,7 +5570,7 @@
                                 source:  'parent-frame',
                                 timestamp: Date.now()
                             }, '*');
-                            console.log('[chat.html] DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER sent, attempt', window.__dcAttempts + 1);
+                            _chatLog('[chat.html] DIRECT_CHAT_REQUEST → OPEN_CHAT_WITH_USER sent, attempt', window.__dcAttempts + 1);
                         }
                         
                         if (window.__dcAttempts++ < 3) { // Reduced from 12 to 3 attempts
@@ -5648,7 +5648,7 @@
                         if (_srAttempts++ < 3) setTimeout(_postStatusReplyOpen, 500);
                     };
                     setTimeout(_postStatusReplyOpen, 300);
-                    console.log('[chat.html] STATUS_REPLY → navigated to messages, opening chat userId:', targetUserId, 'chatId:', targetChatId);
+                    _chatLog('[chat.html] STATUS_REPLY → navigated to messages, opening chat userId:', targetUserId, 'chatId:', targetChatId);
                 }
 
                 if (data.type === 'CHILD_CLOSING') {
@@ -5868,7 +5868,7 @@
                         if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
                     } catch(e) {}
 
-                    console.log('[Parent] Adding participant to call', payload);
+                    _chatLog('[Parent] Adding participant to call', payload);
 
                     if (!resolvedCallId || !payload.targetUserId || !token) {
                         console.warn('[Parent] call participant invite dropped - missing callId, targetUserId, or token');
@@ -5893,7 +5893,7 @@
                         if (!inviteResp.ok || inviteData.success === false || inviteData.status === 'error') {
                             throw new Error(inviteData.message || 'Invite failed');
                         }
-                        console.log('[Parent] participant invite sent successfully -> userId', payload.targetUserId);
+                        _chatLog('[Parent] participant invite sent successfully -> userId', payload.targetUserId);
                     } catch(e) {
                         console.warn('[Parent] call participant invite failed:', e.message);
                     }
@@ -6051,6 +6051,7 @@
             // WEBSOCKET CALL EVENT LISTENERS WITH SOURCE: 'ws-bridge'
             // ── Bound once; re-bound if KynectaRealtime initialises late ────────
             // ======================================================================
+        const _chatLog = (...a) => { if (window.__CHAT_DEBUG__) console.log(...a); };
             var _wsCallListenersBound = false;
             function _bindWsCallListeners() {
                 if (_wsCallListenersBound) return;
@@ -6079,7 +6080,7 @@
                     const callTs = callData.timestamp || callData.ts || callData.startedAt || 0;
                     const callAge = callTs ? (Date.now() - Number(callTs)) : 0;
                     if (callTs && callAge > 30000) {
-                        console.log('[Parent] ⚠️ Stale call ignored (age=' + Math.round(callAge/1000) + 's) callId=' + (callData.callId || callData.id));
+                        _chatLog('[Parent] ⚠️ Stale call ignored (age=' + Math.round(callAge/1000) + 's) callId=' + (callData.callId || callData.id));
                         return;
                     }
                     const payload = {
@@ -6091,10 +6092,10 @@
                     const callKey = payload.callId || payload.id || payload.callerName;
                     if (!_fwdIncomingLogged.has(callKey)) {
                         _fwdIncomingLogged.add(callKey);
-                        console.log('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
+                        _chatLog('[Parent] 📞 Incoming call from:', payload.callerName, '| callId:', callKey);
                     }
                     // ── FORENSIC LOG: CALL_SIGNAL_RECEIVED ───────────────────────────
-                    console.log(`[FORENSIC] CALL_SIGNAL_RECEIVED | callId=${callKey} | callerName=${payload.callerName} | callType=${payload.callType} | ts=${Date.now()}`);
+                    _chatLog(`[FORENSIC] CALL_SIGNAL_RECEIVED | callId=${callKey} | callerName=${payload.callerName} | callType=${payload.callType} | ts=${Date.now()}`);
                     // FIX Bug #3: MUST postMessage INCOMING_CALL to callsIframe BEFORE showing banner.
                     // calls-core.js inside the iframe listens for postMessage type 'INCOMING_CALL'
                     // (and the alias 'call:incoming') to trigger handleIncomingCall() and show the
@@ -6132,7 +6133,7 @@
                     // Also show the parent-frame banner (existing behaviour preserved)
                     if (window.showIncomingCallBanner) {
                         // ── FORENSIC LOG: CALL_UI_RENDERED ───────────────────────────
-                        console.log(`[FORENSIC] CALL_UI_RENDERED | callId=${callKey} | callerName=${payload.callerName} | ts=${Date.now()}`);
+                        _chatLog(`[FORENSIC] CALL_UI_RENDERED | callId=${callKey} | callerName=${payload.callerName} | ts=${Date.now()}`);
                         window.showIncomingCallBanner(payload);
                     }
                 }
@@ -6597,7 +6598,7 @@
                     });
                     try { history.pushState({ kyn: true }, '', window.location.href); } catch(_) {}
 
-                    console.log('[BackNav] ✅ Parent back navigation installed');
+                    _chatLog('[BackNav] ✅ Parent back navigation installed');
                 })();
 
                 // ── SMART GROUP OS REAL-TIME BRIDGE ──────────────────────────
@@ -6909,7 +6910,7 @@
                 ['kyn:call:incoming', 'kyn:incoming_call', 'kyn:call_incoming'].forEach(evt => {
                     window.addEventListener(evt, (e) => {
                         const payload = _normCall(e.detail || {});
-                        console.log('[Parent] 📞 kyn-bridge:', evt, '→ callerName:', payload.callerName);
+                        _chatLog('[Parent] 📞 kyn-bridge:', evt, '→ callerName:', payload.callerName);
                         if (window.showIncomingCallBanner) window.showIncomingCallBanner(payload);
                     });
                 });
@@ -7066,7 +7067,7 @@
                     setTimeout(() => window.__OfflineMessageQueue?.flushAll?.(), 2000);
                 });
 
-                console.log('[Parent] ✅ Global kyn:* realtime bridge installed');
+                _chatLog('[Parent] ✅ Global kyn:* realtime bridge installed');
             })();
             
             const pendingChat = sessionStorage.getItem('pending_chat');
@@ -7251,11 +7252,7 @@ window.addEventListener('message', function (e) {
     }
 
     // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ────────────────────────
-    if (d.type === 'POST_CALL_RESTORE' || d.type === 'CALL_ENDED_RETURN') {
-        // FIX-NAV-RESTORE: CALL_ENDED_RETURN was sent by _onCallEnded but never
-        // handled here — so call-screen-active was never removed and the bottom
-        // nav never came back. Treat it identically to POST_CALL_RESTORE.
-        d.returnTo = d.returnTo || d.origin || 'messages';
+    if (d.type === 'POST_CALL_RESTORE') {
         // ── FIX: A single hangup can trigger this from both the local endCall()
         // path AND a remote call:ended echo. Dedup within 1.5s so we don't fire
         // navigateToPage() twice for the same hangup.
@@ -7274,7 +7271,7 @@ window.addEventListener('message', function (e) {
         if (typeof navigateToPage === 'function') {
             setTimeout(function() { navigateToPage(_pcPage); }, 100);
         }
-        console.log('[chat.html] PHASE15 ✅ POST_CALL_RESTORE → navigating to: ' + _pcPage);
+        _chatLog('[chat.html] PHASE15 ✅ POST_CALL_RESTORE → navigating to: ' + _pcPage);
         return;
     }
     // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────
@@ -7318,7 +7315,7 @@ function clearGroupFromAllStorage(gidStr) {
             }
         } catch (ex) {}
     }
-    console.log('[GroupHdr] Cleared group', gidStr, 'from all storage');
+    _chatLog('[GroupHdr] Cleared group', gidStr, 'from all storage');
 }
 
 /* ── Init ───────────────────────────────────────────────────── */
@@ -7327,7 +7324,7 @@ if (document.readyState === 'loading')
 else
     setTimeout(wireButtons, 100);
 
-console.log('[GroupHdr] v1.0 loaded');
+_chatLog('[GroupHdr] v1.0 loaded');
 // Expose for cross-script access
 window.__groupHdrShow = showGroupHeader;
 window.__groupHdrHide = hideGroupHeader;
@@ -7353,7 +7350,7 @@ window.__groupHdrHide = hideGroupHeader;
       method: 'GET',
       cache: 'no-cache'
     })
-    .then(r => console.log('[KeepAlive] Ping sent, status:', r.status))
+    .then(r => _chatLog('[KeepAlive] Ping sent, status:', r.status))
     .catch(e => console.warn('[KeepAlive] Ping failed:', e.message));
   }
 

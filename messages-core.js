@@ -124,7 +124,7 @@
             
             return function() {
                 if (sent) {
-                    console.log(`[${moduleName}][LifecycleGuard] CHILD_READY already sent, skipping duplicate`);
+                    debugLog(`[${moduleName}][LifecycleGuard] CHILD_READY already sent, skipping duplicate`);
                     return false;
                 }
                 
@@ -133,7 +133,7 @@
                     return false;
                 }
                 
-                console.log(`[${moduleName}][Lifecycle] Sending CHILD_READY (state: ${currentState})`);
+                debugLog(`[${moduleName}][Lifecycle] Sending CHILD_READY (state: ${currentState})`);
                 originalSendFn();
                 sent = true;
                 return true;
@@ -342,7 +342,7 @@
             stateHistory.shift();
         }
 
-        console.log(`[${MODULE_NAME}] State: ${fromState} → ${nextState}${reason ? ` (${reason})` : ''}`);
+        debugLog(`[${MODULE_NAME}] State: ${fromState} → ${nextState}${reason ? ` (${reason})` : ''}`);
 
         notifyStateListeners(nextState, fromState, reason);
         
@@ -589,7 +589,7 @@
                     return;
                 }
                 // Session valid but not ACTIVE — allow write through for queue retries
-                console.log(`[${MODULE_NAME}] ⚠️ Write allowed despite non-ACTIVE state — valid session present`);
+                debugLog(`[${MODULE_NAME}] ⚠️ Write allowed despite non-ACTIVE state — valid session present`);
             }
             
             if (!_validSessionSet || !__isValidSession(_storedSession)) {
@@ -664,7 +664,7 @@ try {
             return;
         }
         
-        console.log(`[${MODULE_NAME}] 📥 API_RESPONSE received: ${requestId}`);
+        debugLog(`[${MODULE_NAME}] 📥 API_RESPONSE received: ${requestId}`);
         
         if (!pendingRequests.has(requestId)) {
             console.warn(`[${MODULE_NAME}] No pending request for: ${requestId}`);
@@ -839,7 +839,7 @@ try {
     function flushMessageQueue() {
         if (processingQueue || messageQueue.length === 0) return;
         if (currentState !== LIFECYCLE_STATES.ACTIVE) {
-            console.log(`[${MODULE_NAME}] Cannot flush queue - not ACTIVE (${currentState})`);
+            debugLog(`[${MODULE_NAME}] Cannot flush queue - not ACTIVE (${currentState})`);
             return;
         }
         
@@ -1128,7 +1128,7 @@ try {
             set(key, value) {
                 try {
                     localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-                    console.log('[LOCAL SAVE]', key, value);
+                    debugLog('[LOCAL SAVE]', key, value);
                     return true;
                 } catch (_error) {
                     return false;
@@ -1321,13 +1321,13 @@ try {
             }, 60000);
             
             if (level === 'log') {
-                console.log(`[${MODULE_NAME}] ${message}`, data || '');
+                debugLog(`[${MODULE_NAME}] ${message}`, data || '');
             } else if (level === 'warn') {
                 console.warn(`[${MODULE_NAME}] ⚠️ ${message}`, data || '');
             } else if (level === 'error') {
                 console.error(`[${MODULE_NAME}] ❌ ${message}`, data || '');
             } else if (level === 'success') {
-                console.log(`[${MODULE_NAME}] ✅ ${message}`, data || '');
+                debugLog(`[${MODULE_NAME}] ✅ ${message}`, data || '');
             } else if (level === 'info') {
                 console.info(`[${MODULE_NAME}] ℹ️ ${message}`, data || '');
             }
@@ -1609,10 +1609,10 @@ try {
                 }
             }
             
-            console.log('[SessionManager] Setting valid session', { userId: sessionData.userId });
+            debugLog('[SessionManager] Setting valid session', { userId: sessionData.userId });
             
             if (_demoModeEnabled) {
-                console.log('[SessionManager] Real session received - disabling demo mode');
+                debugLog('[SessionManager] Real session received - disabling demo mode');
                 // demo mode removed
             }
             
@@ -1656,7 +1656,7 @@ try {
             } catch (e) {}
             
             if (currentState === LIFECYCLE_STATES.WAITING_AUTH && __isValidSession(this._session)) {
-                console.log('[SessionManager] Valid session received, transitioning to ACTIVE');
+                debugLog('[SessionManager] Valid session received, transitioning to ACTIVE');
                 setState(LIFECYCLE_STATES.ACTIVE, 'valid_session_received');
                 flushMessageQueue();
                 startDataFlow();
@@ -1668,7 +1668,7 @@ try {
             else if ((currentState === LIFECYCLE_STATES.INITIALIZING ||
                       currentState === LIFECYCLE_STATES.READY ||
                       currentState === LIFECYCLE_STATES.WAIT_PARENT) && __isValidSession(this._session)) {
-                console.log(`[SessionManager] Session set in state ${currentState} — fast-promoting to ACTIVE`);
+                debugLog(`[SessionManager] Session set in state ${currentState} — fast-promoting to ACTIVE`);
                 setState(LIFECYCLE_STATES.ACTIVE, 'session_set_early_promote');
                 flushMessageQueue();
                 startDataFlow();
@@ -1845,7 +1845,7 @@ try {
             const payload = data.payload || data;
             const friends = payload.friends || payload.data || payload;
             if (Array.isArray(friends) && friends.length > 0) {
-                console.log(`[${MODULE_NAME}] FRIENDS_LIST_UPDATE: ${friends.length} friends received`);
+                debugLog(`[${MODULE_NAME}] FRIENDS_LIST_UPDATE: ${friends.length} friends received`);
                 FriendManager.mergeFriends(friends);
                 // Re-render contacts list if it's visible
                 try {
@@ -1901,7 +1901,7 @@ try {
         
         _handleParentReady: function(data) {
             if (parentReadyReceived) {
-                console.log(`[${MODULE_NAME}] Duplicate PARENT_READY ignored`);
+                debugLog(`[${MODULE_NAME}] Duplicate PARENT_READY ignored`);
                 return;
             }
             
@@ -1910,7 +1910,7 @@ try {
                 return;
             }
             
-            console.log(`[${MODULE_NAME}] PARENT_READY received (state: ${currentState})`);
+            debugLog(`[${MODULE_NAME}] PARENT_READY received (state: ${currentState})`);
             
             parentReadyReceived = true;
             parentReadyData = data.payload || data;
@@ -1922,15 +1922,15 @@ try {
             
             const providedSession = parentReadyData.session || parentReadyData;
             if (providedSession && providedSession.token && providedSession.userId) {
-                console.log(`[${MODULE_NAME}] Session provided in PARENT_READY, userId: ${providedSession.userId}`);
+                debugLog(`[${MODULE_NAME}] Session provided in PARENT_READY, userId: ${providedSession.userId}`);
                 SessionManager.setSession(providedSession);
             } else {
-                console.log(`[${MODULE_NAME}] No session in PARENT_READY payload, will wait for SESSION_DATA`);
+                debugLog(`[${MODULE_NAME}] No session in PARENT_READY payload, will wait for SESSION_DATA`);
                 // FIX: Never inject fake demo tokens. Load cached data for offline-first display instead.
                 if (window.KynectaLocalStore) {
                     window.KynectaLocalStore.getAllConversations().then(convs => {
                         if (convs && convs.length > 0) {
-                            console.log(`[${MODULE_NAME}] Offline-first: rendering ${convs.length} cached conversations`);
+                            debugLog(`[${MODULE_NAME}] Offline-first: rendering ${convs.length} cached conversations`);
                             window.dispatchEvent(new CustomEvent('kyn:offlineCacheLoaded', { detail: { convs } }));
                         }
                     }).catch(() => {});
@@ -1955,7 +1955,7 @@ try {
                         console.warn(`[${MODULE_NAME}] Could not promote to ACTIVE from ${currentState} — forcing`);
                         currentState = LIFECYCLE_STATES.ACTIVE;
                     }
-                    console.log(`[${MODULE_NAME}] ✅ ACTIVE (parent ready + valid session)`);
+                    debugLog(`[${MODULE_NAME}] ✅ ACTIVE (parent ready + valid session)`);
                     initializeUISafe();
                     flushMessageQueue();
                     startDataFlow();
@@ -1970,7 +1970,7 @@ try {
                     } else if (currentState !== LIFECYCLE_STATES.WAITING_AUTH) {
                         setState(LIFECYCLE_STATES.WAITING_AUTH, 'parent_ready_waiting_for_session');
                     }
-                    console.log(`[${MODULE_NAME}] ⏳ WAITING_AUTH (no valid session yet) — requesting session`);
+                    debugLog(`[${MODULE_NAME}] ⏳ WAITING_AUTH (no valid session yet) — requesting session`);
                     safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
                         module: MODULE_NAME,
                         timestamp: Date.now()
@@ -1979,13 +1979,13 @@ try {
                 }
             } else if (currentState === LIFECYCLE_STATES.ACTIVE) {
                 // Already ACTIVE — just refresh data
-                console.log(`[${MODULE_NAME}] PARENT_READY received while already ACTIVE — refreshing data`);
+                debugLog(`[${MODULE_NAME}] PARENT_READY received while already ACTIVE — refreshing data`);
                 if (SessionManager.isAuthenticated()) {
                     flushMessageQueue();
                     startDataFlow();
                 }
             } else {
-                console.log(`[${MODULE_NAME}] PARENT_READY received in unexpected state: ${currentState}`);
+                debugLog(`[${MODULE_NAME}] PARENT_READY received in unexpected state: ${currentState}`);
                 if (SessionManager.isAuthenticated()) {
                     setState(LIFECYCLE_STATES.ACTIVE, 'parent_ready_late_activate');
                     initializeUISafe();
@@ -2025,7 +2025,7 @@ try {
                     LIFECYCLE_STATES.WAITING_AUTH
                 ];
                 if (earlyStates.includes(currentState) && SessionManager.isAuthenticated()) {
-                    console.log(`[${MODULE_NAME}] SESSION_DATA arrived early (state: ${currentState}) — promoting to ACTIVE`);
+                    debugLog(`[${MODULE_NAME}] SESSION_DATA arrived early (state: ${currentState}) — promoting to ACTIVE`);
                     const promoted = setState(LIFECYCLE_STATES.ACTIVE, 'early_session_data');
                     if (promoted) {
                         initializeUISafe();
@@ -2273,7 +2273,7 @@ try {
         
         notifyChildReady: function() {
             if (childReadySent) {
-                console.log(`[${MODULE_NAME}] CHILD_READY already sent, skipping duplicate`);
+                debugLog(`[${MODULE_NAME}] CHILD_READY already sent, skipping duplicate`);
                 return;
             }
             
@@ -2293,8 +2293,8 @@ try {
             if (!result.blocked) {
                 childReadySent = true;
                 setState(LIFECYCLE_STATES.WAIT_PARENT, 'child_ready_sent');
-                console.log(`[${MODULE_NAME}] CHILD_READY sent`);
-                console.log(`[${MODULE_NAME}] WAIT_PARENT`);
+                debugLog(`[${MODULE_NAME}] CHILD_READY sent`);
+                debugLog(`[${MODULE_NAME}] WAIT_PARENT`);
                 // FIX-WAIT_PARENT-MSG: 5-second initialization queue flush timeout
                 // Prevents "Message ERROR blocked in WAIT_PARENT" indefinitely.
                 if (!window.__msgWaitParentTimeout) {
@@ -2517,7 +2517,7 @@ try {
                 if (window.KynectaLocalStore) {
                     window.KynectaLocalStore.getAllConversations().then(convs => {
                         if (convs && convs.length > 0) {
-                            console.log('[ChatManager] Offline-first: loaded', convs.length, 'cached conversations');
+                            debugLog('[ChatManager] Offline-first: loaded', convs.length, 'cached conversations');
                             this._conversations = convs;
                             this._rebuildMap();
                             if (!this._activeConversation && this._conversations.length > 0) {
@@ -2531,7 +2531,7 @@ try {
         
         _loadFromCache: function() {
             try {
-                console.log('[LOCAL LOAD]', LOCAL_STORAGE_KEYS.CHATS_CACHE);
+                debugLog('[LOCAL LOAD]', LOCAL_STORAGE_KEYS.CHATS_CACHE);
                 const cached = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.CHATS_CACHE);
                 if (cached && Array.isArray(cached.conversations)) {
                     let _deleted = new Set();
@@ -2601,7 +2601,7 @@ try {
             
             const existing = this.getPendingConversationByReceiverId(receiverId);
             if (existing) {
-                console.log('[ChatManager] Reusing existing pending conversation for receiverId:', receiverId);
+                debugLog('[ChatManager] Reusing existing pending conversation for receiverId:', receiverId);
                 return existing;
             }
             
@@ -2626,7 +2626,7 @@ try {
             this._saveToCache();
             this._notifySubscribers();
             
-            console.log('[ChatManager] Created new pending conversation for receiverId:', receiverId);
+            debugLog('[ChatManager] Created new pending conversation for receiverId:', receiverId);
             return pendingConversation;
         },
         
@@ -2679,7 +2679,7 @@ try {
             this._saveToCache();
             this._notifySubscribers();
             
-            console.log('[ChatManager] Replaced pending conversation', pendingId, 'with real conversation', newConversation.id);
+            debugLog('[ChatManager] Replaced pending conversation', pendingId, 'with real conversation', newConversation.id);
             
             try {
                 window.dispatchEvent(new CustomEvent('conversationReplaced', {
@@ -2692,7 +2692,7 @@ try {
         
         async fetchConversations() {
             if (!SessionManager.isAuthenticated()) {
-                console.log('[ChatManager] Not authenticated — loading conversations from cache');
+                debugLog('[ChatManager] Not authenticated — loading conversations from cache');
                 // FIX: Always load cache, never demo data
                 this._loadDemoDataIfNeeded();
                 return;
@@ -2703,10 +2703,10 @@ try {
             this._notifyLoading('chats', true);
             
             try {
-                console.log('[ChatManager] 📤 Fetching conversations from backend');
+                debugLog('[ChatManager] 📤 Fetching conversations from backend');
                 const conversations = await makeApiRequest('/chats', 'GET');
                 
-                console.log(`[ChatManager] 📥 Received conversations response:`, conversations);
+                debugLog(`[ChatManager] 📥 Received conversations response:`, conversations);
                 
                 let chatsArray = [];
                 if (conversations && Array.isArray(conversations)) {
@@ -2719,7 +2719,7 @@ try {
                     chatsArray = conversations.data;
                 }
                 
-                console.log(`[ChatManager] 📥 Extracted ${chatsArray.length} chats from response`);
+                debugLog(`[ChatManager] 📥 Extracted ${chatsArray.length} chats from response`);
                 
                 if (chatsArray.length > 0) {
                     this.setConversations(chatsArray);
@@ -2732,7 +2732,7 @@ try {
                     // FIX: Fall back to cache, not demo data
                     this._loadDemoDataIfNeeded();
                     this.setConversations(this._conversations || []);
-                    console.warn('[ChatManager] No conversations received from server');
+                    debugLog('[ChatManager] No conversations received from server');
                 }
             } catch (error) {
                 console.error('[ChatManager] Failed to fetch conversations:', error);
@@ -2746,7 +2746,7 @@ try {
         
         async fetchMessages(conversationId, options = {}) {
             if (conversationId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
-                console.log('[ChatManager] Skipping message fetch for pending conversation');
+                debugLog('[ChatManager] Skipping message fetch for pending conversation');
                 return;
             }
 
@@ -2768,7 +2768,7 @@ try {
             if (options.merge && this._messages && this._messages.length > 0) {
                 const lastMsg = this._messages[this._messages.length - 1];
                 options.after = options.after || lastMsg?.createdAt || lastMsg?.timestamp;
-                console.log('[ChatManager] merge:true — fetching only messages after', options.after);
+                debugLog('[ChatManager] merge:true — fetching only messages after', options.after);
             }
 
             // FIXED: Preserve realtime messages that arrived before this chat was opened.
@@ -2787,7 +2787,7 @@ try {
             }
 
             if (!navigator.onLine) {
-                console.log('[ChatManager] Offline mode - using local store data');
+                debugLog('[ChatManager] Offline mode - using local store data');
                 const cachedMessages = this.loadPreviousMessages(conversationId);
                 if (cachedMessages && cachedMessages.length > 0) {
                     this.setMessages(cachedMessages, conversationId);
@@ -2797,7 +2797,7 @@ try {
             }
 
             if (!SessionManager.isAuthenticated()) {
-                console.log('[ChatManager] Not authenticated — loading messages from local cache');
+                debugLog('[ChatManager] Not authenticated — loading messages from local cache');
                 // FIX: Load from IndexedDB, not fake demo messages
                 if (conversationId && window.KynectaLocalStore) {
                     window.KynectaLocalStore.getMessagesByChat(conversationId).then(cached => {
@@ -2820,7 +2820,7 @@ try {
             this._notifyLoading('messages', true);
 
             try {
-                console.log(`[ChatManager] Fetching messages for conversation: ${conversationId}`);
+                debugLog(`[ChatManager] Fetching messages for conversation: ${conversationId}`);
 
                 if (window.KynectaLocalStore && window.KynectaSyncEngine) {
                     await window.KynectaSyncEngine.syncChat(conversationId, {
@@ -2989,7 +2989,7 @@ try {
                 if (!pendingConv || !pendingConv.pendingReceiverId) {
                     throw new Error('Invalid pending conversation: missing receiverId');
                 }
-                console.log(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
+                debugLog(`[ChatManager] 📤 Sending message to pending conversation - using receiverId: ${pendingConv.pendingReceiverId}`);
                 _recipientUserIdForEncryption = pendingConv.pendingReceiverId;
                 requestBody = {
                     receiverId: pendingConv.pendingReceiverId,
@@ -3003,7 +3003,7 @@ try {
                 };
                 if (window.__pendingMsgMeta) delete window.__pendingMsgMeta;
             } else {
-                console.log(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
+                debugLog(`[ChatManager] 📤 Sending message to real conversation - using chatId: ${conversationId}`);
                 const _conv = this._conversationsMap.get(conversationId);
                 _recipientUserIdForEncryption = _conv?.friendId || _conv?.otherParticipant?.id || null;
                 requestBody = {
@@ -3061,7 +3061,7 @@ try {
 
             // ── OFFLINE PATH: only enqueue when truly offline ──────────────────
             if (!isOnline && offlineQueue) {
-                console.log('[ChatManager] 📦 PHASE10 OFFLINE — queuing with guaranteed delivery');
+                debugLog('[ChatManager] 📦 PHASE10 OFFLINE — queuing with guaranteed delivery');
                 const queueEntry = await offlineQueue.enqueue({
                     ...requestBody,
                     localId: requestBody.localId || options.localId,
@@ -3096,7 +3096,7 @@ try {
                         }
                         if (lanSent) {
                             hybridEngine?.recordSuccess?.('LAN', 0);
-                            console.log('[ChatManager] ✅ PHASE11 LAN delivery');
+                            debugLog('[ChatManager] ✅ PHASE11 LAN delivery');
                         }
                     } catch (_lanErr) {
                         hybridEngine?.recordFailure?.('LAN');
@@ -3121,7 +3121,7 @@ try {
                             meshEngine.send?.({ ...requestBody, _via: 'MESH' });
                             meshSent = true;
                             hybridEngine?.recordSuccess?.('MESH', 0);
-                            console.log('[ChatManager] ✅ PHASE10 MESH relay delivery');
+                            debugLog('[ChatManager] ✅ PHASE10 MESH relay delivery');
                         } catch (_meshErr) { hybridEngine?.recordFailure?.('MESH'); }
                     }
 
@@ -3151,7 +3151,7 @@ try {
                 }
             }
             
-            console.log(`[ChatManager] 📥 Message sent successfully:`, result);
+            debugLog(`[ChatManager] 📥 Message sent successfully:`, result);
             
             if (isPending && result && (result.chatId || (result.data && result.data.chatId))) {
                 const realChatId = result.chatId || result.data.chatId;
@@ -3238,7 +3238,7 @@ try {
                 }
                 
                 if (friendId && seenFriendIds.has(friendId)) {
-                    console.log(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
+                    debugLog(`[ChatManager] Skipping duplicate conversation for friend ${friendId}`);
                     return;
                 }
                 
@@ -3342,7 +3342,7 @@ try {
                 });
             }
             
-            console.log(`[ChatManager] Set ${this._conversations.length} unique conversations`);
+            debugLog(`[ChatManager] Set ${this._conversations.length} unique conversations`);
         },
         
         setMessages: function(messages, conversationId) {
@@ -3966,7 +3966,7 @@ try {
                 if (window.AppCache) {
                     window.AppCache.getAll('friends').then(cached => {
                         if (cached && cached.length > 0) {
-                            console.log('[FriendManager] Offline-first: loaded', cached.length, 'cached friends');
+                            debugLog('[FriendManager] Offline-first: loaded', cached.length, 'cached friends');
                             this._friends = cached;
                             this._rebuildMap();
                             this._friends.forEach(friend => {
@@ -4023,7 +4023,7 @@ try {
         
         async fetchFriends() {
             if (!SessionManager.isAuthenticated()) {
-                console.log('[FriendManager] Not authenticated — loading friends from cache');
+                debugLog('[FriendManager] Not authenticated — loading friends from cache');
                 // FIX: Load from IndexedDB, not fake demo friends
                 this._loadDemoFriendsIfNeeded();
                 return;
@@ -4033,7 +4033,7 @@ try {
             this._loading = true;
             
             try {
-                console.log('[FriendManager] 📤 Fetching friends from backend');
+                debugLog('[FriendManager] 📤 Fetching friends from backend');
                 const raw = await makeApiRequest('/friends', 'GET');
                 
                 let friends = raw;
@@ -4047,7 +4047,7 @@ try {
                     }
                 }
                 
-                console.log(`[FriendManager] 📥 Received ${friends?.length || 0} friends from backend`);
+                debugLog(`[FriendManager] 📥 Received ${friends?.length || 0} friends from backend`);
                 
                 if (friends && Array.isArray(friends) && friends.length > 0) {
                     this.setFriends(friends);
@@ -4077,7 +4077,7 @@ try {
         try { 
             result = await makeApiRequest('/users', 'GET', null, { limit: 200 }); 
         } catch(e) { 
-            console.log('[FriendManager] /users endpoint failed:', e.message);
+            debugLog('[FriendManager] /users endpoint failed:', e.message);
             result = null; 
         }
         
@@ -4086,7 +4086,7 @@ try {
             try { 
                 result = await makeApiRequest('/users/all', 'GET', null, { limit: 200 }); 
             } catch(e) { 
-                console.log('[FriendManager] /users/all endpoint failed:', e.message);
+                debugLog('[FriendManager] /users/all endpoint failed:', e.message);
                 result = null; 
             }
         }
@@ -4117,11 +4117,11 @@ try {
             });
             
             if (users.length > 0) {
-                console.log(`[FriendManager] Loaded ${users.length} users as fallback`);
+                debugLog(`[FriendManager] Loaded ${users.length} users as fallback`);
                 this.setFriends(users);
             }
         } else {
-            console.log('[FriendManager] No users found in fallback fetch');
+            debugLog('[FriendManager] No users found in fallback fetch');
         }
     } catch (e) {
         Logger.warn('FriendManager', 'Failed to fetch users as fallback:', e.message);
@@ -4504,7 +4504,7 @@ try {
             const requestId = SecurityUtils.generateRequestId();
 
             // ── FORENSIC LOG: SEND_START ──────────────────────────────────────
-            console.log(`[FORENSIC] SEND_START | localId=${localId} | conversationId=${conversationId} | contentLen=${(content||'').length} | type=${options.type||'text'} | ts=${Date.now()}`);
+            debugLog(`[FORENSIC] SEND_START | localId=${localId} | conversationId=${conversationId} | contentLen=${(content||'').length} | type=${options.type||'text'} | ts=${Date.now()}`);
 
             const optimisticMessage = {
                 id: localId,
@@ -4537,14 +4537,14 @@ try {
             try {
                 // ── FORENSIC LOG: TRANSPORT_SELECTED ─────────────────────────
                 const _bestTx = window.__HybridTransportEngine?.getBestTransport?.() || 'INTERNET';
-                console.log(`[FORENSIC] TRANSPORT_SELECTED | localId=${localId} | transport=${_bestTx} | online=${navigator.onLine} | ts=${Date.now()}`);
+                debugLog(`[FORENSIC] TRANSPORT_SELECTED | localId=${localId} | transport=${_bestTx} | online=${navigator.onLine} | ts=${Date.now()}`);
 
                 const result = await ChatManager.sendMessageToBackend(content, conversationId, {
                     ...options,
                     localId
                 });
                 
-                console.log(`[MessageHandler] Message sent successfully:`, result);
+                debugLog(`[MessageHandler] Message sent successfully:`, result);
                 
                 const realMessage = result?.message || result?.data?.message || result?.data || result;
                 const serverId = realMessage?.id;
@@ -4598,7 +4598,7 @@ try {
                 }
                 
                 if (result && result.chatId && typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
-                    console.log(`[MessageHandler] Received real chatId ${result.chatId} for pending conversation, updating active chat...`);
+                    debugLog(`[MessageHandler] Received real chatId ${result.chatId} for pending conversation, updating active chat...`);
                     const realConversation = ChatManager.getConversation(result.chatId);
                     if (realConversation) {
                         ChatManager.setActiveConversation(realConversation);
@@ -5022,7 +5022,7 @@ try {
                     await ChatManager.fetchMessages(actualId, { ...options, force: true }).catch(function() {});
                 }
             } else {
-                console.log('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
+                debugLog('[ConversationManager] Skipping message fetch for pending conversation:', actualId);
             }
             // FIX Bug2: if after fetchMessages the panel is empty but IDB had data, restore it.
             if (_idbSnapshot.length > 0 && ChatManager._messages) {
@@ -5032,7 +5032,7 @@ try {
                     return mc === String(actualId) || _sp(mc) === _sp(String(actualId));
                 });
                 if (_inMemory.length === 0) {
-                    console.log('[ConversationManager] FIX Bug2: restoring', _idbSnapshot.length, 'msgs from IDB snapshot for', actualId);
+                    debugLog('[ConversationManager] FIX Bug2: restoring', _idbSnapshot.length, 'msgs from IDB snapshot for', actualId);
                     ChatManager.setMessages(_idbSnapshot, actualId);
                 }
             }
@@ -5142,7 +5142,7 @@ try {
         async fetchMessages(conversationId, options = {}) {
             if (!conversationId) return;
             if (typeof conversationId === 'string' && conversationId.startsWith('pending_')) {
-                console.log('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
+                debugLog('[ConversationManager] Skipping fetchMessages for pending conversation:', conversationId);
                 return;
             }
             if (!ensureActive('fetchMessages')) return;
@@ -5253,7 +5253,7 @@ try {
                                 realUserAvatar = userInfo.avatar || userInfo.photoURL || null;
                             }
                         } catch (e) {
-                            console.log('[ConversationManager] Could not fetch user info:', e);
+                            debugLog('[ConversationManager] Could not fetch user info:', e);
                         }
                     }
                     
@@ -5787,7 +5787,7 @@ try {
             if (startChatButton) {
                 startChatButton.addEventListener('click', () => {
                     if (!canSendUserMessages() || !SessionManager.isAuthenticated()) {
-                        console.log('[UI] Cannot start chat - not ready or not authenticated');
+                        debugLog('[UI] Cannot start chat - not ready or not authenticated');
                         return;
                     }
                     
@@ -6081,7 +6081,7 @@ try {
             // the "stuck in INITIALIZING" bug on first load.
             setTimeout(() => {
                 if (currentState !== LIFECYCLE_STATES.ACTIVE && !SessionManager.isAuthenticated()) {
-                    console.log(`[${MODULE_NAME}] Proactive REQUEST_SESSION after CHILD_READY`);
+                    debugLog(`[${MODULE_NAME}] Proactive REQUEST_SESSION after CHILD_READY`);
                     try {
                         window.parent && window.parent !== window && window.parent.postMessage({
                             id: generateMessageId(),
@@ -6098,7 +6098,7 @@ try {
             
             const parentReadyTimeout = setTimeout(() => {
                 if (currentState === LIFECYCLE_STATES.WAIT_PARENT && !parentReadyReceived) {
-                    console.log(`[${MODULE_NAME}] Parent ready timeout, requesting session...`);
+                    debugLog(`[${MODULE_NAME}] Parent ready timeout, requesting session...`);
                     safeSend(OUTGOING_ACTIONS.REQUEST_SESSION, {
                         module: MODULE_NAME,
                         timestamp: Date.now()
@@ -6313,7 +6313,7 @@ try {
             localStorage.setItem(CLEANUP_VERSION, '1');
         } catch (_) { return; }
 
-        console.log('[CLEANUP] Running one-time stale-cache purge (IDB preserved)…');
+        debugLog('[CLEANUP] Running one-time stale-cache purge (IDB preserved)…');
 
         // 1. DO NOT clear the deleted-chats blocklist — preserve user deletions across refresh.
 
@@ -6326,7 +6326,7 @@ try {
         // 3. DO NOT call KynectaLocalStore.clearAll() — that nukes ALL IDB message history.
         //    Server data will repopulate naturally via the normal fetchConversations() call
         //    that runs as part of startDataFlow() immediately after this IIFE.
-        console.log('[CLEANUP] Stale sidebar cache cleared — IDB message history preserved.');
+        debugLog('[CLEANUP] Stale sidebar cache cleared — IDB message history preserved.');
     })();
 
     function startDataFlow() {
@@ -6341,7 +6341,7 @@ try {
         }
         
         if (_demoModeEnabled) {
-            console.log('[DataFlow] Real session active - disabling demo mode');
+            debugLog('[DataFlow] Real session active - disabling demo mode');
             // demo mode removed
         }
         
@@ -6349,12 +6349,12 @@ try {
         
         if (ChatManager._conversations && ChatManager._conversations.length > 0) {
             // FIX: No longer need to check for fake demo IDs — cache data is always real
-            console.log('[DataFlow] Conversations already loaded from cache — syncing with server');
+            debugLog('[DataFlow] Conversations already loaded from cache — syncing with server');
         }
         if (FriendManager._friends && FriendManager._friends.length > 0) {
             const hasOnlyDemo = false; // Demo data fully removed
             if (hasOnlyDemo) {
-                console.log('[DataFlow] Clearing demo friends to load real data');
+                debugLog('[DataFlow] Clearing demo friends to load real data');
                 FriendManager._friends = [];
                 FriendManager._friendsMap.clear();
             }
@@ -6383,7 +6383,7 @@ try {
         const _bus = window.KynectaEventBus;
         if (_bus && typeof _bus.on === 'function') {
             _bus.on('SYNC_STARTED', async ({ reason } = {}) => {
-                console.log('[DataFlow] Delta sync triggered, reason:', reason);
+                debugLog('[DataFlow] Delta sync triggered, reason:', reason);
                 try {
                     // 1. Re-fetch conversations (soft merge, tombstones prevent resurrection)
                     await ChatManager.fetchConversations();
@@ -6434,7 +6434,7 @@ try {
     // =============================================
 
     async function openChatWithUser(userId, userName, userAvatar) {
-        console.log('[MessageCore] openChatWithUser called:', { userId, userName, userAvatar });
+        debugLog('[MessageCore] openChatWithUser called:', { userId, userName, userAvatar });
         
         if (!userId) {
             console.error('[MessageCore] Cannot open chat: No userId provided');
@@ -6456,13 +6456,13 @@ try {
         const displayName = realUserName || userName || `User_${numericUserId}`;
         
         if (!MessagesCore.isReady()) {
-            console.log('[MessageCore] Module not ready, waiting for boot...');
+            debugLog('[MessageCore] Module not ready, waiting for boot...');
             await MessagesCore.waitForBoot();
         }
         
         try {
             if (MessagesCore.ConversationManager && typeof MessagesCore.ConversationManager.createConversation === 'function') {
-                console.log('[MessageCore] Using ConversationManager.createConversation');
+                debugLog('[MessageCore] Using ConversationManager.createConversation');
                 const result = await MessagesCore.ConversationManager.createConversation(
                     [numericUserId], 
                     { name: displayName, type: 'direct' }
@@ -6484,12 +6484,12 @@ try {
             }
             
             if (MessagesCore.ChatManager && typeof MessagesCore.ChatManager.openChat === 'function') {
-                console.log('[MessageCore] Using ChatManager.openChat');
+                debugLog('[MessageCore] Using ChatManager.openChat');
                 const result = await MessagesCore.ChatManager.openChat(numericUserId, displayName);
                 return { success: true, result };
             }
             
-            console.log('[MessageCore] Dispatching event for UI');
+            debugLog('[MessageCore] Dispatching event for UI');
             window.dispatchEvent(new CustomEvent('messages:openChat', {
                 detail: {
                     userId: numericUserId,
@@ -6612,7 +6612,7 @@ try {
                     if (_renderMsgs.length > 0 && _now) {
                         // ── FORENSIC LOG: UI_RENDERED ─────────────────────────────────
                         const _rmId = normalizedMessage ? (normalizedMessage.id || normalizedMessage.localId || '?') : '?';
-                        console.log(`[FORENSIC] UI_RENDERED | messageId=${_rmId} | chatId=${chatId} | msgCount=${_renderMsgs.length} | ts=${Date.now()}`);
+                        debugLog(`[FORENSIC] UI_RENDERED | messageId=${_rmId} | chatId=${chatId} | msgCount=${_renderMsgs.length} | ts=${Date.now()}`);
                         window.dispatchEvent(new CustomEvent('renderMessages', {
                             detail: { messages: _renderMsgs, currentChat: _now, currentUser: SessionManager && SessionManager.getUser && SessionManager.getUser() }
                         }));
@@ -6656,12 +6656,12 @@ try {
             setTimeout(function() { _realtimeDeliveredAckIds.delete(ackKey); }, 30000);
 
             try {
-                console.log('[messages-core] 📬 delivery ack send', { chatId, messageId });
+                debugLog('[messages-core] 📬 delivery ack send', { chatId, messageId });
                 await makeApiRequest('/messages/mark-delivered/batch', 'POST', {
                     chatId,
                     messageIds: [messageId]
                 });
-                console.log('[messages-core] ✅ delivery ack success', { chatId, messageId });
+                debugLog('[messages-core] ✅ delivery ack success', { chatId, messageId });
             } catch (error) {
                 console.warn('[messages-core] Delivery ack failed:', error && error.message ? error.message : error);
             }
@@ -6868,7 +6868,7 @@ try {
                 const _sk = String(d.localId||'') + ':' + String(d.serverId||d.messageId||d.id||'');
                 if (_sk !== ':' && _realtimeSentIds.has(_sk)) return;
                 if (_sk !== ':') { _realtimeSentIds.add(_sk); setTimeout(()=>_realtimeSentIds.delete(_sk), 15000); }
-                console.log('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
+                debugLog('[messages-core] ✅ message:sent received localId=', d.localId, 'serverId=', d.serverId || d.messageId);
                 // Track serverId so echo prevention knows this was our own sent message
                 const _confirmServerId = d.serverId || d.messageId || d.id;
                 if (_confirmServerId) {
@@ -6893,7 +6893,7 @@ try {
                 if (mid) {
                     // Update local message status to 'received' (single tick → double tick)
                     EventBus.emit('message:status_update', { messageId: mid, status: 'received', timestamp: data.timestamp || Date.now() });
-                    console.log('[messages-core] 📡 message received by server mid=' + mid);
+                    debugLog('[messages-core] 📡 message received by server mid=' + mid);
                 }
                 return;
             }
@@ -7154,7 +7154,7 @@ try {
                     _bindKynectaRealtime();
                 });
             }
-            console.log('[messages] ✅ Bound to KynectaRealtime singleton events');
+            debugLog('[messages] ✅ Bound to KynectaRealtime singleton events');
         }
         _bindKynectaRealtime();
         window.addEventListener('kyn:realtimeReady', _bindKynectaRealtime, { once: true });
@@ -7210,7 +7210,7 @@ try {
         };
         mc.receiveMessage  = mc._handleIncomingRealtimeMessage;
         mc.onNewMessage    = mc._handleIncomingRealtimeMessage;
-        console.log('[messages-core] ✅ _handleIncomingRealtimeMessage, receiveMessage, onNewMessage exposed');
+        debugLog('[messages-core] ✅ _handleIncomingRealtimeMessage, receiveMessage, onNewMessage exposed');
     }
     _exposeRealtimeEntryPoints();
 
@@ -7391,8 +7391,8 @@ try {
     // INITIALIZATION
     // =============================================
     async function initialize() {
-        console.log('[INIT MODULE]', MODULE_NAME);
-        console.log(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added | Pending Chat Handling)`);
+        debugLog('[INIT MODULE]', MODULE_NAME);
+        debugLog(`[${MODULE_NAME}] 🚀 Messages Core v${MODULE_VERSION} (Stabilized Protocol | Real Data Only | Session Validation | UI Enhanced | Demo Data Included | openChatWithUser Added | Pending Chat Handling)`);
         
         try {
             setState(LIFECYCLE_STATES.BOOT, 'initialization_start');
@@ -7410,12 +7410,12 @@ try {
             stateListeners.add((toState) => {
                 if (toState === LIFECYCLE_STATES.ACTIVE) {
                     BootController.completeBoot();
-                    console.log(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
+                    debugLog(`[${MODULE_NAME}] ✅ Module ACTIVE - ready for user interaction`);
                     startRealtimeSync(); // ensures full sync triggers; listener already attached above
                 }
             });
             
-            console.log(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
+            debugLog(`[${MODULE_NAME}] ✅ Initialized - waiting for parent activation and valid session`);
             
             // Production requirement: never activate mock/demo data.
             setTimeout(() => {
@@ -7715,7 +7715,7 @@ try {
                     chatMgr.addMessage(msg);
                 } catch(_) {}
             });
-            console.log('[MessagesCore] PHASE15: Flushed', _pending.length, 'pending messages from localStorage');
+            debugLog('[MessagesCore] PHASE15: Flushed', _pending.length, 'pending messages from localStorage');
         } catch (_) {}
     }
     // Flush on load (catches messages that arrived before this module loaded)
@@ -7830,7 +7830,7 @@ function applySettingToMessagesModule(section, key, value) {
                 try { applySettingToMessagesModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
             });
         });
-        console.log('[messages-core] ✅ Settings bootstrapped from cache');
+        debugLog('[messages-core] ✅ Settings bootstrapped from cache');
     } catch(e) {}
     // Also listen for online event to re-request fresh settings
     window.addEventListener('online', function() {

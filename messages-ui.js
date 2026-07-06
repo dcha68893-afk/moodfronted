@@ -21,6 +21,7 @@
 (function() {
 
     'use strict';
+    const _uiLog = (...a) => { if (window.__MESSAGES_DEBUG__) console.log(...a); };
 
     // FIX-AUDIT: Guaranteed local HTML escape — does NOT depend on `core` being
     // loaded. The caption rendering paths below previously did
@@ -1168,7 +1169,7 @@
 
         forceEnableUI() {
 
-            console.log('[UIFailsafe] Forcing UI enable');
+            _uiLog('[UIFailsafe] Forcing UI enable');
 
             if (window.messagesUI && window.messagesUI.UIStateManager) {
 
@@ -1421,7 +1422,7 @@
 
             if (coreValid && !this.state.sessionValid) {
 
-                console.log('[UIStateManager] Force setting sessionValid true - core has valid session');
+                _uiLog('[UIStateManager] Force setting sessionValid true - core has valid session');
 
                 isValid = true;
 
@@ -1431,7 +1432,7 @@
 
             if (isValid !== this.state.sessionValid) {
 
-                console.log('[UIStateManager] Session validity changed:', { 
+                _uiLog('[UIStateManager] Session validity changed:', { 
 
                     was: this.state.sessionValid, 
 
@@ -1505,7 +1506,7 @@
 
                 if (!this.state.sessionValid || this.state.lifecycleState !== LIFECYCLE_STATES.ACTIVE) {
 
-                    console.log('[UIStateManager] Force syncing session state - core has valid session');
+                    _uiLog('[UIStateManager] Force syncing session state - core has valid session');
 
                     this.state.sessionValid = true;
 
@@ -1531,7 +1532,7 @@
 
                 } else if (this.state.sessionValid === false && coreHasSession) {
 
-                    console.log('[UIStateManager] Fixing mismatched session state - core has session but UI says false');
+                    _uiLog('[UIStateManager] Fixing mismatched session state - core has session but UI says false');
 
                     this.state.sessionValid = true;
 
@@ -1657,7 +1658,7 @@
 
             
 
-            console.log(`[messagesUI] Lifecycle: ${lifecycleState}`);
+            _uiLog(`[messagesUI] Lifecycle: ${lifecycleState}`);
 
             
 
@@ -1741,7 +1742,7 @@
 
                 if (!this._pendingFetchTimer) {
 
-                    console.log('[messagesUI] Core not ACTIVE yet, polling until ready...');
+                    _uiLog('[messagesUI] Core not ACTIVE yet, polling until ready...');
 
                     let attempts = 0;
 
@@ -1771,7 +1772,7 @@
 
                             this._pendingFetchTimer = null;
 
-                            console.log('[messagesUI] Core still not ACTIVE after polling — forcing fetch');
+                            _uiLog('[messagesUI] Core still not ACTIVE after polling — forcing fetch');
 
                             UIFailsafe.forceEnableUI();
 
@@ -1793,7 +1794,7 @@
 
             if (!UIFailsafe.hasValidSession()) {
 
-                console.log('[messagesUI] No valid session, skipping data fetch');
+                _uiLog('[messagesUI] No valid session, skipping data fetch');
 
                 return;
 
@@ -1807,7 +1808,7 @@
 
             if (core && core.fetchConversations) {
 
-                console.log('[messagesUI] Triggering real data fetch from backend');
+                _uiLog('[messagesUI] Triggering real data fetch from backend');
 
                 core.fetchConversations();
 
@@ -2057,7 +2058,7 @@
 
                     
 
-                    console.log('[UIStateManager] SessionUpdated event:', { 
+                    _uiLog('[UIStateManager] SessionUpdated event:', { 
 
                         detail: e.detail,
 
@@ -2301,7 +2302,7 @@
 
                     if (sessionValid !== this.state.sessionValid) {
 
-                        console.log('[UIStateManager] Periodic sync - session valid changed:', { was: this.state.sessionValid, now: sessionValid });
+                        _uiLog('[UIStateManager] Periodic sync - session valid changed:', { was: this.state.sessionValid, now: sessionValid });
 
                         this.state.sessionValid = sessionValid;
 
@@ -2323,7 +2324,7 @@
 
                     } else if (sessionValid && !this.state.sessionValid) {
 
-                        console.log('[UIStateManager] Periodic sync - fixing mismatched session state');
+                        _uiLog('[UIStateManager] Periodic sync - fixing mismatched session state');
 
                         this.state.sessionValid = true;
 
@@ -2369,7 +2370,7 @@
 
             if (!UIFailsafe.hasValidSession()) {
 
-                console.log('[messagesUI] No valid session, waiting for authentication');
+                _uiLog('[messagesUI] No valid session, waiting for authentication');
 
                 return;
 
@@ -5704,7 +5705,7 @@
 
         if (!voiceCallBtn && !videoCallBtn) {
 
-            console.log('[CallHandler] Call buttons not found in DOM');
+            _uiLog('[CallHandler] Call buttons not found in DOM');
 
             return;
 
@@ -5924,7 +5925,7 @@
 
                 
 
-                console.log(`[CallHandler] Initiating ${callType} call with:`, {
+                _uiLog(`[CallHandler] Initiating ${callType} call with:`, {
 
                     userId: info.receiverId,
 
@@ -6092,7 +6093,7 @@
 
         
 
-        console.log('[CallHandler] Call handlers initialized');
+        _uiLog('[CallHandler] Call handlers initialized');
 
     }
 
@@ -6115,7 +6116,7 @@
                 if (window.__lastCallEndedHandled && (_now - window.__lastCallEndedHandled) < 3000) return;
                 window.__lastCallEndedHandled = _now;
 
-                console.log('[CallHandler] Call ended, returning to chat');
+                _uiLog('[CallHandler] Call ended, returning to chat');
 
                 
 
@@ -6180,13 +6181,13 @@
                 const callsVisible = callsContent && !callsContent.classList.contains('hidden');
                 const callScreenActive = window.parent?.document?.body?.classList?.contains?.('call-screen-active');
                 if (!callsVisible && !callScreenActive) {
-                    console.log('[CallHandler] 📞 Incoming call postMessage (mini modal)', data.payload);
+                    _uiLog('[CallHandler] 📞 Incoming call postMessage (mini modal)', data.payload);
 
                     _showIncomingCallModal(data.payload || {});
 
                 } else {
 
-                    console.log('[CallHandler] 📞 Incoming call — calls screen already handling');
+                    _uiLog('[CallHandler] 📞 Incoming call — calls screen already handling');
 
                 }
 
@@ -6198,7 +6199,7 @@
 
         window.addEventListener('incomingCall', (event) => {
 
-            console.log('[CallHandler] 📞 Incoming call window event', event.detail);
+            _uiLog('[CallHandler] 📞 Incoming call window event', event.detail);
 
             _showIncomingCallModal(event.detail || {});
 
@@ -6242,7 +6243,7 @@
 
 
 
-        console.log(`[CallModal] 📞 Showing incoming ${callType} call modal from ${displayName}`);
+        _uiLog(`[CallModal] 📞 Showing incoming ${callType} call modal from ${displayName}`);
 
 
 
@@ -6382,7 +6383,7 @@
 
             if (el) el.remove();
 
-            console.log(`[CallModal] Dismissed: ${reason}`);
+            _uiLog(`[CallModal] Dismissed: ${reason}`);
 
         }
 
@@ -6392,7 +6393,7 @@
 
             _dismissCallModal('rejected');
 
-            console.log('[CallModal] 📵 User REJECTED call from', displayName);
+            _uiLog('[CallModal] 📵 User REJECTED call from', displayName);
 
             // Notify parent/calls iframe
 
@@ -6416,7 +6417,7 @@
 
             _dismissCallModal('accepted');
 
-            console.log('[CallModal] ✅ User ACCEPTED call from', displayName);
+            _uiLog('[CallModal] ✅ User ACCEPTED call from', displayName);
 
             // Notify parent/calls iframe
 
@@ -9401,7 +9402,7 @@ Type: ${message.type || 'text'}`;
 
                     UIStateManager.setState('networkState', 'offline');
 
-                    console.log('[MessageUI] Network offline — using cached data silently');
+                    _uiLog('[MessageUI] Network offline — using cached data silently');
 
                 });
 
@@ -10571,7 +10572,7 @@ Type: ${message.type || 'text'}`;
 
     function setupAutoOpenChat() {
 
-        console.log('[MessageUI] Setting up auto-open chat listener');
+        _uiLog('[MessageUI] Setting up auto-open chat listener');
 
         
 
@@ -10587,7 +10588,7 @@ Type: ${message.type || 'text'}`;
 
             
 
-            console.log('[MessageUI] Auto-open chat requested:', { targetUserId, targetUserName, targetAvatar });
+            _uiLog('[MessageUI] Auto-open chat requested:', { targetUserId, targetUserName, targetAvatar });
 
             
 
@@ -10629,7 +10630,7 @@ Type: ${message.type || 'text'}`;
 
 
 
-            console.log('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName, findExisting, returnFromCall });
+            _uiLog('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName, findExisting, returnFromCall });
 
 
 
@@ -10672,7 +10673,7 @@ Type: ${message.type || 'text'}`;
         // Set a global flag so _showChatPanel (in messages-core) also knows we came from a call
         window.__returningFromCall = returnFromCall === true;
 
-        console.log('[MessageUI] Opening chat with user:', { userId, userName, userAvatar, findExisting, returnFromCall });
+        _uiLog('[MessageUI] Opening chat with user:', { userId, userName, userAvatar, findExisting, returnFromCall });
 
         
 
@@ -10841,7 +10842,7 @@ Type: ${message.type || 'text'}`;
 
         if (window.messagesUI && typeof window.messagesUI.loadChatByFriendId === 'function') {
 
-            console.log('[MessageUI] Using messagesUI.loadChatByFriendId');
+            _uiLog('[MessageUI] Using messagesUI.loadChatByFriendId');
 
             window.messagesUI.loadChatByFriendId(numericUserId, resolvedName);
 
@@ -10853,7 +10854,7 @@ Type: ${message.type || 'text'}`;
 
         if (core && typeof core.openConversation === 'function') {
 
-            console.log('[MessageUI] Using core.openConversation');
+            _uiLog('[MessageUI] Using core.openConversation');
 
             
 
@@ -10865,7 +10866,7 @@ Type: ${message.type || 'text'}`;
 
                 if (existingConv) {
 
-                    console.log('[MessageUI] Found existing conversation:', existingConv.id);
+                    _uiLog('[MessageUI] Found existing conversation:', existingConv.id);
 
                     // FIX Bug5: pass name so header never shows Loading...
                     core.openConversation(existingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
@@ -10880,7 +10881,7 @@ Type: ${message.type || 'text'}`;
                     // exist. Must go through the pending_<receiverId> conversation
                     // so ChatManager._sendMessage sends { receiverId } instead and
                     // lets the backend find-or-create the real chat.
-                    console.log('[MessageUI] No existing conversation found, creating pending conversation for user:', numericUserId);
+                    _uiLog('[MessageUI] No existing conversation found, creating pending conversation for user:', numericUserId);
 
                     let pendingConv = null;
                     if (core.ChatManager && typeof core.ChatManager.getOrCreatePendingConversation === 'function') {
@@ -10980,7 +10981,7 @@ Type: ${message.type || 'text'}`;
 
         if (core && core.ConversationManager && typeof core.ConversationManager.createConversation === 'function') {
 
-            console.log('[MessageUI] Using ConversationManager.createConversation');
+            _uiLog('[MessageUI] Using ConversationManager.createConversation');
 
             const result = core.ConversationManager.createConversation([numericUserId]);
 
@@ -11024,7 +11025,7 @@ Type: ${message.type || 'text'}`;
 
                 result.then((conversation) => {
 
-                    console.log('[MessageUI] Conversation opened:', conversation);
+                    _uiLog('[MessageUI] Conversation opened:', conversation);
 
                     openPanel();
 
@@ -11050,7 +11051,7 @@ Type: ${message.type || 'text'}`;
 
         if (window.ChatManager && typeof window.ChatManager.openChat === 'function') {
 
-            console.log('[MessageUI] Using ChatManager.openChat');
+            _uiLog('[MessageUI] Using ChatManager.openChat');
 
             window.ChatManager.openChat(numericUserId, resolvedName);
 
@@ -11082,7 +11083,7 @@ Type: ${message.type || 'text'}`;
 
             if (userElement) {
 
-                console.log('[MessageUI] Found user element:', selector);
+                _uiLog('[MessageUI] Found user element:', selector);
 
                 const chatButton = userElement.querySelector('.chat-btn, .start-chat, [data-action="start-chat"], button:last-child');
 
@@ -11108,7 +11109,7 @@ Type: ${message.type || 'text'}`;
 
         if (searchInput) {
 
-            console.log('[MessageUI] Searching for user:', resolvedName);
+            _uiLog('[MessageUI] Searching for user:', resolvedName);
 
             searchInput.value = resolvedName;
 
@@ -11150,7 +11151,7 @@ Type: ${message.type || 'text'}`;
 
                 } else {
 
-                    console.log('[MessageUI] No search results found for:', resolvedName);
+                    _uiLog('[MessageUI] No search results found for:', resolvedName);
 
                     showNotificationInMessages(`Click + New Chat to start conversation with ${resolvedName}`, 'info');
 
@@ -11160,7 +11161,7 @@ Type: ${message.type || 'text'}`;
 
         } else {
 
-            console.log('[MessageUI] Could not find way to open chat with user:', userId);
+            _uiLog('[MessageUI] Could not find way to open chat with user:', userId);
 
             showNotificationInMessages(`Click + New Chat to start conversation with ${resolvedName}`, 'info');
 
@@ -11194,7 +11195,7 @@ Type: ${message.type || 'text'}`;
 
         } else {
 
-            console.log('[MessageUI] Notification:', message);
+            _uiLog('[MessageUI] Notification:', message);
 
         }
 
@@ -11234,7 +11235,7 @@ Type: ${message.type || 'text'}`;
             // FIX: Notify parent so it removes chat-panel-active → restores mobile nav bar
             try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch (_) {}
 
-            console.log('[MessageUI] Device back: returned to sidebar');
+            _uiLog('[MessageUI] Device back: returned to sidebar');
 
         }
 
@@ -11565,7 +11566,7 @@ Type: ${message.type || 'text'}`;
 
                 if (UIFailsafe.hasValidSession()) {
 
-                    console.log('[UI] Timeout but session valid - forcing UI enable');
+                    _uiLog('[UI] Timeout but session valid - forcing UI enable');
 
                     UIFailsafe.forceEnableUI();
 
@@ -11573,7 +11574,7 @@ Type: ${message.type || 'text'}`;
 
                 } else {
 
-                    console.log('[UI] Timeout - no session, showing fallback');
+                    _uiLog('[UI] Timeout - no session, showing fallback');
 
                     _updateFallbackUI();
 
@@ -11591,7 +11592,7 @@ Type: ${message.type || 'text'}`;
 
             if (UIFailsafe.hasValidSession() && UIStateManager.getState('sessionValid') !== true) {
 
-                console.log('[UI] 3s timeout - forcing UI enable');
+                _uiLog('[UI] 3s timeout - forcing UI enable');
 
                 UIFailsafe.forceEnableUI();
 
@@ -12026,7 +12027,7 @@ Type: ${message.type || 'text'}`;
 
             if (!core) {
 
-                console.log('[messagesUI] Core not available, retrying in 500ms');
+                _uiLog('[messagesUI] Core not available, retrying in 500ms');
 
                 setTimeout(() => {
 
@@ -12052,7 +12053,7 @@ Type: ${message.type || 'text'}`;
 
             
 
-            console.log('[messagesUI] loadChatByFriendId called with:', { friendId, friendName: displayName });
+            _uiLog('[messagesUI] loadChatByFriendId called with:', { friendId, friendName: displayName });
 
 
 
@@ -12145,7 +12146,7 @@ Type: ${message.type || 'text'}`;
 
                                     UIRenderer.renderMessages(idbMsgs);
 
-                                    console.log('[messagesUI] ✅ FIX C2 Loaded', idbMsgs.length, 'messages from IDB for chat', existingConversation.id);
+                                    _uiLog('[messagesUI] ✅ FIX C2 Loaded', idbMsgs.length, 'messages from IDB for chat', existingConversation.id);
 
                                 } else {
 
@@ -12211,7 +12212,7 @@ Type: ${message.type || 'text'}`;
 
             const ensureChatPanelOpen = (conversationId) => {
 
-                console.log('[messagesUI] Ensuring chat panel open with ID:', conversationId);
+                _uiLog('[messagesUI] Ensuring chat panel open with ID:', conversationId);
 
                 
 
@@ -12315,7 +12316,7 @@ Type: ${message.type || 'text'}`;
 
             if (existingConversation?.id && core.openConversation) {
 
-                console.log('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
+                _uiLog('[messagesUI] Opening existing conversation instantly:', existingConversation.id);
 
                 // FIX Bug3: ensureChatPanelOpen must run AFTER openConversation resolves
                 // so messages are loaded before the panel is shown (no more blank panel).
@@ -12336,7 +12337,7 @@ Type: ${message.type || 'text'}`;
 
             if (core.ConversationManager?.createConversation) {
 
-                console.log('[messagesUI] Using ConversationManager.createConversation');
+                _uiLog('[messagesUI] Using ConversationManager.createConversation');
 
                 const result = core.ConversationManager.createConversation([id]);
 
@@ -12346,11 +12347,11 @@ Type: ${message.type || 'text'}`;
 
                     result.then((conversation) => {
 
-                        console.log('[messagesUI] Conversation created/opened:', conversation);
+                        _uiLog('[messagesUI] Conversation created/opened:', conversation);
 
                         if (conversation === false || conversation === null) {
 
-                            console.log('[messagesUI] createConversation returned false, opening panel anyway');
+                            _uiLog('[messagesUI] createConversation returned false, opening panel anyway');
 
                             ensureChatPanelOpen(id);
 
@@ -12380,7 +12381,7 @@ Type: ${message.type || 'text'}`;
 
             } else if (core.createConversation) {
 
-                console.log('[messagesUI] Using core.createConversation');
+                _uiLog('[messagesUI] Using core.createConversation');
 
                 const result = core.createConversation([id]);
 
@@ -12408,7 +12409,7 @@ Type: ${message.type || 'text'}`;
 
             } else if (core.openConversation) {
 
-                console.log('[messagesUI] Using core.openConversation');
+                _uiLog('[messagesUI] Using core.openConversation');
 
                 core.openConversation(id);
 
@@ -12919,7 +12920,7 @@ Type: ${message.type || 'text'}`;
 
     window.messagesUI.openMultiSendHistory = async function(batchId) {
         if (!batchId) return;
-        console.log('[MultiSend] Opening history detail:', batchId);
+        _uiLog('[MultiSend] Opening history detail:', batchId);
         window.messagesUI?.showMultiSendHistoryPanel?.({ detailOnly: true });
         const core = (window.messagesCore || null);
         let token = null;
@@ -12948,7 +12949,7 @@ Type: ${message.type || 'text'}`;
         if (listEl && typeof listEl.scrollIntoView === 'function') {
             listEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
-        console.log('[MultiSend] History panel opened', settings);
+        _uiLog('[MultiSend] History panel opened', settings);
     };
 
     window.messagesUI.setMultiSendButtonState = function(isLoading) {
@@ -12971,7 +12972,7 @@ Type: ${message.type || 'text'}`;
         const replyVisibility = document.getElementById('multiSendReplyVisibility')?.value || 'public';
         const selectedChats = core && core.multiSendSelectedChats;
 
-        console.log('[MultiSend] Send triggered', {
+        _uiLog('[MultiSend] Send triggered', {
             selectedCount: selectedChats instanceof Set ? selectedChats.size : 0,
             replyVisibility
         });
@@ -13009,7 +13010,7 @@ Type: ${message.type || 'text'}`;
                 type: 'text',
                 replyVisibility
             };
-            console.log('[MultiSend] API request start', payload);
+            _uiLog('[MultiSend] API request start', payload);
 
             const resp = await fetch('/api/messages/bulk', {
                 method: 'POST',
@@ -13017,7 +13018,7 @@ Type: ${message.type || 'text'}`;
                 body: JSON.stringify(payload)
             });
             const result = await resp.json().catch(function() { return {}; });
-            console.log('[MultiSend] API response', { ok: resp.ok, result: result });
+            _uiLog('[MultiSend] API response', { ok: resp.ok, result: result });
 
             if (!resp.ok || result.success === false) {
                 throw new Error(result.message || result.error || 'Failed to send');
@@ -13055,7 +13056,7 @@ Type: ${message.type || 'text'}`;
         if (historyBtn && !historyBtn.dataset.boundHistory) {
             historyBtn.dataset.boundHistory = 'true';
             historyBtn.addEventListener('click', function() {
-                console.log('[MultiSend] History button clicked');
+                _uiLog('[MultiSend] History button clicked');
                 window.messagesUI?.showMultiSendHistoryPanel?.();
                 window.messagesUI?.loadMultiSendHistory?.();
             });
@@ -13065,7 +13066,7 @@ Type: ${message.type || 'text'}`;
         if (toggleBtn && !toggleBtn.dataset.boundHistoryLoad) {
             toggleBtn.dataset.boundHistoryLoad = 'true';
             toggleBtn.addEventListener('click', function() {
-                console.log('[MultiSend] Panel toggle clicked');
+                _uiLog('[MultiSend] Panel toggle clicked');
                 setTimeout(function() {
                     window.messagesUI?.showMultiSendHistoryPanel?.();
                     window.messagesUI?.loadMultiSendHistory?.();
@@ -13816,7 +13817,7 @@ Type: ${message.type || 'text'}`;
         }, 2000);
     });
 
-    console.log('[KynPatch v3.0] ✅ All runtime patches installed');
+    _uiLog('[KynPatch v3.0] ✅ All runtime patches installed');
 })();
 
 
@@ -13956,7 +13957,7 @@ Type: ${message.type || 'text'}`;
     // Expose for external use
     window._kynAppendMessage = _appendMessageBubbleDirect;
 
-    console.log('[KynPatch v4.0] ✅ Message visibility patch installed');
+    _uiLog('[KynPatch v4.0] ✅ Message visibility patch installed');
 })();
 
 // =============================================================================
@@ -14161,5 +14162,5 @@ Type: ${message.type || 'text'}`;
         _installObserver();
     }
 
-    console.log('[KynPatch] ✅ DOM windowing installed for large-chat performance');
+    _uiLog('[KynPatch] ✅ DOM windowing installed for large-chat performance');
 })();
