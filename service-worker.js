@@ -805,7 +805,9 @@ self.addEventListener('unhandledrejection', function(event) {
   event.preventDefault();
 });
 
-console.log('[SW] v' + SW_VERSION + ' loaded - offline-first navigation active');
+if (self.__SW_DEBUG__) {
+  console.log('[SW] v' + SW_VERSION + ' loaded - offline-first navigation active');
+}
 
 // ── PHASE14 FIX: Push notification handlers ──────────────────────────────────
 // Without these, web push notifications are silently swallowed — the browser

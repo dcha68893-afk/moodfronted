@@ -48,6 +48,62 @@
         // Keep errors intact — only filter warnings from extensions
     })();
 
+    // ── FIX-NOISE: Generic routine-banner log filter (every frame) ──────────
+    // The app has ~40 subsystems (mesh engine, call orchestrators, group
+    // engines, presence/notification/monitoring layers, etc.) that each log
+    // their own "[Tag] ✅ Started / Ready / Initialized / Loaded" banner on
+    // boot — and many of those subsystems boot independently inside EVERY
+    // iframe (friend/calls/settings/group/status/tools/message), not just
+    // the parent shell. app.realtime.socket.js already dedupes/quiets some
+    // of this, but it only loads in chat.html and message.html, so all the
+    // OTHER iframes' console output was never touched — that's the "still
+    // lots of console noise" you're seeing. This filter lives here instead,
+    // because kynecta.safety.layer.js is the one file loaded first in every
+    // page (see load-order note at the top of this file), so it applies
+    // uniformly everywhere.
+    //
+    // Only console.log / console.info are touched; console.warn/console.error
+    // are never filtered here, so real problems stay visible.
+    //
+    // Set window.__CHAT_DEBUG__ = true in the console to see everything again.
+    (function _installBannerLogFilter() {
+        if (global.__kynBannerFilterInstalled) return;
+        global.__kynBannerFilterInstalled = true;
+
+        // Matches lines like "[MeshEngine] ✅ Initialised..." / "[Tools] 🔵 READY - ..."
+        // / "[GroupOrchestrator] ✅ Ready" / "[settings] 🚀 SecurityValidator initializing"
+        // i.e. any "[Tag] ..." formatted routine status/lifecycle chatter.
+        const _BANNER_RE = /^\s*\[[^\]\n]{1,40}\]/;
+        // Some subsystems log real failures through console.log/info instead
+        // of console.warn/error (inconsistent, but not ours to refactor here)
+        // — never suppress those even if they're bracket-tagged.
+        const _FAILURE_RE = /\b(error|failed|fail|timed out|timeout|rejected|denied|blocked|invalid)\b/i;
+
+        function _isRoutineBanner(firstArg) {
+            if (global.__CHAT_DEBUG__) return false; // debug mode: show everything
+            if (typeof firstArg !== 'string') return false;
+            if (!_BANNER_RE.test(firstArg)) return false;
+            if (_FAILURE_RE.test(firstArg)) return false;
+            return true;
+        }
+
+        ['log', 'info'].forEach(function (method) {
+            const _orig = console[method] ? console[method].bind(console) : function () {};
+            console[method] = function (...args) {
+                try {
+                    if (_isRoutineBanner(args[0])) return;
+                } catch (_) {}
+                _orig(...args);
+            };
+        });
+
+        // Let app.realtime.socket.js's own dedup installer know a console
+        // filter is already active here, so it doesn't wrap console a
+        // second time in chat.html/message.html (double-wrapping is harmless
+        // but wasteful).
+        global.__consoleDedupInstalled = true;
+    })();
+
     // ── FIX-CHATLOG-SCOPE: global _chatLog ──────────────────────────────────
     // chat.html calls the bare identifier `_chatLog(...)` from many separate
     // <script> tags (module registration, iframe-queue flushing, call
