@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
 <script>
 // Suppress iframe sandbox warnings (usually from extensions)
 (function() {
@@ -3091,7 +3092,12 @@
   async function api(method, url, body) {
     const o = { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok() } };
     if (body) o.body = JSON.stringify(body);
-    try { const r = await fetch(url, o); return r.json(); }
+    // ✅ FIX: prefix relative /api/* URLs with the real backend origin — this
+    // iframe's own origin is the static frontend, which has no /api routes,
+    // so an un-prefixed fetch was silently hitting the frontend and getting
+    // back 404/HTML instead of the intended backend JSON response.
+    const fullUrl = (url.startsWith('/api') && window.API_BASE_URL) ? (window.API_BASE_URL + url) : url;
+    try { const r = await fetch(fullUrl, o); return r.json(); }
     catch (e) { return { status: 'error', message: 'Network error' }; }
   }
   function toast(msg, type) {
