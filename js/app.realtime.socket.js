@@ -25,15 +25,38 @@
     // ── Console dedup utility ─────────────────────────────────────────────────
     // Prevents repeated identical log messages from flooding the console.
     // A message re-logs only when its content changes or after a reset.
+    //
+    // FIX-QUIET: Routine subsystem status/banner logs (module init banners,
+    // reconnect chatter, background-sync/reliability heartbeats) were flooding
+    // the console on every tab-focus / reconnect cycle. These are now
+    // suppressed by default and only re-enabled when window.__CHAT_DEBUG__ is
+    // set to true (same debug flag the rest of the app already uses via
+    // _chatLog). console.error is never touched here.
     if (!window.__consoleDedupInstalled) {
         window.__consoleDedupInstalled = true;
         (function() {
             const _logCache = new Map();
             const DEDUP_MS = 5000; // same message within 5s = suppressed
+
+            // Tag prefixes for routine/status chatter — quiet unless debugging.
+            const _QUIET_TAGS = [
+                '[MeshEngine]', '[COR]', '[Phase6]', '[SW]',
+                '[BGSync]', '[BGReliability]', '[Reconnect]'
+            ];
+            function _isQuietTag(firstArg) {
+                if (window.__CHAT_DEBUG__) return false; // debug mode: show everything
+                const msg = String(firstArg == null ? '' : firstArg);
+                for (let i = 0; i < _QUIET_TAGS.length; i++) {
+                    if (msg.indexOf(_QUIET_TAGS[i]) !== -1) return true;
+                }
+                return false;
+            }
+
             ['log', 'warn', 'info'].forEach(function(method) {
                 const _orig = console[method].bind(console);
                 console[method] = function() {
                     try {
+                        if (_isQuietTag(arguments[0])) return;
                         const key = Array.prototype.slice.call(arguments).join('|');
                         const now = Date.now();
                         const last = _logCache.get(key) || 0;

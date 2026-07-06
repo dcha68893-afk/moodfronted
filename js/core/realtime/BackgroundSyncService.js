@@ -122,22 +122,36 @@
   class NetworkRestorationHandler {
     constructor() {
       this._offlineAt = null;
+      this._wasOffline = false;
     }
 
     attach() {
       window.addEventListener('online', () => {
         const offlineDuration = this._offlineAt ? Date.now() - this._offlineAt : 0;
         this._offlineAt = null;
+        this._wasOffline = false;
         this._onRestored(offlineDuration);
       });
 
       window.addEventListener('offline', () => {
         this._offlineAt = Date.now();
+        this._wasOffline = true;
       });
 
+      // FIX-NETRESTORE-SPAM: this used to call _onRestored(0) on every single
+      // tab-focus event, regardless of whether the connection was ever
+      // actually lost — firing SYSTEM_NETWORK_ONLINE/SYNC_STARTED and an
+      // offline-queue flush on every tab switch, and flooding the console
+      // with duplicate "Network restored (was offline 0s)" lines. Now it
+      // only re-checks after a *genuine* offline period (the 'offline' event
+      // fired first but the 'online' event was missed, e.g. because the tab
+      // was backgrounded when connectivity returned).
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && navigator.onLine) {
-          this._onRestored(0);
+        if (document.visibilityState === 'visible' && navigator.onLine && this._wasOffline) {
+          const offlineDuration = this._offlineAt ? Date.now() - this._offlineAt : 0;
+          this._offlineAt = null;
+          this._wasOffline = false;
+          this._onRestored(offlineDuration);
         }
       });
     }

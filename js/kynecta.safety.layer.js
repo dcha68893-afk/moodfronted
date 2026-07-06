@@ -48,6 +48,24 @@
         // Keep errors intact — only filter warnings from extensions
     })();
 
+    // ── FIX-CHATLOG-SCOPE: global _chatLog ──────────────────────────────────
+    // chat.html calls the bare identifier `_chatLog(...)` from many separate
+    // <script> tags (module registration, iframe-queue flushing, call
+    // handling, group header, keep-alive ping, etc). It was previously only
+    // declared with `const _chatLog = ...` inside ONE of those <script>
+    // blocks, so `const`/`let` top-level declarations are scoped to that one
+    // script tag only — every other <script> tag calling `_chatLog(...)`
+    // threw "_chatLog is not defined". That ReferenceError fired every time
+    // an iframe posted CHILD_READY, aborting registerModule()/the ready-flag
+    // flush *before* the iframe was ever marked ready — which is why some
+    // iframe icons (friends/calls/settings/tools/games/group/status) would
+    // silently fail to open on click. Declaring it here (loaded first, per
+    // this file's own load-order contract) attaches it to window, so the
+    // bare identifier resolves correctly from every later <script> block.
+    global._chatLog = global._chatLog || function (...a) {
+        if (global.__CHAT_DEBUG__) console.log(...a);
+    };
+
     // Log suppression: noisy safety-layer messages printed only once (across iframes).
     function _logOnce(key, level, message) {
         try {
