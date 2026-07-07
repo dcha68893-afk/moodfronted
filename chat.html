@@ -3368,6 +3368,15 @@
     <script src="js/phase15.delivery.patch.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
     <script src="js/app.realtime.socket.js"></script>
+    <!-- FIX-DEAD-RECOVERY-LAYER: this Phase 5 recovery module (exponential
+         backoff reconnect, group/chat room restoration, offline-queue flush,
+         missed-event resync) was fully written but never included on any
+         page, so it never ran. BackendWakeMonitor.js below already listens
+         for the 'kyn:recovery:state' event this module dispatches — that
+         listener was firing on nothing. Must load before BackendWakeMonitor
+         so the 'kyn:recovery:state' events it dispatches are being listened
+         for from the start. -->
+    <script src="js/core/recovery/ReconnectOrchestrator.js"></script>
     <script src="js/core/network/BackendWakeMonitor.js"></script>
     <!-- OFFLINE-FIRST LAYER -->
     <script src="js/localStore.messages.js"></script>
@@ -5751,7 +5760,7 @@
                                 }
                             } catch(_socketCallErr) {}
 
-                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: true, success: true } }, '*');
+                            if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { ...(respData.data?.call || respData.data), calleeName: respData.data?.calleeName || null, calleeAvatar: respData.data?.calleeAvatar || null, callId: serverCallId, localCallId: localCallId, callType: callType, returnTo: callOriginPage, receiverOnline: true, success: true } }, '*');
                         } else {
                             if (callsIframe && callsIframe.contentWindow) callsIframe.contentWindow.postMessage({ type: 'CALL_INITIATED', payload: { success: false, error: respData?.message || 'Failed to start call', localCallId } }, '*');
                         }
