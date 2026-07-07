@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MoodChat — Call Monitoring Dashboard</title>
@@ -164,7 +165,8 @@
 (function() {
   'use strict';
 
-  var API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
+  var API_BASE = window.API_BASE_URL ||
+                 (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
                  localStorage.getItem('kyn_api_base') ||
                  prompt('Enter API base URL (e.g. https://moodchat-fy56.onrender.com)', 'https://moodchat-fy56.onrender.com') || '';
 

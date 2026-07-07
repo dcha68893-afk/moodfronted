@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
      <link rel="manifest" href="/manifest.json">
      <meta name="theme-color" content="#000000">
     <title>Secure Cloudinary Upload Test</title>
@@ -444,7 +445,7 @@
                 
                 // Step 1: Get signed upload parameters from our server with user tags
                 console.log('🔐 Requesting signed upload parameters from server...');
-                const signResponse = await fetch('/api/cloudinary/sign-upload', {
+                const signResponse = await fetch(window.API_BASE_URL + '/api/cloudinary/sign-upload', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -535,7 +536,7 @@
 
                 // Step 3: Verify upload with our server (optional but recommended)
                 console.log('🔍 Verifying upload with our server...');
-                const verifyResponse = await fetch('/api/cloudinary/verify-upload', {
+                const verifyResponse = await fetch(window.API_BASE_URL + '/api/cloudinary/verify-upload', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
