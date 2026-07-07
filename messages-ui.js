@@ -13832,6 +13832,12 @@ Type: ${message.type || 'text'}`;
 (function _kynMessageVisibilityPatch() {
     'use strict';
 
+    // FIX: _uiLog was referenced here but only ever declared inside the separate
+    // top-level IIFE starting at the top of this file — out of scope here, which
+    // threw "Uncaught ReferenceError: _uiLog is not defined" at the end of this
+    // function on every page load. Local copy of the same debug-gated logger.
+    const _uiLog = (...a) => { if (window.__MESSAGES_DEBUG__) console.log(...a); };
+
     // Track rendered message IDs to prevent duplicates
     const _renderedMsgIds = new Set();
 

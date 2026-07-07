@@ -808,13 +808,26 @@
     // ── Socket Listener Registration ──────────────────────────────────────────
 
     _attachSocketListeners() {
-      // Wait for socket to be available
-      const _tryHook = () => {
-        const socket = window.KynectaRealtime?._socket || window._kynSocket;
-        if (!socket) { setTimeout(_tryHook, 1000); return; }
-        this._hookSocket(socket);
-      };
-      _tryHook();
+      // FIX-DUPLICATE-ENGINE: _hookSocket() used to bind directly to the same raw
+      // socket.io events (call:incoming, call:accepted, call:rejected, call:ended,
+      // call:busy, call:dedup_rejected, call:accepted_elsewhere) that calls-core.js
+      // ALSO binds to via its own KynectaRealtime wrapper. calls-ui.js — which
+      // renders every call screen, ring/incoming UI, and control button — subscribes
+      // exclusively to calls-core.js's event system and has zero dependency on
+      // CallManager. That meant every real call was processed twice in parallel:
+      // once by calls-core.js (which drives the UI) and once silently here (which
+      // maintained its own state and fed its own PeerConnectionManager/RTCPeerConnection
+      // with no visible UI attached to it) — a genuine duplicate call-engine bug, not
+      // two working systems. Disabling the raw-socket hook stops the duplicate
+      // processing; CallManager's outbound-only features (hand-raise, screen-share
+      // toggle) go through the separate kyn:call:emit_socket bridge in calls.html and
+      // are unaffected.
+      // const _tryHook = () => {
+      //   const socket = window.KynectaRealtime?._socket || window._kynSocket;
+      //   if (!socket) { setTimeout(_tryHook, 1000); return; }
+      //   this._hookSocket(socket);
+      // };
+      // _tryHook();
 
       // Also hook kyn: CustomEvents for iframe-bridge consumers
       const _on = (event, fn) => {
