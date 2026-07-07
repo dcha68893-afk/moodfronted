@@ -28947,8 +28947,6 @@ _escapeHtml: function(text) {
     window.__activePeerName = _resolvedCalleeName;
     _showCallNotification(`${callData.callType === 'video' ? 'Video' : 'Voice'} call started with ${_resolvedCalleeName}`, 'success');
 
-    _showCallNotification(`Voice call started with ${userName}`, 'success');
-
 
 
 }

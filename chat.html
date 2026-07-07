@@ -2308,9 +2308,23 @@
                 // If already ready, deliver after 100ms settle time.
                 // If not ready within 1500ms, deliver anyway as fallback.
                 let _delivered = false;
+                let _fallbackTimer = null;
+                function _onIframeReady(evt) {
+                    if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
+                        setTimeout(_deliverToIframe, 80);
+                    }
+                }
                 function _deliverToIframe() {
                     if (_delivered) return;
                     _delivered = true;
+                    // FIX-LEAK: tear down the ready-listener here, unconditionally, so it
+                    // is removed whichever path triggered delivery (ready signal OR the
+                    // fallback timer). Previously it was only removed inside _onIframeReady,
+                    // so when the fallback fired first the listener stayed attached forever —
+                    // a stale one accumulated per incoming call, and all of them fired together
+                    // (re-posting old callData) the next time CALLS_IFRAME_READY was seen.
+                    clearTimeout(_fallbackTimer);
+                    window.removeEventListener('message', _onIframeReady);
                     const callsIframe = document.getElementById('callsIframe');
                     if (callsIframe && callsIframe.contentWindow) {
                         // FIX: Send all variant names — calls.html switch now handles all of them
@@ -2330,14 +2344,7 @@
                     setTimeout(_deliverToIframe, 100);
                 } else {
                     // Listen for the ready signal
-                    const _fallbackTimer = setTimeout(_deliverToIframe, 1500);
-                    function _onIframeReady(evt) {
-                        if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
-                            clearTimeout(_fallbackTimer);
-                            window.removeEventListener('message', _onIframeReady);
-                            setTimeout(_deliverToIframe, 80);
-                        }
-                    }
+                    _fallbackTimer = setTimeout(_deliverToIframe, 1500);
                     window.addEventListener('message', _onIframeReady);
                 }
 
@@ -6105,7 +6112,24 @@
                     // FIX BUG #7: Guard against iframe JS not loaded yet — queue the message
                     // until CALLS_IFRAME_READY fires, with a 2s fallback.
                     const _callsIframe = document.getElementById('callsIframe');
+                    let _ws2Delivered = false;
+                    let _callFallback = null;
+                    function _onCallIframeReady(evt) {
+                        if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
+                            _deliverCallToIframe();
+                        }
+                    }
                     function _deliverCallToIframe() {
+                        if (_ws2Delivered) return;
+                        _ws2Delivered = true;
+                        // FIX-LEAK: remove the ready-listener here unconditionally so it's torn
+                        // down whichever path delivers (ready signal OR the 2s fallback timer).
+                        // Previously it was only removed inside _onCallIframeReady, so when the
+                        // fallback fired first the listener stayed attached forever — stale
+                        // listeners accumulated across calls and all fired together the next
+                        // time CALLS_IFRAME_READY was seen, re-posting old/expired call payloads.
+                        if (_callFallback) clearTimeout(_callFallback);
+                        window.removeEventListener('message', _onCallIframeReady);
                         const _fi = document.getElementById('callsIframe');
                         if (_fi && _fi.contentWindow) {
                             // FIX: Send ALL variant names so calls.html switch catches it regardless
@@ -6121,14 +6145,7 @@
                         _deliverCallToIframe();
                     } else if (_callsIframe && _callsIframe.contentWindow) {
                         // Iframe exists but JS may not be initialized — wait for CALLS_IFRAME_READY
-                        const _callFallback = setTimeout(_deliverCallToIframe, 2000);
-                        function _onCallIframeReady(evt) {
-                            if (evt.data && evt.data.type === 'CALLS_IFRAME_READY') {
-                                clearTimeout(_callFallback);
-                                window.removeEventListener('message', _onCallIframeReady);
-                                _deliverCallToIframe();
-                            }
-                        }
+                        _callFallback = setTimeout(_deliverCallToIframe, 2000);
                         window.addEventListener('message', _onCallIframeReady);
                     }
                     // Also show the parent-frame banner (existing behaviour preserved)
