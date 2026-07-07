@@ -261,6 +261,43 @@
             this._setupNetworkMonitoring();
 
             window.KynectaRealtime = this;
+
+            // FIX-STALE-SOCKET-TOKEN: connect() only fetches a token from storage
+            // when _sessionToken is still empty (i.e. the very first connect), and
+            // reconnects triggered internally via _scheduleReconnect() call
+            // _connectInternal() directly — never re-reading storage either. Once a
+            // token refresh happens elsewhere in the app (auth.session.manager.js /
+            // api.auth.js both dispatch 'auth:token:refreshed' on refresh), this
+            // socket would otherwise keep authenticating every future reconnect with
+            // the ORIGINAL, now-stale token — failing auth after any disconnect that
+            // happens post-refresh (network blip, backend sleep/wake-up) until the
+            // user manually reloads the page. Keep _sessionToken current so every
+            // reconnect — internal or explicit — uses the live token.
+            const _onTokenRefreshed = (evt) => {
+                const newToken = evt && evt.detail && evt.detail.token;
+                if (!newToken || newToken === this._sessionToken) return;
+                this._sessionToken = newToken;
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] 🔄 Session token updated after refresh');
+            };
+            window.addEventListener('auth:token:refreshed', _onTokenRefreshed);
+            window.addEventListener('session:restored', _onTokenRefreshed);
+
+            // FIX-NO-DISCONNECT-ON-LOGOUT: confirmed via exhaustive search that
+            // nothing anywhere in the frontend ever listened for the
+            // 'user-logged-out' event api.auth.js dispatches on every logout (or
+            // 'auth:session:ended', dispatched when a refresh genuinely fails and
+            // the session ends). The authenticated socket was never disconnected —
+            // it kept receiving messages/calls/presence for the logged-out session
+            // indefinitely, and logging into a different account in the same tab
+            // could inherit the stale connection/token instead of a fresh one.
+            const _onLoggedOut = () => {
+                if (SOCKET_CONFIG.debug) console.log('[Realtime] 🔒 Logout detected — disconnecting socket');
+                this._sessionToken = null;
+                this.disconnect(); // sets _manualDisconnect, prevents auto-reconnect
+            };
+            window.addEventListener('user-logged-out', _onLoggedOut);
+            window.addEventListener('auth:session:ended', _onLoggedOut);
+
             if (SOCKET_CONFIG.debug) console.log('[Realtime] ✅ Socket.IO compatible manager initialized (v3.1.0)');
         }
 

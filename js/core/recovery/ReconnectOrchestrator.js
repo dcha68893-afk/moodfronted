@@ -394,10 +394,21 @@
 
     _attachSocketListeners() {
       const tryAttach = () => {
-        const rt = window.KynectaRealtime;
+        const rt = window.KynectaEventBus ? true : window.KynectaRealtime;
         if (!rt) { setTimeout(tryAttach, 500); return; }
 
-        // Use EventBus (fired by existing app.realtime.socket.js)
+        // FIX-DUPLICATE-EVENTS: This used to ALSO grab rt._socket directly and
+        // attach socket.on('connect'/'disconnect') on top of these EventBus
+        // listeners. app.realtime.socket.js rebuilds a brand-new socket object
+        // on every reconnect cycle (_socket = null, then reassigned), so that
+        // direct listener went stale after the first rebuild — while on the
+        // very first connect it fired ALONGSIDE the EventBus listener below,
+        // double-running _onConnected() (double session restore, double
+        // sync:missed_events/sync:missed_messages emits, double heartbeat).
+        // app.realtime.socket.js emits SOCKET_CONNECTED/SOCKET_DISCONNECTED on
+        // the EventBus on every cycle (both fresh and rebuilt sockets go
+        // through the same code path), so the EventBus alone is the reliable,
+        // rebuild-proof signal — no need for a second, decaying listener.
         const bus = window.KynectaEventBus;
         if (bus) {
           bus.on('SOCKET_CONNECTED', () => this._onConnected());
@@ -406,16 +417,11 @@
             if (payload?.type === 'socket:reconnected') this._onConnected();
             if (payload?.type === 'socket:disconnected') this._onDisconnected(payload.reason);
           });
-        }
-
-        // Also directly watch the socket
-        const socket = rt._socket;
-        if (socket) {
-          socket.on('connect',    () => this._onConnected());
-          socket.on('disconnect', (reason) => this._onDisconnected(reason));
         } else {
-          // Wait for socket to be created
-          setTimeout(tryAttach, 1000);
+          // No EventBus at all on this page — fall back to polling the socket
+          // directly via the supervisor (_startSupervisor already does this
+          // every 20s), since there's nothing reliable to attach listeners to.
+          console.warn('[Reconnect] KynectaEventBus not found — relying on supervisor polling only');
         }
       };
       tryAttach();

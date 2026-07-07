@@ -7265,14 +7265,53 @@ window.addEventListener('message', function (e) {
 
         // Remove call-screen body classes so sidebar/nav reappear
         document.body.classList.remove('call-screen-active', 'in-call-active');
-        // Navigate to the page the user was on before the call
-        var _pcReturnTo = (d.returnTo || 'messages');
+
+        // FIX-EXACT-RETURN: Use the context saved at call start (__callReturnContext /
+        // sessionStorage 'call_return_ctx') so we reopen the EXACT chat/group/friend
+        // screen the call was triggered from, not just the generic 'messages' tab.
+        // Previously this handler ignored that context entirely and only ever did
+        // navigateToPage(d.returnTo || 'messages'), which always landed on the
+        // messages list instead of the specific conversation.
+        var _pcCtx = window.__callReturnContext;
+        if (!_pcCtx) { try { var _pcS = sessionStorage.getItem('call_return_ctx'); if (_pcS) _pcCtx = JSON.parse(_pcS); } catch(e) {} }
+        window.__callReturnContext = null;
+        try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
+
+        var _pcReturnTo = (_pcCtx && _pcCtx.returnTo) || d.returnTo || window.__lastActivePage || 'messages';
         var _pcPageMap = { conversations: 'messages', chats: 'messages', home: 'messages' };
         var _pcPage = _pcPageMap[_pcReturnTo] || _pcReturnTo;
-        if (typeof navigateToPage === 'function') {
+
+        if (_pcPage === 'group') {
+            navigateToPage('group');
+            var _pcGf = document.getElementById('groupIframe');
+            if (_pcGf && _pcGf.contentWindow) {
+                setTimeout(function() {
+                    _pcGf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _pcCtx && _pcCtx.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*');
+                }, 300);
+            }
+        } else if (_pcPage === 'friends') {
+            navigateToPage('friends');
+            var _pcFf = document.getElementById('friendsIframe');
+            if (_pcFf && _pcFf.contentWindow) {
+                setTimeout(function() {
+                    _pcFf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
+                }, 300);
+            }
+        } else if (_pcPage === 'messages') {
+            navigateToPage('messages');
+            if (_pcCtx && _pcCtx.chatUserId) {
+                var _pcMf = document.getElementById('messagesIframe');
+                if (_pcMf && _pcMf.contentWindow) {
+                    setTimeout(function() {
+                        _pcMf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _pcCtx.chatUserId, userName: _pcCtx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
+                        if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                    }, 300);
+                }
+            }
+        } else if (typeof navigateToPage === 'function') {
             setTimeout(function() { navigateToPage(_pcPage); }, 100);
         }
-        _chatLog('[chat.html] PHASE15 ✅ POST_CALL_RESTORE → navigating to: ' + _pcPage);
+        _chatLog('[chat.html] PHASE15 ✅ POST_CALL_RESTORE → navigating to: ' + _pcPage + (_pcCtx && _pcCtx.chatUserId ? (' (chatUserId=' + _pcCtx.chatUserId + ')') : ''));
         return;
     }
     // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────

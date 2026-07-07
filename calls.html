@@ -4904,29 +4904,6 @@ window.__CALLS_IFRAME__ = {
             if (typeof window.showScreen === 'function') window.showScreen('idle');
         }
 
-            // Deduplicate same callId within 2s
-            if (callId && callId === _lastCallEndedId &&
-                Date.now() - _callEndedAt < 2000) return;
-            _lastCallEndedId = callId;
-            _callEndedAt     = Date.now();
-
-            _log('Call ended:', reason);
-            window.__callEndedNavigating = true;
-            setTimeout(function() { window.__callEndedNavigating = false; }, 3000);
-            _stopRingtones();
-            try { if (window.UIState && window.UIState.localStream) { window.UIState.localStream.getTracks().forEach(function(t) { try { t.stop(); } catch(e) {} }); window.UIState.localStream = null; } } catch(e) {}
-            window.__callActive = false;
-            window._currentIncomingCallId = null;
-            try { sessionStorage.removeItem('kyn_incoming_call_id'); sessionStorage.removeItem('kyn_incoming_caller'); } catch(_) {}
-            if (window.callsState) { window.callsState.callActive = false; window.callsState.callState = 'idle'; }
-            if (window.UIState) { window.UIState.callActive = false; window.UIState.callState = 'idle'; }
-            if (typeof window.endCallScreens === 'function') window.endCallScreens();
-            else { var _c2=document.getElementById('callingScreen'),_i2=document.getElementById('inCallScreen'),_m2=document.getElementById('incomingCallModal'); if(_c2)_c2.classList.remove('active'); if(_i2)_i2.classList.remove('active'); if(_m2){_m2.classList.remove('active');_m2.style.cssText='display:none!important';} if(typeof window._stopDeclineTimer==='function')window._stopDeclineTimer(); }
-            document.body.classList.remove('call-active','call-connected');
-            _sendToParent('CALL_ENDED_RETURN', { origin: window._callOrigin || window.__pendingCallReturnTo || 'calls' });
-            setTimeout(function() { if (!window.__callEndedNavigating && typeof window.showScreen==='function') window.showScreen('idle'); }, 1200);
-        }
-
         // ── 12. PARENT postMessage HANDLER ───────────────────────────────
         // De-duplicate by tracking handled message IDs
         var _handledMsgIds = new Set();
@@ -6218,21 +6195,48 @@ window.__CALLS_IFRAME__ = {
   window.addEventListener('kyn:call:screen_share_stopped', function () { _hideBanner(); });
 
   // Also hook the socket events directly (for remote participants receiving notification)
+  // FIX-IFRAME-SOCKET: This used to poll for window.KynectaRealtime._socket, which is
+  // intentionally left unset when this page runs as an iframe (the normal case — calls.html
+  // is always loaded inside chat.html). app.realtime.socket.js's own "IFRAME GUARD" documents
+  // this: iframes must not open their own Socket.IO connection, and instead receive events
+  // relayed from the parent frame. Because that direct _socket reference never existed here,
+  // _tryHook looped forever and screen-share start/stop notifications were silently dropped.
+  // Real call signaling (PeerConnectionManager._sendSignal) already avoids this by going
+  // through KynectaRealtime.sendSignal()/.send(), which IS bridge-aware — do the same here.
   var _tryHook = function () {
+    var bound = false;
+    var bus = window.KynectaEventBus;
+    if (bus) {
+      bus.on('REALTIME_call:screen_share_started', function (d) {
+        var uid  = (d || {}).userId;
+        var name = (uid && _names[String(uid)]) || null;
+        _showBanner(name);
+        window.dispatchEvent(new CustomEvent('kyn:call:screen_share_started', { detail: d || {} }));
+      });
+      bus.on('REALTIME_call:screen_share_stopped', function () {
+        _hideBanner();
+        window.dispatchEvent(new CustomEvent('kyn:call:screen_share_stopped', {}));
+      });
+      bound = true;
+    }
+    // Also hook a real socket directly when one genuinely exists (e.g. this page
+    // loaded standalone, outside the normal iframe flow) — harmless either way.
     var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
-    if (!sock) { setTimeout(_tryHook, 1000); return; }
-    if (sock._screenShareHooked) return;
-    sock._screenShareHooked = true;
-    sock.on('call:screen_share_started', function (d) {
-      var uid  = (d || {}).userId;
-      var name = (uid && _names[String(uid)]) || null;
-      _showBanner(name);
-      window.dispatchEvent(new CustomEvent('kyn:call:screen_share_started', { detail: d || {} }));
-    });
-    sock.on('call:screen_share_stopped', function () {
-      _hideBanner();
-      window.dispatchEvent(new CustomEvent('kyn:call:screen_share_stopped', {}));
-    });
+    if (sock && !sock._screenShareHooked) {
+      sock._screenShareHooked = true;
+      sock.on('call:screen_share_started', function (d) {
+        var uid  = (d || {}).userId;
+        var name = (uid && _names[String(uid)]) || null;
+        _showBanner(name);
+        window.dispatchEvent(new CustomEvent('kyn:call:screen_share_started', { detail: d || {} }));
+      });
+      sock.on('call:screen_share_stopped', function () {
+        _hideBanner();
+        window.dispatchEvent(new CustomEvent('kyn:call:screen_share_stopped', {}));
+      });
+      bound = true;
+    }
+    if (!bound) setTimeout(_tryHook, 1000);
   };
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _tryHook);
@@ -6241,11 +6245,20 @@ window.__CALLS_IFRAME__ = {
   }
 
   // Emit socket event when CallManager starts/stops screen share
+  // FIX-IFRAME-SOCKET: same issue as above — prefer KynectaRealtime.send()/.emit(),
+  // which correctly proxies through the parent frame's real socket when this page is
+  // an iframe. Falls back to a direct socket emit only if one genuinely exists.
   window.addEventListener('kyn:call:emit_socket', function (e) {
-    var d    = e.detail || {};
+    var d = e.detail || {};
+    if (!d.event || !d.data) return;
+    var rt = window.KynectaRealtime;
+    if (rt && typeof rt.send === 'function') {
+      rt.send(d.event, d.data);
+      return;
+    }
     var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
     if (!sock || !sock.connected) return;
-    if (d.event && d.data) sock.emit(d.event, d.data);
+    sock.emit(d.event, d.data);
   });
 })();
 </script>

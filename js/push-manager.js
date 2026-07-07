@@ -43,7 +43,19 @@
     }
 
     try {
-      _swRegistration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      // FIX-SW-SCOPE-CONFLICT: This used to register '/sw.js' — a second,
+      // different service worker script — at the same scope ('/') that every
+      // other page (chat.html, calls.html, friend.html, upload.html) registers
+      // '/service-worker.js' at. Two different scripts competing for the same
+      // scope causes the browser to flip which one is in control of the page,
+      // firing 'controllerchange' — which chat.html's own PWA-update listener
+      // treats as a signal to possibly window.location.reload() (when
+      // sessionStorage 'pwa_update_ack' is set), causing surprise reloads that
+      // have nothing to do with an actual app update, just this second SW
+      // fighting for control. service-worker.js already has its own complete
+      // push / notificationclick / sync handlers (verified equivalent), so
+      // share that single registration instead of creating a competing one.
+      _swRegistration = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
       console.log('[PushManager] ✅ Service Worker registered');
 
       // Listen for controller change (SW update)
