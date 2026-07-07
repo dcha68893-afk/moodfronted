@@ -2573,6 +2573,9 @@ async function initiateCallWithPendingUser() {
                 window.__activePeerName = userName;
                 window.__activePeerType = callType;
                 window.__activePeerAvatar = null;
+                try {
+                    sessionStorage.setItem('pending_call', JSON.stringify({ userName, userId, callType }));
+                } catch (_) {}
                 showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
                 clearPendingCall();
                 
@@ -2737,7 +2740,7 @@ async function initiateCallWithPendingUser() {
                 callingStatus: '#callingStatus',
                 callingType: '#callingType',
                 callingAvatar: '#callingAvatar',
-                cancelCallBtn: '#cancelCallBtn',
+                cancelCallBtn: '#callingCancelBtn',   // FIX: actual DOM id is callingCancelBtn, not cancelCallBtn
                 callingCollapseBtn: '#callingCollapseBtn',
                 callingAddBtn: '#callingAddBtn',
                 callingMuteBtn: '#callingMuteBtn',
@@ -4941,7 +4944,25 @@ handleContactItemClick: function(e) {
                 avatar: callData.userAvatar || null,
                 isOnline: callData.receiverOnline !== false
             }) || {};
-            const participantName = participant.name || callData.calleeName || callData.userName || callData.receiverName || 'User';
+            let participantName = participant.name || callData.calleeName || callData.userName || callData.receiverName || 'User';
+            // FIX-NAME-FLASH: if nothing above gave us a real name, don't clobber a name
+            // we already know/are showing with the generic 'User' fallback — this is what
+            // caused the outgoing screen to show the real name and then immediately
+            // downgrade to "User" once the delayed server confirmation arrived.
+            if (participantName === 'User') {
+                let _known = window.__activePeerName || null;
+                if (!_known) {
+                    try {
+                        const _backup = JSON.parse(sessionStorage.getItem('pending_call') || '{}');
+                        _known = _backup.userName || _backup.name || null;
+                    } catch (_) {}
+                }
+                if (!_known && elements.callWithName && elements.callWithName.textContent &&
+                    elements.callWithName.textContent !== 'User' && elements.callWithName.textContent !== 'Calling...') {
+                    _known = elements.callWithName.textContent;
+                }
+                if (_known) participantName = _known;
+            }
             const participantAvatar = participant.avatar || participant.photo || callData.userAvatar || null;
             window.__callInitiatedAt = Date.now();
             window.__callEndedHandledAt = 0;
@@ -5365,7 +5386,7 @@ handleContactItemClick: function(e) {
             window.__activePeerName = null; window.__activePeerType = null; window.__activePeerAvatar = null;
             window.__incomingCallerName = null; window.__incomingCallerAvatar = null;
             // FIX 8: also clear sessionStorage backup on clean call end
-            try { sessionStorage.removeItem('_kyn_peer_name'); sessionStorage.removeItem('_kyn_peer_type'); } catch(_) {}
+            try { sessionStorage.removeItem('_kyn_peer_name'); sessionStorage.removeItem('_kyn_peer_type'); sessionStorage.removeItem('pending_call'); } catch(_) {}
             // PHASE15 FIX: Clear receiver fallback timer so it doesn't fire on next call
             if (window._receiverShowFallback) { clearTimeout(window._receiverShowFallback); window._receiverShowFallback = null; }
             // PHASE15 FIX: Reset pending incoming call data so second call isn't blocked by stale data
@@ -8740,6 +8761,37 @@ declineIncomingCall: async function() {
         }
     };
 
+    // FIX-ENDCALL-BRIDGE: UIEventHandlers.endCall / handleCallEnded / handleCallInitiated
+    // were referenced throughout this file (endCallBtn, callHeaderEndBtn, the outgoing
+    // cancel button, decline/timeout/remote-end paths, and the module-level `endCall`
+    // export used by inline onclick handlers) but were never actually defined on
+    // UIEventHandlers — the real implementations live on CoreIntegration. Because every
+    // call site guarded with `UIEventHandlers.handleCallEnded && ...` or relied on
+    // safeBind() (which silently no-ops on a missing function), clicking "End Call" or
+    // "Cancel" did nothing: no server notification, no WebRTC teardown, no UI reset —
+    // which is also why both sides could get stuck on a dark call screen with the
+    // bottom nav/sidebar hidden after a call ended. Bridging these to CoreIntegration's
+    // real methods restores end/cancel/decline/timeout call termination everywhere.
+    UIEventHandlers.handleCallEnded = function(callData) {
+        return CoreIntegration.handleCallEnded(callData || {});
+    };
+    UIEventHandlers.handleCallInitiated = function(callData) {
+        return CoreIntegration.handleCallInitiated(callData || {});
+    };
+    UIEventHandlers.endCall = function() {
+        // Notify the server / tear down WebRTC first, then reset all call UI/state.
+        try {
+            if (window.callCore && typeof window.callCore.endCall === 'function') {
+                window.callCore.endCall();
+            } else if (window.coreInstance && typeof window.coreInstance.endCall === 'function') {
+                window.coreInstance.endCall();
+            }
+        } catch (e) {
+            console.error('[Calls UI] endCall: core teardown failed', e);
+        }
+        UIEventHandlers.handleCallEnded({ reason: 'ended', status: 'ended' });
+    };
+
     // ==================== UI PANEL HANDLERS ====================
     const UIPanelHandlers = {
         openParticipantsPanel: function() {
@@ -10378,7 +10430,7 @@ if (detectExistingCore()) {
 
     // ── Wire up the cancelCallBtn / declineCallBtn ────────────────────────
     function _wireNativeEndBtns() {
-        const cancelBtn  = _el('cancelCallBtn');
+        const cancelBtn  = _el('callingCancelBtn');   // FIX: actual DOM id is callingCancelBtn, not cancelCallBtn
         const declineBtn = _el('declineCallBtn');
 
         if (cancelBtn && !cancelBtn._comWired) {
