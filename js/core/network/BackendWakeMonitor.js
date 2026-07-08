@@ -34,6 +34,28 @@
     let hasConnectedOnce = false;
     let bootStartedAt    = Date.now();
 
+    // FIX-SILENT-RECONNECT: the banner used to show for *any* disconnect/
+    // reconnect on *any* page, including normal messaging. That's the wrong
+    // default — a chat app should retry through slow/flaky networks silently
+    // in the background (the offline queue in app.offline.queue.js already
+    // exists precisely so no message is lost while this happens) and only
+    // interrupt the user when it actually matters: while they're live in a
+    // call, where a dropped connection means the other person may vanish
+    // mid-conversation and they genuinely need to know. Everywhere else —
+    // browsing chats, sending messages on a slow connection, a brief cold
+    // start — this stays completely invisible; the underlying reconnect
+    // logic in ReconnectOrchestrator/app.realtime.socket.js is untouched and
+    // keeps retrying exactly as before, this module just stops narrating it.
+    function isUserInActiveCall() {
+        try {
+            if (window.__activeCallInProgress) return true;
+            if (document.body && document.body.classList.contains('call-screen-active')) return true;
+            // calls.html itself IS the call screen — always eligible to show.
+            if (/\/calls\.html/.test(location.pathname)) return true;
+        } catch (e) { /* ignore */ }
+        return false;
+    }
+
     function ensureBanner() {
         if (bannerEl) return bannerEl;
         bannerEl = document.createElement('div');
@@ -71,9 +93,10 @@
     // Render dyno, not a broken app — say so explicitly instead of leaving
     // the user with silent "Connecting…" that could mean anything.
     function armBootWatch() {
+        if (!isUserInActiveCall()) return; // silent boot everywhere except during a live call
         show('Connecting…', '#5b6472');
         bootTimer = setTimeout(() => {
-            if (!hasConnectedOnce) {
+            if (!hasConnectedOnce && isUserInActiveCall()) {
                 show('Waking up the server — this can take up to a minute the first time…', '#b7791f');
             }
         }, WAKE_UP_THRESHOLD_MS);
@@ -86,6 +109,7 @@
             clearTimers();
             const wasFirstConnect = !hasConnectedOnce;
             hasConnectedOnce = true;
+            if (!isUserInActiveCall()) { hide(); return; } // silent recovery outside calls
             if (wasFirstConnect) {
                 // Brief confirmation flash, then clear — matches how WhatsApp/
                 // Signal acknowledge recovery instead of just silently removing
@@ -101,11 +125,12 @@
 
         if (state === 'disconnected' || state === 'reconnecting' || state === 'error') {
             if (!hasConnectedOnce) return; // boot watcher already covers this case
+            if (!isUserInActiveCall()) { clearTimers(); return; } // keep retrying silently
             // Grace period — a 2s blip during a network handoff shouldn't alarm
             // anyone; only show the banner if it's still down after the grace window.
             if (!graceTimer) {
                 graceTimer = setTimeout(() => {
-                    show('Reconnecting…', '#5b6472');
+                    if (isUserInActiveCall()) show('Reconnecting…', '#5b6472');
                 }, RECONNECT_GRACE_MS);
             }
             return;
@@ -113,6 +138,7 @@
 
         if (state === 'degraded') {
             clearTimers();
+            if (!isUserInActiveCall()) return; // silent — offline queue covers message delivery
             show("Having trouble reaching the server — we'll keep retrying automatically. No need to refresh.", '#b7791f');
             return;
         }

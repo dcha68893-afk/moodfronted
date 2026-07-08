@@ -308,6 +308,34 @@
       console.log('[GroupCall] Left call');
     }
 
+    // FIX-HOST-ONLY-END: in a group call, tapping "End" should only ever
+    // terminate the call for the person who tapped it (leaveGroupCall above
+    // already does that correctly). Ending the call for *everyone* must be
+    // restricted to the host — otherwise any single participant could hang
+    // up the whole meeting for the rest of the group. The server authorizes
+    // this the same way it already does for mute/remove (isHost(callId,
+    // userId)) and broadcasts 'group:call:ended_by_host' to the room so
+    // every other participant's client tears down on its own.
+    endGroupCallForAll(reason = 'host_ended') {
+      if (!this._callId) return;
+      if (!this._isHost) {
+        console.warn('[GroupCall] endGroupCallForAll() ignored — local user is not the host');
+        return;
+      }
+
+      this._sendGroupEvent('group:call:end', {
+        groupId: this._groupId,
+        callId:  this._callId,
+        reason,
+        timestamp: Date.now(),
+      });
+
+      // Tear down locally too — the host doesn't get their own broadcast back.
+      this.leaveGroupCall(reason);
+    }
+
+    isHost() { return !!this._isHost; }
+
     // ── Host controls ────────────────────────────────────────────────────────
 
     muteParticipant(userId) {
@@ -559,6 +587,19 @@
         if (String(data.targetUserId) === this._localUserId) {
           this.lowerHand();
         }
+      });
+
+      // FIX-HOST-ONLY-END: server broadcasts this to every other participant
+      // in the call room when the host ends the call for everyone. Each
+      // participant tears down their own side the same way leaveGroupCall()
+      // normally would — no signal back to the server needed, they're already
+      // being removed from the room server-side.
+      window.addEventListener('kyn:group:call:ended_by_host', e => {
+        const data = e.detail || {};
+        if (!this._callId || (data.callId && String(data.callId) !== String(this._callId))) return;
+        console.log('[GroupCall] Host ended the call for everyone');
+        this._notify('ended_by_host', { by: data.by });
+        this.leaveGroupCall('host_ended');
       });
     }
 

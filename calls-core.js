@@ -29053,6 +29053,10 @@ _escapeHtml: function(text) {
                         console.log('[CallsCore] 🔀 GROUP CALL — receiver joining mesh via GroupCallEngine', _gcCallId);
                         _gce.joinGroupCall(_gcGroupId, _gcCallId, _gcLocalUid, {
                             callType: callData.callType || callData.type || 'audio',
+                            // FIX-HOST-ONLY-END: only the call's original caller may end a
+                            // group call for everyone (mute/remove already gated the same
+                            // way). The receiver here is by definition never the host.
+                            isHost: false,
                         }).catch(function(e) {
                             console.warn('[CallsCore] GroupCallEngine.joinGroupCall (receiver) failed:', e.message);
                         });
@@ -29084,6 +29088,10 @@ _escapeHtml: function(text) {
                     console.log('[CallsCore] 🔀 GROUP CALL — caller joining mesh via GroupCallEngine', _gcCallId2);
                     _gce2.joinGroupCall(_gcGroupId2, _gcCallId2, _gcLocalUid2, {
                         callType: callData.callType || callData.type || 'audio',
+                        // FIX-HOST-ONLY-END: the caller/initiator is the call's host —
+                        // matches the backend's isHost(callId, userId) check, which is
+                        // keyed off the same callerId recorded at call:initiate time.
+                        isHost: true,
                     }).catch(function(e) {
                         console.warn('[CallsCore] GroupCallEngine.joinGroupCall (caller) failed:', e.message);
                     });
@@ -37755,6 +37763,15 @@ clearActiveCall: function() {
 
 
             { event: 'kyn:call_ended',       fn: (d) => handleCallEnded(d) },
+
+
+
+            // FIX-GROUP-HOST-ONLY-END: when the host ends a group call for everyone,
+            // GroupCallEngine tears down the mesh/media, but the visible call screen
+            // and bottom-nav restore still go through the same handleCallEnded() path
+            // as every other call-ended reason — otherwise non-host participants would
+            // be left on a dark call screen even though their media was already released.
+            { event: 'kyn:group:call:ended_by_host', fn: (d) => handleCallEnded({ ...d, reason: 'host_ended' }) },
 
 
 

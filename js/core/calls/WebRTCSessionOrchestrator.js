@@ -440,70 +440,91 @@
     _attachExistingCallListeners() {
       // These are dispatched by app.realtime.socket.js → kyn:call:* CustomEvents
 
-      window.addEventListener('kyn:call:incoming', e => {
-        const data = e.detail || {};
-        const { callId, callerId, callType } = data;
-        if (!callId || !callerId) return;
-
-        // Deduplicate: ignore if already RINGING for this callId
-        if (this._lastIncomingCallId === callId) return;
-        this._lastIncomingCallId = callId;
-        // Clear dedup after 30s
-        setTimeout(() => { if (this._lastIncomingCallId === callId) this._lastIncomingCallId = null; }, 30000);
-
-        const session = this._state.createSession(callId, callType || 'audio', callerId, false);
-        this._state.transition(callId, window.CALL_STATE.RINGING);
-
-        // Store metadata for accept
-        session._inboundData = data;
-
-        console.log(`[CallOrchestrator] Incoming call: ${callId} from ${callerId}`);
-      });
-
-      window.addEventListener('kyn:call:accepted', e => {
-        const data = e.detail || {};
-        const { callId, accepterId, userId } = data;
-        const acceptorId = accepterId || userId;
-        if (!callId || !acceptorId) return;
-        this.onCallAccepted(callId, acceptorId, data);
-      });
-
-      window.addEventListener('kyn:call:rejected', e => {
-        const data   = e.detail || {};
-        const callId = data.callId;
-        if (!callId) return;
-        if (this._ringTimer) { clearTimeout(this._ringTimer); this._ringTimer = null; }
-        this._state.end(callId, 'rejected');
-        this._media.stopAll();
-      });
-
-      window.addEventListener('kyn:call:ended', e => {
-        const data   = e.detail || {};
-        const callId = data.callId;
-        if (!callId) return;
-        this.endCall(callId, data.reason || 'remote_ended');
-      });
-
-      window.addEventListener('kyn:call:cancelled', e => {
-        const data   = e.detail || {};
-        const callId = data.callId;
-        if (!callId) return;
-        if (this._ringTimer) { clearTimeout(this._ringTimer); this._ringTimer = null; }
-        this._state.end(callId, 'cancelled');
-        this._media.stopAll();
-      });
-
-      // Handle webrtc:signal arriving for active call
-      window.addEventListener('kyn:webrtc:signal', e => {
-        const data     = e.detail || {};
-        const peerId   = data.senderId || data.from;
-        const callId   = data.callId;
-        if (!peerId || !callId) return;
-
-        window.__PeerConnectionManager.handleSignal(peerId, callId, data).catch(err => {
-          console.warn('[CallOrchestrator] Signal error:', err.message);
-        });
-      });
+      // FIX-DUPLICATE-ENGINE-3: this orchestrator auto-starts on every page (see
+      // tryStart() below) and, like CallManager.js, was independently reacting to
+      // the exact same kyn:call:* window events that drive the real call in
+      // calls-core.js/calls-ui.js — the only system actually wired to the visible
+      // call screens. That meant three things were running per real call at once
+      // (calls-core.js, CallManager.js, and this orchestrator), each keeping its
+      // own session/state and its own ~30–60s "ring timeout" (see _ringTimeoutMs
+      // above), instead of calls-core.js's correct 3-minute
+      // CALL_INVITATION_TIMEOUT. Whichever fired first won the shared UI. Worse,
+      // the handlers below called this._media.stopAll() and re-emitted a real
+      // 'call:end' signal purely in *reaction* to an event that already meant the
+      // call had ended/been rejected — redundant at best, and capable of tearing
+      // down live media early if _media pointed at tracks still in use. The
+      // kyn:webrtc:signal handler also fed the same SDP/ICE signal into a second,
+      // separate PeerConnectionManager instance in parallel with calls-core.js's
+      // own negotiation, which could corrupt the real connection.
+      // Disabling this listener block leaves calls-core.js as the sole driver of
+      // real call lifecycle, signaling, and UI. This orchestrator's startCall()/
+      // acceptCall() APIs remain available for direct, explicit use elsewhere if
+      // ever wired up on purpose.
+      //
+      // window.addEventListener('kyn:call:incoming', e => {
+      //   const data = e.detail || {};
+      //   const { callId, callerId, callType } = data;
+      //   if (!callId || !callerId) return;
+      //
+      //   // Deduplicate: ignore if already RINGING for this callId
+      //   if (this._lastIncomingCallId === callId) return;
+      //   this._lastIncomingCallId = callId;
+      //   // Clear dedup after 30s
+      //   setTimeout(() => { if (this._lastIncomingCallId === callId) this._lastIncomingCallId = null; }, 30000);
+      //
+      //   const session = this._state.createSession(callId, callType || 'audio', callerId, false);
+      //   this._state.transition(callId, window.CALL_STATE.RINGING);
+      //
+      //   // Store metadata for accept
+      //   session._inboundData = data;
+      //
+      //   console.log(`[CallOrchestrator] Incoming call: ${callId} from ${callerId}`);
+      // });
+      //
+      // window.addEventListener('kyn:call:accepted', e => {
+      //   const data = e.detail || {};
+      //   const { callId, accepterId, userId } = data;
+      //   const acceptorId = accepterId || userId;
+      //   if (!callId || !acceptorId) return;
+      //   this.onCallAccepted(callId, acceptorId, data);
+      // });
+      //
+      // window.addEventListener('kyn:call:rejected', e => {
+      //   const data   = e.detail || {};
+      //   const callId = data.callId;
+      //   if (!callId) return;
+      //   if (this._ringTimer) { clearTimeout(this._ringTimer); this._ringTimer = null; }
+      //   this._state.end(callId, 'rejected');
+      //   this._media.stopAll();
+      // });
+      //
+      // window.addEventListener('kyn:call:ended', e => {
+      //   const data   = e.detail || {};
+      //   const callId = data.callId;
+      //   if (!callId) return;
+      //   this.endCall(callId, data.reason || 'remote_ended');
+      // });
+      //
+      // window.addEventListener('kyn:call:cancelled', e => {
+      //   const data   = e.detail || {};
+      //   const callId = data.callId;
+      //   if (!callId) return;
+      //   if (this._ringTimer) { clearTimeout(this._ringTimer); this._ringTimer = null; }
+      //   this._state.end(callId, 'cancelled');
+      //   this._media.stopAll();
+      // });
+      //
+      // // Handle webrtc:signal arriving for active call
+      // window.addEventListener('kyn:webrtc:signal', e => {
+      //   const data     = e.detail || {};
+      //   const peerId   = data.senderId || data.from;
+      //   const callId   = data.callId;
+      //   if (!peerId || !callId) return;
+      //
+      //   window.__PeerConnectionManager.handleSignal(peerId, callId, data).catch(err => {
+      //     console.warn('[CallOrchestrator] Signal error:', err.message);
+      //   });
+      // });
 
       // Reconnect recovery
       const bus = window.KynectaEventBus;

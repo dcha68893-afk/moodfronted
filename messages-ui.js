@@ -13993,6 +13993,13 @@ Type: ${message.type || 'text'}`;
 (function() {
     'use strict';
 
+    // FIX: this IIFE (DOM windowing patch) called _uiLog(...) at its end but
+    // never declared it — _uiLog from the earlier IIFEs is out of scope here,
+    // which threw "Uncaught ReferenceError: _uiLog is not defined" on every
+    // page load right after the windowing patch installed. Local copy of the
+    // same debug-gated logger used elsewhere in this file.
+    const _uiLog = (...a) => { if (window.__MESSAGES_DEBUG__) console.log(...a); };
+
     const MAX_RENDERED   = 150;  // keep at most this many bubbles attached at once
     const TRIM_BATCH      = 50;   // how many oldest bubbles to detach per trim pass
     const RESTORE_MARGIN  = 600;  // px from top of spacer before triggering restore

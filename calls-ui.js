@@ -8779,6 +8779,28 @@ declineIncomingCall: async function() {
         return CoreIntegration.handleCallInitiated(callData || {});
     };
     UIEventHandlers.endCall = function() {
+        // FIX-GROUP-HOST-ONLY-END: in a group call, "End Call" must not
+        // terminate the meeting for every participant — that's a host-only
+        // action (see CallSignalingService.js's isHost() authorization and
+        // GroupCallEngine.endGroupCallForAll()/leaveGroupCall()). A regular
+        // participant tapping "End" should simply leave; the call keeps
+        // going for everyone else. Only the host's tap ends it for all.
+        try {
+            const gce = window.__GroupCallEngine || window.GroupCall;
+            if (gce && typeof gce.isHost === 'function' && gce._callId) {
+                if (gce.isHost()) {
+                    gce.endGroupCallForAll('host_ended');
+                } else {
+                    gce.leaveGroupCall('left');
+                }
+                UIEventHandlers.handleCallEnded({ reason: 'ended', status: 'ended' });
+                return;
+            }
+        } catch (e) {
+            console.error('[Calls UI] endCall: group-call teardown failed', e);
+        }
+
+        // Not a group call (or GroupCallEngine unavailable) — existing 1:1 path.
         // Notify the server / tear down WebRTC first, then reset all call UI/state.
         try {
             if (window.callCore && typeof window.callCore.endCall === 'function') {

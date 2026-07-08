@@ -829,27 +829,47 @@
       // };
       // _tryHook();
 
-      // Also hook kyn: CustomEvents for iframe-bridge consumers
+      // FIX-DUPLICATE-ENGINE-2: the raw socket.io hook above was disabled because it
+      // duplicated calls-core.js's processing, but these window CustomEvent listeners
+      // were left active — and app.realtime.socket.js dispatches kyn:call:incoming /
+      // kyn:call:accepted / kyn:call:ended / etc. as window CustomEvents on every real
+      // call, which calls-core.js ALSO listens for via its own _installCallEventBridge().
+      // So every real call was still being processed twice: once by calls-core.js
+      // (the only system wired to calls-ui.js and the visible screens) and once here,
+      // silently, with its OWN 30s CALL_TIMEOUT_MS (vs. calls-core.js's correct 3-minute
+      // CALL_INVITATION_TIMEOUT) and its OWN calls to the shared window.showScreen() /
+      // bottom-nav hide-show. Because CallManager's 30s timer fired first, it flipped the
+      // shared screen to "No answer" / terminal and restored the bottom nav out from under
+      // the real call, which was often still ringing — this is why calls appeared to end
+      // themselves before the receiver ever answered, and why the nav/buttons could end up
+      // in a stuck or inconsistent state afterward (two systems independently deciding when
+      // to hide/show them). Disabling these listeners leaves calls-core.js as the sole
+      // driver of real call lifecycle + UI, exactly as calls-ui.js already assumes.
+      // CallManager remains available for its outbound-only features (hand-raise,
+      // screen-share toggle) via the separate kyn:call:emit_socket bridge, unaffected.
+      //
+      // (kept live — still used below by the kyn:endCall/acceptCall/rejectCall/cancelCall
+      // command listeners, which are not duplicated anywhere else)
       const _on = (event, fn) => {
         window.addEventListener(event, fn);
         this._windowListeners.push({ event, fn });
       };
-
-      _on('kyn:call:incoming',          e => this.handleIncomingCall(e.detail || {}));
-      _on('kyn:call_incoming',          e => this.handleIncomingCall(e.detail || {}));
-      _on('kyn:call:accepted',          e => this._onRemoteAccepted(e.detail || {}));
-      _on('kyn:call_accepted',          e => this._onRemoteAccepted(e.detail || {}));
-      _on('kyn:call:rejected',          e => this._onRemoteRejected(e.detail || {}));
-      _on('kyn:call_rejected',          e => this._onRemoteRejected(e.detail || {}));
-      _on('kyn:call:ended',             e => this.onRemoteEnded((e.detail||{}).callId || this._callId));
-      _on('kyn:call_ended',             e => this.onRemoteEnded((e.detail||{}).callId || this._callId));
-      _on('kyn:call:busy',              e => this.onBusy((e.detail||{}).callId));
-      _on('kyn:call_busy',              e => this.onBusy((e.detail||{}).callId));
-      _on('kyn:call:dedup_rejected',    e => this._onDedupRejected(e.detail || {}));
-      _on('kyn:call:accepted_elsewhere',e => this._onAcceptedElsewhere(e.detail || {}));
-      _on('kyn:call:webrtc_connected',  e => this.onConnected((e.detail||{}).callId, (e.detail||{}).hasVideo));
-      _on('kyn:call:webrtc_reconnecting',e => this.onReconnecting((e.detail||{}).callId));
-      _on('kyn:call:webrtc_reconnected', e => this.onReconnected((e.detail||{}).callId));
+      //
+      // _on('kyn:call:incoming',          e => this.handleIncomingCall(e.detail || {}));
+      // _on('kyn:call_incoming',          e => this.handleIncomingCall(e.detail || {}));
+      // _on('kyn:call:accepted',          e => this._onRemoteAccepted(e.detail || {}));
+      // _on('kyn:call_accepted',          e => this._onRemoteAccepted(e.detail || {}));
+      // _on('kyn:call:rejected',          e => this._onRemoteRejected(e.detail || {}));
+      // _on('kyn:call_rejected',          e => this._onRemoteRejected(e.detail || {}));
+      // _on('kyn:call:ended',             e => this.onRemoteEnded((e.detail||{}).callId || this._callId));
+      // _on('kyn:call_ended',             e => this.onRemoteEnded((e.detail||{}).callId || this._callId));
+      // _on('kyn:call:busy',              e => this.onBusy((e.detail||{}).callId));
+      // _on('kyn:call_busy',              e => this.onBusy((e.detail||{}).callId));
+      // _on('kyn:call:dedup_rejected',    e => this._onDedupRejected(e.detail || {}));
+      // _on('kyn:call:accepted_elsewhere',e => this._onAcceptedElsewhere(e.detail || {}));
+      // _on('kyn:call:webrtc_connected',  e => this.onConnected((e.detail||{}).callId, (e.detail||{}).hasVideo));
+      // _on('kyn:call:webrtc_reconnecting',e => this.onReconnecting((e.detail||{}).callId));
+      // _on('kyn:call:webrtc_reconnected', e => this.onReconnected((e.detail||{}).callId));
       _on('kyn:endCall',                e => this.endCall((e.detail||{}).callId));
       _on('kyn:acceptCall',             e => this.acceptCall((e.detail||{}).callId));
       _on('kyn:rejectCall',             e => this.rejectCall((e.detail||{}).callId));
