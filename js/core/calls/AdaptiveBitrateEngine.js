@@ -197,8 +197,15 @@
 
       console.log(`[CallRecovery] Tab visible after ${Math.round(hiddenSec)}s — checking call health`);
 
-      // Recover media tracks that may have ended while backgrounded
-      window.__DeviceMediaManager?.recoverTracks().then(() => {
+      // Recover media tracks that may have ended while backgrounded.
+      // FIX: DeviceMediaManager.recoverTracks() only ever operated on its own
+      // internal stream, which nothing in this app ever populates — always a
+      // no-op. window.callsCoreRecoverMedia (calls-core.js) does the same job
+      // against the real stream and real peer connection senders.
+      const _recover = typeof window.callsCoreRecoverMedia === 'function'
+        ? window.callsCoreRecoverMedia()
+        : Promise.resolve();
+      _recover.then(() => {
         if (hiddenSec > 10) {
           // Long absence — try ICE restart
           this._triggerICERestart(active);
@@ -229,9 +236,22 @@
     }
 
     _triggerICERestart(session) {
-      if (!session || !session.peerId || !session.callId) return;
-      window.__CallOrchestrator?.restartICE(session.callId, session.peerId)
-        .catch(err => console.warn('[CallRecovery] ICE restart error:', err.message));
+      if (!session || !session.callId) return;
+      // FIX: calls-core.js is the sole owner of the real, live RTCPeerConnection
+      // for this app. window.callsCoreRestartICE is a small hook it exposes
+      // (see calls-core.js WebRTCManager) specifically so this recovery engine
+      // can trigger a restart on the REAL connection instead of routing through
+      // WebRTCSessionOrchestrator's own separate, unused peer connection.
+      if (typeof window.callsCoreRestartICE === 'function') {
+        try {
+          const r = window.callsCoreRestartICE(session.callId, session.peerId);
+          if (r && typeof r.catch === 'function') {
+            r.catch(err => console.warn('[CallRecovery] ICE restart error:', err && err.message));
+          }
+        } catch (err) {
+          console.warn('[CallRecovery] ICE restart error:', err && err.message);
+        }
+      }
     }
 
     _notify(event, data) {
@@ -313,6 +333,13 @@
 
       console.log(`[AdaptiveBR] Quality change for ${peerId}: ${QUALITY_ORDER[prevIndex]} → ${newQuality}`);
 
+      // NOTE: video-disable / resolution adaptation here are currently safe no-ops
+      // (DeviceMediaManager._localStream is never populated in this app). Leave it
+      // that way — js/adaptive-bitrate.js already owns bitrate + resolution scaling
+      // for the real connection via sender.setParameters(). If DeviceMediaManager's
+      // stream reference is ever wired up for real, these two calls would start
+      // fighting that engine over the same video track and need to be reconciled
+      // (e.g. disable one of the two) before being allowed to run for real.
       // Adapt video track constraints
       const media = window.__DeviceMediaManager;
       if (newQuality === 'AUDIO_ONLY') {
@@ -321,13 +348,16 @@
         media?.disableVideo(false); // Restore video if we were audio-only
       }
 
-      // Apply bitrate caps to all senders for this peer
+      // Apply bitrate caps to all senders for this peer.
+      // NOTE: peerSession._pc is intentionally not provided by PeerConnectionManager's
+      // getSession() fallback (see its comment) — this stays a no-op by design so it
+      // doesn't fight js/adaptive-bitrate.js, which already does this job for real.
       const peerSession = window.__PeerConnectionManager?.getSession(peerId, callId);
       if (peerSession?._pc) {
         await this._bitrate.applyProfile(peerSession._pc, profile);
       }
 
-      // Adapt video resolution
+      // Adapt video resolution — same no-op caveat as disableVideo() above.
       if (newQuality !== 'AUDIO_ONLY') {
         await media?.adaptQuality(newQuality === 'HD' ? 'high' : newQuality === 'SD' ? 'medium' : 'low');
       }

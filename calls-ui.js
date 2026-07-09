@@ -882,8 +882,15 @@ function transitionToInCall(callInfo) {
     if (incallAvatar) {
         const participant = (UIState.callParticipants && UIState.callParticipants[0]) || {};
         const photo = callInfo.userAvatar || participant.avatar || participant.photo;
-        if (photo) {
-            incallAvatar.innerHTML = `<img src="${photo}" alt="${name}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.textContent='${name.charAt(0).toUpperCase()}'">`;
+        const _safePhoto = photo && window.SecuritySanitizer ? SecuritySanitizer.sanitizeURL(photo) : photo;
+        if (_safePhoto && _safePhoto !== '#') {
+            incallAvatar.textContent = '';
+            const img = document.createElement('img');
+            img.src = _safePhoto;
+            img.alt = name;
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%';
+            img.onerror = function() { incallAvatar.textContent = name.charAt(0).toUpperCase(); };
+            incallAvatar.appendChild(img);
         } else {
             incallAvatar.textContent = name.charAt(0).toUpperCase();
         }
@@ -4869,8 +4876,14 @@ handleContactItemClick: function(e) {
                     const initials = (callData.callerName || 'C').charAt(0).toUpperCase();
                     // Use profile photo if available, else show initials
                     const photoUrl = callData.callerAvatar || callData.callerPhoto || callData.callerProfilePhoto;
-                    if (photoUrl) {
-                        elements.incomingCallAvatar.innerHTML = `<img src="${photoUrl}" alt="${callData.callerName || 'Caller'}" onerror="this.parentNode.innerHTML='${initials}'">`;
+                    const _safePhotoUrl = photoUrl && window.SecuritySanitizer ? SecuritySanitizer.sanitizeURL(photoUrl) : photoUrl;
+                    if (_safePhotoUrl && _safePhotoUrl !== '#') {
+                        elements.incomingCallAvatar.textContent = '';
+                        const img = document.createElement('img');
+                        img.src = _safePhotoUrl;
+                        img.alt = callData.callerName || 'Caller';
+                        img.onerror = function() { elements.incomingCallAvatar.textContent = initials; };
+                        elements.incomingCallAvatar.appendChild(img);
                     } else {
                         elements.incomingCallAvatar.textContent = initials;
                     }
@@ -4969,7 +4982,9 @@ handleContactItemClick: function(e) {
             window.__activePeerName = participantName;
             window.__activePeerType = callData.callType || callData.type || UIState.callType || 'voice';
             window.__activePeerAvatar = participantAvatar;
-            UIState.activeCallId = callData.callId;
+            // FIX: don't clobber a known activeCallId with undefined when this event
+            // carries no callId (e.g. the initiate request failed server-side).
+            if (callData.callId) UIState.activeCallId = callData.callId;
             setCallParticipants(callData.participants && callData.participants.length ? callData.participants : [participant], { merge: false });
             // ⚠ DO NOT set callStartTime here — timer only starts when receiver answers.
             // callStartTime stays null until handleCallAccepted fires.
@@ -5028,8 +5043,15 @@ handleContactItemClick: function(e) {
 
                 // Set avatar: photo or initials
                 if (elements.callingAvatar) {
-                    if (participant.avatar || participant.photo) {
-                        elements.callingAvatar.innerHTML = `<img src="${SecuritySanitizer ? SecuritySanitizer.sanitizeString(participant.avatar || participant.photo) : (participant.avatar || participant.photo)}" alt="${name}" onerror="this.parentNode.innerHTML='${name.charAt(0).toUpperCase()}'">`;
+                    const _avatarUrl = participant.avatar || participant.photo || '';
+                    const _safeAvatarUrl = SecuritySanitizer ? SecuritySanitizer.sanitizeURL(_avatarUrl) : _avatarUrl;
+                    if (_safeAvatarUrl && _safeAvatarUrl !== '#') {
+                        elements.callingAvatar.textContent = '';
+                        const img = document.createElement('img');
+                        img.src = _safeAvatarUrl;
+                        img.alt = name; // safe: DOM property assignment, not HTML parsing
+                        img.onerror = function() { elements.callingAvatar.textContent = name.charAt(0).toUpperCase(); };
+                        elements.callingAvatar.appendChild(img);
                     } else {
                         elements.callingAvatar.textContent = name.charAt(0).toUpperCase();
                     }

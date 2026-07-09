@@ -564,7 +564,37 @@
     }
 
     getSession(peerId, callId) {
-      return this._peers.get(`${peerId}:${callId}`) || null;
+      const owned = this._peers.get(`${peerId}:${callId}`);
+      if (owned) return owned;
+      // FIX: this engine never actually owns the real peer connection in this app —
+      // calls-core.js does. Return a read-only stats proxy over the real connection
+      // so consumers like PeerHealthMonitor can still poll quality, without this
+      // manager creating/negotiating a second, competing RTCPeerConnection.
+      const realPc = window.__callsPeerConnection;
+      if (!realPc) return null;
+      return {
+        // NOTE: intentionally no `_pc` here. AdaptiveBitrateEngine._onQualityChange()
+        // uses session._pc to call applyProfile() (sender.setParameters for bitrate/
+        // resolution caps) — js/adaptive-bitrate.js already does that exact job against
+        // this same real connection on its own poll loop. Exposing _pc here would give
+        // it a second, independent bitrate controller fighting over the same senders.
+        // getStats() below is all PeerHealthMonitor actually needs for quality scoring.
+        getStats: async () => {
+          const report = await realPc.getStats();
+          let rtt = 0, packetsLost = 0, bytesReceived = 0, jitter = 0;
+          report.forEach(stat => {
+            if (stat.type === 'candidate-pair' && stat.state === 'succeeded' && stat.currentRoundTripTime != null) {
+              rtt = stat.currentRoundTripTime;
+            }
+            if (stat.type === 'inbound-rtp' && !stat.isRemote) {
+              packetsLost   += stat.packetsLost || 0;
+              bytesReceived += stat.bytesReceived || 0;
+              jitter          = stat.jitter || jitter;
+            }
+          });
+          return { roundTripTime: rtt, packetsLost, bytesReceived, jitter };
+        },
+      };
     }
 
     async handleSignal(peerId, callId, signal) {

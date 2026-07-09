@@ -3227,6 +3227,7 @@
                     if (messageEl) {
 
                         const statusIcon = messageEl.querySelector('.message-status i');
+                        const statusSpan = messageEl.querySelector('.message-status'); // FIX: was undefined (ReferenceError), which aborted this whole handler
 
                         if (statusIcon) {
 

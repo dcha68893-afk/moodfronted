@@ -4826,13 +4826,20 @@
                 }
 
                 if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
-                    // ── GUARD: ignore if a call was just dispatched in the last 10s ──────
+                    // ── GUARD: ignore if a call was just dispatched in the last 3s ───────
                     // CALL_ENDED_RETURN fires from stale WS echoes during call SETUP, not
                     // just after call ends. Only drop signals within the first 3 seconds
                     // (true instantaneous echoes). 10s was too long — it blocked short calls.
+                    // FIX-NAV-BACK: previously this *dropped* the signal outright, so a call
+                    // that was genuinely declined/cancelled within the first 3s never navigated
+                    // the user back at all (permanently stuck on the calls screen). Instead,
+                    // re-deliver the same signal once the guard window has passed.
                     const _sinceDispatch = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                     if (_sinceDispatch < 3000) {
-                        console.warn('[Parent] CALL_ENDED_RETURN ignored — call dispatched only', Math.round(_sinceDispatch/1000)+'s ago (stale echo)');
+                        console.warn('[Parent] CALL_ENDED_RETURN deferred — call dispatched only', Math.round(_sinceDispatch/1000)+'s ago (possible stale echo), retrying shortly');
+                        setTimeout(() => {
+                            try { window.postMessage({ type: data.type, returnTo: data.returnTo, payload: data.payload, source: 'stale-echo-retry' }, '*'); } catch(_e) {}
+                        }, 3000 - _sinceDispatch + 50);
                         return;
                     }
 

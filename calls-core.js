@@ -4873,6 +4873,15 @@ function applySession(sessionData) {
 
     };
 
+    // FIX: expose the real callsState so code outside this closure (e.g. the
+    // global updateCallUI() function below, and defensive `window.callsState &&`
+    // reads elsewhere in this file) can actually see live call state instead
+    // of always reading undefined. The most severe consequence of this being
+    // missing: updateCallUI() always fell through to its "idle" branch and
+    // force-navigated the user OFF their active call screen on every
+    // participant presence update received during a live call.
+    window.callsState = callsState;
+
     // ══════════════════════════════════════════════════════════════════════════
     // CALLMANAGER BRIDGE — Single Source of Truth Integration
     //
@@ -8368,11 +8377,17 @@ function applySession(sessionData) {
 
                 // If a call is active, trigger ICE restart to recover the connection
                 try {
-                    var activeCallId = window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId);
-                    if (activeCallId && window.__PeerConnectionManager) {
+                    // FIX: window.callsState was never actually exposed (always undefined),
+                    // so this recovery path never ran. Use the real in-scope callsState.
+                    var activeCallId = callsState && (callsState.activeCallId || callsState.serverCallId);
+                    if (activeCallId) {
                         logInfo(MODULE, 'Triggering ICE restart after network recovery');
                         setTimeout(function() {
-                            try { window.__PeerConnectionManager.restartICEForAll && window.__PeerConnectionManager.restartICEForAll(); } catch(_e) {}
+                            // FIX: window.__PeerConnectionManager is a separate, unpopulated
+                            // shadow WebRTC engine (no real sessions registered in it) —
+                            // calling it here was a silent no-op. WebRTCManager owns the
+                            // actual live peer connection for this call; restart it directly.
+                            try { WebRTCManager.handleIceFailure && WebRTCManager.handleIceFailure(); } catch(_e) {}
                         }, 800); // Short delay to let network stabilise
                     }
                 } catch(_e) {}
@@ -12831,6 +12846,53 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                 this._peerConnection = new RTCPeerConnection(pcConfig);
                 // FIX BUG-3: expose for adaptive-bitrate.js
                 window.__callsPeerConnection = this._peerConnection;
+                // FIX: hook for AdaptiveBitrateEngine.js's CallRecoveryEngine (tab-visibility,
+                // network-change, socket-reconnect recovery) to trigger a restart on THIS real
+                // connection, rather than a separate/unused WebRTC engine creating its own.
+                window.callsCoreRestartICE = function(callId) {
+                    if (callId && WebRTCManager._currentCallId && String(callId) !== String(WebRTCManager._currentCallId)) {
+                        return Promise.resolve(); // stale request for a call that's no longer active
+                    }
+                    return Promise.resolve(WebRTCManager.handleIceFailure());
+                };
+                // FIX: hook for AdaptiveBitrateEngine.js's CallRecoveryEngine tab-visibility
+                // recovery. DeviceMediaManager.recoverTracks() is a no-op in this app (its
+                // internal stream reference is never populated — calls-ui.js's UIState owns
+                // the real one). This does the same job against the real stream and the real
+                // peer connection: reacquire any ended tracks, then replaceTrack() on this
+                // connection's actual senders so the remote party receives the recovered
+                // media (not just a local preview refresh).
+                window.callsCoreRecoverMedia = async function() {
+                    try {
+                        var ui = window.callsUI && window.callsUI.UIState;
+                        var stream = ui && ui.localStream;
+                        if (!stream) return;
+                        var videoEnded = stream.getVideoTracks().some(function(t) { return t.readyState === 'ended'; });
+                        var audioEnded = stream.getAudioTracks().some(function(t) { return t.readyState === 'ended'; });
+                        if (!videoEnded && !audioEnded) return;
+
+                        var hasVideo = stream.getVideoTracks().length > 0;
+                        var hasAudio = stream.getAudioTracks().length > 0;
+                        var newStream = await navigator.mediaDevices.getUserMedia({ audio: hasAudio, video: hasVideo });
+
+                        var pc = WebRTCManager._peerConnection;
+                        if (pc) {
+                            pc.getSenders().forEach(function(sender) {
+                                if (!sender.track) return;
+                                var newTrack = sender.track.kind === 'audio'
+                                    ? newStream.getAudioTracks()[0]
+                                    : newStream.getVideoTracks()[0];
+                                if (newTrack) sender.replaceTrack(newTrack).catch(function() {});
+                            });
+                        }
+
+                        stream.getTracks().forEach(function(t) { if (t.readyState === 'ended') t.stop(); });
+                        ui.localStream = newStream;
+                        logInfo(MODULE, 'Recovered local media tracks after backgrounding/device interruption');
+                    } catch (err) {
+                        logWarn(MODULE, 'Media recovery failed', err && err.message);
+                    }
+                };
                 window.dispatchEvent(new CustomEvent('call:connected', { detail: { pc: this._peerConnection } }));
 
 
@@ -13261,7 +13323,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                     });
                     console.log('[CallsCore] ✅ AUDIO TRACK routed → #remoteAudio (audio-only stream)');
                     // ✅ FIX: Notify UI that remote stream arrived — triggers transitionToInCall if not already shown
-                    if (window.UIState) window.UIState.hasRemoteAudio = true;
+                    if (window.callsUI && window.callsUI.UIState) window.callsUI.UIState.hasRemoteAudio = true; // FIX: was window.UIState (never assigned)
                     // Retry play after short delay (browser autoplay policies)
                     setTimeout(function() {
                         if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
@@ -13328,7 +13390,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                         document.addEventListener('touchend',   retryVideoPlay, { once: true });
                     });
                     // ✅ FIX: Notify MasterFix that remote video arrived
-                    if (window.UIState) window.UIState.hasRemoteVideo = true;
+                    if (window.callsUI && window.callsUI.UIState) window.callsUI.UIState.hasRemoteVideo = true; // FIX: was window.UIState (never assigned)
                     // Retry play after delays (autoplay policy)
                     [300, 800, 2000].forEach(function(ms) {
                         setTimeout(function() {
@@ -14595,7 +14657,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
         var _CSOut = window.CALL_STATE;
         if (_smOut && _CSOut && callId) {
             if (!_smOut.getSession(callId)) {
-                _smOut.createSession(callId, callType || 'audio', null, true);
+                _smOut.createSession(callId, callType || 'audio', (participants && participants[0]) || null, true);
                 _smOut.transition(callId, _CSOut.OUTGOING);
             }
         }
@@ -28925,7 +28987,7 @@ _escapeHtml: function(text) {
     // frame — but that is the parent frame's window, so read it via sessionStorage
     // which IS shared between parent and iframe on same origin).
     let _resolvedCalleeName = callData.calleeName
-        || (window.UIState && window.UIState.pendingCallUser && window.UIState.pendingCallUser.userName)
+        || (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.pendingCallUser && window.callsUI.UIState.pendingCallUser.userName) // FIX: was window.UIState (never assigned)
         || window.__activePeerName;
     // sessionStorage is same-origin shared across frames
     if (!_resolvedCalleeName) {
@@ -29276,7 +29338,7 @@ _escapeHtml: function(text) {
                 var _cid2 = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
                 if (_cid2) {
                     if (!_sm2.getSession(_cid2)) {
-                        _sm2.createSession(_cid2, callsState.callType || 'audio', null, !!callsState._isCaller);
+                        _sm2.createSession(_cid2, callsState.callType || 'audio', (callsState.callParticipants && callsState.callParticipants[0]) || (callsState.callData && callsState.callData.callerId) || null, !!callsState._isCaller);
                         _sm2.transition(_cid2, _CS2.OUTGOING);
                         _sm2.transition(_cid2, _CS2.CONNECTING);
                     }
@@ -29411,9 +29473,10 @@ _escapeHtml: function(text) {
             if (typeof window.showScreen === "function") { window.showScreen("idle"); }
             var __ov2 = document.getElementById("callOverlay"); if (__ov2) __ov2.setAttribute("data-state", "idle");
             // Stop all media tracks immediately on call end
-            if (window.UIState && window.UIState.localStream) {
-                try { window.UIState.localStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
-                window.UIState.localStream = null;
+            // FIX: was window.UIState (never assigned) — real path is window.callsUI.UIState
+            if (window.callsUI && window.callsUI.UIState && window.callsUI.UIState.localStream) {
+                try { window.callsUI.UIState.localStream.getTracks().forEach(function(t) { t.stop(); }); } catch(e) {}
+                window.callsUI.UIState.localStream = null;
             }
             // Clear caller flag on call end
             if (window.callsState) window.callsState._isCaller = false;
