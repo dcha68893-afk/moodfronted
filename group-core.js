@@ -5074,9 +5074,9 @@ function buildGroupMessageMarkup(message) {
         html: `
             <div class="group-message-row" style="display: flex; align-items: flex-end; gap: 8px; ${isSent ? 'justify-content: flex-end;' : ''}">
                 ${senderAvatarMarkup}
-                <div class="group-message-bubble" style="max-width: min(78%, 540px); display: flex; flex-direction: column; gap: 4px;">
+                <div class="group-message-bubble" style="max-width: min(75%, 540px); display: flex; flex-direction: column; gap: 4px;">
                     ${!isSent ? `<div class="message-sender" style="font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 0 4px;">${escapeGroupChatHTML(senderName)}</div>` : ''}
-                    <div class="group-message-card" style="padding: 10px 12px; border-radius: 18px; background: ${isSent ? 'var(--primary-color, #0084ff)' : 'var(--bg-color)'}; color: ${isSent ? '#fff' : 'var(--text-primary)'}; box-shadow: 0 1px 2px rgba(0,0,0,0.08);">
+                    <div class="group-message-card" style="padding: 6px 10px 4px 10px; border-radius: 7.5px; background: ${isSent ? '#005c4b' : '#202c33'}; color: #e9edef; box-shadow: 0 1px 1px rgba(0,0,0,0.3); font-size: 14.2px; line-height: 1.45;">
                         ${replyMarkup}
                         ${buildGroupMessageBody(message)}
                         <div class="message-meta" style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; opacity: 0.8;">

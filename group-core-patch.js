@@ -307,7 +307,14 @@ async function _loadMemberPicker(GC) {
         try {
             const token = _getToken();
             if (token) {
-                const base = window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                const base = (function() {
+                    // FIX: window.API_BASE_URL is set (in chat.html/calls.html/etc.) WITHOUT
+                    // the /api suffix — this was silently winning over the correctly-suffixed
+                    // window.__kynAPI.baseUrl and producing 404s (e.g. /groups/user instead of
+                    // /api/groups/user). Prefer the properly-suffixed source and normalize.
+                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                    return /\/api$/.test(b) ? b : (b.replace(/\/$/, '') + '/api');
+                })();
                 const res = await fetch(`${base}/friends`, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
                 if (res.ok) {
                     const d = await res.json();
@@ -561,7 +568,14 @@ async function _remapGroupId(GC, tempId, serverGroup) {
 async function _inviteMembers(groupId, memberIds, myUserId) {
     const token = _getToken();
     if (!token || !groupId) return;
-    const base = window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+    const base = (function() {
+                    // FIX: window.API_BASE_URL is set (in chat.html/calls.html/etc.) WITHOUT
+                    // the /api suffix — this was silently winning over the correctly-suffixed
+                    // window.__kynAPI.baseUrl and producing 404s (e.g. /groups/user instead of
+                    // /api/groups/user). Prefer the properly-suffixed source and normalize.
+                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                    return /\/api$/.test(b) ? b : (b.replace(/\/$/, '') + '/api');
+                })();
     for (const uid of memberIds) {
         if (String(uid) === String(myUserId)) continue;
         try {
@@ -590,7 +604,14 @@ async function _apiBridge(endpoint, method = 'GET', body = null) {
 }
 
 async function _rawFetch(endpoint, method = 'GET', body = null) {
-    const base = window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+    const base = (function() {
+                    // FIX: window.API_BASE_URL is set (in chat.html/calls.html/etc.) WITHOUT
+                    // the /api suffix — this was silently winning over the correctly-suffixed
+                    // window.__kynAPI.baseUrl and producing 404s (e.g. /groups/user instead of
+                    // /api/groups/user). Prefer the properly-suffixed source and normalize.
+                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                    return /\/api$/.test(b) ? b : (b.replace(/\/$/, '') + '/api');
+                })();
     const token = _getToken();
     const url = endpoint.startsWith('http') ? endpoint : `${base}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
     const opts = { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } };

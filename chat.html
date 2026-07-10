@@ -1194,6 +1194,13 @@
         #globalHeader.group-chat-active #profileTrigger   { display: none !important; }
         #globalHeader.group-chat-active #headerGroupCtx   { display: flex !important; }
 
+        /* ── 1:1 chat context in globalHeader (mirrors group pattern) ── */
+        #headerChatCtx { display: none; align-items: center; flex: 1; gap: 8px; min-width: 0; overflow: hidden; }
+        #globalHeader.chat-active .header-context { display: none !important; }
+        #globalHeader.chat-active #headerActions    { display: none !important; }
+        #globalHeader.chat-active #profileTrigger   { display: none !important; }
+        #globalHeader.chat-active #headerChatCtx    { display: flex !important; }
+
         /* ── Group header buttons — clean dark style, NO colored bar ── */
         .hgm-btn {
             background: none; border: none;
@@ -1414,6 +1421,26 @@
                 <div id="headerModuleTitle" class="header-module-title">Messages</div>
                 <div id="headerModuleSubtitle" class="header-module-subtitle">Your recent chats load from local cache first.</div>
             </div>
+        </div>
+
+        <!-- 1:1 CHAT CONTEXT: replaces default when a direct-message chat is open.
+             Mirrors message.html's own header (kept functional but visually hidden
+             there) so there is exactly one header rendered, with no duplicate row
+             and no leftover blank space. -->
+        <div id="headerChatCtx">
+            <button class="hgm-btn" id="hdrChatBack" title="Back to chats">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <div id="hdrChatAvatar" style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#a855f7);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:13px;color:#fff;cursor:pointer;user-select:none;overflow:hidden;">
+                <i class="fas fa-user"></i>
+            </div>
+            <div style="flex:1;min-width:0;cursor:pointer;" id="hdrChatInfo">
+                <div id="hdrChatName" style="font-weight:600;font-size:14px;color:var(--text-primary,#e5e7eb);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Chat</div>
+                <div id="hdrChatStatus" style="font-size:11px;color:var(--text-secondary,#9ca3af);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Offline</div>
+            </div>
+            <button class="hgm-btn" id="hdrChatCall"  title="Voice call"><i class="fas fa-phone"></i></button>
+            <button class="hgm-btn" id="hdrChatVideo" title="Video call"><i class="fas fa-video"></i></button>
+            <button class="hgm-btn" id="hdrChatMore" title="More options"><i class="fas fa-ellipsis-v"></i></button>
         </div>
 
         <!-- GROUP CHAT CONTEXT: replaces default when a group panel is open -->
@@ -5499,7 +5526,17 @@
 
                 // MODULE SWITCHING
                 if (data.type === 'SWITCH_MODULE' && data.module !== 'calls') {
-                    navigateToPage(data.module);
+                    // FIX: avoid double-navigation right after a call ends. The
+                    // CALL_ENDED_RETURN handler (fired moments earlier) already
+                    // navigated using its own tracked return-context; this
+                    // follow-up SWITCH_MODULE message uses a separate, older
+                    // tracking mechanism in calls-ui.js and can disagree on the
+                    // destination, causing a visible flash between two pages.
+                    const _isPostCallFollowup = !!(data.payload && data.payload.returnFromCall);
+                    const _justNavigatedFromCallEnd = window.__callEndedNavAt && (Date.now() - window.__callEndedNavAt) < 1500;
+                    if (!(_isPostCallFollowup && _justNavigatedFromCallEnd)) {
+                        navigateToPage(data.module);
+                    }
                     
                     // ✅ FIXED: Handle chat opening for messages module from friends/calls
                     if (data.module === 'messages' && data.payload) {
@@ -7187,6 +7224,7 @@ function showGroupHeader(g) {
         av.textContent = ii;
     }
     if (hdr)  hdr.classList.add('group-chat-active');
+    hdr && hdr.classList.remove('chat-active');
     if (acts) acts.classList.add('hidden');
     if (prof) prof.style.visibility = 'hidden';
     window.__groupHeaderShown = true;
@@ -7405,6 +7443,110 @@ window.__groupHdrHide = hideGroupHeader;
 </script>
 
     <script>
+    (function () {
+    'use strict';
+
+    function messageIframe() { return document.getElementById('messageIframe') || document.getElementById('messagesIframe'); }
+    function postToMessage(type, payload) {
+        var f = messageIframe();
+        if (f && f.contentWindow)
+            f.contentWindow.postMessage({ type: type, payload: payload || {}, source: 'parent-chat-hdr', timestamp: Date.now() }, '*');
+    }
+
+    /* ── Show 1:1 chat context in globalHeader ───────────────────── */
+    function showChatHeader(info) {
+        if (!info) return;
+        var hdr  = document.getElementById('globalHeader');
+        var name = document.getElementById('hdrChatName');
+        var stat = document.getElementById('hdrChatStatus');
+        var av   = document.getElementById('hdrChatAvatar');
+        var acts = document.getElementById('headerActions');
+        var prof = document.getElementById('profileTrigger');
+
+        if (name) name.textContent = info.name || 'Chat';
+        if (stat) stat.textContent = info.status || (info.online ? 'Online' : 'Offline');
+        if (av) {
+            if (info.avatarUrl) {
+                av.innerHTML = '';
+                var img = document.createElement('img');
+                img.src = info.avatarUrl;
+                img.alt = info.name || 'Chat';
+                img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%;';
+                img.onerror = function () { av.innerHTML = '<i class="fas fa-user"></i>'; };
+                av.appendChild(img);
+            } else if (!av.querySelector('img')) {
+                av.innerHTML = '<i class="fas fa-user"></i>';
+            }
+        }
+        // Don't fight the group header if a group panel happens to be active
+        if (hdr && !hdr.classList.contains('group-chat-active')) hdr.classList.add('chat-active');
+        if (acts) acts.classList.add('hidden');
+        if (prof) prof.style.visibility = 'hidden';
+        window.__chatHeaderShown = true;
+    }
+
+    /* ── Restore default header ───────────────────────────────────── */
+    function hideChatHeader() {
+        var hdr  = document.getElementById('globalHeader');
+        var prof = document.getElementById('profileTrigger');
+        if (hdr)  hdr.classList.remove('chat-active');
+        if (prof) prof.style.visibility = '';
+        window.__chatHeaderShown = false;
+
+        var page = window.__currentPage || 'messages';
+        if (typeof updateHeaderContext === 'function') try { updateHeaderContext(page); } catch (e) {}
+        if (typeof updateHeaderActions === 'function') try { updateHeaderActions(page); } catch (e) {}
+    }
+
+    /* ── Wire header buttons (called once after DOM ready) ─────────── */
+    function wireButtons() {
+        var back = document.getElementById('hdrChatBack');
+        if (back && !back._chw) { back._chw = true;
+            back.addEventListener('click', function () {
+                postToMessage('PARENT_CHAT_ACTION', { action: 'back' });
+                hideChatHeader();
+            });
+        }
+        var call = document.getElementById('hdrChatCall');
+        if (call && !call._chw) { call._chw = true;
+            call.addEventListener('click', function () { postToMessage('PARENT_CHAT_ACTION', { action: 'call' }); });
+        }
+        var vid = document.getElementById('hdrChatVideo');
+        if (vid && !vid._chw) { vid._chw = true;
+            vid.addEventListener('click', function () { postToMessage('PARENT_CHAT_ACTION', { action: 'video' }); });
+        }
+        var more = document.getElementById('hdrChatMore');
+        if (more && !more._chw) { more._chw = true;
+            more.addEventListener('click', function (e) {
+                e.stopPropagation();
+                postToMessage('PARENT_CHAT_ACTION', { action: 'menu' });
+            });
+        }
+        var info = document.getElementById('hdrChatInfo');
+        if (info && !info._chw) { info._chw = true;
+            info.addEventListener('click', function () { postToMessage('PARENT_CHAT_ACTION', { action: 'profile' }); });
+        }
+    }
+
+    /* ── Listen for state broadcasts from the message iframe ───────── */
+    window.addEventListener('message', function (e) {
+        var d = e.data;
+        if (!d || typeof d !== 'object') return;
+        if (d.source === 'message-iframe') {
+            if (d.type === 'CHAT_HEADER_UPDATE') { showChatHeader(d.payload || {}); return; }
+            if (d.type === 'CHAT_PANEL_CLOSED')  { hideChatHeader(); return; }
+        }
+    });
+
+    if (document.readyState === 'loading')
+        document.addEventListener('DOMContentLoaded', wireButtons);
+    else
+        setTimeout(wireButtons, 100);
+
+    window.__chatHdrShow = showChatHeader;
+    window.__chatHdrHide = hideChatHeader;
+    })();
+    </script>
   // FIX-KEEPALIVE: 14 minutes left almost no margin against Render's
   // 15-minute idle-sleep window — a single slow tick (network hiccup, tab
   // throttled in background, a missed timer due to heavy main-thread work)

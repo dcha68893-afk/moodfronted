@@ -14071,6 +14071,16 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
         handleIceFailure: function() {
 
+            // FIX: guard against being invoked with no active peer connection
+            // (e.g. window.callsCoreRestartICE fired from a tab-visibility or
+            // network-restore event when no call is connected, or right as a
+            // call is ending). Without this, createOffer() always threw "No
+            // peer connection" and logged it as a spurious error.
+            if (!this._peerConnection) {
+                logInfo(MODULE, 'ICE restart skipped — no active peer connection');
+                return;
+            }
+
 
 
             logWarn(MODULE, 'ICE connection failed');

@@ -2281,6 +2281,89 @@
     <script src="mesh/mesh-engine.js"></script>
     <script src="mesh/mesh-messages-bridge.js"></script>
 
+<!-- FIX: header consolidation — mirror this iframe's chat header up into
+     chat.html's own header (#headerChatCtx), and hide this iframe's own
+     header to eliminate the duplicate header / blank-space bug. Uses a
+     MutationObserver rather than hooking every call site that sets
+     chatFriendName/avatar/status directly (there are 9+ of them scattered
+     across messages-core.js and messages-ui.js, no single authoritative one). -->
+<script>
+(function() {
+    'use strict';
+    function postToParent(type, payload) {
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: type, payload: payload || {}, source: 'message-iframe', timestamp: Date.now() }, '*');
+            }
+        } catch (_) {}
+    }
+
+    function currentChatInfo() {
+        var nameEl   = document.getElementById('chatFriendName');
+        var statusEl = document.getElementById('chatStatusText');
+        var avatarEl = document.getElementById('chatFriendAvatar');
+        var indEl    = document.getElementById('chatStatusIndicator');
+        var name = nameEl ? nameEl.textContent.trim() : '';
+        var isPlaceholder = !name || name === 'Select a chat' || name === 'Loading…' || name === 'Chat';
+        var avatarUrl = '';
+        var avatarImg = avatarEl ? avatarEl.querySelector('img') : null;
+        if (avatarImg) avatarUrl = avatarImg.src;
+        var online = !!(indEl && indEl.classList.contains('online'));
+        return {
+            isPlaceholder: isPlaceholder,
+            name: name,
+            status: statusEl ? statusEl.textContent.trim() : '',
+            avatarUrl: avatarUrl,
+            online: online
+        };
+    }
+
+    function broadcastState() {
+        var chatPanel = document.getElementById('chatPanel');
+        var panelOpen = !!(chatPanel && !chatPanel.classList.contains('hidden'));
+        var info = currentChatInfo();
+        if (panelOpen && !info.isPlaceholder) {
+            postToParent('CHAT_HEADER_UPDATE', info);
+        } else {
+            postToParent('CHAT_PANEL_CLOSED', {});
+        }
+    }
+
+    // Hide this iframe's own header row. Kept functional (not removed) so
+    // every existing button/search/click handler that targets these elements
+    // keeps working exactly as before — only the visual row collapses,
+    // since chat.html now renders the equivalent header itself.
+    var styleTag = document.createElement('style');
+    styleTag.textContent = '.chat-header { display: none !important; }';
+    document.head.appendChild(styleTag);
+
+    // Forward header-button clicks made on the parent's mirrored header back
+    // down to this iframe's real (hidden but functional) buttons.
+    window.addEventListener('message', function(e) {
+        var d = e.data;
+        if (!d || typeof d !== 'object') return;
+        if (d.type === 'PARENT_CHAT_ACTION') {
+            var action = d.payload && d.payload.action;
+            var idMap = { call: 'voiceCallBtn', video: 'videoCallBtn', menu: 'chatOptionsBtn', back: 'backToChatsBtn', profile: 'chatFriendName' };
+            var elId = idMap[action];
+            var el = elId && document.getElementById(elId);
+            if (el) el.click();
+        }
+    });
+
+    var target = document.getElementById('chatPanel');
+    if (target) {
+        var observer = new MutationObserver(function() { broadcastState(); });
+        observer.observe(target, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['class', 'src'] });
+    }
+
+    // Initial state + a cheap safety-net poll covering any update path the
+    // observer's filters might miss.
+    broadcastState();
+    setInterval(broadcastState, 1500);
+})();
+</script>
+
 <script src="back-nav.js"></script>
 <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
   Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
