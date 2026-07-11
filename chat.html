@@ -2909,6 +2909,14 @@
             document.querySelectorAll('.nav-icon, .mobile-nav-icon').forEach(b => b.classList.remove('active'));
             document.querySelectorAll(`.nav-icon[data-page="${page}"], .mobile-nav-icon[data-page="${page}"]`).forEach(b => b.classList.add('active'));
             
+            // FIX: the mirrored 1:1 chat header (#headerChatCtx) must only ever
+            // show while the messages page is actually the visible one — the
+            // iframe that feeds it keeps running (and broadcasting its state)
+            // even while hidden, so guard here rather than trust it to know.
+            if (page !== 'messages' && typeof window.__chatHdrHide === 'function') {
+                window.__chatHdrHide();
+            }
+
             // Handle mobile panel states - CRITICAL FIX
             // NEVER remove call-screen-active while a call is in progress.
             // __activeCallInProgress is set by CALL_SCREEN_ACTIVE messages from the iframe.
@@ -7533,7 +7541,7 @@ window.__groupHdrHide = hideGroupHeader;
         var d = e.data;
         if (!d || typeof d !== 'object') return;
         if (d.source === 'message-iframe') {
-            if (d.type === 'CHAT_HEADER_UPDATE') { showChatHeader(d.payload || {}); return; }
+            if (d.type === 'CHAT_HEADER_UPDATE') { if (window.__currentPage === 'messages') showChatHeader(d.payload || {}); return; }
             if (d.type === 'CHAT_PANEL_CLOSED')  { hideChatHeader(); return; }
         }
     });

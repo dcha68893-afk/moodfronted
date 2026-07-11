@@ -300,10 +300,10 @@
             }
             
             .group-details-panel {
-                position: relative !important;
+                position: fixed !important;
                 width: 100% !important;
-                height: auto !important;
-                z-index: auto !important;
+                height: 100% !important;
+                z-index: 1000 !important;
             }
             
             .app-container {
@@ -867,12 +867,21 @@
         }
         
         /* Group Details Panel */
+        /* FIX: was flex:1 / position:relative — a full sibling "screen" that
+           sat alongside (or replaced) the chat panel in the layout, i.e. a
+           second screen. Now a fixed overlay on top of the chat, which stays
+           rendered underneath — opened from the chat's "more" menu instead of
+           being a separate navigable screen. */
         .group-details-panel {
-            flex: 1;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            width: 100%;
+            height: 100%;
             background-color: var(--bg-color);
-            position: relative;
             display: none;
             overflow: hidden;
+            z-index: 1000;
+            box-shadow: 0 0 24px rgba(0,0,0,0.35);
         }
         
         .group-details-panel.active {

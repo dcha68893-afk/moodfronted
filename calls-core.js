@@ -17311,7 +17311,29 @@ initiateCall: async function(callType, participants = []) {
 
 
         // Set active call
-        setActiveCall(callId, callType, participants);
+        let _activeCallWasSet = setActiveCall(callId, callType, participants);
+        if (!_activeCallWasSet) {
+            // setActiveCall refused because callsState still thinks a previous
+            // call is active — a known race with the stale-state auto-reset
+            // above (see its own comment: JS microtask ordering can mean
+            // callActive is still true here). Force-clear and retry once
+            // instead of silently continuing to negotiate WebRTC for callId
+            // while callsState.activeCallId still points at the old call —
+            // that inconsistency is what was causing the call to visually
+            // start (both sides), then self-terminate seconds later.
+            logWarn(MODULE, 'setActiveCall failed — force-clearing stale state and retrying once', { callId });
+            if (window.callCore && window.callCore.forceResetCallState) {
+                window.callCore.forceResetCallState();
+            } else {
+                callsState.activeCallId = null;
+                callsState.callActive = false;
+            }
+            _activeCallWasSet = setActiveCall(callId, callType, participants);
+            if (!_activeCallWasSet) {
+                logError(MODULE, 'Unable to start call — previous call session would not clear', { callId });
+                throw new Error('Another call is still ending. Please try again in a moment.');
+            }
+        }
 
         // ✅ FIX: Mark as caller so isCaller check in handleCallAccepted always works
         callsState._isCaller = true;
@@ -17982,7 +18004,21 @@ initiateCall: async function(callType, participants = []) {
 
 
 
-                setActiveCall(callId, callType, []);
+                let _activeCallWasSet2 = setActiveCall(callId, callType, []);
+                if (!_activeCallWasSet2) {
+                    logWarn(MODULE, 'setActiveCall failed — force-clearing stale state and retrying once', { callId });
+                    if (window.callCore && window.callCore.forceResetCallState) {
+                        window.callCore.forceResetCallState();
+                    } else {
+                        callsState.activeCallId = null;
+                        callsState.callActive = false;
+                    }
+                    _activeCallWasSet2 = setActiveCall(callId, callType, []);
+                    if (!_activeCallWasSet2) {
+                        logError(MODULE, 'Unable to start call — previous call session would not clear', { callId });
+                        throw new Error('Another call is still ending. Please try again in a moment.');
+                    }
+                }
 
 
 

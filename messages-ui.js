@@ -3421,7 +3421,7 @@
                 const domId = el.dataset.messageId;
                 if (domId && !existingDomIds.has(domId) && !domId.startsWith('tmp_')) {
                     // Try to recover message from ChatManager store
-                    const stored = ChatManager && ChatManager._messagesMap && ChatManager._messagesMap.get(domId);
+                    const stored = window.ChatManager && window.ChatManager._messagesMap && window.ChatManager._messagesMap.get(domId);
                     if (stored) domOnlyMessages.push(stored);
                 }
             });
@@ -3444,6 +3444,50 @@
 
             this.scrollToBottom(container);
 
+            // FIX-E2E-DECRYPT-WIRING: messages get encrypted before sending
+            // (see messages-core.js's encryptForChat call) but nothing ever
+            // called the matching decryptFromChat when rendering — so
+            // encrypted content (a JSON envelope) was displayed as raw text
+            // instead of the actual message. Decrypt in place, post-render,
+            // so this works regardless of which of renderMessages' several
+            // call sites triggered this render.
+            this._decryptRenderedMessages(allMessages, currentChat, currentUser);
+        },
+
+        // FIX-E2E-DECRYPT-WIRING: scan just-rendered messages for encrypted
+        // envelopes and replace the bubble's visible text with the decrypted
+        // plaintext once available. Non-blocking — the bubble already shows
+        // something (the raw envelope) synchronously; this patches it in
+        // place a moment later, same pattern as other async UI patches in
+        // this file (avatar/name updates, etc.).
+        _decryptRenderedMessages(messages, currentChat, currentUser) {
+            if (!window.KynectaE2E || !window.KynectaE2E.enabled) return;
+            if (!Array.isArray(messages) || messages.length === 0) return;
+            const currentUserId = currentUser?.id || currentUser?.userId;
+            const otherPartyId = currentChat?.friendId || currentChat?.otherUserId || currentChat?.id;
+            const chatId = currentChat?.id;
+            messages.forEach(message => {
+                if (!message) return;
+                if (message.type && message.type !== 'text') return; // only text messages get encrypted
+                const raw = message.content;
+                if (typeof raw !== 'string' || raw.charAt(0) !== '{' || raw.indexOf('"v"') === -1) return; // quick heuristic, avoids parsing every message
+                const isSent = String(message.senderId) === String(currentUserId);
+                const senderForDecrypt = isSent ? otherPartyId : message.senderId;
+                if (!senderForDecrypt || !chatId) return;
+                window.KynectaE2E.decryptFromChat(raw, chatId, senderForDecrypt).then(plaintext => {
+                    if (!plaintext || plaintext === raw) return;
+                    const bubble = document.querySelector(`[data-message-id="${message.id}"] .message-content`);
+                    if (bubble) {
+                        const core = this._getCore ? this._getCore() : null;
+                        bubble.innerHTML = core?.formatMessageText ? core.formatMessageText(plaintext) : _safeEscapeHtml(plaintext);
+                    }
+                    // Cache the decrypted plaintext on the message object so any
+                    // re-render (e.g. a later renderMessages call) doesn't need
+                    // to decrypt it again and can display it immediately.
+                    message.content = plaintext;
+                    message._decrypted = true;
+                }).catch(() => {});
+            });
         },
 
 
@@ -4952,7 +4996,12 @@
                                  || _core.FriendManager.getFriend(parseInt(_fid))
                                  || _core.FriendManager.getFriend(String(_fid));
 
-                    if (_friend) _isOnline = !!(_friend.online || _friend.status === 'online');
+                    // FIX: don't let a stale FriendManager cache entry
+                    // override a fresher "online" already known from chat.online
+                    // (this was the "shows offline while actually online" bug —
+                    // any cached friend record, even a stale one, unconditionally
+                    // won here before). Either source saying online now wins.
+                    if (_friend) _isOnline = _isOnline || !!(_friend.online || _friend.status === 'online');
 
                 }
 

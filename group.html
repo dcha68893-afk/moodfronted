@@ -3147,6 +3147,12 @@ window._openSmartGroupOSFromSidebar = function() {
 </script>
 
 <script src="back-nav.js"></script>
+<!-- FIX: group.html's own .chat-header duplicates chat.html's #headerGroupCtx,
+     which already mirrors this data correctly (see the GROUP_PANEL_OPENED /
+     GROUP_PANEL_UPDATE listeners in chat.html). Hide the in-iframe header
+     visually only — keep it in the DOM so nothing that reads/writes its
+     child elements (chatTitle, chatSubtitle, etc.) breaks. -->
+<style>.chat-header { display: none !important; }</style>
 <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
   Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
   DO NOT move above existing scripts.
