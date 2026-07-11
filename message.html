@@ -2298,23 +2298,32 @@
         } catch (_) {}
     }
 
+    var _chatInfoSeq = 0;
     function currentChatInfo() {
         var nameEl   = document.getElementById('chatFriendName');
         var statusEl = document.getElementById('chatStatusText');
         var avatarEl = document.getElementById('chatFriendAvatar');
         var indEl    = document.getElementById('chatStatusIndicator');
+        var chatPanelEl = document.getElementById('chatPanel');
         var name = nameEl ? nameEl.textContent.trim() : '';
         var isPlaceholder = !name || name === 'Select a chat' || name === 'Loading…' || name === 'Chat';
         var avatarUrl = '';
         var avatarImg = avatarEl ? avatarEl.querySelector('img') : null;
         if (avatarImg) avatarUrl = avatarImg.src;
         var online = !!(indEl && indEl.classList.contains('online'));
+        // FIX: include the chat id + a monotonic sequence number so the
+        // receiving side (chat.html) can detect and drop an out-of-order/
+        // stale broadcast (e.g. one for the chat that was just left, arriving
+        // after the newly-opened chat's broadcast) instead of blindly
+        // displaying whichever one happens to arrive last.
         return {
             isPlaceholder: isPlaceholder,
             name: name,
             status: statusEl ? statusEl.textContent.trim() : '',
             avatarUrl: avatarUrl,
-            online: online
+            online: online,
+            chatId: chatPanelEl ? (chatPanelEl.getAttribute('data-current-chat-id') || name) : name,
+            seq: ++_chatInfoSeq
         };
     }
 

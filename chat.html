@@ -7462,8 +7462,20 @@ window.__groupHdrHide = hideGroupHeader;
     }
 
     /* ── Show 1:1 chat context in globalHeader ───────────────────── */
+    var _lastChatHeaderInfo = null; // {chatId, seq}
     function showChatHeader(info) {
         if (!info) return;
+        // FIX: drop an out-of-order broadcast — if we've already shown a
+        // *different* chat with a higher sequence number, this one is stale
+        // (e.g. the previous chat's trailing update arriving after the user
+        // already switched to a new one).
+        if (_lastChatHeaderInfo && info.chatId !== _lastChatHeaderInfo.chatId &&
+            typeof info.seq === 'number' && typeof _lastChatHeaderInfo.seq === 'number' &&
+            info.seq < _lastChatHeaderInfo.seq) {
+            return;
+        }
+        _lastChatHeaderInfo = { chatId: info.chatId, seq: info.seq };
+
         var hdr  = document.getElementById('globalHeader');
         var name = document.getElementById('hdrChatName');
         var stat = document.getElementById('hdrChatStatus');
@@ -7665,50 +7677,13 @@ window.__groupHdrHide = hideGroupHeader;
         if (b) b.remove();
     });
 
-    // SW update — force instant skipWaiting + banner
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
-            function _checkWaiting(sw) {
-                if (!sw) return;
-                sw.postMessage({ type: 'SKIP_WAITING' });
-                _showUpdateBanner();
-            }
-            if (reg.waiting) _checkWaiting(reg.waiting);
-            reg.addEventListener('updatefound', function() {
-                var nw = reg.installing;
-                nw.addEventListener('statechange', function() {
-                    if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-                        _checkWaiting(nw);
-                    }
-                });
-            });
-            setInterval(function() { reg.update().catch(function(){}); }, 30 * 60000);
-        }).catch(function(e) { console.warn('[PWA] SW reg failed:', e); });
-
-        var _refreshing = false;
-        navigator.serviceWorker.addEventListener('controllerchange', function() {
-            if (_refreshing) return;
-            _refreshing = true;
-            if (sessionStorage.getItem('pwa_update_ack')) window.location.reload();
-        });
-    }
-
-    function _showUpdateBanner() {
-        if (document.getElementById('pwaUpdateBanner')) return;
-        _showEl('pwaUpdateBanner',
-            '<div style="position:fixed;top:0;left:0;right:0;z-index:999999;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;font-family:-apple-system,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.2);animation:_uslide .3s ease">' +
-            '<style>@keyframes _uslide{from{transform:translateY(-100%)}to{transform:translateY(0)}}</style>' +
-            '<span style="font-size:18px">&#10024;</span>' +
-            '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">New update available!</div>' +
-            '<div style="font-size:11px;opacity:.85">Tap Refresh for latest features</div></div>' +
-            '<button onclick="window._pwaApplyUpdate()" style="background:#fff;color:#667eea;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0">Refresh</button>' +
-            '<button onclick="document.getElementById(\'pwaUpdateBanner\').remove()" style="background:none;border:none;color:rgba(255,255,255,.7);font-size:18px;cursor:pointer;padding:2px;flex-shrink:0">&times;</button></div>'
-        );
-    }
-    window._pwaApplyUpdate = function() {
-        sessionStorage.setItem('pwa_update_ack', '1');
-        window.location.reload();
-    };
+    // FIX: removed a duplicate, buggier inline PWA-update/banner implementation
+    // that lived here. pwa-manager.js (loaded above) already does this
+    // correctly: it compares SW versions before showing the banner (fixing
+    // false-positive banners with no real update) and uses controllerchange
+    // as the single, one-time reload trigger (fixing the double-reload
+    // "opening-loading-opening-loading" loop). Having both meant two
+    // independent systems racing each other on every update.
 })();
 </script>
     <!-- Push notifications + multi-device sync (main shell) -->

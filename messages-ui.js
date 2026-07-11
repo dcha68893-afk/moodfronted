@@ -4643,7 +4643,13 @@
 
                 
 
-                const _rawLast = (chat.lastMessage || '').trim();
+                const _rawLast = (function() {
+                    const v = (chat.lastMessage || '').trim();
+                    // FIX: same root cause as the message-bubble decrypt issue —
+                    // don't ever show the raw encrypted envelope as literal text.
+                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1 && v.indexOf('"ct"') !== -1) return '🔒 Encrypted message';
+                    return v;
+                })();
 
                 const _words = _rawLast.split(/\s+/).filter(Boolean);
 
@@ -5655,7 +5661,11 @@
 
                 const name = chat.friendName || chat.name || 'Chat';
 
-                const lastMsg = chat.lastMessage || '';
+                const lastMsg = (function() {
+                    const v = chat.lastMessage || '';
+                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1 && v.indexOf('"ct"') !== -1) return '🔒 Encrypted message';
+                    return v;
+                })();
 
                 const avatarUrl = chat.friendAvatar || chat.avatar || '';
 
@@ -13493,10 +13503,15 @@ Type: ${message.type || 'text'}`;
                 row.style.cssText = 'display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;cursor:pointer;transition:background .15s;';
                 row.onmouseenter = function(){ this.style.background='rgba(255,255,255,0.06)'; };
                 row.onmouseleave = function(){ this.style.background=''; };
+                const _hcLast = (function() {
+                    const v = c.lastMessage || '';
+                    if (v.charAt(0) === '{' && v.indexOf('"v"') !== -1 && v.indexOf('"ct"') !== -1) return '🔒 Encrypted message';
+                    return v || 'No messages';
+                })();
                 row.innerHTML = '<div style="width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#2563eb,#06b6d4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;">' +
                     (c.friendName||'?').charAt(0).toUpperCase() + '</div>' +
                     '<div><div style="color:#e5e7eb;font-weight:600;font-size:14px;">' + (c.friendName||'Unknown') + '</div>' +
-                    '<div style="color:#64748b;font-size:12px;">' + (c.lastMessage||'No messages') + '</div></div>';
+                    '<div style="color:#64748b;font-size:12px;">' + _hcLast + '</div></div>';
                 row.onclick = function() {
                     modal.remove();
                     window.messagesUI?.openChat(c);
