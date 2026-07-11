@@ -3498,33 +3498,50 @@
 
             let batchCount = 0;
 
-            
+            // FIX (WhatsApp-layout spec item 7 — spacing): track the previous
+            // message rendered so consecutive messages from the same sender
+            // within a short window get a tighter 'grouped' spacing class,
+            // and the gap goes back to normal whenever the sender changes or
+            // there's a time jump. Resets at each date separator too.
+            const _tsOf = function(m) {
+                const v = (m && (m.createdAt || m.timestamp)) || 0;
+                return typeof v === 'string' ? new Date(v).getTime() : Number(v) || 0;
+            };
+            const GROUP_WINDOW_MS = 60 * 1000;
+            let _prevMsg = null;
 
             for (const [date, dateMessages] of Object.entries(groupedMessages)) {
 
                 html += `<div class="message-date-separator"><span>${date}</span></div>`;
 
-                
+                _prevMsg = null; // a new date always starts a fresh (ungrouped) message
 
                 for (const message of dateMessages) {
 
                     const template = this.messageTemplates.get(message.type || 'text');
 
+                    let messageHtml;
                     if (template) {
 
-                        html += template.call(this, message, currentUser);
+                        messageHtml = template.call(this, message, currentUser);
 
                     } else {
 
-                        html += this.messageTemplates.get('text').call(this, message, currentUser);
+                        messageHtml = this.messageTemplates.get('text').call(this, message, currentUser);
 
                     }
 
-                    
+                    const isGrouped = !!(_prevMsg &&
+                        String(_prevMsg.senderId) === String(message.senderId) &&
+                        (_tsOf(message) - _tsOf(_prevMsg)) < GROUP_WINDOW_MS &&
+                        (_tsOf(message) - _tsOf(_prevMsg)) >= 0);
+                    if (isGrouped) {
+                        messageHtml = messageHtml.replace('class="message ', 'class="message grouped ');
+                    }
+                    html += messageHtml;
+                    _prevMsg = message;
 
                     batchCount++;
-
-                    
 
                     if (batchCount >= this.renderBatchSize) {
 
@@ -3540,8 +3557,6 @@
 
             }
 
-            
-
             if (html) {
 
                 container.innerHTML += html;
@@ -3549,6 +3564,7 @@
             }
 
         },
+
 
 
 

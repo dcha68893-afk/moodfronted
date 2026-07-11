@@ -240,14 +240,49 @@
     // Only reload ONCE when user explicitly tapped Refresh (pwa_update_acknowledged set).
     // Set _refreshing=true BEFORE reload to block any re-entrant controllerchange events.
     var _refreshing = false;
+
+    // FIX (moved here from calls.html's removed duplicate SW block): never
+    // auto-reload while a call is active — it destroys the live WebRTC
+    // connection and was causing "calling screen disappears" / no in-call
+    // screen. If the user taps Refresh mid-call, defer the actual reload
+    // until 'kyn:call:ended' fires (or the call screen is no longer active).
+    function _isCallActive() {
+        // window.__callActive is the flag both chat.html (parent) and
+        // calls.html (iframe) set/clear on their own `window` for the
+        // lifetime of a call — check it first since it's reliable in
+        // whichever document this script happens to be running in.
+        if (window.__callActive) return true;
+        return !!(document.body && (
+            document.body.classList.contains('call-screen-active') ||
+            document.body.classList.contains('in-call-active')
+        ));
+    }
+
+    function _doReload() {
+        if (_refreshing) return;
+        if (_isCallActive()) {
+            var onEnded = function () {
+                window.removeEventListener('kyn:call:ended', onEnded);
+                _doReload();
+            };
+            window.addEventListener('kyn:call:ended', onEnded);
+            // Safety net in case the end event is never dispatched
+            setTimeout(function () {
+                if (!_isCallActive()) _doReload();
+            }, 5000);
+            return;
+        }
+        _refreshing = true;
+        setTimeout(function() { window.location.reload(); }, 50);
+    }
+
     navigator.serviceWorker.addEventListener('controllerchange', function () {
         if (_refreshing) return;
         var ackKey = 'pwa_update_acknowledged';
         if (sessionStorage.getItem(ackKey)) {
-            _refreshing = true;
             sessionStorage.removeItem(ackKey); // clear BEFORE reload
             // Short delay lets the SW fully settle before reload
-            setTimeout(function() { window.location.reload(); }, 50);
+            _doReload();
         }
     });
 

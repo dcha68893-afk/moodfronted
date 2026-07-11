@@ -3296,7 +3296,14 @@ try {
             
             const existingPending = (this._conversations || []).filter(c => c.isPending === true);
             existingPending.forEach(pending => {
-                const friendId = pending.pendingReceiverId || pending.friendId;
+                // BUG FIX (duplicate chat-history entries per contact): pendingReceiverId is
+                // stored as a Number (it comes straight from numericUserId in messages-ui.js),
+                // while every friendId added to seenFriendIds above is a String. A Number and
+                // its String twin are never equal inside a Set, so seenFriendIds.has(123) was
+                // always false even when '123' had already been added — the leftover pending
+                // conversation for that contact was never recognized as a duplicate and got
+                // added again alongside the real, server-confirmed chat for the same contact.
+                const friendId = String(pending.pendingReceiverId || pending.friendId || '');
                 if (friendId && !seenFriendIds.has(friendId)) {
                     uniqueMap.set(pending.id, pending);
                     seenFriendIds.add(friendId);
@@ -3448,12 +3455,18 @@ try {
                 byId.set(String(msg.id), { ...msg });
                 if (msg.localId && msg.localId !== msg.id) byId.delete(String(msg.localId));
             }
-            // Layer server/incoming on top — server data wins
+            // Layer server/incoming on top — server data wins.
+            // BUG FIX: previously skipped any incoming message with no `.id`
+            // (`if (!msg.id) continue`). Locally-composed/queued messages can
+            // legitimately carry only a `localId` until the server confirms
+            // them — falling back to that here means they no longer get
+            // silently dropped out of the merged history.
             for (const msg of incomingMessages) {
-                if (!msg.id) continue;
-                const existing = byId.get(String(msg.id));
-                byId.set(String(msg.id), existing ? { ...existing, ...msg } : { ...msg });
-                if (msg.localId && msg.localId !== msg.id) byId.delete(String(msg.localId));
+                const _key = msg.id || msg.localId;
+                if (!_key) continue;
+                const existing = byId.get(String(_key));
+                byId.set(String(_key), existing ? { ...existing, ...msg } : { ...msg });
+                if (msg.localId && msg.localId !== _key) byId.delete(String(msg.localId));
             }
 
             const uniqueMessages = Array.from(byId.values());
@@ -4615,7 +4628,20 @@ try {
             } catch (error) {
                 console.error(`[MessageHandler] Failed to send message:`, error);
 
-                const shouldQueue = !navigator.onLine || /network|fetch|timeout|offline/i.test(String(error.message || ''));
+                // BUG FIX (1:1 messages disappear on send, refresh doesn't bring them back):
+                // this regex only matched client-side network failures (offline, fetch
+                // rejected, timeout). A backend outage that still returns an HTTP response —
+                // 502/503 Bad Gateway/Service Unavailable, which this app has hit repeatedly —
+                // throws an error whose message looks like "Server error (502)" or "HTTP 503",
+                // which never matched, so shouldQueue was false and the message was marked
+                // 'failed' instead of queued. Failed messages are NOT retried automatically,
+                // so once the backend recovered the message was never actually delivered —
+                // it just sat there, and a refresh (which re-fetches from the still-broken
+                // or now-different backend state) never showed it again.
+                const shouldQueue = !navigator.onLine ||
+                    /network|fetch|timeout|offline/i.test(String(error.message || '')) ||
+                    /\b(5\d{2})\b/.test(String(error.message || error.status || '')) ||
+                    (error.status && error.status >= 500 && error.status < 600);
                 if (shouldQueue && window.KynectaMsgQueue) {
                     optimisticMessage.status = 'pending';
                     optimisticMessage.optimistic = false;

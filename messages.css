@@ -575,6 +575,21 @@ body {
     padding: 0 60px 0 6px;
 }
 
+/* FIX (WhatsApp-layout spec item 7 — spacing): consecutive messages from the
+   same sender within a short window get pulled closer together; the normal
+   2px gap above is the "sender changed / time jump" spacing. */
+.message.grouped {
+    margin-top: -1px;
+}
+.message.sent.grouped .message-bubble::after,
+.message.received.grouped .message-bubble::after {
+    /* Consecutive bubbles from the same sender don't repeat the little
+       corner tail — only the first bubble in a run points at the avatar.
+       The asymmetric corner shape itself (the "square" side) stays the
+       same on every bubble in the run, matching WhatsApp's own look. */
+    display: none;
+}
+
 /* SENT: right side, dark green bubble */
 .message.sent .message-bubble {
     background: #005c4b;

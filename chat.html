@@ -2933,10 +2933,22 @@
             // FIX: Clean up group/status panel classes when navigating away from those modules
             if (page !== 'group')  document.body.classList.remove('group-panel-active');
             if (page !== 'status') document.body.classList.remove('status-panel-active');
-            
-            // chat-panel-active is managed by message iframe events
+
+            // BUG FIX (no icon nav after a call ends / after leaving a screen):
+            // chat-panel-active hides .mobile-nav-bar (see CSS), and this used
+            // to be left untouched whenever navigating away from 'messages',
+            // on the theory that "the message iframe manages it". In practice
+            // if a call — or any other navigation — happened without a clean
+            // close event from that iframe (e.g. call started from the Calls
+            // or Friends tab, or the iframe was swapped out mid-chat), the
+            // class stayed stuck true forever, hiding the bottom nav bar even
+            // on screens that have nothing to do with an open chat. Clear it
+            // here for every page except 'messages'; POST_CALL_RESTORE (and
+            // any other flow that deliberately reopens a specific chat) sets
+            // it again explicitly right after calling navigateToPage(), so
+            // that legitimate case is unaffected.
             if (page !== 'messages') {
-                // Don't auto-remove chat-panel-active - let messages iframe manage it
+                document.body.classList.remove('chat-panel-active');
             }
             
             if (page === 'calls')    sendFriendsToCallsIframe();
@@ -7386,6 +7398,12 @@ window.addEventListener('message', function (e) {
                         if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
                     }, 300);
                 }
+            } else {
+                // BUG FIX: returning to the general chats list (not a specific
+                // chat) — navigateToPage() only clears chat-panel-active when
+                // leaving 'messages', not when landing on it, so a stale class
+                // from before the call could still hide the nav bar here.
+                document.body.classList.remove('chat-panel-active');
             }
         } else if (typeof navigateToPage === 'function') {
             setTimeout(function() { navigateToPage(_pcPage); }, 100);

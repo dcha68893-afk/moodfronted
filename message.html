@@ -3,21 +3,19 @@
 <head>
 <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
 <script>
-// ✅ CRITICAL SW UPDATE CHECK — runs FIRST, before any other JS loads.
-(function() {
-    if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.getRegistration('/').then(function(reg) {
-        if (!reg) return;
-        var sw = reg.waiting || reg.installing;
-        if (sw) {
-            console.log('[SW-BOOT] New SW waiting/installing — forcing activation');
-            sw.postMessage({ type: 'SKIP_WAITING' });
-            navigator.serviceWorker.addEventListener('controllerchange', function() {
-                window.location.reload();
-            });
-        }
-    }).catch(function() {});
-})();
+// BUG FIX (update banner shows with "no real changes" + refresh causes an
+// endless "opening-loading, opening-loading" cycle): this iframe used to run
+// its own unconditional SKIP_WAITING + window.location.reload() on every
+// controllerchange, completely bypassing pwa-manager.js's gated, one-tap
+// "Refresh" banner (loaded once in the parent chat.html). Because message.html
+// is re-opened as an iframe every time a chat is opened, this script re-ran
+// constantly and force-reloaded the iframe the instant it detected ANY
+// installing/waiting service worker — with no ack, no debounce, and no check
+// that the update was actually meaningful. That's what produced the
+// never-ending reload loop and the banner appearing without a real change.
+// pwa-manager.js in the parent document is the single source of truth for
+// service-worker updates now; this iframe does not need — and must not run —
+// its own competing copy of that logic.
 </script>
 <script>
 // Suppress iframe sandbox warnings and raw WebSocket error Events

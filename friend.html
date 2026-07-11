@@ -3182,24 +3182,12 @@
     })();
     </script>
      <script>
-    (function() {
-        if (!('serviceWorker' in navigator)) return;
-        // Re-use the root SW. No-op if already controlling this scope.
-        navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
-            .then(function(reg) {
-                console.log('[friend.html] SW registered. Scope:', reg.scope);
-                if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                reg.addEventListener('updatefound', function() {
-                    var nw = reg.installing;
-                    if (nw) nw.addEventListener('statechange', function() {
-                        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-                            nw.postMessage({ type: 'SKIP_WAITING' });
-                        }
-                    });
-                });
-            })
-            .catch(function(err) { console.warn('[friend.html] SW registration failed:', err); });
-    })();
+    // BUG FIX (false "update available" banner): this duplicated the exact
+    // registration + force-SKIP_WAITING logic that pwa-manager.js (loaded
+    // below) already owns. Two independent registrations racing to activate
+    // a waiting service worker is what caused the update banner to appear
+    // on other open tabs without a real, user-visible change having shipped.
+    // pwa-manager.js is the single place that manages this now.
     </script>
 <script src="back-nav.js"></script>
 <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
