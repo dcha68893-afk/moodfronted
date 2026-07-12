@@ -520,7 +520,7 @@ body {
     word-break: break-word;
     line-height: 1.45;
     font-size: 14.2px;
-    max-width: 75%;
+    max-width: 85%;
     width: fit-content;
     display: inline-block;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
@@ -564,7 +564,12 @@ body {
     flex-direction: column;
     align-items: flex-end;
     margin-bottom: 2px;
-    padding: 0 6px 0 60px;
+    /* FIX (narrow-bubble bug): this used to reserve 60px of dead space on
+       the non-content side — a leftover meant for a group-chat avatar that
+       1:1 messages (this file/context) never render. On mobile widths that
+       60px was eating ~15% of the row before max-width below even applied,
+       making every bubble far narrower than intended. */
+    padding: 0 6px 0 14px;
 }
 
 .message.received {
@@ -572,7 +577,7 @@ body {
     flex-direction: column;
     align-items: flex-start;
     margin-bottom: 2px;
-    padding: 0 60px 0 6px;
+    padding: 0 14px 0 6px;
 }
 
 /* FIX (WhatsApp-layout spec item 7 — spacing): consecutive messages from the
@@ -595,7 +600,7 @@ body {
     background: #005c4b;
     color: #e9edef;
     border-radius: 7.5px 0 7.5px 7.5px;
-    max-width: 75%;
+    max-width: 85%;
     width: fit-content;
     padding: 6px 10px 4px 10px;
     font-size: 14.2px;
@@ -619,7 +624,7 @@ body {
     background: #202c33;
     color: #e9edef;
     border-radius: 0 7.5px 7.5px 7.5px;
-    max-width: 75%;
+    max-width: 85%;
     width: fit-content;
     padding: 6px 10px 4px 10px;
     font-size: 14.2px;

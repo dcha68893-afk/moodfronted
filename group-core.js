@@ -1155,7 +1155,18 @@ case 'SETTING_CHANGED':
     
     handleApiResponse(message) {
         const payload = message.payload || {};
-        const { requestId, success, error } = payload;
+        // FIX (root cause of "stuck fetching group conversation" / send button
+        // doing nothing): chat.html replies with the correlation id at the TOP
+        // LEVEL of the posted message ({ type:'API_RESPONSE', requestId, payload }),
+        // not inside payload. This handler was destructuring requestId from
+        // `payload` only, so it was always undefined here, resolveRequest/
+        // rejectRequest below never ran, and every pending group apiRequest()
+        // call (group details, members, messages, send) just sat there until
+        // its own client-side timeout fired 12-20s later. Read the top-level
+        // id first; keep payload.requestId as a fallback for any caller that
+        // does embed it there.
+        const requestId = message.requestId || payload.requestId;
+        const { success, error } = payload;
         // Normalise common backend response shapes so callers always get the entity directly:
         //   { data: { group: {…} } }  →  data = group object
         //   { data: { message: {…} } } →  data = message object

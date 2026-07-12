@@ -2336,6 +2336,28 @@
         }
     }
 
+    // FIX (header icons vanish / blank header space): broadcastState() used
+    // to run synchronously on every single MutationObserver callback, and
+    // that observer watched the *entire* chatPanel subtree (see below) —
+    // so it fired on every incoming/outgoing message render, tick-mark
+    // update, timestamp refresh, etc, not just on actual header changes.
+    // Two problems followed: (1) a flood of CHAT_HEADER_UPDATE/CHAT_PANEL_
+    // CLOSED postMessages (visible in devtools as "postMessage storm
+    // detected" warnings), and (2) some of those callbacks fired *mid-
+    // render*, catching chatFriendName briefly empty/placeholder and so
+    // sending a spurious CHAT_PANEL_CLOSED — which chat.html acts on
+    // immediately, collapsing the mirrored header (all its icons) even
+    // though a real chat was still open. Debouncing coalesces a burst of
+    // mutations into a single check after things settle.
+    var _broadcastDebounceTimer = null;
+    function scheduleBroadcastState() {
+        if (_broadcastDebounceTimer) clearTimeout(_broadcastDebounceTimer);
+        _broadcastDebounceTimer = setTimeout(function() {
+            _broadcastDebounceTimer = null;
+            broadcastState();
+        }, 150);
+    }
+
     // Hide this iframe's own header row. Kept functional (not removed) so
     // every existing button/search/click handler that targets these elements
     // keeps working exactly as before — only the visual row collapses,
@@ -2358,14 +2380,27 @@
         }
     });
 
+    // FIX: only observe the specific nodes that actually represent header
+    // state (name/status/avatar/online-indicator) plus chatPanel's own
+    // class/src (open vs hidden) — NOT `subtree:true` on the whole panel,
+    // which used to also cover every message bubble ever rendered.
+    var _headerObserveTargets = ['chatFriendName', 'chatStatusText', 'chatFriendAvatar', 'chatStatusIndicator'];
+    _headerObserveTargets.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) {
+            var obs = new MutationObserver(scheduleBroadcastState);
+            obs.observe(el, { childList: true, subtree: true, attributes: true, characterData: true });
+        }
+    });
     var target = document.getElementById('chatPanel');
     if (target) {
-        var observer = new MutationObserver(function() { broadcastState(); });
-        observer.observe(target, { childList: true, subtree: true, attributes: true, characterData: true, attributeFilter: ['class', 'src'] });
+        var panelObserver = new MutationObserver(scheduleBroadcastState);
+        panelObserver.observe(target, { attributes: true, attributeFilter: ['class', 'src'] });
     }
 
     // Initial state + a cheap safety-net poll covering any update path the
-    // observer's filters might miss.
+    // observers' filters might miss (kept at 1.5s — this one is fine since
+    // it's a single check, not a per-mutation flood).
     broadcastState();
     setInterval(broadcastState, 1500);
 })();
