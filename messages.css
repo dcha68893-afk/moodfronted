@@ -517,7 +517,8 @@ body {
     border-radius: 7.5px;
     position: relative;
     word-wrap: break-word;
-    word-break: break-word;
+    overflow-wrap: break-word;
+    word-break: normal;
     line-height: 1.45;
     font-size: 14.2px;
     max-width: 75%;
@@ -600,7 +601,8 @@ body {
     padding: 6px 10px 4px 10px;
     font-size: 14.2px;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
-    word-break: break-word;
+    overflow-wrap: break-word;
+    word-break: normal;
     position: relative;
 }
 
@@ -624,7 +626,8 @@ body {
     padding: 6px 10px 4px 10px;
     font-size: 14.2px;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
-    word-break: break-word;
+    overflow-wrap: break-word;
+    word-break: normal;
     position: relative;
 }
 

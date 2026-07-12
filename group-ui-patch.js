@@ -1925,8 +1925,27 @@
             _openGroupChat(gData);
         }, true);
 
+        // FIX: the Group Details overlay's own #backBtn (group.html's
+        // .group-details-panel — a fixed, full-screen panel stacked on top
+        // of the group chat, see group.css) was being caught by the generic
+        // back-button handler further below, which hid the *group chat
+        // panel and sidebar* instead of just dismissing this overlay. That
+        // made the details-panel back arrow look non-functional: nothing
+        // visibly returned the user to their chat. Handle it first and
+        // close only the details overlay, leaving the chat that was already
+        // open underneath exactly as it was.
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#groupDetailsPanel #backBtn')) return;
+            const groupDetailsPanel = document.getElementById('groupDetailsPanel');
+            if (groupDetailsPanel) {
+                groupDetailsPanel.classList.remove('active');
+                groupDetailsPanel.style.display = 'none';
+            }
+        });
+
         // Back/close buttons restore sidebar
         document.addEventListener('click', (e) => {
+            if (e.target.closest('#groupDetailsPanel #backBtn')) return;
             if (!e.target.closest('.mobile-back-btn, .gc-back-btn, #closeChatBtn, #backBtn')) return;
             if (window.innerWidth <= 768) {
                 _showSidebar();

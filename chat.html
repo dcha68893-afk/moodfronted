@@ -1085,14 +1085,22 @@
                 left: 0;
                 padding: 0 14px;
             }
-            body.chat-panel-active #globalHeader,
             body.call-screen-active #globalHeader,
             body.status-panel-active #globalHeader {
                 opacity: 0 !important;
                 pointer-events: none !important;
                 visibility: hidden !important;
             }
-            body.group-panel-active #globalHeader {
+            body.group-panel-active #globalHeader,
+            body.chat-panel-active #globalHeader {
+                /* FIX: a 1:1 chat panel now renders its header via the mirrored
+                   #headerChatCtx block inside #globalHeader itself (name, avatar,
+                   back arrow, call/video/menu buttons — see showChatHeader()).
+                   Previously chat-panel-active hid #globalHeader entirely on
+                   mobile, leaving only an empty bar where that header should be
+                   and losing the back button + call controls. Only fully-custom
+                   full-bleed screens (an active call, the status viewer) still
+                   hide the global header. */
                 opacity: 1 !important;
                 visibility: visible !important;
                 pointer-events: auto !important;

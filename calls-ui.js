@@ -1070,11 +1070,16 @@ window.showInCallScreen   = showInCallScreen;
         const data = event.detail || event.data || {};
         const userId = data.userId || data.user_id || data.id;
         if (userId) {
-            const lock = window.__earlyCallLock;
+            // FIX: use the SAME dedup lock as guardedHandleOpenCallWithUser
+            // (setupOpenCallWithUserListener, further below) instead of the
+            // separate __earlyCallLock — see rationale above this block.
+            if (!window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+            const lock = window.__uiCallDispatchLock;
             if (lock.userId === String(userId) && (Date.now() - lock.ts) < 2000) {
                 console.log('[Calls UI][Early] ⏭ Duplicate suppressed for userId', userId);
                 return;
             }
+            window.__uiCallDispatchLock = { ts: Date.now(), userId: String(userId) };
             window.__earlyCallLock = { ts: Date.now(), userId: String(userId) };
         }
         const userName = data.userName || data.name || data.user_name || 'User';
