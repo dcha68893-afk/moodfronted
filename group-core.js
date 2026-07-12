@@ -1155,18 +1155,7 @@ case 'SETTING_CHANGED':
     
     handleApiResponse(message) {
         const payload = message.payload || {};
-        // FIX (root cause of "stuck fetching group conversation" / send button
-        // doing nothing): chat.html replies with the correlation id at the TOP
-        // LEVEL of the posted message ({ type:'API_RESPONSE', requestId, payload }),
-        // not inside payload. This handler was destructuring requestId from
-        // `payload` only, so it was always undefined here, resolveRequest/
-        // rejectRequest below never ran, and every pending group apiRequest()
-        // call (group details, members, messages, send) just sat there until
-        // its own client-side timeout fired 12-20s later. Read the top-level
-        // id first; keep payload.requestId as a fallback for any caller that
-        // does embed it there.
-        const requestId = message.requestId || payload.requestId;
-        const { success, error } = payload;
+        const { requestId, success, error } = payload;
         // Normalise common backend response shapes so callers always get the entity directly:
         //   { data: { group: {…} } }  →  data = group object
         //   { data: { message: {…} } } →  data = message object
@@ -5085,7 +5074,7 @@ function buildGroupMessageMarkup(message) {
         html: `
             <div class="group-message-row" style="display: flex; align-items: flex-end; gap: 8px; ${isSent ? 'justify-content: flex-end;' : ''}">
                 ${senderAvatarMarkup}
-                <div class="group-message-bubble" style="max-width: min(75%, 540px); display: flex; flex-direction: column; gap: 4px;">
+                <div class="group-message-bubble" style="max-width: 75%; max-width: min(75%, 540px); flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;">
                     ${!isSent ? `<div class="message-sender" style="font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 0 4px;">${escapeGroupChatHTML(senderName)}</div>` : ''}
                     <div class="group-message-card" style="padding: 6px 10px 4px 10px; border-radius: 7.5px; background: ${isSent ? '#005c4b' : '#202c33'}; color: #e9edef; box-shadow: 0 1px 1px rgba(0,0,0,0.3); font-size: 14.2px; line-height: 1.45;">
                         ${replyMarkup}

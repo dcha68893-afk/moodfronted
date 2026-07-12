@@ -35474,7 +35474,21 @@ clearActiveCall: function() {
 
 
 
-            if (callsState.callActive) {
+            // FIX (call self-ends right after Accept): this used to check bare
+            // callsState.callActive, but handleSignalOffer() legitimately sets
+            // that flag true the moment the incoming WebRTC offer arrives --
+            // which happens BEFORE the receiver taps Accept, not after. That
+            // meant a real Accept tap hit this guard and returned
+            // {success:false, reason:'call_active'} even though no call had
+            // actually been accepted yet, so CallsStateGovernor.acceptCall()
+            // (which sends the real accept signal) never ran. calls-ui.js
+            // treats any failure here as "accepted anyway" and shows the
+            // in-call screen regardless -- so the receiver saw an in-call
+            // screen while the caller/server never got a genuine accept,
+            // and the call died shortly after. Match the same, more precise
+            // check enforceSingleActiveCall() already uses elsewhere: only
+            // block when a genuinely DIFFERENT call is already active.
+            if (callsState.callActive && callsState.activeCall && callsState.activeCallId && callsState.activeCallId !== callId) {
 
 
 

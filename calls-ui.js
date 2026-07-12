@@ -5344,27 +5344,8 @@ handleContactItemClick: function(e) {
         handleCallEnded: function(callData) {
             const endedCallId = (callData && (callData.callId || callData.id)) || null;
             if (endedCallId && UIState.activeCallId && String(endedCallId) !== String(UIState.activeCallId)) {
-                // FIX: a callId "mismatch" here can legitimately happen because the
-                // caller-generated local id (call_<ts>_<rand>) and the backend's own
-                // call-record id (uuid) aren't always the same string for the same
-                // logical call — see CallLocalStore's serverId field, which was wired
-                // up to receive the reconciled id but never actually set anywhere.
-                // Previously ANY mismatch caused this whole handler to bail out before
-                // running its cleanup/navigation code, which is exactly why calls were
-                // observed to end with the caller stuck on a dark screen and the
-                // receiver stuck on an idle one — the real CALL_ENDED was arriving,
-                // just under an id that didn't string-match, so it was thrown away.
-                // Only treat it as a genuine stale echo when it matches a call we've
-                // already recorded as ended; there is only ever one active call in
-                // this UI, so any other end signal while a call is active can only be
-                // referring to that call regardless of which id-namespace it used.
-                const isKnownStaleEcho = window.__lastEndedCallId && String(endedCallId) === String(window.__lastEndedCallId);
-                if (isKnownStaleEcho) {
-                    console.warn('[Calls UI] handleCallEnded ignored - mismatched callId (confirmed stale echo)', endedCallId, UIState.activeCallId);
-                    return;
-                }
-                console.warn('[Calls UI] handleCallEnded: callId namespace mismatch, treating as end of the current call', endedCallId, UIState.activeCallId);
-                // fall through — proceed with cleanup below instead of returning
+                console.warn('[Calls UI] handleCallEnded ignored - mismatched callId', endedCallId, UIState.activeCallId);
+                return;
             }
             if (!endedCallId && UIState.activeCallId && window.__callInitiatedAt &&
                 (Date.now() - window.__callInitiatedAt) < 8000 &&
@@ -5496,11 +5477,6 @@ handleContactItemClick: function(e) {
             const chatUserName = window.__callOriginChatUserName || null;
 
             // Reset state FIRST
-            // FIX: remember this call's id (in whichever namespace it was
-            // tracked under) so a genuine repeat echo of THIS call is still
-            // recognized as stale above, now that a namespace mismatch alone
-            // no longer blocks the first legitimate end signal.
-            window.__lastEndedCallId = endedCallId || UIState.activeCallId || null;
             UIState.activeCallId = null;
             UIState.callActive = false;
             UIState.callState = 'idle';

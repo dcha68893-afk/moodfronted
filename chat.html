@@ -7494,10 +7494,16 @@ window.__groupHdrHide = hideGroupHeader;
         // FIX: drop an out-of-order broadcast — if we've already shown a
         // *different* chat with a higher sequence number, this one is stale
         // (e.g. the previous chat's trailing update arriving after the user
-        // already switched to a new one).
+        // already switched to a new one). BUT: if the message iframe reloads
+        // (module switch away and back, a reconnect, etc.), its internal seq
+        // counter resets to 1 while _lastChatHeaderInfo here keeps whatever
+        // high seq it last saw — every future update then looked "stale" and
+        // was dropped forever, permanently hiding the chat header icons for
+        // the rest of the session. A low incoming seq (<=2) means a fresh
+        // iframe session, not a stale message, so always accept it.
         if (_lastChatHeaderInfo && info.chatId !== _lastChatHeaderInfo.chatId &&
             typeof info.seq === 'number' && typeof _lastChatHeaderInfo.seq === 'number' &&
-            info.seq < _lastChatHeaderInfo.seq) {
+            info.seq < _lastChatHeaderInfo.seq && info.seq > 2) {
             return;
         }
         _lastChatHeaderInfo = { chatId: info.chatId, seq: info.seq };
