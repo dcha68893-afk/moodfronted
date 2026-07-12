@@ -6169,6 +6169,14 @@
                         callerName:   callData.callerName   || (callData.caller && callData.caller.username) || callData.fromUserName || 'Unknown',
                         callerAvatar: callData.callerAvatar || (callData.caller && callData.caller.avatar)   || null,
                         callType:     callData.callType     || callData.type || 'voice',
+                        // FIX (return-to-origin, receiver side): this is the primary
+                        // websocket incoming-call path (wsService 'incoming_call' →
+                        // _fwdIncoming), and unlike the banner-bridge path further up in
+                        // this file it was never tagging _receiverReturnTo at all — so
+                        // calls-core.js's POST_CALL_RESTORE logic (which reads exactly
+                        // that field) had nothing to restore to and fell back to
+                        // 'messages' regardless of what the receiver was actually doing.
+                        _receiverReturnTo: window.__currentPage || window.__lastActivePage || 'messages',
                     };
                     const callKey = payload.callId || payload.id || payload.callerName;
                     if (!_fwdIncomingLogged.has(callKey)) {
@@ -7585,6 +7593,7 @@ window.__groupHdrHide = hideGroupHeader;
     window.__chatHdrHide = hideChatHeader;
     })();
     </script>
+    <script>
   // FIX-KEEPALIVE: 14 minutes left almost no margin against Render's
   // 15-minute idle-sleep window — a single slow tick (network hiccup, tab
   // throttled in background, a missed timer due to heavy main-thread work)

@@ -4242,7 +4242,7 @@ handleContactItemClick: function(e) {
                     if (window._incomingRingtone) { try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {} window._incomingRingtone = null; }
                     if (elements.incomingCallModal) { const _ct = parseInt(elements.incomingCallModal.dataset.timer); if (_ct) clearInterval(_ct); elements.incomingCallModal.dataset.timer = ''; elements.incomingCallModal.classList.remove('active'); elements.incomingCallModal.style.setProperty('display','none','important'); UIState.activeModals.delete('incomingCallModal'); }
                     window._currentIncomingCallId = null; UIState.callState = 'idle'; UIState.callActive = false; window.__callActive = false;
-                    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _cr=(window.__callOriginReturnTo&&window.__callOriginReturnTo!=='calls')?window.__callOriginReturnTo:'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_cr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
+                    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _cr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_cr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
                     this.handleCallEnded(data);
                     this.refreshCallHistory();
                     showNotification('Call was cancelled by the caller', 'info');
@@ -5460,11 +5460,17 @@ handleContactItemClick: function(e) {
             })();
 
             // ── Capture navigation target BEFORE clearing state ───────────────
-            const returnTo = (window.__callOriginReturnTo && window.__callOriginReturnTo !== 'calls')
-                ? window.__callOriginReturnTo
-                : (window.__pendingCallReturnTo && window.__pendingCallReturnTo !== 'calls')
-                    ? window.__pendingCallReturnTo
-                    : 'messages'; // NEVER default to calls panel
+            // FIX (return-to-origin): this used to explicitly exclude 'calls'
+            // as a destination ("NEVER default to calls panel"), which meant
+            // a call placed via redial from the Calls tab would still bounce
+            // the caller to Messages afterward instead of back to Calls.
+            // 'calls' is only wrong when it's an unset/guessed fallback, not
+            // when it's the call's real, tracked origin — so now we trust
+            // whatever origin was actually recorded and only fall back to
+            // 'messages' if nothing was recorded at all.
+            const returnTo = window.__callOriginReturnTo
+                || window.__pendingCallReturnTo
+                || 'messages';
             const chatUserId = window.__callOriginChatUserId
                 || window.__pendingCallChatUserId
                 || null;
@@ -8461,7 +8467,7 @@ declineIncomingCall: async function() {
     }
     if (typeof window._stopRingtones === 'function') window._stopRingtones();
     if (typeof window._stopAllRingtones === 'function') window._stopAllRingtones();
-    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _dr=(window.__callOriginReturnTo&&window.__callOriginReturnTo!=='calls')?window.__callOriginReturnTo:'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
+    if (window.parent && window.parent !== window) { window.__callEndedNavigating = true; setTimeout(function(){window.__callEndedNavigating=false;},3000); window.parent.postMessage({type:'CALL_ENDED_RETURN',timestamp:Date.now()},'*'); const _dr=window.__callOriginReturnTo||window.__pendingCallReturnTo||'messages'; setTimeout(function(){if(window.parent&&window.parent!==window)window.parent.postMessage({type:'SWITCH_MODULE',module:_dr,payload:{returnFromCall:true},timestamp:Date.now()},'*');},350); }
     showIdleScreen(true);
     showNotification('Call declined', 'info');
 

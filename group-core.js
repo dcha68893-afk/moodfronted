@@ -5311,6 +5311,14 @@ function setupGroupAttachmentControls() {
             if (typeof hideAllPanels === 'function') hideAllPanels();
             if (typeof closeGroupChatMobile === 'function') closeGroupChatMobile();
             currentChatGroup = null;
+            // FIX: notify chat.html so it can restore its default header —
+            // without this, the group-specific header icons (voice/video
+            // call, more-options) stayed visible/stuck because chat.html
+            // only ever learns to switch INTO group-header mode (see
+            // GROUP_PANEL_OPEN below); nothing told it to switch back out.
+            try {
+                window.parent.postMessage({ type: 'GROUP_PANEL_CLOSE', source: 'group-module', timestamp: Date.now() }, '*');
+            } catch (_) {}
         };
         
         if (backBtn && !backBtn._groupBackBound && !backBtn._gcCl) {
@@ -5411,6 +5419,31 @@ const openGroupChat = async function(groupData) {
             GroupCore.saveGroups();
             updateGroupChatHeader(resolvedGroup, membersPayload);
 
+            // FIX: chat.html's header only switches into "group mode" (showing
+            // its own voice/video/more icons for the open group) when it
+            // receives a GROUP_PANEL_OPEN message — see showGroupHeader() in
+            // chat.html. That message was only ever sent by a separate, older
+            // openPanel() function in group.html that isn't the code path
+            // actually used to open a group chat (openGroupChat, here), so
+            // the parent header never learned a group was open and kept
+            // showing (or hid) the wrong icons. Send it from the code path
+            // that's actually used.
+            try {
+                window.parent.postMessage({
+                    type: 'GROUP_PANEL_OPEN',
+                    payload: {
+                        id: resolvedGroup.id,
+                        name: resolvedGroup.name,
+                        memberCount: resolvedGroup.memberCount,
+                        stats: resolvedGroup.stats,
+                        purpose: resolvedGroup.purpose,
+                        isPublic: resolvedGroup.isPublic,
+                    },
+                    source: 'group-module',
+                    timestamp: Date.now(),
+                }, '*');
+            } catch (_) {}
+
             // P1 FIX: Sync slow mode interval and posting rule from DB into client engine
             try {
                 const modEngine = window.__GroupModerationEngine;
@@ -5436,7 +5469,16 @@ const openGroupChat = async function(groupData) {
 
         await loadGroupChatMessages(groupData.id);
         setupTypingListener(groupData.id);
-        loadUniqueFeaturesPanels(groupData.id);
+        // FIX (duplicate-screen bug): loadUniqueFeaturesPanels() renders the
+        // legacy Notes / Event Countdown / Transparency panels as extra
+        // blocks stacked directly underneath the chat panel every time a
+        // group chat is opened. That functionality now lives in the Group
+        // Tools panel (the header's "wrench" icon, id=groupOSTabBtn, backed
+        // by group-os.js + smart-groups.js), which the user opens
+        // deliberately instead of having it forced onto the chat screen. Both
+        // systems read/write the same group notes/events, so nothing is
+        // lost — this just stops it from auto-rendering on top of the chat.
+        // loadUniqueFeaturesPanels(groupData.id);
         checkPostingRules(currentChatGroup || groupData);
         
     } catch (error) {}

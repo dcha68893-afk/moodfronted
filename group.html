@@ -1067,6 +1067,13 @@
             <div class="chat-header">
                 <div class="chat-header-info" id="chatHeaderInfo">
                     <button class="chat-header-btn" id="chatBackBtn" title="Back"><i class="fas fa-arrow-left"></i></button>
+                    <!-- FIX: moved here (next to the back arrow) per request — this is the
+                         single entry point for group tools (events/tasks/polls/notes/files),
+                         previously all the way on the right side of the header. -->
+                    <button class="chat-header-btn" id="groupOSTabBtn" title="Group Tools" onclick="window._openGroupOSPanel()" style="position:relative;">
+                        <i class="fas fa-tools"></i>
+                        <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;background:#667eea;border-radius:50%;display:none" id="gosNewDot"></span>
+                    </button>
                     <div class="chat-header-avatar" id="chatAvatar">
                         <i class="fas fa-users"></i>
                     </div>
@@ -1088,10 +1095,6 @@
                     </div>
                 </div>
                 <div class="chat-header-actions">
-                    <button class="chat-header-btn" id="groupOSTabBtn" title="Group Tools" onclick="window._openGroupOSPanel()" style="position:relative;">
-                        <i class="fas fa-tools"></i>
-                        <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;background:#667eea;border-radius:50%;display:none" id="gosNewDot"></span>
-                    </button>
                     <!-- NOTE: call/video/more buttons intentionally omitted here.
                          They are rendered by chat.html's #hdrGroupCall, #hdrGroupVideo, #hdrGroupMore
                          in the parent page header bar to avoid duplicate icons. -->
