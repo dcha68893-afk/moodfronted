@@ -14824,6 +14824,9 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
     callsState.localCallId = null;
+    // FIX: clear the handleCallAccepted dedup set (see that function) here
+    // so it doesn't grow forever and a fresh call always starts clean.
+    if (callsState._acceptedCallIds) callsState._acceptedCallIds.clear();
 
 
 
@@ -29067,17 +29070,32 @@ _escapeHtml: function(text) {
 
     function handleCallAccepted(callData) {
 
-
-
         logCall(MODULE, 'handleCallAccepted', callData);
 
-
-
-        
-
-
-
         const acceptedCallId = callData && (callData.callId || callData.id);
+
+        // FIX: this event reaches handleCallAccepted through two independent
+        // listener pipelines (the CALL_EVENT_MAP DOM-event bridge just below
+        // — 'kyn:call_accepted' / 'kyn:call:accepted' / 'kyn:call_answered'
+        // — AND _bindRealtime()'s direct 'call_accepted' / 'call:accepted' /
+        // 'call_answered' socket.io bindings further down). A single real
+        // acceptance from the server can therefore invoke this function
+        // twice. What follows is NOT safe to run twice in a row on the same
+        // RTCPeerConnection — in particular WebRTCManager.createOffer() +
+        // setLocalDescription() on the caller side. The second attempt fails
+        // while the first negotiation is still in flight and takes the
+        // connection down with it, which is what made calls die right after
+        // being accepted instead of staying connected (in-call screen
+        // briefly shown, then caller goes dark / receiver drops to idle).
+        // Once acceptance for a given callId has been processed once, treat
+        // any further delivery of the same event as a duplicate and no-op.
+        if (acceptedCallId && callsState._acceptedCallIds && callsState._acceptedCallIds.has(acceptedCallId)) {
+            logWarn(MODULE, 'handleCallAccepted: duplicate delivery for already-accepted call, ignoring', acceptedCallId);
+            return;
+        }
+        if (!callsState._acceptedCallIds) callsState._acceptedCallIds = new Set();
+        if (acceptedCallId) callsState._acceptedCallIds.add(acceptedCallId);
+
         if (acceptedCallId) {
             callsState.activeCallId = acceptedCallId;
             callsState.serverCallId = callsState.serverCallId || acceptedCallId;

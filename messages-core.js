@@ -1060,6 +1060,23 @@ try {
         const friendId = senderId && senderId !== myId ? senderId : (receiverId && receiverId !== myId ? receiverId : '');
         if (!friendId) return null;
 
+        // FIX (duplicate chat-history entries): the chatId lookup above only
+        // catches a conversation already keyed under this exact chatId. If the
+        // REST-loaded conversation for this same friend was keyed under a
+        // different id (conversation id vs chat-room id — the two aren't
+        // always the same value from this backend), we'd otherwise create a
+        // second row for a friend who already has one. Search by friendId too
+        // before creating anything new, and just re-key + update that row.
+        const byFriend = (ChatManager._conversations || []).find(c => c && String(c.friendId) === friendId && !c.isPending);
+        if (byFriend) {
+            byFriend.id = String(chatId);
+            byFriend.chatId = String(chatId);
+            byFriend.lastMessage = normalizedMessage.content || byFriend.lastMessage || '';
+            byFriend.lastMessageAt = normalizedMessage.createdAt || normalizedMessage.timestamp || Date.now();
+            ChatManager._conversationsMap.set(String(chatId), byFriend);
+            return byFriend;
+        }
+
         const friendRecord = FriendManager && FriendManager.getFriend
             ? (FriendManager.getFriend(friendId) || FriendManager.getFriend(Number(friendId)))
             : null;
@@ -5103,8 +5120,24 @@ try {
             }
             
             // FIX: Notify parent to add chat-panel-active class → hides mobile nav bar
+            // Also include the conversation's own header info (name/avatar/online) so
+            // chat.html can render its mirrored header immediately, instead of only
+            // ever finding out via the separate CHAT_HEADER_UPDATE broadcast (which is
+            // debounced and polled, not instant) from message.html's DOM observers.
             if (window.innerWidth <= 768) {
-                try { window.parent.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*'); } catch (_) {}
+                try {
+                    window.parent.postMessage({
+                        type: 'CHAT_OPENED',
+                        timestamp: Date.now(),
+                        payload: {
+                            chatId: conversation && conversation.id,
+                            userId: conversation && conversation.friendId,
+                            name: conversation && conversation.friendName,
+                            avatarUrl: conversation && conversation.friendAvatar,
+                            online: !!(conversation && conversation.online)
+                        }
+                    }, '*');
+                } catch (_) {}
             }
             
             const nameEl = document.getElementById('chatFriendName');

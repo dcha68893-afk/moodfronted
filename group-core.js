@@ -6258,9 +6258,26 @@ function setupTypingListener(groupId) {
     try {
         const chatInput = safeGetElement('#chatInput');
         if (!chatInput) return;
-        
+
+        // FIX: preserve whatever the user has already typed (and focus/
+        // cursor position) across the clone-and-replace below — see
+        // rationale above this function. cloneNode(true) does not carry
+        // over the live `.value` the user typed, only the original HTML.
+        const _preservedValue = chatInput.value;
+        const _hadFocus = document.activeElement === chatInput;
+        const _selStart = chatInput.selectionStart;
+        const _selEnd = chatInput.selectionEnd;
+
         const newChatInput = chatInput.cloneNode(true);
         chatInput.parentNode.replaceChild(newChatInput, chatInput);
+
+        if (_preservedValue) {
+            newChatInput.value = _preservedValue;
+            if (_hadFocus) {
+                newChatInput.focus();
+                try { newChatInput.setSelectionRange(_selStart, _selEnd); } catch (_) {}
+            }
+        }
         
         newChatInput.addEventListener('input', () => {
             try {

@@ -10827,7 +10827,11 @@ Type: ${message.type || 'text'}`;
 
             try {
 
-                window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
+                window.parent?.postMessage({
+                    type: 'CHAT_OPENED',
+                    timestamp: Date.now(),
+                    payload: { userId: numericUserId, name: resolvedName, avatarUrl: resolvedAvatar }
+                }, '*');
 
             } catch (_error) {}
 
@@ -12188,7 +12192,13 @@ Type: ${message.type || 'text'}`;
 
                 // FIX: Send ACK immediately so chat.html retry loop stops on attempt 1
 
-                try { window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*'); } catch(_) {}
+                try {
+                    window.parent?.postMessage({
+                        type: 'CHAT_OPENED',
+                        timestamp: Date.now(),
+                        payload: { userId: id, name: displayName, avatarUrl: existingConversation && existingConversation.friendAvatar }
+                    }, '*');
+                } catch(_) {}
 
                 
 
@@ -12300,7 +12310,11 @@ Type: ${message.type || 'text'}`;
 
                     try {
 
-                        window.parent?.postMessage({ type: 'CHAT_OPENED', timestamp: Date.now() }, '*');
+                        window.parent?.postMessage({
+                            type: 'CHAT_OPENED',
+                            timestamp: Date.now(),
+                            payload: { userId: id, name: displayName, avatarUrl: existingConversation && existingConversation.friendAvatar }
+                        }, '*');
 
                     } catch (_error) {}
 

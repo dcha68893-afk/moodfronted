@@ -3142,6 +3142,24 @@
                     document.body.classList.add('chat-panel-active');
                     // Clear pending_chat so all retry loops stop
                     try { sessionStorage.removeItem('pending_chat'); } catch (_) {}
+                    // FIX: render the header immediately with whatever we already
+                    // know (name/avatar/userId, now sent along with CHAT_OPENED)
+                    // instead of leaving it blank until the separate
+                    // CHAT_HEADER_UPDATE broadcast eventually arrives. That
+                    // broadcast (debounced + a 1.5s poll on the message.html
+                    // side) still runs and will refine/correct this (e.g. live
+                    // online status), it just no longer has to be the *first*
+                    // thing that ever populates the header.
+                    var _coInfo = data.payload || {};
+                    if ((_coInfo.name || _coInfo.userId) && typeof showChatHeader === 'function') {
+                        showChatHeader({
+                            name: _coInfo.name,
+                            avatarUrl: _coInfo.avatarUrl,
+                            online: !!_coInfo.online,
+                            chatId: _coInfo.chatId || _coInfo.userId,
+                            seq: 1
+                        });
+                    }
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
                     if (window.innerWidth <= 768) {
@@ -3150,6 +3168,7 @@
                             document.body.classList.remove('chat-panel-active');
                         }
                     }
+                    if (typeof hideChatHeader === 'function') hideChatHeader();
                 }
 
                 // ── GROUP PANEL: hide nav when group chat/detail opens; show when back ──
@@ -7540,6 +7559,10 @@ window.__groupHdrHide = hideGroupHeader;
         }
         // Don't fight the group header if a group panel happens to be active
         if (hdr && !hdr.classList.contains('group-chat-active')) hdr.classList.add('chat-active');
+        // FIX: belt-and-suspenders — also clear any inline style that might
+        // be forcing this bar hidden from an older/unrelated code path, so
+        // the CSS rule above is never fought by a leftover inline override.
+        if (hdr) { hdr.style.removeProperty('opacity'); hdr.style.removeProperty('visibility'); hdr.style.removeProperty('display'); hdr.style.removeProperty('pointer-events'); }
         if (acts) acts.classList.add('hidden');
         if (prof) prof.style.visibility = 'hidden';
         window.__chatHeaderShown = true;
