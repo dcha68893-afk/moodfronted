@@ -14827,6 +14827,10 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
     // FIX: clear the handleCallAccepted dedup set (see that function) here
     // so it doesn't grow forever and a fresh call always starts clean.
     if (callsState._acceptedCallIds) callsState._acceptedCallIds.clear();
+    // FIX: clear the handleSignalOffer dedup set (see that function) too.
+    if (callsState._processedOfferKeys) callsState._processedOfferKeys.clear();
+    if (callsState._processedAnswerKeys) callsState._processedAnswerKeys.clear();
+    if (callsState._processedIceKeys) callsState._processedIceKeys.clear();
 
 
 
@@ -30550,6 +30554,27 @@ window.CallHandlers = {
 
     logCall(MODULE, 'handleSignalOffer', { callId: payload.callId });
 
+    // FIX: this function is reachable from two independent window 'message'
+    // listeners in this file, both of which forward MESSAGE_TYPES.SIGNAL_OFFER
+    // here. A single real offer from the caller was therefore being processed
+    // twice on the receiver's side — the second setRemoteDescription() call
+    // fails because the connection is already past the have-remote-offer
+    // state from the first, breaking the receiver's WebRTC setup entirely
+    // while the caller (who never handles incoming offers) stays fine. That
+    // asymmetry is exactly the "caller shows in-call, receiver goes dark"
+    // pattern. Ignore a duplicate delivery of the same offer for the same call.
+    const _offerCallId = payload && (payload.callId || payload.id);
+    const _offerSdpKey = payload && payload.offer && payload.offer.sdp ? payload.offer.sdp.length : (payload && payload.sdp ? String(payload.sdp).length : 0);
+    const _offerDedupKey = _offerCallId ? (String(_offerCallId) + ':' + _offerSdpKey) : null;
+    if (_offerDedupKey) {
+        if (!callsState._processedOfferKeys) callsState._processedOfferKeys = new Set();
+        if (callsState._processedOfferKeys.has(_offerDedupKey)) {
+            logWarn(MODULE, 'handleSignalOffer: duplicate delivery of same offer, ignoring', _offerDedupKey);
+            return;
+        }
+        callsState._processedOfferKeys.add(_offerDedupKey);
+    }
+
 
 
     
@@ -30761,6 +30786,26 @@ window.CallHandlers = {
 
         logCall(MODULE, 'handleSignalAnswer', { callId: payload.callId });
 
+    // FIX: same duplicate-delivery problem as handleSignalOffer above, but on
+    // the CALLER's side this time — this function is also reachable from the
+    // two independent window 'message' listeners in this file. A single real
+    // answer from the receiver was being processed twice, and the second
+    // setRemoteDescription() call fails on a connection already past that
+    // state from the first, breaking the CALLER's peer connection this time
+    // (receiver, who never handles incoming answers, stays fine). This is
+    // the "caller goes dark" half of the same bug class.
+    const _ansCallId = payload && (payload.callId || payload.id);
+    const _ansSdpKey = payload && payload.answer && payload.answer.sdp ? payload.answer.sdp.length : (payload && payload.sdp ? String(payload.sdp).length : 0);
+    const _ansDedupKey = _ansCallId ? (String(_ansCallId) + ':' + _ansSdpKey) : null;
+    if (_ansDedupKey) {
+        if (!callsState._processedAnswerKeys) callsState._processedAnswerKeys = new Set();
+        if (callsState._processedAnswerKeys.has(_ansDedupKey)) {
+            logWarn(MODULE, 'handleSignalAnswer: duplicate delivery of same answer, ignoring', _ansDedupKey);
+            return;
+        }
+        callsState._processedAnswerKeys.add(_ansDedupKey);
+    }
+
 
 
         
@@ -30896,6 +30941,21 @@ window.CallHandlers = {
 
 
     logCall(MODULE, 'handleIceCandidate', { callId: payload.callId });
+
+    // FIX: same dual-listener duplicate-delivery pattern as handleSignalOffer
+    // and handleSignalAnswer above. Duplicate ICE candidates are usually
+    // harmless (browsers silently ignore an already-added candidate), but
+    // skip the redundant work and log noise consistently with those fixes.
+    const _iceCallId = payload && (payload.callId || payload.id);
+    const _iceCandKey = payload && payload.candidate ? JSON.stringify(payload.candidate).length + ':' + (payload.candidate.sdpMLineIndex || 0) : 0;
+    const _iceDedupKey = _iceCallId ? (String(_iceCallId) + ':' + _iceCandKey) : null;
+    if (_iceDedupKey) {
+        if (!callsState._processedIceKeys) callsState._processedIceKeys = new Set();
+        if (callsState._processedIceKeys.has(_iceDedupKey)) {
+            return;
+        }
+        callsState._processedIceKeys.add(_iceDedupKey);
+    }
 
 
 
