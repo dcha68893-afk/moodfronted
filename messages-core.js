@@ -3252,6 +3252,20 @@ try {
                         const _cid = String(chat.createdBy);
                         if (_cid && _cid !== _myId) friendId = _cid;
                     }
+                    // FIX: last-resort — the lastMessage sub-object's senderId/receiverId.
+                    // Malformed chat rows with none of the structures above (participants,
+                    // chatParticipants, chatCreator, createdBy) still usually carry a real
+                    // lastMessage with a genuine senderId, since a message clearly did get
+                    // sent/received on this chat. Without this, friendId stays empty for
+                    // these rows, they skip the seenFriendIds dedup check just below
+                    // entirely, and a fresh duplicate row gets created every time instead
+                    // of ever being matched to the real conversation for that friend.
+                    if (!friendId && chat.lastMessage) {
+                        const _senderId = String(chat.lastMessage.senderId || '');
+                        const _receiverId = String(chat.lastMessage.receiverId || '');
+                        if (_senderId && _senderId !== _myId) friendId = _senderId;
+                        else if (_receiverId && _receiverId !== _myId) friendId = _receiverId;
+                    }
                 }
                 
                 if (friendId && seenFriendIds.has(friendId)) {
@@ -3274,8 +3288,22 @@ try {
                 // FIX: build real display name from firstName+lastName when available
                 const _fn = otherUser && otherUser.firstName ? otherUser.firstName.trim() : '';
                 const _ln = otherUser && otherUser.lastName  ? otherUser.lastName.trim()  : '';
+                // FIX: chat.name (and chat.chatName, for 1:1 chats which don't have a
+                // real "chat name" concept) is unreliable — this backend sometimes
+                // populates it with the conversation's last-message preview text
+                // instead of an actual name (documented and worked around elsewhere
+                // in this file for the multi-send picker, but never here, where the
+                // main chat list is actually built). Rather than ever risk showing
+                // message content as a contact's name, only trust chat.name/chatName
+                // if it doesn't look like it's just the last message repeated back.
+                const _lastMsgPreview = String(
+                    (chat.lastMessage && chat.lastMessage.content) || chat.lastMessageContent || ''
+                ).trim().toLowerCase();
+                const _chatNameCandidate = String(chat.chatName || chat.name || '').trim();
+                const _chatNameLooksSafe = _chatNameCandidate &&
+                    !(_lastMsgPreview && _chatNameCandidate.toLowerCase() === _lastMsgPreview);
                 const _rawFriendName = (_fn && _ln) ? (_fn + ' ' + _ln)
-                    : (_fn || (otherUser && (otherUser.displayName || otherUser.username)) || chat.chatName || chat.name || 'User');
+                    : (_fn || (otherUser && (otherUser.displayName || otherUser.username)) || (_chatNameLooksSafe ? _chatNameCandidate : '') || 'User');
                 const friendName = _rawFriendName.trim() || 'User';
                 const friendAvatar = otherUser?.avatar || chat.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friendName)}&background=random&color=fff`;
                 

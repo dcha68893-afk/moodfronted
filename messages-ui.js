@@ -13969,7 +13969,8 @@ Type: ${message.type || 'text'}`;
             'font-size:14px',
             'line-height:1.5',
             'box-shadow:0 1px 4px rgba(0,0,0,0.1)',
-            'word-break:break-word',
+            'overflow-wrap:break-word',
+            'word-break:normal',
             'position:relative',
         ].join(';');
         bubbleInner.textContent = content;
