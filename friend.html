@@ -2321,8 +2321,9 @@
         /* ── Bottom FAB ─────────────────────────────────────────── */
         #friendAddFAB {
             position: fixed;
-            bottom: 24px;
-            right: 20px;
+            top: 50%;
+            left: 16px;
+            transform: translateY(-50%);
             z-index: 500;
             width: 56px;
             height: 56px;
@@ -2338,8 +2339,8 @@
             box-shadow: 0 4px 20px rgba(102,126,234,.55);
             transition: transform .15s, box-shadow .15s;
         }
-        #friendAddFAB:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(102,126,234,.7); }
-        #friendAddFAB:active { transform: scale(.93); }
+        #friendAddFAB:hover { transform: translateY(-50%) scale(1.1); box-shadow: 0 6px 28px rgba(102,126,234,.7); }
+        #friendAddFAB:active { transform: translateY(-50%) scale(.93); }
     </style>
 <script src="/js/settings-broadcast-listener.js" defer></script>
 </head>

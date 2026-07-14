@@ -8736,6 +8736,7 @@ if (typeof window !== 'undefined') {
     secureExpose('sendGroupMessage', sendGroupMessage);
     secureExpose('adjustTextareaHeight', adjustTextareaHeight);
     secureExpose('updateGroupPrimaryActionState', updateGroupPrimaryActionState);
+    secureExpose('updateGroupCounts', updateGroupCounts);
     secureExpose('addMessageToChat', addMessageToChat);
     secureExpose('removeSelectedFriend', removeSelectedFriend);
     secureExpose('showGroupDetails', showGroupDetails);

@@ -6015,6 +6015,15 @@
 
                 if (window.parent && window.parent !== window) {
 
+                    // FIX: previously this ALSO sent a second, separate 'INITIATE_CALL'
+                    // postMessage 100ms after this one. chat.html treats both message
+                    // types as a complete, independent call-dispatch trigger (each one
+                    // calls __dispatchCallToIframe), so a single "start call" tap was
+                    // resulting in TWO calls being dispatched a moment apart — the same
+                    // duplicate-initiation problem that caused calls to die right after
+                    // being accepted elsewhere in this app. SWITCH_MODULE below already
+                    // carries everything chat.html needs (including the correct
+                    // returnTo:'messages'), so it alone is sufficient.
                     window.parent.postMessage({
 
                         type: 'SWITCH_MODULE',
@@ -6046,30 +6055,6 @@
                         timestamp: Date.now()
 
                     }, '*');
-
-                    
-
-                    setTimeout(() => {
-
-                        window.parent.postMessage({
-
-                            type: 'INITIATE_CALL',
-
-                            payload: {
-
-                                userId: info.receiverId,
-
-                                userName: finalUserName,
-
-                                callType: callType,
-
-                                source: 'messages'
-
-                            }
-
-                        }, '*');
-
-                    }, 100);
 
                     
 

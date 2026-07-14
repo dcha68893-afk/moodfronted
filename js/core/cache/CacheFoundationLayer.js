@@ -302,13 +302,30 @@
 
     _listenForServerTruth() {
       // When socket events with server data arrive, invalidate related caches
+      //
+      // FIX: this used to match on `type.includes('message')` etc. — a
+      // substring check against EVERY postMessage this window receives from
+      // any iframe. This app's iframes exchange a constant stream of purely
+      // internal postMessages (session forwarding, API request/response
+      // plumbing, UI debug logs — see the "postMessage storm detected"
+      // warnings logged elsewhere), and many of those incidentally contain
+      // "message", "friend", or "group" as a substring without being a
+      // genuine "new data arrived from the server" event. That meant this
+      // cache was being invalidated dozens of times a second during normal
+      // use, forcing constant re-fetches — and when one of those re-fetches
+      // hit a slow/failing backend endpoint, there was nothing left to fall
+      // back to and the UI rendered empty. Match specific known event types
+      // instead of a loose substring.
+      const MESSAGE_EVENTS = new Set(['MESSAGE_RECEIVED', 'MESSAGE_DELETED', 'MESSAGE_ACK', 'message:created', 'message:deleted', 'message:new', 'newMessage', 'new_message']);
+      const FRIEND_EVENTS  = new Set(['FRIEND_REQUEST_RECEIVED', 'FRIEND_REQUEST_ACCEPTED', 'FRIEND_REMOVED', 'friend:added', 'friend:removed']);
+      const GROUP_EVENTS   = new Set(['GROUP_MESSAGE_RECEIVED', 'group:message', 'group:updated', 'group:member:added', 'group:member:removed']);
       window.addEventListener('message', (e) => {
         if (!e.data || typeof e.data !== 'object') return;
         const type = e.data.type || '';
 
-        if (type.includes('message')) this.invalidate('messages');
-        if (type.includes('friend')) this.invalidate('friends');
-        if (type.includes('group')) this.invalidate('groups');
+        if (MESSAGE_EVENTS.has(type)) this.invalidate('messages');
+        if (FRIEND_EVENTS.has(type)) this.invalidate('friends');
+        if (GROUP_EVENTS.has(type)) this.invalidate('groups');
         if (type === 'SOCKET_CONNECTED' || type === 'socket:reconnected') {
           // On reconnect, invalidate all caches to force server re-sync
           this._invalidation.clear();

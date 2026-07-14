@@ -4355,6 +4355,9 @@ export function registerUICoreEvents() {
             if (typeof renderGroupsListSecure === 'function') {
                 try { renderGroupsListSecure(); } catch(_) {}
             }
+            if (typeof window.updateGroupCounts === 'function') {
+                try { window.updateGroupCounts(); } catch(_) {}
+            }
         });
 
         // group:message-received — message arrived for a group the user is in

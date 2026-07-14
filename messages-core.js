@@ -5120,25 +5120,29 @@ try {
             }
             
             // FIX: Notify parent to add chat-panel-active class → hides mobile nav bar
+            // (on desktop this only drives the header switch below, since chat.html's
+            // CSS still gates the mobile-only layout effects behind its own media query)
             // Also include the conversation's own header info (name/avatar/online) so
             // chat.html can render its mirrored header immediately, instead of only
             // ever finding out via the separate CHAT_HEADER_UPDATE broadcast (which is
             // debounced and polled, not instant) from message.html's DOM observers.
-            if (window.innerWidth <= 768) {
-                try {
-                    window.parent.postMessage({
-                        type: 'CHAT_OPENED',
-                        timestamp: Date.now(),
-                        payload: {
-                            chatId: conversation && conversation.id,
-                            userId: conversation && conversation.friendId,
-                            name: conversation && conversation.friendName,
-                            avatarUrl: conversation && conversation.friendAvatar,
-                            online: !!(conversation && conversation.online)
-                        }
-                    }, '*');
-                } catch (_) {}
-            }
+            // FIX: previously gated to `window.innerWidth <= 768` — that meant chat.html
+            // never learned a chat was opened at all on desktop, so the header never
+            // switched to showing the friend's name/avatar/back/call icons on large
+            // screens. Send this on every width now.
+            try {
+                window.parent.postMessage({
+                    type: 'CHAT_OPENED',
+                    timestamp: Date.now(),
+                    payload: {
+                        chatId: conversation && conversation.id,
+                        userId: conversation && conversation.friendId,
+                        name: conversation && conversation.friendName,
+                        avatarUrl: conversation && conversation.friendAvatar,
+                        online: !!(conversation && conversation.online)
+                    }
+                }, '*');
+            } catch (_) {}
             
             const nameEl = document.getElementById('chatFriendName');
             const avatarEl = document.getElementById('chatFriendAvatar');

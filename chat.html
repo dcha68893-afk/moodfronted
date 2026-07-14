@@ -1669,12 +1669,12 @@
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
     </div>
 
-    <!-- ── Add Friend FAB (fixed, bottom-left of screen, above mobile nav) ── -->
+    <!-- ── Add Friend FAB (fixed, middle-left of screen) ── -->
     <!-- Shown only on messages and calls modules via JS below -->
     <button id="fabAddFriend"
         onclick="navigateToPage('friends')"
         title="Add Friend"
-        style="display:none;position:fixed;bottom:76px;left:16px;z-index:400;
+        style="display:none;position:fixed;top:50%;left:16px;transform:translateY(-50%);z-index:400;
                width:48px;height:48px;border-radius:50%;border:none;cursor:pointer;
                background:linear-gradient(135deg,#667eea,#764ba2);
                color:#fff;display:none;align-items:center;justify-content:center;
@@ -1707,16 +1707,16 @@
             transition: transform .15s ease, box-shadow .15s ease;
         }
         #fabAddFriend:hover {
-            transform: scale(1.1);
+            transform: translateY(-50%) scale(1.1);
             box-shadow: 0 6px 24px rgba(102,126,234,.65) !important;
         }
-        #fabAddFriend:active { transform: scale(.94); }
+        #fabAddFriend:active { transform: translateY(-50%) scale(.94); }
         /* Hide FAB while a call is active */
         body.call-active #fabAddFriend,
         body.in-call-screen #fabAddFriend { display: none !important; }
-        /* Desktop: sit left of sidebar */
+        /* Desktop: sit left of sidebar, still vertically centered */
         @media (min-width: 768px) {
-            #fabAddFriend { bottom: 24px !important; left: 80px !important; }
+            #fabAddFriend { top: 50% !important; left: 80px !important; bottom: auto !important; transform: translateY(-50%) !important; }
         }
     </style>
 
