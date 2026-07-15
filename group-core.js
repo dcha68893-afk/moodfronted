@@ -5272,51 +5272,17 @@ function setupGroupAttachmentControls() {
         const callBtn = safeGetElement('#chatCallBtn');
         const videoBtn = safeGetElement('#chatVideoCallBtn');
         
-        if (attachBtn && !attachBtn._groupAttachBound) {
-            attachBtn._groupAttachBound = true;
-            attachBtn.addEventListener('click', () => attachInput?.click());
-        }
-        
-        if (cameraBtn && !cameraBtn._groupCameraBound) {
-            cameraBtn._groupCameraBound = true;
-            cameraBtn.addEventListener('click', () => cameraInput?.click());
-        }
-        
-        if (micBtn && !micBtn._groupMicBound) {
-            micBtn._groupMicBound = true;
-            micBtn.addEventListener('click', () => audioInput?.click());
-        }
-        
+        // FIX-CAMERA-FILE-CONFLICT: attachBtn/attachInput (and cameraInput) are already
+        // bound by group.html's own setupInput(), which shows a Camera-vs-Choose-File
+        // menu and opens a freshly-created capture="environment" input for the camera
+        // option. Binding a second, competing click handler here that jumped straight
+        // to attachInput.click() (the generic file/gallery picker, no capture attr) is
+        // what made the camera icon "open the file picker" instead of the camera — and
+        // binding a second 'change' handler on the same inputs double-sent every file.
+        // Left unbound intentionally; do not re-add these bindings.
         if (dropdownBtn && moreBtn && !dropdownBtn._groupDropdownBound) {
             dropdownBtn._groupDropdownBound = true;
             dropdownBtn.addEventListener('click', () => moreBtn.click());
-        }
-        
-        if (attachInput && !attachInput._groupUploadBound) {
-            attachInput._groupUploadBound = true;
-            attachInput.addEventListener('change', async event => {
-                const file = event.target.files && event.target.files[0];
-                event.target.value = '';
-                if (file) await sendGroupAttachment(file, 'file');
-            });
-        }
-        
-        if (cameraInput && !cameraInput._groupCameraInputBound) {
-            cameraInput._groupCameraInputBound = true;
-            cameraInput.addEventListener('change', async event => {
-                const file = event.target.files && event.target.files[0];
-                event.target.value = '';
-                if (file) await sendGroupAttachment(file, 'image');
-            });
-        }
-        
-        if (audioInput && !audioInput._groupAudioInputBound) {
-            audioInput._groupAudioInputBound = true;
-            audioInput.addEventListener('change', async event => {
-                const file = event.target.files && event.target.files[0];
-                event.target.value = '';
-                if (file) await sendGroupAttachment(file, 'audio');
-            });
         }
         
         const closeHandler = () => {
@@ -5353,12 +5319,25 @@ function setupGroupAttachmentControls() {
                 .filter(id => id && String(id) !== currentUserId);
             
             if (window.parent && typeof window.parent.__dispatchCallToIframe === 'function') {
-                window.parent.__dispatchCallToIframe(currentChatGroup.id, currentChatGroup.name, callType, 'group', currentChatGroup.id, 'group-module');
+                // FIX-GROUP-CALL-NOTICE: the 7th arg (extraCtx) carries groupId/groupName/
+                // isGroupCall/participantIds through chat.html -> calls-ui.js -> calls-core.js
+                // -> POST /calls. Without it, the call is indistinguishable from a 1:1 call to
+                // a "user" whose id happens to equal the group id, so the backend never resolves
+                // real group members and never notifies anyone else to join/decline.
+                window.parent.__dispatchCallToIframe(
+                    currentChatGroup.id,
+                    currentChatGroup.name,
+                    callType,
+                    'group',
+                    currentChatGroup.id,
+                    'group-module',
+                    { groupId: currentChatGroup.id, groupName: currentChatGroup.name, isGroupCall: true, participantIds }
+                );
                 return;
             }
             
             if (window.callCore?.startGroupCall) {
-                window.callCore.startGroupCall(participantIds, callType);
+                window.callCore.startGroupCall(participantIds, callType, { groupId: currentChatGroup.id, groupName: currentChatGroup.name, isGroupCall: true });
             }
         };
         

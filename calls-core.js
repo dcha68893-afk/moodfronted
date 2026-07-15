@@ -29120,7 +29120,7 @@ _escapeHtml: function(text) {
 
         logCall(MODULE, 'handleCallAccepted', callData);
 
-        const acceptedCallId = callData && String(callData.callId || callData.id || '') || '';
+        const acceptedCallId = callData && (callData.callId || callData.id);
 
         // FIX: this event reaches handleCallAccepted through two independent
         // listener pipelines (the CALL_EVENT_MAP DOM-event bridge just below

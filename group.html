@@ -2484,11 +2484,23 @@ function uploadFile(file,type){
     var tmpEl=document.createElement('div');tmpEl.className='message sent';
     tmpEl.innerHTML='<div class="message-bubble"><i class="fas fa-spinner fa-spin"></i> Uploading '+esc(file.name)+'\u2026</div>';
     if(box)box.appendChild(tmpEl);scrollBot();
-    var fd=new FormData();fd.append('file',file);if(type)fd.append('type',type);
-    fetch(BASE+'/groups/'+g.id+'/messages',{method:'POST',headers:{Authorization:'Bearer '+tok()},body:fd})
+    // FIX-CONTENT-REQUIRED: /groups/:groupId/messages only accepts a JSON body
+    // (content/type/metadata.attachment) — it never parses an uploaded file, so
+    // POSTing the raw file straight there (as before) always left content empty
+    // and metadata.attachment null, tripping "Message content is required" for
+    // every camera photo, chosen file, and voice recording. Upload the file to
+    // /media/upload first, then send the message with metadata.attachment set.
+    var fd=new FormData();fd.append('file',file);fd.append('description',file.name||'Group attachment');
+    fetch(BASE+'/media/upload',{method:'POST',headers:{Authorization:'Bearer '+tok()},body:fd})
         .then(function(r){return r.json();}).then(function(d){
+            if(!d||d.success===false)throw new Error((d&&d.message)||'Upload failed');
+            var media=(d.data&&d.data.media)||d.data||{};
+            var derivedType=type||(file.type&&file.type.startsWith('image/')?'image':file.type&&file.type.startsWith('audio/')?'audio':file.type&&file.type.startsWith('video/')?'video':'file');
+            var attachment={id:media.id||null,url:media.url||media.fileUrl||media.path||null,thumbnailUrl:media.thumbnailUrl||null,name:media.originalName||media.fileName||file.name||'Attachment',mimeType:media.mimeType||file.type||'application/octet-stream',size:media.fileSize||media.size||file.size||0};
+            return api('/groups/'+g.id+'/messages',{method:'POST',body:{content:'',type:derivedType,metadata:{attachment:attachment}}});
+        }).then(function(d){
             if(tmpEl.parentNode)tmpEl.remove();
-            var msg=d.data||d.message||{};if(!msg.senderId)msg.senderId=me;if(!msg.sender)msg.sender={id:me,displayName:'You'};if(!msg.type&&type)msg.type=type;
+            var msg=(d.data&&d.data.message)||d.data||{};if(!msg.senderId)msg.senderId=me;if(!msg.sender)msg.sender={id:me,displayName:'You'};if(!msg.type&&type)msg.type=type;
             appendBubble(box,msg,me);scrollBot();
         }).catch(function(){if(tmpEl.parentNode){var b=tmpEl.querySelector('.message-bubble');if(b){b.innerHTML='\u26a0 Upload failed';b.style.color='#ef4444';}}ntf('Upload failed','error');});
 }

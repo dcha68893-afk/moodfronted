@@ -8018,20 +8018,16 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           break;
           
         case 'unhandled_rejection':
-          // For API errors, clear cache and retry
-          if (errorDetails.reason && errorDetails.reason.message && 
-              (errorDetails.reason.message.includes('API') || 
+          // FIX-CACHE-WIPE: previously called DATA_CACHE.clearAll() here whenever an
+          // unrelated unhandled rejection's message merely contained "API" or "fetch" —
+          // matching nearly any transient network hiccup (aborted request, timed-out
+          // background poll, "Failed to fetch", etc.) and silently wiping all cached
+          // chat/message data 3s later. That doesn't fix a failed request; it only
+          // destroys legitimate local history. Just log it — no destructive "recovery".
+          if (errorDetails.reason && errorDetails.reason.message &&
+              (errorDetails.reason.message.includes('API') ||
                errorDetails.reason.message.includes('fetch'))) {
-            setTimeout(() => {
-              this.nativeConsole.log.call(console, '🔄 Attempting to recover from API error...');
-              if (typeof DATA_CACHE !== 'undefined') {
-                try {
-                  DATA_CACHE.clearAll();
-                } catch (cacheError) {
-                  this.nativeConsole.error.call(console, 'Failed to clear cache:', cacheError);
-                }
-              }
-            }, 3000);
+            this.nativeConsole.log.call(console, '[Recovery] Ignoring transient API/fetch rejection (cache left intact):', errorDetails.reason.message);
           }
           break;
       }

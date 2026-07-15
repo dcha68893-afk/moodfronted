@@ -3351,6 +3351,19 @@
 
             if (normalizedMessages.length === 0) {
 
+                // FIX-MSG-CLEAR-ON-REFRESH: don't wipe an already-rendered chat just
+                // because this particular call happened to receive an empty array —
+                // that's frequently a transient state (e.g. the local/IndexedDB or
+                // server fetch hasn't resolved yet after a refresh, or a filter on
+                // another call site produced zero matches). Only show the "no
+                // messages" empty state when we don't already have this exact chat's
+                // history rendered; otherwise leave what's on screen untouched.
+                const _alreadyRenderedThisChat = container.dataset.renderedChatId === currentChatId &&
+                    container.querySelectorAll('[data-message-id]').length > 0;
+                if (_alreadyRenderedThisChat) {
+                    return;
+                }
+
                 container.innerHTML = '';
 
                 this._lastRenderedMessagesSignature = `${currentChatId}|empty`;
@@ -9622,22 +9635,7 @@ Type: ${message.type || 'text'}`;
 
                     if (currentChat) {
 
-                        // FIX-INSTANT-REPLY-WIPES-RECEIVED-MSG: core.getMessages() returns
-                        // EVERY message across EVERY conversation, unfiltered. Passing that
-                        // straight into renderMessages() (which does no chatId filtering of
-                        // its own — it trusts the caller) meant that right after receiving a
-                        // message and replying instantly, this render pass carried a mixed
-                        // bag of every open conversation's messages. That confused the
-                        // renderMessages "smart render" bookkeeping (rendered-id tracking is
-                        // keyed only by message id, not by chat), which could treat the just-
-                        // received message as unrendered/foreign and drop it on the next pass.
-                        // renderRealtimeUpdate already filters to the current chat correctly —
-                        // mirror that here instead of using the raw unfiltered list.
-                        const _ccid = String(currentChat.id || '');
-                        const messages = (core?.getMessages?.() || []).filter(m => {
-                            const mid = String(m.chatId || m.conversationId || '');
-                            return mid === _ccid;
-                        });
+                        const messages = core?.getMessages?.() || [];
 
                         UIRenderer.renderMessages(messages, currentChat, currentUser);
 
@@ -11403,12 +11401,7 @@ Type: ${message.type || 'text'}`;
 
             if (currentChat && messages.length > 0) {
 
-                const _ccid2 = String(currentChat.id || '');
-                const _chatMessages = messages.filter(m => {
-                    const mid = String(m.chatId || m.conversationId || '');
-                    return mid === _ccid2;
-                });
-                UIRenderer.renderMessages(_chatMessages, currentChat, user);
+                UIRenderer.renderMessages(messages, currentChat, user);
 
             }
 
@@ -11483,12 +11476,8 @@ Type: ${message.type || 'text'}`;
                         if (activeChat && messages) {
 
                             const user = core.getCurrentUser?.();
-                            const _acid = String(activeChat.id || '');
-                            const _activeChatMessages = (messages || []).filter(m => {
-                                const mid = String(m.chatId || m.conversationId || '');
-                                return mid === _acid;
-                            });
-                            UIRenderer.renderMessages(_activeChatMessages, activeChat, user);
+
+                            UIRenderer.renderMessages(messages, activeChat, user);
 
                         }
 

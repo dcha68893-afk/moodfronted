@@ -158,15 +158,6 @@
     global.safeArray = function safeArray(data) {
         if (Array.isArray(data)) return data;
         if (data === null || data === undefined) return [];
-        // FIX-STRING-CHAR-SPLIT: strings are technically iterable in JS, so
-        // Array.from('word') silently produced ['w','o','r','d'] below — every
-        // caller in this codebase uses safeArray() to coerce a *list of items*
-        // (messages, conversations, etc.), never a string, so a bare string
-        // reaching here always means something upstream meant to pass an array/
-        // object and passed its raw text instead. Treating it as "not a valid
-        // list" (empty array) instead of exploding it character-by-character
-        // fixes cases like a one-word message rendering as one bubble per letter.
-        if (typeof data === 'string') return [];
         // Handle Set / Map / iterables
         if (typeof data[Symbol.iterator] === 'function') {
             try { return Array.from(data); } catch (_) { return []; }
