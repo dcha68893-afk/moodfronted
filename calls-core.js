@@ -14835,6 +14835,8 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
     // FIX: clear the handleCallAccepted dedup set (see that function) here
     // so it doesn't grow forever and a fresh call always starts clean.
     if (callsState._acceptedCallIds) callsState._acceptedCallIds.clear();
+    // FIX: clear the handleCallConnected dedup set (see that function) too.
+    if (callsState._connectedCallIds) callsState._connectedCallIds.clear();
     // FIX: clear the handleSignalOffer dedup set (see that function) too.
     if (callsState._processedOfferKeys) callsState._processedOfferKeys.clear();
     if (callsState._processedAnswerKeys) callsState._processedAnswerKeys.clear();
@@ -29381,6 +29383,24 @@ _escapeHtml: function(text) {
 
 
     function handleCallConnected(callData) {
+            // FIX: dedup, mirroring the same protection already on
+            // handleCallAccepted (callsState._acceptedCallIds). This file has
+            // multiple independent delivery paths for the same logical event
+            // (two separate window 'message' listeners, plus the
+            // oniceconnectionstatechange handler, each capable of reaching
+            // handleCallConnected for the same call) and nothing here stopped
+            // a second/third delivery from re-running this function's side
+            // effects for a call that was already marked connected.
+            var __connectedId = (callData && (callData.callId || callData.id)) || callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+            var __resolveConn = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
+            if (__connectedId) __connectedId = __resolveConn(__connectedId);
+            if (__connectedId && callsState._connectedCallIds && callsState._connectedCallIds.has(__connectedId)) {
+                logCall(MODULE, 'handleCallConnected: duplicate delivery ignored', __connectedId);
+                return;
+            }
+            if (!callsState._connectedCallIds) callsState._connectedCallIds = new Set();
+            if (__connectedId) callsState._connectedCallIds.add(__connectedId);
+
             // SCREEN MANAGER: switch to in-call screen
             if (typeof window.showScreen === "function") { window.showScreen("in-call"); }
             var __ov = document.getElementById("callOverlay"); if (__ov) __ov.setAttribute("data-state", "idle");
@@ -29524,6 +29544,28 @@ _escapeHtml: function(text) {
 
 
     function handleCallEnded(callData) {
+            // FIX: validate this event actually belongs to the call that's
+            // currently active before doing ANY teardown. Previously this ran
+            // unconditionally — stopping local media tracks and forcing the
+            // idle screen — for ANY CALL_ENDED delivery regardless of which
+            // call it was for. Combined with the local-id/server-uuid mismatch
+            // (see handleCallInitiatedAck/resolveCallId above) and this file's
+            // multiple redundant message-listener paths, a stale or
+            // differently-tagged event could kill a different, currently
+            // healthy, already-connected call. Mirrors the same guard already
+            // added to calls-ui.js's handleCallEnded (UIState layer).
+            var __endedIncomingId = callData && (callData.callId || callData.id);
+            if (__endedIncomingId) {
+                var __endedCurrentId = (window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId || window.callsState.localCallId)) || null;
+                if (__endedCurrentId) {
+                    var __resolveId = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
+                    if (String(__resolveId(__endedIncomingId)) !== String(__resolveId(__endedCurrentId))) {
+                        logWarn(MODULE, 'handleCallEnded: ignoring stale event for a different/previous call', __endedIncomingId, __endedCurrentId);
+                        return;
+                    }
+                }
+            }
+
             // FIX-020: Guaranteed ringtone stop — must run BEFORE anything else
             // to prevent ringtone looping when UI reset path fails
             try {
@@ -29851,89 +29893,61 @@ function handleCallForceEnd(callData) {
 
 
 
+// FIX: handleCallFailed/handleCallTimeout previously tore down whatever call
+// was currently active via resetCallState() with NO check that the event
+// they received actually belongs to that call. This file has multiple
+// independent window 'message' listeners plus DOM-event and socket.io
+// bridges all capable of delivering these events — so a stale CALL_TIMEOUT
+// or CALL_FAILED left over from an earlier attempt (busy-retry, a quick
+// redial after a dropped call, or a duplicate delivery racing a newer,
+// successfully-connected call) could reach here and kill a perfectly
+// healthy, already-connected call seconds after it connected — exactly the
+// "shows in-call then disappears" pattern being reported. Also resolves
+// through resolveCallId() so a locally-generated id and its server-assigned
+// UUID (see handleCallInitiatedAck above) are recognized as the same call.
+function _isStaleCallEvent(callData) {
+    var incomingId = callData && (callData.callId || callData.id);
+    if (!incomingId) return false;
+    var currentId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+    if (!currentId) return false;
+    var resolve = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
+    return String(resolve(incomingId)) !== String(resolve(currentId));
+}
+
 function handleCallFailed(callData) {
-
-
 
     logCall(MODULE, 'handleCallFailed', callData);
 
-
-
-    
-
-
+    if (_isStaleCallEvent(callData)) {
+        logWarn(MODULE, 'handleCallFailed: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        return;
+    }
 
     resetCallState();
 
-
-
     notifyListeners('call_failed', callData);
-
-
 
 }
 
+// De-duplicated: this used to be a second, full copy of handleCallFailed
+// (identical body) rather than a genuine second implementation — collapsed
+// to a thin alias so there's only one place to fix/maintain the logic above.
+function handleCallFailed2(callData) { return handleCallFailed(callData); }
 
+function handleCallTimeout(callData) {
 
+    logCall(MODULE, 'handleCallTimeout', callData);
 
-
-
-
-    function handleCallFailed(callData) {
-
-
-
-        logCall(MODULE, 'handleCallFailed', callData);
-
-
-
-        
-
-
-
-        resetCallState();
-
-
-
-        notifyListeners('call_failed', callData);
-
-
-
+    if (_isStaleCallEvent(callData)) {
+        logWarn(MODULE, 'handleCallTimeout: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        return;
     }
 
+    resetCallState();
 
+    notifyListeners('call_timeout', callData);
 
-    
-
-
-
-    function handleCallTimeout(callData) {
-
-
-
-        logCall(MODULE, 'handleCallTimeout', callData);
-
-
-
-        
-
-
-
-        resetCallState();
-
-
-
-        notifyListeners('call_timeout', callData);
-
-
-
-    }
-
-
-
-
-
-
+}
 
 // Real-time message handlers for instant messaging and status updates
 

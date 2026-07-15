@@ -3162,11 +3162,13 @@
                     }
                 }
                 if (data.type === 'CHAT_LIST_SHOWN' || data.type === 'CHAT_CLOSED' || data.type === 'GO_BACK_TO_CHAT_LIST') {
-                    if (window.innerWidth <= 768) {
-                        const messagesContainer = document.getElementById('messagesContent');
-                        if (messagesContainer && !messagesContainer.classList.contains('hidden')) {
-                            document.body.classList.remove('chat-panel-active');
-                        }
+                    // FIX: previously only cleared chat-panel-active on mobile widths (and only
+                    // if messagesContent wasn't hidden), which — now that the flag is applied
+                    // unconditionally on open (see CHAT_OPENED/CONVERSATION_OPENED above) — left
+                    // it permanently stuck on desktop after closing a chat. Clear it on all widths.
+                    const messagesContainer = document.getElementById('messagesContent');
+                    if (window.innerWidth > 768 || !messagesContainer || !messagesContainer.classList.contains('hidden')) {
+                        document.body.classList.remove('chat-panel-active');
                     }
                     if (typeof hideChatHeader === 'function') hideChatHeader();
                 }
@@ -3330,8 +3332,15 @@
         window.addEventListener('resize', function() {
             // NOTE: Never remove call-screen-active on resize — an active call
             // must keep its fullscreen overlay regardless of viewport width.
-            // Only remove chat-panel-active on desktop (no chat panel there).
-            if (window.innerWidth > 768) {
+            // FIX: this used to unconditionally strip chat-panel-active on any
+            // resize while the viewport was desktop-width, on the old assumption
+            // that "there's no chat panel on desktop". That assumption is wrong —
+            // a chat can be (and now correctly is) open on desktop too — so this
+            // was silently undoing the header/avatar/call/video/more icons the
+            // moment any resize event fired (window resize, devtools toggle,
+            // browser zoom, etc.) while a desktop chat was open. Only clear the
+            // flag here if no chat is actually open right now.
+            if (window.innerWidth > 768 && !window.__chatHeaderShown) {
                 document.body.classList.remove('chat-panel-active');
             }
         });
@@ -4456,7 +4465,7 @@
                             navigateToPage('messages');
                             if (_ctx && _ctx.chatUserId) {
                                 const _mf = document.getElementById('messagesIframe');
-                                if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx.chatUserId, userName: _ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active'); }, 300);
+                                if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx.chatUserId, userName: _ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */ }, 300);
                             }
                         } else if (_returnTo && _returnTo !== 'calls') {
                             navigateToPage(_returnTo);
@@ -4506,7 +4515,7 @@
                             navigateToPage('messages');
                             if (_ctx3 && _ctx3.chatUserId) {
                                 const _mf3 = document.getElementById('messagesIframe');
-                                if (_mf3 && _mf3.contentWindow) setTimeout(() => { _mf3.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx3.chatUserId, userName: _ctx3.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active'); }, 300);
+                                if (_mf3 && _mf3.contentWindow) setTimeout(() => { _mf3.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx3.chatUserId, userName: _ctx3.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */ }, 300);
                             }
                         } else if (_rt3 && _rt3 !== 'calls') {
                             navigateToPage(_rt3);
@@ -4967,7 +4976,7 @@
                                         payload: { userId: ctx.chatUserId, userName: ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() },
                                         source: 'parent-frame'
                                     }, '*');
-                                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                                    document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                                 }, 300);
                             }
                         }
@@ -5598,7 +5607,7 @@
                                 timestamp: Date.now()
                             };
                             sessionStorage.setItem('pending_chat', JSON.stringify(_callChatPayload));
-                            if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                            document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                             // Retry until iframe ACKs (clears pending_chat via CHAT_OPENED)
                             let _rfcAttempts = 0;
                             const _postRFC = () => {
@@ -5626,7 +5635,7 @@
                             };
                             
                             sessionStorage.setItem('pending_chat', JSON.stringify(chatPayload));
-                            if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                            document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                             
                             // Retry until iframe ACKs
                             let _chatAttempts = 0;
@@ -7200,7 +7209,7 @@
             if (pendingChat) {
                 try {
                     const chatData = JSON.parse(pendingChat);
-                    if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                    document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                     // Retry posting until message.html ACKs by clearing pending_chat
                     let _loadAttempts = 0;
                     const _postPending = () => {
@@ -7430,7 +7439,7 @@ window.addEventListener('message', function (e) {
                 if (_pcMf && _pcMf.contentWindow) {
                     setTimeout(function() {
                         _pcMf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _pcCtx.chatUserId, userName: _pcCtx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
-                        if (window.innerWidth <= 768) document.body.classList.add('chat-panel-active');
+                        document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                     }, 300);
                 }
             } else {

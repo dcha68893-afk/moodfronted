@@ -1091,25 +1091,76 @@
         _renderDiscoverCards(myGroups, resultsEl, true);
     }
 
+    let _discoverScope = null; // null = not chosen yet; must pick before results load
+
+    function _discoverScopePicker(resultsEl) {
+        resultsEl.innerHTML =
+            '<div style="padding:20px 4px">' +
+            '<div style="font-weight:700;margin-bottom:12px;text-align:center">Discover groups from…</div>' +
+            '<div id="_discScopeGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+            _discoverScopeButton('friends',   '👥', 'My Friends') +
+            _discoverScopeButton('community', '🏘️', 'Community') +
+            _discoverScopeButton('region',    '🗺️', 'Region') +
+            _discoverScopeButton('county',    '📍', 'County') +
+            '</div>' +
+            '<div style="margin-top:10px">' + _discoverScopeButton('world', '🌍', 'Everywhere (World)', true) + '</div>' +
+            '</div>';
+        resultsEl.querySelectorAll('[data-scope]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                _discoverScope = btn.dataset.scope;
+                _doDiscoverSearch((qs('#discoverSearchInput') || {}).value || '', resultsEl);
+            });
+        });
+    }
+
+    function _discoverScopeButton(scope, icon, label, full) {
+        return '<button data-scope="' + scope + '" style="' + (full ? 'width:100%;' : '') +
+            'padding:16px 10px;border-radius:12px;border:none;cursor:pointer;background:var(--bg-tertiary,#2a2a3e);' +
+            'color:var(--text-primary,#fff);font-weight:600;font-size:13px;display:flex;flex-direction:column;' +
+            'align-items:center;gap:6px;">' +
+            '<span style="font-size:22px">' + icon + '</span>' + label + '</button>';
+    }
+
     async function _doDiscoverSearch(q, resultsEl) {
-        resultsEl.innerHTML = '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+        // FEATURE: require a scope choice before showing results, so Discover Others
+        // is filtered to what the user actually asked for instead of one dumped list.
+        if (!_discoverScope) { _discoverScopePicker(resultsEl); return; }
+
+        const backBarHtml =
+            '<div style="display:flex;align-items:center;gap:8px;padding:0 4px 10px">' +
+            '<button id="_discScopeBack" style="background:none;border:none;color:var(--primary-color,#6c63ff);cursor:pointer;font-weight:600;font-size:13px"><i class="fas fa-chevron-left"></i> Change scope</button>' +
+            '</div>';
+        resultsEl.innerHTML = backBarHtml + '<div style="text-align:center;padding:24px"><i class="fas fa-spinner fa-spin"></i></div>';
+        qs('#_discScopeBack').addEventListener('click', () => { _discoverScope = null; _discoverScopePicker(resultsEl); });
+
         const uid     = _myUserId();
         const purpose = (qs('.discover-filter.active') || qs('.discover-filter[data-purpose="all"]'))?.dataset?.purpose || 'all';
-        const params  = new URLSearchParams({ limit: '40' });
-        if (q) params.set('search', q);
+        const params  = new URLSearchParams({ limit: '40', scope: _discoverScope });
+        if (q) params.set('query', q);
         if (purpose && purpose !== 'all') params.set('purpose', purpose);
         try {
-            const data   = await apiFetch('/groups?' + params.toString());
+            // FIX: this used to call GET /groups (getUserGroups), which only ever
+            // returns groups the caller already belongs to and silently ignores
+            // search/purpose — so "Discover Others" could never surface a genuinely
+            // new public group. The real discovery endpoint is /groups/search.
+            const data   = await apiFetch('/groups/search?' + params.toString());
             let groups   = (data.data && (data.data.groups || data.data)) || data.groups || [];
             // Exclude groups the user owns/admins so they appear only in "My Groups"
             if (uid) groups = groups.filter(g => String(g.createdBy) !== uid && !g.isCreator && !g.isAdmin);
+
+            const resultsAnchor = document.createElement('div');
+            resultsEl.innerHTML = backBarHtml;
+            qs('#_discScopeBack').addEventListener('click', () => { _discoverScope = null; _discoverScopePicker(resultsEl); });
+            resultsEl.appendChild(resultsAnchor);
+
             if (!groups.length) {
-                resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">No public groups found</div>';
+                resultsAnchor.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">No public groups found for this scope</div>';
                 return;
             }
-            _renderDiscoverCards(groups, resultsEl, false);
+            _renderDiscoverCards(groups, resultsAnchor, false);
         } catch(err) {
-            resultsEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary)">' + (err.message||'Failed to load') + '</div>';
+            resultsEl.innerHTML = backBarHtml + '<div style="padding:24px;text-align:center;color:var(--text-secondary)">' + (err.message||'Failed to load') + '</div>';
+            const bb = qs('#_discScopeBack'); if (bb) bb.addEventListener('click', () => { _discoverScope = null; _discoverScopePicker(resultsEl); });
         }
     }
 

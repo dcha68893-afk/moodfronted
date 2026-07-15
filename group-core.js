@@ -7940,6 +7940,24 @@ function calculateGroupPulse(groupData) {
 
 function updateGroupCounts() {
     try {
+        // FIX (2026-07-13): the real data-loading path — requestGroupList() calling
+        // GET /groups/user — only ever populated GroupCore.myGroups / .joinedGroups /
+        // .adminGroups / .groups (the object's own properties). It never touched
+        // these bare module-level `myGroups`/`joinedGroups`/`adminGroups`/`groups`
+        // variables, which stayed permanently empty arrays from their initial
+        // declaration. The 'groups:list-updated' event correctly carried the fresh
+        // counts as its payload, but the listener wired to it (group-ui-patch.js)
+        // called updateGroupCounts() with no arguments, so this function always
+        // rendered 0 for My Groups / Joined / Admin regardless of real data.
+        // Prefer the live GroupCore arrays; fall back to the local ones only if
+        // GroupCore isn't available for some reason.
+        const GC = (typeof window !== 'undefined' && window.GroupCore) ? window.GroupCore : null;
+        const liveGroups      = (GC && Array.isArray(GC.groups))       ? GC.groups       : groups;
+        const liveMyGroups    = (GC && Array.isArray(GC.myGroups))     ? GC.myGroups     : myGroups;
+        const liveJoined      = (GC && Array.isArray(GC.joinedGroups)) ? GC.joinedGroups : joinedGroups;
+        const liveAdmin       = (GC && Array.isArray(GC.adminGroups))  ? GC.adminGroups  : adminGroups;
+        // groupInvites IS kept correctly in sync by syncGroupInvitesFromServer(), so no GC fallback needed there.
+
         const totalGroupsEl = safeGetElement('#totalGroups');
         const activeGroupsEl = safeGetElement('#activeGroups');
         const totalMembersEl = safeGetElement('#totalMembers');
@@ -7947,19 +7965,31 @@ function updateGroupCounts() {
         const joinedCountEl = safeGetElement('#joinedCount');
         const invitesCountEl = safeGetElement('#invitesCount');
         const adminCountEl = safeGetElement('#adminCount');
-        
-        if (totalGroupsEl) totalGroupsEl.textContent = groups.length;
-        
-        const activeGroups = groups.filter(g => g.lastActivity && (Date.now() - new Date(g.lastActivity).getTime()) < 86400000).length;
+
+        if (totalGroupsEl) totalGroupsEl.textContent = liveGroups.length;
+
+        const activeGroups = liveGroups.filter(g => g.lastActivity && (Date.now() - new Date(g.lastActivity).getTime()) < 86400000).length;
         if (activeGroupsEl) activeGroupsEl.textContent = activeGroups;
-        
-        const totalMembers = groups.reduce((sum, group) => sum + (group.memberCount || 0), 0);
+
+        const totalMembers = liveGroups.reduce((sum, group) => sum + (group.memberCount || 0), 0);
         if (totalMembersEl) totalMembersEl.textContent = totalMembers;
-        
-        if (myGroupsCountEl) myGroupsCountEl.textContent = myGroups.length;
-        if (joinedCountEl) joinedCountEl.textContent = joinedGroups.length;
+
+        if (myGroupsCountEl) myGroupsCountEl.textContent = liveMyGroups.length;
+        if (joinedCountEl) joinedCountEl.textContent = liveJoined.length;
         if (invitesCountEl) invitesCountEl.textContent = groupInvites.length;
-        if (adminCountEl) adminCountEl.textContent = adminGroups.length;
+        if (adminCountEl) adminCountEl.textContent = liveAdmin.length;
+
+        // Keep the local module-level arrays in sync too, so any other code
+        // still reading the bare `myGroups`/`joinedGroups`/`adminGroups`/`groups`
+        // variables (e.g. renderGroupsListSecure()) sees the real data as well.
+        if (GC) {
+            try {
+                groups = liveGroups;
+                myGroups = liveMyGroups;
+                joinedGroups = liveJoined;
+                adminGroups = liveAdmin;
+            } catch (_) {}
+        }
     } catch (error) {}
 }
 

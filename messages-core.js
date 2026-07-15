@@ -2794,13 +2794,34 @@ try {
                 return String(m.chatId || m.conversationId || '') === String(conversationId) && !m.isLocalOnly;
             });
 
+            let _gotLocalMsgs = false;
             if (window.KynectaLocalStore) {
                 try {
                     const localMsgs = await window.KynectaLocalStore.getMessagesByChat(conversationId, { limit: options.limit || 100 });
                     if (localMsgs && localMsgs.length > 0) {
                         this.setMessages(localMsgs, conversationId);
+                        _gotLocalMsgs = true;
                     }
                 } catch (_lsErr) {}
+            }
+            // FIX: this localStorage snapshot (kynecta_messages_v8_<chatId>) was being
+            // written on 'beforeunload' and on visibilitychange-hidden, but nothing
+            // anywhere ever read it back — so it provided zero benefit and any gap in
+            // IndexedDB (still hydrating on cold start, a device where it's unsupported,
+            // etc.) meant messages simply didn't show until/unless the network fetch
+            // below succeeded. Use it as an immediate-paint fallback.
+            if (!_gotLocalMsgs && conversationId) {
+                try {
+                    const _legacyKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${conversationId}`;
+                    const _legacyRaw = localStorage.getItem(_legacyKey);
+                    if (_legacyRaw) {
+                        const _legacyMsgs = JSON.parse(_legacyRaw);
+                        if (Array.isArray(_legacyMsgs) && _legacyMsgs.length > 0) {
+                            this.setMessages(_legacyMsgs, conversationId);
+                            this._notifySubscribers();
+                        }
+                    }
+                } catch (_legacyErr) {}
             }
 
             if (!navigator.onLine) {
