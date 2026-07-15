@@ -1141,18 +1141,17 @@
                         <option value="discussion">💬 Discussion</option>
                     </select>
                 </div>
-                <div class="chat-input-actions">
+                <div class="chat-input-actions" id="gcComposerPill">
                     <button class="chat-input-btn" id="chatEmojiBtn" title="Emoji">
                         <i class="far fa-smile"></i>
                     </button>
-                    <button class="chat-input-btn" id="chatAttachBtn" title="Attach File">
+                    <textarea class="chat-input" id="chatInput" placeholder="Type a message..." rows="1"></textarea>
+                    <!-- FIX-CAMERA-MERGE: camera is no longer a separate always-visible icon.
+                         Clicking the paperclip now shows a small "Camera / Upload File" choice
+                         (see setupInput()'s attBtn handler), then routes to whichever hidden
+                         file input is appropriate. -->
+                    <button class="chat-input-btn" id="chatAttachBtn" title="Attach">
                         <i class="fas fa-paperclip"></i>
-                    </button>
-                    <button class="chat-input-btn" id="chatCameraBtn" title="Camera">
-                        <i class="fas fa-camera"></i>
-                    </button>
-                    <button class="chat-input-btn" id="chatMicBtn" title="Voice message">
-                        <i class="fas fa-microphone"></i>
                     </button>
                     <!-- EXISTING: Silent Participation Mode Toggle -->
                     <button class="chat-input-btn" id="silentModeBtn" title="Toggle Silent Mode" style="display: none;">
@@ -1163,7 +1162,6 @@
                         <i class="fas fa-user-secret"></i>
                     </button>
                 </div>
-                <textarea class="chat-input" id="chatInput" placeholder="Type a message..." rows="1"></textarea>
                 <button class="chat-input-btn send" id="chatSendBtn" title="Send Message">
                     <i class="fas fa-microphone" id="chatPrimaryActionIcon"></i>
                 </button>
@@ -2203,6 +2201,15 @@ function injectCSS(){
     /* Chat panel */
     '#groupChatPanel{position:relative;flex-direction:column;background:var(--bg-color);}',
     '#groupChatPanel.active{display:flex!important;}',
+    /* FIX-COMPOSER-ENLARGE: emoji + attach now live INSIDE the rounded input
+       pill (#gcComposerPill) instead of as separate flat icons to its left,
+       and the pill itself is taller/roomier per request. */
+    '.chat-input-container{align-items:flex-end;}',
+    '#gcComposerPill{flex:1;display:flex;align-items:flex-end;gap:6px;background:var(--secondary-color);border:1px solid var(--border-color);border-radius:24px;padding:6px 8px;min-height:48px;}',
+    '#gcComposerPill:focus-within{border-color:var(--primary-color);}',
+    '#gcComposerPill .chat-input-btn{width:34px;height:34px;font-size:18px;flex-shrink:0;}',
+    '#gcComposerPill .chat-input{flex:1;border:none;background:transparent;padding:9px 4px;max-height:140px;min-height:34px;border-radius:0;}',
+    '#gcComposerPill .chat-input:focus{border:none;background:transparent;}',
     '#chatMessagesContainer{flex:1;overflow-y:auto;min-height:0;background:var(--secondary-color,#e5ddd5);padding:12px 14px 6px;}',
     '#chatMessages{display:flex;flex-direction:column;gap:4px;}',
     /* Bubbles */
@@ -2389,7 +2396,22 @@ function appendBubble(box,m,me){
     // loads). Previously me==='' forced own=false for everything -- including your own
     // outgoing message -- so it rendered as a "received" bubble with a sender-name box.
     var own=m._tmp?true:(me!==''&&rawSid!==''&&rawSid===me);
-    if(m.id){if(!box._seen)box._seen=new Set();if(box._seen.has(String(m.id)))return;box._seen.add(String(m.id));}
+    if(!box._seen)box._seen=new Set();
+    if(m.id){if(box._seen.has('id:'+String(m.id)))return;box._seen.add('id:'+String(m.id));}
+    // FIX-DUPLICATE-BUBBLES: incoming/echoed messages can reach appendBubble via
+    // two independent socket paths (GroupCore's own 'group:message' emit AND the
+    // KynectaRealtime bridge re-emitting the same server event as
+    // 'group:message-received'). Whenever both fire for the same message, the
+    // id-based check above only catches it if BOTH payload shapes carried a real
+    // `.id` — if either omitted it, the second call fell through and rendered a
+    // second, near-identical bubble (visible as a stray duplicate box on both the
+    // sender's and receiver's screens). Guard with a content+sender+minute
+    // composite key too, independent of whether `.id` is present.
+    if(!m._tmp){
+        var _dedupKey='c:'+rawSid+'|'+String(m.content||m.text||m.body||'').slice(0,200)+'|'+String((m.createdAt||m.created_at||m.timestamp||'')).slice(0,16);
+        if(box._seen.has(_dedupKey))return;
+        box._seen.add(_dedupKey);
+    }
     var isSystem=(m.type==='system'||m.type==='info');
     var sObj=m.sender||{};
     var rawName=m.senderName||m.sender_name||sObj.displayName||sObj.firstName||sObj.username||sObj.name||'';
@@ -2448,9 +2470,9 @@ function sendMsg(){
     var tmpEl=box&&box.querySelector('[data-localid="'+localId+'"]');
     var sent=false;
     if(gc2&&typeof gc2.sendGroupMessage==='function'){
-        try{gc2.sendGroupMessage(g.id,text).then(function(res){_pendingIds.delete(localId);if(res&&res.success&&res.data&&res.data.id&&tmpEl&&tmpEl.dataset.tmp){tmpEl.removeAttribute('data-tmp');tmpEl.dataset.mid=String(res.data.id);if(box._seen)box._seen.add(String(res.data.id));}}).catch(function(){_pendingIds.delete(localId);_markFailed(tmpEl);});sent=true;}catch(err){}
+        try{gc2.sendGroupMessage(g.id,text).then(function(res){_pendingIds.delete(localId);if(res&&res.success&&res.data&&res.data.id&&tmpEl&&tmpEl.dataset.tmp){tmpEl.removeAttribute('data-tmp');tmpEl.dataset.mid=String(res.data.id);if(box._seen)box._seen.add('id:'+String(res.data.id));}}).catch(function(){_pendingIds.delete(localId);_markFailed(tmpEl);});sent=true;}catch(err){}
     }
-    if(!sent){api('/groups/'+g.id+'/messages',{method:'POST',body:{content:text,type:'text'}}).then(function(d){_pendingIds.delete(localId);var msg=(d.data&&d.data.message)||d.data||{};if(msg.id&&tmpEl&&tmpEl.dataset.tmp){tmpEl.removeAttribute('data-tmp');tmpEl.dataset.mid=String(msg.id);if(box._seen)box._seen.add(String(msg.id));}}).catch(function(){_pendingIds.delete(localId);_markFailed(tmpEl);});}
+    if(!sent){api('/groups/'+g.id+'/messages',{method:'POST',body:{content:text,type:'text'}}).then(function(d){_pendingIds.delete(localId);var msg=(d.data&&d.data.message)||d.data||{};if(msg.id&&tmpEl&&tmpEl.dataset.tmp){tmpEl.removeAttribute('data-tmp');tmpEl.dataset.mid=String(msg.id);if(box._seen)box._seen.add('id:'+String(msg.id));}}).catch(function(){_pendingIds.delete(localId);_markFailed(tmpEl);});}
 }
 function _markFailed(el){if(!el)return;var t=el.querySelector('.message-time');if(t){t.textContent='\u26a0 Failed';t.style.color='#ef4444';}}
 
@@ -2511,7 +2533,7 @@ function hookRT(){
         if(!gid||!msg)return;var cur=window.__gcCurGroup;if(!cur||String(cur.id)!==String(gid))return;
         var box=document.getElementById('chatMessages');if(!box)return;var me=myId();
         var sid=String(msg.senderId||msg.userId||(msg.sender&&msg.sender.id)||'');
-        if(sid===me&&msg.id){if(box._seen&&box._seen.has(String(msg.id)))return;var tmp=box.querySelector('[data-tmp]');if(tmp){tmp.removeAttribute('data-tmp');tmp.dataset.mid=String(msg.id);if(box._seen)box._seen.add(String(msg.id));var t2=tmp.querySelector('.message-time');if(t2)t2.textContent=fmt(msg.createdAt||msg.created_at||new Date().toISOString());return;}}
+        if(sid===me&&msg.id){if(box._seen&&box._seen.has('id:'+String(msg.id)))return;var tmp=box.querySelector('[data-tmp]');if(tmp){tmp.removeAttribute('data-tmp');tmp.dataset.mid=String(msg.id);if(box._seen)box._seen.add('id:'+String(msg.id));var t2=tmp.querySelector('.message-time');if(t2)t2.textContent=fmt(msg.createdAt||msg.created_at||new Date().toISOString());return;}}
         /* FIX-GROUP-ENCRYPTION: same gap as renderMsgs above -- this is the
            realtime single-message path in this separate implementation.
            Decrypt msg.content in place before appendBubble ever sees it. */
@@ -2609,6 +2631,24 @@ function setupMenu(){
         menu.style.setProperty('position', 'fixed', 'important');
         menu.style.setProperty('top', '56px', 'important');
         menu.style.setProperty('right', '8px', 'important');
+    }
+    // FIX-GROUP-SUBPANEL-HIDDEN: #gcSubPanel lives in the exact same hidden
+    // .chat-header ancestor as #chatMoreMenu (see .group-chat-panel > .chat-header
+    // { display:none!important } in group.css). The menu itself was moved out
+    // above, which is why the dots list opens fine — but every item inside it
+    // (Members/Settings/Theme/Purpose/Group Info) calls openSub(), which just
+    // toggled display/class on #gcSubPanel *in place*, so the panel content was
+    // built correctly yet stayed invisible inside the display:none ancestor.
+    // Move it out to <body> too, with fixed positioning covering the same
+    // right-hand-drawer look it had when it was positioned inside the panel.
+    var subPanel = document.getElementById('gcSubPanel');
+    if (subPanel && subPanel.parentElement !== document.body) {
+        document.body.appendChild(subPanel);
+        subPanel.style.setProperty('position', 'fixed', 'important');
+        subPanel.style.setProperty('top', '0', 'important');
+        subPanel.style.setProperty('right', '0', 'important');
+        subPanel.style.setProperty('bottom', '0', 'important');
+        subPanel.style.setProperty('z-index', '100000', 'important');
     }
     btn.addEventListener('click',function(e){e.stopPropagation();menu.style.display=menu.style.display==='none'?'block':'none';});
     document.addEventListener('click',function(){if(menu)menu.style.display='none';});
@@ -2735,27 +2775,35 @@ function setupInput(){
     if(inp&&!inp._gcI){inp._gcI=true;inp.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}});inp.addEventListener('input',function(){this.style.height='';this.style.height=Math.min(this.scrollHeight,120)+'px';updateSendBtn();});}
     var emBtn=document.getElementById('chatEmojiBtn');if(emBtn&&!emBtn._gcI){emBtn._gcI=true;emBtn.addEventListener('click',function(e){e.stopPropagation();toggleEmojiPicker(e);});}
     var attBtn=document.getElementById('chatAttachBtn'),attInp=document.getElementById('groupAttachmentInput');
-    if(attBtn&&attInp&&!attBtn._gcI){attBtn._gcI=true;attBtn.addEventListener('click',function(e){e.stopPropagation();attInp.click();});attInp.addEventListener('change',function(){var f=this.files&&this.files[0];if(!f)return;var t=f.type.startsWith('image/')?'image':f.type.startsWith('audio/')?'audio':f.type.startsWith('video/')?'video':'file';uploadFile(f,t);this.value='';});}
-    var camBtn=document.getElementById('chatCameraBtn'),camInp=document.getElementById('groupCameraInput');
-    if(camBtn&&camInp&&!camBtn._gcI){
-        camBtn._gcI=true;
-        camBtn.addEventListener('click',function(e){
+    if(attInp&&!attInp._gcI){attInp._gcI=true;attInp.addEventListener('change',function(){var f=this.files&&this.files[0];if(!f)return;var t=f.type.startsWith('image/')?'image':f.type.startsWith('audio/')?'audio':f.type.startsWith('video/')?'video':'file';uploadFile(f,t);this.value='';});}
+    function _gcOpenCamera(){
+        // FIX: recreate the input each time so capture= attr is freshly set —
+        // this is what makes mobile browsers open the camera app instead of
+        // the generic file/gallery picker.
+        var fresh=document.createElement('input');
+        fresh.type='file';fresh.accept='image/*';fresh.setAttribute('capture','environment');fresh.style.display='none';
+        fresh.addEventListener('change',function(){var f=this.files&&this.files[0];if(f)uploadFile(f,'image');document.body.removeChild(fresh);});
+        document.body.appendChild(fresh);
+        setTimeout(function(){fresh.click();},30);
+    }
+    // FIX-CAMERA-MERGE: previously the camera lived as its own always-on icon
+    // next to the paperclip. Now the single attach (paperclip) button opens a
+    // tiny "Camera / Choose File" menu, and only THEN triggers the relevant
+    // hidden file input — matching the requested one-button-with-options UX.
+    if(attBtn&&!attBtn._gcI){
+        attBtn._gcI=true;
+        attBtn.addEventListener('click',function(e){
             e.stopPropagation();
-            // FIX: recreate the input each click so capture= attr is freshly set
-            // This ensures mobile browsers open the camera, not the file picker
-            var fresh=document.createElement('input');
-            fresh.type='file';
-            fresh.accept='image/*';
-            fresh.setAttribute('capture','environment');
-            fresh.style.display='none';
-            fresh.addEventListener('change',function(){
-                var f=this.files&&this.files[0];
-                if(f) uploadFile(f,'image');
-                document.body.removeChild(fresh);
-            });
-            document.body.appendChild(fresh);
-            // Small delay so DOM paint settles before .click()
-            setTimeout(function(){fresh.click();},30);
+            var old=document.getElementById('gcAttachChoice');if(old){old.remove();return;}
+            var r=attBtn.getBoundingClientRect();
+            var menu=document.createElement('div');
+            menu.id='gcAttachChoice';
+            menu.style.cssText='position:fixed;z-index:100001;min-width:170px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.2);padding:6px 0;bottom:'+(window.innerHeight-r.top+8)+'px;left:'+Math.max(8,r.left-60)+'px;';
+            menu.innerHTML='<button class="gcm-item" id="gcAttachCam"><i class="fas fa-camera"></i> Camera</button><button class="gcm-item" id="gcAttachFile"><i class="fas fa-file"></i> Choose File</button>';
+            document.body.appendChild(menu);
+            document.getElementById('gcAttachCam').addEventListener('click',function(ev){ev.stopPropagation();menu.remove();_gcOpenCamera();});
+            document.getElementById('gcAttachFile').addEventListener('click',function(ev){ev.stopPropagation();menu.remove();if(attInp)attInp.click();});
+            setTimeout(function(){document.addEventListener('click',function _c(){var m=document.getElementById('gcAttachChoice');if(m)m.remove();document.removeEventListener('click',_c);});},0);
         });
     }
     var micBtn=document.getElementById('chatMicBtn');if(micBtn&&!micBtn._gcI){micBtn._gcI=true;micBtn.addEventListener('click',function(){if(_mr&&_mr.state==='recording')stopRec();else startRec();});}

@@ -16850,7 +16850,7 @@ _startStaleCallCleanup: function() {
 
 
 
-initiateCall: async function(callType, participants = []) {
+initiateCall: async function(callType, participants = [], options = {}) {
 
 
 
@@ -17411,7 +17411,7 @@ initiateCall: async function(callType, participants = []) {
 
 
 
-        const isGroupCall = Array.isArray(participants) && participants.length > 1;
+        const isGroupCall = !!options.isGroupCall || (Array.isArray(participants) && participants.length > 1);
 
 
 
@@ -17640,6 +17640,7 @@ initiateCall: async function(callType, participants = []) {
 
 
             isGroupCall: isGroupCall,
+            groupId: options.groupId || null,
 
 
 
@@ -35524,7 +35525,9 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.initiateCall(callType, participants);
+            // FIX-GROUP-CALL-NOTICE: thread options (groupId/isGroupCall) through
+            // instead of dropping them, so group calls keep their group context.
+            return CallsStateGovernor.initiateCall(callType, participants, options);
 
 
 

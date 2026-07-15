@@ -1629,6 +1629,12 @@ function cacheCallHistory(calls) {
         userId: null,
         userName: null,
         callType: null,
+        // FIX-GROUP-CALL-NOTICE: groupId/isGroupCall were previously dropped here,
+        // so a call started from a group chat was indistinguishable from a 1:1
+        // call and the backend never got the group context it needs to notify
+        // every member / broadcast group:call-started.
+        groupId: null,
+        isGroupCall: false,
         initiated: false,
         retryCount: 0,
         maxRetries: 5,
@@ -2327,6 +2333,8 @@ function cacheCallHistory(calls) {
         pendingCall.userId = userId;
         pendingCall.userName = userName;
         pendingCall.callType = callType;
+        pendingCall.groupId = data.groupId || data.group_id || null;
+        pendingCall.isGroupCall = !!(data.isGroupCall || data.isGroup || pendingCall.groupId);
         pendingCall.initiated = false;
         pendingCall.retryCount = 0;
         
@@ -2508,7 +2516,8 @@ function cacheCallHistory(calls) {
 async function initiateCallWithPendingUser() {
     if (!pendingCall.userId || pendingCall.initiated) return;
     
-    const { userId, userName, callType } = pendingCall;
+    const { userId, userName, callType, groupId, isGroupCall } = pendingCall;
+    const _callOptions = { groupId, isGroupCall };
     
     pendingCall.initiated = true;
     
@@ -2571,7 +2580,7 @@ async function initiateCallWithPendingUser() {
 
         // CRITICAL FIX: Use startCall method instead of sendAction
         if (coreInstance.startCall) {
-            const result = await coreInstance.startCall(parseInt(userId), callType);
+            const result = await coreInstance.startCall(parseInt(userId), callType, _callOptions);
             if (result && result.success) {
                 // Store call context so CALL_ACCEPTED can resolve peer name + type
                 UIState.callActive = true;
@@ -2600,7 +2609,7 @@ async function initiateCallWithPendingUser() {
                 console.warn('[Calls UI] call_active on startCall, force-resetting and retrying once');
                 if (coreInstance.forceResetCallState) coreInstance.forceResetCallState();
                 await new Promise(resolve => setTimeout(resolve, 300));
-                const retryResult = await coreInstance.startCall(parseInt(userId), callType);
+                const retryResult = await coreInstance.startCall(parseInt(userId), callType, _callOptions);
                 if (retryResult && retryResult.success) {
                     showNotification(`${callType === 'video' ? 'Video call' : 'Voice call'} started with ${userName}`, 'success');
                     clearPendingCall();

@@ -4864,7 +4864,13 @@
                     const callsIframe = document.getElementById('callsIframe');
                     if (!callsIframe) return;
 
-                    const payload = { userId, userName, callType, returnTo, chatUserId: chatUserId || userId, source, timestamp: Date.now() };
+                    // FIX-GROUP-CALL-NOTICE: previously extraCtx (which carries groupId/
+                    // groupName for group calls) was captured into ctx/call_return_ctx but
+                    // silently dropped from the payload actually posted to the calls iframe.
+                    // Without groupId reaching calls-ui.js, a "start call" from a group chat
+                    // was indistinguishable from a 1:1 call to a user whose id happened to
+                    // equal the group's id — so no real members were notified.
+                    const payload = { userId, userName, callType, returnTo, chatUserId: chatUserId || userId, source, timestamp: Date.now(), ...(extraCtx || {}) };
 
                     try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
 
@@ -4879,7 +4885,7 @@
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {
                     const p = data.payload || {};
                     const _swReturnTo = p.returnTo || window.__currentPage || 'messages';
-                    const _swExtra = p.groupId ? { groupId: p.groupId, groupName: p.groupName || p.userName } : {};
+                    const _swExtra = p.groupId ? { groupId: p.groupId, groupName: p.groupName || p.userName, isGroupCall: true } : {};
                     __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _swReturnTo, p.chatUserId || p.userId, 'messages-module', _swExtra);
                     return;
                 }
@@ -4887,7 +4893,7 @@
                 if (data.type === 'INITIATE_CALL') {
                     const p = data.payload || {};
                     const _iciReturnTo = p.returnTo || (p.isGroup ? 'group' : 'messages');
-                    const _iciExtra = p.isGroup ? { groupId: p.groupId || p.userId, groupName: p.userName } : {};
+                    const _iciExtra = p.isGroup ? { groupId: p.groupId || p.userId, groupName: p.userName, isGroupCall: true } : {};
                     __dispatchCallToIframe(p.userId, p.userName || 'User', p.callType || 'voice', _iciReturnTo, p.userId, 'messages-module', _iciExtra);
                 }
 
@@ -5819,6 +5825,10 @@
                     const calleeId = data.payload?.calleeId;
                     const participantIds = data.payload?.participantIds;
                     const isGroupCall = data.payload?.isGroupCall || false;
+                    // FIX-GROUP-CALL-NOTICE: groupId was previously never read here at all,
+                    // so the backend had no way to resolve the group's member list or know
+                    // which group's room to broadcast group:call-started to.
+                    const groupId = data.payload?.groupId || null;
                     const callOriginPage = data.payload?.returnTo || window.__currentPage || window.__lastActivePage || 'calls';
                     window.__pendingCallOrigin = callOriginPage;
                     const baseUrl = window.__getApiBase();
@@ -5826,8 +5836,9 @@
                     try { if (!token) token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(e) {}
                     try {
                         const body = { callType: callType === 'voice' ? 'audio' : callType, isGroupCall: isGroupCall };
+                        if (isGroupCall && groupId) body.groupId = parseInt(groupId, 10);
                         if (isGroupCall && participantIds) body.participantIds = participantIds;
-                        else if (calleeId) body.participantIds = [parseInt(calleeId)];
+                        else if (calleeId && !isGroupCall) body.participantIds = [parseInt(calleeId)];
                         const resp = await fetch(`${baseUrl}/calls`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify(body) });
                         const respData = await resp.json();
                         const callsIframe = document.getElementById('callsIframe');
