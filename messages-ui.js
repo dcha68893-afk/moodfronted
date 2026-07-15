@@ -9622,7 +9622,22 @@ Type: ${message.type || 'text'}`;
 
                     if (currentChat) {
 
-                        const messages = core?.getMessages?.() || [];
+                        // FIX-INSTANT-REPLY-WIPES-RECEIVED-MSG: core.getMessages() returns
+                        // EVERY message across EVERY conversation, unfiltered. Passing that
+                        // straight into renderMessages() (which does no chatId filtering of
+                        // its own — it trusts the caller) meant that right after receiving a
+                        // message and replying instantly, this render pass carried a mixed
+                        // bag of every open conversation's messages. That confused the
+                        // renderMessages "smart render" bookkeeping (rendered-id tracking is
+                        // keyed only by message id, not by chat), which could treat the just-
+                        // received message as unrendered/foreign and drop it on the next pass.
+                        // renderRealtimeUpdate already filters to the current chat correctly —
+                        // mirror that here instead of using the raw unfiltered list.
+                        const _ccid = String(currentChat.id || '');
+                        const messages = (core?.getMessages?.() || []).filter(m => {
+                            const mid = String(m.chatId || m.conversationId || '');
+                            return mid === _ccid;
+                        });
 
                         UIRenderer.renderMessages(messages, currentChat, currentUser);
 
@@ -11388,7 +11403,12 @@ Type: ${message.type || 'text'}`;
 
             if (currentChat && messages.length > 0) {
 
-                UIRenderer.renderMessages(messages, currentChat, user);
+                const _ccid2 = String(currentChat.id || '');
+                const _chatMessages = messages.filter(m => {
+                    const mid = String(m.chatId || m.conversationId || '');
+                    return mid === _ccid2;
+                });
+                UIRenderer.renderMessages(_chatMessages, currentChat, user);
 
             }
 
@@ -11463,8 +11483,12 @@ Type: ${message.type || 'text'}`;
                         if (activeChat && messages) {
 
                             const user = core.getCurrentUser?.();
-
-                            UIRenderer.renderMessages(messages, activeChat, user);
+                            const _acid = String(activeChat.id || '');
+                            const _activeChatMessages = (messages || []).filter(m => {
+                                const mid = String(m.chatId || m.conversationId || '');
+                                return mid === _acid;
+                            });
+                            UIRenderer.renderMessages(_activeChatMessages, activeChat, user);
 
                         }
 
