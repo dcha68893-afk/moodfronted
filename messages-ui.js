@@ -13959,7 +13959,14 @@ Type: ${message.type || 'text'}`;
         bubble.style.cssText = 'display:flex;flex-direction:column;align-items:' + (isOwn ? 'flex-end' : 'flex-start') + ';padding:2px 12px;animation:fadeIn .15s ease;';
 
         const bubbleInner = document.createElement('div');
-        bubbleInner.className = 'message-bubble';
+        // FIX-E2E-DIRECT-APPEND-DECRYPT: added the 'message-content' class (in
+        // addition to 'message-bubble') so this element is also discoverable
+        // by _decryptRenderedMessages()'s `[data-message-id] .message-content`
+        // selector — previously this fallback path used a class no decrypt
+        // patch ever looked for, so a still-encrypted bubble rendered here
+        // could never be fixed up later even if decryption became available
+        // a moment afterward.
+        bubbleInner.className = 'message-bubble message-content';
         bubbleInner.style.cssText = [
             'max-width:72%',
             'padding:9px 13px',
@@ -13989,6 +13996,41 @@ Type: ${message.type || 'text'}`;
         requestAnimationFrame(function() {
             container.scrollTop = container.scrollHeight;
         });
+
+        // FIX-E2E-DIRECT-APPEND-DECRYPT (root cause of "message still shows
+        // encrypted in chat panel"): this whole function is a bypass path —
+        // it writes msg.content straight into the DOM with zero decryption,
+        // wired up separately from the normal renderMessages()/
+        // _decryptRenderedMessages() pipeline. Any message this fallback won
+        // the race on (it fires ~120ms after a message:new event, specifically
+        // to beat a slow normal render) displayed the raw E2E ciphertext
+        // envelope (`{"v":1,...}` or `{"v":2,...}`) as literal on-screen text
+        // forever, since nothing else ever revisited this bubble. Decrypt
+        // in place here too, using the same heuristic + API as
+        // _decryptRenderedMessages, and patch the .message-content text once
+        // the async decrypt resolves.
+        try {
+            if (window.KynectaE2E && typeof content === 'string' && content.charAt(0) === '{' && content.indexOf('"v"') !== -1) {
+                const chatId = String(
+                    msg.chatId || msg.conversationId ||
+                    window.ChatManager?._activeConversation?.id ||
+                    window.__activeChatId || ''
+                );
+                const otherPartyId =
+                    window.ChatManager?._activeConversation?.friendId ||
+                    window.ChatManager?._activeConversation?.otherUserId ||
+                    null;
+                const senderForDecrypt = isOwn ? otherPartyId : senderId;
+                if (chatId && senderForDecrypt) {
+                    window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
+                        if (!plaintext || plaintext === content) return;
+                        bubbleInner.textContent = plaintext;
+                        msg.content = plaintext;
+                        msg._decrypted = true;
+                    }).catch(function () {});
+                }
+            }
+        } catch (_) { /* never let a decrypt attempt break message rendering */ }
     }
 
     function _esc(str) {

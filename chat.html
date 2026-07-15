@@ -3151,6 +3151,7 @@
                     // online status), it just no longer has to be the *first*
                     // thing that ever populates the header.
                     var _coInfo = data.payload || {};
+                    if (typeof window.__cancelChatHeaderClose === 'function') window.__cancelChatHeaderClose();
                     if ((_coInfo.name || _coInfo.userId) && typeof showChatHeader === 'function') {
                         showChatHeader({
                             name: _coInfo.name,
@@ -7621,12 +7622,37 @@ window.__groupHdrHide = hideGroupHeader;
     }
 
     /* ── Listen for state broadcasts from the message iframe ───────── */
+    // FIX-HEADER-ICON-REVERT: CHAT_PANEL_CLOSED used to call hideChatHeader()
+    // synchronously and unconditionally the instant the message arrived.
+    // message.html's broadcastState() (mutation observer + 1.5s poll) can
+    // fire once right around the moment a chat panel opens or re-renders —
+    // e.g. sampling chatPanel's classList a beat before 'hidden' is actually
+    // removed, or a debounce window that resolves mid-transition — and send
+    // a stale CLOSED for a panel that is, in fact, open and already showing
+    // its own header (back/call/video/menu icons). Accepting that at face
+    // value snapped the header straight back to the default page icon set
+    // (the messages-list "history" icons: multi-send/new-chat), even though
+    // the user was still inside the chat panel. Debounce it: delay applying
+    // a close, and cancel the pending close if a CHAT_HEADER_UPDATE (proof
+    // the panel is genuinely open) arrives in the meantime.
+    var _chatHeaderCloseTimer = null;
     window.addEventListener('message', function (e) {
         var d = e.data;
         if (!d || typeof d !== 'object') return;
         if (d.source === 'message-iframe') {
-            if (d.type === 'CHAT_HEADER_UPDATE') { if (window.__currentPage === 'messages') showChatHeader(d.payload || {}); return; }
-            if (d.type === 'CHAT_PANEL_CLOSED')  { hideChatHeader(); return; }
+            if (d.type === 'CHAT_HEADER_UPDATE') {
+                if (_chatHeaderCloseTimer) { clearTimeout(_chatHeaderCloseTimer); _chatHeaderCloseTimer = null; }
+                if (window.__currentPage === 'messages') showChatHeader(d.payload || {});
+                return;
+            }
+            if (d.type === 'CHAT_PANEL_CLOSED') {
+                if (_chatHeaderCloseTimer) clearTimeout(_chatHeaderCloseTimer);
+                _chatHeaderCloseTimer = setTimeout(function () {
+                    _chatHeaderCloseTimer = null;
+                    hideChatHeader();
+                }, 400);
+                return;
+            }
         }
     });
 
@@ -7637,6 +7663,13 @@ window.__groupHdrHide = hideGroupHeader;
 
     window.__chatHdrShow = showChatHeader;
     window.__chatHdrHide = hideChatHeader;
+    // FIX-HEADER-ICON-REVERT: let other listeners (e.g. the CHAT_OPENED
+    // handler in setupPanelDetection, earlier in this document) cancel a
+    // pending debounced close the instant they know the panel just opened,
+    // instead of waiting for the 400ms timer to expire on its own.
+    window.__cancelChatHeaderClose = function () {
+        if (_chatHeaderCloseTimer) { clearTimeout(_chatHeaderCloseTimer); _chatHeaderCloseTimer = null; }
+    };
     })();
     </script>
     <script>

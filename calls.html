@@ -275,9 +275,19 @@ window.__CALLS_IFRAME__ = {
                 var endedId  = (data && (data.callId || data.id)) || null;
                 var activeId = (window.UIState && window.UIState.activeCallId)
                     || (window.callsState && window.callsState.activeCallId) || null;
+                // FIX-CALLID-RECONCILE: resolve both ids through the same
+                // caller/server alias map calls-ui.js's handleCallEnded uses,
+                // instead of a raw strict-equality compare — otherwise an
+                // event tagged with the caller's pre-ack local id never
+                // matches an activeId that's since been reconciled to the
+                // server UUID (or vice versa), and a real end/failure signal
+                // gets silently dropped here.
+                var _resolveCallIdTop = function (id) {
+                    return (window.callCore && typeof window.callCore.resolveCallId === 'function') ? window.callCore.resolveCallId(id) : id;
+                };
                 if (window.__callActive) {
                     if (!endedId) break;
-                    if (activeId && endedId !== activeId) break;
+                    if (activeId && String(_resolveCallIdTop(endedId)) !== String(_resolveCallIdTop(activeId))) break;
                 }
                 _navigateAfterCall();
                 _endCallScreens();

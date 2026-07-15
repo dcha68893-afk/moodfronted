@@ -12973,17 +12973,37 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
+        // FIX-ICE-DATACLONEERROR: event.candidate is a live RTCIceCandidate
+        // instance. Passing it directly to postMessage() throws
+        // "DataCloneError: Failed to execute 'postMessage': RTCIceCandidate
+        // object could not be cloned" in this browser. That throw happened
+        // BEFORE the socket.emit fallback below in source order, so it
+        // aborted the whole handler early -- meaning NO ice candidate ever
+        // reached the other peer via ANY transport, guaranteeing ICE
+        // negotiation would time out and fail (the direct cause of the
+        // "ICE connection failed" / "Max ICE restarts reached" cascade that
+        // ends the call). Convert to a plain JSON-serializable object up
+        // front (the spec-correct way to pass an RTCIceCandidate across a
+        // boundary) and use that everywhere below instead of the raw
+        // instance.
+        var _iceCandidateJSON = (typeof event.candidate.toJSON === 'function')
+            ? event.candidate.toJSON()
+            : {
+                candidate: event.candidate.candidate,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+                usernameFragment: event.candidate.usernameFragment
+            };
+
         this._iceCandidates.push(event.candidate);
 
 
 
-        this._notifyListeners('ice_candidate', { candidate: event.candidate });
+        this._notifyListeners('ice_candidate', { candidate: _iceCandidateJSON });
 
 
 
         
-
-
 
         // FIX: Include targetUserId in ICE candidate payload.
         // Resolve remote user from callsState so backend can route to correct peer.
@@ -13001,21 +13021,34 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                 }
                 return null;
             })();
+            // FIX-CALLID-RECONCILE: prefer the server-reconciled callId (see
+            // resolveCallId()/handleCallInitiatedAck below) over the raw
+            // local id, so ICE candidates carry the same id the remote
+            // side's active call is keyed on instead of a stale pre-ack
+            // local id that the far end has no way to recognize.
+            var _iceCallId = (typeof resolveCallId === 'function') ? resolveCallId(this._currentCallId) : this._currentCallId;
             var _icePayload = {
-                callId: this._currentCallId,
-                candidate: event.candidate,
+                callId: _iceCallId,
+                candidate: _iceCandidateJSON,
                 targetUserId: _iceRemoteUserId,
                 remoteUserId: _iceRemoteUserId,
                 timestamp: Date.now()
             };
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'ICE_CANDIDATE', payload: _icePayload, source: 'calls-core-direct' }, '*');
+            // FIX-ICE-DATACLONEERROR: wrapped in try/catch so a clone
+            // failure on this transport can never prevent the socket.emit
+            // fallback right below from still running.
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'ICE_CANDIDATE', payload: _icePayload, source: 'calls-core-direct' }, '*');
+                }
+            } catch (_postErr) {
+                logWarn(MODULE, 'ICE_CANDIDATE postMessage failed, relying on socket transport', _postErr && _postErr.message);
             }
             // Also emit directly via socket for lowest latency
             var _iceSock = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
             if (_iceSock && typeof _iceSock.emit === 'function' && _iceRemoteUserId) {
                 _iceSock.emit('call:ice_candidate', {
-                    callId: this._currentCallId, targetUserId: _iceRemoteUserId, candidate: event.candidate,
+                    callId: _iceCallId, targetUserId: _iceRemoteUserId, candidate: _iceCandidateJSON,
                 });
             } else {
                 safeSend('ICE_CANDIDATE', _icePayload, false);
@@ -30609,6 +30642,23 @@ window.CallHandlers = {
 
         callsState.serverCallId = serverCallId;
         callsState.activeCallId = serverCallId;
+
+        // FIX-CALLID-RECONCILE: WebRTCManager keeps its own copy of the call
+        // id (_currentCallId) separately from callsState, set once when the
+        // peer connection is created. Without updating it here too, every
+        // ICE candidate and every locally-detected call_failed/call_ended
+        // notification sent for the rest of THIS call would keep using the
+        // stale pre-ack local id forever — the receiver (and the server)
+        // only ever recognize the server UUID, so those signals would be
+        // silently unmatchable on the far end. This is the root cause behind
+        // "receiver accepts, briefly connects, then goes dark while caller
+        // stays in-call": the caller's own end-of-call/failure signal never
+        // matched anything on the receiver's side.
+        try {
+            if (typeof WebRTCManager !== 'undefined' && WebRTCManager && WebRTCManager._currentCallId && WebRTCManager._currentCallId !== serverCallId) {
+                WebRTCManager._currentCallId = serverCallId;
+            }
+        } catch (_) {}
 
         try { notifyListeners('call_initiated_ack', { callId: serverCallId, calleeName: payload.calleeName }); } catch (_) {}
 
