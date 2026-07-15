@@ -4338,6 +4338,33 @@ window.__CALLS_IFRAME__ = {
             _log('Full reset complete');
         }
 
+        // FIX-AVATAR-DOUBLE-WRAP: callInfo.userAvatar arrives in two different
+        // shapes depending on which module built it — calls-ui.js's own
+        // startCall()/pending-call paths build it as a FULL <img ...> HTML
+        // string (meant to be assigned straight to .innerHTML), while other
+        // callers pass a plain image URL. This file used to always assume the
+        // latter and wrap whatever it got in a brand new <img src="...">, so
+        // when it received the HTML-string form the result was literally
+        // <img src="<img src="https://...">"> — the browser then requested
+        // that garbled string as a URL, producing the 404 on the frontend's
+        // own origin seen in the console. Detect which shape we were given
+        // and render accordingly instead of always wrapping.
+        function _renderAvatarInto(el, avatarValue, initial) {
+            if (!el) return;
+            if (!avatarValue) {
+                el.textContent = initial;
+                return;
+            }
+            var trimmed = String(avatarValue).trim();
+            if (trimmed.charAt(0) === '<') {
+                // Already a full HTML fragment (e.g. an <img> or <i> tag) — use as-is.
+                el.innerHTML = trimmed;
+            } else {
+                // Plain image URL — wrap it ourselves with a fallback to the initial.
+                el.innerHTML = '<img src="' + trimmed + '" alt="' + initial + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.textContent=\'' + initial + '\'">';
+            }
+        }
+
         // ── 2. CALLING SCREEN ─────────────────────────────────────────────
         function _showCallingNow(callInfo) {
             callInfo = callInfo || {};
@@ -4366,11 +4393,7 @@ window.__CALLS_IFRAME__ = {
                 if (typeEl)   typeEl.textContent   = callInfo.callType === 'video' ? 'Video Call' : 'Voice Call';
                 if (avatarEl) {
                     var initial = (callInfo.userName || 'U').charAt(0).toUpperCase();
-                    if (callInfo.userAvatar) {
-                        avatarEl.innerHTML = '<img src="' + callInfo.userAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.textContent=\'' + initial + '\'">';
-                    } else {
-                        avatarEl.textContent = initial;
-                    }
+                    _renderAvatarInto(avatarEl, callInfo.userAvatar, initial);
                 }
             }
 
@@ -4418,11 +4441,7 @@ window.__CALLS_IFRAME__ = {
                 if (durEl)  durEl.textContent  = '00:00';
                 if (avatarEl) {
                     var initial = name.charAt(0).toUpperCase();
-                    if (avatar) {
-                        avatarEl.innerHTML = '<img src="' + avatar + '" alt="' + name + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.parentNode.textContent=\'' + initial + '\'">';
-                    } else {
-                        avatarEl.textContent = initial;
-                    }
+                    _renderAvatarInto(avatarEl, avatar, initial);
                 }
 
                 if (typeof window.showScreen === 'function') window.showScreen('in-call');

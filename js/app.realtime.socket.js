@@ -1535,6 +1535,17 @@
                 'call:ended', 'call_ended', 'call_force_ended',
                 'call:cancelled', 'call_cancelled',
                 'call:initiated', 'call_initiated',
+                // FIX-CALLID-MISMATCH: the server emits 'call:initiated_ack' with the
+                // real server-generated callId right after 'call:initiated', but this
+                // event was never in the forwarded-events list — so the socket never
+                // subscribed to it, calls-core.js's ready-and-waiting
+                // handleCallInitiatedAck() never ran, and the client kept tracking
+                // every call under its own locally-generated id forever. Every real
+                // signal about that call from then on (accept/end/offer/answer) arrives
+                // tagged with the server's real UUID, never matches, and gets rejected
+                // as "mismatched callId" — which is also what causes the call to look
+                // like it self-terminates almost immediately on the other end.
+                'call:initiated_ack', 'call_initiated_ack',
                 'webrtc:signal', 'webrtc_signal',
                 'call:ringing', 'call_ringing',
                 // FIX: These were missing — calls-core.js emits and listens for these

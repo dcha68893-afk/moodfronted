@@ -4475,10 +4475,20 @@ function getAuthToken() {
     );
 }
 
+// FIX-PANEL-FETCH-WRONG-ORIGIN: this used a bare relative path ('/api/groups/public...')
+// with plain fetch(), which resolves against whatever origin THIS document is served
+// from — the frontend (moodfronted.onrender.com), not the backend API
+// (moodchat-fy56.onrender.com). Every panelFetch call (Discover, Explore Public,
+// Events, Invitations, Friends-for-invite) was therefore 404ing against the frontend
+// and silently falling into the catch block, rendering "No public groups found" /
+// "Could not load" etc. even when the backend had real data. group.html's own api()
+// helper already prepends window.API_BASE_URL correctly — do the same here.
 async function panelFetch(path, opts = {}) {
+    const base = window.API_BASE_URL || (window.__getApiBase && window.__getApiBase()) || '';
+    const url = /^https?:\/\//i.test(path) ? path : (base + path);
     const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken(), ...(opts.headers||{}) };
     try {
-        const res = await fetch(path, { ...opts, headers });
+        const res = await fetch(url, { ...opts, headers });
         return await res.json().catch(() => ({}));
     } catch (error) {
         console.warn('[GROUP UI] panelFetch failed:', error?.message || error);

@@ -2601,7 +2601,31 @@ function setupMenu(){
     }
     btn.addEventListener('click',function(e){e.stopPropagation();menu.style.display=menu.style.display==='none'?'block':'none';});
     document.addEventListener('click',function(){if(menu)menu.style.display='none';});
-    menu.querySelectorAll('.gcm-item').forEach(function(it){it.addEventListener('click',function(e){e.stopPropagation();menu.style.display='none';var a=it.getAttribute('data-action');if(a==='leave')doLeave();else if(a==='delete')doDelete();else if(a==='tools')window._openGroupOSPanel();else openSub(a);});});
+    // FIX-GROUP-MENU-DEAD-CLICKS: Members/Settings/Theme/Purpose/Info/Delete/Leave
+    // all short-circuit silently (openSub/doLeave/doDelete each bail out on `if(!g)return`)
+    // whenever window.__gcCurGroup isn't set. Group Tools was the only item that kept
+    // working because it resolves its own group id independently (_getGroupId(), which
+    // also checks URL params / GroupCore / DOM) instead of relying on this single global.
+    // Recover the same way here before dispatching, instead of trusting __gcCurGroup blindly.
+    function _gcResolveGroupThen(cb) {
+        if (window.__gcCurGroup) { cb(window.__gcCurGroup); return; }
+        var gid = null;
+        try {
+            var url = new URL(window.location.href);
+            gid = url.searchParams.get('groupId') || url.searchParams.get('gid');
+        } catch(_) {}
+        try {
+            var gcRef = window.GroupCore;
+            if (!gid && gcRef && gcRef._activeGroup) { window.__gcCurGroup = gcRef._activeGroup; cb(gcRef._activeGroup); return; }
+            if (!gid && gcRef && typeof gcRef.getActiveGroupId === 'function') gid = gcRef.getActiveGroupId();
+        } catch(_) {}
+        if (!gid) { cb(null); return; }
+        api('/groups/' + gid).then(function(d){
+            var gr = d.data || d.group || d;
+            if (gr && gr.id) { window.__gcCurGroup = gr; cb(gr); } else { cb(null); }
+        }).catch(function(){ cb(null); });
+    }
+    menu.querySelectorAll('.gcm-item').forEach(function(it){it.addEventListener('click',function(e){e.stopPropagation();menu.style.display='none';var a=it.getAttribute('data-action');if(a==='tools'){window._openGroupOSPanel();return;}_gcResolveGroupThen(function(g){if(!g){ntf('No group selected','error');return;}window.__gcCurGroup=g;if(a==='leave')doLeave();else if(a==='delete')doDelete();else openSub(a);});});});
     // ✅ FIX: Listen for parent postMessage so hdrGroupMore in chat.html opens this menu
     window.addEventListener('message', function(ev) {
         var d = ev.data;
