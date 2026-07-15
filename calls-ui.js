@@ -4203,6 +4203,17 @@ handleContactItemClick: function(e) {
                     // locally-generated id we started with.
                     if (data && data.callId) {
                         UIState.activeCallId = data.callId;
+                        // FIX-CALLID-RECONCILE-OVERLAY: CallOverlayManager
+                        // keeps its own private copy of the call id
+                        // (_callInfo.callId), captured once when the overlay
+                        // opened. It's a separate closure from this handler,
+                        // so setting UIState.activeCallId above never reached
+                        // it — the overlay's own mismatched-callId guard kept
+                        // reading the stale local id and rejecting the real
+                        // CALL_ENDED/CALL_REJECTED signal for this call.
+                        if (window.CallOverlayManager && typeof window.CallOverlayManager.reconcileCallId === 'function') {
+                            window.CallOverlayManager.reconcileCallId(data.callId);
+                        }
                         if (data.calleeName) {
                             const nameEl = document.getElementById('callerName') || document.getElementById('outgoingCallName') || document.querySelector('.call-name');
                             if (nameEl && (!nameEl.textContent || nameEl.textContent.trim() === 'User')) {
@@ -10582,6 +10593,27 @@ if (detectExistingCore()) {
         isInCall()   { return _state === 'in-call'; },
         isIdle()     { return _state === 'idle'; },
 
+        // FIX-CALLID-RECONCILE-OVERLAY: _callInfo.callId is set once, when the
+        // overlay starts (the locally-generated id), and every state
+        // transition since (setState above) has been careful to preserve it
+        // rather than let it drop. That carefulness is exactly why it never
+        // updates: nothing ever called back in with the server's real id once
+        // call_initiated_ack arrived. UIEventHandlers.handleCoreEvent (this
+        // same file) receives that ack and updates UIState.activeCallId, but
+        // it has no access to this closure's private _callInfo — so the
+        // overlay kept comparing incoming CALL_ENDED/CALL_REJECTED events
+        // against the stale local id forever, via whichever id the mismatch
+        // guard happened to read first. Call this from the ack handler to
+        // land the real id here too.
+        reconcileCallId(serverCallId) {
+            if (!serverCallId) return;
+            if (_callInfo) {
+                _callInfo.callId = serverCallId;
+            } else {
+                _callInfo = { callId: serverCallId };
+            }
+        },
+
         // ── Transition to a new state ──────────────────────────────────────
         setState(newState, callInfo) {
             _enforceLayoutIntegrity(); // Always enforce before any state change
@@ -10852,7 +10884,15 @@ if (detectExistingCore()) {
                 // same call id alias map callCore already maintains.
                 const _resolve = (id) => (window.callCore && typeof window.callCore.resolveCallId === 'function') ? window.callCore.resolveCallId(id) : id;
                 const _endedId  = payload && (payload.callId || payload.id);
-                const _activeId = (_callInfo && _callInfo.callId) || (window.UIState && window.UIState.activeCallId) || (typeof UIState !== 'undefined' && UIState.activeCallId);
+                // FIX-CALLID-RECONCILE-OVERLAY: prefer UIState.activeCallId —
+                // it's the one call_initiated_ack actually keeps current (see
+                // handleCoreEvent's 'call_initiated_ack' case above). _callInfo
+                // now also gets reconciled via CallOverlayManager.reconcileCallId,
+                // but keeping UIState first here means a call_initiated_ack that
+                // arrives between overlay-open and this check still resolves
+                // correctly even in the unlikely event reconcileCallId hasn't
+                // run yet.
+                const _activeId = (window.UIState && window.UIState.activeCallId) || (_callInfo && _callInfo.callId) || (typeof UIState !== 'undefined' && UIState.activeCallId);
                 if (_endedId && _activeId && String(_resolve(_endedId)) !== String(_resolve(_activeId))) {
                     console.warn('[CallOverlayManager] Ignoring CALL_ENDED/CALL_REJECTED - mismatched callId', _endedId, _activeId);
                     break;

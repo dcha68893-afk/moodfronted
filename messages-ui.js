@@ -12385,6 +12385,29 @@ Type: ${message.type || 'text'}`;
 
                 
 
+
+                // FIX: this function makes the chat panel LOOK open and ready
+                // immediately (header/avatar/status), as instant feedback while
+                // core.openConversation() is still resolving asynchronously in
+                // the background. But messageInput.disabled/.focus() was only
+                // ever set later, inside _showChatPanel (messages-core.js),
+                // which only runs once that async call finishes. Opening a
+                // chat from the history list calls this function first and
+                // core.openConversation() second -- so there was a real window
+                // where the panel appeared open but the input wasn't focused
+                // yet, and keystrokes typed in that window (or a stray
+                // keystroke landing exactly as focus finally arrived) were
+                // silently lost or dropped a character. Enable + focus here
+                // too so the panel is functionally ready the instant it looks
+                // ready, not just visually.
+                const _mInput = document.getElementById('messageInput');
+                const _mSendBtn = document.getElementById('sendButton');
+                if (_mInput) _mInput.disabled = false;
+                if (_mSendBtn) _mSendBtn.disabled = false;
+                if (_mInput && document.activeElement !== _mInput) {
+                    setTimeout(() => { _mInput.focus(); }, 50);
+                }
+
             };
 
 
@@ -12744,6 +12767,19 @@ Type: ${message.type || 'text'}`;
 // =============================================
 
 (function installSettingsUIBridge() {
+
+    // FIX: this IIFE (MultiSend / settings UI bridge) calls _uiLog(...) in
+    // several handlers below (history panel open, send-triggered, API
+    // request/response logging, button clicks) but never declared it —
+    // _uiLog from the very first IIFE in this file is scoped to that
+    // closure and is NOT visible here, so every one of those call sites
+    // threw "Uncaught ReferenceError: _uiLog is not defined" the first
+    // time a user opened chat history or sent a multi-send message,
+    // aborting the handler mid-execution. That abort is what left the
+    // header icons, back arrow, name, and avatar in an inconsistent state
+    // after opening a chat from history. Local copy of the same
+    // debug-gated logger used elsewhere in this file.
+    const _uiLog = (...a) => { if (window.__MESSAGES_DEBUG__) console.log(...a); };
 
     function applyUISettingChange(section, key, value) {
 
