@@ -1696,7 +1696,18 @@
     <script src="js/sticker-picker.js" defer></script>
     <script src="js/message-select.js" defer></script>
     <!-- Phase 3: Security -->
-    <script src="js/e2e-encryption.js" defer></script>
+    <!-- FIX-E2E-DUPLICATE-LOAD: js/e2e-encryption.js was loaded a second time
+         here (on top of the load + tryInitE2E() init above). Re-executing
+         this module reassigns window.KynectaE2E to a brand-new, uninitialized
+         object (_enabled=false, _myPrivKey=null), silently discarding the
+         key material tryInitE2E() had already loaded into the FIRST instance.
+         Every message rendered after that point failed the
+         `!window.KynectaE2E.enabled` check in messages-ui.js's
+         _decryptRenderedMessages() and stayed on-screen as the raw ciphertext
+         envelope. group.html hit this identical bug (see FIX-E2E-DUPLICATE-LOAD
+         there) and was already fixed by removing its duplicate load; this is
+         the same fix applied here. Only ONE load of e2e-encryption.js should
+         ever exist per document. -->
     <script src="js/double-ratchet.js" defer></script>
     <script src="js/safety-numbers.js" defer></script>
     <!-- Remaining features -->
@@ -2086,7 +2097,15 @@
                 const _dk = 'open_chat_' + targetUserId;
                 const _nt = Date.now();
                 if (window.__openChatDedup && window.__openChatDedup[_dk] && (_nt - window.__openChatDedup[_dk]) < 2000) {
-                    try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nt }, '*'); } catch(_) {}
+                    // FIX-CHAT-OPENED-PAYLOAD: chat.html's listener reads
+                    // `data.payload` (see its `_coInfo = data.payload || {}`)
+                    // to decide whether to call showChatHeader() immediately —
+                    // this used to send userId/name as top-level fields instead,
+                    // so data.payload was always {} there and the immediate
+                    // header switch never fired, leaving the default (chat-
+                    // history) icon set showing until/unless a later broadcast
+                    // corrected it.
+                    try { window.parent.postMessage({ type: 'CHAT_OPENED', payload: { userId: targetUserId, name: targetUserName, chatId: targetUserId }, timestamp: _nt }, '*'); } catch(_) {}
                     return;
                 }
                 if (!window.__openChatDedup) window.__openChatDedup = {};
@@ -2094,7 +2113,10 @@
                 setTimeout(() => { if (window.__openChatDedup) delete window.__openChatDedup[_dk]; }, 2000);
 
                 // ACK parent so retry loop stops
-                try { window.parent.postMessage({ type: 'CHAT_OPENED', userId: targetUserId, timestamp: _nt }, '*'); } catch(_) {}
+                // FIX-CHAT-OPENED-PAYLOAD: see matching fix note above — must be
+                // under `payload` with a `name`, or chat.html's immediate
+                // showChatHeader() call from this event never fires.
+                try { window.parent.postMessage({ type: 'CHAT_OPENED', payload: { userId: targetUserId, name: targetUserName, chatId: targetUserId }, timestamp: _nt }, '*'); } catch(_) {}
                 sessionStorage.removeItem('open_chat_on_load');
                 sessionStorage.removeItem('pending_chat');
 
@@ -2328,12 +2350,35 @@
     function broadcastState() {
         var chatPanel = document.getElementById('chatPanel');
         var panelOpen = !!(chatPanel && !chatPanel.classList.contains('hidden'));
-        var info = currentChatInfo();
-        if (panelOpen && !info.isPlaceholder) {
-            postToParent('CHAT_HEADER_UPDATE', info);
-        } else {
+        // FIX-HEADER-ICON-SWAP: the panel-closed message must be driven by
+        // whether the panel is actually closed, NOT by whether the friend
+        // name happens to have resolved yet. The old `panelOpen &&
+        // !info.isPlaceholder` check sent CHAT_PANEL_CLOSED any time the
+        // panel was open but the name was still an intentional empty string
+        // (messages-core.js's openConversation() sets friendName: '' on
+        // purpose while the real conversation loads, specifically so the
+        // header never shows a 'Loading…' flash — see its FIX Bug4 comment).
+        // chat.html's listener treats CHAT_PANEL_CLOSED as "chat panel isn't
+        // open" and reverts #globalHeader to its default state — the same
+        // icon set used for the chat-history/list view — even though the
+        // chat panel itself was genuinely still on screen. That produced
+        // exactly the symptom reported: opening a chat from the history
+        // list never showed the chat panel's own call/video/menu icons,
+        // and the header instead showed (or fell back to) the chat-history
+        // icon set while still inside the chat panel. This also self-
+        // triggered repeatedly since this function is polled every 1.5s.
+        // Only report CLOSED when the panel is truly not open; if it's open
+        // but the name hasn't resolved yet, skip broadcasting this cycle —
+        // the next mutation (or the 1.5s poll) will send CHAT_HEADER_UPDATE
+        // once real data lands, and until then the parent should keep
+        // showing whatever chat-panel header state it already has.
+        if (!panelOpen) {
             postToParent('CHAT_PANEL_CLOSED', {});
+            return;
         }
+        var info = currentChatInfo();
+        if (info.isPlaceholder) return; // panel is open, just no name yet — don't report closed
+        postToParent('CHAT_HEADER_UPDATE', info);
     }
 
     // FIX (header icons vanish / blank header space): broadcastState() used

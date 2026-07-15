@@ -10591,8 +10591,16 @@ if (detectExistingCore()) {
                 return;
             }
 
+            // FIX-PREMATURE-CALL-END: don't let a state transition's
+            // callInfo (e.g. the one transitionToInCall() builds on accept)
+            // silently drop the callId that showIncoming()/an earlier
+            // setState() already captured — the CALL_ENDED mismatch guard
+            // in the message listener above depends on it surviving every
+            // transition, not just the first one.
+            const _prevCallId = _callInfo && _callInfo.callId;
             _state    = newState;
             _callInfo = callInfo || _callInfo || {};
+            if (!_callInfo.callId && _prevCallId) _callInfo.callId = _prevCallId;
             _minimized = false;
             _expanded  = false;
 
@@ -10824,9 +10832,34 @@ if (detectExistingCore()) {
             case 'CALL_ENDED':
             case 'call:ended':
             case 'CALL_REJECTED':
-            case 'call:rejected':
+            case 'call:rejected': {
+                // FIX-PREMATURE-CALL-END: this listener used to call
+                // CallOverlayManager.endCall() unconditionally on ANY
+                // CALL_ENDED/CALL_REJECTED postMessage, with no check that
+                // the event was actually about the call currently on screen.
+                // UIEventHandlers.handleCallEnded elsewhere in this file
+                // already guards against exactly this (see its "mismatched
+                // callId" check) — a stray/duplicate CALL_ENDED for a
+                // different, unrelated call session (e.g. a leftover
+                // pending-call id from before the server ack reconciled it)
+                // got ignored there, but this SEPARATE listener had no such
+                // guard and killed the overlay anyway. That's the trace
+                // behind "receiver accepts, briefly shows in-call, then
+                // immediately goes dark/idle while the caller stays
+                // connected" — the receiver's own genuinely-active call got
+                // torn down by an end event meant for a different call.
+                // Apply the same resolve+compare check here, using the
+                // same call id alias map callCore already maintains.
+                const _resolve = (id) => (window.callCore && typeof window.callCore.resolveCallId === 'function') ? window.callCore.resolveCallId(id) : id;
+                const _endedId  = payload && (payload.callId || payload.id);
+                const _activeId = (_callInfo && _callInfo.callId) || (window.UIState && window.UIState.activeCallId) || (typeof UIState !== 'undefined' && UIState.activeCallId);
+                if (_endedId && _activeId && String(_resolve(_endedId)) !== String(_resolve(_activeId))) {
+                    console.warn('[CallOverlayManager] Ignoring CALL_ENDED/CALL_REJECTED - mismatched callId', _endedId, _activeId);
+                    break;
+                }
                 CallOverlayManager.endCall();
                 break;
+            }
 
             case 'CALL_RINGING':
             case 'call:ringing':
@@ -10839,6 +10872,13 @@ if (detectExistingCore()) {
                 CallOverlayManager.showIncoming({
                     userName:   info.callerName || info.userName || 'Incoming Call',
                     userId:     info.callerId   || info.userId,
+                    // FIX-PREMATURE-CALL-END: callId was never carried into
+                    // _callInfo from here, so the guard above (and any
+                    // other callId-aware check) had nothing to compare
+                    // against for an incoming call — it's the id every
+                    // subsequent signal for this call (accept/end/offer)
+                    // will be tagged with, so it must be captured up front.
+                    callId:     info.callId     || info.id,
                     callType:   info.callType   || info.type || 'voice',
                     status:     'Incoming call'
                 });
