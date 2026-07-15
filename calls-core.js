@@ -5925,7 +5925,7 @@ function applySession(sessionData) {
 
         CALL_INITIATE: 'call:initiate',
 
-
+        CALL_INITIATED_ACK: 'call:initiated_ack',
 
         CALL_INCOMING: 'call:incoming',
 
@@ -9656,6 +9656,14 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
                 
 
 
+
+                if (message.type === MESSAGE_TYPES.CALL_INITIATED_ACK) {
+
+                    handleCallInitiatedAck(message.payload || message.data);
+
+                    return;
+
+                }
 
                 // WebRTC Signaling (real)
 
@@ -30548,6 +30556,63 @@ window.CallHandlers = {
 
 
 
+    function resolveCallId(id) {
+        if (!id) return id;
+        if (callsState._callIdAliases && callsState._callIdAliases.has(id)) {
+            return callsState._callIdAliases.get(id);
+        }
+        return id;
+    }
+
+    // FIX: root cause of "mismatched callId" call-ending across every call
+    // path (traced directly from console logs showing e.g. handleCallEnded
+    // ignored - mismatched callId <server-uuid> call_<timestamp>_<random>).
+    // The client generates its own local id the moment it starts a call,
+    // before the server has created anything. The server later creates the
+    // real call record and sends back its own UUID via call:initiated_ack
+    // (now actually reachable now that the dead-code bug in
+    // CallSignalingService.js elsewhere in this batch was fixed) — but the
+    // frontend never had a listener for that event at all, so it kept
+    // tracking the call under its made-up local id forever. Every real
+    // signal about that call from then on (accept, end, offer/answer)
+    // arrives tagged with the server's real UUID, never matches the
+    // client's local id, and gets rejected as "mismatched" — while other
+    // local cleanup code fires anyway and finds "no active call". This
+    // reconciles the two ids the moment the ack arrives, and keeps the old
+    // local id mapped as an alias so anything still holding a reference to
+    // it resolves correctly instead of breaking.
+    function handleCallInitiatedAck(payload) {
+        const serverCallId = payload && payload.callId;
+        const localCallId = callsState.activeCallId || callsState.localCallId;
+        logCall(MODULE, 'handleCallInitiatedAck', { serverCallId, localCallId });
+        if (!serverCallId) return;
+
+        if (!callsState._callIdAliases) callsState._callIdAliases = new Map();
+        if (localCallId && localCallId !== serverCallId) {
+            callsState._callIdAliases.set(localCallId, serverCallId);
+        }
+        callsState._callIdAliases.set(serverCallId, serverCallId);
+
+        callsState.serverCallId = serverCallId;
+        callsState.activeCallId = serverCallId;
+
+        try { notifyListeners('call_initiated_ack', { callId: serverCallId, calleeName: payload.calleeName }); } catch (_) {}
+
+        // FIX: also fixes the outgoing-call screen showing "User" instead of
+        // the real callee name when calling from the Calls module — the
+        // resolved name lives in this same payload and was never applied
+        // because nothing was listening for this event at all.
+        if (payload.calleeName) {
+            callsState.remoteUserName = payload.calleeName;
+            try {
+                const nameEl = document.getElementById('callerName') || document.getElementById('outgoingCallName') || document.querySelector('.call-name');
+                if (nameEl && (!nameEl.textContent || nameEl.textContent.trim() === 'User')) {
+                    nameEl.textContent = payload.calleeName;
+                }
+            } catch (_) {}
+        }
+    }
+
     async function handleSignalOffer(payload) {
 
 
@@ -33898,6 +33963,14 @@ _closeCallUI: function() {
                 
 
 
+
+                if (msg.type === MESSAGE_TYPES.CALL_INITIATED_ACK) {
+
+                    handleCallInitiatedAck(msg.payload || msg.data);
+
+                    return;
+
+                }
 
                 if (msg.type === MESSAGE_TYPES.SIGNAL_OFFER) {
 
@@ -37732,6 +37805,7 @@ clearActiveCall: function() {
     // These MUST exist on window.callCore or video signals are silently dropped
     window.callCore.handleRemoteOffer  = function(payload) { handleSignalOffer(payload);  };
     window.callCore.handleRemoteAnswer = function(payload) { handleSignalAnswer(payload); };
+    window.callCore.resolveCallId = resolveCallId;
     window.callCore.handleIceCandidate = window.callCore.handleIceCandidate ||
                                          function(payload) { handleIceCandidate(payload); };
 

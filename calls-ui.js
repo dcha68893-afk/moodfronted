@@ -4196,6 +4196,21 @@ handleContactItemClick: function(e) {
                     // Receiver answered — now start the timer
                     this.handleCallAccepted(data);
                     break;
+                case 'call_initiated_ack':
+                    // Server assigned the call its real id — adopt it so
+                    // later end/accept/signal events (tagged with this real
+                    // id) aren't rejected as "mismatched" against whatever
+                    // locally-generated id we started with.
+                    if (data && data.callId) {
+                        UIState.activeCallId = data.callId;
+                        if (data.calleeName) {
+                            const nameEl = document.getElementById('callerName') || document.getElementById('outgoingCallName') || document.querySelector('.call-name');
+                            if (nameEl && (!nameEl.textContent || nameEl.textContent.trim() === 'User')) {
+                                nameEl.textContent = data.calleeName;
+                            }
+                        }
+                    }
+                    break;
                 case 'call_started':
                     this.handleCallStarted(data);
                     break;
@@ -5347,8 +5362,11 @@ handleContactItemClick: function(e) {
         },
 
         handleCallEnded: function(callData) {
+            const _resolve = (id) => (window.callCore && typeof window.callCore.resolveCallId === 'function') ? window.callCore.resolveCallId(id) : id;
             const endedCallId = (callData && (callData.callId || callData.id)) || null;
-            if (endedCallId && UIState.activeCallId && String(endedCallId) !== String(UIState.activeCallId)) {
+            const _resolvedEnded = _resolve(endedCallId);
+            const _resolvedActive = _resolve(UIState.activeCallId);
+            if (endedCallId && UIState.activeCallId && String(_resolvedEnded) !== String(_resolvedActive)) {
                 console.warn('[Calls UI] handleCallEnded ignored - mismatched callId', endedCallId, UIState.activeCallId);
                 return;
             }
