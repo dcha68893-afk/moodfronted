@@ -2201,7 +2201,7 @@ function injectCSS(){
     var s=document.createElement('style');s.id='gcp-css';
     s.textContent=[
     /* Chat panel */
-    '#groupChatPanel{flex-direction:column;background:var(--bg-color);}',
+    '#groupChatPanel{position:relative;flex-direction:column;background:var(--bg-color);}',
     '#groupChatPanel.active{display:flex!important;}',
     '#chatMessagesContainer{flex:1;overflow-y:auto;min-height:0;background:var(--secondary-color,#e5ddd5);padding:12px 14px 6px;}',
     '#chatMessages{display:flex;flex-direction:column;gap:4px;}',
@@ -2384,17 +2384,24 @@ function renderMsgs(box,msgs){
 function appendBubble(box,m,me){
     if(!box||!m)return;
     var rawSid=String(m.senderId||m.userId||m.sender_id||(m.sender&&(m.sender.id||m.sender.userId))||'');
-    var own=(me!==''&&rawSid!==''&&rawSid===me);
+    // BUGFIX: a freshly-sent own message (_tmp flag) always counts as "own" even if
+    // myId() has not resolved yet (can be empty for an instant right after the iframe
+    // loads). Previously me==='' forced own=false for everything -- including your own
+    // outgoing message -- so it rendered as a "received" bubble with a sender-name box.
+    var own=m._tmp?true:(me!==''&&rawSid!==''&&rawSid===me);
     if(m.id){if(!box._seen)box._seen=new Set();if(box._seen.has(String(m.id)))return;box._seen.add(String(m.id));}
     var isSystem=(m.type==='system'||m.type==='info');
     var sObj=m.sender||{};
     var rawName=m.senderName||m.sender_name||sObj.displayName||sObj.firstName||sObj.username||sObj.name||'';
-    var displayName=own?'You':(rawName||'User');
+    var displayName=own?'You':rawName;
     var wrap=document.createElement('div');
     wrap.className='message '+(isSystem?'system':own?'sent':'received');
-    if(m.id)wrap.dataset.mid=String(m.id);if(m._tmp)wrap.dataset.tmp='1';
+    if(m.id)wrap.dataset.mid=String(m.id);if(m._tmp)wrap.dataset.tmp='1';if(m._localId)wrap.dataset.localid=m._localId;
     var inner='';
-    if(!isSystem&&!own)inner+='<div class="message-sender">'+esc(displayName)+'</div>';
+    // BUGFIX: used to fall back to the literal word "User" as a placeholder label
+    // whenever the real name could not be resolved, showing an empty-looking box
+    // with just "User" in it. Only render the label when a real name is known.
+    if(!isSystem&&!own&&displayName)inner+='<div class="message-sender">'+esc(displayName)+'</div>';
     var mtype=m.type||m.messageType||'text';var content='';
     if((mtype==='image'||mtype==='photo')&&(m.mediaUrl||m.media_url)){
         var src=m.mediaUrl||m.media_url;content='<img class="msg-img" src="'+esc(src)+'" data-src="'+esc(src)+'" alt="image">';
@@ -2432,9 +2439,13 @@ function sendMsg(){
     var me=myId(),gc2=gc(),cu=gc2&&gc2.currentUser;
     var localId='tmp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
     _pendingIds.add(localId);
-    var tmp={_tmp:true,senderId:me,sender:{id:me,displayName:(cu&&(cu.displayName||cu.firstName||cu.username))||'You'},content:text,type:'text',createdAt:new Date().toISOString()};
+    var tmp={_tmp:true,_localId:localId,senderId:me,sender:{id:me,displayName:(cu&&(cu.displayName||cu.firstName||cu.username))||'You'},content:text,type:'text',createdAt:new Date().toISOString()};
     appendBubble(box,tmp,me);scrollBot();
-    var tmpEl=box&&box.lastElementChild;
+    // BUGFIX: used to grab box.lastElementChild here, which breaks if anything else
+    // appends to the message list between this line and appendBubble above (e.g. a
+    // fast second send, or a realtime message from someone else arriving first).
+    // Look the bubble up by its own localId instead so we always convert the right one.
+    var tmpEl=box&&box.querySelector('[data-localid="'+localId+'"]');
     var sent=false;
     if(gc2&&typeof gc2.sendGroupMessage==='function'){
         try{gc2.sendGroupMessage(g.id,text).then(function(res){_pendingIds.delete(localId);if(res&&res.success&&res.data&&res.data.id&&tmpEl&&tmpEl.dataset.tmp){tmpEl.removeAttribute('data-tmp');tmpEl.dataset.mid=String(res.data.id);if(box._seen)box._seen.add(String(res.data.id));}}).catch(function(){_pendingIds.delete(localId);_markFailed(tmpEl);});sent=true;}catch(err){}

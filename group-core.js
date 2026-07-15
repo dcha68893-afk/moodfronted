@@ -3424,6 +3424,18 @@ if (typeof window !== 'undefined' && !window.__GROUPS_MESSAGE_LISTENER_SET__) {
             });
         }
 
+        // BUGFIX: window.__groupCoreRefreshInvitations was referenced below (twice) but
+        // never defined anywhere in the codebase, so both "typeof === 'function'" checks
+        // always failed and neither branch ever refreshed anything -- an invitation
+        // arriving via the kyn: custom event or the parent postMessage relay never showed
+        // up until the invites panel was manually closed and reopened.
+        if (typeof window.__groupCoreRefreshInvitations !== 'function') {
+            window.__groupCoreRefreshInvitations = function() {
+                try { if (document.getElementById('inviteBody') && typeof window.loadReceivedInvites === 'function') window.loadReceivedInvites(); } catch (_) {}
+                try { if (typeof window.renderGroupInvitesSecure === 'function') window.renderGroupInvitesSecure(); } catch (_) {}
+            };
+        }
+
         // PHASE14 FIX P1: Listen for group invitation received socket event
         // Backend emits 'group:invitation:received' but group-core had no listener.
         if (!window.__groupCoreListenersRegistered.has('p14:group:invitation:received')) {

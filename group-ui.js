@@ -4832,10 +4832,16 @@ export async function loadSentInvites() {
     if (!body) return;
     body.innerHTML = panelLoader();
     try {
+        // BUGFIX: this used to call '/api/group-members/'+gid+'/invitations' whenever a group
+        // was selected. That endpoint is the ADMIN-ONLY "pending invitations for this group"
+        // view (getPendingInvitations) -- it 404/403s for non-admins and, even when it does
+        // return data, its rows use the 'invitee' alias, not 'targetUser', so the card below
+        // always fell back to "No sent invitations." Use the dedicated sent-invitations
+        // endpoint (targetUser/targetUserId shape) unconditionally instead.
         const gid = window.selectedGroup?.id;
-        const url = gid ? '/api/group-members/' + gid + '/invitations' : '/api/groups/invitations/sent';
-        const data = await panelFetch(url);
-        const invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
+        const data = await panelFetch('/api/groups/invitations/sent');
+        let invites = data?.data?.invitations || data?.invitations || (Array.isArray(data?.data) ? data.data : []);
+        if (gid) invites = invites.filter(inv => String(inv.groupId) === String(gid));
         if (!invites.length) { body.innerHTML = panelEmpty('fas fa-paper-plane', 'No sent invitations.'); return; }
         body.innerHTML = '';
         invites.forEach(inv => {
@@ -4846,7 +4852,7 @@ export async function loadSentInvites() {
                     <div style="flex:1"><div style="font-weight:600;font-size:13px;color:var(--text-primary)">@${tname}</div><div style="font-size:12px;color:var(--text-secondary)">Sent ${timeAgo(inv.createdAt)}</div></div>
                     <div style="display:flex;align-items:center;gap:8px">
                         <span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#f6ad5522;color:#f6ad55">${inv.status||'pending'}</span>
-                        ${inv.status==='pending'?'<button data-cinv="'+inv.id+'" style="padding:5px 10px;border-radius:7px;background:none;border:1px solid var(--border-color);cursor:pointer;color:var(--text-primary);font-size:12px;">Cancel</button>':''}
+                        ${inv.status==='pending'?`<button data-cinv="${inv.id}" style="padding:5px 10px;border-radius:7px;background:none;border:1px solid var(--border-color);cursor:pointer;color:var(--text-primary);font-size:12px;">Cancel</button>`:''}
                     </div>
                 </div>
             `);
@@ -4899,6 +4905,13 @@ if (typeof window !== 'undefined') {
     secureExpose('manageRoles', manageRoles);
     secureExpose('createEvent', createEvent);
     secureExpose('createPoll', createPoll);
+    // BUGFIX: these were only ES-module exports, invisible to group-core.js /
+    // group-core-patch.js (separate scripts). Real-time invite refresh relied on
+    // calling them via `window.loadReceivedInvites()` / `window.loadSentInvites()`,
+    // which silently no-op'd because the functions never existed on window.
+    secureExpose('loadReceivedInvites', loadReceivedInvites);
+    secureExpose('loadSentInvites', loadSentInvites);
+    secureExpose('renderGroupInvitesSecure', renderGroupInvitesSecure);
     secureExpose('getUIState', () => ({
         isInitialized: _UI_STATE.isInitialized,
         protocolReady: _protocolReady,

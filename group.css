@@ -3368,6 +3368,7 @@ input:focus + .toggle-slider,
 /* Panel base */
 #groupChatPanel {
     display: none;
+    position: relative;
     flex-direction: column !important;
     background: var(--bg-color);
     overflow: hidden;

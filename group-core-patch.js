@@ -504,6 +504,26 @@ function _setupSocketHandlers(GC) {
             GC.groupInvites.push(data);
             GC.saveGroups();
             GC.emit('group:invites-updated', GC.groupInvites);
+            // FIX: also refresh the tabbed invites panel (#inviteBody) if it's open —
+            // GC.emit above only reaches the old #invitesList sidebar renderer.
+            try { if (document.getElementById('inviteBody') && typeof window.loadReceivedInvites === 'function') window.loadReceivedInvites(); } catch (_) {}
+            try { if (typeof window.showNotification === 'function') window.showNotification('New group invitation received', 'info'); } catch (_) {}
+        });
+
+        // FIX: these three had no frontend listener anywhere, so a sent invite's
+        // status never updated live — the "Sent" tab kept showing it as pending
+        // until the panel was closed and reopened, even after the other person
+        // had already accepted or declined it.
+        socket.on('group:invitation:accepted', (data) => {
+            try { if (document.getElementById('inviteBody') && typeof window.loadSentInvites === 'function') window.loadSentInvites(); } catch (_) {}
+            try { if (typeof window.showNotification === 'function') window.showNotification((data?.inviteeName || 'Someone') + ' accepted your group invitation', 'success'); } catch (_) {}
+        });
+        socket.on('group:invitation:rejected', (data) => {
+            try { if (document.getElementById('inviteBody') && typeof window.loadSentInvites === 'function') window.loadSentInvites(); } catch (_) {}
+            try { if (typeof window.showNotification === 'function') window.showNotification((data?.inviteeName || 'Someone') + ' declined your group invitation', 'info'); } catch (_) {}
+        });
+        socket.on('group:invitation:cancelled', (data) => {
+            try { if (document.getElementById('inviteBody') && typeof window.loadReceivedInvites === 'function') window.loadReceivedInvites(); } catch (_) {}
         });
 
         // (log suppressed)
