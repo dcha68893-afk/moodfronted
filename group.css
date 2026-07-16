@@ -1940,9 +1940,13 @@
         }
         
         .chat-header-title {
-            font-weight: 600;
+            font-weight: 700;
             font-size: 16px;
             margin-bottom: 2px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
         .chat-header-subtitle {
@@ -1951,6 +1955,9 @@
             display: flex;
             align-items: center;
             gap: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
         .chat-header-actions {

@@ -14616,19 +14616,25 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-    // If there's a stale call with the same ID, or callActive with no ID, clean it first
+    // FIX (call self-terminates right after Accept / dark screen): this used to also
+    // treat "activeCallId === callId && callActive" as stale and call resetCallState().
+    // But that combination is the NORMAL state during acceptCall() — handleSignalOffer()
+    // legitimately sets callActive=true (and activeCallId is already set to this callId
+    // from handleIncomingCall) the moment the early WebRTC offer arrives, BEFORE the user
+    // taps Accept. Calling resetCallState() here stopped the just-acquired local media
+    // stream, closed the WebRTC peer connection, and told CallManager to end the call —
+    // all mid-flight while acceptCall() was still setting up the SAME call. That's why the
+    // receiver's screen went dark almost immediately after accepting. Only a genuinely
+    // orphaned callActive flag (true with no matching id at all) is truly stale here; a
+    // matching id is call continuation, not staleness, and must not be torn down.
 
 
 
-    if ((callsState.activeCallId === callId && callsState.callActive) ||
+    if (callsState.callActive && !callsState.activeCallId) {
 
 
 
-        (callsState.callActive && !callsState.activeCallId)) {
-
-
-
-        logWarn(MODULE, 'Stale call state detected, resetting before new call', { callId });
+        logWarn(MODULE, 'Stale call state detected (orphaned callActive flag), resetting before new call', { callId });
 
 
 
@@ -14641,6 +14647,14 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
         callsState.activeCallId = null;
+
+
+
+    } else if (callsState.activeCallId === callId && callsState.callActive) {
+
+
+
+        logCall(MODULE, 'Continuing existing active call session (not stale) — skipping teardown', { callId });
 
 
 
@@ -15313,7 +15327,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING, CALLS_STATE.ACTIVE, CALLS_STATE.CALL_READY], // CALL_READY added for direct call initiation
+                [CALLS_STATE.INIT]: [CALLS_STATE.REGISTERING, CALLS_STATE.ACTIVE, CALLS_STATE.CALL_READY, CALLS_STATE.IN_CALL], // CALL_READY added for direct call initiation; IN_CALL added so accept can formalize the FSM even if lifecycle was still INIT
 
 
 

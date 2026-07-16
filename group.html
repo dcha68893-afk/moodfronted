@@ -1102,15 +1102,30 @@
                     <div style="position:relative">
                         <button class="chat-header-btn" id="chatMoreBtn" title="More options"><i class="fas fa-ellipsis-v"></i></button>
                         <div id="chatMoreMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;min-width:200px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:9999;padding:6px 0">
+                            <button class="gcm-item" data-action="search"><i class="fas fa-search"></i> Search</button>
                             <button class="gcm-item" data-action="members"><i class="fas fa-users"></i> Members</button>
+                            <button class="gcm-item" data-action="media"><i class="fas fa-photo-video"></i> Group Media</button>
+                            <button class="gcm-item" data-action="mute"><i class="fas fa-bell-slash"></i> <span data-mute-label>Mute Notifications</span></button>
+                            <button class="gcm-item" data-action="disappearing"><i class="fas fa-clock"></i> Disappearing Messages</button>
                             <button class="gcm-item" data-action="settings"><i class="fas fa-cog"></i> Settings</button>
                             <button class="gcm-item" data-action="theme"><i class="fas fa-palette"></i> Theme</button>
                             <button class="gcm-item" data-action="purpose"><i class="fas fa-bullseye"></i> Purpose</button>
                             <button class="gcm-item" data-action="info"><i class="fas fa-info-circle"></i> Group Info</button>
                             <button class="gcm-item" data-action="tools" id="groupOSBtn"><i class="fas fa-tools"></i> Group Tools</button>
                             <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
+                            <button class="gcm-item" data-action="more"><i class="fas fa-ellipsis-h"></i> More</button>
+                            <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
                             <button class="gcm-item gcm-danger" data-action="delete"><i class="fas fa-trash"></i> Delete Group</button>
                             <button class="gcm-item gcm-danger" data-action="leave"><i class="fas fa-sign-out-alt"></i> Leave Group</button>
+                        </div>
+                        <!-- "More" submenu: Clear Chat / Export Chat / Add Shortcut / Add to List / Report -->
+                        <div id="chatMoreSubMenu" style="display:none;position:absolute;top:calc(100% + 4px);right:0;min-width:200px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:9999;padding:6px 0">
+                            <button class="gcm-item" data-subaction="clear"><i class="fas fa-broom"></i> Clear Chat</button>
+                            <button class="gcm-item" data-subaction="export"><i class="fas fa-file-export"></i> Export Chat</button>
+                            <button class="gcm-item" data-subaction="shortcut"><i class="fas fa-thumbtack"></i> Add Shortcut</button>
+                            <button class="gcm-item" data-subaction="addtolist"><i class="fas fa-list"></i> Add to List</button>
+                            <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
+                            <button class="gcm-item gcm-danger" data-subaction="report"><i class="fas fa-flag"></i> Report</button>
                         </div>
                     </div>
                     <button class="chat-header-btn" id="closeChatBtn" title="Close"><i class="fas fa-times"></i></button>
@@ -2435,6 +2450,24 @@ function appendBubble(box,m,me){
         var furl=m.mediaUrl||m.media_url,fname=m.fileName||m.file_name||'File';
         content='<a class="msg-file" href="'+esc(furl)+'" target="_blank"><i class="fas fa-file" style="font-size:20px;flex-shrink:0;"></i><span>'+esc(fname)+'</span></a>';
     }else{content=esc(m.content||m.text||m.body||'');}
+    // FIX-EMPTY-BUBBLE: some realtime echo events for the sender's OWN message
+    // (e.g. a server broadcast that assumes the sender already has the content
+    // locally) arrive with no content and no media at all. Rendering those as
+    // a brand-new bubble produces a permanent blank box next to the real one.
+    // If there's genuinely nothing to show, don't create a new bubble — fold
+    // it into the still-pending optimistic bubble for this send (if any) so
+    // that one just gets confirmed, otherwise drop the event entirely.
+    var hasMedia=!!(m.mediaUrl||m.media_url||(m.metadata&&m.metadata.attachment));
+    if(!isSystem&&!hasMedia&&!content){
+        if(own){
+            var _pendingTmp=box.querySelector('[data-tmp="1"]');
+            if(_pendingTmp){
+                if(m.id){_pendingTmp.removeAttribute('data-tmp');_pendingTmp.dataset.mid=String(m.id);if(box._seen)box._seen.add('id:'+String(m.id));}
+                return;
+            }
+        }
+        return;
+    }
     inner+='<div class="message-bubble">'+content+'</div>';
     inner+='<div class="message-time">'+fmt(m.createdAt||m.created_at||m.timestamp||m.sentAt)+'</div>';
     wrap.innerHTML=inner;box.appendChild(wrap);
@@ -2688,7 +2721,47 @@ function setupMenu(){
             if (gr && gr.id) { window.__gcCurGroup = gr; cb(gr); } else { cb(null); }
         }).catch(function(){ cb(null); });
     }
-    menu.querySelectorAll('.gcm-item').forEach(function(it){it.addEventListener('click',function(e){e.stopPropagation();menu.style.display='none';var a=it.getAttribute('data-action');if(a==='tools'){window._openGroupOSPanel();return;}_gcResolveGroupThen(function(g){if(!g){ntf('No group selected','error');return;}window.__gcCurGroup=g;if(a==='leave')doLeave();else if(a==='delete')doDelete();else openSub(a);});});});
+    menu.querySelectorAll('.gcm-item').forEach(function(it){it.addEventListener('click',function(e){
+        e.stopPropagation();
+        var a=it.getAttribute('data-action');
+        if(a==='tools'){menu.style.display='none';window._openGroupOSPanel();return;}
+        if(a==='more'){
+            var sub=document.getElementById('chatMoreSubMenu');
+            if(sub){
+                if(sub.parentElement!==document.body){
+                    document.body.appendChild(sub);
+                    sub.style.setProperty('position','fixed','important');
+                    sub.style.setProperty('top','56px','important');
+                    sub.style.setProperty('right','8px','important');
+                }
+                menu.style.display='none';
+                sub.style.display=sub.style.display==='none'?'block':'none';
+            }
+            return;
+        }
+        menu.style.display='none';
+        if(a==='mute'){_gcResolveGroupThen(function(g){if(!g){ntf('No group selected','error');return;}window.__gcCurGroup=g;toggleMute(g);});return;}
+        _gcResolveGroupThen(function(g){if(!g){ntf('No group selected','error');return;}window.__gcCurGroup=g;if(a==='leave')doLeave();else if(a==='delete')doDelete();else openSub(a);});
+    });});
+    // "More" submenu items — Clear Chat / Export Chat / Add Shortcut / Add to List / Report
+    var subMenu=document.getElementById('chatMoreSubMenu');
+    if(subMenu&&!subMenu._gcM){
+        subMenu._gcM=true;
+        subMenu.querySelectorAll('.gcm-item').forEach(function(it){it.addEventListener('click',function(e){
+            e.stopPropagation();subMenu.style.display='none';
+            var sa=it.getAttribute('data-subaction');
+            _gcResolveGroupThen(function(g){
+                if(!g){ntf('No group selected','error');return;}
+                window.__gcCurGroup=g;
+                if(sa==='clear')doClearChat(g);
+                else if(sa==='export')doExportChat(g);
+                else if(sa==='shortcut')doAddShortcut(g);
+                else if(sa==='addtolist')doAddToList(g);
+                else if(sa==='report')doReportGroup(g);
+            });
+        });});
+        document.addEventListener('click',function(){if(subMenu)subMenu.style.display='none';});
+    }
     // ✅ FIX: Listen for parent postMessage so hdrGroupMore in chat.html opens this menu
     window.addEventListener('message', function(ev) {
         var d = ev.data;
@@ -2710,7 +2783,7 @@ function setupMenu(){
 function openSub(type){
     var sp=document.getElementById('gcSubPanel'),ti=document.getElementById('gcSubTitle'),ct=document.getElementById('gcSubContent'),g=window.__gcCurGroup;
     if(!sp||!ti||!ct||!g)return;
-    ti.textContent={members:'Members',settings:'Settings',theme:'Theme',purpose:'Purpose',info:'Group Info'}[type]||type;
+    ti.textContent={members:'Members',settings:'Settings',theme:'Theme',purpose:'Purpose',info:'Group Info',search:'Search',media:'Group Media',disappearing:'Disappearing Messages'}[type]||type;
     ct.innerHTML='<div style="text-align:center;padding:30px"><i class="fas fa-spinner fa-spin"></i></div>';
     sp.style.display='flex';sp.classList.add('open');setTimeout(function(){buildSub(type,g,ct);},60);
 }
@@ -2770,7 +2843,147 @@ function buildSub(type,g,el){
         el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;padding:0 4px">Current: <b>'+esc(g.purpose||'general')+'</b></p><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 4px">'+pp.map(function(p){return'<button data-pid="'+esc(p.id)+'" style="display:flex;align-items:center;gap:8px;padding:10px;border:'+(g.purpose===p.id?'2px solid var(--primary-color,#0084ff)':'2px solid var(--border-color,#ddd)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:13px"><span>'+p.icon+'</span><span>'+esc(p.id)+'</span></button>';}).join('')+'</div>';
         el.querySelectorAll('[data-pid]').forEach(function(b){b.addEventListener('click',function(){api('/groups/'+g.id,{method:'PUT',body:{purpose:b.getAttribute('data-pid')}}).then(function(){g.purpose=b.getAttribute('data-pid');buildSub('purpose',g,el);ntf('Purpose updated!');}).catch(function(){ntf('Failed','error');});});});return;
     }
+    if(type==='disappearing'){
+        var curOn=!!(g.settings&&g.settings.disappearingMessages);
+        var curSecs=(g.settings&&g.settings.disappearingTimer)||0;
+        var opts=[{v:0,l:'Off'},{v:86400,l:'24 hours'},{v:604800,l:'7 days'},{v:7776000,l:'90 days'}];
+        el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);margin:0 0 12px;padding:0 4px">Messages will disappear after the selected time for everyone in this chat.</p><div style="display:flex;flex-direction:column;gap:8px;padding:0 4px">'+opts.map(function(o){var active=(curOn&&curSecs===o.v)||(!curOn&&o.v===0);return'<button data-dsec="'+o.v+'" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border:'+(active?'2px solid var(--primary-color,#0084ff)':'2px solid var(--border-color,#ddd)')+';border-radius:8px;cursor:pointer;background:var(--bg-color);font-size:14px"><span>'+o.l+'</span>'+(active?'<i class="fas fa-check" style="color:var(--primary-color,#0084ff)"></i>':'')+'</button>';}).join('')+'</div>';
+        el.querySelectorAll('[data-dsec]').forEach(function(b){b.addEventListener('click',function(){
+            var secs=parseInt(b.getAttribute('data-dsec'),10);
+            api('/groups/'+g.id+'/settings',{method:'PUT',body:{disappearingMessages:secs>0,disappearingTimer:secs}}).then(function(){
+                g.settings=Object.assign({},g.settings,{disappearingMessages:secs>0,disappearingTimer:secs});
+                buildSub('disappearing',g,el);ntf(secs>0?'Disappearing messages enabled':'Disappearing messages turned off');
+            }).catch(function(){ntf('Failed to update','error');});
+        });});
+        return;
+    }
+    if(type==='search'){
+        el.innerHTML='<div style="padding:0 4px"><input id="gcSearchInput" type="text" placeholder="Search in this chat…" style="width:100%;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-color);color:var(--text-primary);font-size:14px;box-sizing:border-box"><div id="gcSearchResults" style="margin-top:12px"></div></div>';
+        var _sTimer=null,_input=document.getElementById('gcSearchInput'),_res=document.getElementById('gcSearchResults');
+        _input.focus();
+        _input.addEventListener('input',function(){
+            clearTimeout(_sTimer);
+            var q=_input.value.trim();
+            if(!q){_res.innerHTML='';return;}
+            _sTimer=setTimeout(function(){
+                _res.innerHTML='<div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin"></i></div>';
+                var cid=g.chatId||g.id;
+                api('/messaging/chats/'+cid+'/search?q='+encodeURIComponent(q)).then(function(d){
+                    var list=(d.data&&d.data.messages)||d.data||[];
+                    if(!Array.isArray(list)||!list.length){_res.innerHTML='<p style="text-align:center;padding:16px;color:var(--text-secondary)">No results</p>';return;}
+                    _res.innerHTML=list.map(function(m){
+                        var sn=(m.sender&&(m.sender.displayName||m.sender.username))||m.senderName||'Member';
+                        var c=String(m.content||m.text||'').slice(0,140);
+                        return '<div data-mid="'+esc(String(m.id||''))+'" style="padding:10px 4px;border-bottom:1px solid var(--border-color);cursor:pointer"><div style="font-size:12px;font-weight:600;color:#667eea">'+esc(sn)+'</div><div style="font-size:13px">'+esc(c)+'</div><div style="font-size:11px;color:var(--text-secondary);margin-top:2px">'+fmt(m.createdAt||m.timestamp)+'</div></div>';
+                    }).join('');
+                    _res.querySelectorAll('[data-mid]').forEach(function(row){row.addEventListener('click',function(){
+                        var mid=row.getAttribute('data-mid');
+                        var target=document.querySelector('[data-mid="'+mid+'"], [data-message-id="'+mid+'"]');
+                        var chatBox=document.getElementById('chatMessages')||document.getElementById('chatMessagesContainer');
+                        if(target&&chatBox){
+                            target.scrollIntoView({behavior:'smooth',block:'center'});
+                            target.style.transition='background .3s';var _prevBg=target.style.background;
+                            target.style.background='rgba(102,126,234,.18)';
+                            setTimeout(function(){target.style.background=_prevBg||'';},1200);
+                        }
+                    });});
+                }).catch(function(){_res.innerHTML='<p style="text-align:center;padding:16px;color:var(--text-secondary)">Search unavailable</p>';});
+            },300);
+        });
+        return;
+    }
+    if(type==='media'){
+        el.innerHTML='<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i></div>';
+        var cid2=g.chatId||g.id;
+        api('/groups/'+g.id+'/messages?limit=100').then(function(d){
+            var list=(d.data&&d.data.messages)||d.data||[];
+            if(!Array.isArray(list))list=[];
+            var media=list.filter(function(m){
+                var t=m.type||m.messageType;
+                return (t==='image'||t==='photo'||t==='video'||t==='file'||t==='document')&&(m.mediaUrl||m.media_url||(m.metadata&&m.metadata.attachment));
+            });
+            if(!media.length){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">No media, links, or docs yet</p>';return;}
+            el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:0 4px">'+media.map(function(m){
+                var t=m.type||m.messageType;
+                var url=m.mediaUrl||m.media_url||(m.metadata&&m.metadata.attachment&&m.metadata.attachment.url)||'';
+                if(t==='image'||t==='photo')return '<a href="'+esc(url)+'" target="_blank" style="display:block;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--secondary-color)"><img src="'+esc(url)+'" style="width:100%;height:100%;object-fit:cover" alt=""></a>';
+                if(t==='video')return '<a href="'+esc(url)+'" target="_blank" style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:8px;background:var(--secondary-color)"><i class="fas fa-play-circle" style="font-size:22px"></i></a>';
+                var fname=m.fileName||m.file_name||(m.metadata&&m.metadata.attachment&&m.metadata.attachment.name)||'File';
+                return '<a href="'+esc(url)+'" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;aspect-ratio:1;border-radius:8px;background:var(--secondary-color);padding:4px;text-align:center"><i class="fas fa-file" style="font-size:18px"></i><span style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">'+esc(fname)+'</span></a>';
+            }).join('')+'</div>';
+        }).catch(function(){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load media</p>';});
+        return;
+    }
     el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Coming soon</p>';
+}
+
+/* ─── Mute / Clear / Export / Shortcut / Add-to-list / Report ──── */
+function toggleMute(g){
+    var newState=!(g.isMuted||(g.settings&&g.settings.muted));
+    var cid=g.chatId||g.id;
+    api('/messaging/chats/'+cid+'/mute',{method:newState?'PUT':'DELETE',body:newState?{muted:true}:undefined}).then(function(){
+        g.isMuted=newState;
+        var lbl=document.querySelector('[data-mute-label]');
+        if(lbl)lbl.textContent=newState?'Unmute Notifications':'Mute Notifications';
+        ntf(newState?'Group muted':'Group unmuted');
+    }).catch(function(){ntf('Failed to update mute state','error');});
+}
+function doClearChat(g){
+    if(!confirm('Clear all messages in "'+g.name+'" from this device? This only clears your view — it does not delete messages for other members.'))return;
+    var box=document.getElementById('chatMessages')||document.getElementById('chatMessagesContainer');
+    if(box){box.innerHTML='';box._seen=new Set();}
+    try{localStorage.setItem('kynecta_group_cleared_'+g.id,String(Date.now()));}catch(e){}
+    ntf('Chat cleared on this device');
+}
+function doExportChat(g){
+    api('/groups/'+g.id+'/messages?limit=500').then(function(d){
+        var list=(d.data&&d.data.messages)||d.data||[];
+        if(!Array.isArray(list))list=[];
+        var lines=list.map(function(m){
+            var sn=(m.sender&&(m.sender.displayName||m.sender.username))||m.senderName||'Member';
+            var ts=m.createdAt||m.timestamp||'';
+            var c=m.content||m.text||(m.type?'['+m.type+']':'');
+            return '['+fmt(ts)+'] '+sn+': '+c;
+        });
+        var blob=new Blob([lines.join('\n')],{type:'text/plain'});
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement('a');a.href=url;a.download=(g.name||'group-chat').replace(/[^a-z0-9]+/gi,'_')+'_export.txt';
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(function(){URL.revokeObjectURL(url);},2000);
+        ntf('Chat exported');
+    }).catch(function(){ntf('Failed to export chat','error');});
+}
+function doAddShortcut(g){
+    try{
+        var raw=localStorage.getItem('kynecta_group_shortcuts');
+        var list=raw?JSON.parse(raw):[];
+        if(!list.some(function(x){return String(x.id)===String(g.id);})){
+            list.push({id:g.id,name:g.name,addedAt:Date.now()});
+            localStorage.setItem('kynecta_group_shortcuts',JSON.stringify(list));
+        }
+        ntf('Shortcut added');
+    }catch(e){ntf('Failed to add shortcut','error');}
+}
+function doAddToList(g){
+    var listName=prompt('Add "'+g.name+'" to which list?');
+    if(!listName)return;
+    try{
+        var raw=localStorage.getItem('kynecta_group_customlists');
+        var lists=raw?JSON.parse(raw):{};
+        if(!lists[listName])lists[listName]=[];
+        if(!lists[listName].some(function(x){return String(x.id)===String(g.id);}))lists[listName].push({id:g.id,name:g.name});
+        localStorage.setItem('kynecta_group_customlists',JSON.stringify(lists));
+        ntf('Added to "'+listName+'"');
+    }catch(e){ntf('Failed to add to list','error');}
+}
+function doReportGroup(g){
+    if(!confirm('Report the group "'+g.name+'" to moderators?'))return;
+    var ownerId=g.createdBy||g.ownerId||(g.owner&&g.owner.id);
+    if(!ownerId){ntf('Unable to report this group','error');return;}
+    api('/privacy/report',{method:'POST',body:{reportedUserId:ownerId,reason:'other',details:'Reported group "'+(g.name||'')+'" (ID: '+g.id+')'}}).then(function(d){
+        if(d&&d.status==='error'){ntf(d.message||'Failed to report','error');return;}
+        ntf('Report submitted');
+    }).catch(function(){ntf('Failed to report group','error');});
 }
 
 /* ─── Leave / Delete ──────────────────────────────────────────── */
@@ -2861,9 +3074,105 @@ function setupClose(){
     if(bb&&!bb._gcCl){bb._gcCl=true;bb.addEventListener('click',function(){var sp=document.getElementById('gcSubPanel');if(sp){sp.style.display='none';sp.classList.remove('open');}});}
 }
 
+/* ─── Header click → full Group Details screen ──────────────────
+   #groupDetailsPanel/#groupDetailsContent already existed in the markup
+   and CSS (fixed full-screen overlay with a back button) but nothing ever
+   opened it or filled it in, so the header name/avatar were dead clicks. */
+function setupHeaderInfo(){
+    var info=document.getElementById('chatHeaderInfo');
+    if(info&&!info._gcHI){
+        info._gcHI=true;
+        info.addEventListener('click',function(){
+            _gcResolveGroupThen(function(g){
+                if(!g){ntf('No group selected','error');return;}
+                window.__gcCurGroup=g;
+                openGroupDetails(g);
+            });
+        });
+    }
+    var back=document.getElementById('backBtn');
+    if(back&&!back._gcHI){
+        back._gcHI=true;
+        back.addEventListener('click',function(){
+            var p=document.getElementById('groupDetailsPanel');
+            if(p){p.classList.remove('active');p.style.display='none';}
+        });
+    }
+}
+// _gcResolveGroupThen is defined inside setupMenu()'s closure — re-declare a
+// standalone copy here so header clicks work even if setupMenu() hasn't run yet.
+function _gcResolveGroupThen(cb){
+    if(window.__gcCurGroup){cb(window.__gcCurGroup);return;}
+    var gid=null;
+    try{var url=new URL(window.location.href);gid=url.searchParams.get('groupId')||url.searchParams.get('gid');}catch(_){}
+    try{
+        var gcRef=window.GroupCore;
+        if(!gid&&gcRef&&gcRef._activeGroup){window.__gcCurGroup=gcRef._activeGroup;cb(gcRef._activeGroup);return;}
+        if(!gid&&gcRef&&typeof gcRef.getActiveGroupId==='function')gid=gcRef.getActiveGroupId();
+    }catch(_){}
+    if(!gid){cb(null);return;}
+    api('/groups/'+gid).then(function(d){
+        var gr=d.data||d.group||d;
+        if(gr&&gr.id){window.__gcCurGroup=gr;cb(gr);}else{cb(null);}
+    }).catch(function(){cb(null);});
+}
+function openGroupDetails(g){
+    var panel=document.getElementById('groupDetailsPanel'),content=document.getElementById('groupDetailsContent');
+    if(!panel||!content)return;
+    var initials=(g.name||'G').split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2)||'G';
+    var mc=Math.max((g.createdBy?1:0),parseInt(g.memberCount)||parseInt(g.stats&&g.stats.totalMembers)||0);
+    var avatarStyle=g.avatar?('background-image:url(\''+esc(g.avatar)+'\')'):'';
+    content.innerHTML=''+
+        '<div class="group-profile-header">'+
+            '<div class="group-profile-avatar" style="'+avatarStyle+'">'+(g.avatar?'':esc(initials))+'</div>'+
+            '<div class="group-profile-name">'+esc(g.name||'Group')+'</div>'+
+            '<div class="group-profile-topic">'+mc+' member'+(mc===1?'':'s')+'</div>'+
+            '<div class="group-profile-type '+(g.isPublic?'public':'private')+'">'+(g.isPublic?'🌐 Public':'🔒 Private')+'</div>'+
+            '<div class="action-buttons">'+
+                '<button class="action-btn primary" id="gdVoiceBtn"><i class="fas fa-phone"></i> Voice chat</button>'+
+                '<button class="action-btn secondary" id="gdAddBtn"><i class="fas fa-user-plus"></i> Add</button>'+
+                '<button class="action-btn secondary" id="gdSearchBtn"><i class="fas fa-search"></i> Search</button>'+
+            '</div>'+
+        '</div>'+
+        '<div class="group-info-section">'+
+            '<div class="info-item" style="cursor:pointer" id="gdMediaRow"><span class="info-label"><i class="fas fa-photo-video"></i> Media, links, and docs</span><span class="info-value"><i class="fas fa-chevron-right"></i></span></div>'+
+        '</div>'+
+        '<div class="group-info-section">'+
+            '<div class="info-item" style="cursor:pointer" id="gdMuteRow"><span class="info-label"><i class="fas fa-bell"></i> Notifications</span><span class="info-value" data-mute-label2>'+((g.isMuted)?'Muted':'All')+'</span></div>'+
+            '<div class="info-item"><span class="info-label"><i class="fas fa-lock"></i> Encryption</span><span class="info-value" style="font-weight:400;color:var(--text-secondary)">Messages are end-to-end encrypted</span></div>'+
+            '<div class="info-item" style="cursor:pointer" id="gdDisapRow"><span class="info-label"><i class="fas fa-clock"></i> Disappearing messages</span><span class="info-value">'+((g.settings&&g.settings.disappearingMessages)?'On':'Off')+'</span></div>'+
+        '</div>'+
+        '<div class="group-info-section">'+
+            '<div class="info-section-title"><i class="fas fa-users"></i> '+mc+' member'+(mc===1?'':'s')+'</div>'+
+            '<div id="gdMembersList"><div style="text-align:center;padding:16px"><i class="fas fa-spinner fa-spin"></i></div></div>'+
+        '</div>';
+    panel.style.display='flex';panel.classList.add('active');
+    document.getElementById('gdVoiceBtn').addEventListener('click',function(){var wire=document.getElementById('chatCallBtn');if(wire)wire.click();});
+    document.getElementById('gdAddBtn').addEventListener('click',function(){panel.classList.remove('active');panel.style.display='none';openSub('members');});
+    document.getElementById('gdSearchBtn').addEventListener('click',function(){panel.classList.remove('active');panel.style.display='none';openSub('search');});
+    document.getElementById('gdMediaRow').addEventListener('click',function(){panel.classList.remove('active');panel.style.display='none';openSub('media');});
+    document.getElementById('gdMuteRow').addEventListener('click',function(){toggleMute(g);var lbl=document.querySelector('[data-mute-label2]');if(lbl)lbl.textContent=g.isMuted?'Muted':'All';});
+    document.getElementById('gdDisapRow').addEventListener('click',function(){panel.classList.remove('active');panel.style.display='none';openSub('disappearing');});
+    // Reuse the same member list renderer as the "Members" sub-panel
+    api('/groups/'+g.id+'/members?limit=100').then(function(d){
+        var list=(d.data&&d.data.members)||(d.data&&Array.isArray(d.data)?d.data:null)||d.members||[];
+        var host=document.getElementById('gdMembersList');
+        if(!host)return;
+        if(!list.length){host.innerHTML='<p style="text-align:center;padding:16px;color:var(--text-secondary)">No members found</p>';return;}
+        var colors={owner:'#f59e0b',admin:'#3b82f6',moderator:'#8b5cf6',member:'#6b7280'};
+        host.innerHTML=list.map(function(m){
+            var u=m.user||m,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
+            return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)">'+
+                '<div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0;">'+esc(n.slice(0,2).toUpperCase())+'</div>'+
+                '<div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(n)+'</div><span style="font-size:11px;padding:2px 7px;border-radius:8px;background:'+rc+'22;color:'+rc+'">'+esc(rl)+'</span></div>'+
+            '</div>';
+        }).join('');
+    }).catch(function(){var host=document.getElementById('gdMembersList');if(host)host.innerHTML='<p style="text-align:center;padding:16px;color:var(--text-secondary)">Could not load members</p>';});
+}
+
 /* ─── init ────────────────────────────────────────────────────── */
 function init(){
-    injectCSS();setupMenu();setupCall();setupClose();setupInput();
+    injectCSS();setupMenu();setupCall();setupClose();setupInput();setupHeaderInfo();
     hookClicks();hookRT();hookCreated();_setupImageViewer();
     window.__gcOpenPanel=openPanel;window.__gcClosePanel=closePanel;
     console.log('[GCP] v4.2 ready');
