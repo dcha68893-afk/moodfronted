@@ -3301,6 +3301,24 @@
 
             const normalizedMessages = ensureSafeArray(messages);
 
+            // FIX (messages sometimes rendering corrupted/cut-off text):
+            // every message template used to embed the ENTIRE message object
+            // as JSON.stringify(message) directly inside an onclick="..."
+            // HTML attribute, escaping only double-quotes. Message content
+            // containing things like <, >, backslashes, or newlines was not
+            // escaped for that context, so the browser's HTML parser could
+            // misread the attribute boundary and chop up/garble the
+            // surrounding markup — visible as broken or split message text.
+            // Group chat (group.html/appendBubble) never does this; it just
+            // keeps a data-message-id and looks the message up when needed.
+            // We now do the same: keep a lookup map instead of ever
+            // serializing message content into HTML.
+            this._messageById = this._messageById || new Map();
+            for (const m of normalizedMessages) {
+                if (m && m.id != null) this._messageById.set(String(m.id), m);
+            }
+            this._setupMessageClickDelegation(container);
+
             const currentChatId = currentChat?.id ? String(currentChat.id) : '';
 
             const renderSignature = `${currentChatId}|${normalizedMessages.length}|${normalizedMessages.map(m => `${m.id}:${m.status || ''}:${m.timestamp || m.createdAt || ''}`).join(',')}`;
@@ -3473,6 +3491,26 @@
         // something (the raw envelope) synchronously; this patches it in
         // place a moment later, same pattern as other async UI patches in
         // this file (avatar/name updates, etc.).
+        // FIX: single delegated click handler for message bubbles, replacing
+        // the removed per-template inline onclick="...JSON.stringify(message)..."
+        // attributes (see renderMessages() for why those were unsafe). Looks
+        // the clicked message up by id from the in-memory map instead of
+        // ever re-serializing its content into HTML.
+        _setupMessageClickDelegation(container) {
+            if (!container || container._msgClickDelegated) return;
+            container._msgClickDelegated = true;
+            container.addEventListener('click', (event) => {
+                const bubble = event.target.closest('.message-bubble');
+                if (!bubble) return;
+                const holder = event.target.closest('[data-message-id]');
+                const id = holder && holder.getAttribute('data-message-id');
+                if (!id) return;
+                const message = this._messageById && this._messageById.get(String(id));
+                if (!message) return;
+                this.showMessageActions(message, event.clientX, event.clientY);
+            });
+        },
+
         _decryptRenderedMessages(messages, currentChat, currentUser) {
             if (!window.KynectaE2E || !window.KynectaE2E.enabled) return;
             if (!Array.isArray(messages) || messages.length === 0) return;
@@ -3666,7 +3704,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -3674,7 +3711,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass}" data-message-id="${message.id}" data-message-type="text" data-status="${status}">
 
-                    <div class="message-bubble ${isSent ? 'sent' : 'received'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}">
 
                         ${replyIndicator}
 
@@ -3730,7 +3767,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -3738,7 +3774,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="image" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble">
 
                         <div class="message-image" onclick="window.messagesUI?.viewMedia('${message.mediaUrl || message.fileUrl || message.content}', '${message.fileName || 'image'}')">
 
@@ -3797,7 +3833,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -3805,7 +3840,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="video" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble">
 
                         <div class="message-video" onclick="window.messagesUI?.playVideo('${message.mediaUrl || message.fileUrl || message.content}')">
 
@@ -3865,7 +3900,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -3873,7 +3907,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="audio" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble">
 
                         <div class="message-audio">
 
@@ -3943,7 +3977,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -3951,7 +3984,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="file" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble">
 
                         <div class="message-file" onclick="window.messagesUI?.downloadFile('${message.content}', '${message.fileName || 'file'}')">
 
@@ -4017,7 +4050,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -4025,7 +4057,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="location" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble">
 
                         <div class="message-location" onclick="window.messagesUI?.openLocation(${message.latitude || 0}, ${message.longitude || 0})">
 
@@ -4085,7 +4117,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -4121,7 +4152,7 @@
 
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="poll" data-status="${status}">
 
-                    <div class="message-bubble" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble">
 
                         <div class="poll-question">${message.question || 'Poll'}</div>
 
@@ -4161,7 +4192,6 @@
             const time = core?.formatTime
                 ? core.formatTime(message.createdAt || message.timestamp)
                 : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             const reactions = this._renderReactions(message.reactions);
 
             // Delegate rendering to gif-picker.js if loaded, otherwise inline fallback
@@ -4175,7 +4205,7 @@
             }
 
             return `
-                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" data-message-id="${message.id}">
                     <div class="message-bubble ${isSent ? 'sent' : 'received'}" style="padding:4px;background:transparent;border:none;">
                         ${gifHtml}
                         <div class="message-meta" style="padding:0 4px 2px;">
@@ -4195,7 +4225,6 @@
             const time = core?.formatTime
                 ? core.formatTime(message.createdAt || message.timestamp)
                 : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             const reactions = this._renderReactions(message.reactions);
 
             let voHtml;
@@ -4206,7 +4235,7 @@
             }
 
             return `
-                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" data-message-id="${message.id}">
                     <div class="message-bubble ${isSent ? 'sent' : 'received'}">
                         ${voHtml}
                         <div class="message-meta">
@@ -4226,7 +4255,6 @@
             const time = core?.formatTime
                 ? core.formatTime(message.createdAt || message.timestamp)
                 : new Date(message.createdAt || message.timestamp).toLocaleTimeString([],{hour:'numeric',minute:'2-digit',hour12:true});
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
             const reactions = this._renderReactions(message.reactions);
 
             let stickerHtml;
@@ -4238,7 +4266,7 @@
             }
 
             return `
-                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                <div class="message-wrapper ${isSent ? 'sent-wrapper' : 'received-wrapper'}" data-message-id="${message.id}">
                     <div class="message-bubble ${isSent ? 'sent' : 'received'}" style="background:transparent;border:none;padding:4px;">
                         ${stickerHtml}
                         <div class="message-meta" style="padding:0 2px;">
@@ -4283,7 +4311,6 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             
 
@@ -4291,7 +4318,7 @@
 
                 <div class="message note-message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="note" data-status="${status}">
 
-                    <div class="message-bubble ${isSent ? 'sent' : 'received'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'}">
 
                         <div class="note-icon"><i class="fas fa-sticky-note"></i></div>
 
@@ -4353,12 +4380,11 @@
             const callLabel = isVideo ? 'Video call' : 'Voice call';
             const statusText = isMissed ? 'Missed call' : (durationText || 'Call ended');
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
 
             // WhatsApp-style: call appears as a special bubble with icon + label + duration
             return `
                 <div class="message ${isSent ? 'sent' : 'received'}" data-message-id="${message.id}" data-message-type="call" data-status="${callStatus}">
-                    <div class="message-bubble ${isSent ? 'sent' : 'received'} call-message-bubble" style="min-width:180px;cursor:pointer;" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
+                    <div class="message-bubble ${isSent ? 'sent' : 'received'} call-message-bubble" style="min-width:180px;cursor:pointer;">
                         <div style="display:flex;align-items:center;gap:10px;padding:2px 0;">
                             <div style="width:36px;height:36px;border-radius:50%;background:rgba(${isMissed?'255,59,48':'0,168,132'},0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
                                 <i class="fas ${iconClass}" style="color:${iconColor};font-size:15px;${isSent && !isVideo ? 'transform:scaleX(-1);' : ''}"></i>
@@ -10742,7 +10768,7 @@ Type: ${message.type || 'text'}`;
 
     function openChatWithUserInUI(userId, userName, userAvatar, options = {}) {
 
-        const { findExisting = false, returnFromCall = false } = options;
+        const { findExisting = false, returnFromCall = false, fromPopState = false } = options;
 
         // Set a global flag so _showChatPanel (in messages-core) also knows we came from a call
         window.__returningFromCall = returnFromCall === true;
@@ -10819,7 +10845,7 @@ Type: ${message.type || 'text'}`;
 
             try {
 
-                history.pushState({ view: 'chat', userId: numericUserId, userName: resolvedName }, '', '');
+                if (!fromPopState) history.pushState({ view: 'chat', userId: numericUserId, userName: resolvedName }, '', '');
 
             } catch (_e) {}
 
@@ -11293,11 +11319,20 @@ Type: ${message.type || 'text'}`;
 
         const state = event.state || {};
 
+        if (state.view === 'chat' && state.userId) {
+            // FIX: navigating (via device back/forward, or a back-gesture) to a
+            // history entry that IS a chat — restore that chat's panel and let
+            // openChatWithUserInUI's own CHAT_OPENED dispatch put the chat's
+            // phone/video/options icons back in the parent header, instead of
+            // leaving/forcing the default sidebar (multi-send/new-chat) icons.
+            openChatWithUserInUI(state.userId, state.userName, null, { fromPopState: true });
+            _uiLog('[MessageUI] Device back/forward: restored chat', state.userId);
+            return;
+        }
 
+        if (UIStateManager.getState('chatVisible')) {
 
-        if (state.view === 'chat' || UIStateManager.getState('chatVisible')) {
-
-            // Going back from chat → show sidebar
+            // Going back from chat to a non-chat state → show sidebar
 
             if (chatPanel) chatPanel.classList.add('hidden');
 

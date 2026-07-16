@@ -2723,11 +2723,51 @@ function buildSub(type,g,el){
     }
     if(type==='members'){
         el.innerHTML='<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i></div>';
+        // FIX: the group creator/owner had no way to promote members to admin
+        // or remove them — this list was pure read-only display even though
+        // the backend (PUT /groups/:id/members/:userId/role and DELETE
+        // /groups/:id/members/:userId) already supports it. Only show these
+        // controls to the owner/admin, and never on your own row.
+        var myUid = myId();
+        var canManage = (g.role === 'owner' || g.role === 'admin' || String(g.createdBy) === myUid);
         api('/groups/'+g.id+'/members?limit=100').then(function(d){
             var list=(d.data&&d.data.members)||(d.data&&Array.isArray(d.data)?d.data:null)||d.members||[];
             if(!list.length){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">No members found</p>';return;}
             var colors={owner:'#f59e0b',admin:'#3b82f6',moderator:'#8b5cf6',member:'#6b7280'};
-            el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){var u=m.user||m,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';return'<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)"><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0;">'+esc(n.slice(0,2).toUpperCase())+'</div><div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(n)+'</div><span style="font-size:11px;padding:2px 7px;border-radius:8px;background:'+rc+'22;color:'+rc+'">'+esc(rl)+'</span></div></div>';}).join('')+'</div>';
+            el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){
+                var u=m.user||m,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
+                var uid=String(u.id||m.userId||'');
+                var isSelf = uid===myUid;
+                var actions='';
+                if(canManage && !isSelf && rl!=='owner'){
+                    actions='<div style="display:flex;gap:6px;flex-shrink:0">'+
+                        (rl==='admin'?'<button class="gcm-role-btn" data-uid="'+esc(uid)+'" data-role="member" style="font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer">Remove Admin</button>':'<button class="gcm-role-btn" data-uid="'+esc(uid)+'" data-role="admin" style="font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer">Make Admin</button>')+
+                        '<button class="gcm-remove-btn" data-uid="'+esc(uid)+'" data-name="'+esc(n)+'" style="font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;cursor:pointer">Remove</button>'+
+                    '</div>';
+                }
+                return'<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)"><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0;">'+esc(n.slice(0,2).toUpperCase())+'</div><div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(n)+'</div><span style="font-size:11px;padding:2px 7px;border-radius:8px;background:'+rc+'22;color:'+rc+'">'+esc(rl)+'</span></div>'+actions+'</div>';
+            }).join('')+'</div>';
+            el.querySelectorAll('.gcm-role-btn').forEach(function(btn){
+                btn.addEventListener('click',function(){
+                    var uid=btn.getAttribute('data-uid'), role=btn.getAttribute('data-role');
+                    btn.disabled=true;
+                    api('/groups/'+g.id+'/members/'+uid+'/role',{method:'PUT',body:{role:role}}).then(function(){
+                        ntf(role==='admin'?'Member is now an admin':'Admin removed');
+                        openSub('members');
+                    }).catch(function(){ntf('Failed to update role','error');btn.disabled=false;});
+                });
+            });
+            el.querySelectorAll('.gcm-remove-btn').forEach(function(btn){
+                btn.addEventListener('click',function(){
+                    var uid=btn.getAttribute('data-uid'), name=btn.getAttribute('data-name');
+                    if(!confirm('Remove '+name+' from the group?'))return;
+                    btn.disabled=true;
+                    api('/groups/'+g.id+'/members/'+uid,{method:'DELETE'}).then(function(){
+                        ntf(name+' removed from group');
+                        openSub('members');
+                    }).catch(function(){ntf('Failed to remove member','error');btn.disabled=false;});
+                });
+            });
         }).catch(function(){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load</p>';});
         return;
     }
