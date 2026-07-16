@@ -272,16 +272,6 @@ const MeshEngine = (() => {
         // previously caused the false "Weak network" badge on good WiFi/mobile.
         const ws = window.wsService;
         const wsState = ws?.io?.engine?.readyState || '';
-        // FIX (false "Weak network" badge on pages with no socket wiring at all):
-        // app.realtime.socket.js — the only script that ever sets window.wsService
-        // or window.KynectaRealtime — is loaded by chat.html only. Pages like
-        // group.html never load it, so on those pages `ws` and `KynectaRealtime`
-        // are permanently undefined and every check below is permanently false,
-        // regardless of the device's actual connection. When none of the
-        // socket-status signals exist on this page AND we're not inside an
-        // iframe (where the parent's socket is authoritative), fall back to
-        // trusting navigator.onLine — that's the only signal this page has.
-        const hasAnySocketSignal = !!(ws || window.KynectaRealtime || window.__kynParentReady !== undefined);
         const wsOk = !!(ws && (
             ws.isConnected?.() ||
             ws._socket?.connected ||
@@ -294,7 +284,7 @@ const MeshEngine = (() => {
             window.__kynParentReady === true ||
             // In iframe mode the parent owns the socket — always trust online state
             (window.parent !== window && navigator.onLine)
-        )) || (!hasAnySocketSignal && navigator.onLine);
+        ));
         const meshPeers = MeshTransport.getPeerCount();
 
         // If online and socket ok — immediately clear badge and cancel any pending show

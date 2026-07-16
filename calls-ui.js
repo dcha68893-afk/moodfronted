@@ -349,8 +349,7 @@ const GlobalCallHistory = {
     let pendingOpenCall = null;
     let listenerEstablished = false;
 
-    async function startCallWithUser(userId, userName, callType, groupId, isGroupCall) {
-    const _groupCallOptions = (groupId || isGroupCall) ? { groupId, isGroupCall: true } : {};
+    async function startCallWithUser(userId, userName, callType) {
     console.log('[Calls UI] startCallWithUser userId:', userId, '| type:', callType);
     
     if (!userId) {
@@ -478,10 +477,10 @@ const GlobalCallHistory = {
         
         if (window.callCore && window.callCore.startCall) {
             console.log('[Calls UI] Using callCore.startCall');
-            result = await window.callCore.startCall(parseInt(userId), callType, _groupCallOptions);
+            result = await window.callCore.startCall(parseInt(userId), callType);
         } else if (window.callCore && window.callCore.initiateCall) {
             console.log('[Calls UI] Using callCore.initiateCall');
-            result = await window.callCore.initiateCall(callType, [parseInt(userId)], _groupCallOptions);
+            result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
         } else {
             throw new Error('No call initiation method available');
         }
@@ -503,9 +502,9 @@ const GlobalCallHistory = {
             }
             // Retry
             if (window.callCore && window.callCore.startCall) {
-                result = await window.callCore.startCall(parseInt(userId), callType, _groupCallOptions);
+                result = await window.callCore.startCall(parseInt(userId), callType);
             } else if (window.callCore && window.callCore.initiateCall) {
-                result = await window.callCore.initiateCall(callType, [parseInt(userId)], _groupCallOptions);
+                result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
             }
             if (result && result.success) {
                 console.log('[Calls UI] Retry successful');
@@ -1058,7 +1057,7 @@ window.showInCallScreen   = showInCallScreen;
              (window.callCore.isCoreReady && window.callCore.isCoreReady()));
         
         if (isCoreActive) {
-            startCallWithUser(callData.userId, callData.userName, callData.callType, callData.groupId, callData.isGroupCall);
+            startCallWithUser(callData.userId, callData.userName, callData.callType);
         } else {
             console.log('[Calls UI] Core not ready, waiting...');
             pendingOpenCall = callData;
@@ -1092,10 +1091,8 @@ window.showInCallScreen   = showInCallScreen;
         else returnTo = 'calls';
 
         const chatUserId = data.chatUserId || data.conversationUserId || null;
-        const groupId = data.groupId || data.group_id || null;
-        const isGroupCall = !!(data.isGroupCall || data.isGroup || groupId);
         
-        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId, groupId, isGroupCall });
+        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId });
         
         if (!userId) return;
         
@@ -1105,7 +1102,7 @@ window.showInCallScreen   = showInCallScreen;
         window.__callOriginChatUserId = chatUserId || userId;
         window.__callOriginChatUserName = userName || null;
         
-        pendingOpenCall = { userId, userName, callType, groupId, isGroupCall };
+        pendingOpenCall = { userId, userName, callType };
         
         const isCoreActive = window.callCore && 
             ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||

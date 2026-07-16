@@ -2218,7 +2218,7 @@ function injectCSS(){
     '.message.received{align-self:flex-start;align-items:flex-start;}',
     '.message.system{align-self:center;max-width:85%;text-align:center;}',
     '.message-sender{font-size:11.5px;font-weight:600;color:var(--primary-color,#0084ff);margin-bottom:2px;padding:0 3px;}',
-    '.message-bubble{padding:8px 12px;border-radius:8px;font-size:14px;line-height:1.45;overflow-wrap:break-word;word-break:normal;}',
+    '.message-bubble{padding:8px 12px;border-radius:8px;font-size:14px;line-height:1.45;overflow-wrap:break-word;word-break:normal;min-width:44px;white-space:normal;writing-mode:horizontal-tb;}',
     '.message.sent .message-bubble{background:var(--primary-color,#0084ff);color:#fff;border-radius:18px 18px 4px 18px;}',
     '.message.received .message-bubble{background:var(--bg-color,#fff);color:var(--text-primary,#111);border-radius:18px 18px 18px 4px;box-shadow:0 1px 2px rgba(0,0,0,.12);}',
     '.message.system .message-bubble{background:rgba(0,0,0,.07);color:var(--text-secondary);font-size:12px;border-radius:10px;}',
@@ -2723,49 +2723,33 @@ function buildSub(type,g,el){
     }
     if(type==='members'){
         el.innerHTML='<div style="text-align:center;padding:20px"><i class="fas fa-spinner fa-spin"></i></div>';
-        // FIX: the group creator/owner had no way to promote members to admin
-        // or remove them — this list was pure read-only display even though
-        // the backend (PUT /groups/:id/members/:userId/role and DELETE
-        // /groups/:id/members/:userId) already supports it. Only show these
-        // controls to the owner/admin, and never on your own row.
-        var myUid = myId();
-        var canManage = (g.role === 'owner' || g.role === 'admin' || String(g.createdBy) === myUid);
         api('/groups/'+g.id+'/members?limit=100').then(function(d){
             var list=(d.data&&d.data.members)||(d.data&&Array.isArray(d.data)?d.data:null)||d.members||[];
             if(!list.length){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">No members found</p>';return;}
             var colors={owner:'#f59e0b',admin:'#3b82f6',moderator:'#8b5cf6',member:'#6b7280'};
-            el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){
-                var u=m.user||m,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
-                var uid=String(u.id||m.userId||'');
-                var isSelf = uid===myUid;
+            var me=myId();
+            // FIX-GROUP-MEMBER-MANAGEMENT: determine whether the current user can
+            // manage members (owner/admin) so promote/demote/remove controls only
+            // show for them, and never against the owner or against themselves.
+            var mine=list.find(function(m){var u=m.user||m;return String(u.id||m.userId)===String(me);});
+            var canManage=mine&&['owner','admin'].includes(mine.role);
+            el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){var u=m.user||m,uid=u.id||m.userId,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
                 var actions='';
-                if(canManage && !isSelf && rl!=='owner'){
-                    actions='<div style="display:flex;gap:6px;flex-shrink:0">'+
-                        (rl==='admin'?'<button class="gcm-role-btn" data-uid="'+esc(uid)+'" data-role="member" style="font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer">Remove Admin</button>':'<button class="gcm-role-btn" data-uid="'+esc(uid)+'" data-role="admin" style="font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer">Make Admin</button>')+
-                        '<button class="gcm-remove-btn" data-uid="'+esc(uid)+'" data-name="'+esc(n)+'" style="font-size:11px;padding:5px 8px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;cursor:pointer">Remove</button>'+
-                    '</div>';
+                if(canManage&&rl!=='owner'&&String(uid)!==String(me)){
+                    var promoteBtn=rl==='admin'?'<button data-mact="demote" data-uid="'+uid+'" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);cursor:pointer;">Demote</button>':'<button data-mact="promote" data-uid="'+uid+'" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);cursor:pointer;">Make Admin</button>';
+                    actions='<div style="display:flex;gap:6px;flex-shrink:0">'+promoteBtn+'<button data-mact="remove" data-uid="'+uid+'" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid #ef444455;background:transparent;color:#ef4444;cursor:pointer;">Remove</button></div>';
                 }
-                return'<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)"><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0;">'+esc(n.slice(0,2).toUpperCase())+'</div><div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(n)+'</div><span style="font-size:11px;padding:2px 7px;border-radius:8px;background:'+rc+'22;color:'+rc+'">'+esc(rl)+'</span></div>'+actions+'</div>';
-            }).join('')+'</div>';
-            el.querySelectorAll('.gcm-role-btn').forEach(function(btn){
+                return'<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-color)"><div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:12px;flex-shrink:0;">'+esc(n.slice(0,2).toUpperCase())+'</div><div style="flex:1"><div style="font-size:14px;font-weight:500">'+esc(n)+'</div><span style="font-size:11px;padding:2px 7px;border-radius:8px;background:'+rc+'22;color:'+rc+'">'+esc(rl)+'</span></div>'+actions+'</div>';}).join('')+'</div>';
+            el.querySelectorAll('[data-mact]').forEach(function(btn){
                 btn.addEventListener('click',function(){
-                    var uid=btn.getAttribute('data-uid'), role=btn.getAttribute('data-role');
-                    btn.disabled=true;
-                    api('/groups/'+g.id+'/members/'+uid+'/role',{method:'PUT',body:{role:role}}).then(function(){
-                        ntf(role==='admin'?'Member is now an admin':'Admin removed');
-                        openSub('members');
-                    }).catch(function(){ntf('Failed to update role','error');btn.disabled=false;});
-                });
-            });
-            el.querySelectorAll('.gcm-remove-btn').forEach(function(btn){
-                btn.addEventListener('click',function(){
-                    var uid=btn.getAttribute('data-uid'), name=btn.getAttribute('data-name');
-                    if(!confirm('Remove '+name+' from the group?'))return;
-                    btn.disabled=true;
-                    api('/groups/'+g.id+'/members/'+uid,{method:'DELETE'}).then(function(){
-                        ntf(name+' removed from group');
-                        openSub('members');
-                    }).catch(function(){ntf('Failed to remove member','error');btn.disabled=false;});
+                    var act=btn.getAttribute('data-mact'),uid=btn.getAttribute('data-uid');
+                    if(act==='remove'){
+                        if(!confirm('Remove this member from the group?'))return;
+                        api('/groups/'+g.id+'/members/'+uid,{method:'DELETE'}).then(function(){ntf('Member removed');buildSub('members',g,el);}).catch(function(){ntf('Failed to remove member','error');});
+                    }else{
+                        var newRole=act==='promote'?'admin':'member';
+                        api('/groups/'+g.id+'/members/'+uid+'/role',{method:'PUT',body:{role:newRole}}).then(function(){ntf(act==='promote'?'Member promoted to admin':'Admin demoted to member');buildSub('members',g,el);}).catch(function(){ntf('Failed to update role','error');});
+                    }
                 });
             });
         }).catch(function(){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load</p>';});
@@ -2806,7 +2790,15 @@ function doDelete(){
 
 /* ─── Call buttons / banner ───────────────────────────────────── */
 function setupCall(){
-    function wire(id,type){var btn=document.getElementById(id);if(!btn||btn._gcC)return;btn._gcC=true;btn.addEventListener('click',function(){var g=window.__gcCurGroup;if(!g)return;try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(g.id,g.name,type,'group',g.id,'group-module');return;}}catch(e){}try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:g.id,userName:g.name,callType:type,isGroup:true,groupId:g.id,returnTo:'group'}},'*');}catch(e){}});}
+    function wire(id,type){var btn=document.getElementById(id);if(!btn||btn._gcC)return;btn._gcC=true;btn.addEventListener('click',function(){var g=window.__gcCurGroup;if(!g)return;
+        // FIX-GROUP-CALL-NOTICE-DUP: this is a second binding on the same button
+        // group-core.js's setupGroupAttachmentControls() already wires up; without
+        // the same groupId/isGroupCall/participantIds context that fix added
+        // there, this one could win the race and silently drop the group context
+        // again, breaking notify-other-members even after that fix.
+        var _participantIds=(Array.isArray(g.members)?g.members.map(function(m){return (m.user&&m.user.id)||m.userId||m.id;}).filter(Boolean):[]);
+        var _extraCtx={groupId:g.id,groupName:g.name,isGroupCall:true,participantIds:_participantIds};
+        try{if(window.parent&&window.parent.__dispatchCallToIframe){window.parent.__dispatchCallToIframe(g.id,g.name,type,'group',g.id,'group-module',_extraCtx);return;}}catch(e){}try{window.parent.postMessage({type:'INITIATE_CALL',payload:{userId:g.id,userName:g.name,callType:type,isGroup:true,groupId:g.id,returnTo:'group',participantIds:_participantIds}},'*');}catch(e){}});}
     wire('chatCallBtn','voice');wire('chatVideoCallBtn','video');
 }
 function showCallBanner(callerName,groupName,groupId,callId){

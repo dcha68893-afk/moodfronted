@@ -523,8 +523,25 @@ body {
     font-size: 14.2px;
     max-width: 75%;
     width: fit-content;
+    /* FIX-CHAR-SPLIT-GUARD: defensive floor — a short word (e.g. a single
+       four-letter word) should never need less than this to lay out on one
+       line. Could not identify an exact mechanism narrowing a bubble below
+       this after extensive tracing, but this closes off that failure mode
+       regardless of cause. */
+    min-width: 44px;
     display: inline-block;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
+}
+
+.message-content {
+    /* FIX-CHAR-SPLIT-GUARD: make wrapping behavior explicit and immune to any
+       inherited/bled-through white-space or writing-mode value rather than
+       relying on browser defaults. */
+    white-space: normal;
+    writing-mode: horizontal-tb;
+    overflow-wrap: break-word;
+    word-break: normal;
+    display: block;
 }
 
 .message-bubble.sent {
