@@ -7984,6 +7984,14 @@ function updateGroupCounts() {
     } catch (error) {}
 }
 
+// FIX-GROUP-COUNTS-GLOBAL: group-ui.js / group-ui-patch.js call this guarded by
+// `typeof updateGroupCounts === 'function'` against the *global* scope. Since
+// this file is an ES module, the bare function declaration above was never
+// visible outside this module, so those guards always failed and the My
+// Groups / Joined / Admin tab badges stayed frozen at 0 even though this
+// function's own logic (and the data behind it) was already correct.
+window.updateGroupCounts = updateGroupCounts;
+
 function updateCurrentSection() {
     try {
         const activeSection = document.querySelector('.groups-section.active');

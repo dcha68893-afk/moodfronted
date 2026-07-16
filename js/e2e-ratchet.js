@@ -148,6 +148,16 @@
     return JSON.stringify({ v: 2, n: counter, iv: b64(iv), ct: b64(ct) });
   }
 
+  // FIX-DECRYPT-REDISPLAY: once a given (chatId, n) has been successfully
+  // decrypted, cache its plaintext for the lifetime of the page. Reopening a
+  // chat, refreshing message history, or any other re-render re-fetches the
+  // same server-stored ciphertext and asks us to decrypt it again — that is
+  // not a replay, it's the same message being shown again, but the ratchet's
+  // single-use skipped-keys and forward-only counter would otherwise treat it
+  // as one and fail with "[Decryption failed]". Checking this cache first
+  // avoids ever re-entering the ratchet for a message already resolved once.
+  const _plaintextCache = new Map();
+
   // ── Public: decrypt ───────────────────────────────────────────────────────
   async function decrypt(chatId, envelopeStr, senderUserId) {
     let env;
@@ -162,11 +172,14 @@
     }
 
     const { n, iv, ct } = env;
+    const cacheKey = `${chatId}:${n}`;
+
+    const cachedPlaintext = _plaintextCache.get(cacheKey);
+    if (cachedPlaintext !== undefined) return cachedPlaintext;
 
     if (!_chains.has(chatId)) await _lazyInit(chatId, senderUserId);
 
     // Check if we already derived and cached this key (out-of-order delivery)
-    const cacheKey = `${chatId}:${n}`;
     let messageKey = _skippedKeys.get(cacheKey);
     if (messageKey) {
       _skippedKeys.delete(cacheKey);
@@ -190,7 +203,9 @@
         messageKey,
         new Uint8Array(unb64(ct))
       );
-      return new TextDecoder().decode(pt);
+      const plaintext = new TextDecoder().decode(pt);
+      _plaintextCache.set(cacheKey, plaintext);
+      return plaintext;
     } catch (_) {
       return '🔒 [Decryption failed — key mismatch or corrupted message]';
     }

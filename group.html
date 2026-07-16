@@ -2739,7 +2739,7 @@ function buildSub(type,g,el){
     if(type==='theme'){
         var themes=[{id:'blue',name:'Ocean Blue',bg:'linear-gradient(135deg,#0084ff,#0055cc)'},{id:'green',name:'Forest',bg:'linear-gradient(135deg,#22c55e,#16a34a)'},{id:'purple',name:'Violet',bg:'linear-gradient(135deg,#a855f7,#7c3aed)'},{id:'red',name:'Crimson',bg:'linear-gradient(135deg,#ef4444,#b91c1c)'},{id:'orange',name:'Sunset',bg:'linear-gradient(135deg,#f97316,#c2410c)'},{id:'teal',name:'Teal',bg:'linear-gradient(135deg,#14b8a6,#0f766e)'},{id:'dark',name:'Dark',bg:'linear-gradient(135deg,#374151,#111827)'}];
         el.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px">'+themes.map(function(th){return'<button data-tid="'+esc(th.id)+'" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 8px;border:'+(g.theme===th.id?'2px solid var(--primary-color,#0084ff)':'2px solid var(--border-color,#ddd)')+';border-radius:10px;cursor:pointer;background:var(--bg-color)"><div style="width:40px;height:40px;border-radius:50%;background:'+th.bg+'"></div><span style="font-size:12px;font-weight:500">'+esc(th.name)+'</span></button>';}).join('')+'</div>';
-        el.querySelectorAll('[data-tid]').forEach(function(b){b.addEventListener('click',function(){api('/groups/'+g.id,{method:'PUT',body:{settings:{theme:b.getAttribute('data-tid')}}}).then(function(){g.theme=b.getAttribute('data-tid');buildSub('theme',g,el);ntf('Theme updated!');}).catch(function(){ntf('Failed','error');});});});return;
+        el.querySelectorAll('[data-tid]').forEach(function(b){b.addEventListener('click',function(){api('/groups/'+g.id+'/settings',{method:'PUT',body:{settings:{theme:b.getAttribute('data-tid')}}}).then(function(){g.theme=b.getAttribute('data-tid');buildSub('theme',g,el);ntf('Theme updated!');}).catch(function(){ntf('Failed','error');});});});return;
     }
     if(type==='purpose'){
         var pp=[{id:'social',icon:'\ud83d\udc65'},{id:'work',icon:'\ud83d\udcbc'},{id:'education',icon:'\ud83c\udf93'},{id:'gaming',icon:'\ud83c\udfae'},{id:'health',icon:'\ud83c\udfe5'},{id:'hobby',icon:'\ud83c\udfa8'},{id:'tech',icon:'\ud83d\udcbb'},{id:'music',icon:'\ud83c\udfb5'},{id:'sports',icon:'\u26bd'},{id:'travel',icon:'\u2708\ufe0f'},{id:'support',icon:'\ud83e\udd1d'},{id:'general',icon:'\ud83d\udcac'}];
@@ -2918,6 +2918,13 @@ window._openSmartGroupOSFromSidebar = function() {
             if (gc && typeof gc.getActiveGroupId === 'function') return gc.getActiveGroupId();
             if (gc && gc._activeGroup) return gc._activeGroup.id;
             if (window.__activeGroupId) return parseInt(window.__activeGroupId, 10);
+        } catch(_) {}
+        // FIX-GROUPOS-NO-GROUPID: window.__gcCurGroup is the live "currently open
+        // group chat" reference set by openChat()/openGroupChat() in this file —
+        // check it before falling back to DOM lookups, which never actually carry
+        // a data-group-id for the open chat.
+        try {
+            if (window.__gcCurGroup && window.__gcCurGroup.id) return parseInt(window.__gcCurGroup.id, 10);
         } catch(_) {}
         // From DOM
         try {
