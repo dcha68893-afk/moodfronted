@@ -253,6 +253,18 @@
         this._onActiveSpeaker(speakerId, level);
       });
 
+      // FIX-CAMERA-SWITCH-FROZEN-REMOTE: propagate camera/mic device switches
+      // to every active peer in the mesh, not just the local preview. Stored
+      // so leaveGroupCall() can unsubscribe and avoid leaking this listener
+      // into the next call.
+      this._unsubMediaChange = window.__DeviceMediaManager.onChange((payload) => {
+        if (payload && payload.event === 'media:camera_switched' && payload.track) {
+          window.__PeerConnectionManager.replaceTrackForAll('video', payload.track);
+        } else if (payload && payload.event === 'media:audio_device_switched' && payload.track) {
+          window.__PeerConnectionManager.replaceTrackForAll('audio', payload.track);
+        }
+      });
+
       // Acquire local media
       const localStream = await window.__DeviceMediaManager.acquireMedia({
         audio: true,
@@ -300,6 +312,11 @@
 
       this._speakerDetect?.stop();
       window.__DeviceMediaManager.stopAll();
+
+      if (this._unsubMediaChange) {
+        try { this._unsubMediaChange(); } catch (_) {}
+        this._unsubMediaChange = null;
+      }
 
       this._participants.clear();
       this._callId  = null;
@@ -529,7 +546,74 @@
 
     // ── Private — Socket listeners ─────────────────────────────────────────
 
+    // FIX-GROUP-CALL-DEAD-BRIDGE (CRITICAL): this function's window
+    // listeners below (kyn:group:call:participant_joined,
+    // kyn:group:call:current_participants, etc.) were never fed by anything.
+    // The backend (CallSignalingService.js) genuinely emits the matching raw
+    // socket events (group:call:participant_joined, etc.), but no file
+    // anywhere in this frontend translated them into the kyn:group:call:*
+    // window CustomEvents this class listens for -- confirmed by an
+    // exhaustive search of the whole repo. Concretely: when a second
+    // participant joined a group call, the existing participant(s) never
+    // learned about it (no 'participant_joined'), and the new joiner never
+    // learned who was already in the call (no 'current_participants'), so
+    // _connectToParticipant() was never called by anyone for anyone. Group
+    // calls rendered a UI but no mesh peer connection ever formed between
+    // any two participants — no audio, no video, ever, for any 2+ person
+    // call. This binds directly to the raw socket here so the fix doesn't
+    // depend on any other file's bootstrap code being correct.
+    _bindRawGroupCallSocketEvents() {
+      if (this._rawGroupSocketBound) return;
+      this._rawGroupSocketBound = true;
+
+      const rt = window.KynectaRealtime;
+      if (!rt || typeof rt.on !== 'function') {
+        // Realtime layer not ready yet — retry shortly rather than silently
+        // giving up, mirroring the retry pattern used elsewhere in this app
+        // (e.g. calls-core.js's _bindRealtime / phase bootstrap tryWire()).
+        this._rawGroupSocketBound = false;
+        setTimeout(() => this._bindRawGroupCallSocketEvents(), 500);
+        return;
+      }
+
+      // NOTE: 'group:call:ended_by_host' is intentionally excluded — it's
+      // already bridged directly in calls-core.js's RT_MAP and routed
+      // through handleCallEnded(); bridging it again here would double-fire.
+      const rawToKynEvents = [
+        'group:call:participant_joined',
+        'group:call:current_participants',
+        'group:call:participant_left',
+        'group:call:participant_update',
+        'group:call:hand_raised',
+        'group:call:hand_lowered',
+        'group:call:muted_by_host',
+        'group:call:error',
+      ];
+
+      for (const evt of rawToKynEvents) {
+        rt.on(evt, payload => {
+          try { window.dispatchEvent(new CustomEvent(`kyn:${evt}`, { detail: payload || {} })); }
+          catch (_) {}
+        });
+      }
+
+      console.log(`[GroupCall] Bridged ${rawToKynEvents.length} raw socket events to kyn:group:call:* window events`);
+    }
+
     _attachGroupSocketListeners() {
+      // FIX-GROUP-CALL-DUPLICATE-LISTENERS: window.__GroupCallEngine is a
+      // singleton reused for the lifetime of the page (see bottom of this
+      // file), but this method is called fresh every time joinGroupCall()
+      // runs. Without this guard, leaving a group call and joining another
+      // (or rejoining the same one) added a whole additional set of
+      // window.addEventListener bindings on top of the previous ones — so
+      // after N join cycles, every single incoming group-call event handler
+      // body ran N times.
+      if (this._groupSocketListenersAttached) return;
+      this._groupSocketListenersAttached = true;
+
+      this._bindRawGroupCallSocketEvents();
+
       window.addEventListener('kyn:group:call:participant_joined', e => {
         this._onParticipantJoined(e.detail || {});
       });
@@ -555,6 +639,20 @@
           window.__DeviceMediaManager.muteAudio(true);
           this._notify('muted_by_host', {});
         }
+      });
+
+      // FIX-GROUP-CALL-DEAD-BRIDGE: the server emits this on authorization
+      // failures (e.g. a non-host tries to mute/remove a participant) but
+      // nothing surfaced it — the action just silently did nothing from the
+      // caller's perspective, with no feedback about why.
+      // NOTE: must NOT call this._notify('error', ...) here — _notify()
+      // dispatches 'kyn:group:call:' + event, which for event='error' would
+      // re-dispatch this exact same window event and re-trigger this
+      // listener forever. Use a distinctly-named internal event instead.
+      window.addEventListener('kyn:group:call:error', e => {
+        const data = e.detail || {};
+        console.warn('[GroupCall] Server error:', data.code, data.message);
+        this._notify('server_error', data);
       });
 
       // ── Raise Hand events ────────────────────────────────────────────────
@@ -638,7 +736,23 @@
     _notify(event, data) {
       this._listeners.forEach(fn => { try { fn({ event, ...data }); } catch (_) {} });
       try {
-        window.dispatchEvent(new CustomEvent(`kyn:group:call:${event}`, { detail: data }));
+        // FIX-GROUP-CALL-DEAD-BRIDGE: this used to dispatch
+        // 'kyn:group:call:' + event with no namespace separation from raw
+        // server-forwarded events. Once _bindRawGroupCallSocketEvents() (see
+        // above) started actually bridging real socket events like
+        // 'hand_raised', 'hand_lowered', and 'muted_by_host' onto
+        // 'kyn:group:call:<name>', several _notify() call sites below used
+        // those exact same names for their OWN outbound broadcast — e.g.
+        // raiseHand() calling _notify('hand_raised', ...) would dispatch
+        // 'kyn:group:call:hand_raised', which is the very same window event
+        // the server-forwarded listener for actual incoming hand-raises is
+        // bound to — retriggering it, calling _notify() again, forever.
+        // Confirmed nothing external listens to this window-dispatch form
+        // (real consumers use .onChange() callbacks above), so namespacing
+        // it under 'local:' is safe and permanently forecloses this
+        // collision class rather than relying on every future call site
+        // remembering to pick a non-colliding name.
+        window.dispatchEvent(new CustomEvent(`kyn:group:call:local:${event}`, { detail: data }));
       } catch (_) {}
     }
 

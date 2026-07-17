@@ -7538,11 +7538,42 @@ handleContactItemClick: function(e) {
         },
 
         // ── RECORDING (audio+video with visual indicator) ─────────────────
-        toggleRecording: function() {
+        // FIX-SILENT-RECORDING: shared by both recording entry points in this
+        // file. Calls the same backend endpoint the host-only #kyn-record-btn
+        // already uses, so every participant gets notified via their existing
+        // 'call:recording_started'/'_stopped' socket listener no matter which
+        // "record" control was clicked. Returns true only if the server
+        // confirmed the notification went out — callers should NOT start
+        // capturing on a false/rejected result (fail closed: no confirmed
+        // consent notification means no recording, rather than silently
+        // recording anyway and only losing the banner).
+        _notifyRecordingConsent: async function(action) {
+            try {
+                const callId = window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId);
+                if (!callId) return false;
+                const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) || (window.config && window.config.apiUrl) || '';
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                if (!apiBase || !token) return false;
+                const res = await fetch(apiBase + '/api/calls/' + callId + '/recording/' + (action === 'start' ? 'start' : 'stop'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+                });
+                return res.ok;
+            } catch (_) {
+                return false;
+            }
+        },
+
+        toggleRecording: async function() {
             if (UIState._recorder && UIState._recorder.state === 'recording') {
                 // Stop recording
                 UIState._recorder.stop();
                 UIState._recorder = null;
+                // FIX-SILENT-RECORDING: tell the server (and therefore every other
+                // participant, via their existing 'call:recording_stopped' banner
+                // listener) that recording has stopped. See start branch below for
+                // why this call exists at all.
+                UIEventHandlers._notifyRecordingConsent('stop');
                 // Clear pulsing indicator
                 if (UIState._recPulseInterval) { clearInterval(UIState._recPulseInterval); UIState._recPulseInterval = null; }
                 if (UIState._recAnimFrame)     { cancelAnimationFrame(UIState._recAnimFrame); UIState._recAnimFrame = null; }
@@ -7559,6 +7590,19 @@ handleContactItemClick: function(e) {
 
             if (!localStream && !remoteStream) {
                 showNotification('No active streams to record', 'error');
+                return;
+            }
+
+            // FIX-SILENT-RECORDING: confirm the other participant(s) were
+            // actually notified BEFORE capturing anything at all. Fail closed:
+            // if the server can't be reached, or this user isn't authorized
+            // to record (server currently restricts this to the call's
+            // initiator), do not proceed with local capture either — silently
+            // recording someone without a confirmed notification is exactly
+            // the gap this fix closes.
+            const _consentOk = await UIEventHandlers._notifyRecordingConsent('start');
+            if (!_consentOk) {
+                showNotification('Recording requires host permission and could not be started', 'error');
                 return;
             }
 
@@ -7622,6 +7666,10 @@ handleContactItemClick: function(e) {
             };
             recorder.start(1000);
             UIState._recorder = recorder;
+
+            // FIX-SILENT-RECORDING: consent was already confirmed via
+            // _notifyRecordingConsent('start') above, before any capture
+            // setup began (fail closed) — no second call needed here.
 
             // Pulse the Record menu item red while active
             const menuRecord = document.getElementById('menuRecord');

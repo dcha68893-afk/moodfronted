@@ -377,9 +377,21 @@
 
       console.log(`[PeerConn] Destroying peer session: ${this.peerId}`);
 
-      // Remove all senders and stop their tracks
+      // FIX-GROUP-CALL-BLACKOUT: this used to also call sender.track?.stop()
+      // here. In a group/mesh call, GroupCallEngine fetches ONE shared local
+      // MediaStream from DeviceMediaManager and passes the SAME
+      // MediaStreamTrack objects into init() for every remote participant's
+      // Session — that's the correct design for a mesh (one camera/mic feed
+      // sent to N peers). But MediaStreamTrack.stop() is global to the track,
+      // not scoped to one sender/peer connection: destroying just ONE peer's
+      // session (e.g. because that one participant left) was stopping the
+      // local track outright, going black/silent for every OTHER remaining
+      // participant too — not just the one who left. Track lifecycle belongs
+      // exclusively to DeviceMediaManager (its stopAll() already runs when
+      // the local user actually leaves the call, in leaveGroupCall()); this
+      // method now only detaches the track from THIS peer connection.
       for (const sender of this._senders.values()) {
-        try { sender.track?.stop(); this._pc?.removeTrack(sender); } catch (_) {}
+        try { this._pc?.removeTrack(sender); } catch (_) {}
       }
       this._senders.clear();
 
@@ -608,6 +620,19 @@
         return;
       }
       await session.handleSignal(signal);
+    }
+
+    // FIX-CAMERA-SWITCH-FROZEN-REMOTE (group calls): DeviceMediaManager.switchCamera()/
+    // switchAudioDevice() only ever updated the local shared stream — nothing
+    // propagated the new track to any of the N active mesh peer connections,
+    // so switching camera/mic mid-group-call froze/silenced you for every
+    // other participant while your own preview kept working. Called from
+    // GroupCallEngine's DeviceMediaManager.onChange subscription.
+    replaceTrackForAll(kind, newTrack) {
+      if (!newTrack) return;
+      for (const session of this._peers.values()) {
+        session.replaceTrack(kind, newTrack).catch(() => {});
+      }
     }
 
     destroySession(peerId, callId) {

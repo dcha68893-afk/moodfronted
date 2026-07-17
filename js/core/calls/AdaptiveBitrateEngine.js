@@ -178,7 +178,40 @@
         bus.on('SOCKET_CONNECTED', () => this._onSocketReconnected());
       }
 
+      // FIX-DEVICE-CHANGE: Bluetooth headset connect/disconnect, wired
+      // headset plug/unplug, or any other audio/video input device change
+      // had no handling anywhere in the app. If the device currently in use
+      // (e.g. a Bluetooth mic) disappears mid-call, its MediaStreamTrack
+      // ends silently and nothing reacted until the tab was backgrounded and
+      // re-foregrounded (which triggers _onTabVisible above) — on desktop
+      // that could mean staying silent/dark for the rest of the call.
+      // navigator.mediaDevices.ondevicechange fires immediately on any such
+      // change, so route it through the same recovery pipeline.
+      if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) {
+        navigator.mediaDevices.addEventListener('devicechange', () => this._onDeviceChange());
+      }
+
       console.log('[CallRecovery] Attached');
+    }
+
+    // FIX-DEVICE-CHANGE: debounced the same way network-type-change is above —
+    // devicechange can fire multiple times in quick succession for a single
+    // physical event (e.g. a Bluetooth headset registering as both an audio
+    // input and output device change).
+    _onDeviceChange() {
+      const active = window.__CallStateMachine?.getActive();
+      if (!active) return;
+
+      clearTimeout(this._deviceChangeTimer);
+      this._deviceChangeTimer = setTimeout(() => {
+        console.log('[CallRecovery] Audio/video device change detected — checking for ended tracks');
+        const _recover = typeof window.callsCoreRecoverMedia === 'function'
+          ? window.callsCoreRecoverMedia()
+          : Promise.resolve();
+        _recover.then(() => {
+          this._notify('recovery:device_changed', { callId: active.callId });
+        });
+      }, 500);
     }
 
     onRecovery(fn) {

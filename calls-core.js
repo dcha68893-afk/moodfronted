@@ -5031,7 +5031,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] ℹ️ ${message}`, data ? data : '');
+        console.log(`[${module}] ℹ️ ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5042,6 +5042,50 @@ function applySession(sessionData) {
     
 
 
+
+    // FIX-STRUCTURED-LOGGING (Phase 13): every log line now also carries a
+    // structured record with timestamp, callId, userId, socketId, event, and
+    // state -- the fields explicitly required -- alongside the existing
+    // human-readable emoji line (kept as-is so nothing that scans console
+    // output for the old format breaks). Dedup-by-time-window logic in each
+    // of the four functions below is unchanged.
+    function _buildStructuredLog(module, message, extra) {
+        var callId = null;
+        try {
+            callId = (extra && (extra.callId || extra.id))
+                || (typeof callsState !== 'undefined' && callsState && callsState.activeCallId)
+                || null;
+        } catch (_) {}
+
+        var userId = null;
+        try {
+            userId = (typeof callsState !== 'undefined' && callsState && callsState.session && callsState.session.userId)
+                || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId)
+                || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.user && window.__CHILD_SESSION__.user.id)
+                || null;
+        } catch (_) {}
+
+        var socketId = null;
+        try {
+            var _sock = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
+            socketId = (_sock && _sock.id) || null;
+        } catch (_) {}
+
+        var state = null;
+        try {
+            state = (typeof callsState !== 'undefined' && callsState && callsState.callState) || null;
+        } catch (_) {}
+
+        return {
+            timestamp: new Date().toISOString(),
+            module:    module,
+            event:     message,
+            callId:    callId,
+            userId:    userId,
+            socketId:  socketId,
+            state:     state,
+        };
+    }
 
     function logWarn(module, message, data = null) {
 
@@ -5075,7 +5119,7 @@ function applySession(sessionData) {
 
 
 
-        console.warn(`[${module}] ⚠️ ${message}`, data ? data : '');
+        console.warn(`[${module}] ⚠️ ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5119,7 +5163,7 @@ function applySession(sessionData) {
 
 
 
-        console.error(`[${module}] 🔴 ${message}`, error ? error : '', data ? data : '');
+        console.error(`[${module}] 🔴 ${message}`, error ? error : '', data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5163,7 +5207,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] ✅ ${message}`, data ? data : '');
+        console.log(`[${module}] ✅ ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5207,7 +5251,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] 📤 ${message}`, data ? data : '');
+        console.log(`[${module}] 📤 ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5251,7 +5295,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] 🔵 ${message}`, data ? data : '');
+        console.log(`[${module}] 🔵 ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5295,7 +5339,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] 📊 ${fromState} → ${toState}${reason ? ` (${reason})` : ''}`);
+        console.log(`[${module}] 📊 ${fromState} → ${toState}${reason ? ` (${reason})` : ''}`, _buildStructuredLog(module, `${fromState}->${toState}`, { reason }));
 
 
 
@@ -5339,7 +5383,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] 🎫 ${message}`, data ? data : '');
+        console.log(`[${module}] 🎫 ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5383,7 +5427,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] 💓 ${message}`, data ? data : '');
+        console.log(`[${module}] 💓 ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -5427,7 +5471,7 @@ function applySession(sessionData) {
 
 
 
-        console.log(`[${module}] 📞 ${message}`, data ? data : '');
+        console.log(`[${module}] 📞 ${message}`, data ? data : '', _buildStructuredLog(module, message, data));
 
 
 
@@ -12377,7 +12421,14 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                return { success: true, facingMode: newMode };
+                // FIX-CAMERA-SWITCH-FROZEN-REMOTE: return the new track itself.
+                // Previously this only updated the LOCAL stream/preview -- nothing
+                // ever called sender.replaceTrack() on the active RTCPeerConnection,
+                // so after switching cameras the remote party kept receiving the
+                // last frame from the old (now-stopped) camera track for the rest
+                // of the call. Returning it here lets the caller push it to the
+                // real peer connection (see window.callsCoreReplaceVideoTrack below).
+                return { success: true, facingMode: newMode, track: newVideoTracks[0] || null };
 
 
 
@@ -12455,17 +12506,35 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
                 callsState.screenSharing = true;
 
+                // FIX-SCREENSHARE-NEVER-SENT: previously this just captured the
+                // screen and returned it -- nothing ever pushed the screen track
+                // to the peer connection's video sender, so the remote party
+                // never saw the shared screen at all, only the local preview.
+                // Store the screen stream/track and the camera track being
+                // replaced so stopScreenShare() can properly release the
+                // capture AND revert the sender back to the camera.
+                this._screenStream = screenStream;
+                var screenTrack = screenStream.getVideoTracks()[0] || null;
+                this._preShareCameraTrack = (this._videoTracks && this._videoTracks[0]) || null;
 
+                // If the user stops sharing via the browser's own "Stop sharing"
+                // control (not our button), react the same way our stopScreenShare
+                // button does: release the capture and revert to camera.
+                if (screenTrack) {
+                    screenTrack.addEventListener('ended', () => {
+                        if (callsState.screenSharing) {
+                            MediaManager.stopScreenShare();
+                            if (typeof window.callsCoreReplaceVideoTrack === 'function' && this._preShareCameraTrack) {
+                                window.callsCoreReplaceVideoTrack(this._preShareCameraTrack);
+                            }
+                            this._notifyListeners('screen_share_ended', {});
+                        }
+                    });
+                }
 
                 this._notifyListeners('screen_share_started', { stream: screenStream });
 
-
-
-                
-
-
-
-                return { success: true, stream: screenStream };
+                return { success: true, stream: screenStream, track: screenTrack };
 
 
 
@@ -12499,15 +12568,24 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
         stopScreenShare: function() {
 
-
-
             callsState.screenSharing = false;
 
-
+            // FIX-SCREENSHARE-NEVER-SENT: previously this never actually
+            // stopped the getDisplayMedia capture tracks -- the browser's
+            // screen-sharing indicator/capture kept running in the background
+            // indefinitely after "stopping" screen share. Now release it, and
+            // hand back the camera track that was active before sharing
+            // started so the caller can revert the peer connection's sender.
+            var revertTrack = this._preShareCameraTrack || null;
+            if (this._screenStream) {
+                this._screenStream.getTracks().forEach(function(t) { try { t.stop(); } catch (_) {} });
+                this._screenStream = null;
+            }
+            this._preShareCameraTrack = null;
 
             this._notifyListeners('screen_share_ended', {});
 
-
+            return { success: true, revertTrack: revertTrack };
 
         },
 
@@ -12809,6 +12887,35 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
+
+                // FIX-SINGLE-SESSION-AUTHORITY (Phase 15): this used to
+                // unconditionally create a fresh RTCPeerConnection every time
+                // it was called, with no check for an existing one -- the
+                // single choke point all peer-connection creation flows
+                // through had zero protection against being invoked twice
+                // for the same call (a rapid double-tap on Accept before
+                // callActive flips true, or the dual accept-listener-pipeline
+                // race documented elsewhere in this file for
+                // handleCallAccepted). Each duplicate call silently orphaned
+                // the previous RTCPeerConnection -- never closed, its ICE
+                // gathering and any acquired media continuing to run in the
+                // background -- while this._peerConnection got overwritten
+                // with a second, competing connection. For the same call,
+                // there must be exactly one. If a live, non-terminal
+                // connection already exists, return it instead of creating
+                // a second one. If the existing one is already
+                // closed/failed, close it explicitly first (belt-and-suspenders
+                // against any listener/reference still expecting a close
+                // event) before creating the real replacement.
+                if (this._peerConnection) {
+                    var _existingState = this._peerConnection.connectionState || this._peerConnection.iceConnectionState;
+                    if (_existingState && _existingState !== 'closed' && _existingState !== 'failed') {
+                        logWarn(MODULE, 'createPeerConnection: a live connection already exists for this call -- reusing it instead of creating a duplicate', { state: _existingState });
+                        return this._peerConnection;
+                    }
+                    try { this._peerConnection.close(); } catch (_) {}
+                }
+
                 const pcConfig = {
 
 
@@ -12862,6 +12969,21 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                         return Promise.resolve(); // stale request for a call that's no longer active
                     }
                     return Promise.resolve(WebRTCManager.handleIceFailure());
+                };
+                // FIX-CAMERA-SWITCH-FROZEN-REMOTE: MediaManager.switchCamera() only
+                // ever updated the local stream/preview. This pushes the freshly
+                // acquired track onto the active peer connection's real video
+                // sender via replaceTrack(), so the remote party actually sees the
+                // new camera instead of a frozen frame from the old (stopped) one.
+                window.callsCoreReplaceVideoTrack = function(newTrack) {
+                    if (!newTrack) return;
+                    var pc = WebRTCManager._peerConnection;
+                    if (!pc) return;
+                    pc.getSenders().forEach(function(sender) {
+                        if (sender.track && sender.track.kind === 'video') {
+                            sender.replaceTrack(newTrack).catch(function() {});
+                        }
+                    });
                 };
                 // FIX: hook for AdaptiveBitrateEngine.js's CallRecoveryEngine tab-visibility
                 // recovery. DeviceMediaManager.recoverTracks() is a no-op in this app (its
@@ -13113,6 +13235,21 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
+                    // FIX-ICE-STALE-TIMER: ICE recovered on its own (transient blip) —
+                    // cancel the pending 5s "still disconnected" recovery timer set in
+                    // the 'disconnected' branch below. Without this, a connection that
+                    // healed itself in under 5s still got hit with a spurious
+                    // handleIceFailure() restart 5s later, because that timer only
+                    // checks iceConnectionState at fire-time and was never cancelled on
+                    // successful recovery — only full call cleanup cleared it, which is
+                    // too late (mid-call, not at call end).
+                    if (this._iceDisconnectTimer) {
+                        clearTimeout(this._iceDisconnectTimer);
+                        this._iceDisconnectTimer = null;
+                    }
+
+
+
                     this._notifyListeners('ice_connected', { state });
 
                     // FIX: also fire 'call_connected' so UIEventHandlers.handleCallConnected
@@ -13124,6 +13261,16 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
                     });
 
                 } else if (state === 'failed') {
+
+
+
+                    // FIX-ICE-STALE-TIMER: cancel any pending 5s disconnect-recovery
+                    // timer so it can't fire handleIceFailure() a second time for the
+                    // same failure a few seconds after we already triggered it here.
+                    if (this._iceDisconnectTimer) {
+                        clearTimeout(this._iceDisconnectTimer);
+                        this._iceDisconnectTimer = null;
+                    }
 
 
 
@@ -28221,7 +28368,7 @@ _escapeHtml: function(text) {
 
 
 
-        console.log(`[${module}] ${icon} Pipeline stage: ${stage} - ${status}`, data ? data : '');
+        console.log(`[${module}] ${icon} Pipeline stage: ${stage} - ${status}`, data ? data : '', _buildStructuredLog(module, `pipeline:${stage}:${status}`, data));
 
 
 
@@ -29158,6 +29305,24 @@ _escapeHtml: function(text) {
         if (!callsState._acceptedCallIds) callsState._acceptedCallIds = new Set();
         if (acceptedCallId) callsState._acceptedCallIds.add(acceptedCallId);
 
+        // FIX-CALLID-RECONCILE (Phase 2): the dedup check above only catches
+        // a duplicate delivery of the SAME accept event for the call
+        // already being tracked. It does not catch a late-arriving accept
+        // for a DIFFERENT, earlier call attempt (e.g. a quick redial after
+        // no answer) arriving after a new call has already started —
+        // that case would fall through to the assignment below and
+        // overwrite callsState.activeCallId with the WRONG call's id,
+        // hijacking tracking away from the genuinely active call for the
+        // rest of its lifetime. Uses the same resolveCallId()-aware
+        // staleness check as handleCallEnded/handleCallConnected so a
+        // legitimate first accept (where activeCallId is still the
+        // pre-ack local id) is correctly recognized as the same call, not
+        // rejected as stale.
+        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
+            logWarn(MODULE, 'handleCallAccepted: ignoring stale accept for a different/previous call', acceptedCallId);
+            return;
+        }
+
         if (acceptedCallId) {
             callsState.activeCallId = acceptedCallId;
             callsState.serverCallId = callsState.serverCallId || acceptedCallId;
@@ -29339,10 +29504,50 @@ _escapeHtml: function(text) {
                     var _offerId = callId;
                     var _offTarget = _resolvedTarget;
                     if (_directSocket && typeof _directSocket.emit === 'function' && _offTarget) {
-                        _directSocket.emit('call:webrtc_offer', {
-                            callId: _offerId, targetUserId: _offTarget,
-                            offer: offer,
-                        });
+                        // FIX-SIGNALING-ACK (Phase 20): the offer is the single
+                        // most critical signaling message — if it's lost (e.g.
+                        // the target's socket had just dropped and hadn't been
+                        // pruned server-side yet), the call never connects at
+                        // all with no recovery. This was previously a bare
+                        // fire-and-forget emit with zero delivery confirmation.
+                        // Now retries (capped) if the server doesn't ack
+                        // delivery, and bails out early if this call is no
+                        // longer the one actually active (already connected via
+                        // a parallel path, or already ended/cancelled) so a
+                        // stale retry can't disrupt a call that's since moved on.
+                        (function sendOfferWithRetry(attempt) {
+                            var _acked = false;
+                            var _payload = { callId: _offerId, targetUserId: _offTarget, offer: offer };
+                            _directSocket.emit('call:webrtc_offer', _payload, function(ackResp) {
+                                _acked = true;
+                                if (ackResp && ackResp.delivered) {
+                                    logCall(MODULE, 'Offer delivery confirmed by server', { callId: _offerId, attempt: attempt });
+                                }
+                            });
+                            setTimeout(function() {
+                                if (_acked) return;
+                                var stillRelevant = typeof _isStaleCallEvent !== 'function' || !_isStaleCallEvent({ callId: _offerId });
+                                // FIX-SIGNALING-ACK: don't retry into an already-connected
+                                // call. An ack can go missing (network blip on the way
+                                // back) even though the offer itself was delivered and
+                                // the call proceeded to connect fine — resending in that
+                                // case would hit setRemoteDescription('offer') on an
+                                // already-stable peer connection and break it, per the
+                                // documented InvalidStateError failure mode elsewhere in
+                                // this file (see handleSignalOffer's duplicate-delivery fix).
+                                var alreadyConnected = callsState.callState === 'connected' || callsState.callState === 'in-call';
+                                if (!stillRelevant || alreadyConnected) {
+                                    logWarn(MODULE, 'Offer ack timeout — not retrying (call no longer pending)', { callId: _offerId, state: callsState.callState });
+                                    return;
+                                }
+                                if (attempt < 3) {
+                                    logWarn(MODULE, `Offer ack timeout — retrying (attempt ${attempt + 1}/3)`, _offerId);
+                                    sendOfferWithRetry(attempt + 1);
+                                } else {
+                                    logError(MODULE, 'Offer delivery failed after 3 attempts — target may be unreachable', null, { callId: _offerId });
+                                }
+                            }, 3000);
+                        })(1);
                         console.log('[CallsCore] ✅ OFFER sent via Socket.IO to targetUserId:', _offTarget);
                     } else {
                         safeSend('SIGNAL_OFFER', _offerPayload, false);
@@ -29563,25 +29768,53 @@ _escapeHtml: function(text) {
 
 
 
-    function handleCallRejected(callData) {
+    // FIX-MULTI-DEVICE-RING: the backend (CallSignalingService, see FEAT-02)
+    // already emits 'call:accepted_elsewhere' to every OTHER socket of a user
+    // when one of their devices accepts an incoming call — but calls-core.js's
+    // _bindRealtime() RT_MAP never listened for it, so a second device (another
+    // tab, phone + laptop, etc.) kept ringing indefinitely after the call was
+    // answered elsewhere. resetCallState() only clears local state — it does
+    // not emit any reject/end signal to the server — so calling it here is
+    // safe: the server already knows the call was accepted on the other device.
+    function handleCallAcceptedElsewhere(callData) {
 
+        logCall(MODULE, 'handleCallAcceptedElsewhere', callData);
 
-
-        logCall(MODULE, 'handleCallRejected', callData);
-
-
-
-        
-
-
+        // FIX-CALLID-RECONCILE (Phase 2): added retroactively — this handler
+        // was modeled on the (at-the-time-also-unguarded) handleCallRejected
+        // and inherited the same gap. A stale accepted_elsewhere for a
+        // previous ring shouldn't be able to tear down a newer active call.
+        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
+            logWarn(MODULE, 'handleCallAcceptedElsewhere: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+            return;
+        }
 
         resetCallState();
 
+        notifyListeners('call_accepted_elsewhere', callData);
 
+    }
+
+    function handleCallRejected(callData) {
+
+        logCall(MODULE, 'handleCallRejected', callData);
+
+        // FIX-CALLID-RECONCILE (Phase 2): this handler had no staleness/
+        // callId-match check at all, unlike its sibling handlers
+        // (handleCallEnded, handleCallConnected, handleCallFailed) which all
+        // guard via _isStaleCallEvent(). A stale/duplicate call:rejected
+        // event -- e.g. left over from a quick redial after a previous
+        // attempt was declined, or a duplicate delivery racing a newer,
+        // already-connected call -- would unconditionally call
+        // resetCallState(), tearing down a perfectly healthy different call.
+        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
+            logWarn(MODULE, 'handleCallRejected: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+            return;
+        }
+
+        resetCallState();
 
         notifyListeners('call_rejected', callData);
-
-
 
     }
 
@@ -29778,6 +30011,17 @@ function handleCallForceEnd(callData) {
 
 
     logCall(MODULE, 'Force ending call', callData);
+
+    // FIX-CALLID-RECONCILE (Phase 2): both real-world triggers for this
+    // function (CALL_CANCELLED, CALL_FORCE_END) carry a specific callId and
+    // should be validated like every other terminal event -- a stale
+    // force-end/cancel for an old call attempt shouldn't be able to nuke a
+    // newer, genuinely active call's state.
+    if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
+        logWarn(MODULE, 'handleCallForceEnd: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        return;
+    }
+
 
 
 
@@ -30719,6 +30963,24 @@ window.CallHandlers = {
         callsState._processedOfferKeys.add(_offerDedupKey);
     }
 
+    // FIX-CALLID-RECONCILE (Phase 2): call:offer is explicitly one of the
+    // events that must be verified against the single immutable callId for
+    // this call — this handler previously only deduped an EXACT repeat
+    // delivery of the same offer, with no check that the offer belongs to
+    // the call currently being tracked at all. A stale offer left over from
+    // a previous, already-ended call attempt (delayed/retried network
+    // delivery) arriving after a new call has started would otherwise be
+    // applied to the CURRENT peer connection via setRemoteDescription(),
+    // corrupting the real negotiation. Only checked when this device
+    // already has an active call tracked (a fresh incoming call's very
+    // first offer legitimately arrives before any prior local id exists,
+    // and _isStaleCallEvent() already returns false — "not stale" — in
+    // that case, so this doesn't block the normal flow).
+    if (_offerCallId && typeof _isStaleCallEvent === 'function' && _isStaleCallEvent({ callId: _offerCallId })) {
+        logWarn(MODULE, 'handleSignalOffer: ignoring stale offer for a different/previous call', _offerCallId);
+        return;
+    }
+
 
 
     
@@ -30948,6 +31210,18 @@ window.CallHandlers = {
             return;
         }
         callsState._processedAnswerKeys.add(_ansDedupKey);
+    }
+
+    // FIX-CALLID-RECONCILE (Phase 2): call:answer is explicitly one of the
+    // events that must be verified against the single immutable callId —
+    // same gap and same fix as handleSignalOffer above, on the caller's
+    // side this time. A stale answer for a previous, already-ended call
+    // attempt arriving late would otherwise be applied via
+    // setRemoteDescription() to whatever peer connection is CURRENTLY
+    // active, corrupting the real negotiation.
+    if (_ansCallId && typeof _isStaleCallEvent === 'function' && _isStaleCallEvent({ callId: _ansCallId })) {
+        logWarn(MODULE, 'handleSignalAnswer: ignoring stale answer for a different/previous call', _ansCallId);
+        return;
     }
 
 
@@ -36022,6 +36296,15 @@ clearActiveCall: function() {
 
                 if (result.success) {
 
+                    // FIX-CAMERA-SWITCH-FROZEN-REMOTE: actually push the new
+                    // camera track to the live peer connection's sender.
+                    // Previously only the local preview updated and the
+                    // remote party's video froze on the old camera.
+                    if (typeof window.callsCoreReplaceVideoTrack === 'function') {
+                        window.callsCoreReplaceVideoTrack(result.track);
+                    }
+
+
 
 
                     IframeTransport.sendAction('SWITCH_CAMERA', {
@@ -36102,36 +36385,27 @@ clearActiveCall: function() {
 
             return MediaManager.startScreenShare().then(result => {
 
-
-
                 if (result.success) {
 
-
+                    // FIX-SCREENSHARE-NEVER-SENT: actually push the screen
+                    // capture track to the live peer connection's video
+                    // sender. Previously only the local preview updated and
+                    // the remote party never received the shared screen.
+                    if (typeof window.callsCoreReplaceVideoTrack === 'function' && result.track) {
+                        window.callsCoreReplaceVideoTrack(result.track);
+                    }
 
                     IframeTransport.sendAction('START_SCREEN_SHARE', {
 
-
-
                         timestamp: Date.now()
-
-
 
                     });
 
-
-
                 }
-
-
 
                 return result;
 
-
-
             });
-
-
-
         },
 
 
@@ -36152,17 +36426,19 @@ clearActiveCall: function() {
 
 
 
-            MediaManager.stopScreenShare();
+            var _stopResult = MediaManager.stopScreenShare();
 
-
+            // FIX-SCREENSHARE-NEVER-SENT: revert the peer connection's video
+            // sender back to the camera track that was active before sharing
+            // started. Without this, ending screen share left the remote
+            // party's video frozen on the last screen-share frame forever.
+            if (typeof window.callsCoreReplaceVideoTrack === 'function' && _stopResult && _stopResult.revertTrack) {
+                window.callsCoreReplaceVideoTrack(_stopResult.revertTrack);
+            }
 
             IframeTransport.sendAction('STOP_SCREEN_SHARE', {
 
-
-
                 timestamp: Date.now()
-
-
 
             });
 
@@ -38219,7 +38495,55 @@ clearActiveCall: function() {
             if (!rt.__callsCoreBoundDisconnectWired) {
                 rt.__callsCoreBoundDisconnectWired = true;
                 rt.on('disconnect', function() { rt.__callsCoreBound = false; });
-                rt.on('connect', function() { rt.__callsCoreBound = false; setTimeout(_bindRealtime, 150); });
+                rt.on('connect', function() {
+                    rt.__callsCoreBound = false;
+                    setTimeout(_bindRealtime, 150);
+
+                    // FIX-STATE-RECONCILE (Phase 20): the backend already fully
+                    // implements call:resync / call:resync_response — verified
+                    // in CallSignalingService.js — but nothing in this frontend
+                    // ever called it. Without this, a socket that drops and
+                    // reconnects mid-call has no way to find out the call ended
+                    // (or a participant left) while it was offline; it just
+                    // keeps showing a call that the server has already torn
+                    // down, with no path back to a correct idle state short of
+                    // the user manually hanging up.
+                    try {
+                        var _resyncCallId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+                        if (_resyncCallId && callsState.callActive) {
+                            logCall(MODULE, 'Reconnected mid-call — requesting state resync', _resyncCallId);
+                            rt.emit('call:resync', { callId: _resyncCallId });
+                        }
+                    } catch (_) {}
+                });
+
+                rt.on('call:resync_response', function(resp) {
+                    try {
+                        if (!resp || !resp.callId) return;
+                        // Ignore a resync response for a call we've since moved
+                        // on from (e.g. it arrived late, after the user already
+                        // hung up and started a new call).
+                        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(resp)) return;
+
+                        var roomActive = resp.roomState && resp.roomState.active;
+                        if (!roomActive) {
+                            logWarn(MODULE, 'call:resync_response — server reports call no longer active, force-ending locally', resp.callId);
+                            handleCallForceEnd({ callId: resp.callId, reason: 'resync_call_ended' });
+                            return;
+                        }
+
+                        var myId = callsState.session && callsState.session.userId;
+                        var stillParticipant = !myId || !Array.isArray(resp.participants)
+                            || resp.participants.some(function(p) { return String(p && (p.userId || p.id || p)) === String(myId); });
+                        if (!stillParticipant) {
+                            logWarn(MODULE, 'call:resync_response — server no longer lists us as a participant, force-ending locally', resp.callId);
+                            handleCallForceEnd({ callId: resp.callId, reason: 'resync_removed' });
+                            return;
+                        }
+
+                        logCall(MODULE, 'call:resync_response — state confirmed consistent', resp.callId);
+                    } catch (_) {}
+                });
             }
 
 
@@ -38315,6 +38639,36 @@ clearActiveCall: function() {
                 ['user_online_status', (p) => {
                     // Response to check_user_online — used by UI before sending a message
                     EventBus && EventBus.emit && EventBus.emit('user:online_status', p);
+                }],
+
+                // FIX-MULTI-DEVICE-RING: backend already emits these three events
+                // (CallSignalingService.js) but nothing in this file was listening
+                // for them, so: (1) other devices kept ringing forever after the
+                // call was accepted on one device, (2) callers got no feedback when
+                // the callee was already on another call, and (3) callers got no
+                // feedback when a rapid repeat call attempt was rate-limited — in
+                // both (2) and (3) the outgoing-call UI stayed stuck indefinitely.
+                ['call:accepted_elsewhere', (p) => {
+                    console.log('[CallsCore] 📴 call:accepted_elsewhere — dismissing ring on this device', p);
+                    handleCallAcceptedElsewhere(p);
+                }],
+                ['call:busy', (p) => {
+                    console.warn('[CallsCore] 📵 call:busy — target is in another call', p);
+                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'busy' });
+                    else if (typeof resetCallState === 'function') resetCallState();
+                }],
+                ['call:dedup_rejected', (p) => {
+                    console.warn('[CallsCore] 📵 call:dedup_rejected — rate limited', p);
+                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'rate_limited' });
+                    else if (typeof resetCallState === 'function') resetCallState();
+                }],
+                ['call:waiting', (p) => {
+                    // Informational: callee is already in a call and could optionally
+                    // accept/decline this one as call-waiting. No dedicated call-waiting
+                    // UI exists yet — surface it on the EventBus so one can be added
+                    // without another silent-drop of a real backend event.
+                    console.log('[CallsCore] ℹ️ call:waiting', p);
+                    EventBus && EventBus.emit && EventBus.emit('call:waiting', p);
                 }],
 
             ];
