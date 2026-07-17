@@ -178,10 +178,25 @@
         async mergeServerMessages(chatId, serverMessages) {
             // FIX #1 — MERGE NOT REPLACE: upsert each server message individually.
             // Existing messages are NEVER removed; only updated if server has newer version.
+            // FIX (delete-persistence gap): this was the one place in the
+            // reconciliation pipeline that never checked the deletion tombstone
+            // registry (window.__PHASE10_DeletionRegistry, populated both by
+            // realtime message:deleted events and by /deletions polling on
+            // reconnect for anything missed while offline). Everywhere else
+            // that reads messages back out already filters through this
+            // registry, but skipping the check here meant a tombstoned message
+            // could still get re-upserted into IndexedDB on every merge — a
+            // latent trap for any future/other render path that doesn't also
+            // filter by registry.
             const normalized = [];
             for (const item of (serverMessages || [])) {
                 const serverId = item.id ? String(item.id) : (item.serverId ? String(item.serverId) : null);
                 if (!serverId) continue;
+
+                if (window.__PHASE10_DeletionRegistry && window.__PHASE10_DeletionRegistry.isDeleted('message', serverId)) {
+                    try { await window.AppCache.remove('messages', serverId); } catch (_) {}
+                    continue;
+                }
 
                 // Check if we already have this message — if so, only update metadata
                 const existing = await this._findExistingMessage({ serverId, id: serverId });

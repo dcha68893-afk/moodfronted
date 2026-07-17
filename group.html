@@ -2395,11 +2395,21 @@ function renderMsgs(box,msgs){
        app's E2E wiring. */
     var gid = window.__gcCurGroup && window.__gcCurGroup.id;
     var renderAll = function(){ msgs.forEach(function(m){appendBubble(box,m,me);}); scrollBot(); };
-    if (gid && window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncomingBatch === 'function') {
-        window.KynectaGroupE2E.decryptIncomingBatch(gid, msgs).then(renderAll).catch(renderAll);
-    } else {
-        renderAll();
+    function _tryDecryptAndRender(attemptsLeft){
+        if (gid && window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncomingBatch === 'function') {
+            window.KynectaGroupE2E.decryptIncomingBatch(gid, msgs).then(renderAll).catch(renderAll);
+        } else if (attemptsLeft > 0 && msgs.some(function(m){return m && m.metadata && m.metadata.encrypted;})) {
+            // FIX (ciphertext must never render, and never behind a visible
+            // loading state — decryption happens fully in the background):
+            // the E2E module can still be loading on first paint. Give it a
+            // moment instead of immediately rendering raw ciphertext. Nothing
+            // is appended to the DOM at all until this resolves either way.
+            setTimeout(function(){ _tryDecryptAndRender(attemptsLeft - 1); }, 300);
+        } else {
+            renderAll();
+        }
     }
+    _tryDecryptAndRender(6);
 }
 
 /* ─── appendBubble ────────────────────────────────────────────── */
@@ -2582,8 +2592,23 @@ function hookRT(){
         /* FIX-GROUP-ENCRYPTION: same gap as renderMsgs above -- this is the
            realtime single-message path in this separate implementation.
            Decrypt msg.content in place before appendBubble ever sees it. */
-        if (gid && msg && msg.metadata && msg.metadata.encrypted && window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncoming === 'function') {
-            window.KynectaGroupE2E.decryptIncoming(gid, msg).then(function(){ appendBubble(box,msg,me);scrollBot(); }).catch(function(){ appendBubble(box,msg,me);scrollBot(); });
+        if (gid && msg && msg.metadata && msg.metadata.encrypted) {
+            if (window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncoming === 'function') {
+                window.KynectaGroupE2E.decryptIncoming(gid, msg).then(function(){ appendBubble(box,msg,me);scrollBot(); }).catch(function(){ appendBubble(box,msg,me);scrollBot(); });
+            } else {
+                // FIX (ciphertext must never render — module still loading):
+                // wait for it briefly instead of rendering raw ciphertext.
+                var _rt=0;
+                (function _waitForE2E(){
+                    if (window.KynectaGroupE2E && typeof window.KynectaGroupE2E.decryptIncoming === 'function') {
+                        window.KynectaGroupE2E.decryptIncoming(gid, msg).then(function(){ appendBubble(box,msg,me);scrollBot(); }).catch(function(){ appendBubble(box,msg,me);scrollBot(); });
+                    } else if (_rt++ < 6) {
+                        setTimeout(_waitForE2E, 300);
+                    } else {
+                        appendBubble(box,msg,me);scrollBot();
+                    }
+                })();
+            }
             return;
         }
         appendBubble(box,msg,me);scrollBot();

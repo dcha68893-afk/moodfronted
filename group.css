@@ -2040,6 +2040,23 @@
             opacity: 0.8;
         }
         
+        .message-bubble {
+            /* FIX-CHAR-SPLIT-GUARD (group chat): this panel has its own
+               separate rendering path from the 1:1 DM chat (see group.html's
+               appendBubble) and never loads messages.css, so the .message-bubble
+               fix already proven correct there never applied here — group
+               chat text relied on unstyled browser defaults for wrapping,
+               which reproduced the same "H e l l o" / mid-word-break symptom
+               reported for DMs. Padding/max-width are intentionally NOT
+               duplicated here since the outer .message wrapper above already
+               constrains those in this file's structure. */
+            white-space: normal;
+            writing-mode: horizontal-tb;
+            overflow-wrap: break-word;
+            word-break: normal;
+            display: block;
+        }
+        
         .message-content {
             font-size: 14px;
             line-height: 1.4;

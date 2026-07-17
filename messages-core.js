@@ -7053,7 +7053,7 @@ try {
                 return;
             }
 
-            if (normalizedType === 'message_deleted' || normalizedType === 'message:deleted') {
+            if (normalizedType === 'message_deleted' || normalizedType === 'message:deleted' || normalizedType === 'messages:disappeared') {
                 const d = (data.payload && (data.payload.messageId || data.payload.messageIds)) ? data.payload : data;
                 const ids = Array.isArray(d.messageIds) && d.messageIds.length > 0
                     ? d.messageIds.map(String)
@@ -7225,7 +7225,7 @@ try {
 
         if (!hasRealtimeBinding && window.wsService?.on) {
             hasRealtimeBinding = true;
-            ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {
+            ['new_message', 'message:new', 'message_delivered', 'message:delivered', 'message_read', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted', 'messages:disappeared'].forEach((eventName) => {
                 if (typeof window.wsService.off === 'function') {
                     window.wsService.off(eventName);
                 }
@@ -7243,7 +7243,7 @@ try {
             if (!rt || !rt.on || rt.__msgCoreBound) return;
             rt.__msgCoreBound = true;
             ['message:new', 'new_message', 'chat:message', 'MESSAGE_RECEIVED',
-             'message:delivered', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted'].forEach((eventName) => {
+             'message:delivered', 'message:read', 'message_seen', 'message:seen', 'message_deleted', 'message:deleted', 'messages:disappeared'].forEach((eventName) => {
                 if (typeof rt.off === 'function') {
                     rt.off(eventName);
                 }

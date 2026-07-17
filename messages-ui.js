@@ -3473,34 +3473,69 @@
         // something (the raw envelope) synchronously; this patches it in
         // place a moment later, same pattern as other async UI patches in
         // this file (avatar/name updates, etc.).
-        _decryptRenderedMessages(messages, currentChat, currentUser) {
-            if (!window.KynectaE2E || !window.KynectaE2E.enabled) return;
+        _decryptRenderedMessages(messages, currentChat, currentUser, _attemptsLeft) {
             if (!Array.isArray(messages) || messages.length === 0) return;
+            const pending = messages.filter(m => m && (!m.type || m.type === 'text') &&
+                typeof m.content === 'string' && m.content.charAt(0) === '{' && m.content.indexOf('"v"') !== -1 && !m._decrypted);
+            if (pending.length === 0) return;
+
+            // FIX (bubbles must never stay invisible forever): the old version
+            // returned immediately if E2E wasn't enabled/loaded yet, which
+            // under the new hidden-until-ready render (no ciphertext, no
+            // "Decrypting…" text) meant those messages would just never
+            // appear at all. Give the module a moment to finish loading —
+            // it usually does within a second or two — before falling back.
+            if (!window.KynectaE2E || !window.KynectaE2E.enabled) {
+                const attemptsLeft = _attemptsLeft === undefined ? 6 : _attemptsLeft;
+                if (attemptsLeft > 0) {
+                    setTimeout(() => this._decryptRenderedMessages(messages, currentChat, currentUser, attemptsLeft - 1), 300);
+                    return;
+                }
+                // Module never became available — reveal with a neutral
+                // fallback rather than leaving these messages invisible.
+                pending.forEach(message => this._revealDecryptedBubble(message, '[Unable to decrypt message]', true));
+                return;
+            }
+
             const currentUserId = currentUser?.id || currentUser?.userId;
             const otherPartyId = currentChat?.friendId || currentChat?.otherUserId || currentChat?.id;
             const chatId = currentChat?.id;
-            messages.forEach(message => {
-                if (!message) return;
-                if (message.type && message.type !== 'text') return; // only text messages get encrypted
+            pending.forEach(message => {
                 const raw = message.content;
-                if (typeof raw !== 'string' || raw.charAt(0) !== '{' || raw.indexOf('"v"') === -1) return; // quick heuristic, avoids parsing every message
                 const isSent = String(message.senderId) === String(currentUserId);
                 const senderForDecrypt = isSent ? otherPartyId : message.senderId;
-                if (!senderForDecrypt || !chatId) return;
+                if (!senderForDecrypt || !chatId) {
+                    this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
+                    return;
+                }
                 window.KynectaE2E.decryptFromChat(raw, chatId, senderForDecrypt).then(plaintext => {
-                    if (!plaintext || plaintext === raw) return;
-                    const bubble = document.querySelector(`[data-message-id="${message.id}"] .message-content`);
-                    if (bubble) {
-                        const core = this._getCore ? this._getCore() : null;
-                        bubble.innerHTML = core?.formatMessageText ? core.formatMessageText(plaintext) : _safeEscapeHtml(plaintext);
+                    if (!plaintext || plaintext === raw) {
+                        this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
+                        return;
                     }
-                    // Cache the decrypted plaintext on the message object so any
-                    // re-render (e.g. a later renderMessages call) doesn't need
-                    // to decrypt it again and can display it immediately.
-                    message.content = plaintext;
-                    message._decrypted = true;
-                }).catch(() => {});
+                    this._revealDecryptedBubble(message, plaintext, false);
+                }).catch(() => {
+                    this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
+                });
             });
+        },
+
+        // Fills in the real (or, on failure, a neutral fallback — never raw
+        // ciphertext) text and un-hides the bubble that was rendered with
+        // the `pending-decrypt` class. Caches the result on the message
+        // object so a later re-render shows it immediately, no re-decrypt.
+        _revealDecryptedBubble(message, text, isFallback) {
+            const wrapper = document.querySelector(`[data-message-id="${message.id}"]`);
+            const bubble = wrapper ? wrapper.querySelector('.message-content') : null;
+            if (bubble) {
+                const core = this._getCore ? this._getCore() : null;
+                bubble.innerHTML = (!isFallback && core?.formatMessageText) ? core.formatMessageText(text) : _safeEscapeHtml(text);
+            }
+            if (wrapper) wrapper.classList.remove('pending-decrypt');
+            if (!isFallback) {
+                message.content = text;
+                message._decrypted = true;
+            }
         },
 
 
@@ -3648,11 +3683,28 @@
 
             const sendingClass = status === 'sending' ? 'message-sending' : '';
 
-            const content = core?.formatMessageText ? 
+            // FIX (ciphertext AND any visible "decrypting" state must never
+            // render — decryption happens fully in the background, only the
+            // real final message is ever shown): detect the same encrypted-
+            // envelope heuristic _decryptRenderedMessages uses, before ever
+            // building HTML. An encrypted-and-not-yet-decrypted message
+            // renders with empty content and a `pending-decrypt` class that
+            // CSS hides entirely (no ciphertext, no loading text, no empty
+            // box) — _decryptRenderedMessages fills in the real text and
+            // removes that class once plaintext is actually ready.
+            const _rawContent = message.content;
+            const _isEncryptedEnvelope = !message._decrypted && typeof _rawContent === 'string' &&
+                _rawContent.charAt(0) === '{' && _rawContent.indexOf('"v"') !== -1;
+
+            const content = _isEncryptedEnvelope
+                ? ''
+                : (core?.formatMessageText ? 
 
                 core.formatMessageText(message.content) : 
 
-                message.content;
+                message.content);
+
+            const pendingDecryptClass = _isEncryptedEnvelope ? 'pending-decrypt' : '';
 
             // FIX: Always use createdAt (real server time) first, fallback to timestamp
 
@@ -3666,13 +3718,13 @@
 
             
 
-            const safeMessage = JSON.stringify(message).replace(/"/g, '&quot;');
+            const safeMessage = JSON.stringify(_isEncryptedEnvelope ? { ...message, content: '' } : message).replace(/"/g, '&quot;');
 
             
 
             return `
 
-                <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass}" data-message-id="${message.id}" data-message-type="text" data-status="${status}">
+                <div class="message ${isSent ? 'sent' : 'received'} ${deletedClass} ${failedClass} ${sendingClass} ${pendingDecryptClass}" data-message-id="${message.id}" data-message-type="text" data-status="${status}">
 
                     <div class="message-bubble ${isSent ? 'sent' : 'received'}" onclick="window.messagesUI?.showMessageActions(${safeMessage}, event.clientX, event.clientY)">
 
@@ -14021,6 +14073,52 @@ Type: ${message.type || 'text'}`;
         // Check if this message is already in DOM
         if (msgId && document.querySelector('[data-message-id="' + msgId + '"],[data-id="' + msgId + '"]')) return;
 
+        // FIX-E2E-DIRECT-APPEND-DECRYPT (ciphertext must never render, and
+        // never behind a visible "Decrypting…" state either — decrypt fully
+        // in the background, only the finished bubble ever touches the DOM):
+        // this whole function is a bypass path, wired up separately from the
+        // normal renderMessages()/_decryptRenderedMessages() pipeline. It
+        // used to build the bubble with the raw content immediately and only
+        // patch in the decrypted text afterward — ciphertext was genuinely
+        // on screen for that interval. Now, anything that looks encrypted is
+        // decrypted first; the bubble isn't created or appended until the
+        // real content (or, on failure, a neutral fallback — never the raw
+        // envelope) is ready.
+        const looksEncrypted = typeof content === 'string' && content.charAt(0) === '{' && content.indexOf('"v"') !== -1 && !msg._decrypted;
+        if (looksEncrypted && window.KynectaE2E) {
+            const chatId = String(
+                msg.chatId || msg.conversationId ||
+                window.ChatManager?._activeConversation?.id ||
+                window.__activeChatId || ''
+            );
+            const otherPartyId =
+                window.ChatManager?._activeConversation?.friendId ||
+                window.ChatManager?._activeConversation?.otherUserId ||
+                null;
+            const senderForDecrypt = isOwn ? otherPartyId : senderId;
+            if (chatId && senderForDecrypt) {
+                window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
+                    const finalMsg = Object.assign({}, msg, {
+                        content: (plaintext && plaintext !== content) ? plaintext : '[Unable to decrypt message]',
+                        _decrypted: true
+                    });
+                    _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
+                }).catch(function () {
+                    const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });
+                    _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
+                });
+                return;
+            }
+        }
+        _buildAndAppendBubble(msg, msgId, isOwn, timeStr, senderName);
+    }
+
+    function _buildAndAppendBubble(msg, msgId, isOwn, timeStr, senderName) {
+        const container = document.getElementById('messagesContainer');
+        if (!container) return;
+        if (msgId && document.querySelector('[data-message-id="' + msgId + '"],[data-id="' + msgId + '"]')) return;
+        const content = msg.content || msg.text || '';
+
         const bubble = document.createElement('div');
         bubble.className = 'message-wrapper ' + (isOwn ? 'own' : 'other');
         bubble.dataset.messageId = msgId || 'tmp_' + Date.now();
@@ -14067,41 +14165,6 @@ Type: ${message.type || 'text'}`;
         requestAnimationFrame(function() {
             container.scrollTop = container.scrollHeight;
         });
-
-        // FIX-E2E-DIRECT-APPEND-DECRYPT (root cause of "message still shows
-        // encrypted in chat panel"): this whole function is a bypass path —
-        // it writes msg.content straight into the DOM with zero decryption,
-        // wired up separately from the normal renderMessages()/
-        // _decryptRenderedMessages() pipeline. Any message this fallback won
-        // the race on (it fires ~120ms after a message:new event, specifically
-        // to beat a slow normal render) displayed the raw E2E ciphertext
-        // envelope (`{"v":1,...}` or `{"v":2,...}`) as literal on-screen text
-        // forever, since nothing else ever revisited this bubble. Decrypt
-        // in place here too, using the same heuristic + API as
-        // _decryptRenderedMessages, and patch the .message-content text once
-        // the async decrypt resolves.
-        try {
-            if (window.KynectaE2E && typeof content === 'string' && content.charAt(0) === '{' && content.indexOf('"v"') !== -1) {
-                const chatId = String(
-                    msg.chatId || msg.conversationId ||
-                    window.ChatManager?._activeConversation?.id ||
-                    window.__activeChatId || ''
-                );
-                const otherPartyId =
-                    window.ChatManager?._activeConversation?.friendId ||
-                    window.ChatManager?._activeConversation?.otherUserId ||
-                    null;
-                const senderForDecrypt = isOwn ? otherPartyId : senderId;
-                if (chatId && senderForDecrypt) {
-                    window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
-                        if (!plaintext || plaintext === content) return;
-                        bubbleInner.textContent = plaintext;
-                        msg.content = plaintext;
-                        msg._decrypted = true;
-                    }).catch(function () {});
-                }
-            }
-        } catch (_) { /* never let a decrypt attempt break message rendering */ }
     }
 
     function _esc(str) {

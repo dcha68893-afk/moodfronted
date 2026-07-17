@@ -544,6 +544,15 @@ body {
     display: block;
 }
 
+/* Decryption happens fully in the background — a message that isn't
+   decrypted yet is not on screen at all (not ciphertext, not a "Decrypting…"
+   placeholder, not an empty box). messages-ui.js removes this class the
+   moment real content (or, on genuine failure, a neutral fallback) is
+   ready, so it just appears in place once. */
+.message.pending-decrypt {
+    display: none !important;
+}
+
 .message-bubble.sent {
     background-color: #005c4b;
     color: #e9edef;

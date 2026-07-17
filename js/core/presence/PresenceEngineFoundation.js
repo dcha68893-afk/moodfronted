@@ -350,6 +350,26 @@
     _onHeartbeat() {
       this._session.pingOtherTabs(this._myStatus);
 
+      // FIX (real gap — spec item 8, presence accuracy): this cycle only
+      // ever did local, cross-tab bookkeeping below. Nothing here actually
+      // told the SERVER this client was still alive between connect and
+      // disconnect — only the raw Socket.IO connection itself did, via its
+      // own ping/pong (a ~90s timeout, configured server-side). Emitting a
+      // real heartbeat here lets the server keep an accurate lastSeen for
+      // this user and detect a connection that's gone quiet well before
+      // that 90s backstop would. window.KynectaRealtime.emit is this app's
+      // safe wrapper around the actual socket — window.__socket/window.__io
+      // are known to always be undefined in this codebase, so those are
+      // deliberately not used here.
+      if (this._myStatus === PresenceStatus.ONLINE || this._myStatus === PresenceStatus.IDLE) {
+        try {
+          if (window.KynectaRealtime && typeof window.KynectaRealtime.emit === 'function') {
+            const result = window.KynectaRealtime.emit('presence:heartbeat', {}, { retry: false });
+            if (result && typeof result.catch === 'function') result.catch(() => {});
+          }
+        } catch (_) { /* never let a heartbeat failure disrupt local presence bookkeeping */ }
+      }
+
       // Garbage-collect ghost users
       const now = Date.now();
       for (const [userId, data] of this._onlineUsers) {
