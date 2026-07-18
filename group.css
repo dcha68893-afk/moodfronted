@@ -3277,6 +3277,12 @@ body[data-module="friends"] .friend-item:hover {
   --color-friend-bg: #1f2937;
   --color-friend-card: #111827;
   --color-friend-border: #374151;
+  /* FIX (group name / header text invisible in dark mode): these were only
+     ever defined once at :root (#050505 — near-black) and never redefined
+     here, so text using them — including the group name in the chat header
+     — stayed near-black against a dark background regardless of theme. */
+  --text-primary: #ffffff;
+  --text-secondary: #b0b3b8;
 }
 
 [data-theme="dark"] .message-bubble.sent,

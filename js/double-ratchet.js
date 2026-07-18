@@ -466,20 +466,56 @@
     };
 
     // Wrap decrypt: detect v2 envelope and use DR, else fall through to ECDH
+    //
+    // FIX (DM-only message corruption / "character splitting"): decrypt()
+    // below mutates and persists ratchet state (recvChainKey, recvMsgNum) on
+    // EVERY call — it is not safe to call twice for the same ciphertext.
+    // There are multiple independent code paths in messages-ui.js that can
+    // each end up calling decryptFromChat for the same incoming message
+    // (the main render pipeline and a separate "fast path" append, plus
+    // realtime re-render races), and each duplicate call was consuming the
+    // NEXT message's key instead of re-deriving the same one — corrupting
+    // that message and permanently desyncing the ratchet for every message
+    // after it in that conversation. Group chat's Sender Keys have no such
+    // per-call state and were never affected, which is why this was DM-only.
+    // Memoizing by the exact ciphertext string (unique per message — AES-GCM
+    // with a random IV never repeats ciphertext) guarantees the stateful
+    // ratchet decrypt only ever actually runs once per real message,
+    // regardless of how many places ask for it or how many times.
+    const _decryptMemo = new Map(); // ciphertext string -> Promise<plaintext>
+    const _DECRYPT_MEMO_MAX = 500;
     global.KynectaE2E.decryptFromChat = async function (ciphertext, chatId, senderUserId) {
-      try {
-        let parsed;
-        try { parsed = JSON.parse(ciphertext); } catch { return ciphertext; }
-        if (parsed?.v === DR_VERSION && global.KynectaE2E.enabled && senderUserId) {
-          const ctx = global.KynectaE2E.getEncryptionContext(chatId, senderUserId);
-          const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
-          const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(senderUserId);
-          return await decrypt(ctx, ciphertext, theirPub, myPriv);
-        }
-      } catch (e) {
-        console.warn('[DR] decrypt error, falling back:', e.message);
+      if (_decryptMemo.has(ciphertext)) {
+        return _decryptMemo.get(ciphertext);
       }
-      return _origDecrypt(ciphertext, chatId, senderUserId);
+      const resultPromise = (async () => {
+        try {
+          let parsed;
+          try { parsed = JSON.parse(ciphertext); } catch { return ciphertext; }
+          if (parsed?.v === DR_VERSION && global.KynectaE2E.enabled && senderUserId) {
+            const ctx = global.KynectaE2E.getEncryptionContext(chatId, senderUserId);
+            const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
+            const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(senderUserId);
+            return await decrypt(ctx, ciphertext, theirPub, myPriv);
+          }
+        } catch (e) {
+          console.warn('[DR] decrypt error, falling back:', e.message);
+        }
+        return _origDecrypt(ciphertext, chatId, senderUserId);
+      })();
+      _decryptMemo.set(ciphertext, resultPromise);
+      if (_decryptMemo.size > _DECRYPT_MEMO_MAX) {
+        _decryptMemo.delete(_decryptMemo.keys().next().value);
+      }
+      // Don't memoize a genuine failure — let a later retry actually retry,
+      // since a failure here likely means keys weren't ready yet rather
+      // than the message being unreadable forever.
+      resultPromise.then(r => {
+        if (typeof r === 'string' && r.indexOf('[Decryption failed') === 0) {
+          _decryptMemo.delete(ciphertext);
+        }
+      }).catch(() => { _decryptMemo.delete(ciphertext); });
+      return resultPromise;
     };
 
     console.log('[DR] ✅ KynectaE2E patched with Double Ratchet');

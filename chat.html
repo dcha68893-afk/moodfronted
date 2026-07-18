@@ -2299,6 +2299,13 @@
                 // ── FIX: Always tag the receiver's current page, even when backgrounded,
                 // so calls-core.js knows where to navigate back to after the call ends.
                 callData._receiverReturnTo = window.__currentPage || 'messages';
+                // FIX (call-end return navigation — receiver side): also carry
+                // the SPECIFIC chat that was open (if any), not just the page,
+                // so ending the call can return to that exact conversation.
+                if (window.__currentPage === 'messages' && window.__lastOpenChatUserId) {
+                    callData._receiverReturnChatUserId = window.__lastOpenChatUserId;
+                    callData._receiverReturnChatName = window.__lastOpenChatName;
+                }
 
                 // Hidden / backgrounded app: show only the OS notification, never force-open the call page.
                 if (!_appVisible) {
@@ -2329,6 +2336,13 @@
                     // this, the receiver always returns to 'messages' after the call ends,
                     // regardless of where they actually were (friends, group, calls, etc).
                     callData._receiverReturnTo = window.__currentPage || 'messages';
+                // FIX (call-end return navigation — receiver side): also carry
+                // the SPECIFIC chat that was open (if any), not just the page,
+                // so ending the call can return to that exact conversation.
+                if (window.__currentPage === 'messages' && window.__lastOpenChatUserId) {
+                    callData._receiverReturnChatUserId = window.__lastOpenChatUserId;
+                    callData._receiverReturnChatName = window.__lastOpenChatName;
+                }
                     banner.style.display = 'none';
                     // ── FIX: callsContent visibility — .hidden sets visibility:hidden
                     // which hides the iframe even with call-screen-active fullscreen CSS.
@@ -2959,6 +2973,24 @@
                 document.body.classList.remove('chat-panel-active');
             }
             
+            // FIX (message module stuck in chat panel after navigating away
+            // without clicking back): navigateToPage() already told the
+            // messages iframe when it becomes FOCUSED again, but never told
+            // it anything when navigating AWAY from it. If the user was
+            // inside a specific chat (not just the chat list) and switched
+            // to another module via the nav bar — not by tapping the
+            // in-chat back button first — the iframe's own internal state
+            // stayed on that chat forever, so coming back to Messages later
+            // (or even just glancing at the tab) showed the same open chat
+            // instead of the chat list. Tell it to reset, mirroring exactly
+            // what clicking its own back button already does.
+            if (page !== 'messages' && window.__lastActivePage === 'messages') {
+                const _msgIframeBlur = document.getElementById('messagesIframe');
+                if (_msgIframeBlur && _msgIframeBlur.contentWindow) {
+                    _msgIframeBlur.contentWindow.postMessage({ type: 'MODULE_BLURRED', source: 'parent', timestamp: Date.now() }, '*');
+                }
+            }
+
             if (page === 'calls')    sendFriendsToCallsIframe();
             if (page === 'messages') sendFriendsToMessagesIframe();
             if (page === 'group')    sendFriendsToGroupIframe();
@@ -3151,6 +3183,15 @@
                     // online status), it just no longer has to be the *first*
                     // thing that ever populates the header.
                     var _coInfo = data.payload || {};
+                    // FIX (call-end return navigation — receiver side): remember
+                    // exactly which chat is open, not just that the Messages page
+                    // is active, so an incoming call that interrupts a specific
+                    // conversation can return the receiver to that same
+                    // conversation afterward instead of just the chat list.
+                    if (_coInfo.userId || _coInfo.chatId) {
+                        window.__lastOpenChatUserId = _coInfo.userId || _coInfo.chatId;
+                        window.__lastOpenChatName = _coInfo.name || null;
+                    }
                     if (typeof window.__cancelChatHeaderClose === 'function') window.__cancelChatHeaderClose();
                     if ((_coInfo.name || _coInfo.userId) && typeof showChatHeader === 'function') {
                         showChatHeader({
@@ -3171,6 +3212,8 @@
                     if (window.innerWidth > 768 || !messagesContainer || !messagesContainer.classList.contains('hidden')) {
                         document.body.classList.remove('chat-panel-active');
                     }
+                    window.__lastOpenChatUserId = null;
+                    window.__lastOpenChatName = null;
                     if (typeof hideChatHeader === 'function') hideChatHeader();
                 }
 
@@ -4464,9 +4507,15 @@
                             if (_ff && _ff.contentWindow) setTimeout(() => _ff.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
                         } else if (_returnTo === 'messages') {
                             navigateToPage('messages');
-                            if (_ctx && _ctx.chatUserId) {
+                            // FIX (receiver-side exact return, same as POST_CALL_RESTORE
+                            // handler): _ctx.chatUserId only exists for the call's
+                            // initiator. Fall back to the last chat this parent frame
+                            // saw opened (captured from CHAT_OPENED) for the receiver's case.
+                            const _naChatUserId = (_ctx && _ctx.chatUserId) || window.__lastOpenChatUserId;
+                            const _naChatUserName = (_ctx && _ctx.userName) || window.__lastOpenChatName;
+                            if (_naChatUserId) {
                                 const _mf = document.getElementById('messagesIframe');
-                                if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx.chatUserId, userName: _ctx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */ }, 300);
+                                if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _naChatUserId, userName: _naChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */ }, 300);
                             }
                         } else if (_returnTo && _returnTo !== 'calls') {
                             navigateToPage(_returnTo);
@@ -6225,6 +6274,10 @@
                         // that field) had nothing to restore to and fell back to
                         // 'messages' regardless of what the receiver was actually doing.
                         _receiverReturnTo: window.__currentPage || window.__lastActivePage || 'messages',
+                        // FIX (same as banner-bridge path above): carry the specific
+                        // open chat too, not just the page.
+                        _receiverReturnChatUserId: (window.__currentPage === 'messages' && window.__lastOpenChatUserId) ? window.__lastOpenChatUserId : undefined,
+                        _receiverReturnChatName: (window.__currentPage === 'messages' && window.__lastOpenChatUserId) ? window.__lastOpenChatName : undefined,
                     };
                     const callKey = payload.callId || payload.id || payload.callerName;
                     if (!_fwdIncomingLogged.has(callKey)) {
@@ -7446,11 +7499,20 @@ window.addEventListener('message', function (e) {
             }
         } else if (_pcPage === 'messages') {
             navigateToPage('messages');
-            if (_pcCtx && _pcCtx.chatUserId) {
+            // FIX (receiver-side exact return): _pcCtx.chatUserId only exists
+            // when the CURRENT user initiated the call (__dispatchCallToIframe
+            // sets it). For the receiver of a call, the specific chat they were
+            // in — if any — comes through as d.chatUserId instead (threaded via
+            // calls-core.js's pendingCallReturnChatUserId, itself set from
+            // chat.html's callData._receiverReturnChatUserId at the moment the
+            // incoming call interrupted them).
+            var _pcChatUserId = (_pcCtx && _pcCtx.chatUserId) || d.chatUserId;
+            var _pcChatUserName = (_pcCtx && _pcCtx.userName) || d.chatUserName;
+            if (_pcChatUserId) {
                 var _pcMf = document.getElementById('messagesIframe');
                 if (_pcMf && _pcMf.contentWindow) {
                     setTimeout(function() {
-                        _pcMf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _pcCtx.chatUserId, userName: _pcCtx.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
+                        _pcMf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _pcChatUserId, userName: _pcChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*');
                         document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */
                     }, 300);
                 }

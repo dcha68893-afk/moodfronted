@@ -2671,6 +2671,8 @@ try {
             this._conversationsMap.delete(pendingId);
             this._conversationsMap.set(newConversation.id, newConversation);
             
+            const _wasActive = this._activeConversation && this._activeConversation.id === pendingId;
+
             if (pendingMessages.length > 0) {
                 const realMessagesKey = `${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${newConversation.id}`;
                 const existingMessages = SafeStorage.getJSON(realMessagesKey, []);
@@ -2681,16 +2683,35 @@ try {
                 mergedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                 SafeStorage.setJSON(realMessagesKey, mergedMessages);
                 SafeStorage.remove(pendingMessagesKey);
-                
-                if (this._activeConversation && this._activeConversation.id === pendingId) {
+
+                if (_wasActive) {
                     this._messages = mergedMessages;
-                    this._activeConversation = newConversation;
-                    this._rebuildMessagesMap();
                 }
             }
-            
-            if (this._activeConversation && this._activeConversation.id === pendingId) {
+
+            if (_wasActive) {
+                // FIX (messages disappearing right after the receiver replies):
+                // this reassignment used to live ONLY inside the
+                // `pendingMessages.length > 0` branch above. The receiver's side
+                // of a brand-new conversation typically has zero pending-cached
+                // messages (they only ever received messages here, which are
+                // already stored under the real chatId via _handleMessageReceive,
+                // never under a "pending_" key) — so this never ran for them, and
+                // _activeConversation stayed permanently stuck referencing the old
+                // pending_X id even after the real conversation existed. Any later
+                // render/filter comparing against activeChat.id would then mismatch
+                // the real chatId on every new message, making the chat look empty.
                 this._activeConversation = newConversation;
+                if (!(pendingMessages.length > 0)) {
+                    // Re-stamp any in-memory messages that were tagged with the
+                    // pending id so they still match under the real id too.
+                    this._messages = (this._messages || []).map(m =>
+                        (m && String(m.chatId || m.conversationId) === String(pendingId))
+                            ? { ...m, chatId: newConversation.id, conversationId: newConversation.id }
+                            : m
+                    );
+                }
+                this._rebuildMessagesMap();
             }
             
             this._saveToCache();

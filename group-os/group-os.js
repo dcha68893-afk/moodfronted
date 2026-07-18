@@ -144,6 +144,24 @@
     // ════════════════════════════════════════════════════════════════════
     async function renderTasks(body) {
         const data = await _api('GET', `/${_groupId}/tasks?limit=100`) || { tasks:[], total:0 };
+        // FIX ("no area for create" — Group Tools): the backend only requires
+        // group membership to create a task (see TaskService.create's
+        // _assertMember call), not admin/moderator/owner. Gating the create
+        // button behind a stricter role check than the server enforces meant
+        // regular members never saw it at all — and if role detection ever
+        // silently fell back to 'member' (_getMyRole's default on any lookup
+        // failure), even a real admin could lose the button. Match the
+        // backend's actual permission: any member can create.
+        // FIX ("no area for create" — Group Tools): the backend requires
+        // only membership to CREATE a task (TaskService.create's
+        // _assertMember) but requires admin/moderator/owner to DELETE one
+        // (TaskService.delete's _assertRole) — two different backend
+        // permissions that this file was collapsing into a single
+        // admin-only `canManage` flag, which hid the create button from
+        // regular members entirely (and could hide it from a real admin
+        // too, if _getMyRole's silent 'member' fallback ever fired on a
+        // lookup failure). Split to match the backend exactly.
+        const canCreate = true;
         const canManage = ['admin','owner','moderator'].includes(_role);
         const tasks = data.tasks || [];
 
@@ -190,7 +208,7 @@
         body.innerHTML = `
         <div style="padding:16px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            ${canManage ? `<button onclick="GroupOS.createTask()" style="${_btnStyle('#667eea')}">+ New Task</button>` : '<div></div>'}
+            ${canCreate ? `<button onclick="GroupOS.createTask()" style="${_btnStyle('#667eea')}">+ New Task</button>` : '<div></div>'}
             <div style="display:flex;gap:8px">
               <button onclick="GroupOS.switchTaskView('kanban')" style="font-size:12px;background:#667eea;color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer">📋 Kanban</button>
               <button onclick="GroupOS.switchTaskView('list')" style="font-size:12px;background:#f1f5f9;color:#374151;border:none;border-radius:8px;padding:6px 12px;cursor:pointer">☰ List</button>
@@ -412,7 +430,8 @@
     // ════════════════════════════════════════════════════════════════════
     async function renderEvents(body) {
         const data = await _api('GET', `/${_groupId}/smart-events?upcoming=true&limit=60`) || { events:[] };
-        const canManage = ['admin','owner','moderator'].includes(_role);
+        // Same fix as the tasks tab above — backend only requires membership.
+        const canManage = true;
         const events    = data.events || [];
 
         // P3 FIX: Calendar grid view for current month

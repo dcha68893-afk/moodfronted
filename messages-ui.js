@@ -7597,6 +7597,38 @@ Type: ${message.type || 'text'}`;
 
             const backBtn = UIFailsafe.safeGetElement('backToChatsBtn');
 
+            // FIX (message module stuck in chat panel after navigating away
+            // without clicking back): extracted so it can run automatically
+            // too, not just on an explicit tap.
+            const _resetToChatList = () => {
+                const chatPanel = UIFailsafe.safeGetElement('chatPanel');
+                const sidebar = UIFailsafe.safeGetElement('sidebar');
+                if (chatPanel) UIFailsafe.safeAddClass(chatPanel, 'hidden');
+                if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
+                document.body.classList.remove('chat-active');
+                UIStateManager.setState('chatVisible', false);
+                try {
+                    const core = getMessagesCore();
+                    if (core && core.SafeStorage) { core.SafeStorage.remove('lastChatId'); }
+                    localStorage.removeItem('lastChatId');
+                } catch(_) {}
+                try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch(_) {}
+            };
+
+            // FIX (same bug): chat.html's navigateToPage() now sends this
+            // when the user switches to a different module via the nav bar
+            // while a specific chat was open in this iframe, without using
+            // the in-chat back button first. Mirrors exactly what that back
+            // button already does. No-op if the chat list was already showing.
+            window.addEventListener('message', (evt) => {
+                if (evt.data && evt.data.type === 'MODULE_BLURRED') {
+                    const chatPanel = UIFailsafe.safeGetElement('chatPanel');
+                    if (chatPanel && !chatPanel.classList.contains('hidden')) {
+                        _resetToChatList();
+                    }
+                }
+            });
+
             if (backBtn) {
 
                 backBtn.addEventListener('click', () => {
@@ -7605,34 +7637,12 @@ Type: ${message.type || 'text'}`;
 
                         if (!this._canPerformAction('backToChats')) return;
 
-                        const chatPanel = UIFailsafe.safeGetElement('chatPanel');
-
-                        const sidebar = UIFailsafe.safeGetElement('sidebar');
-
-                        if (chatPanel) UIFailsafe.safeAddClass(chatPanel, 'hidden');
-
-                        if (sidebar) UIFailsafe.safeAddClass(sidebar, 'active');
-
-                        // Remove CSS safeguard class so sidebar slides back in
-                        document.body.classList.remove('chat-active');
-
-                        UIStateManager.setState('chatVisible', false);
-
-                        // FIX: Clear lastChatId so navigating away and back doesn't
-                        // auto-reopen the same chat — user should see the sidebar first.
-                        try {
-                            const core = getMessagesCore();
-                            if (core && core.SafeStorage) { core.SafeStorage.remove('lastChatId'); }
-                            localStorage.removeItem('lastChatId');
-                        } catch(_) {}
-
-                        // Notify parent that chat list is now shown (clears chat-panel-active on mobile)
-
-                        try { window.parent.postMessage({ type: 'CHAT_LIST_SHOWN', timestamp: Date.now() }, '*'); } catch(_) {}
+                        _resetToChatList();
 
                     });
 
                 });
+
 
             }
 
@@ -10792,6 +10802,45 @@ Type: ${message.type || 'text'}`;
 
 
 
+    // Defensive fallback used only when core.ChatManager.getOrCreatePendingConversation
+    // is itself unavailable (e.g. not yet initialized) — mirrors that function's
+    // exact object shape and registration so a pending conversation this app
+    // creates is NEVER left unregistered (which previously caused every send in
+    // that chat to throw "Invalid pending conversation: missing receiverId").
+    function _registerFallbackPendingConversation(core, numericUserId, resolvedName, userAvatar) {
+        try {
+            const cm = core && core.ChatManager;
+            if (!cm) return null;
+            const pendingId = `pending_${numericUserId}`;
+            const existing = cm._conversationsMap && cm._conversationsMap.get(pendingId);
+            if (existing) return existing;
+
+            const pendingConversation = {
+                id: pendingId,
+                type: 'direct',
+                friendId: numericUserId,
+                friendName: resolvedName || `User_${numericUserId}`,
+                friendAvatar: userAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(resolvedName || `User_${numericUserId}`)}&background=random&color=fff`,
+                online: false,
+                unreadCount: 0,
+                lastMessage: '',
+                lastMessageAt: Date.now(),
+                pendingReceiverId: numericUserId,
+                isPending: true
+            };
+
+            if (cm._conversations) cm._conversations.unshift(pendingConversation);
+            if (cm._conversationsMap) cm._conversationsMap.set(pendingId, pendingConversation);
+            if (cm._pendingConversations) cm._pendingConversations.set(numericUserId, pendingConversation);
+            if (typeof cm._saveToCache === 'function') { try { cm._saveToCache(); } catch (_) {} }
+
+            return pendingConversation;
+        } catch (err) {
+            console.error('[MessageUI] _registerFallbackPendingConversation failed:', err);
+            return null;
+        }
+    }
+
     function openChatWithUserInUI(userId, userName, userAvatar, options = {}) {
 
         const { findExisting = false, returnFromCall = false } = options;
@@ -10804,6 +10853,21 @@ Type: ${message.type || 'text'}`;
         
 
         const numericUserId = parseInt(userId);
+
+        if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
+            // FIX (root cause of "Invalid pending conversation: missing
+            // receiverId" on send): this used to fall through to a "last
+            // resort" fallback further down that opened an UNREGISTERED
+            // pending_NaN (or pending_0) conversation — nothing ever set a
+            // pendingReceiverId for it, so sendMessageToBackend() always
+            // threw the moment the user tried to reply. Fail loudly here
+            // instead of opening a chat that's guaranteed to break.
+            console.error('[MessageUI] openChatWithUserInUI: invalid userId, refusing to open a broken chat', { userId, numericUserId });
+            try {
+                if (typeof window.showToast === 'function') window.showToast('Could not open this chat — invalid user', 'error');
+            } catch (_) {}
+            return;
+        }
 
         const core = getMessagesCore();
 
@@ -11018,11 +11082,20 @@ Type: ${message.type || 'text'}`;
                         pendingConv = core.ChatManager.getOrCreatePendingConversation(numericUserId, resolvedName, userAvatar);
                     }
 
+                    if (!pendingConv || !pendingConv.id) {
+                        // FIX (root cause of "Invalid pending conversation: missing
+                        // receiverId" on send): this used to fall straight to
+                        // core.openConversation(`pending_${numericUserId}`, ...)
+                        // without ever registering that id anywhere — nothing set
+                        // pendingReceiverId, so sending in that chat always threw.
+                        // numericUserId is guaranteed valid at this point (checked
+                        // above), so build and register the same shape
+                        // getOrCreatePendingConversation would have, by hand.
+                        pendingConv = _registerFallbackPendingConversation(core, numericUserId, resolvedName, userAvatar);
+                    }
+
                     if (pendingConv && pendingConv.id) {
                         core.openConversation(pendingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-                    } else {
-                        // Last-resort fallback: still avoid passing the raw userId as a chatId.
-                        core.openConversation(`pending_${numericUserId}`, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
                     }
 
                 }
@@ -11035,10 +11108,12 @@ Type: ${message.type || 'text'}`;
                     pendingConv = core.ChatManager.getOrCreatePendingConversation(numericUserId, resolvedName, userAvatar);
                 }
 
+                if (!pendingConv || !pendingConv.id) {
+                    pendingConv = _registerFallbackPendingConversation(core, numericUserId, resolvedName, userAvatar);
+                }
+
                 if (pendingConv && pendingConv.id) {
                     core.openConversation(pendingConv.id, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
-                } else {
-                    core.openConversation(`pending_${numericUserId}`, { friendName: resolvedName, userName: resolvedName, minFetchGap: 0 });
                 }
 
             }

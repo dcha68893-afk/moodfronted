@@ -1067,13 +1067,6 @@
             <div class="chat-header">
                 <div class="chat-header-info" id="chatHeaderInfo">
                     <button class="chat-header-btn" id="chatBackBtn" title="Back"><i class="fas fa-arrow-left"></i></button>
-                    <!-- FIX: moved here (next to the back arrow) per request — this is the
-                         single entry point for group tools (events/tasks/polls/notes/files),
-                         previously all the way on the right side of the header. -->
-                    <button class="chat-header-btn" id="groupOSTabBtn" title="Group Tools" onclick="window._openGroupOSPanel()" style="position:relative;">
-                        <i class="fas fa-tools"></i>
-                        <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;background:#667eea;border-radius:50%;display:none" id="gosNewDot"></span>
-                    </button>
                     <div class="chat-header-avatar" id="chatAvatar">
                         <i class="fas fa-users"></i>
                     </div>
@@ -2831,7 +2824,12 @@ function buildSub(type,g,el){
             // show for them, and never against the owner or against themselves.
             var mine=list.find(function(m){var u=m.user||m;return String(u.id||m.userId)===String(me);});
             var canManage=mine&&['owner','admin'].includes(mine.role);
-            el.innerHTML='<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){var u=m.user||m,uid=u.id||m.userId,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
+            var existingIds=list.map(function(m){var u=m.user||m;return String(u.id||m.userId);});
+            el.innerHTML='<div style="padding:0 4px 12px">'+
+                '<button id="gcAddMembersBtn" style="width:100%;padding:10px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;display:flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-user-plus"></i> Add Members</button>'+
+                '<div id="gcAddMembersPicker" style="display:none;margin-top:10px"></div>'+
+                '</div>'+
+                '<p style="font-size:13px;color:var(--text-secondary);padding:0 4px;margin:0 0 10px">'+list.length+' member'+(list.length===1?'':'s')+'</p><div style="padding:0 4px">'+list.map(function(m){var u=m.user||m,uid=u.id||m.userId,n=u.displayName||u.firstName||u.username||'Member',rl=m.role||'member',rc=colors[rl]||'#6b7280';
                 var actions='';
                 if(canManage&&rl!=='owner'&&String(uid)!==String(me)){
                     var promoteBtn=rl==='admin'?'<button data-mact="demote" data-uid="'+uid+'" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);cursor:pointer;">Demote</button>':'<button data-mact="promote" data-uid="'+uid+'" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-secondary);cursor:pointer;">Make Admin</button>';
@@ -2849,6 +2847,34 @@ function buildSub(type,g,el){
                         api('/groups/'+g.id+'/members/'+uid+'/role',{method:'PUT',body:{role:newRole}}).then(function(){ntf(act==='promote'?'Member promoted to admin':'Admin demoted to member');buildSub('members',g,el);}).catch(function(){ntf('Failed to update role','error');});
                     }
                 });
+            });
+            // ── Add Members picker (missing feature — friend list, invite selected) ──
+            var addBtn=document.getElementById('gcAddMembersBtn'),picker=document.getElementById('gcAddMembersPicker');
+            addBtn.addEventListener('click',function(){
+                if(picker.style.display==='block'){picker.style.display='none';return;}
+                picker.style.display='block';
+                picker.innerHTML='<div style="text-align:center;padding:12px"><i class="fas fa-spinner fa-spin"></i></div>';
+                api('/friends/list').then(function(fd){
+                    var friends=(fd.data&&fd.data.friends)||(fd.data&&Array.isArray(fd.data)?fd.data:null)||fd.friends||[];
+                    var candidates=friends.filter(function(f){var fid=String(f.id||f.friendId||(f.user&&f.user.id));return fid&&existingIds.indexOf(fid)===-1;});
+                    if(!candidates.length){picker.innerHTML='<p style="text-align:center;padding:12px;color:var(--text-secondary);font-size:13px">All your friends are already in this group</p>';return;}
+                    picker.innerHTML='<div style="max-height:240px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;padding:6px">'+candidates.map(function(f){
+                        var u=f.user||f,fid=u.id||f.friendId,fn=u.displayName||u.firstName||u.username||'User';
+                        return '<label style="display:flex;align-items:center;gap:10px;padding:8px 6px;cursor:pointer;border-bottom:1px solid var(--border-color)"><input type="checkbox" data-invite-uid="'+fid+'" style="width:16px;height:16px"><div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:11px;flex-shrink:0;">'+esc(fn.slice(0,2).toUpperCase())+'</div><span style="font-size:14px">'+esc(fn)+'</span></label>';
+                    }).join('')+'</div><button id="gcSendInvitesBtn" style="width:100%;margin-top:10px;padding:9px;background:var(--primary-color,#0084ff);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500">Send Invite</button>';
+                    document.getElementById('gcSendInvitesBtn').addEventListener('click',function(){
+                        var checked=Array.prototype.slice.call(picker.querySelectorAll('[data-invite-uid]:checked'));
+                        if(!checked.length){ntf('Select at least one friend','error');return;}
+                        Promise.all(checked.map(function(cb){
+                            return api('/groups/'+g.id+'/invitations',{method:'POST',body:{targetUserId:cb.getAttribute('data-invite-uid')}}).catch(function(){return null;});
+                        })).then(function(results){
+                            var sent=results.filter(Boolean).length;
+                            ntf(sent>0?(sent+' invite'+(sent===1?'':'s')+' sent'):'Failed to send invites',sent>0?'success':'error');
+                            picker.style.display='none';
+                            buildSub('members',g,el);
+                        });
+                    });
+                }).catch(function(){picker.innerHTML='<p style="text-align:center;padding:12px;color:var(--text-secondary);font-size:13px">Could not load friends list</p>';});
             });
         }).catch(function(){el.innerHTML='<p style="text-align:center;padding:20px;color:var(--text-secondary)">Could not load</p>';});
         return;

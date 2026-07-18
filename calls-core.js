@@ -15150,7 +15150,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
         var _returnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
         try {
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _returnTarget, timestamp: Date.now() }, '*');
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _returnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
             }
         } catch(_) {}
         console.log('[CallsCore] PHASE15 ✅ Post-call UI restored to: ' + _returnTarget);
@@ -16835,7 +16835,7 @@ _clearStaleCallState: function() {
             // 120s left the user stuck looking at a dead call UI with no nav.
             try {
                 if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleReturnTarget, timestamp: Date.now() }, '*');
+                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleReturnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
                 }
             } catch (_e) {}
 
@@ -16887,7 +16887,7 @@ _clearStaleCallState: function() {
 
             try {
                 if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleInitReturnTarget, timestamp: Date.now() }, '*');
+                    window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _staleInitReturnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
                 }
             } catch (_e) {}
 
@@ -18425,7 +18425,7 @@ initiateCall: async function(callType, participants = [], options = {}) {
                     // whatever screen happened to be showing.
                     try {
                         if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _rejReturnTarget, timestamp: Date.now() }, '*');
+                            window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _rejReturnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
                         }
                     } catch (_e) {}
 
@@ -18730,7 +18730,7 @@ endCall: async function(callId, options = {}) {
         // user was before the call started/was received.
         try {
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _ecReturnTarget, timestamp: Date.now() }, '*');
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _ecReturnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
             }
         } catch (_e) {}
 
@@ -28406,6 +28406,13 @@ _escapeHtml: function(text) {
             if (callData && callData._receiverReturnTo && !callsState.pendingCallReturnTo) {
                 callsState.pendingCallReturnTo = callData._receiverReturnTo;
             }
+            // FIX (call-end return navigation — receiver side): also carry the
+            // SPECIFIC chat that was open, if any, so returning after the call
+            // reopens that exact conversation instead of just the chat list.
+            if (callData && callData._receiverReturnChatUserId && !callsState.pendingCallReturnChatUserId) {
+                callsState.pendingCallReturnChatUserId = callData._receiverReturnChatUserId;
+                callsState.pendingCallReturnChatName = callData._receiverReturnChatName || null;
+            }
         } catch (_e) {}
 
         // ── Multi-tab guard: only the leader tab handles incoming calls ────────
@@ -29986,7 +29993,7 @@ _escapeHtml: function(text) {
 
         try {
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _hceReturnTarget, timestamp: Date.now() }, '*');
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _hceReturnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
             }
         } catch (_e) {}
 
