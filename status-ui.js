@@ -4018,12 +4018,19 @@ window._applyStatusTemplate = function(template) {
     bgOptions.forEach(b => b.classList.remove('selected'));
     // Store template in a temp var to apply on submit
     window._activeTemplate = template;
-    // Apply preview style to text editor
-    const textSlide = document.querySelector('.create-status-preview, #textStatusPreview, .text-status-slide');
-    if (textSlide) {
-        textSlide.style.background    = template.background;
-        textSlide.style.color         = template.textColor;
-        textSlide.style.fontFamily    = template.fontFamily;
+    // FIX-TEMPLATE-NOT-LIVE: this selector never matched anything that
+    // actually exists in the markup (.create-status-preview /
+    // #textStatusPreview / .text-status-slide are all names that don't
+    // appear anywhere in status.html) — so applying a template silently
+    // changed nothing visible, while still showing a "Template applied"
+    // success toast. The real canvas is #textTab (background) and
+    // #textStatusInput (text color/font).
+    const textTab = document.getElementById('textTab');
+    if (textTab && template.background) textTab.style.background = template.background;
+    const textInput = document.getElementById('textStatusInput');
+    if (textInput) {
+        if (template.textColor) textInput.style.color = template.textColor;
+        if (template.fontFamily) textInput.style.fontFamily = template.fontFamily;
     }
     // Mark selected
     document.querySelectorAll('.status-template-card').forEach(c => c.classList.remove('active'));
@@ -5736,6 +5743,15 @@ function initializeBackgroundOptions() {
         option.addEventListener('click', () => {
             grid.querySelectorAll('.background-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
+            // FIX-BG-NOT-LIVE: this previously only toggled .selected —
+            // nothing ever visibly changed on the actual status canvas, so
+            // picking a color looked like it did nothing. Apply it live to
+            // the text tab so what you pick is what you see.
+            const textTab = document.getElementById('textTab');
+            if (textTab) {
+                if (bg.type === 'solid') textTab.style.background = bg.color;
+                else if (bg.type === 'gradient') textTab.style.background = bg.gradient;
+            }
         });
         grid.appendChild(option);
     });
@@ -8283,6 +8299,21 @@ window._searchMentions = async function(query) {
     }
 };
 
+// FIX-MENTION-NEVER-CALLED: _searchMentions(query) above already does real
+// work (calls the search API, falls back to scanning visible contacts,
+// renders clickable suggestions) — but nothing ever called it. There was
+// no listener on mentionSearchInput at all, so typing into the mention box
+// did nothing no matter what you typed. The search logic itself was never
+// broken, it was just never wired to the input.
+document.addEventListener('DOMContentLoaded', () => {
+    const mentionInput = document.getElementById('mentionSearchInput');
+    if (mentionInput) {
+        mentionInput.addEventListener('input', () => {
+            window._searchMentions(mentionInput.value);
+        });
+    }
+});
+
 window._addMention = function(user) {
     // Avoid duplicates
     if (_mentionedUsers.some(u => String(u.userId) === String(user.userId))) return;
@@ -8382,16 +8413,14 @@ function resetStickerState() {
 }
 window._resetStickerState = resetStickerState;
 
-// Show alt text field when media tab is active
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.create-status-tab').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tab = btn.dataset.tab;
-            const altSection = document.getElementById('altTextSection');
-            if (altSection) altSection.style.display = (tab === 'media') ? 'block' : 'none';
-        });
-    });
-});
+// FIX-ALTTEXT-INLINE-STYLE-CONFLICT: previously forced altTextSection's
+// inline style.display based on which legacy tab was active. Inline
+// styles override external CSS, so this fought the composer redesign's
+// rule that shows altTextSection only once it's inside the Add-ons
+// panel — every click the bottom mode switcher dispatched on the media
+// tab would yank it back to visible in its old inline position. Alt
+// text now lives in the Add-ons panel regardless of mode, so this
+// tab-based toggle is removed rather than fought against.
 
 
 // ═══════════════════════════════════════════════════════════════════

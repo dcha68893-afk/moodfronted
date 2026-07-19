@@ -4396,6 +4396,61 @@ html, body, .app-container {
 }
 #createStatusModal .composer-sheet .metadata-title { color: #fff; opacity: 0.7; margin-bottom: 8px; }
 
+/* FIX-SECTIONS-NOT-RELOCATED (belt-and-suspenders): these must only ever
+   be visible once actually moved into a sheet/panel body by moveOnce().
+   Hiding them by default everywhere else means a JS failure can no
+   longer result in everything showing at once under the text canvas —
+   which is exactly what happened before moveOnce() ran unconditionally. */
+#createStatusModal .emoji-picker-container,
+#createStatusModal .background-options,
+#createStatusModal .sticker-section,
+#createStatusModal #altTextSection {
+    display: none;
+}
+#createStatusModal .composer-sheet-body .emoji-picker-container,
+#createStatusModal .composer-sheet-body .background-options,
+#createStatusModal .composer-panel-body .sticker-section,
+#createStatusModal .composer-panel-body #altTextSection {
+    display: block;
+}
+
+/* FIX-NOT-A-REAL-PICKER: emoji grid inside the sheet — bounded to ~2 rows
+   (10+ emojis visible) with vertical scroll for the rest, instead of the
+   old unbounded grid that dumped every emoji onto the page at once. */
+#createStatusModal .composer-sheet .emoji-grid {
+    grid-template-columns: repeat(6, 1fr);
+    max-height: 108px;
+    overflow-y: auto;
+    padding-bottom: 4px;
+}
+#createStatusModal .composer-sheet .emoji-btn {
+    font-size: 22px;
+    padding: 6px;
+    border: none;
+}
+
+/* FIX-NOT-A-REAL-PICKER: background swatches as small circles in a single
+   horizontally-scrollable row (WhatsApp-style), not a grid of boxes. */
+#createStatusModal .composer-sheet .background-grid {
+    display: flex;
+    grid-template-columns: none;
+    overflow-x: auto;
+    gap: 14px;
+    padding: 4px 2px 10px;
+}
+#createStatusModal .composer-sheet .background-option {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    border-radius: 50%;
+    font-size: 0;
+    border-width: 2px;
+}
+#createStatusModal .composer-sheet .background-option.selected {
+    border-width: 3px;
+    transform: scale(1.08);
+}
+
 @media (min-width: 769px) {
     #createStatusModal .create-status-container { max-width: 480px; margin: 0 auto; border-radius: 20px; }
     #createStatusModal.active { align-items: center; justify-content: center; }

@@ -3158,7 +3158,18 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             // Re-parent immediately if the modal is already open (e.g. hot
             // reload during dev); otherwise the first sheet/panel open call
             // above triggers it lazily.
-            if (modal.classList.contains('active')) moveOnce();
+            // FIX-SECTIONS-NOT-RELOCATED: moveOnce() previously only ran when
+            // the user tapped a top-bar/More-sheet button, or once at page
+            // load IF the composer modal happened to already be open. Since
+            // the modal actually opens later (via handleCreateStatusClick),
+            // that condition was never true in practice, so background/
+            // emoji/mention/link/countdown/GIF/music sections stayed in
+            // their original inline position under the text canvas the
+            // entire time — showing everything at once instead of hidden
+            // behind icons. Run it immediately and unconditionally instead;
+            // moving elements into their (CSS-hidden) sheet containers
+            // before the modal is even shown is harmless.
+            moveOnce();
         });
     })();
     </script>

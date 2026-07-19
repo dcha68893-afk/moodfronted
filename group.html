@@ -1269,14 +1269,16 @@
     <!-- ========== EXISTING: Create Group Modal (UPDATED with new features) ========== -->
     <div class="create-group-modal" id="createGroupModal">
         <div class="create-group-container">
-            <div class="create-group-header">
-                <h3>Create Group</h3>
-                <button class="create-group-btn" id="closeCreateGroupModal">
+            <!-- REDESIGN: top bar replaces the old dialog title bar -->
+            <div class="groupc-topbar">
+                <button class="groupc-icon-btn" id="closeCreateGroupModal" aria-label="Close" title="Close">
                     <i class="fas fa-times"></i>
                 </button>
+                <span class="groupc-topbar-title">Create Group</span>
+                <span class="groupc-topbar-spacer"></span>
             </div>
-            
-            <div class="create-group-tabs">
+
+            <div class="create-group-tabs" id="legacyCreateGroupTabs">
                 <button class="create-group-tab active" data-tab="basic">Basic</button>
                 <button class="create-group-tab" data-tab="settings">Settings</button>
                 <button class="create-group-tab" data-tab="purpose">Purpose</button>
@@ -1285,8 +1287,9 @@
             </div>
             
             <form id="createGroupForm" onsubmit="return false;">
-            <div class="create-group-content">
-                <!-- ========== EXISTING: Basic Tab ========== -->
+            <div class="create-group-content groupc-scroll">
+                <!-- ========== EXISTING: Basic Tab — shown directly, it's the
+                     only required step ========== -->
                 <div class="create-group-tab-content active" id="basicTab">
                     <div class="input-group">
                         <label class="input-label">Group Name *</label>
@@ -1311,6 +1314,43 @@
                             <option value="private" selected>Private - Invite only</option>
                             <option value="secret">Secret - Hidden and invite only</option>
                         </select>
+                    </div>
+
+                    <!-- REDESIGN: More options — Settings/Purpose/Theme/Members
+                         used to be permanently-visible tabs (5 tabs, one huge
+                         scrolling form). Each is now one tap away instead. -->
+                    <div class="groupc-more-title">More options</div>
+                    <div class="groupc-card" id="groupcCardSettings">
+                        <div class="groupc-card-icon"><i class="fas fa-sliders-h"></i></div>
+                        <div class="groupc-card-text">
+                            <div class="groupc-card-title">Settings</div>
+                            <div class="groupc-card-subtitle">Welcome message, rules, moderation</div>
+                        </div>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="groupc-card" id="groupcCardPurpose">
+                        <div class="groupc-card-icon"><i class="fas fa-bullseye"></i></div>
+                        <div class="groupc-card-text">
+                            <div class="groupc-card-title">Purpose</div>
+                            <div class="groupc-card-subtitle">What this group is for</div>
+                        </div>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="groupc-card" id="groupcCardTheme">
+                        <div class="groupc-card-icon"><i class="fas fa-palette"></i></div>
+                        <div class="groupc-card-text">
+                            <div class="groupc-card-title">Theme</div>
+                            <div class="groupc-card-subtitle">Icon, color, and appearance</div>
+                        </div>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="groupc-card" id="groupcCardMembers">
+                        <div class="groupc-card-icon"><i class="fas fa-user-plus"></i></div>
+                        <div class="groupc-card-text">
+                            <div class="groupc-card-title">Members</div>
+                            <div class="groupc-card-subtitle">Invite friends to this group</div>
+                        </div>
+                        <i class="fas fa-chevron-right"></i>
                     </div>
                 </div>
                 
@@ -1547,7 +1587,111 @@
                 <button class="action-btn success" id="createGroupBtnModal">Create Group</button>
             </div>
         </div>
+
+        <!-- REDESIGN: full-screen panels for the four secondary cards -->
+        <div class="groupc-fullscreen-panel" id="groupcSettingsPanel">
+            <div class="groupc-panel-header"><button class="groupc-icon-btn groupc-panel-back"><i class="fas fa-arrow-left"></i></button><span>Settings</span></div>
+            <div class="groupc-panel-body" id="groupcSettingsPanelBody"></div>
+        </div>
+        <div class="groupc-fullscreen-panel" id="groupcPurposePanel">
+            <div class="groupc-panel-header"><button class="groupc-icon-btn groupc-panel-back"><i class="fas fa-arrow-left"></i></button><span>Purpose</span></div>
+            <div class="groupc-panel-body" id="groupcPurposePanelBody"></div>
+        </div>
+        <div class="groupc-fullscreen-panel" id="groupcThemePanel">
+            <div class="groupc-panel-header"><button class="groupc-icon-btn groupc-panel-back"><i class="fas fa-arrow-left"></i></button><span>Theme</span></div>
+            <div class="groupc-panel-body" id="groupcThemePanelBody"></div>
+        </div>
+        <div class="groupc-fullscreen-panel" id="groupcMembersPanel">
+            <div class="groupc-panel-header"><button class="groupc-icon-btn groupc-panel-back"><i class="fas fa-arrow-left"></i></button><span>Members</span></div>
+            <div class="groupc-panel-body" id="groupcMembersPanelBody"></div>
+        </div>
     </div>
+
+    <script>
+    // =========================================================================
+    // REDESIGN: Create Group shell. Same safe pattern as status/friend — no
+    // group-creation business logic here, only re-parenting existing
+    // tab-content sections (same ids, so group-ui-patch.js's direct
+    // getElementById()/'.create-group-tab' handling keeps working) and
+    // dispatching real clicks on the original tab buttons.
+    // =========================================================================
+    (function () {
+        function onReady(fn) {
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+            else fn();
+        }
+        onReady(function () {
+            var modal = document.getElementById('createGroupModal');
+            if (!modal) return;
+
+            var moved = false;
+            function moveOnce() {
+                if (moved) return;
+                moved = true;
+                [['settingsTab', 'groupcSettingsPanelBody'],
+                 ['purposeTab', 'groupcPurposePanelBody'],
+                 ['themeTab', 'groupcThemePanelBody'],
+                 ['membersTab', 'groupcMembersPanelBody']].forEach(function (pair) {
+                    var el = document.getElementById(pair[0]);
+                    var dest = document.getElementById(pair[1]);
+                    if (el && dest) dest.appendChild(el);
+                });
+            }
+            moveOnce();
+
+            function closeAllPanels() {
+                document.querySelectorAll('.groupc-fullscreen-panel.open').forEach(function (p) { p.classList.remove('open'); });
+            }
+            document.querySelectorAll('.groupc-panel-back').forEach(function (btn) {
+                btn.addEventListener('click', closeAllPanels);
+            });
+
+            // Opening a card activates the matching legacy tab (via a real
+            // click, so group-ui-patch.js's own tab-switch handler runs
+            // exactly as before) as well as showing the new panel — keeps
+            // "which tab is active" state consistent for anything else that
+            // reads it (e.g. the direct-to-Members-tab flow used elsewhere).
+            function openCard(panelId, tabName) {
+                var legacyTab = document.querySelector('.create-group-tab[data-tab="' + tabName + '"]');
+                if (legacyTab) legacyTab.click();
+                var p = document.getElementById(panelId);
+                if (p) p.classList.add('open');
+            }
+
+            var cardMap = [
+                ['groupcCardSettings', 'groupcSettingsPanel', 'settings'],
+                ['groupcCardPurpose', 'groupcPurposePanel', 'purpose'],
+                ['groupcCardTheme', 'groupcThemePanel', 'theme'],
+                ['groupcCardMembers', 'groupcMembersPanel', 'members']
+            ];
+            cardMap.forEach(function (entry) {
+                var card = document.getElementById(entry[0]);
+                if (card) card.addEventListener('click', function () { openCard(entry[1], entry[2]); });
+            });
+
+            // If something elsewhere in the app drives the legacy tabs
+            // directly to "members" (group-ui-patch.js does this for an
+            // invite flow), open the matching panel too so the user isn't
+            // looking at a hidden tab-content with nothing on screen.
+            var legacyTabsEl = document.getElementById('legacyCreateGroupTabs');
+            if (legacyTabsEl) {
+                var tabToPanel = { settings: 'groupcSettingsPanel', purpose: 'groupcPurposePanel', theme: 'groupcThemePanel', members: 'groupcMembersPanel', basic: null };
+                var observer = new MutationObserver(function () {
+                    var active = document.querySelector('.create-group-tab.active');
+                    if (!active) return;
+                    var mapped = tabToPanel[active.dataset.tab];
+                    if (mapped && !document.getElementById(mapped).classList.contains('open')) {
+                        closeAllPanels();
+                        document.getElementById(mapped).classList.add('open');
+                    } else if (active.dataset.tab === 'basic') {
+                        closeAllPanels();
+                    }
+                });
+                observer.observe(legacyTabsEl, { attributes: true, subtree: true, attributeFilter: ['class'] });
+            }
+        });
+    })();
+    </script>
     
     <!-- ========== EXISTING: ADMIN MANAGEMENT MODAL ========== -->
     <div class="admin-management-modal" id="adminManagementModal">

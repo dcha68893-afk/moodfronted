@@ -4450,6 +4450,26 @@
                 document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
             }
 
+            // FIX-CALL-STUCK-WATCHDOG: this app has many different event-name
+            // variants for a call ending (CALL_CANCELLED, CALL_REJECTED,
+            // CALL_ENDED, CALL_FORCE_ENDED, CALL_MISSED, CALL_NO_ANSWER,
+            // ws-bridge snake_case aliases of all of the above...), each
+            // reachable from a different trigger (local button vs remote
+            // event vs a ring timing out). Rather than assume every single
+            // path funnels through one of the handlers above, this checks
+            // for the actual stuck STATE every couple seconds — call-screen-
+            // active still set on body, but __activeCallInProgress (already
+            // reliably cleared to false by every termination handler in this
+            // file) says no call is actually running — and self-corrects
+            // regardless of which specific event was supposed to fire.
+            setInterval(() => {
+                if (document.body.classList.contains('call-screen-active') && !window.__activeCallInProgress) {
+                    _chatLog('[Parent] Watchdog: call-screen-active stuck with no active call — force-restoring nav');
+                    document.body.classList.remove('call-screen-active');
+                    _kynReturnFromCallToOrigin();
+                }
+            }, 1500);
+
             window.addEventListener('message', async function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
 
