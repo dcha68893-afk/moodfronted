@@ -3280,6 +3280,7 @@
                         var _sinceDispatchCSA = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                         if (_sinceDispatchCSA < 4000) {
                             console.warn('[Parent] CALL_SCREEN_ACTIVE(false) ignored — call dispatched only ' + Math.round(_sinceDispatchCSA/1000) + 's ago (stale idle reset)');
+                            if (window._kynDeferStaleCallEvent) window._kynDeferStaleCallEvent(data, 4000 - _sinceDispatchCSA);
                         } else {
                             window.__activeCallInProgress = false;
                             document.body.classList.remove('call-screen-active');
@@ -3295,6 +3296,7 @@
                     var _sinceDispatchCE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                     if (_sinceDispatchCE < 4000 && data.source !== 'end-btn' && data.source !== 'parent-echo') {
                         console.warn('[Parent] Early CALL_ENDED/FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchCE/1000)+'s ago');
+                        if (window._kynDeferStaleCallEvent) window._kynDeferStaleCallEvent(data, 4000 - _sinceDispatchCE);
                         return;
                     }
                     hideGlobalBanner();
@@ -4470,6 +4472,26 @@
                 }
             }, 1500);
 
+            // FIX-NAV-STUCK: several guards below suppress CALL_ENDED / CALL_FORCE_ENDED /
+            // CALL_SCREEN_ACTIVE(false) when they land within __callDispatchedAt's
+            // anti-echo window (protects a freshly-started call from a trailing signal
+            // left over from the PREVIOUS call). That's correct when it really is a
+            // stale echo — but when the signal is genuine (e.g. the call is legitimately
+            // very short: instant decline/cancel, or just signaling latency), the event
+            // was being dropped with no fallback, so nothing ever cleared
+            // 'call-screen-active' / __activeCallInProgress — leaving both sidebar/bottom
+            // nav hidden and the caller/receiver stuck on the call screen indefinitely.
+            // Instead of dropping it, re-deliver the same message once the suppression
+            // window has passed. A one-shot flag prevents this from ever looping.
+            function _kynDeferStaleCallEvent(data, remainingMs) {
+                if (data && data.__staleRetried) return; // already retried once — don't loop
+                var _redelivered = Object.assign({}, data, { __staleRetried: true });
+                setTimeout(function() {
+                    window.postMessage(_redelivered, window.location.origin);
+                }, Math.max(50, remainingMs) + 50);
+            }
+            window._kynDeferStaleCallEvent = _kynDeferStaleCallEvent;
+
             window.addEventListener('message', async function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
 
@@ -4524,6 +4546,7 @@
                     var _sinceDispatchWS = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                     if (_sinceDispatchWS < 4000 && data.source !== 'end-btn') {
                         console.warn('[Parent] CALL_ENDED (non-ws) ignored — call dispatched only', Math.round(_sinceDispatchWS/1000)+'s ago (stale echo)');
+                        _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchWS);
                         return;
                     }
                     if (callId) {
@@ -4704,6 +4727,7 @@
                     var _sinceDispatchFE = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                     if (_sinceDispatchFE < 4000) {
                         console.warn('[Parent] CALL_FORCE_ENDED ignored — call dispatched only', Math.round(_sinceDispatchFE/1000)+'s ago (stale echo)');
+                        _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchFE);
                         return;
                     }
                     handleForceEnded(data.payload, data.source);
@@ -4715,6 +4739,7 @@
                     var _sinceDispatchFE2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                     if (_sinceDispatchFE2 < 4000) {
                         console.warn('[Parent] call_force_ended alias ignored — call dispatched only', Math.round(_sinceDispatchFE2/1000)+'s ago (stale echo)');
+                        _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchFE2);
                         return;
                     }
                     _chatLog('[Parent] Force end alias received:', data.type);
@@ -4796,6 +4821,7 @@
                         var _sinceDispatchCSA2 = window.__callDispatchedAt ? Date.now() - window.__callDispatchedAt : 99999;
                         if (_sinceDispatchCSA2 < 4000) {
                             console.warn('[Parent] CALL_SCREEN_ACTIVE(false) #2 ignored — call dispatched only ' + Math.round(_sinceDispatchCSA2/1000) + 's ago');
+                            _kynDeferStaleCallEvent(data, 4000 - _sinceDispatchCSA2);
                         } else {
                             window.__activeCallInProgress = false;
                             document.body.classList.remove('call-screen-active');

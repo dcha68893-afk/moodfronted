@@ -6724,9 +6724,20 @@ try {
                     const _all = ChatManager._messages || [];
                     const _now = ChatManager._activeConversation || activeChat;
                     const _mid = _rcId || _acId;
+                    // FIX-MSG-VANISH-A: strip the 'pending_' prefix before comparing, same as
+                    // every other chatId comparison in this file (setMessages/addMessage/etc).
+                    // Without this, a message sent locally under 'pending_<id>' (before the
+                    // server confirms the real numeric chatId) fails this exact-string match
+                    // the instant the real chatId becomes active — e.g. right when the other
+                    // user's reply arrives — and silently drops out of the re-rendered list.
+                    const _stripPend = function(s) { s = String(s || ''); return s.startsWith('pending_') ? s.slice(8) : s; };
+                    const _midStripped = _stripPend(_mid);
+                    const _acIdStripped = _stripPend(_acId);
                     let _msgs = _all.filter(function(m) {
                         const mid = String(m.chatId || m.conversationId || '');
-                        return mid === _mid || mid === _acId;
+                        const midStripped = _stripPend(mid);
+                        return mid === _mid || mid === _acId ||
+                               midStripped === _midStripped || midStripped === _acIdStripped;
                     }).sort(function(a, b) {
                         return _tsMs3(a.createdAt || a.timestamp) - _tsMs3(b.createdAt || b.timestamp);
                     });

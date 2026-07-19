@@ -3430,12 +3430,33 @@
             // so we merge them into the render list and don't lose them
             const existingDomIds = new Set(normalizedMessages.map(m => String(m.id || '')));
             const domOnlyMessages = [];
+            const domOnlyRawNodes = []; // FIX-MSG-VANISH-B: last-resort clones, never lost
             container.querySelectorAll('[data-message-id]').forEach(el => {
                 const domId = el.dataset.messageId;
-                if (domId && !existingDomIds.has(domId) && !domId.startsWith('tmp_')) {
-                    // Try to recover message from ChatManager store
-                    const stored = window.ChatManager && window.ChatManager._messagesMap && window.ChatManager._messagesMap.get(domId);
-                    if (stored) domOnlyMessages.push(stored);
+                // FIX-MSG-VANISH-B: previously excluded any id starting with 'tmp_', but
+                // that's exactly the placeholder id a locally-sent message carries before
+                // the server confirms it — meaning THIS safety net was disabled for the
+                // one message most likely to get dropped by an upstream filter (e.g. a
+                // pending_<id> chatId mismatch when a reply triggers a re-render). A
+                // currently-visible bubble should never be silently deleted just because
+                // its id looks temporary.
+                if (domId && !existingDomIds.has(domId)) {
+                    // Try ChatManager's map first (keyed by current id)...
+                    let stored = window.ChatManager && window.ChatManager._messagesMap && window.ChatManager._messagesMap.get(domId);
+                    // ...but once a temp/local id is reconciled to a real server id,
+                    // _messagesMap deletes the old temp key, so also scan _messages by
+                    // id OR localId so a stale DOM id still finds its message.
+                    if (!stored && window.ChatManager && Array.isArray(window.ChatManager._messages)) {
+                        stored = window.ChatManager._messages.find(m =>
+                            m && (String(m.id || '') === domId || String(m.localId || '') === domId));
+                    }
+                    if (stored) {
+                        domOnlyMessages.push(stored);
+                    } else {
+                        // Nothing recoverable as structured data — keep the raw node itself
+                        // as an absolute last resort so the bubble is never simply deleted.
+                        domOnlyRawNodes.push(el.cloneNode(true));
+                    }
                 }
             });
             // Merge dom-only messages into normalizedMessages before rendering
@@ -3452,6 +3473,14 @@
             const groupedMessages = this._groupMessagesByDate(allMessages);
 
             this._renderMessageBatches(container, groupedMessages, currentUser);
+
+            // FIX-MSG-VANISH-B: re-attach any bubbles that had no recoverable structured
+            // data (see domOnlyRawNodes above). Appended at the end rather than sorted in,
+            // since we don't have a timestamp for them, but this still beats silently
+            // deleting a message the user can see on screen.
+            if (domOnlyRawNodes.length > 0) {
+                domOnlyRawNodes.forEach(node => container.appendChild(node));
+            }
 
             this._lastRenderedMessagesSignature = renderSignature;
 
