@@ -527,8 +527,11 @@ body {
        four-letter word) should never need less than this to lay out on one
        line. Could not identify an exact mechanism narrowing a bubble below
        this after extensive tracing, but this closes off that failure mode
-       regardless of cause. */
-    min-width: 44px;
+       regardless of cause. Raised from 44px: at this font-size/line-height,
+       44px is still tight enough to wrap a 4-6 letter word (matches the
+       "aje" / "mku" / "u" style wrapping still seen live), so this now
+       floors at roughly one short word's width instead of half of one. */
+    min-width: 72px;
     display: inline-block;
     box-shadow: 0 1px 1px rgba(0,0,0,0.3);
 }

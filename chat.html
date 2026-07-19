@@ -4398,6 +4398,58 @@
             // ======================================================================
             // MAIN MESSAGE HANDLER - WITH WS-BRIDGE SOURCE DETECTION
             // ======================================================================
+            // FIX-CALL-RETURN-ALL-PATHS: the exact-return-to-origin logic below used to
+            // live ONLY inline inside the CALL_ENDED handler (as a couple of duplicated
+            // IIFEs). That meant a normal hangup restored nav icons + returned each user
+            // to exactly where they were, but CALL_CANCELLED, CALL_REJECTED and
+            // CALL_FORCE_ENDED — which fire when a call is cancelled before pickup or
+            // declined — only dismissed the banner and never navigated back, leaving nav
+            // icons hidden (call-screen-active removed, but the origin screen/iframe was
+            // never re-shown) and the user stuck on the calls screen. Extracted here so
+            // ALL termination paths restore the exact same way.
+            function _kynReturnFromCallToOrigin() {
+                const _ceNow = Date.now();
+                if (window.__callEndedNavAt && (_ceNow - window.__callEndedNavAt) < 3000) return; // debounce
+                window.__callEndedNavAt = _ceNow;
+                setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
+                let _ctx = window.__callReturnContext;
+                if (!_ctx) { try { const _s = sessionStorage.getItem('call_return_ctx'); if (_s) _ctx = JSON.parse(_s); } catch(e) {} }
+                const _returnTo = (_ctx && _ctx.returnTo) || window.__lastActivePage || 'messages';
+                window.__callReturnContext = null;
+                window.__moduleSessionDispatchCache = {};
+                try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
+                if (_returnTo === 'group') {
+                    navigateToPage('group');
+                    const _gf = document.getElementById('groupIframe');
+                    if (_gf && _gf.contentWindow) setTimeout(() => _gf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _ctx && _ctx.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                } else if (_returnTo === 'friends') {
+                    navigateToPage('friends');
+                    const _ff = document.getElementById('friendsIframe');
+                    if (_ff && _ff.contentWindow) setTimeout(() => _ff.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
+                } else if (_returnTo === 'messages') {
+                    navigateToPage('messages');
+                    // _ctx.chatUserId only exists for the call's initiator. Fall back to the
+                    // last chat this parent frame saw opened (captured from CHAT_OPENED) for
+                    // the receiver's case — so the receiver also lands exactly where they were.
+                    const _naChatUserId = (_ctx && _ctx.chatUserId) || window.__lastOpenChatUserId;
+                    const _naChatUserName = (_ctx && _ctx.userName) || window.__lastOpenChatName;
+                    if (_naChatUserId) {
+                        const _mf = document.getElementById('messagesIframe');
+                        if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _naChatUserId, userName: _naChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); }, 300);
+                    } else {
+                        document.body.classList.remove('chat-panel-active');
+                    }
+                } else if (_returnTo && _returnTo !== 'calls') {
+                    navigateToPage(_returnTo);
+                }
+                // ── FIX: explicitly restore nav icon visibility. Removing
+                // call-screen-active alone relies on CSS cascade; on some paths a
+                // stale inline opacity/pointer-events (set by other call-UI code
+                // while the call screen was up) survives the class removal.
+                clearTimeout(window.__navHideWatchdog);
+                document.querySelectorAll('.nav-icon, .mobile-nav-icon, .sidebar-nav .nav-item').forEach(el => { el.style.opacity = ''; el.style.pointerEvents = ''; });
+            }
+
             window.addEventListener('message', async function(event) {
                 if (!isTrustedOrigin(event.origin)) return;
 
@@ -4609,6 +4661,7 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
+                    _kynReturnFromCallToOrigin();
                     return;
                 }
                 
@@ -4621,6 +4674,7 @@
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
                     refreshCallHistoryForUser(cachedUserId);
+                    _kynReturnFromCallToOrigin();
                 }
                 
                 if (data.type === 'CALL_FORCE_ENDED') {
@@ -4678,6 +4732,7 @@
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
                     window.__activeCallInProgress = false;
+                    _kynReturnFromCallToOrigin();
                     return;
                 }
 

@@ -3693,6 +3693,11 @@ export function setupChatControls() {
     const chatInput = safeGetElement('#chatInput');
     if (chatInput && !chatInput._gcI) {
         registerUIEventListener(chatInput, 'keydown', (e) => {
+            // FIX-IME-SPLIT-SEND: see same fix in messages-ui.js — Android/Gboard
+            // fires a synthetic composing Enter (isComposing / keyCode 229) while
+            // a word is still mid-composition; without this guard it sends the
+            // in-progress text early and splits one message into fragments.
+            if (e.isComposing || e.keyCode === 229) return;
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (typeof sendGroupMessage === 'function') {

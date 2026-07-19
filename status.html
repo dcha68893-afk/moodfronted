@@ -2494,14 +2494,28 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
     <!-- Create Status Modal -->
     <div class="create-status-modal" id="createStatusModal">
         <div class="create-status-container">
-            <div class="create-status-header">
-                <h3>Create Status</h3>
-                <button class="create-status-btn" id="closeCreateStatusModal">
+            <!-- REDESIGN: immersive full-screen top bar, replaces the old
+                 "Create Status" dialog title bar. closeCreateStatusModal keeps
+                 its original id so the existing close handler is untouched. -->
+            <div class="composer-topbar">
+                <button class="composer-icon-btn" id="closeCreateStatusModal" aria-label="Close" title="Close">
                     <i class="fas fa-times"></i>
                 </button>
+                <div class="composer-topbar-right">
+                    <button class="composer-icon-btn" id="composerEmojiBtn" aria-label="Emoji" title="Emoji">
+                        <i class="far fa-smile"></i>
+                    </button>
+                    <button class="composer-icon-btn composer-font-btn" id="composerFontBtn" aria-label="Font" title="Font">Aa</button>
+                    <button class="composer-icon-btn" id="composerBgBtn" aria-label="Background" title="Background">
+                        <i class="fas fa-palette"></i>
+                    </button>
+                    <button class="composer-icon-btn" id="composerMoreBtn" aria-label="More" title="More">
+                        <i class="fas fa-ellipsis-h"></i>
+                    </button>
+                </div>
             </div>
-            
-            <div class="create-status-tabs">
+
+            <div class="create-status-tabs" id="legacyStatusTabs">
                 <button class="create-status-tab active" data-tab="text">Text</button>
                 <button class="create-status-tab" data-tab="media">Media</button>
                 <button class="create-status-tab" data-tab="poll">Poll</button>
@@ -2861,27 +2875,293 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                     </div>
                 </div>
             </div>
-            
-            <div style="padding: 16px 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <button class="action-btn secondary" id="saveDraftBtn">
-                    <i class="fas fa-save"></i> Save Draft
+
+            <!-- REDESIGN: bottom mode switcher — drives the (now hidden)
+                 legacy tab buttons above via real .click() calls, so the
+                 exact same tab/content-active logic in status-ui.js runs
+                 unchanged. Video and Photo both map to the existing media
+                 tab; the file input's accept attribute is narrowed per mode. -->
+            <div class="composer-bottombar" id="composerBottombar">
+                <button class="composer-mode-btn" data-mode="media" data-accept="video/*" title="Video">
+                    <i class="fas fa-video"></i><span>Video</span>
                 </button>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <button class="action-btn ghost" id="cancelCreateStatusBtn"
-                        style="color: var(--text-secondary); background: transparent; border: 1px solid var(--border-color);"
-                        onclick="document.getElementById('createStatusModal')?.classList.remove('active')">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                    <button class="action-btn success" id="scheduleStatusBtn">
+                <button class="composer-mode-btn" data-mode="media" data-accept="image/*" title="Photo">
+                    <i class="fas fa-image"></i><span>Photo</span>
+                </button>
+                <button class="composer-mode-btn active" data-mode="text" title="Text">
+                    <i class="fas fa-font"></i><span>Text</span>
+                </button>
+                <button class="composer-mode-btn" data-mode="poll" title="Poll">
+                    <i class="fas fa-poll"></i><span>Poll</span>
+                </button>
+            </div>
+
+            <!-- postStatusBtn keeps its original id/click-handler; only its
+                 position and appearance change, from a footer button to an
+                 always-visible floating action button bottom-right. -->
+            <button class="action-btn primary composer-post-fab" id="postStatusBtn" title="Post Status">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+
+            <!-- Kept for the existing auto-save-on-click handler; no longer
+                 shown as a manual button (spec: autosave every 3s instead).
+                 A small script below clicks this on an interval. -->
+            <button class="action-btn secondary" id="saveDraftBtn" style="display:none;" aria-hidden="true">
+                <i class="fas fa-save"></i> Save Draft
+            </button>
+        </div>
+
+        <!-- REDESIGN: bottom sheets. Background/Emoji get the existing grids
+             moved into them at runtime (same ids). More holds everything that
+             used to be permanently-visible sections: Templates, Draw,
+             Settings, Schedule, Cancel, and the mention/link/countdown/
+             alt-text/GIF/music add-ons — all present exactly as before, just
+             not shown until requested. -->
+        <div class="composer-sheet-backdrop" id="composerSheetBackdrop"></div>
+
+        <div class="composer-sheet" id="composerBgSheet">
+            <div class="composer-sheet-handle"></div>
+            <div class="composer-sheet-title">Background</div>
+            <div class="composer-sheet-body" id="composerBgSheetBody"></div>
+        </div>
+
+        <div class="composer-sheet" id="composerEmojiSheet">
+            <div class="composer-sheet-handle"></div>
+            <div class="composer-sheet-title">Emoji</div>
+            <div class="composer-sheet-body" id="composerEmojiSheetBody"></div>
+        </div>
+
+        <div class="composer-sheet composer-sheet-tall" id="composerMoreSheet">
+            <div class="composer-sheet-handle"></div>
+            <div class="composer-sheet-title">More</div>
+            <div class="composer-sheet-body">
+                <div class="composer-more-row" id="composerMoreTemplates"><i class="fas fa-layer-group"></i><span>Templates</span><i class="fas fa-chevron-right"></i></div>
+                <div class="composer-more-row" id="composerMoreDraw"><i class="fas fa-paint-brush"></i><span>Draw</span><i class="fas fa-chevron-right"></i></div>
+                <div class="composer-more-row" id="composerMoreSettings"><i class="fas fa-sliders-h"></i><span>Settings</span><i class="fas fa-chevron-right"></i></div>
+                <div class="composer-more-row" id="composerMoreAddons"><i class="fas fa-magic"></i><span>Add-ons (mention, link, countdown, GIF, music, alt text)</span><i class="fas fa-chevron-right"></i></div>
+                <div class="composer-more-row" id="composerMoreScheduleRow">
+                    <button class="action-btn success composer-more-inline-btn" id="scheduleStatusBtn">
                         <i class="fas fa-clock"></i> Schedule
                     </button>
-                    <button class="action-btn primary" id="postStatusBtn">
-                        <i class="fas fa-paper-plane"></i> Post Status
+                </div>
+                <div class="composer-more-row composer-more-danger" id="composerMoreCancelRow">
+                    <button class="action-btn ghost composer-more-inline-btn" id="cancelCreateStatusBtn"
+                        onclick="document.getElementById('createStatusModal')?.classList.remove('active')">
+                        <i class="fas fa-times"></i> Cancel
                     </button>
                 </div>
             </div>
         </div>
+
+        <!-- Full-screen sub-panels for Templates / Draw / Settings / Add-ons —
+             each receives its original tab-content div (unchanged id/markup)
+             at runtime. Matches the spec: Draw opens as a separate canvas,
+             not inline in the main editor; Templates/Settings are hidden
+             until opened from More. -->
+        <div class="composer-fullscreen-panel" id="composerTemplatesPanel">
+            <div class="composer-panel-header"><button class="composer-icon-btn composer-panel-back"><i class="fas fa-arrow-left"></i></button><span>Templates</span></div>
+            <div class="composer-panel-body" id="composerTemplatesPanelBody"></div>
+        </div>
+        <div class="composer-fullscreen-panel" id="composerDrawPanel">
+            <div class="composer-panel-header"><button class="composer-icon-btn composer-panel-back"><i class="fas fa-arrow-left"></i></button><span>Draw</span></div>
+            <div class="composer-panel-body" id="composerDrawPanelBody"></div>
+        </div>
+        <div class="composer-fullscreen-panel" id="composerSettingsPanel">
+            <div class="composer-panel-header"><button class="composer-icon-btn composer-panel-back"><i class="fas fa-arrow-left"></i></button><span>Settings</span></div>
+            <div class="composer-panel-body" id="composerSettingsPanelBody"></div>
+        </div>
+        <div class="composer-fullscreen-panel" id="composerAddonsPanel">
+            <div class="composer-panel-header"><button class="composer-icon-btn composer-panel-back"><i class="fas fa-arrow-left"></i></button><span>Add-ons</span></div>
+            <div class="composer-panel-body" id="composerAddonsPanelBody"></div>
+        </div>
     </div>
+
+    <script>
+    // =========================================================================
+    // REDESIGN: Status composer shell — Discover-Friends-style immersive UI.
+    // This script does not contain any posting/draft/poll/media/draw logic —
+    // it only (a) re-parents existing sections (same ids, so status-ui.js's
+    // getElementById() calls and already-bound listeners keep working
+    // untouched) into the new sheets/panels, and (b) dispatches real .click()
+    // events on the original controls it's standing in front of. All actual
+    // behavior still lives in status-ui.js / status-core.js exactly as before.
+    // =========================================================================
+    (function () {
+        function onReady(fn) {
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+            else fn();
+        }
+
+        onReady(function () {
+            var modal = document.getElementById('createStatusModal');
+            if (!modal) return;
+
+            var moved = false;
+            function moveOnce() {
+                if (moved) return;
+                moved = true;
+
+                // Background / Emoji pickers → their own sheets
+                var bgBody = document.getElementById('composerBgSheetBody');
+                var bgSection = modal.querySelector('.background-options');
+                if (bgBody && bgSection) bgBody.appendChild(bgSection);
+
+                var emojiBody = document.getElementById('composerEmojiSheetBody');
+                var emojiSection = modal.querySelector('.emoji-picker-container');
+                if (emojiBody && emojiSection) emojiBody.appendChild(emojiSection);
+
+                // Templates / Draw / Settings tab-content → full-screen panels.
+                // Kept as .create-status-tab-content so status-ui.js's existing
+                // "which tab content is active" logic still finds/toggles them
+                // exactly as before; only their container changed.
+                var moves = [
+                    ['templatesTab', 'composerTemplatesPanelBody'],
+                    ['drawTab', 'composerDrawPanelBody'],
+                    ['settingsTab', 'composerSettingsPanelBody']
+                ];
+                moves.forEach(function (pair) {
+                    var el = document.getElementById(pair[0]);
+                    var dest = document.getElementById(pair[1]);
+                    if (el && dest) dest.appendChild(el);
+                });
+
+                // Mention / link / countdown / alt-text / GIF / music add-ons →
+                // grouped into one Add-ons panel instead of always being
+                // visible inline under the text/media editor.
+                var addonsBody = document.getElementById('composerAddonsPanelBody');
+                if (addonsBody) {
+                    ['mentionStickerSection', 'linkStickerSection', 'countdownStickerSection', 'altTextSection']
+                        .forEach(function (id) {
+                            var el = document.getElementById(id);
+                            if (el) addonsBody.appendChild(el);
+                        });
+                    // The GIF-search and music-overlay blocks in the old Media
+                    // tab are the first two .sticker-section children there —
+                    // move them too rather than leaving them stranded inline.
+                    var mediaTab = document.getElementById('mediaTab');
+                    if (mediaTab) {
+                        mediaTab.querySelectorAll('.sticker-section').forEach(function (el) {
+                            addonsBody.appendChild(el);
+                        });
+                    }
+                }
+            }
+
+            // Sheets / panels open+close helpers
+            function closeAllSheets() {
+                document.querySelectorAll('.composer-sheet.open').forEach(function (s) { s.classList.remove('open'); });
+                var backdrop = document.getElementById('composerSheetBackdrop');
+                if (backdrop) backdrop.classList.remove('open');
+            }
+            function openSheet(id) {
+                closeAllSheets();
+                var s = document.getElementById(id);
+                var backdrop = document.getElementById('composerSheetBackdrop');
+                if (s) s.classList.add('open');
+                if (backdrop) backdrop.classList.add('open');
+            }
+            function closeAllPanels() {
+                document.querySelectorAll('.composer-fullscreen-panel.open').forEach(function (p) { p.classList.remove('open'); });
+            }
+            function openPanel(id) {
+                closeAllSheets();
+                closeAllPanels();
+                var p = document.getElementById(id);
+                if (p) p.classList.add('open');
+            }
+
+            var backdrop = document.getElementById('composerSheetBackdrop');
+            if (backdrop) backdrop.addEventListener('click', closeAllSheets);
+            document.querySelectorAll('.composer-panel-back').forEach(function (btn) {
+                btn.addEventListener('click', closeAllPanels);
+            });
+
+            // Top bar
+            var emojiBtn = document.getElementById('composerEmojiBtn');
+            if (emojiBtn) emojiBtn.addEventListener('click', function () { moveOnce(); openSheet('composerEmojiSheet'); });
+            var bgBtn = document.getElementById('composerBgBtn');
+            if (bgBtn) bgBtn.addEventListener('click', function () { moveOnce(); openSheet('composerBgSheet'); });
+            var fontBtn = document.getElementById('composerFontBtn');
+            if (fontBtn) fontBtn.addEventListener('click', function () {
+                moveOnce();
+                openPanel('composerTemplatesPanel');
+                if (window._loadStatusTemplates) window._loadStatusTemplates();
+            });
+            var moreBtn = document.getElementById('composerMoreBtn');
+            if (moreBtn) moreBtn.addEventListener('click', function () { moveOnce(); openSheet('composerMoreSheet'); });
+
+            // More sheet rows
+            var moreTemplates = document.getElementById('composerMoreTemplates');
+            if (moreTemplates) moreTemplates.addEventListener('click', function () {
+                moveOnce();
+                openPanel('composerTemplatesPanel');
+                if (window._loadStatusTemplates) window._loadStatusTemplates();
+            });
+            var moreDraw = document.getElementById('composerMoreDraw');
+            if (moreDraw) moreDraw.addEventListener('click', function () {
+                moveOnce();
+                openPanel('composerDrawPanel');
+                if (window._initDrawingCanvas) window._initDrawingCanvas();
+            });
+            var moreSettings = document.getElementById('composerMoreSettings');
+            if (moreSettings) moreSettings.addEventListener('click', function () { moveOnce(); openPanel('composerSettingsPanel'); });
+            var moreAddons = document.getElementById('composerMoreAddons');
+            if (moreAddons) moreAddons.addEventListener('click', function () { moveOnce(); openPanel('composerAddonsPanel'); });
+
+            // Bottom mode switcher — drives the original (now hidden) tab
+            // buttons via a real click(), so status-ui.js's own tab-switch
+            // handler (which reads .create-status-tab.active) runs unchanged.
+            var bottombar = document.getElementById('composerBottombar');
+            if (bottombar) {
+                bottombar.addEventListener('click', function (e) {
+                    var btn = e.target.closest('.composer-mode-btn');
+                    if (!btn) return;
+                    bottombar.querySelectorAll('.composer-mode-btn').forEach(function (b) { b.classList.remove('active'); });
+                    btn.classList.add('active');
+
+                    var mode = btn.dataset.mode;
+                    var accept = btn.dataset.accept;
+                    if (accept) {
+                        var fileInput = document.getElementById('mediaFileInput');
+                        if (fileInput) fileInput.accept = accept;
+                    }
+                    var legacyTab = document.querySelector('.create-status-tab[data-tab="' + mode + '"]');
+                    if (legacyTab) legacyTab.click();
+                });
+            }
+
+            // Keep the mode switcher's active state in sync if something
+            // else (e.g. a template pre-selecting the media tab) changes the
+            // legacy tab selection directly.
+            var legacyObserver = new MutationObserver(function () {
+                var activeLegacy = document.querySelector('.create-status-tab.active');
+                if (!activeLegacy || !bottombar) return;
+                var mode = activeLegacy.dataset.tab;
+                if (mode !== 'text' && mode !== 'media' && mode !== 'poll') return;
+                bottombar.querySelectorAll('.composer-mode-btn').forEach(function (b) {
+                    b.classList.toggle('active', b.dataset.mode === mode && (mode !== 'media' || true));
+                });
+            });
+            var legacyTabsEl = document.getElementById('legacyStatusTabs');
+            if (legacyTabsEl) legacyObserver.observe(legacyTabsEl, { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+            // Auto-save draft every 3s while the composer is open — replaces
+            // the old manual "Save Draft" button. Reuses the exact same
+            // click handler that button always had; nothing about how a
+            // draft gets saved changes.
+            setInterval(function () {
+                if (!modal.classList.contains('active')) return;
+                var draftBtn = document.getElementById('saveDraftBtn');
+                if (draftBtn) draftBtn.click();
+            }, 3000);
+
+            // Re-parent immediately if the modal is already open (e.g. hot
+            // reload during dev); otherwise the first sheet/panel open call
+            // above triggers it lazily.
+            if (modal.classList.contains('active')) moveOnce();
+        });
+    })();
+    </script>
     
     <!-- Drafts Modal -->
     <div class="create-status-modal" id="draftsModal">

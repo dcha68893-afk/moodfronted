@@ -472,8 +472,14 @@ function _setupSocketHandlers(GC) {
                     if (grp) {
                         if (!grp.members) grp.members = [];
                         if (!grp.members.some(m => String(m.userId) === String(member.userId))) grp.members.push(member);
-                        // FIX: update memberCount from server payload or recompute from members array
-                        const newCount = data.memberCount || grp.members.length;
+                        // FIX-UNDEFINED-DATA: was `data.memberCount` — `data` was never defined
+                        // in this scope (a ReferenceError on every call, silently swallowed by
+                        // the try/catch below), which meant the code never got past this line:
+                        // memberCount, saveGroups(), and the 'group:member-added' emit that
+                        // triggers a UI re-render all silently never ran. The server payload
+                        // for this event doesn't include a memberCount field at all, so the
+                        // only correct source is the members array we just updated above.
+                        const newCount = grp.members.length;
                         grp.memberCount = newCount;
                         if (grp.stats) grp.stats.totalMembers = newCount;
                         GC.updateGroupInLists(grp); GC.saveGroups(); GC.emit('group:member-added', { groupId: member.groupId, member, memberCount: newCount });
@@ -482,7 +488,18 @@ function _setupSocketHandlers(GC) {
                     if (!groupId || !userId) return;
                     await LocalGroupStore.deleteMemberLocal(`${groupId}_${userId}`, groupId);
                     const grp = GC.getGroupById(groupId);
-                    if (grp?.members) { grp.members = grp.members.filter(m => String(m.userId) !== String(userId)); GC.updateGroupInLists(grp); GC.saveGroups(); GC.emit('group:member-removed', { groupId, userId }); }
+                    if (grp?.members) {
+                        grp.members = grp.members.filter(m => String(m.userId) !== String(userId));
+                        // FIX-STALE-MEMBERCOUNT: members array was updated but memberCount
+                        // (the field the group card / chat header actually render) was left
+                        // untouched — a connected client would keep showing the pre-removal
+                        // count until their next full reload, while a client who reloaded
+                        // more recently would already show the correct lower count. Same bug
+                        // class as the member_add ReferenceError above, different mechanism.
+                        grp.memberCount = grp.members.length;
+                        if (grp.stats) grp.stats.totalMembers = grp.memberCount;
+                        GC.updateGroupInLists(grp); GC.saveGroups(); GC.emit('group:member-removed', { groupId, userId, memberCount: grp.memberCount });
+                    }
                 } else if (action === 'member_role_update') {
                     if (!member?.groupId || !member?.userId) return;
                     await LocalGroupStore.saveMemberLocal({ ...member, isLocalOnly: false });
@@ -492,7 +509,15 @@ function _setupSocketHandlers(GC) {
                     if (!groupId || !userId) return;
                     await LocalGroupStore.deleteMemberLocal(`${groupId}_${userId}`, groupId);
                     const grp = GC.getGroupById(groupId);
-                    if (grp?.members) { grp.members = grp.members.filter(m => String(m.userId) !== String(userId)); GC.updateGroupInLists(grp); GC.saveGroups(); }
+                    if (grp?.members) {
+                        grp.members = grp.members.filter(m => String(m.userId) !== String(userId));
+                        // FIX-STALE-MEMBERCOUNT: same as member_remove above. This branch
+                        // also never emitted anything at all, so a group card/header showing
+                        // this group had no signal to re-render even once memberCount is fixed.
+                        grp.memberCount = grp.members.length;
+                        if (grp.stats) grp.stats.totalMembers = grp.memberCount;
+                        GC.updateGroupInLists(grp); GC.saveGroups(); GC.emit('group:member-removed', { groupId, userId, memberCount: grp.memberCount });
+                    }
                 } else if (action === 'ownership_transfer') {
                     GroupSyncEngine.triggerSync();
                 }

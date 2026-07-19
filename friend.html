@@ -2663,14 +2663,24 @@
     <!-- Add Friend Modal -->
     <div class="add-friend-modal" id="addFriendModal">
         <div class="add-friend-container">
-            <div class="add-friend-header">
-                <h3>Add Friend</h3>
-                <button class="add-friend-btn" id="closeAddFriendModal">
+            <!-- REDESIGN: Discover Friends top bar, replaces the old dialog
+                 title bar. closeAddFriendModal keeps its original id. -->
+            <div class="discover-topbar">
+                <button class="discover-icon-btn" id="closeAddFriendModal" aria-label="Close" title="Close">
                     <i class="fas fa-times"></i>
                 </button>
+                <span class="discover-topbar-title">Discover Friends</span>
+                <span class="discover-topbar-spacer"></span>
             </div>
-            
-            <div class="add-friend-tabs">
+
+            <div class="discover-search-wrap">
+                <div class="discover-search-field" id="discoverSearchField">
+                    <i class="fas fa-search"></i>
+                    <span>Search username, phone or email</span>
+                </div>
+            </div>
+
+            <div class="add-friend-tabs" id="legacyAddFriendTabs">
                 <button class="add-friend-tab active" data-tab="methods">Methods</button>
                 <button class="add-friend-tab" data-tab="username">Username</button>
                 <button class="add-friend-tab" data-tab="qr">QR Code</button>
@@ -2678,9 +2688,54 @@
                 <button class="add-friend-tab" data-tab="groups">Groups</button>
                 <button class="add-friend-tab" data-tab="all-users">All Users</button>
             </div>
-            
-            <div class="add-friend-content">
-                <!-- Methods Tab -->
+
+            <div class="discover-cards" id="discoverCards">
+                <div class="discover-card" id="discoverCardUsername">
+                    <div class="discover-card-icon"><i class="fas fa-at"></i></div>
+                    <div class="discover-card-text">
+                        <div class="discover-card-title">Search Username</div>
+                        <div class="discover-card-subtitle">Find friends instantly</div>
+                    </div>
+                    <i class="fas fa-chevron-right discover-card-chevron"></i>
+                </div>
+                <div class="discover-card" id="discoverCardQr">
+                    <div class="discover-card-icon"><i class="fas fa-qrcode"></i></div>
+                    <div class="discover-card-text">
+                        <div class="discover-card-title">QR Code</div>
+                        <div class="discover-card-subtitle">Scan or share your code</div>
+                    </div>
+                    <i class="fas fa-chevron-right discover-card-chevron"></i>
+                </div>
+                <div class="discover-card" id="discoverCardContacts">
+                    <div class="discover-card-icon"><i class="fas fa-address-book"></i></div>
+                    <div class="discover-card-text">
+                        <div class="discover-card-title">Sync Contacts</div>
+                        <div class="discover-card-subtitle">Find friends already using Kynecta</div>
+                    </div>
+                    <i class="fas fa-chevron-right discover-card-chevron"></i>
+                </div>
+                <div class="discover-card" id="discoverCardNearby">
+                    <div class="discover-card-icon"><i class="fas fa-wifi"></i></div>
+                    <div class="discover-card-text">
+                        <div class="discover-card-title">Nearby</div>
+                        <div class="discover-card-subtitle">Discover friends around you</div>
+                    </div>
+                    <i class="fas fa-chevron-right discover-card-chevron"></i>
+                </div>
+                <div class="discover-card" id="discoverCardMore">
+                    <div class="discover-card-icon"><i class="fas fa-ellipsis-h"></i></div>
+                    <div class="discover-card-text">
+                        <div class="discover-card-title">More Methods</div>
+                        <div class="discover-card-subtitle">Groups, all users, and more</div>
+                    </div>
+                    <i class="fas fa-chevron-right discover-card-chevron"></i>
+                </div>
+            </div>
+
+            <!-- methodsTab kept in the DOM (hidden) — some code paths may
+                 still target #methodsTab directly; the 5 cards above are
+                 what the user actually sees and interacts with now. -->
+            <div class="add-friend-content" id="legacyMethodsHost" style="display:none;">
                 <div class="add-friend-tab-content active" id="methodsTab">
                     <div class="method-item" data-method="username">
                         <div class="method-title">
@@ -2742,7 +2797,12 @@
                         </div>
                     </div>
                 </div>
-                
+            </div>
+            <!-- REDESIGN: remaining legacy tab-contents — these get moved by
+                 script into dedicated full-screen panels / the More Methods
+                 sheet at runtime; hidden here so nothing shows before that
+                 happens. -->
+            <div class="add-friend-content" id="legacyPanelsHost" style="display:none;">
                 <!-- Username Tab -->
                 <div class="add-friend-tab-content" id="usernameTab">
                     <div class="input-group">
@@ -2893,7 +2953,178 @@
                 <button class="action-btn primary" id="sendFriendRequestBtn">Send Friend Request</button>
             </div>
         </div>
+
+        <!-- REDESIGN: dedicated full-screen pages for the three primary
+             cards — "Do NOT replace the card with a huge form", each opens
+             its own page instead. -->
+        <div class="discover-fullscreen-panel" id="discoverUsernamePanel">
+            <div class="discover-panel-header"><button class="discover-icon-btn discover-panel-back"><i class="fas fa-arrow-left"></i></button><span>Search Username</span></div>
+            <div class="discover-panel-body" id="discoverUsernamePanelBody"></div>
+        </div>
+        <div class="discover-fullscreen-panel" id="discoverQrPanel">
+            <div class="discover-panel-header"><button class="discover-icon-btn discover-panel-back"><i class="fas fa-arrow-left"></i></button><span>QR Code</span></div>
+            <div class="discover-panel-body" id="discoverQrPanelBody"></div>
+        </div>
+        <div class="discover-fullscreen-panel" id="discoverNearbyPanel">
+            <div class="discover-panel-header"><button class="discover-icon-btn discover-panel-back"><i class="fas fa-arrow-left"></i></button><span>Nearby</span></div>
+            <div class="discover-panel-body" id="discoverNearbyPanelBody"></div>
+        </div>
+
+        <!-- More Methods bottom sheet — Groups and Browse All Users, the two
+             remaining methods that aren't one of the five primary cards. -->
+        <div class="discover-sheet-backdrop" id="discoverSheetBackdrop"></div>
+        <div class="discover-sheet" id="discoverMoreSheet">
+            <div class="discover-sheet-handle"></div>
+            <div class="discover-sheet-title">More Methods</div>
+            <div class="discover-sheet-body">
+                <div class="discover-more-row" id="discoverMoreGroups"><i class="fas fa-users"></i><span>Add friends from groups</span><i class="fas fa-chevron-right"></i></div>
+                <div class="discover-more-row" id="discoverMoreAllUsers"><i class="fas fa-globe"></i><span>Browse all users</span><i class="fas fa-chevron-right"></i></div>
+            </div>
+        </div>
+        <div class="discover-fullscreen-panel" id="discoverGroupsPanel">
+            <div class="discover-panel-header"><button class="discover-icon-btn discover-panel-back"><i class="fas fa-arrow-left"></i></button><span>From Groups</span></div>
+            <div class="discover-panel-body" id="discoverGroupsPanelBody"></div>
+        </div>
+        <div class="discover-fullscreen-panel" id="discoverAllUsersPanel">
+            <div class="discover-panel-header"><button class="discover-icon-btn discover-panel-back"><i class="fas fa-arrow-left"></i></button><span>Browse All Users</span></div>
+            <div class="discover-panel-body" id="discoverAllUsersPanelBody"></div>
+        </div>
     </div>
+
+    <script>
+    // =========================================================================
+    // REDESIGN: Discover Friends shell. Same approach as the status composer
+    // rewrite — no add/QR/nearby/groups/search business logic lives here.
+    // This only re-parents the existing tab-content sections (same ids, so
+    // every getElementById() call and already-bound listener in friend-ui.js
+    // keeps working) and dispatches real clicks on the original controls.
+    // =========================================================================
+    (function () {
+        function onReady(fn) {
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+            else fn();
+        }
+
+        onReady(function () {
+            var modal = document.getElementById('addFriendModal');
+            if (!modal) return;
+
+            var moved = false;
+            function moveOnce() {
+                if (moved) return;
+                moved = true;
+                var moves = [
+                    ['usernameTab', 'discoverUsernamePanelBody'],
+                    ['qrTab', 'discoverQrPanelBody'],
+                    ['nearbyTab', 'discoverNearbyPanelBody'],
+                    ['groupsTab', 'discoverGroupsPanelBody'],
+                    ['all-usersTab', 'discoverAllUsersPanelBody']
+                ];
+                moves.forEach(function (pair) {
+                    var el = document.getElementById(pair[0]);
+                    var dest = document.getElementById(pair[1]);
+                    if (el && dest) dest.appendChild(el);
+                });
+            }
+
+            function closeAllPanels() {
+                document.querySelectorAll('.discover-fullscreen-panel.open').forEach(function (p) { p.classList.remove('open'); });
+            }
+            function closeSheet() {
+                var s = document.getElementById('discoverMoreSheet');
+                var b = document.getElementById('discoverSheetBackdrop');
+                if (s) s.classList.remove('open');
+                if (b) b.classList.remove('open');
+            }
+            function openPanel(id) {
+                closeSheet();
+                closeAllPanels();
+                var p = document.getElementById(id);
+                if (p) p.classList.add('open');
+            }
+            // A panel opening for one of the five cards should also fire the
+            // exact same click the old .method-item for that method used to
+            // dispatch, so QR-code generation / nearby auto-start / etc keep
+            // firing exactly as before (see the method-item handler in
+            // friend-ui.js this is intentionally mirroring).
+            function openPanelAndActivateTab(panelId, tabName) {
+                moveOnce();
+                openPanel(panelId);
+                var legacyTab = document.querySelector('.add-friend-tab[data-tab="' + tabName + '"]');
+                var legacyContent = document.getElementById(tabName + 'Tab');
+                document.querySelectorAll('.add-friend-tab').forEach(function (t) { t.classList.remove('active'); });
+                document.querySelectorAll('.add-friend-tab-content').forEach(function (c) { c.classList.remove('active'); });
+                if (legacyTab) legacyTab.classList.add('active');
+                if (legacyContent) legacyContent.classList.add('active');
+                if (tabName === 'qr') {
+                    var qrItem = document.querySelector('.method-item[data-method="qr"]');
+                    if (qrItem) qrItem.click(); else if (window.generateUniqueQRCode) setTimeout(window.generateUniqueQRCode, 100);
+                }
+                if (tabName === 'nearby') {
+                    setTimeout(function () {
+                        var startBtn = document.getElementById('startNearbyBtn');
+                        if (startBtn && !startBtn.disabled) startBtn.click();
+                    }, 100);
+                }
+            }
+
+            document.querySelectorAll('.discover-panel-back').forEach(function (btn) {
+                btn.addEventListener('click', closeAllPanels);
+            });
+
+            var backdrop = document.getElementById('discoverSheetBackdrop');
+            if (backdrop) backdrop.addEventListener('click', closeSheet);
+
+            var cardUsername = document.getElementById('discoverCardUsername');
+            if (cardUsername) cardUsername.addEventListener('click', function () { openPanelAndActivateTab('discoverUsernamePanel', 'username'); });
+
+            var cardQr = document.getElementById('discoverCardQr');
+            if (cardQr) cardQr.addEventListener('click', function () { openPanelAndActivateTab('discoverQrPanel', 'qr'); });
+
+            var cardNearby = document.getElementById('discoverCardNearby');
+            if (cardNearby) cardNearby.addEventListener('click', function () { openPanelAndActivateTab('discoverNearbyPanel', 'nearby'); });
+
+            // Sync Contacts has no dedicated tab of its own — it always
+            // triggered an immediate sync action via this hidden button
+            // (same one the sidebar's "More" menu already uses).
+            var cardContacts = document.getElementById('discoverCardContacts');
+            if (cardContacts) cardContacts.addEventListener('click', function () {
+                var btn = document.getElementById('syncContactsBtn');
+                if (btn) btn.click();
+            });
+
+            var cardMore = document.getElementById('discoverCardMore');
+            if (cardMore) cardMore.addEventListener('click', function () {
+                var s = document.getElementById('discoverMoreSheet');
+                var b = document.getElementById('discoverSheetBackdrop');
+                if (s) s.classList.add('open');
+                if (b) b.classList.add('open');
+            });
+
+            var moreGroups = document.getElementById('discoverMoreGroups');
+            if (moreGroups) moreGroups.addEventListener('click', function () { openPanelAndActivateTab('discoverGroupsPanel', 'groups'); });
+
+            var moreAllUsers = document.getElementById('discoverMoreAllUsers');
+            if (moreAllUsers) moreAllUsers.addEventListener('click', function () { openPanelAndActivateTab('discoverAllUsersPanel', 'all-users'); });
+
+            // The large top search field is a real entry point into the same
+            // username search the app already supports — tapping it opens
+            // that page and focuses the input (rather than faking a live
+            // dropdown for phone/email search this app doesn't actually have
+            // wired up).
+            var searchField = document.getElementById('discoverSearchField');
+            if (searchField) searchField.addEventListener('click', function () {
+                openPanelAndActivateTab('discoverUsernamePanel', 'username');
+                setTimeout(function () {
+                    var input = document.getElementById('usernameInput');
+                    if (input) input.focus();
+                }, 260);
+            });
+
+            if (modal.classList.contains('active')) moveOnce();
+        });
+    })();
+    </script>
     <!-- In the requests tab header -->
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
     <h3>Friend Requests</h3>

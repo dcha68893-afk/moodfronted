@@ -3475,8 +3475,19 @@
         // this file (avatar/name updates, etc.).
         _decryptRenderedMessages(messages, currentChat, currentUser, _attemptsLeft) {
             if (!Array.isArray(messages) || messages.length === 0) return;
+            // FIX-DOUBLE-DECRYPT-RACE: also exclude messages that are already
+            // in-flight or have already been attempted (success OR failure).
+            // decryptFromChat() is async, and renderMessages() can fire again
+            // (typing indicator, status update, a new message arriving) before
+            // the first call resolves — without this guard, the SAME still-
+            // "!m._decrypted" message would be handed to decryptFromChat() a
+            // second time. The Double Ratchet is stateful: a second decrypt of
+            // the same envelope permanently advances/desyncs the receive chain,
+            // which is what produced "[Decryption failed — message may be out
+            // of order or corrupted]" on every message after it in that chat.
             const pending = messages.filter(m => m && (!m.type || m.type === 'text') &&
-                typeof m.content === 'string' && m.content.charAt(0) === '{' && m.content.indexOf('"v"') !== -1 && !m._decrypted);
+                typeof m.content === 'string' && m.content.charAt(0) === '{' && m.content.indexOf('"v"') !== -1 &&
+                !m._decrypted && !m._decryptAttempted && !m._decryptInFlight);
             if (pending.length === 0) return;
 
             // FIX (bubbles must never stay invisible forever): the old version
@@ -3508,6 +3519,10 @@
                     this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
                     return;
                 }
+                // Claim this message synchronously, before the async call starts,
+                // so a second _decryptRenderedMessages() pass (which can run
+                // before this promise resolves) skips it via the `pending` filter.
+                message._decryptInFlight = true;
                 window.KynectaE2E.decryptFromChat(raw, chatId, senderForDecrypt).then(plaintext => {
                     if (!plaintext || plaintext === raw) {
                         this._revealDecryptedBubble(message, '[Unable to decrypt message]', true);
@@ -3532,6 +3547,14 @@
                 bubble.innerHTML = (!isFallback && core?.formatMessageText) ? core.formatMessageText(text) : _safeEscapeHtml(text);
             }
             if (wrapper) wrapper.classList.remove('pending-decrypt');
+            // FIX-DOUBLE-DECRYPT-RACE: mark as attempted regardless of outcome.
+            // The ratchet key for this envelope is consumed the instant decrypt()
+            // runs, whether it succeeds or fails — retrying a failed one on a
+            // later render would call decryptFromChat() again on the same
+            // envelope with an already-advanced chain, turning one bad message
+            // into a permanent decrypt failure for every message after it.
+            message._decryptInFlight = false;
+            message._decryptAttempted = true;
             if (!isFallback) {
                 message.content = text;
                 message._decrypted = true;
@@ -5478,7 +5501,7 @@
 
                 <input type="text" id="${inputId}" class="edit-message-input" value="${escaped}" 
 
-                       onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); window.messagesUI?.saveEditedMessage('${message.id}') }">
+                       onkeydown="if(event.isComposing || event.keyCode===229) return; if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); window.messagesUI?.saveEditedMessage('${message.id}') }">
 
                 <div class="edit-actions">
 
@@ -9104,6 +9127,21 @@ Type: ${message.type || 'text'}`;
 
                 UIFailsafe.queueAction(() => {
 
+                    // FIX-IME-SPLIT-SEND: mobile IME keyboards (Gboard and others,
+                    // seen on Android Chrome) fire a synthetic keydown with
+                    // key:'Enter' WHILE the current word is still mid-composition —
+                    // e.g. when accepting a predictive-text suggestion or confirming
+                    // a candidate from the suggestion strip. During that window the
+                    // browser sets e.isComposing = true and/or e.keyCode = 229.
+                    // Without this guard, that synthetic Enter was treated as a real
+                    // "send" keypress: it sent whatever partial text was in the input
+                    // box at that instant, the user's next keystrokes continued the
+                    // word into a now-empty input, and the next composing Enter (or
+                    // the real one) sent the rest as a second/third message. That is
+                    // what produced messages arriving split into fragments (e.g. one
+                    // word sent as two or three separate bubbles).
+                    if (e.isComposing || e.keyCode === 229) return;
+
                     if (e.key === 'Enter' && !e.shiftKey) {
 
                         e.preventDefault();
@@ -9697,7 +9735,28 @@ Type: ${message.type || 'text'}`;
 
                     if (currentChat) {
 
-                        const messages = core?.getMessages?.() || [];
+                        // FIX-CROSS-CHAT-RENDER: core.getMessages() returns ChatManager's
+                        // single global _messages array — every message across every chat
+                        // this session has touched, not just this conversation. Every other
+                        // call site in this file filters that list down to the active chat
+                        // before handing it to renderMessages() (see addMessage()'s own
+                        // internal render trigger in messages-core.js for the same pattern);
+                        // this optimistic-send path was the one place that didn't. Passing
+                        // the unfiltered list in let renderMessages() append bubbles from
+                        // OTHER open/recent chats into this one, and — once the next,
+                        // correctly-filtered render ran and found the container held more
+                        // bubbles than its (correct, smaller) list — triggered a full
+                        // re-render that could drop previously-shown messages instead of
+                        // just the leaked ones. That's what showed up as a receiver's
+                        // earlier received messages vanishing right after they sent a reply.
+                        const _cid = String(currentChat.id || '');
+                        const _fid = String(currentChat.friendId || currentChat.otherUserId ||
+                            (currentChat.otherParticipant && currentChat.otherParticipant.id) || '');
+                        const _allMsgs = core?.getMessages?.() || [];
+                        const messages = _allMsgs.filter(m => {
+                            const mCid = String(m.chatId || m.conversationId || '');
+                            return (_cid && mCid === _cid) || (_fid && mCid === _fid);
+                        });
 
                         UIRenderer.renderMessages(messages, currentChat, currentUser);
 
@@ -11527,7 +11586,13 @@ Type: ${message.type || 'text'}`;
 
             const friends = core.getFriends?.() || [];
 
-            const messages = core.getMessages?.() || [];
+            const messages = (core.getMessages?.() || []).filter(m => {
+                const mCid = String(m.chatId || m.conversationId || '');
+                const _pcCid = currentChat ? String(currentChat.id || '') : '';
+                const _pcFid = currentChat ? String(currentChat.friendId || currentChat.otherUserId ||
+                    (currentChat.otherParticipant && currentChat.otherParticipant.id) || '') : '';
+                return (_pcCid && mCid === _pcCid) || (_pcFid && mCid === _pcFid);
+            });
 
             const user = core.getCurrentUser?.();
 
@@ -11623,7 +11688,25 @@ Type: ${message.type || 'text'}`;
 
                             const user = core.getCurrentUser?.();
 
-                            UIRenderer.renderMessages(messages, activeChat, user);
+                            // FIX-CROSS-CHAT-RENDER: messages here is ChatManager's raw
+                            // global _messages array (see _notifySubscribers in
+                            // messages-core.js — it hands (conversations, activeConversation,
+                            // this._messages) to every subscriber, unfiltered). This
+                            // subscribe callback fires on nearly every state change, so
+                            // passing that whole cross-chat list straight to renderMessages()
+                            // for whatever chat happens to be active was likely the most
+                            // frequent trigger of messages from other chats leaking in, or
+                            // of a later correctly-filtered render wiping bubbles that
+                            // weren't in its (correct) smaller list.
+                            const _subCid = String(activeChat.id || '');
+                            const _subFid = String(activeChat.friendId || activeChat.otherUserId ||
+                                (activeChat.otherParticipant && activeChat.otherParticipant.id) || '');
+                            const _filteredMsgs = (Array.isArray(messages) ? messages : []).filter(m => {
+                                const mCid = String(m.chatId || m.conversationId || '');
+                                return (_subCid && mCid === _subCid) || (_subFid && mCid === _subFid);
+                            });
+
+                            UIRenderer.renderMessages(_filteredMsgs, activeChat, user);
 
                         }
 
@@ -12358,7 +12441,16 @@ Type: ${message.type || 'text'}`;
 
                     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
 
-                        UIRenderer.renderMessages(cachedMessages);
+                        // FIX-MISSING-RENDER-ARGS: renderMessages(messages, currentChat,
+                        // currentUser) treats a missing/undefined currentChat as "no chat
+                        // selected" and immediately wipes messagesContainer to the empty-
+                        // chat placeholder — it does not fall back to inferring the chat
+                        // from the messages themselves. Calling it with only the messages
+                        // array (as before) discarded the just-loaded cached history on
+                        // every single chat-open, showing an empty conversation until (if
+                        // ever) a later fetch re-populated it.
+                        const _curUser = core?.getCurrentUser?.() || { id: currentUserId, userId: currentUserId };
+                        UIRenderer.renderMessages(cachedMessages, existingConversation, _curUser);
 
                     } else if (existingConversation?.id && window.KynectaLocalStore) {
 
@@ -12374,7 +12466,9 @@ Type: ${message.type || 'text'}`;
 
                                 if (idbMsgs && idbMsgs.length > 0) {
 
-                                    UIRenderer.renderMessages(idbMsgs);
+                                    // Same missing-args bug as above — see FIX-MISSING-RENDER-ARGS.
+                                    const _curUser2 = core?.getCurrentUser?.() || { id: currentUserId, userId: currentUserId };
+                                    UIRenderer.renderMessages(idbMsgs, existingConversation, _curUser2);
 
                                     _uiLog('[messagesUI] ✅ FIX C2 Loaded', idbMsgs.length, 'messages from IDB for chat', existingConversation.id);
 
