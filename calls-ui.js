@@ -349,8 +349,21 @@ const GlobalCallHistory = {
     let pendingOpenCall = null;
     let listenerEstablished = false;
 
-    async function startCallWithUser(userId, userName, callType) {
-    console.log('[Calls UI] startCallWithUser userId:', userId, '| type:', callType);
+    // FIX (group-call-wrong-recipients): startCallWithUser previously always
+    // called callCore.initiateCall(callType, [parseInt(userId)]) — a single-
+    // element array. For a group call, the caller (chat.html/group-core.js)
+    // dispatches with `userId` set to the GROUP's id (see
+    // __dispatchCallToIframe(currentChatGroup.id, ...)), so this was sending
+    // the group's own id as if it were one member's user id, and never
+    // setting isGroupCall. The backend then created a call whose only
+    // "participant" was the group id itself — real members never got a
+    // correct invite, and non-members could be notified if the group id
+    // happened to collide with a real user id. `groupContext`, when passed,
+    // carries the real participantIds (already fetched fresh from
+    // /groups/:id/members by group-core.js) plus groupId/groupName, and is
+    // threaded through to initiateCall() below instead.
+    async function startCallWithUser(userId, userName, callType, groupContext = null) {
+    console.log('[Calls UI] startCallWithUser userId:', userId, '| type:', callType, '| groupContext:', groupContext);
     
     if (!userId) {
         console.error('[Calls UI] Cannot start call: No userId');
@@ -472,10 +485,22 @@ const GlobalCallHistory = {
     window._currentCallTimer = ringTimer;
     
     // ========== STEP 5: Initiate the actual call ==========
+    // FIX (group-call-wrong-recipients): callCore.startCall(targetUserId, ...)
+    // always builds `participants = [targetUserId]` internally — it cannot
+    // send more than one id regardless of what's in `options`. For a group
+    // call, go straight to initiateCall() with the real member list instead.
+    const _isGroupCallReq = !!(groupContext && Array.isArray(groupContext.participantIds) && groupContext.participantIds.length > 0);
     try {
         let result = null;
         
-        if (window.callCore && window.callCore.startCall) {
+        if (_isGroupCallReq && window.callCore && window.callCore.initiateCall) {
+            console.log('[Calls UI] Using callCore.initiateCall for GROUP call', groupContext);
+            result = await window.callCore.initiateCall(callType, groupContext.participantIds.map(id => parseInt(id)), {
+                isGroupCall: true,
+                groupId: groupContext.groupId,
+                groupName: groupContext.groupName
+            });
+        } else if (window.callCore && window.callCore.startCall) {
             console.log('[Calls UI] Using callCore.startCall');
             result = await window.callCore.startCall(parseInt(userId), callType);
         } else if (window.callCore && window.callCore.initiateCall) {
@@ -501,7 +526,13 @@ const GlobalCallHistory = {
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
             // Retry
-            if (window.callCore && window.callCore.startCall) {
+            if (_isGroupCallReq && window.callCore && window.callCore.initiateCall) {
+                result = await window.callCore.initiateCall(callType, groupContext.participantIds.map(id => parseInt(id)), {
+                    isGroupCall: true,
+                    groupId: groupContext.groupId,
+                    groupName: groupContext.groupName
+                });
+            } else if (window.callCore && window.callCore.startCall) {
                 result = await window.callCore.startCall(parseInt(userId), callType);
             } else if (window.callCore && window.callCore.initiateCall) {
                 result = await window.callCore.initiateCall(callType, [parseInt(userId)]);
@@ -1057,7 +1088,7 @@ window.showInCallScreen   = showInCallScreen;
              (window.callCore.isCoreReady && window.callCore.isCoreReady()));
         
         if (isCoreActive) {
-            startCallWithUser(callData.userId, callData.userName, callData.callType);
+            startCallWithUser(callData.userId, callData.userName, callData.callType, callData.groupContext || null);
         } else {
             console.log('[Calls UI] Core not ready, waiting...');
             pendingOpenCall = callData;
@@ -1091,8 +1122,20 @@ window.showInCallScreen   = showInCallScreen;
         else returnTo = 'calls';
 
         const chatUserId = data.chatUserId || data.conversationUserId || null;
+
+        // FIX (group-call-wrong-recipients): data.isGroupCall / data.participantIds /
+        // data.groupId / data.groupName arrive here (sent by group-core.js's
+        // startCall() via __dispatchCallToIframe's extraCtx) but were never
+        // read — only userId/userName/callType survived into pendingOpenCall.
+        // For a group call `userId` here is actually the group's id (see
+        // __dispatchCallToIframe(currentChatGroup.id, ...)), not a real
+        // member id, so it must never be used on its own as the sole
+        // recipient.
+        const groupContext = (data.isGroupCall && Array.isArray(data.participantIds) && data.participantIds.length > 0)
+            ? { participantIds: data.participantIds, groupId: data.groupId || userId, groupName: data.groupName || userName }
+            : null;
         
-        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId });
+        console.log('[Calls UI][Early] Received OPEN_CALL_WITH_USER:', { userId, userName, callType, returnTo, chatUserId, groupContext });
         
         if (!userId) return;
         
@@ -1102,7 +1145,7 @@ window.showInCallScreen   = showInCallScreen;
         window.__callOriginChatUserId = chatUserId || userId;
         window.__callOriginChatUserName = userName || null;
         
-        pendingOpenCall = { userId, userName, callType };
+        pendingOpenCall = { userId, userName, callType, groupContext };
         
         const isCoreActive = window.callCore && 
             ((window.callCore.getLifecycleState && window.callCore.getLifecycleState() === 'ACTIVE') ||

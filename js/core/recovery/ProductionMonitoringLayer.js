@@ -229,7 +229,7 @@
         lan:         window.__LANCommunicationEngine?.getDiagnostics?.() || { enabled: false },
         mesh:        window.__MeshMessagesTransport?.getDiagnostics?.() || { enabled: false },
         offlineQueue: window.__OfflineMessageQueue?.getDiagnostics?.() || { total: 0, queued: 0 },
-        tombstones:  (() => { try { const t = JSON.parse(localStorage.getItem('kynecta_tombstones_v1') || '{}'); return { count: Object.keys(t).length, ids: Object.keys(t) }; } catch(_) { return { count: 0 }; } })(),
+        tombstones:  (() => { try { const t = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}'); return { count: Object.keys(t).length, ids: Object.keys(t) }; } catch(_) { return { count: 0 }; } })(),
         activeTransport: window.__HybridTransportEngine?.getBestTransport?.() || 'INTERNET',
         lanPeers:    window.__lanPeerList?.length || 0,
         socketState: window.KynectaRealtime?._socket?.connected ? 'CONNECTED' : 'DISCONNECTED',

@@ -2557,8 +2557,12 @@ try {
                         if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
                     } catch(_) {}
                     // Also check tombstone registry
+                    // FIX (chat-resurrects-on-refresh): was reading
+                    // 'kynecta_tombstones_v1', which deleteConversation() never
+                    // wrote to (see its fix above) — so this check always found
+                    // an empty object and never actually excluded anything.
                     try {
-                        const _tombstones = SafeStorage.getJSON('kynecta_tombstones_v1') || {};
+                        const _tombstones = SafeStorage.getJSON('moodchat_tombstones_v1') || {};
                         Object.keys(_tombstones).forEach(id => _deleted.add(String(id)));
                     } catch(_) {}
                     this._conversations = ensureSafeArray(cached.conversations)
@@ -3258,8 +3262,13 @@ try {
                 if (Array.isArray(_d)) _deleted = new Set(_d.map(String));
             } catch(_) {}
             // Also check tombstone registry - prevents server response from resurrecting deleted chats
+            // FIX (chat-resurrects-on-refresh): was reading 'kynecta_tombstones_v1',
+            // which deleteConversation() never wrote to (see its fix above) — so
+            // this filter, despite the comment describing exactly the bug being
+            // fixed here, always found an empty object and let every chat
+            // through, including ones just deleted locally moments earlier.
             try {
-                const _tombstones = SafeStorage.getJSON('kynecta_tombstones_v1') || {};
+                const _tombstones = SafeStorage.getJSON('moodchat_tombstones_v1') || {};
                 Object.keys(_tombstones).forEach(id => _deleted.add(String(id)));
             } catch(_) {}
 
@@ -4813,6 +4822,23 @@ try {
                 console.error('[MessageHandler] deleteMessage failed:', error);
                 return false;
             }
+
+            // FIX (delete-persistence gap): mark the deletion tombstone registry
+            // immediately once the API call succeeds. Previously this only
+            // happened when the server's 'message:deleted' socket event echoed
+            // back to this same client (see the socket handler further down
+            // this file that calls __PHASE10_DeletionRegistry?.mark). That echo
+            // is not guaranteed to arrive before the user navigates away or
+            // refreshes — and when it doesn't, the registry never learns the
+            // message was deleted, so the next sync/merge re-inserts it from
+            // the server as if it were new. Marking it here, synchronously with
+            // the user's own delete action, closes that race.
+            try {
+                window.__PHASE10_DeletionRegistry?.mark('message', String(targetId), 'deleted');
+                if (String(targetId) !== String(messageId)) {
+                    window.__PHASE10_DeletionRegistry?.mark('message', String(messageId), 'deleted');
+                }
+            } catch (_) {}
 
             const filteredMessages = (ChatManager.getMessages() || []).filter((entry) =>
                 String(entry.id) !== String(messageId)
@@ -7637,9 +7663,18 @@ try {
                 if (!_d.includes(sid)) { _d.push(sid); SafeStorage.setJSON('kynecta_deleted_chats_v8', _d); }
 
                 // 2. Tombstone registry — version-aware, survives service worker
-                const _tombstones = SafeStorage.getJSON('kynecta_tombstones_v1') || {};
+                // FIX (chat-resurrects-on-refresh): this used to write to
+                // 'kynecta_tombstones_v1', but every read path that actually
+                // checks for tombstones (AppCache.getAll() for chats/groups in
+                // app.cache.js, and LocalMessageStore.saveConversation /
+                // deleteConversation in localStore.messages.js) reads
+                // 'moodchat_tombstones_v1'. Because the keys never matched, the
+                // tombstone written here was invisible to every one of those
+                // checks, so a deleted chat's row simply sat in IndexedDB
+                // un-flagged and came back on the next refresh/hydration.
+                const _tombstones = SafeStorage.getJSON('moodchat_tombstones_v1') || {};
                 _tombstones[sid] = tombstone;
-                SafeStorage.setJSON('kynecta_tombstones_v1', _tombstones);
+                SafeStorage.setJSON('moodchat_tombstones_v1', _tombstones);
 
                 // 3. Clear all message caches for this conversation
                 SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`);
@@ -7673,14 +7708,22 @@ try {
                 } catch(_) {}
 
                 // 7. FIX: Clear from IndexedDB so refresh doesn't resurrect the chat
+                // FIX (chat-resurrects-on-refresh): this previously called
+                // window.KynectaDB.deleteMessages()/.deleteConversation() —
+                // window.KynectaDB is never defined anywhere in this codebase,
+                // so both calls threw immediately and were silently swallowed
+                // by the surrounding try/catch. The actual IndexedDB chat row
+                // was therefore NEVER removed; only the messages were (via the
+                // KynectaLocalStore.deleteMessagesByChat call above). Call the
+                // real store's deleteConversation(), which removes the chat
+                // from IDB, deletes its messages, and writes the tombstone to
+                // the correct key ('moodchat_tombstones_v1') that
+                // getAllConversations()/getAll('chats') actually check.
                 try {
-                    if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteMessagesByChat === 'function') {
+                    if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteConversation === 'function') {
+                        window.KynectaLocalStore.deleteConversation(sid).catch(() => {});
+                    } else if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteMessagesByChat === 'function') {
                         window.KynectaLocalStore.deleteMessagesByChat(sid).catch(() => {});
-                    }
-                    // Also try generic IDB deletion
-                    if (window.KynectaDB) {
-                        window.KynectaDB.deleteMessages(sid).catch(() => {});
-                        window.KynectaDB.deleteConversation(sid).catch(() => {});
                     }
                 } catch(_) {}
             } catch(_) {}

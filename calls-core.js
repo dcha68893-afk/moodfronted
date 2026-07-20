@@ -38736,33 +38736,39 @@ clearActiveCall: function() {
 
 
 
+            // FIX-LISTENER-DEDUP: _bindRealtime() can run again on every
+            // 'connect' event (see the reconnect handler above, and the
+            // window 'kyn:realtimeReady' listener below). rt.on() only
+            // dedupes by exact function reference, and every call to this
+            // function previously created brand-new anonymous closures for
+            // each RT_MAP entry, so nothing ever matched and the old
+            // listeners were never removed — they just kept accumulating,
+            // one full extra set per reconnect. Track the exact wrapped
+            // handler we registered for each event so it can be explicitly
+            // unbound before the new one goes on.
+            if (!rt.__callsCoreRtHandlers) rt.__callsCoreRtHandlers = new Map();
+
             RT_MAP.forEach(([evtName, handler]) => {
 
+                const prevWrapped = rt.__callsCoreRtHandlers.get(evtName);
+                if (prevWrapped) {
+                    try { rt.off(evtName, prevWrapped); } catch (_) {}
+                }
 
-
-                rt.on(evtName, (payload) => {
-
-
+                const wrapped = (payload) => {
 
                     console.log(`[${MODULE_NAME}] 📞 KynectaRealtime event [${evtName}]`, payload);
 
-
-
                     try { handler(payload); } catch (e) {
-
-
 
                         console.warn(`[${MODULE_NAME}] KynectaRealtime call handler error (${evtName}):`, e.message);
 
-
-
                     }
 
+                };
 
-
-                });
-
-
+                rt.__callsCoreRtHandlers.set(evtName, wrapped);
+                rt.on(evtName, wrapped);
 
             });
 

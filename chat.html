@@ -4936,6 +4936,10 @@
                     }
                     hideGlobalBanner();
                     document.body.classList.remove('call-screen-active');
+                    // FIX (nav-icons-stuck-hidden): reset the flag alongside the
+                    // class — see the matching fix on POST_CALL_RESTORE above for
+                    // why leaving this stale=true breaks the stuck-nav watchdog.
+                    window.__activeCallInProgress = false;
                     // Broadcast CALL_ENDED to all iframes so the CALLER side resets when declined
                     const _rCallId = callId;
                     document.querySelectorAll('iframe').forEach(f => {
@@ -7566,6 +7570,17 @@ window.addEventListener('message', function (e) {
 
         // Remove call-screen body classes so sidebar/nav reappear
         document.body.classList.remove('call-screen-active', 'in-call-active');
+        // FIX (nav-icons-stuck-hidden): this is the definitive final cleanup
+        // step for a hangup (per the dedup comment above, it fires from both
+        // the local endCall() path and a remote call:ended echo), but it
+        // never reset window.__activeCallInProgress. That flag staying
+        // stale=true defeats the FIX-CALL-STUCK-WATCHDOG a few hundred lines
+        // up (which only force-restores nav when call-screen-active is
+        // present AND __activeCallInProgress is false) for any later,
+        // genuinely-stuck occurrence, and also makes navigateToPage()'s own
+        // call-screen-active guards misbehave afterward, since those branch
+        // directly on this flag.
+        window.__activeCallInProgress = false;
 
         // FIX-EXACT-RETURN: Use the context saved at call start (__callReturnContext /
         // sessionStorage 'call_return_ctx') so we reopen the EXACT chat/group/friend
