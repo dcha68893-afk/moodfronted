@@ -5311,7 +5311,7 @@ function setupGroupAttachmentControls() {
         
         const startCall = async (callType = 'voice') => {
             if (!currentChatGroup) return;
-            const membersResponse = await secureApiCall(`/groups/${currentChatGroup.id}/members`, { silent: true }).catch(() => null);
+            const membersResponse = await secureApiCall(`/groups/${currentChatGroup.id}/members?limit=100`, { silent: true }).catch(() => null);
             const membersPayload = normalizeMembersPayload(membersResponse?.data);
             const currentUserId = getCurrentGroupUserId();
             const participantIds = membersPayload.members

@@ -554,7 +554,11 @@ const GlobalCallHistory = {
         }
         
         // Store call info
-        UIState.activeCallId = result?.callId || `call_${Date.now()}`;
+        // FIX (callId-clobber): don't blindly overwrite — a call_started/call_ringing
+        // socket event may have already set the real server callId while we were
+        // awaiting startCall()/initiateCall() above. Only fall back to a synthetic
+        // local id if nothing has been set at all yet.
+        UIState.activeCallId = result?.callId || UIState.activeCallId || `call_${Date.now()}`;
         UIState.callType = callType;
         UIState.callActive = true;
         UIState.callState = 'calling';
@@ -2410,8 +2414,8 @@ function cacheCallHistory(calls) {
 
         // Pre-fill UI only when call comes from within the calls module
         // (no need to pre-fill when user already chose someone in messages/friends)
-        const isExternalSource = (callSource === 'messages-module' || callSource === 'friends-module'
-                                || returnTo === 'messages' || returnTo === 'friends');
+        const isExternalSource = (callSource === 'messages-module' || callSource === 'friends-module' || callSource === 'group-module'
+                                || returnTo === 'messages' || returnTo === 'friends' || returnTo === 'group');
 
         // If the "New Call" contacts picker is open from a previous action, close it —
         // external calls skip that screen entirely and go straight to dialling.

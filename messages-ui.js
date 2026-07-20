@@ -4752,17 +4752,21 @@
 
             let filteredChats = normalizedChats;
 
+            const _localSetHas = function(key, id) {
+                try { return (JSON.parse(localStorage.getItem(key) || '[]')).includes(String(id)); } catch(_) { return false; }
+            };
+
             if (normalizedCategory === 'unread') {
 
                 filteredChats = normalizedChats.filter(c => (Number(c?.unreadCount) || 0) > 0);
 
             } else if (normalizedCategory === 'archived') {
 
-                filteredChats = normalizedChats.filter(c => !!c?.archived);
+                filteredChats = normalizedChats.filter(c => !!c?.archived || _localSetHas('kyn_archived_chats_v1', c.id));
 
             } else if (normalizedCategory === 'blocked') {
 
-                filteredChats = normalizedChats.filter(c => !!c?.blocked);
+                filteredChats = normalizedChats.filter(c => !!c?.blocked || _localSetHas('kyn_blocked_chats_v1', c.id));
 
             } else if (normalizedCategory === 'notes') {
 
@@ -4770,7 +4774,7 @@
 
             } else {
 
-                filteredChats = normalizedChats.filter(c => !c?.archived && !c?.blocked);
+                filteredChats = normalizedChats.filter(c => !c?.archived && !_localSetHas('kyn_archived_chats_v1', c.id) && !c?.blocked && !_localSetHas('kyn_blocked_chats_v1', c.id));
 
             }
 
@@ -4920,9 +4924,10 @@
 
                         </div>
 
-                        <button class="chat-delete-btn" data-delete-chat-id="${chat.id}" title="Delete chat"
-                            style="display:none;border:none;background:none;cursor:pointer;color:#ef4444;padding:6px 8px;border-radius:8px;font-size:15px;flex-shrink:0;line-height:1;">
-                            <i class="fas fa-trash-alt" style="pointer-events:none;"></i>
+                        <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
+                            onclick="event.stopPropagation();event.preventDefault();window.messagesUI?._showChatContextMenu('${chat.id}', event);"
+                            style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;">
+                            <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                         </button>
 
                     </div>
@@ -10816,60 +10821,15 @@ Type: ${message.type || 'text'}`;
 
     }.init();
 
-    // ── Delete chat: CSS hover + capture-phase click delegation ───────────────
+    // ── Chat row "more" button: always-visible three-dot trigger for the
+    //    long-press context menu (pin/lock/block/archive/clear/delete/contact).
+    //    Replaces the old always-present hover-to-reveal delete icon.
     (function() {
         var _s = document.createElement('style');
         _s.textContent =
             '.chat-item{position:relative;}' +
-            '.chat-item:hover .chat-delete-btn{display:flex!important;align-items:center;justify-content:center;}' +
-            '.chat-delete-btn:hover{background:rgba(239,68,68,0.12)!important;}';
+            '.chat-more-btn:hover{background:rgba(255,255,255,0.08)!important;}';
         document.head.appendChild(_s);
-
-        document.addEventListener('click', function(ev) {
-            // Walk up to find [data-delete-chat-id]
-            var el = ev.target;
-            for (var i = 0; i < 5; i++) {
-                if (!el || el === document.body) return;
-                if (el.dataset && el.dataset.deleteChatId) break;
-                el = el.parentElement;
-            }
-            if (!el || !el.dataset || !el.dataset.deleteChatId) return;
-
-            ev.stopPropagation();
-            ev.preventDefault();
-            var chatId = String(el.dataset.deleteChatId);
-
-            // Animate row out immediately
-            var row = el.parentElement;
-            while (row && !row.classList.contains('chat-item')) row = row.parentElement;
-            if (row) {
-                row.style.transition = 'opacity 0.15s,max-height 0.2s,padding 0.2s,margin 0.2s';
-                row.style.opacity = '0'; row.style.maxHeight = '0';
-                row.style.overflow = 'hidden'; row.style.padding = '0'; row.style.margin = '0';
-                setTimeout(function() { try { row.remove(); } catch(_) {} }, 220);
-            }
-
-            // Persist + remove via core (survives refresh)
-            var core = window.messagesCore;
-            if (core && core.deleteConversation) {
-                core.deleteConversation(chatId);
-            } else {
-                try {
-                    var _d = JSON.parse(localStorage.getItem('kynecta_deleted_chats_v8') || '[]');
-                    if (!_d.includes(chatId)) _d.push(chatId);
-                    localStorage.setItem('kynecta_deleted_chats_v8', JSON.stringify(_d));
-                } catch(_) {}
-            }
-
-            // Hide panel if deleted chat was active
-            var activeId = core && core.getCurrentConversation && core.getCurrentConversation() && String(core.getCurrentConversation().id);
-            if (activeId && activeId === chatId) {
-                var panel = document.getElementById('chatPanel');
-                var sidebar = document.getElementById('sidebar');
-                if (panel) panel.classList.add('hidden');
-                if (sidebar) sidebar.classList.add('active');
-            }
-        }, true); // capture phase — fires before chat-item onclick
     })();
 
 
@@ -13596,9 +13556,10 @@ Type: ${message.type || 'text'}`;
     // CHAT LONG-PRESS CONTEXT MENU + PIN/HIDE/BLOCK/DELETE SYSTEM
     // ============================================================
     (function installChatContextMenu() {
-        const STORAGE_KEY_PINNED  = 'kyn_pinned_chats_v1';
-        const STORAGE_KEY_HIDDEN  = 'kyn_hidden_chats_v1';
-        const STORAGE_KEY_BLOCKED = 'kyn_blocked_chats_v1';
+        const STORAGE_KEY_PINNED   = 'kyn_pinned_chats_v1';
+        const STORAGE_KEY_HIDDEN   = 'kyn_hidden_chats_v1';
+        const STORAGE_KEY_BLOCKED  = 'kyn_blocked_chats_v1';
+        const STORAGE_KEY_ARCHIVED = 'kyn_archived_chats_v1';
         const STORAGE_KEY_HIDDEN_PIN = 'kyn_hidden_pin_v1';
 
         function _store(key) {
@@ -13647,9 +13608,10 @@ Type: ${message.type || 'text'}`;
         // Show context menu
         window.messagesUI._showChatContextMenu = function(chatId, e) {
             _removeChatContextMenu();
-            const isPinned  = _setHas(STORAGE_KEY_PINNED,  chatId);
-            const isHidden  = _setHas(STORAGE_KEY_HIDDEN,  chatId);
-            const isBlocked = _setHas(STORAGE_KEY_BLOCKED, chatId);
+            const isPinned   = _setHas(STORAGE_KEY_PINNED,   chatId);
+            const isHidden   = _setHas(STORAGE_KEY_HIDDEN,   chatId);
+            const isBlocked  = _setHas(STORAGE_KEY_BLOCKED,  chatId);
+            const isArchived = _setHas(STORAGE_KEY_ARCHIVED, chatId);
 
             const menu = document.createElement('div');
             menu.id = 'chatContextMenu';
@@ -13661,10 +13623,13 @@ Type: ${message.type || 'text'}`;
             ].join('');
 
             const actions = [
-                { icon: '📌', label: isPinned  ? 'Unpin chat'    : 'Pin chat',     action: 'pin'    },
-                { icon: '🔒', label: isHidden  ? 'Unhide chat'   : 'Hide chat',    action: 'hide'   },
-                { icon: '🚫', label: isBlocked ? 'Unblock user'  : 'Block user',   action: 'block'  },
-                { icon: '🗑️', label: 'Delete chat',                                 action: 'delete' },
+                { icon: '📌', label: isPinned   ? 'Unpin chat'    : 'Pin chat',      action: 'pin'      },
+                { icon: '🔒', label: isHidden   ? 'Unlock chat'   : 'Lock chat',     action: 'hide'     },
+                { icon: '📥', label: isArchived ? 'Unarchive chat': 'Archive chat',  action: 'archive'  },
+                { icon: '🚫', label: isBlocked  ? 'Unblock user'  : 'Block user',    action: 'block'    },
+                { icon: '🧹', label: 'Clear chat',                                    action: 'clear'    },
+                { icon: '👤', label: 'View contact',                                  action: 'contact'  },
+                { icon: '🗑️', label: 'Delete chat',                                   action: 'delete'   },
             ];
 
             actions.forEach(function(a) {
@@ -13761,6 +13726,68 @@ Type: ${message.type || 'text'}`;
                         } catch(_) {}
                     }
                     window.messagesUI?.refreshChatsList?.();
+                    break;
+
+                case 'archive':
+                    if (_setHas(STORAGE_KEY_ARCHIVED, chatId)) {
+                        _setRemove(STORAGE_KEY_ARCHIVED, chatId);
+                        _showToast('Chat unarchived');
+                    } else {
+                        _setAdd(STORAGE_KEY_ARCHIVED, chatId);
+                        _showToast('Chat archived');
+                    }
+                    window.messagesUI?.refreshChatsList?.();
+                    break;
+
+                case 'clear':
+                    _showConfirm('Clear all messages in this chat? This cannot be undone.', function(ok) {
+                        if (!ok) return;
+                        const _cid = String(chatId);
+
+                        if (window.ChatManager) {
+                            if (window.ChatManager._messages) {
+                                window.ChatManager._messages = window.ChatManager._messages.filter(
+                                    function(m) { return String(m.chatId || m.conversationId || '') !== _cid; }
+                                );
+                            }
+                            if (window.ChatManager._messagesMap) {
+                                Array.from(window.ChatManager._messagesMap.keys()).forEach(function(k) {
+                                    const v = window.ChatManager._messagesMap.get(k);
+                                    if (v && String(v.chatId || v.conversationId || '') === _cid) window.ChatManager._messagesMap.delete(k);
+                                });
+                            }
+                            if (window.ChatManager._saveToCache) window.ChatManager._saveToCache();
+                            const _active = window.ChatManager.getActiveChat && window.ChatManager.getActiveChat();
+                            if (_active && String(_active.id) === _cid && window.ChatManager._notifySubscribers) {
+                                window.ChatManager._notifySubscribers();
+                            }
+                        }
+
+                        if (window.KynectaLocalStore && window.KynectaLocalStore.deleteMessagesByChat) {
+                            window.KynectaLocalStore.deleteMessagesByChat(_cid).catch(function(){});
+                        }
+
+                        try {
+                            for (let i = 0; i < localStorage.length; i++) {
+                                const k = localStorage.key(i);
+                                if (k && (k.includes('messages_' + _cid) || k.includes('kynecta_messages_v8_' + _cid))) {
+                                    localStorage.removeItem(k);
+                                }
+                            }
+                        } catch(_) {}
+
+                        _showToast('Chat cleared');
+                        window.messagesUI?.refreshChatsList?.();
+                    });
+                    break;
+
+                case 'contact':
+                    window.dispatchEvent(new CustomEvent('messages:viewContact', { detail: { chatId: String(chatId) } }));
+                    if (window.parent && window.parent !== window) {
+                        try {
+                            window.parent.postMessage({ type: 'OPEN_FRIEND_PROFILE', friendId: String(chatId).replace('pending_', '') }, '*');
+                        } catch(_) {}
+                    }
                     break;
 
                 case 'delete':

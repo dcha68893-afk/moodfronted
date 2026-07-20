@@ -4578,44 +4578,12 @@
                     window.__activeCallInProgress = false;
                     await refreshCallHistoryForUser(cachedUserId);
                     // ── Navigate back to origin page after CALL_ENDED (non-ws) ──
-                    // The calls iframe fires CALL_ENDED_RETURN for its own navigation,
-                    // but relay it here too so state is always cleaned regardless of
-                    // which path triggered the end.
-                    (function _navigateAfterEnd() {
-                        const _ceNow2 = Date.now();
-                        if (window.__callEndedNavAt && (_ceNow2 - window.__callEndedNavAt) < 3000) return; // debounce
-                        window.__callEndedNavAt = _ceNow2;
-                        setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
-                        let _ctx = window.__callReturnContext;
-                        if (!_ctx) { try { const _s = sessionStorage.getItem('call_return_ctx'); if (_s) _ctx = JSON.parse(_s); } catch(e) {} }
-                        const _returnTo = (_ctx && _ctx.returnTo) || window.__lastActivePage || 'messages';
-                        window.__callReturnContext = null;
-                        window.__moduleSessionDispatchCache = {};
-                        try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
-                        if (_returnTo === 'group') {
-                            navigateToPage('group');
-                            const _gf = document.getElementById('groupIframe');
-                            if (_gf && _gf.contentWindow) setTimeout(() => _gf.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _ctx && _ctx.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
-                        } else if (_returnTo === 'friends') {
-                            navigateToPage('friends');
-                            const _ff = document.getElementById('friendsIframe');
-                            if (_ff && _ff.contentWindow) setTimeout(() => _ff.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
-                        } else if (_returnTo === 'messages') {
-                            navigateToPage('messages');
-                            // FIX (receiver-side exact return, same as POST_CALL_RESTORE
-                            // handler): _ctx.chatUserId only exists for the call's
-                            // initiator. Fall back to the last chat this parent frame
-                            // saw opened (captured from CHAT_OPENED) for the receiver's case.
-                            const _naChatUserId = (_ctx && _ctx.chatUserId) || window.__lastOpenChatUserId;
-                            const _naChatUserName = (_ctx && _ctx.userName) || window.__lastOpenChatName;
-                            if (_naChatUserId) {
-                                const _mf = document.getElementById('messagesIframe');
-                                if (_mf && _mf.contentWindow) setTimeout(() => { _mf.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _naChatUserId, userName: _naChatUserName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */ }, 300);
-                            }
-                        } else if (_returnTo && _returnTo !== 'calls') {
-                            navigateToPage(_returnTo);
-                        }
-                    })();
+                    // FIX-CONSOLIDATE: this used to be its own copy-pasted IIFE that had
+                    // drifted from _kynReturnFromCallToOrigin() (missing its nav-icon
+                    // opacity/pointer-events restoration), which was exactly the kind of
+                    // "different behavior depending on which path ended the call" bug
+                    // this app has struggled with. Route through the one shared function.
+                    _kynReturnFromCallToOrigin();
                     return;
                 }
                 
@@ -4637,35 +4605,9 @@
                     });
                     await refreshCallHistoryForUser(cachedUserId);
                     // ── ws-bridge CALL_ENDED: also navigate back ──────────────────
-                    (function _wsNavigateAfterEnd() {
-                        const _ceNow3 = Date.now();
-                        if (window.__callEndedNavAt && (_ceNow3 - window.__callEndedNavAt) < 3000) return;
-                        window.__callEndedNavAt = _ceNow3;
-                        setTimeout(() => { window.__callEndedNavAt = 0; }, 4000);
-                        let _ctx3 = window.__callReturnContext;
-                        if (!_ctx3) { try { const _s3 = sessionStorage.getItem('call_return_ctx'); if (_s3) _ctx3 = JSON.parse(_s3); } catch(e) {} }
-                        const _rt3 = (_ctx3 && _ctx3.returnTo) || window.__lastActivePage || 'messages';
-                        window.__callReturnContext = null;
-                        window.__moduleSessionDispatchCache = {};
-                        try { sessionStorage.removeItem('call_return_ctx'); } catch(e) {}
-                        if (_rt3 === 'group') {
-                            navigateToPage('group');
-                            const _gf3 = document.getElementById('groupIframe');
-                            if (_gf3 && _gf3.contentWindow) setTimeout(() => _gf3.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, groupId: _ctx3 && _ctx3.groupId, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
-                        } else if (_rt3 === 'friends') {
-                            navigateToPage('friends');
-                            const _ff3 = document.getElementById('friendsIframe');
-                            if (_ff3 && _ff3.contentWindow) setTimeout(() => _ff3.contentWindow.postMessage({ type: 'RETURN_FROM_CALL', payload: { returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'), 300);
-                        } else if (_rt3 === 'messages') {
-                            navigateToPage('messages');
-                            if (_ctx3 && _ctx3.chatUserId) {
-                                const _mf3 = document.getElementById('messagesIframe');
-                                if (_mf3 && _mf3.contentWindow) setTimeout(() => { _mf3.contentWindow.postMessage({ type: 'OPEN_CHAT_WITH_USER', payload: { userId: _ctx3.chatUserId, userName: _ctx3.userName || 'User', returnFromCall: true, timestamp: Date.now() }, source: 'parent-frame' }, '*'); document.body.classList.add('chat-panel-active'); /* FIX: was gated to mobile-only (window.innerWidth<=768), so desktop never got this flag and the header/avatar/call/video/more icons never fully activated on wide screens for these code paths. Now applied on all widths, matching group-panel-active. */ }, 300);
-                            }
-                        } else if (_rt3 && _rt3 !== 'calls') {
-                            navigateToPage(_rt3);
-                        }
-                    })();
+                    // FIX-CONSOLIDATE: same drift/duplication problem as the non-ws
+                    // CALL_ENDED path above — route through the one shared function.
+                    _kynReturnFromCallToOrigin();
                     return;
                 }
                 
