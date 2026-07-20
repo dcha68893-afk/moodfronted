@@ -2899,6 +2899,47 @@
 
 
 
+    // FIX-DOUBLE-DECRYPT-RACE-2: two independent code paths in this file can
+    // decrypt an incoming E2E message — the normal render pipeline
+    // (UIRenderer._decryptRenderedMessages) and a separate direct-append
+    // bypass listener (_appendMessageBubbleDirect, further down this file)
+    // that renders real-time messages immediately without waiting for a full
+    // re-render. They operate on separate message object copies, so neither
+    // one's per-object _decrypted/_decryptAttempted flags are visible to the
+    // other. Because the underlying ratchet advances irreversibly the instant
+    // decryptFromChat() runs — success or failure — if both paths decrypt the
+    // same envelope, the second call corrupts the receive chain for every
+    // message after it (this is what produced "[Decryption failed — message
+    // may be out of order or corrupted]"). window.__kynClaimDecrypt(key)
+    // gives whichever path gets there first exclusive rights to decrypt a
+    // given message id; the other path must skip it and let the first one's
+    // render stand.
+    window.__kynDecryptClaims = window.__kynDecryptClaims || new Set();
+    window.__kynClaimDecrypt = window.__kynClaimDecrypt || function(key) {
+        key = String(key || '');
+        if (!key) return true; // no id to dedupe on — let it proceed, can't do better
+        if (window.__kynDecryptClaims.has(key)) return false;
+        window.__kynDecryptClaims.add(key);
+        return true;
+    };
+    // Writes a successful decrypt back into ChatManager's canonical store
+    // (whichever path performed it), so a later full re-render — which reads
+    // from ChatManager._messages, not from either path's local copy — shows
+    // the plaintext instead of regressing back to raw ciphertext.
+    window.__kynCommitDecrypt = window.__kynCommitDecrypt || function(id, localId, plaintext) {
+        try {
+            const cm = window.ChatManager;
+            if (!cm || !cm._messagesMap) return;
+            const stored = cm._messagesMap.get(String(id || '')) || (localId && cm._messagesMap.get(String(localId)));
+            if (stored) {
+                stored.content = plaintext;
+                stored._decrypted = true;
+                stored._decryptAttempted = true;
+                stored._decryptInFlight = false;
+            }
+        } catch (_) { /* best-effort only */ }
+    };
+
     // =============================================
 
     // UI RENDERER (ENHANCED WITH DETERMINISTIC LIFECYCLE & REAL DATA)
@@ -3431,6 +3472,11 @@
             const existingDomIds = new Set(normalizedMessages.map(m => String(m.id || '')));
             const domOnlyMessages = [];
             const domOnlyRawNodes = []; // FIX-MSG-VANISH-B: last-resort clones, never lost
+            // FIX-MSG-ORDER: track the nearest preceding bubble id that WILL be
+            // re-rendered (from normalizedMessages or recovered domOnlyMessages), so
+            // any raw-fallback node can be reinserted in its correct relative position
+            // afterward instead of always being dumped at the end of the container.
+            let _lastAnchorId = null;
             container.querySelectorAll('[data-message-id]').forEach(el => {
                 const domId = el.dataset.messageId;
                 // FIX-MSG-VANISH-B: previously excluded any id starting with 'tmp_', but
@@ -3452,11 +3498,14 @@
                     }
                     if (stored) {
                         domOnlyMessages.push(stored);
+                        _lastAnchorId = domId;
                     } else {
                         // Nothing recoverable as structured data — keep the raw node itself
                         // as an absolute last resort so the bubble is never simply deleted.
-                        domOnlyRawNodes.push(el.cloneNode(true));
+                        domOnlyRawNodes.push({ node: el.cloneNode(true), afterId: _lastAnchorId });
                     }
+                } else if (domId) {
+                    _lastAnchorId = domId;
                 }
             });
             // Merge dom-only messages into normalizedMessages before rendering
@@ -3474,12 +3523,20 @@
 
             this._renderMessageBatches(container, groupedMessages, currentUser);
 
-            // FIX-MSG-VANISH-B: re-attach any bubbles that had no recoverable structured
-            // data (see domOnlyRawNodes above). Appended at the end rather than sorted in,
-            // since we don't have a timestamp for them, but this still beats silently
-            // deleting a message the user can see on screen.
+            // FIX-MSG-ORDER / FIX-MSG-VANISH-B: re-attach any bubbles that had no
+            // recoverable structured data, each right after the bubble it originally
+            // followed (falling back to the very start of the container if it was the
+            // first message), instead of always appending at the end — which previously
+            // visibly scrambled send/receive order whenever this fallback fired.
             if (domOnlyRawNodes.length > 0) {
-                domOnlyRawNodes.forEach(node => container.appendChild(node));
+                domOnlyRawNodes.forEach(({ node, afterId }) => {
+                    const anchorEl = afterId ? container.querySelector(`[data-message-id="${CSS.escape(String(afterId))}"]`) : null;
+                    if (anchorEl) {
+                        anchorEl.insertAdjacentElement('afterend', node);
+                    } else {
+                        container.insertBefore(node, container.firstChild);
+                    }
+                });
             }
 
             this._lastRenderedMessagesSignature = renderSignature;
@@ -3514,9 +3571,17 @@
             // the same envelope permanently advances/desyncs the receive chain,
             // which is what produced "[Decryption failed — message may be out
             // of order or corrupted]" on every message after it in that chat.
+            // FIX-DOUBLE-DECRYPT-RACE-2: also consult the shared cross-path claim
+            // registry (see window.__kynClaimDecrypt below) so a message that the
+            // OTHER decrypt path (the direct-append bypass listener further down
+            // this file) has already claimed doesn't get decrypted a second time
+            // here — the two paths work from separate message object copies, so
+            // the per-object _decryptInFlight/_decryptAttempted flags above don't
+            // protect against each other.
             const pending = messages.filter(m => m && (!m.type || m.type === 'text') &&
                 typeof m.content === 'string' && m.content.charAt(0) === '{' && m.content.indexOf('"v"') !== -1 &&
-                !m._decrypted && !m._decryptAttempted && !m._decryptInFlight);
+                !m._decrypted && !m._decryptAttempted && !m._decryptInFlight &&
+                (window.__kynClaimDecrypt ? window.__kynClaimDecrypt(m.id || m.localId) : true));
             if (pending.length === 0) return;
 
             // FIX (bubbles must never stay invisible forever): the old version
@@ -3587,6 +3652,7 @@
             if (!isFallback) {
                 message.content = text;
                 message._decrypted = true;
+                if (window.__kynCommitDecrypt) window.__kynCommitDecrypt(message.id, message.localId, text);
             }
         },
 
@@ -14284,6 +14350,15 @@ Type: ${message.type || 'text'}`;
         // envelope) is ready.
         const looksEncrypted = typeof content === 'string' && content.charAt(0) === '{' && content.indexOf('"v"') !== -1 && !msg._decrypted;
         if (looksEncrypted && window.KynectaE2E) {
+            // FIX-DOUBLE-DECRYPT-RACE-2: claim this message id before decrypting.
+            // If the normal render pipeline already claimed it (racing on the same
+            // incoming message), don't decrypt it again here — that would corrupt
+            // the ratchet for every message after it. Just skip; the pipeline's
+            // own render is the one that will actually show this message.
+            const claimKey = msgId || (payload && (payload.id || payload.localId));
+            if (window.__kynClaimDecrypt && !window.__kynClaimDecrypt(claimKey)) {
+                return;
+            }
             const chatId = String(
                 msg.chatId || msg.conversationId ||
                 window.ChatManager?._activeConversation?.id ||
@@ -14296,10 +14371,14 @@ Type: ${message.type || 'text'}`;
             const senderForDecrypt = isOwn ? otherPartyId : senderId;
             if (chatId && senderForDecrypt) {
                 window.KynectaE2E.decryptFromChat(content, chatId, senderForDecrypt).then(function (plaintext) {
+                    const finalText = (plaintext && plaintext !== content) ? plaintext : '[Unable to decrypt message]';
                     const finalMsg = Object.assign({}, msg, {
-                        content: (plaintext && plaintext !== content) ? plaintext : '[Unable to decrypt message]',
+                        content: finalText,
                         _decrypted: true
                     });
+                    if (plaintext && plaintext !== content && window.__kynCommitDecrypt) {
+                        window.__kynCommitDecrypt(msg.id, msg.localId, finalText);
+                    }
                     _buildAndAppendBubble(finalMsg, msgId, isOwn, timeStr, senderName);
                 }).catch(function () {
                     const finalMsg = Object.assign({}, msg, { content: '[Unable to decrypt message]', _decrypted: true });

@@ -5421,8 +5421,16 @@ handleContactItemClick: function(e) {
                 (document.getElementById('inCallScreen') && document.getElementById('inCallScreen').classList.contains('active')) ||
                 (document.getElementById('incomingCallModal') && document.getElementById('incomingCallModal').classList.contains('active'));
             if (!_anyScreenActive) {
-                console.warn('[Calls UI] handleCallEnded ignored — no active call screen visible (stale echo)');
-                return;
+                // FIX-STUCK-SCREEN: previously returned here and skipped everything below —
+                // including the parent postMessage that restores the sidebar/bottom-nav
+                // icons and the return-to-origin navigation. In practice UIState is often
+                // already reset by the time this runs (a different end-call path got there
+                // first), which made this guard fire on genuine end events, not just true
+                // stale echoes — leaving both sides stuck on the call screen with nav
+                // hidden. The debounce immediately below already prevents this from
+                // double-processing the same end event, so it's safe to fall through and
+                // still run the nav-restore/navigation instead of dropping it entirely.
+                console.warn('[Calls UI] handleCallEnded: no active call screen visible, but still restoring nav/navigation as a safety net');
             }
 
             // ── Debounce: ignore duplicate CALL_ENDED within 3 seconds ──────

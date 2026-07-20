@@ -105,6 +105,13 @@ function _realOpenProduct(productId) {
 }
 
 function _renderProductFallback(product, panel, content, nameEl) {
+    // AUDIT FIX: stash the product so _jmAddToCart/_jmBuyNow (defined below)
+    // can look it up by id — CartEngine.add() needs the full product object,
+    // not just an id, and this is the simplest way to get it there from an
+    // inline onclick without re-fetching.
+    window.__uiFixProductCache = window.__uiFixProductCache || {};
+    window.__uiFixProductCache[String(product.id || product._id)] = product;
+
     const price = product.flash_sale_price || product.flashSalePrice || product.price || 0;
     const img   = (product.images || [])[0] || product.image || product.mediaUrl || '';
     if (nameEl) nameEl.textContent = product.title || 'Product';
@@ -157,6 +164,37 @@ function _reinstall() {
 }
 document.addEventListener('DOMContentLoaded', () => setTimeout(_reinstall, 300));
 window.addEventListener('load', () => { _reinstall(); setTimeout(_reinstall, 800); setTimeout(_reinstall, 2000); });
+
+// AUDIT FIX: these were called by the fallback product-detail buttons
+// (onclick="window._jmAddToCart?.(...)") but never defined anywhere in the
+// entire codebase — Add to Cart was a permanent silent no-op, and Buy Now
+// only appeared to work because of its `|| window._jmNavMore?.('checkout')`
+// fallback, which navigated to checkout without actually adding anything.
+function _resolveCachedProduct(productId) {
+    const cached = window.__uiFixProductCache?.[String(productId)];
+    if (cached) return cached;
+    // Fall back to the EcomMarketplace product store if the fallback
+    // renderer's cache doesn't have it (e.g. called from elsewhere).
+    return window.EcomMarketplace?.ProductEngine?.getStore?.()?.products?.get(String(productId)) || null;
+}
+
+window._jmAddToCart = function(productId, quantity = 1) {
+    const product = _resolveCachedProduct(productId);
+    if (!product) { console.warn('[ui-fix] _jmAddToCart: product not found for', productId); return; }
+    if (!window.CartEngine) { console.warn('[ui-fix] _jmAddToCart: CartEngine not loaded'); return; }
+    return window.CartEngine.add(product, quantity);
+};
+
+window._jmBuyNow = function(productId) {
+    const product = _resolveCachedProduct(productId);
+    if (!product || !window.CartEngine) return false;
+    const result = window.CartEngine.add(product, 1);
+    if (result?.success) {
+        window._jmNavMore?.('checkout');
+        return true;
+    }
+    return false;
+};
 
 // ── 3. _api BASE URL PATCH for seller.js and admin.js ─────────────────────
 // These files define their own _api internally — patch the global fallback
