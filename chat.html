@@ -5329,7 +5329,14 @@
                         source: data.source || 'settings',
                         timestamp: Date.now()
                     }, { async: true });
-                    dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings, timestamp: Date.now() }, originalSource: 'settings' });
+                    // NOTE: settings is included both nested (payload.settings) and flat
+                    // (top-level settings) because different module iframes read different
+                    // shapes: group-core.js/friend-core.js/messages-core.js/Tool-core.js
+                    // read data.payload.settings, while settings-module-subscriptions.js/
+                    // settings-global-propagation.js/calls-core.js/marketplace-ecommerce.js
+                    // read data.settings. Sending both avoids silently dropping the update
+                    // for half of the app.
+                    dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings, timestamp: Date.now() }, settings, originalSource: 'settings' });
 
                     // ✅ FIX: Also broadcast via BroadcastChannel + localStorage so that
                     // iframes which aren't currently visible (not yet CHILD_READY or throttled
@@ -5456,7 +5463,10 @@
                     if (window.AppSettings && typeof window.AppSettings.merge === 'function') {
                         window.AppSettings.merge(settingsPayload, { skipBroadcast: true, source: 'parent-socket-relay' });
                     }
-                    dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings: settingsPayload, timestamp: Date.now() }, originalSource: 'socket' });
+                    // See comment above the other dispatchEventToModules('SETTINGS_UPDATED', ...)
+                    // call: settings is sent both nested and flat so every consumer shape
+                    // across the module iframes picks it up.
+                    dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings: settingsPayload, timestamp: Date.now() }, settings: settingsPayload, originalSource: 'socket' });
                     emitGlobalAppEvent('SETTINGS_UPDATED', { settings: settingsPayload, source: 'socket', timestamp: Date.now() }, { async: true });
                 }
 

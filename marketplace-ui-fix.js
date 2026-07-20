@@ -129,6 +129,11 @@ function _renderProductFallback(product, panel, content, nameEl) {
                     ${product.condition ? `<span style="background:#dbeafe;color:#1e40af;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.condition}</span>` : ''}
                     ${product.stock != null ? `<span style="background:#d1fae5;color:#065f46;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600">${product.stock > 0 ? `${product.stock} in stock` : 'Out of stock'}</span>` : ''}
                 </div>
+                ${(product.seller_id || product.seller?.id) ? `
+                <button onclick="window._jmMessageSeller?.(${JSON.stringify(product.seller_id || product.seller?.id)}, ${JSON.stringify(product.seller?.name || 'Seller')}, ${JSON.stringify(product.id || product._id)})"
+                    style="width:100%;background:#fff;color:#374151;border:1.5px solid #e5e7eb;border-radius:12px;padding:12px;font-weight:700;cursor:pointer;font-size:14px;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px">
+                    💬 Message Seller
+                </button>` : ''}
                 <div style="position:fixed;bottom:0;left:0;right:0;background:#fff;padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;z-index:100">
                     <button onclick="window._jmAddToCart?.(${JSON.stringify(product.id || product._id)})"
                         style="flex:1;background:#fff;color:#f57224;border:2px solid #f57224;border-radius:12px;padding:14px;font-weight:700;cursor:pointer;font-size:15px">
@@ -165,6 +170,64 @@ function _reinstall() {
 document.addEventListener('DOMContentLoaded', () => setTimeout(_reinstall, 300));
 window.addEventListener('load', () => { _reinstall(); setTimeout(_reinstall, 800); setTimeout(_reinstall, 2000); });
 
+// ── ROOT-CAUSE FIX: Seller Dashboard (and every other seller/admin tool,
+// plus wallet/loyalty/referral) rendered nothing when clicked ───────────────
+// Tool-core.js and Tool-ui.js are loaded with type="module" in Tools.html.
+// Module scripts are ALWAYS deferred by the browser, regardless of where
+// they appear in the document — so even though they're declared near the
+// top of the page, they actually execute AFTER every classic <script src=...>
+// tag below them, including marketplace-ecommerce.js, -checkout.js,
+// -advanced.js, -seller.js, and -admin.js.
+//
+// Those classic scripts each wrap window._jmNavMore in turn — advanced.js
+// adds wallet/loyalty/referral, seller.js adds all seller-* pages plus
+// admin-approval, admin.js adds the rest of admin-*  — with each wrapper
+// falling back to whatever _jmNavMore was before it for keys it doesn't
+// recognize. By the time admin.js finishes, that chain is complete and
+// correct.
+//
+// Then Tool-ui.js's deferred module code runs and does
+// `window._jmNavMore = _navMore` unconditionally, discarding that entire
+// chain and replacing it with its own base implementation — whose page
+// switch has explicit empty-`break` cases for every seller-*/admin-* key
+// (the code comment there literally says "handled by marketplace-seller.js
+// _jmNavMore override," which is exactly the override that just got
+// destroyed) and no case at all for wallet/loyalty/referral. Result: every
+// one of those menu items silently renders nothing.
+//
+// Fix: capture the working chain right now (this classic script runs last,
+// after admin.js, so window._jmNavMore at this exact point IS that correct,
+// fully-assembled chain) and recompose it with Tool-ui's base after Tool-ui
+// has had its chance to run.
+const _sellerAdminNavChain = window._jmNavMore;
+const _chainHandledKeys = new Set([
+    'seller-dashboard','my-listings','seller-inventory','seller-analytics',
+    'seller-payouts','seller-shipping','seller-returns','seller-verification',
+    'seller-subscription','admin-approval','admin-dashboard','admin-products',
+    'admin-sellers','admin-buyers','admin-orders','admin-analytics',
+    'admin-payouts','admin-coupons','admin-reviews','admin-support',
+    'admin-settings','wallet','loyalty','referral',
+]);
+
+function _reinstallNavMore() {
+    const toolUiBase = window._jmNavMore; // whatever Tool-ui.js installed, by now
+    if (toolUiBase === _sellerAdminNavChain) return; // nothing clobbered it — leave alone
+    if (window.__uiFixNavMoreInstalled) return;       // already recomposed
+    window.__uiFixNavMoreInstalled = true;
+    window._jmNavMore = function(page, ...args) {
+        if (_chainHandledKeys.has(page) && typeof _sellerAdminNavChain === 'function') {
+            return _sellerAdminNavChain(page, ...args);
+        }
+        return toolUiBase?.(page, ...args);
+    };
+}
+// Module scripts finish executing before DOMContentLoaded fires, so by the
+// time this handler runs, Tool-ui.js's clobbering has already happened and
+// toolUiBase above will be captured correctly. The extra delayed retries
+// guard against any further re-installs elsewhere in the app.
+document.addEventListener('DOMContentLoaded', () => setTimeout(_reinstallNavMore, 300));
+window.addEventListener('load', () => { _reinstallNavMore(); setTimeout(_reinstallNavMore, 800); setTimeout(_reinstallNavMore, 2000); });
+
 // AUDIT FIX: these were called by the fallback product-detail buttons
 // (onclick="window._jmAddToCart?.(...)") but never defined anywhere in the
 // entire codebase — Add to Cart was a permanent silent no-op, and Buy Now
@@ -194,6 +257,30 @@ window._jmBuyNow = function(productId) {
         return true;
     }
     return false;
+};
+
+// AUDIT FIX: the real product-detail page had no way at all to message the
+// seller — confirmed missing entirely. This is direct buyer↔seller chat
+// (no admin routing/moderation step exists anywhere in the backend for it).
+// chat.html already has a real, working bridge for this ("Chat-seller
+// bridge — marketplace requests opening a DM"), but it only fires on an
+// exact payload shape: type 'OPEN_CHAT' with payload.product_id present
+// and userId/userName fields — matching that exactly here.
+window._jmMessageSeller = function(sellerId, sellerName, productId) {
+    if (!sellerId) return;
+    try {
+        window.parent?.postMessage({
+            type: 'OPEN_CHAT',
+            payload: {
+                userId: sellerId, userName: sellerName || 'Seller',
+                seller_id: sellerId, seller_name: sellerName || 'Seller',
+                product_id: productId || 'unknown',
+                message: `Hi, I'm interested in your listing`,
+            },
+        }, '*');
+    } catch(_) {
+        window.location.href = '/chat.html?recipientId=' + encodeURIComponent(sellerId) + '&name=' + encodeURIComponent(sellerName || 'Seller');
+    }
 };
 
 // ── 3. _api BASE URL PATCH for seller.js and admin.js ─────────────────────

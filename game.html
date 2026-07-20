@@ -358,7 +358,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #poolGame.show{display:flex;}
 
 /* Premium HUD */
-#poolHud{display:flex;align-items:center;gap:8px;padding:5px 10px;width:100%;
+#poolHud{display:flex;align-items:center;gap:7px;padding:5px 10px;width:100%;
   background:linear-gradient(180deg,rgba(0,0,0,0.7) 0%,rgba(0,0,0,0.3) 100%);
   border-bottom:1px solid rgba(255,255,255,0.07);min-height:38px;}
 .hud-badge{background:linear-gradient(135deg,#f5c518,#e67e22);border-radius:8px;
@@ -366,6 +366,15 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 .hud-score{background:rgba(0,0,0,0.5);border:1px solid rgba(245,197,24,0.3);border-radius:8px;
   padding:2px 10px;color:#f5c518;font-weight:800;font-size:14px;white-space:nowrap;}
 .hud-lives{display:flex;gap:1px;align-items:center;}
+.hud-pill{display:flex;align-items:center;gap:4px;background:rgba(0,0,0,0.5);
+  border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:3px 10px 3px 7px;
+  font-size:12px;font-weight:800;color:#eee;white-space:nowrap;flex-shrink:0;}
+.hud-pill .ic{font-size:13px;line-height:1;}
+.hud-progress-track{flex:1;height:6px;min-width:36px;background:rgba(0,0,0,0.45);
+  border-radius:4px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);}
+.hud-progress-fill{height:100%;width:0%;border-radius:4px;
+  background:linear-gradient(90deg,#f5c518,#ff8a00);
+  box-shadow:0 0 8px rgba(245,197,24,0.7);transition:width .35s cubic-bezier(.34,1.56,.64,1);}
 .spacer{flex:1;}
 #muteBtn{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.08);
   border:1px solid rgba(255,255,255,0.15);color:#ccc;font-size:14px;cursor:pointer;
@@ -375,15 +384,26 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #poolMain{position:relative;flex:1;display:flex;overflow:hidden;}
 #poolCanvas{display:block;touch-action:none;cursor:crosshair;}
 
-/* Spin selector */
+/* Coin badge — floats over top-left corner of the table, like a stage/reward tracker */
+#poolCoinBadge{position:absolute;top:8px;left:8px;z-index:11;
+  width:56px;height:56px;border-radius:50%;cursor:pointer;
+  background:radial-gradient(circle at 35% 30%,#3a3a3a,#1a1a1a 70%);
+  border:3px solid #f5c518;box-shadow:0 0 0 2px rgba(0,0,0,0.5),0 4px 14px rgba(0,0,0,0.6),inset 0 2px 4px rgba(255,255,255,0.15);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;}
+#poolCoinBadge .cb-icon{font-size:16px;line-height:1;}
+#poolCoinBadge .cb-val{font-size:10px;font-weight:900;color:#f5c518;line-height:1;margin-top:1px;}
+#poolCoinBadge:active{transform:scale(0.93);}
+
+/* Spin selector — compact chrome dial */
 #spinSelector{position:absolute;left:6px;top:50%;transform:translateY(-50%);
   width:64px;display:flex;flex-direction:column;align-items:center;gap:3px;z-index:10;}
 #spinLabel{font-size:8px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:1px;}
-#spinPad{width:54px;height:54px;background:rgba(0,0,0,0.65);border:1.5px solid rgba(255,255,255,0.18);
+#spinPad{width:54px;height:54px;background:radial-gradient(circle at 35% 30%,#2a2a2a,#0a0a0a 75%);
+  border:2px solid rgba(255,255,255,0.25);
   border-radius:50%;position:relative;cursor:pointer;
-  box-shadow:0 0 12px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.1);}
+  box-shadow:0 0 0 2px rgba(0,0,0,0.5),0 0 14px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.12);}
 #spinPad::before{content:'';position:absolute;inset:4px;border-radius:50%;
-  border:1px solid rgba(255,255,255,0.07);}
+  border:1px solid rgba(255,255,255,0.09);}
 #spinIndicator{width:16px;height:16px;
   background:radial-gradient(circle at 35% 35%,#fff 0%,#f5c518 50%,#e67e22 100%);
   border-radius:50%;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
@@ -393,21 +413,27 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 .spin-marker{position:absolute;font-size:7px;color:rgba(255,255,255,0.3);user-select:none;font-weight:700;}
 #spinTypeLbl{font-size:8px;color:#f5c518;font-weight:800;letter-spacing:0.5px;min-height:10px;text-align:center;}
 
-/* Power slider */
+/* Power slider — vertical ruler/gauge, chrome housing with tick marks */
 #powerSlider{position:absolute;right:6px;top:50%;transform:translateY(-50%);
-  width:34px;height:160px;display:flex;flex-direction:column;align-items:center;gap:3px;}
-#powerSliderTrack{width:12px;height:130px;background:rgba(255,255,255,0.06);
-  border-radius:6px;position:relative;cursor:pointer;border:1px solid rgba(255,255,255,0.12);
-  box-shadow:inset 0 2px 6px rgba(0,0,0,0.5);}
+  width:34px;height:180px;display:flex;flex-direction:column;align-items:center;gap:3px;}
+#powerSliderTrack{width:16px;height:150px;background:linear-gradient(90deg,#111,#222,#111);
+  border-radius:4px;position:relative;cursor:pointer;border:1px solid rgba(255,255,255,0.18);
+  box-shadow:inset 0 2px 8px rgba(0,0,0,0.7),0 0 0 2px rgba(0,0,0,0.4);overflow:visible;}
+#powerSliderTrack::before{content:'';position:absolute;left:-7px;top:0;bottom:0;width:5px;
+  background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,0.55) 0,rgba(255,255,255,0.55) 1px,transparent 1px,transparent 9px);
+  opacity:0.7;}
+#powerSliderTrack::after{content:'';position:absolute;right:-7px;top:0;bottom:0;width:5px;
+  background-image:repeating-linear-gradient(to bottom,rgba(255,255,255,0.55) 0,rgba(255,255,255,0.55) 1px,transparent 1px,transparent 9px);
+  opacity:0.7;}
 #powerFill{position:absolute;bottom:0;left:0;right:0;
-  background:linear-gradient(to top,#3498db,#2ecc71);border-radius:6px;height:0%;}
+  background:linear-gradient(to top,#3498db,#2ecc71);border-radius:3px;height:0%;}
 #powerGlow{position:absolute;bottom:0;left:-2px;right:-2px;
   background:linear-gradient(to top,rgba(52,152,219,0.3),rgba(46,204,113,0.3));
   border-radius:8px;height:0%;filter:blur(4px);}
-#powerThumb{position:absolute;left:50%;transform:translateX(-50%);width:20px;height:20px;
-  background:radial-gradient(circle at 40% 35%,#ffe566,#f5c518,#c48a00);
-  border-radius:50%;border:2px solid rgba(255,255,255,0.7);cursor:grab;bottom:0;
-  box-shadow:0 2px 8px rgba(0,0,0,0.6),0 0 8px rgba(245,197,24,0.4);}
+#powerThumb{position:absolute;left:50%;transform:translateX(-50%);width:24px;height:14px;
+  background:linear-gradient(180deg,#f5f5f5,#c8c8c8 45%,#8a8a8a);
+  border-radius:3px;border:1px solid rgba(0,0,0,0.4);cursor:grab;bottom:0;
+  box-shadow:0 2px 8px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.6);}
 #sliderLabel{font-size:8px;color:#888;font-weight:700;letter-spacing:1px;text-transform:uppercase;}
 #powerPctLabel{font-size:10px;color:#f5c518;font-weight:800;}
 
@@ -497,36 +523,41 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 /* ── BLOCK PUZZLE ────────────────────────────────────────────────────────────*/
 #blockGame{display:none;width:100%;height:100%;flex-direction:column;background:#2a1f3d;overflow:hidden;}
 #blockGame.show{display:flex;}
-#blockHud{display:flex;align-items:center;gap:6px;padding:5px 10px;
+#blockHud{display:flex;align-items:center;gap:7px;padding:5px 10px;
   background:linear-gradient(180deg,rgba(0,0,0,0.5),rgba(0,0,0,0.2));
   border-bottom:1px solid rgba(255,255,255,0.07);}
 #blockHud .hud-badge{background:linear-gradient(135deg,#c0392b,#e74c3c);}
 #blkScore{background:rgba(0,0,0,0.4);border:1.5px solid rgba(245,197,24,0.4);border-radius:8px;
-  padding:2px 10px;color:#f5c518;font-weight:900;font-size:14px;}
-#blkTarget{background:rgba(0,0,0,0.4);border:1.5px solid rgba(255,100,100,0.4);border-radius:8px;
-  padding:2px 10px;color:#ff8888;font-weight:800;font-size:12px;}
+  padding:2px 10px;color:#f5c518;font-weight:900;font-size:14px;white-space:nowrap;}
+#blkTarget{background:rgba(0,0,0,0.4);border:1.5px solid rgba(255,100,100,0.4);border-radius:20px;
+  padding:3px 10px 3px 7px;color:#ff8888;font-weight:800;font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap;flex-shrink:0;}
 #blockMain{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;
   padding:6px 4px 4px;overflow:hidden;gap:6px;}
-#blkBoardWrap{position:relative;border-radius:10px;overflow:visible;}
-#blkBoard{display:grid;gap:2px;background:#1a0f2a;border-radius:10px;
-  border:3px solid #3d2a5a;padding:4px;
-  box-shadow:inset 0 2px 12px rgba(0,0,0,0.7),0 0 20px rgba(155,89,182,0.15);}
-.blk-cell{border-radius:4px;background:#221535;border:1px solid rgba(255,255,255,0.04);
-  transition:background .1s;position:relative;}
+#blkBoardWrap{position:relative;border-radius:10px;overflow:visible;
+  filter:drop-shadow(0 8px 24px rgba(0,0,0,0.5));}
+#blkBoard{display:grid;gap:3px;background:linear-gradient(160deg,#241638,#160c24);border-radius:12px;
+  border:3px solid #4a3270;padding:5px;
+  box-shadow:inset 0 3px 14px rgba(0,0,0,0.75),inset 0 -1px 0 rgba(255,255,255,0.05),0 0 26px rgba(155,89,182,0.2);}
+.blk-cell{border-radius:6px;background:#221535;border:1px solid rgba(255,255,255,0.04);
+  box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);
+  transition:background .1s,box-shadow .12s;position:relative;background-size:100% 100%;}
 .blk-cell.filled{border:none;}
 .blk-cell.preview{opacity:0.55;border:none;}
 .blk-cell.clearing{animation:blkClear .35s ease-out forwards;}
+.blk-cell.pop{animation:blkPop .22s cubic-bezier(.34,1.56,.64,1);}
 @keyframes blkClear{0%{transform:scale(1);opacity:1}50%{transform:scale(1.15);filter:brightness(2)}100%{transform:scale(0);opacity:0}}
+@keyframes blkPop{0%{transform:scale(0.5)}60%{transform:scale(1.12)}100%{transform:scale(1)}}
 #blkTray{display:flex;align-items:center;justify-content:space-around;
-  width:100%;padding:6px 8px;
-  background:linear-gradient(180deg,rgba(0,0,0,0.4),rgba(0,0,0,0.6));
-  border-top:2px solid rgba(255,255,255,0.08);border-radius:0 0 10px 10px;
-  min-height:90px;flex-shrink:0;}
+  width:100%;padding:8px 8px;
+  background:linear-gradient(180deg,rgba(0,0,0,0.35),rgba(0,0,0,0.55));
+  border-top:2px solid rgba(255,255,255,0.08);border-radius:14px;
+  box-shadow:inset 0 2px 10px rgba(0,0,0,0.5);
+  min-height:96px;flex-shrink:0;}
 .blk-piece{display:inline-grid;cursor:grab;transition:transform .15s,filter .15s;
-  padding:4px;border-radius:8px;touch-action:none;user-select:none;}
-.blk-piece:active{cursor:grabbing;transform:scale(1.15);filter:brightness(1.3);}
+  padding:5px;border-radius:10px;touch-action:none;user-select:none;}
+.blk-piece:active{cursor:grabbing;transform:scale(1.15);filter:brightness(1.3) drop-shadow(0 6px 14px rgba(0,0,0,0.5));}
 .blk-piece.used{opacity:0.18;pointer-events:none;}
-.blk-piece-cell{border-radius:3px;width:18px;height:18px;}
+.blk-piece-cell{border-radius:4px;width:18px;height:18px;background-size:100% 100%;}
 #blkOverlay{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.85);
   align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(6px);}
 #blkOverlay.show{display:flex;}
@@ -805,9 +836,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
     <div id="poolGame">
       <div id="poolHud">
         <div class="hud-badge" id="poolStage">LV.01</div>
-        <div class="hud-lives" id="poolLives"></div>
-        <div class="spacer"></div>
-        <div id="targetInfo">0/3 🎯</div>
+        <div class="hud-pill"><span class="ic">❤️</span><span id="poolLivesNum">8</span></div>
+        <div class="hud-pill"><span class="ic">🎱</span><span id="targetInfo">0/3</span></div>
+        <div class="hud-progress-track"><div class="hud-progress-fill" id="poolProgressFill"></div></div>
         <div class="hud-score" id="poolScore">⭐ 0</div>
         <button id="muteBtn" onclick="AudioMgr.toggle()">🔊</button>
       </div>
@@ -820,6 +851,12 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
       </div>
       <div id="poolMain">
         <canvas id="poolCanvas"></canvas>
+
+        <!-- Coin badge -->
+        <div id="poolCoinBadge" onclick="AudioMgr.uiClick();openShopModal();">
+          <span class="cb-icon">🪙</span>
+          <span class="cb-val" id="poolCoinVal">0</span>
+        </div>
 
         <!-- Spin Selector -->
         <div id="spinSelector">
@@ -894,8 +931,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
     <div id="blockGame">
       <div id="blockHud">
         <div class="hud-badge" id="blkLevel">LV.1</div>
-        <div class="spacer"></div>
-        <div id="blkTarget">🎯 0</div>
+        <div id="blkTarget"><span>🎯</span><span id="blkTargetTxt">0/0</span></div>
+        <div class="hud-progress-track"><div class="hud-progress-fill" id="blkProgressFill"></div></div>
         <div id="blkScore">⭐ 0</div>
       </div>
       <div id="blockMain">
@@ -2890,7 +2927,8 @@ function initPool() {
   buildThemeBar();
   poolStartStage(1);
   if(poolAnimId) cancelAnimationFrame(poolAnimId);
-  poolLoop();
+  poolLastTime=null; poolAccumulator=0;
+  poolAnimId=requestAnimationFrame(poolLoop);
   poolBindInput();
   poolBindSlider();
   poolBindSpinPad();
@@ -3165,6 +3203,7 @@ function poolStep() {
         pCombo++;
         poolUpdateHUD();
         AudioMgr.pocket();
+        b.num===8?Haptic.heavy():Haptic.success();
         onPoolPocket();
         Camera.shake(5,9);
         Camera.pulse(0.05,POOL.BALL_COLORS[b.num]||'#fff');
@@ -3186,6 +3225,7 @@ function poolStep() {
         pScratch=true; pScratchTimer=90; pCue.vx=0; pCue.vy=0; pCombo=0;
         pLives=Math.max(0,pLives-1); poolUpdateHUD();
         AudioMgr.scratch();
+        Haptic.error();
         Camera.shake(7,12);
         Camera.pulse(0.06,'#ff3333');
         Particles.burst(p.x,p.y,'#ff4444',16);
@@ -4068,6 +4108,19 @@ function drawCueBall(ctx, speed){
   ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2);
   ctx.fillStyle=g2; ctx.fill();
 
+  // English/spin marker — shows where the cue will strike the ball,
+  // matching the spin pad setting, only while lining up a shot.
+  if(!pShooting && !pScratch && (Math.abs(pSpinX)>0.05 || Math.abs(pSpinY)>0.05)){
+    const dotX=pSpinX*R*0.62, dotY=pSpinY*R*0.62;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(dotX,dotY,R*0.16,0,Math.PI*2);
+    const dg=ctx.createRadialGradient(dotX-1,dotY-1,0,dotX,dotY,R*0.16);
+    dg.addColorStop(0,'#ff8a80'); dg.addColorStop(1,'#c0392b');
+    ctx.fillStyle=dg; ctx.fill();
+    ctx.strokeStyle='rgba(0,0,0,0.4)'; ctx.lineWidth=0.6; ctx.stroke();
+    ctx.restore();
+  }
+
   // Specular
   ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
   ctx.beginPath(); ctx.ellipse(-R*0.26,-R*0.38,R*0.3,R*0.14,-0.45,0,Math.PI*2);
@@ -4091,8 +4144,25 @@ function drawCueBall(ctx, speed){
 // ────────────────────────────────────────────────────────────
 // GAME LOOP
 // ────────────────────────────────────────────────────────────
-function poolLoop(){
-  if(pShooting) poolStep();
+// Fixed-timestep accumulator: keeps physics speed/friction/spin identical
+// across 60Hz, 90Hz and 120Hz+ displays (previously one poolStep() ran per
+// rAF callback, so the simulation silently ran ~2x too fast on 120Hz phones).
+const POOL_STEP_MS = 1000/60;
+let poolLastTime=null, poolAccumulator=0;
+
+function poolLoop(ts){
+  if(typeof ts!=='number'){ poolAnimId=requestAnimationFrame(poolLoop); return; }
+  if(poolLastTime===null) poolLastTime=ts;
+  let delta=ts-poolLastTime;
+  poolLastTime=ts;
+  if(delta>250) delta=250; // clamp huge gaps (tab switch, breakpoint) to avoid spiral of death
+  poolAccumulator+=delta;
+  let steps=0;
+  while(poolAccumulator>=POOL_STEP_MS && steps<8){
+    if(pShooting) poolStep();
+    poolAccumulator-=POOL_STEP_MS;
+    steps++;
+  }
   poolDraw();
   poolAnimId=requestAnimationFrame(poolLoop);
 }
@@ -4106,7 +4176,7 @@ document.addEventListener('visibilitychange', () => {
   } else {
     // Resume pool if pool game is active
     const poolEl = document.getElementById('poolGame');
-    if (poolEl && poolEl.classList.contains('show') && !poolAnimId) poolLoop();
+    if (poolEl && poolEl.classList.contains('show') && !poolAnimId) { poolLastTime=null; poolAccumulator=0; poolAnimId=requestAnimationFrame(poolLoop); }
     // Resume trivia timer if trivia is active
     const triviaEl = document.getElementById('triviaGame');
     if (triviaEl && triviaEl.classList.contains('show') && typeof tvStartTimer === 'function') tvStartTimer();
@@ -4156,6 +4226,7 @@ function poolShoot(e){
   pCue.spinY=pSpinY;
   pShooting=true; pPower=0;
   AudioMgr.cueStrike(stored);
+  stored>0.6?Haptic.heavy():(stored>0.25?Haptic.medium():Haptic.light());
   Camera.shake(pwr*0.55,6);
   Camera.pulse(pwr*0.004,'rgba(255,255,200,0.3)');
   if(stored>0.75) Particles.powerShotBurst(pCue.x,pCue.y);
@@ -4253,10 +4324,12 @@ function resetSpin(){
 function poolUpdateHUD(){
   document.getElementById('poolStage').textContent='LV.'+(pStage<10?'0'+pStage:pStage);
   document.getElementById('poolScore').textContent='⭐ '+pScore;
-  document.getElementById('targetInfo').textContent=pPocketed+'/'+pTarget+' 🎯';
-  let h='';
-  for(let i=0;i<8;i++) h+=`<span style="filter:${i<pLives?'none':'grayscale(1) opacity(0.3)'};font-size:11px;">❤️</span>`;
-  document.getElementById('poolLives').innerHTML=h;
+  document.getElementById('targetInfo').textContent=pPocketed+'/'+pTarget;
+  document.getElementById('poolLivesNum').textContent=pLives;
+  const pf=document.getElementById('poolProgressFill');
+  if(pf) pf.style.width=Math.min(100,Math.round((pPocketed/pTarget)*100))+'%';
+  const cv=document.getElementById('poolCoinVal');
+  if(cv) cv.textContent=(typeof PS!=='undefined' && PS) ? PS.coins : 0;
 }
 
 function poolShowMsg(txt){
@@ -4278,6 +4351,7 @@ function poolStageClear(){
   const bonus=pPocketed*5+(pLives*2);
   pScore+=bonus; poolUpdateHUD();
   AudioMgr.stageClear();
+  Haptic.success();
   Particles.winBurst(POOL.CW/2,POOL.CH/2);
   Camera.pulse(0.08,'rgba(245,197,24,0.2)');
   onLevelCleared('pool', pScore);
@@ -4295,6 +4369,7 @@ function poolStageClear(){
 
 function poolGameOver(){
   AudioMgr.gameOver();
+  Haptic.error();
   Camera.shake(8,15);
   document.getElementById('poolOIcon').textContent='😔';
   document.getElementById('poolOTitle').textContent='GAME OVER';
@@ -4555,6 +4630,15 @@ function blkColorFor(colorIdx){
   return BLK.COLORS[colorIdx % BLK.COLORS.length];
 }
 
+// Composite background: soft glossy highlight over the base color gradient —
+// gives filled cells a raised, "premium candy" pop without changing the palette.
+function blkCellBG(colorIdx){
+  const col=blkColorFor(colorIdx);
+  return `radial-gradient(circle at 30% 25%,rgba(255,255,255,0.6) 0%,rgba(255,255,255,0) 48%),`
+       + `linear-gradient(135deg,${col.shine} 0%,${col.fill} 45%,${col.border} 100%)`;
+}
+const BLK_FILLED_SHADOW='inset 0 2px 0 rgba(255,255,255,0.4),inset 0 -3px 4px rgba(0,0,0,0.35),0 2px 5px rgba(0,0,0,0.3)';
+
 function blkRenderBoard(){
   const board = document.getElementById('blkBoard');
   const cs = blkCellSize;
@@ -4568,9 +4652,8 @@ function blkRenderBoard(){
       cell.style.width = cs+'px';
       cell.style.height = cs+'px';
       if(blkBoard[r][c]!==null){
-        const col = blkColorFor(blkBoard[r][c]);
-        cell.style.background = `linear-gradient(135deg,${col.shine} 0%,${col.fill} 40%,${col.border} 100%)`;
-        cell.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.3),inset 0 -1px 0 rgba(0,0,0,0.3)`;
+        cell.style.background = blkCellBG(blkBoard[r][c]);
+        cell.style.boxShadow = BLK_FILLED_SHADOW;
       }
       cell.dataset.r = r; cell.dataset.c = c;
       board.appendChild(cell);
@@ -4589,16 +4672,15 @@ function blkApplyPreview(shape, startR, startC, colorIdx, clear){
       // restore original
       cell.classList.remove('preview');
       if(blkBoard[r][c]!==null){
-        const col=blkColorFor(blkBoard[r][c]);
-        cell.style.background=`linear-gradient(135deg,${col.shine} 0%,${col.fill} 40%,${col.border} 100%)`;
+        cell.style.background=blkCellBG(blkBoard[r][c]);
+        cell.style.boxShadow=BLK_FILLED_SHADOW;
         cell.classList.add('filled');
       } else {
-        cell.style.background=''; cell.classList.remove('filled');
+        cell.style.background=''; cell.style.boxShadow=''; cell.classList.remove('filled');
       }
     } else {
       if(blkBoard[r][c]===null){
-        const col=blkColorFor(colorIdx);
-        cell.style.background=`linear-gradient(135deg,${col.shine} 0%,${col.fill} 40%,${col.border} 100%)`;
+        cell.style.background=blkCellBG(colorIdx);
         cell.classList.add('preview');
       }
     }
@@ -4620,8 +4702,17 @@ function blkPlace(shape, startR, startC, colorIdx){
   blkScore += shape.length * 5;
   AudioMgr.blockPlace();
   Haptic.light();
-  blkCheckClear();
   blkRenderBoard();
+  const board=document.getElementById('blkBoard');
+  shape.forEach(([dr,dc])=>{
+    const r=startR+dr, c=startC+dc;
+    if(r<0||r>=BLK.ROWS||c<0||c>=BLK.COLS) return;
+    const cell=board.children[r*BLK.COLS+c];
+    if(cell) cell.classList.add('pop');
+  });
+  // Runs after the placed piece is on-screen, so its 'clearing' class survives
+  // (previously blkRenderBoard() ran right after this and wiped it via innerHTML='').
+  blkCheckClear();
   blkUpdateHUD();
 }
 
@@ -4694,11 +4785,9 @@ function blkRenderTray(){
     grid.forEach((v,i)=>{
       const cell = document.createElement('div');
       if(v){
-        const col = blkColorFor(p.colorIdx);
         cell.className = 'blk-piece-cell';
-        cell.style.background=`linear-gradient(135deg,${col.shine} 0%,${col.fill} 50%,${col.border} 100%)`;
-        cell.style.boxShadow=`inset 0 1px 0 rgba(255,255,255,0.4)`;
-        cell.style.borderRadius='3px';
+        cell.style.background=blkCellBG(p.colorIdx);
+        cell.style.boxShadow=BLK_FILLED_SHADOW;
       } else {
         cell.style.width=cellW+'px'; cell.style.height=cellW+'px';
       }
@@ -4856,7 +4945,9 @@ function blkLevelClear(){
 
 function blkUpdateHUD(){
   document.getElementById('blkScore').textContent='⭐ '+blkScore;
-  document.getElementById('blkTarget').textContent='🎯 '+blkCleared+'/'+blkTarget;
+  document.getElementById('blkTargetTxt').textContent=blkCleared+'/'+blkTarget;
+  const pf=document.getElementById('blkProgressFill');
+  if(pf) pf.style.width=Math.min(100,Math.round((blkCleared/blkTarget)*100))+'%';
 }
 
 function blkShowMsg(txt){

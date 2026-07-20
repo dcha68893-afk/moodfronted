@@ -98,6 +98,15 @@
               ${_esc(d.platform || 'Web')} · Last active ${_timeAgo(d.lastSeenAt)}
             </div>
           </div>
+          <button onclick="window.__kynRenameDevice('${d.deviceId}', '${_esc(d.deviceName || '').replace(/'/g, "\\'")}')" style="
+            background:none; border:1px solid var(--border-color,rgba(255,255,255,0.15));
+            border-radius:8px; color:var(--text-secondary,#aaa);
+            font-size:11px; padding:5px 10px; cursor:pointer;
+            flex-shrink:0; margin-right:6px; transition:background 0.15s;
+          " onmouseover="this.style.background='rgba(255,255,255,0.06)'"
+             onmouseout="this.style.background='none'">
+            Rename
+          </button>
           <button onclick="window.__kynRevokeDevice('${d.deviceId}')" style="
             background:none; border:1px solid rgba(239,68,68,0.4);
             border-radius:8px; color:#ef4444;
@@ -114,6 +123,23 @@
         Failed to load devices: ${e.message}</div>`;
     }
   }
+
+  window.__kynLoadDevices = _loadDevices;
+
+  window.__kynRenameDevice = async function (deviceId, currentName) {
+    const newName = prompt('Rename this device:', currentName || '');
+    if (!newName || !newName.trim() || newName.trim() === currentName) return;
+    try {
+      await _apiFetch(`/api/devices/${deviceId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ deviceName: newName.trim() }),
+      });
+      await _loadDevices();
+      _toast('Device renamed');
+    } catch (e) {
+      _toast('Failed to rename device', true);
+    }
+  };
 
   window.__kynRevokeDevice = async function (deviceId) {
     if (!confirm('Remove this device? It will be signed out immediately.')) return;
@@ -367,13 +393,16 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
-    _injectDevicesButton();
+    // _injectDevicesButton() intentionally not called: the native
+    // #viewSessionsBtn in the Security section (settings-ui.js) now opens
+    // this same device list — see settings-ui.js setupSecurityEventListeners.
+    // Injecting a second "Manage Linked Devices" button next to it duplicated
+    // the same action twice in one section.
     _injectTwoStepPin();
     _wireSessionsModal();
 
     // Re-inject when settings-core re-renders panels
     new MutationObserver(() => {
-      _injectDevicesButton();
       _injectTwoStepPin();
     }).observe(document.body, { childList: true, subtree: true });
   }

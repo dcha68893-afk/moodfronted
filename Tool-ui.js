@@ -6555,29 +6555,38 @@ function _renderRecent() {
 function _renderReviewsPage() {
     const container = document.getElementById('jmReviewsContent');
     if (!container) return;
-    const ecom = window.EcomMarketplace;
-    const orders = ecom ? ecom.OrderEngine.getLocalOrders().filter(o=>o.status==='delivered') : [];
-    if (!orders.length) {
-        container.innerHTML = `<div class="jm-empty-state"><div class="jm-empty-icon">⭐</div><div class="jm-empty-title">No orders to review yet</div><div class="jm-empty-desc">Complete orders to rate &amp; review products</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button></div>`;
-        return;
-    }
-    container.innerHTML = orders.map(o => {
-        const items = o.items||[];
-        return items.map(item => {
-            const img = item.image||'';
-            const date = o.delivered_at || o.deliveredAt || '';
-            const dateStr = date ? new Date(date).toLocaleDateString('en-KE') : '';
-            return `<div class="jm-review-item">
-                ${img ? `<img class="jm-review-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-review-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
-                <div style="flex:1;min-width:0">
-                    <div style="font-size:13px;font-weight:500;margin-bottom:4px;line-height:1.3">${_esc(item.title||'')}</div>
-                    <div style="font-size:12px;color:#6b7280">Order No: ${o.id?.slice(-9)||''}</div>
-                    ${dateStr?`<div style="font-size:12px;font-weight:700;color:#22c55e;margin-top:4px">DELIVERED ON ${dateStr}</div>`:''}
-                </div>
-                <button class="jm-review-rate-btn" onclick="window._jmRateProduct('${item.product_id||''}','${o.id}')">Rate This Product</button>
-            </div>`;
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
+
+    (async () => {
+        const ecom = window.EcomMarketplace;
+        // AUDIT FIX: getLocalOrders() only reads the client-side cache,
+        // which is empty unless "My Orders" happened to be visited earlier
+        // in this session — but this page is reachable directly from the
+        // More Options menu. Fetch real orders first.
+        if (ecom) { try { await ecom.OrderEngine.getOrders(); } catch(_) {} }
+        const orders = ecom ? ecom.OrderEngine.getLocalOrders().filter(o=>o.status==='delivered') : [];
+        if (!orders.length) {
+            container.innerHTML = `<div class="jm-empty-state"><div class="jm-empty-icon">⭐</div><div class="jm-empty-title">No orders to review yet</div><div class="jm-empty-desc">Complete orders to rate &amp; review products</div><button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button></div>`;
+            return;
+        }
+        container.innerHTML = orders.map(o => {
+            const items = o.items||[];
+            return items.map(item => {
+                const img = item.image||'';
+                const date = o.delivered_at || o.deliveredAt || '';
+                const dateStr = date ? new Date(date).toLocaleDateString('en-KE') : '';
+                return `<div class="jm-review-item">
+                    ${img ? `<img class="jm-review-img" src="${_esc(img)}" loading="lazy">` : `<div class="jm-review-img" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:24px">📦</div>`}
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;font-weight:500;margin-bottom:4px;line-height:1.3">${_esc(item.title||'')}</div>
+                        <div style="font-size:12px;color:#6b7280">Order No: ${o.id?.slice(-9)||''}</div>
+                        ${dateStr?`<div style="font-size:12px;font-weight:700;color:#22c55e;margin-top:4px">DELIVERED ON ${dateStr}</div>`:''}
+                    </div>
+                    <button class="jm-review-rate-btn" onclick="window._jmRateProduct('${item.product_id||''}','${o.id}')">Rate This Product</button>
+                </div>`;
+            }).join('');
         }).join('');
-    }).join('');
+    })();
 }
 
 window._jmRateProduct = function(productId, orderId) {
@@ -6597,13 +6606,35 @@ window._jmRateProduct = function(productId, orderId) {
 function _renderVouchers() {
     const container = document.getElementById('jmVouchersContent');
     if (!container) return;
-    container.innerHTML = `
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
+
+    (async () => {
+        const r = await window._api?.('GET', '/marketplace/coupons');
+        const coupons = r?.data?.coupons || [];
+
+        const emptyBlock = `
         <div class="jm-empty-state">
             <div class="jm-empty-icon" style="background:none;box-shadow:none;font-size:52px">🎟️</div>
             <div class="jm-empty-title">You currently have no available Vouchers</div>
             <div class="jm-empty-desc">All your available Knecta Vouchers will be displayed here</div>
             <button class="jm-orange-btn" onclick="window._jmNav('home')">Continue Shopping</button>
-        </div>
+        </div>`;
+
+        const couponsBlock = coupons.length ? `
+        <div class="jm-section">
+            <div class="jm-section-header"><span>Available Vouchers</span></div>
+            ${coupons.map(c => `
+            <div style="background:#fff;border:1.5px dashed #f57224;border-radius:12px;margin:8px 16px;padding:14px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div style="font-weight:800;font-size:16px;color:#f57224">${_esc(c.code)}</div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:2px">${_esc(c.description || (c.type==='percent' ? c.value+'% off' : 'KES '+c.value+' off'))}</div>
+                    ${c.minOrderAmt ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px">Min. order KES ${c.minOrderAmt.toLocaleString()}</div>` : ''}
+                </div>
+                <button class="jm-orange-btn" style="padding:8px 14px;font-size:12px" onclick="navigator.clipboard?.writeText('${_esc(c.code)}');window._jmToast?.('Code copied!','success','📋')">Copy</button>
+            </div>`).join('')}
+        </div>` : emptyBlock;
+
+        container.innerHTML = couponsBlock + `
         <div class="jm-section">
             <div class="jm-section-header"><span>Recommended for you</span><button class="jm-see-all" onclick="window._jmNav('home')">See All</button></div>
             <div class="jm-hscroll" id="jmVoucherRecRow"></div>
@@ -6612,68 +6643,116 @@ function _renderVouchers() {
             <div class="jm-section-header"><span>Recently Viewed</span><button class="jm-see-all" onclick="window._jmNav('recent')">See All</button></div>
             <div class="jm-hscroll" id="jmVoucherRecentRow"></div>
         </div>`;
-    setTimeout(() => {
+
         const ecom = window.EcomMarketplace;
         const recs = ecom ? ecom.ProductEngine.getTrending().slice(0,6) : [];
         _renderHScroll('jmVoucherRecRow', recs);
         _renderHScroll('jmVoucherRecentRow', _state.recent);
-    }, 50);
+    })();
 }
 
 // ── INBOX PAGE ─────────────────────────────────────────────────────────────
 function _renderInbox() {
     const container = document.getElementById('jmInboxContent');
     if (!container) return;
-    container.innerHTML = `<div class="jm-empty-state">
-        <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">✉️</div>
-        <div class="jm-empty-title">You don't have any messages</div>
-        <div class="jm-empty-desc">Here you will be able to see all the messages that we send you. Stay tuned</div>
-    </div>`;
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
+
+    (async () => {
+        const r = await window._api?.('GET', '/notifications');
+        const notifications = r?.data?.notifications || [];
+
+        if (!notifications.length) {
+            container.innerHTML = `<div class="jm-empty-state">
+                <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">✉️</div>
+                <div class="jm-empty-title">You don't have any messages</div>
+                <div class="jm-empty-desc">Here you will be able to see all the messages that we send you. Stay tuned</div>
+            </div>`;
+            return;
+        }
+
+        container.innerHTML = notifications.map(n => `
+            <div style="display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid #f3f4f6;${n.isRead ? '' : 'background:#fff7ed'}">
+                <div style="width:38px;height:38px;border-radius:50%;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${n.type==='order'?'📦':n.type==='payment'?'💳':n.type==='review'?'⭐':'🔔'}</div>
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:700;font-size:14px;color:#111827">${_esc(n.title || 'Notification')}</div>
+                    <div style="font-size:13px;color:#6b7280;margin-top:2px">${_esc(n.message || n.body || '')}</div>
+                    <div style="font-size:11px;color:#9ca3af;margin-top:4px">${formatTimeAgo ? formatTimeAgo(n.createdAt) : new Date(n.createdAt).toLocaleDateString()}</div>
+                </div>
+                ${!n.isRead ? `<div style="width:8px;height:8px;border-radius:50%;background:#f57224;flex-shrink:0;margin-top:6px"></div>` : ''}
+            </div>`).join('');
+    })();
 }
 
 // ── FOLLOW SELLERS PAGE ────────────────────────────────────────────────────
 function _renderFollowSellers() {
     const container = document.getElementById('jmFollowSellersContent');
     if (!container) return;
-    container.innerHTML = `
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
+
+    (async () => {
+        const followedR = await window._api?.('GET', '/me/following');
+        const followed = followedR?.data?.sellers || [];
+
+        const followedBlock = followed.length ? `
+        <div style="background:#f3f4f6;padding:10px 16px;font-size:12px;color:#6b7280;font-weight:600">Sellers you follow</div>
+        ${followed.map(s => `
+            <div class="jm-seller-item">
+                <div class="jm-seller-header">
+                    <div class="jm-seller-icon">🏪</div>
+                    <div><div class="jm-seller-name">${_esc(s.name)}</div>${s.trust_score ? `<div class="jm-seller-score">${s.trust_score}% Seller Score</div>` : ''}</div>
+                    <i class="fas fa-chevron-right jm-seller-chevron"></i>
+                </div>
+                <button class="jm-follow-btn following" onclick="window._jmFollowSeller('${s.id}',this)">Following</button>
+            </div>`).join('')}` : `
         <div class="jm-empty-state">
             <div class="jm-empty-icon" style="font-size:44px;background:none;box-shadow:none">🏪</div>
             <div class="jm-empty-title">You don't follow any seller!</div>
             <div class="jm-empty-desc">All your followed sellers will be displayed here</div>
             <button class="jm-orange-btn" onclick="window._jmNav('home')">Start Shopping</button>
-        </div>
+        </div>`;
+
+        container.innerHTML = followedBlock + `
         <div style="background:#f3f4f6;padding:10px 16px;font-size:12px;color:#6b7280;font-weight:600">Suggested sellers for you</div>
         <div id="jmSuggestedSellers"></div>`;
 
-    // Load suggested sellers from listings
-    const ecom = window.EcomMarketplace;
-    const listings = ecom ? ecom.ProductEngine.getAllProducts().slice(0,6) : (window.currentListings||[]).slice(0,6);
-    const sellers = {};
-    listings.forEach(l => {
-        const sid = l.seller_id||l.sellerId||l.userId;
-        if (sid && !sellers[sid]) sellers[sid] = { id:sid, name:l.seller?.name||l.user?.displayName||'Seller', products:[l], followers:Math.floor(Math.random()*2000)+100, score:Math.floor(Math.random()*30)+70 };
-        else if (sid) sellers[sid].products.push(l);
-    });
-    const suggestEl = document.getElementById('jmSuggestedSellers');
-    if (suggestEl) {
-        suggestEl.innerHTML = Object.values(sellers).slice(0,3).map(s => `
-            <div class="jm-seller-item">
-                <div class="jm-seller-header">
-                    <div class="jm-seller-icon">🏪</div>
-                    <div><div class="jm-seller-name">${_esc(s.name)}</div><div class="jm-seller-score">${s.score}% Seller Score &bull; ${s.followers.toLocaleString()} Followers</div></div>
-                    <i class="fas fa-chevron-right jm-seller-chevron"></i>
-                </div>
-                <button class="jm-follow-btn" onclick="window._jmFollowSeller('${s.id}',this)">Follow</button>
-                <div class="jm-seller-products">
-                    ${s.products.slice(0,2).map(p=>_img(p)?`<img class="jm-seller-product-thumb" src="${_esc(_img(p))}" loading="lazy">`:`<div class="jm-seller-product-thumb" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:22px">🛒</div>`).join('')}
-                    ${s.products.length>2?`<div class="jm-seller-see-all">SEE ALL</div>`:''}
-                </div>
-            </div>`).join('');
-    }
+        // Suggested sellers still come from recent listings (browsing signal,
+        // not a real recommendation engine) — but the follower count/score
+        // per seller is no longer faked, it's simply not shown until the
+        // seller has real followers, rather than a random number.
+        const ecom = window.EcomMarketplace;
+        const listings = ecom ? ecom.ProductEngine.getAllProducts().slice(0,6) : (window.currentListings||[]).slice(0,6);
+        const followedIds = new Set(followed.map(s => String(s.id)));
+        const sellers = {};
+        listings.forEach(l => {
+            const sid = l.seller_id||l.sellerId||l.userId;
+            if (!sid || followedIds.has(String(sid))) return;
+            if (!sellers[sid]) sellers[sid] = { id:sid, name:l.seller?.name||l.user?.displayName||'Seller', products:[l] };
+            else sellers[sid].products.push(l);
+        });
+        const suggestEl = document.getElementById('jmSuggestedSellers');
+        if (suggestEl) {
+            suggestEl.innerHTML = Object.values(sellers).slice(0,3).map(s => `
+                <div class="jm-seller-item">
+                    <div class="jm-seller-header">
+                        <div class="jm-seller-icon">🏪</div>
+                        <div><div class="jm-seller-name">${_esc(s.name)}</div></div>
+                        <i class="fas fa-chevron-right jm-seller-chevron"></i>
+                    </div>
+                    <button class="jm-follow-btn" onclick="window._jmFollowSeller('${s.id}',this)">Follow</button>
+                    <div class="jm-seller-products">
+                        ${s.products.slice(0,2).map(p=>_img(p)?`<img class="jm-seller-product-thumb" src="${_esc(_img(p))}" loading="lazy">`:`<div class="jm-seller-product-thumb" style="background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:22px">🛒</div>`).join('')}
+                        ${s.products.length>2?`<div class="jm-seller-see-all">SEE ALL</div>`:''}
+                    </div>
+                </div>`).join('');
+        }
+    })();
 }
 
-window._jmFollowSeller = function(sellerId, btn) {
-    const following = btn.classList.toggle('following');
+window._jmFollowSeller = async function(sellerId, btn) {
+    const r = await window._api?.('POST', `/marketplace/sellers/${sellerId}/follow`);
+    if (!r || r.success === false) { _toast('Could not update follow status', 'error', '❌'); return; }
+    const following = r.data?.following;
+    btn.classList.toggle('following', !!following);
     btn.textContent = following ? 'Following' : 'Follow';
     _toast(following ? 'Following seller' : 'Unfollowed', 'success', following?'🏪':'👋');
 };
@@ -6713,41 +6792,49 @@ function _renderAnalyticsPage() {
         container.id = 'jmPageAnalytics'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
-    const listings = (window.EcomMarketplace?.ProductEngine?.getAllProducts?.() || window.currentListings || []);
-    const uid = window.currentUser?.id || window.__kynUser?.id;
-    const mine = listings.filter(l => l.seller_id===uid||l.sellerId===uid||l.userId===uid);
-    const views = mine.reduce((s,l)=>s+(l.views||0),0);
-    const sold  = mine.reduce((s,l)=>s+(l.sold_count||0),0);
-    const rating = mine.length ? (mine.reduce((s,l)=>s+(parseFloat(l.rating)||0),0)/mine.length).toFixed(1) : '—';
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
 
-    container.innerHTML = `<div class="jm-page-title">📊 My Analytics</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px">
-        ${[['📦 Listings',mine.length,'Products you sell'],['👁️ Views',views.toLocaleString(),'Total product views'],['⭐ Avg Rating',rating,'Customer rating'],['🛍️ Sold',sold,'Units sold total']].map(([l,v,s])=>`
-        <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-            <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;margin-bottom:4px">${l}</div>
-            <div style="font-size:22px;font-weight:900;color:#111">${v}</div>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px">${s}</div>
-        </div>`).join('')}
-    </div>
-    ${mine.length ? `
-    <div style="background:#fff;margin:0 16px;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-        <div style="font-weight:800;font-size:14px;margin-bottom:12px">Top Products by Views</div>
-        ${[...mine].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,5).map((l,i)=>`
-        <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f9fafb">
-            <div style="width:24px;height:24px;border-radius:50%;background:${i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'#f3f4f6'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0">${i+1}</div>
-            <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(l.title||'')}</div><div style="font-size:11px;color:#9ca3af">${l.views||0} views · ${l.sold_count||0} sold</div></div>
-            <div style="font-size:13px;font-weight:800;color:#f57224">${_fmt(l.price)}</div>
-        </div>`).join('')}
-    </div>` : `
-    <div style="background:#fff;margin:0 16px;border-radius:14px;padding:40px 20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-        <div style="font-size:48px;margin-bottom:12px">📊</div>
-        <div style="font-size:16px;font-weight:800;color:#111;margin-bottom:8px">No seller data yet</div>
-        <div style="font-size:13px;color:#6b7280;margin-bottom:16px">Create your first product listing to start tracking analytics.</div>
-        <button onclick="window._jmNavMore('seller-dashboard')" style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-size:14px;font-weight:800;cursor:pointer">Go to Seller Hub →</button>
-    </div>`}
-    <div style="padding:12px 16px 0">
-        <button onclick="window._jmNavMore('seller-analytics')" style="width:100%;background:#111;color:#fff;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer">Full Seller Analytics →</button>
-    </div>`;
+    (async () => {
+        // AUDIT FIX: previously filtered the generic product-browse feed
+        // cache for "my" listings — that cache is often paginated/partial
+        // and can be completely empty if the seller never browsed products
+        // this session, making an active seller with real sales see "No
+        // seller data yet". Fetch the real dedicated endpoint instead.
+        const r = await window._api?.('GET', '/marketplace/seller/products?limit=200');
+        const mine = r?.data?.products || [];
+        const views = mine.reduce((s,l)=>s+(l.views||0),0);
+        const sold  = mine.reduce((s,l)=>s+(l.sold_count||0),0);
+        const rating = mine.length ? (mine.reduce((s,l)=>s+(parseFloat(l.rating)||0),0)/mine.length).toFixed(1) : '—';
+
+        container.innerHTML = `<div class="jm-page-title">📊 My Analytics</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px">
+            ${[['📦 Listings',mine.length,'Products you sell'],['👁️ Views',views.toLocaleString(),'Total product views'],['⭐ Avg Rating',rating,'Customer rating'],['🛍️ Sold',sold,'Units sold total']].map(([l,v,s])=>`
+            <div style="background:#fff;border-radius:14px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;margin-bottom:4px">${l}</div>
+                <div style="font-size:22px;font-weight:900;color:#111">${v}</div>
+                <div style="font-size:11px;color:#6b7280;margin-top:2px">${s}</div>
+            </div>`).join('')}
+        </div>
+        ${mine.length ? `
+        <div style="background:#fff;margin:0 16px;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+            <div style="font-weight:800;font-size:14px;margin-bottom:12px">Top Products by Views</div>
+            ${[...mine].sort((a,b)=>(b.views||0)-(a.views||0)).slice(0,5).map((l,i)=>`
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f9fafb">
+                <div style="width:24px;height:24px;border-radius:50%;background:${i===0?'#ffd700':i===1?'#c0c0c0':i===2?'#cd7f32':'#f3f4f6'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0">${i+1}</div>
+                <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(l.title||'')}</div><div style="font-size:11px;color:#9ca3af">${l.views||0} views · ${l.sold_count||0} sold</div></div>
+                <div style="font-size:13px;font-weight:800;color:#f57224">${_fmt(l.price)}</div>
+            </div>`).join('')}
+        </div>` : `
+        <div style="background:#fff;margin:0 16px;border-radius:14px;padding:40px 20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+            <div style="font-size:48px;margin-bottom:12px">📊</div>
+            <div style="font-size:16px;font-weight:800;color:#111;margin-bottom:8px">No seller data yet</div>
+            <div style="font-size:13px;color:#6b7280;margin-bottom:16px">Create your first product listing to start tracking analytics.</div>
+            <button onclick="window._jmNavMore('seller-dashboard')" style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-size:14px;font-weight:800;cursor:pointer">Go to Seller Hub →</button>
+        </div>`}
+        <div style="padding:12px 16px 0">
+            <button onclick="window._jmNavMore('seller-analytics')" style="width:100%;background:#111;color:#fff;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer">Full Seller Analytics →</button>
+        </div>`;
+    })();
 }
 
 // ── NOTES PAGE ──────────────────────────────────────────────────────────────

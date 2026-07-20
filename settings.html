@@ -2428,6 +2428,10 @@
     <script src="/js/settingsSync.engine.js"></script>
 
     <!-- ⑤ Patch: ties LocalStoreSettings into SettingsState + AppSettings -->
+    <!-- Intentionally NOT deferred: this file is designed to run before
+         settings-core.js exists — it listens for the 'settingsLoaded' event
+         and polls window.__SETTINGS_STATE_OBJ__ rather than assuming
+         SettingsState is available synchronously. See file header. -->
     <script src="/js/settings-core.local-first.patch.js"></script>
 
     <!-- ⑥ Core module (SettingsState, lifecycle, backend sync, UI sections) -->
@@ -2437,7 +2441,10 @@
     <script type="module" src="settings-ui.js"></script>
 
     <!-- ⑧ UI additions — offline indicator, sync badge, sync toggle row -->
-    <script src="/js/settings-ui.local-first.patch.js"></script>
+    <!-- defer required: settings-ui.js above is type="module" (auto-deferred),
+         so this patch must also defer or it captures window.__updateSetting
+         before settings-ui.js has defined it, and then gets overwritten -->
+    <script src="/js/settings-ui.local-first.patch.js" defer></script>
 
     <!-- =============================================
          INLINE ERROR BOUNDARY AND INITIALIZATION - SILENT

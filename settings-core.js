@@ -6333,75 +6333,91 @@ async function clearChatCache() {
     if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
-    
-    try {
-        const response = await authorizedRequest('/api/storage/clear-chat-cache', {
-            method: 'POST'
-        });
-        
-        if (response.success && userSettings.storage) {
-            userSettings.storage.storageBreakdown.chats = 0;
-            userSettings.storage.totalStorageUsed = 
-                (userSettings.storage.storageBreakdown.media || 0) + 
-                (userSettings.storage.storageBreakdown.other || 0);
-            calculateStorageUsage();
-            unsavedChanges = true;
-            
-            await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
-                cacheType: 'chat'
-            });
-            
-            const event = new CustomEvent('chatCacheCleared', {
-                detail: { timestamp: Date.now() }
-            });
-            window.dispatchEvent(event);
-            
-            return true;
-        }
-        
-        return false;
-    } catch (error) {
-        throw error;
+
+    // FIX: this previously POSTed to /api/storage/clear-chat-cache, a route
+    // that does not exist anywhere in the backend (verified against every
+    // file in src/routes/) — the request always 404'd, silently, because the
+    // caller in settings-ui.js didn't await this function either. "Chat
+    // cache" is genuinely client-side data (cached messages in IndexedDB),
+    // so clear it directly via the existing local cache layer instead of a
+    // network round-trip that could never succeed.
+    if (!window.AppCache || typeof window.AppCache.clear !== 'function') {
+        throw new Error('Local cache is not available yet');
     }
+
+    const cleared = await window.AppCache.clear('messages');
+    if (!cleared) {
+        throw new Error('Failed to clear local message cache');
+    }
+
+    if (userSettings.storage) {
+        userSettings.storage.storageBreakdown.chats = 0;
+        userSettings.storage.totalStorageUsed =
+            (userSettings.storage.storageBreakdown.media || 0) +
+            (userSettings.storage.storageBreakdown.other || 0);
+        calculateStorageUsage();
+        unsavedChanges = true;
+    }
+
+    await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
+        cacheType: 'chat'
+    });
+
+    window.dispatchEvent(new CustomEvent('chatCacheCleared', {
+        detail: { timestamp: Date.now() }
+    }));
+
+    return true;
 }
 
 // =============================================
-// CLEAR MEDIA CACHE - USES authorizedRequest
+// CLEAR MEDIA CACHE — uses the service worker's CACHE_CLEARED mechanism
 // =============================================
 async function clearMediaCache() {
     if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
-    
-    try {
-        const response = await authorizedRequest('/api/storage/clear-media-cache', {
-            method: 'POST'
-        });
-        
-        if (response.success && userSettings.storage) {
-            userSettings.storage.storageBreakdown.media = 0;
-            userSettings.storage.totalStorageUsed = 
-                (userSettings.storage.storageBreakdown.chats || 0) + 
-                (userSettings.storage.storageBreakdown.other || 0);
-            calculateStorageUsage();
-            unsavedChanges = true;
-            
-            await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
-                cacheType: 'media'
-            });
-            
-            const event = new CustomEvent('mediaCacheCleared', {
-                detail: { timestamp: Date.now() }
-            });
-            window.dispatchEvent(event);
-            
-            return true;
-        }
-        
-        return false;
-    } catch (error) {
-        throw error;
+
+    // FIX: this previously POSTed to /api/storage/clear-media-cache, which
+    // also does not exist in the backend. Media cache is the service
+    // worker's Cache Storage (service-worker.js, CACHE_NAME), which already
+    // has a working CLEAR_CACHE message handler — use that instead of a
+    // network call.
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+        throw new Error('Service worker not available to clear media cache');
     }
+
+    await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timed out clearing media cache')), 8000);
+        const onMessage = (event) => {
+            if (event.data && event.data.type === 'CACHE_CLEARED') {
+                clearTimeout(timeout);
+                navigator.serviceWorker.removeEventListener('message', onMessage);
+                resolve();
+            }
+        };
+        navigator.serviceWorker.addEventListener('message', onMessage);
+        navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
+    });
+
+    if (userSettings.storage) {
+        userSettings.storage.storageBreakdown.media = 0;
+        userSettings.storage.totalStorageUsed =
+            (userSettings.storage.storageBreakdown.chats || 0) +
+            (userSettings.storage.storageBreakdown.other || 0);
+        calculateStorageUsage();
+        unsavedChanges = true;
+    }
+
+    await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
+        cacheType: 'media'
+    });
+
+    window.dispatchEvent(new CustomEvent('mediaCacheCleared', {
+        detail: { timestamp: Date.now() }
+    }));
+
+    return true;
 }
 
 // =============================================

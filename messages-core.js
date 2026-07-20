@@ -4538,6 +4538,13 @@ try {
                 this._lastTypingTime = now;
             }
             
+            // FIX: Typing Indicators privacy setting was set (window.__typingIndicatorsEnabled)
+            // but never checked here — typing was always broadcast regardless.
+            const typingIndicatorsEnabled = window.__typingIndicatorsEnabled !== undefined ? window.__typingIndicatorsEnabled : true;
+            if (isTyping && !typingIndicatorsEnabled) {
+                return false;
+            }
+
             const result = safeSend(
                 isTyping ? OUTGOING_ACTIONS.START_TYPING : OUTGOING_ACTIONS.STOP_TYPING,
                 { conversationId: conversationId },
@@ -5335,7 +5342,14 @@ try {
                 .map((message) => message.serverId || message.id)
                 .filter(Boolean);
 
-            if (pendingReadIds.length > 0) {
+            // FIX: Read Receipts privacy setting (window.__readReceiptsEnabled,
+            // set by applySettingToMessagesModule on every settings change) was
+            // never actually checked here — read receipts were always sent to
+            // the server regardless of the setting. Local unread-count clearing
+            // below still happens either way (that's this user's own client
+            // state); only the notification to the *other* party is gated.
+            const readReceiptsEnabled = window.__readReceiptsEnabled !== undefined ? window.__readReceiptsEnabled : true;
+            if (pendingReadIds.length > 0 && readReceiptsEnabled) {
                 makeApiRequest('/messages/mark-read/batch', 'POST', {
                     chatId: conversationId,
                     messageIds: pendingReadIds

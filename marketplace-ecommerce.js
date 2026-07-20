@@ -500,7 +500,7 @@ const OrderEngine = {
     },
 
     async updateStatus(orderId, status, note = '') {
-        const resp = await _api('PUT', `/api/marketplace/orders/${orderId}/status`, { status, note });
+        const resp = await _api('PATCH', `/api/marketplace/orders/${orderId}/status`, { status, note });
         if (resp?.success || resp?.data) {
             const order = _store.orders.get(orderId);
             if (order) {

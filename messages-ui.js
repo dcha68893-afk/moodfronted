@@ -9238,6 +9238,18 @@ Type: ${message.type || 'text'}`;
                     if (e.isComposing || e.keyCode === 229) return;
 
                     if (e.key === 'Enter' && !e.shiftKey) {
+                        // FIX: "Enter to Send" setting (window.__enterToSend, set by
+                        // applySettingToMessagesModule et al.) was written on every
+                        // settings change but never read anywhere in the repo — the
+                        // toggle had no effect and Enter always sent. Default true
+                        // matches DEFAULT_SETTINGS.chat.enterKeySends.
+                        const enterToSendEnabled = window.__enterToSend !== undefined ? window.__enterToSend : true;
+
+                        if (!enterToSendEnabled) {
+                            // Let Enter insert a normal newline; sending now requires
+                            // Shift+Enter or the send button.
+                            return;
+                        }
 
                         e.preventDefault();
 
@@ -9245,6 +9257,16 @@ Type: ${message.type || 'text'}`;
 
                         this._handleSendMessage();
 
+                    } else if (e.key === 'Enter' && e.shiftKey) {
+                        const enterToSendEnabled = window.__enterToSend !== undefined ? window.__enterToSend : true;
+                        if (!enterToSendEnabled) {
+                            // Enter-to-send is off, so Shift+Enter becomes the
+                            // explicit "send" chord instead of inserting a newline.
+                            e.preventDefault();
+                            if (!this._canPerformAction('sendMessage')) return;
+                            this._handleSendMessage();
+                        }
+                        // else: default behavior (newline) when enter-to-send is on.
                     }
 
                 });

@@ -30,7 +30,12 @@
         normalizedUrl = normalizedUrl.replace(/^\/api\/friends\/user\/([^/?#]+)(.*)$/i, '/api/friends/$1$2');
         normalizedUrl = normalizedUrl.replace(/^\/api\/groups\/invites\/pending\b/i, '/api/groups/invitations?status=pending');
         normalizedUrl = normalizedUrl.replace(/^\/api\/events\b/i, '/api/groups/events');
-        normalizedUrl = normalizedUrl.replace(/^\/api\/settings\/2fa\b/i, '/api/2fa');
+        // REMOVED: /api/settings/2fa -> /api/2fa rewrite.
+        // /api/settings/2fa/* (settings.js) writes to User.mfaEnabled/mfaSecret,
+        // which is what auth.js's login gate actually checks.
+        // /api/2fa/* (twoFactor.js) writes to a separate user_totp_secrets table
+        // that the login flow never reads — redirecting into it would let a user
+        // "enable" 2FA that never actually protects their account. See report.
 
         if (/^\/api\/groups\/[^/]+\/members$/i.test(normalizedUrl) && String(method || 'GET').toUpperCase() === 'POST') {
             let body = data;

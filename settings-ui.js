@@ -182,6 +182,21 @@ window.__updateSetting = async (section, key, value) => {
 // =============================================
 // UI STATE VARIABLES - ENHANCED
 // =============================================
+// =============================================
+// DEBOUNCE HELPER — for text inputs that call __updateSetting
+// Without this, every keystroke in a text field (displayName, username,
+// email, bio) fired a full authenticated PUT to the backend. At normal
+// typing speed that can burn through the 100 req/min rate limit on
+// /api/settings/* well before the user finishes typing a sentence.
+// =============================================
+function _debounceSettingUpdate(fn, delay = 600) {
+    let timer = null;
+    return (...args) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+    };
+}
+
 let colorPicker = null;
 let uiInitialized = false;
 let currentModal = null;
@@ -1185,9 +1200,22 @@ export function setupEventListeners() {
     
     const terminateAllSessionsBtn = document.getElementById('terminateAllSessionsBtn');
     if (terminateAllSessionsBtn) {
-        terminateAllSessionsBtn.addEventListener('click', () => {
-            if (confirm('Terminate all other sessions?')) {
-                terminateAllSessions().catch(() => {});
+        terminateAllSessionsBtn.addEventListener('click', async () => {
+            if (!confirm('Terminate all other sessions?')) return;
+            // FIX: previously called terminateAllSessions(), which POSTs to
+            // /api/auth/terminate-all-sessions — a route that does not exist
+            // anywhere in the backend — and swallowed the resulting error
+            // with .catch(() => {}), so this button silently did nothing.
+            // /api/devices/revoke-all is the real, working endpoint (also
+            // used by the linked-devices "logout all" flow).
+            terminateAllSessionsBtn.disabled = true;
+            try {
+                await secureFetchWrapper('/api/devices/revoke-all', 'DELETE');
+                showNotification('All other sessions terminated', 'success');
+            } catch (error) {
+                showNotification('Failed to terminate sessions: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                terminateAllSessionsBtn.disabled = false;
             }
         });
     }
@@ -1410,11 +1438,16 @@ function setupFallbackColorPicker() {
     
     const picker = document.getElementById('fallbackColorPicker');
     if (picker) {
+        // 'input' fires continuously while dragging inside the picker (many
+        // events/sec) — use it only for the live preview, not the network call.
         picker.addEventListener('input', (e) => {
+            updateAccentColor(e.target.value);
+        });
+        // 'change' fires once, when the picker is closed/committed — save then.
+        picker.addEventListener('change', (e) => {
             SettingsState.update('appearance', 'accentColor', e.target.value).then(() => {
                 unsavedChanges = true;
                 updateSaveButton();
-                updateAccentColor(e.target.value);
             }).catch(error => {
                 debugLog('Error saving accent color:', error);
             });
@@ -1773,11 +1806,31 @@ export function escapeHtml(text) {
 // =============================================
 export function takePhoto() {
     debugLog('Photo capture requested');
-    
-    setTimeout(() => {
-        pendingPhotoData = 'data:image/jpeg;base64,/9j/4AAQSkZJRg...';
-        updatePhotoPreview(pendingPhotoData);
-    }, 500);
+
+    // FIX: this previously set pendingPhotoData to a hardcoded, truncated,
+    // invalid base64 literal after a fake setTimeout delay — a fake value
+    // that would have corrupted the user's real avatar if saved. Use a real
+    // file input with capture="environment" (the standard way to open the
+    // device camera from a web page) and read the actual photo, same as
+    // choosePhoto() below.
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment';
+
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                pendingPhotoData = event.target.result;
+                updatePhotoPreview(pendingPhotoData);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    input.click();
 }
 
 export function choosePhoto() {
@@ -1896,9 +1949,15 @@ export async function changePassword() {
     try {
         setPasswordInputsDisabled(true);
         
-        await makeSafeRequest('/api/auth/change-password', 'POST', {
+        // FIX: was POSTing to /api/auth/change-password, which does not exist
+        // anywhere in the backend — the real handler is /api/settings/change-password
+        // (settings.js), which also requires confirmPassword in the body (it
+        // re-validates the match server-side). Every password change attempt
+        // was failing before this fix.
+        await makeSafeRequest('/api/settings/change-password', 'POST', {
             currentPassword: currentPassword.value,
-            newPassword: newPassword.value
+            newPassword: newPassword.value,
+            confirmPassword: confirmPassword.value
         });
         
         closeModal('changePasswordModal');
@@ -2113,29 +2172,43 @@ function setupProfileEventListeners() {
     
     const displayNameInput = document.getElementById('displayNameInput');
     if (displayNameInput) {
+        const debouncedUpdate = _debounceSettingUpdate((value) => {
+            window.__updateSetting('profile', 'displayName', value);
+        });
         displayNameInput.addEventListener('input', () => {
-            window.__updateSetting('profile', 'displayName', displayNameInput.value);
+            debouncedUpdate(displayNameInput.value);
         });
     }
     
     const usernameInput = document.getElementById('usernameInput');
     if (usernameInput) {
+        const debouncedUpdate = _debounceSettingUpdate((value) => {
+            window.__updateSetting('profile', 'username', value);
+        });
         usernameInput.addEventListener('input', () => {
-            window.__updateSetting('profile', 'username', usernameInput.value);
+            debouncedUpdate(usernameInput.value);
         });
     }
     
     const emailInput = document.getElementById('emailInput');
     if (emailInput) {
+        const debouncedUpdate = _debounceSettingUpdate((value) => {
+            window.__updateSetting('profile', 'email', value);
+        });
         emailInput.addEventListener('input', () => {
-            window.__updateSetting('profile', 'email', emailInput.value);
+            debouncedUpdate(emailInput.value);
         });
     }
     
     const bioInput = document.getElementById('bioInput');
     const bioCounter = document.getElementById('bioCounter');
     if (bioInput && bioCounter) {
+        const debouncedUpdate = _debounceSettingUpdate((value) => {
+            window.__updateSetting('profile', 'bio', value);
+        });
         bioInput.addEventListener('input', () => {
+            // Character counter updates instantly (client-only, cheap);
+            // the network call is debounced.
             const length = bioInput.value.length;
             bioCounter.textContent = length;
             if (length > 150) {
@@ -2143,7 +2216,7 @@ function setupProfileEventListeners() {
             } else {
                 bioCounter.style.color = 'var(--primary-color)';
             }
-            window.__updateSetting('profile', 'bio', bioInput.value);
+            debouncedUpdate(bioInput.value);
         });
     }
     
@@ -2263,7 +2336,17 @@ function setupSecurityEventListeners() {
     const viewSessionsBtn = document.getElementById('viewSessionsBtn');
     if (viewSessionsBtn) {
         viewSessionsBtn.addEventListener('click', () => {
-            showActiveSessions();
+            // Prefer the real device list (linked-sessions-and-pin.js, backed by
+            // /api/devices + linked_devices) over the legacy showActiveSessions()
+            // below, which reads stale data from /api/auth/sessions and whose
+            // terminate button duplicated/fought with this same #sessionsList.
+            const modal = document.getElementById('sessionsModal');
+            if (window.__kynLoadDevices && modal) {
+                modal.classList.add('active');
+                window.__kynLoadDevices();
+            } else {
+                showActiveSessions();
+            }
         });
     }
     
@@ -3001,10 +3084,13 @@ export function loadStatusSection(container) {
     if (saveStatusHistory) saveStatusHistory.addEventListener('change', () => window.__updateSetting('status', 'saveStatusHistory', saveStatusHistory.checked));
     
     const clearStatusHistoryBtn = document.getElementById('clearStatusHistoryBtn');
-    if (clearStatusHistoryBtn) clearStatusHistoryBtn.addEventListener('click', () => {
-        if (confirm('Clear all status history?')) {
-            window.__updateSetting('status', 'statusHistory', []);
+    if (clearStatusHistoryBtn) clearStatusHistoryBtn.addEventListener('click', async () => {
+        if (!confirm('Clear all status history?')) return;
+        try {
+            await window.__updateSetting('status', 'statusHistory', []);
             showNotification('Status history cleared', 'success');
+        } catch (error) {
+            showNotification('Failed to clear status history', 'error');
         }
     });
 }
@@ -3325,18 +3411,32 @@ export function loadStorageSection(container) {
     `;
     
     const clearChatCacheBtn = document.getElementById('clearChatCacheBtn');
-    if (clearChatCacheBtn) clearChatCacheBtn.addEventListener('click', () => {
-        if (confirm('Clear all chat cache?')) {
-            clearChatCache();
+    if (clearChatCacheBtn) clearChatCacheBtn.addEventListener('click', async () => {
+        if (!confirm('Clear all chat cache?')) return;
+        clearChatCacheBtn.disabled = true;
+        try {
+            await clearChatCache();
             showNotification('Chat cache cleared', 'success');
+            loadStorageSection(container);
+        } catch (error) {
+            showNotification('Failed to clear chat cache: ' + (error.message || 'Unknown error'), 'error');
+        } finally {
+            clearChatCacheBtn.disabled = false;
         }
     });
     
     const clearMediaCacheBtn = document.getElementById('clearMediaCacheBtn');
-    if (clearMediaCacheBtn) clearMediaCacheBtn.addEventListener('click', () => {
-        if (confirm('Clear all media cache?')) {
-            clearMediaCache();
+    if (clearMediaCacheBtn) clearMediaCacheBtn.addEventListener('click', async () => {
+        if (!confirm('Clear all media cache?')) return;
+        clearMediaCacheBtn.disabled = true;
+        try {
+            await clearMediaCache();
             showNotification('Media cache cleared', 'success');
+            loadStorageSection(container);
+        } catch (error) {
+            showNotification('Failed to clear media cache: ' + (error.message || 'Unknown error'), 'error');
+        } finally {
+            clearMediaCacheBtn.disabled = false;
         }
     });
     
@@ -3640,21 +3740,62 @@ export function loadBackupSection(container) {
     
     const backupNowBtn = document.getElementById('backupNowBtn');
     if (backupNowBtn) backupNowBtn.addEventListener('click', async () => {
+        backupNowBtn.disabled = true;
         try {
-            SettingsState._saveToCache();
+            // Real backup: fetch the full current settings snapshot from the
+            // backend (not just the locally-cached copy) and let the user
+            // download it. Previously this button just wrote a timestamp and
+            // claimed success without saving any data anywhere.
+            const response = await secureFetchWrapper('/api/settings', 'GET');
+            const snapshot = response?.data?.settings || response?.settings || response?.data || response;
+            const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), settings: snapshot }, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `moodchat-settings-backup-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+
             await SettingsState.update('backup', 'lastBackup', Date.now());
-            showNotification('Backup created successfully', 'success');
+            showNotification('Backup downloaded', 'success');
             loadBackupSection(container);
         } catch (error) {
             showNotification('Backup failed: ' + error.message, 'error');
+        } finally {
+            backupNowBtn.disabled = false;
         }
     });
     
     const restoreBackupBtn = document.getElementById('restoreBackupBtn');
     if (restoreBackupBtn) restoreBackupBtn.addEventListener('click', () => {
-        if (confirm('Restore settings from backup? Current settings will be lost.')) {
-            showNotification('Restore feature coming soon', 'info');
-        }
+        if (!confirm('Restore settings from backup? Current settings will be lost.')) return;
+
+        // Real restore: let the user pick a previously-downloaded backup file,
+        // parse it, and push it back to the backend. Previously this just
+        // showed "coming soon" and did nothing.
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'application/json';
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const parsed = JSON.parse(text);
+                const settingsToRestore = parsed && parsed.settings ? parsed.settings : parsed;
+                if (!settingsToRestore || typeof settingsToRestore !== 'object') {
+                    throw new Error('Invalid backup file');
+                }
+                await secureFetchWrapper('/api/settings', 'PUT', settingsToRestore);
+                showNotification('Settings restored — reloading…', 'success');
+                setTimeout(() => window.location.reload(), 1000);
+            } catch (error) {
+                showNotification('Restore failed: ' + error.message, 'error');
+            }
+        });
+        fileInput.click();
     });
 }
 
@@ -3732,16 +3873,22 @@ export function loadDangerSection(container) {
         resetAllSettingsBtn.addEventListener('click', async () => {
             if (confirm('Reset ALL settings to default? This action cannot be undone.')) {
                 if (confirm('Are you absolutely sure?')) {
+                    resetAllSettingsBtn.disabled = true;
                     try {
-                        for (const [section, defaults] of Object.entries(DEFAULT_SETTINGS)) {
-                            for (const [key, value] of Object.entries(defaults)) {
-                                await SettingsState.update(section, key, value);
-                            }
-                        }
+                        // FIX: this previously looped over every default section/key
+                        // and awaited a separate PUT per key (100+ sequential
+                        // requests for a full settings object) — easily exceeding
+                        // the 100 req/min rate limit and leaving settings
+                        // half-reset if it got throttled partway through.
+                        // SettingsState.reset() already does this atomically via
+                        // the real POST /api/settings/reset endpoint.
+                        await SettingsState.reset();
                         showNotification('All settings reset to default', 'success');
                         setTimeout(() => loadSection(currentSection), 500);
                     } catch (error) {
                         showNotification('Error resetting settings: ' + error.message, 'error');
+                    } finally {
+                        resetAllSettingsBtn.disabled = false;
                     }
                 }
             }
@@ -3751,14 +3898,51 @@ export function loadDangerSection(container) {
     const deleteAccountBtn = document.getElementById('deleteAccountBtn');
     if (deleteAccountBtn) {
         deleteAccountBtn.addEventListener('click', () => {
-            if (confirm('⚠️ DANGER: This will permanently delete your account. This action cannot be undone. Continue?')) {
-                if (confirm('Type "DELETE ACCOUNT" to confirm')) {
-                    const confirmation = prompt('Type "DELETE ACCOUNT" to confirm:');
-                    if (confirmation === 'DELETE ACCOUNT') {
-                        showNotification('Account deletion requested. Contact support.', 'warning');
-                    }
-                }
+            if (!confirm('⚠️ DANGER: This will permanently delete your account. This action cannot be undone. Continue?')) return;
+
+            const confirmation = prompt('Type "delete my account" to confirm:');
+            if (!confirmation || confirmation.trim().toLowerCase() !== 'delete my account') {
+                if (confirmation !== null) showNotification('Confirmation text did not match — account not deleted', 'warning');
+                return;
             }
+
+            const password = prompt('Enter your password to finish deleting your account:');
+            if (!password) {
+                showNotification('Password is required to delete your account', 'warning');
+                return;
+            }
+
+            (async () => {
+                deleteAccountBtn.disabled = true;
+                showNotification('Deleting your account…', 'info');
+                try {
+                    const response = await secureFetchWrapper('/api/settings/account', 'DELETE', {
+                        confirmation,
+                        password
+                    });
+                    if (response && response.success !== false && response.status !== 'error') {
+                        showNotification('Account deleted. Signing you out…', 'success');
+                        try {
+                            localStorage.clear();
+                            sessionStorage.clear();
+                        } catch (_) {}
+                        setTimeout(() => {
+                            if (window.parent && window.parent !== window) {
+                                window.parent.postMessage({ type: 'ACCOUNT_DELETED', source: 'settings' }, '*');
+                            } else {
+                                window.location.href = '/login.html';
+                            }
+                        }, 800);
+                    } else {
+                        showNotification(response?.message || 'Failed to delete account', 'error');
+                        deleteAccountBtn.disabled = false;
+                    }
+                } catch (error) {
+                    debugLog('Error deleting account:', error);
+                    showNotification('Failed to delete account: ' + (error.message || 'Unknown error'), 'error');
+                    deleteAccountBtn.disabled = false;
+                }
+            })();
         });
     }
 }
