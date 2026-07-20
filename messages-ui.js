@@ -10898,45 +10898,21 @@ Type: ${message.type || 'text'}`;
 
 
 
-        window.addEventListener('message', function(event) {
-
-            const msg = event.data || {};
-
-            if (msg.type !== 'OPEN_CHAT_WITH_USER') return;
-
-
-
-            const payload = msg.payload || {};
-
-            const targetUserId = payload.userId || payload.recipientId;
-
-            const targetUserName = payload.userName || payload.recipientName || 'User';
-
-            const targetAvatar = payload.userAvatar || payload.recipientAvatar || null;
-
-            const findExisting = payload.findExisting || false;
-
-            const returnFromCall = payload.returnFromCall || false;
-
-
-
-            _uiLog('[MessageUI] Received OPEN_CHAT_WITH_USER postMessage:', { targetUserId, targetUserName, findExisting, returnFromCall });
-
-
-
-            if (!targetUserId) {
-
-                console.error('[MessageUI] OPEN_CHAT_WITH_USER: No userId in payload');
-
-                return;
-
-            }
-
-
-
-            openChatWithUserInUI(targetUserId, targetUserName, targetAvatar, { findExisting, returnFromCall });
-
-        });
+        // REMOVED (duplicate-invocation race): this used to also listen for
+        // the raw 'OPEN_CHAT_WITH_USER' postMessage directly here and call
+        // openChatWithUserInUI() immediately, ungated. message.html's own
+        // inline listener already owns that same postMessage type -- with a
+        // 2s dedup window and a retry loop that waits for messagesCore to
+        // reach ACTIVE -- then re-dispatches it as 'messages:openChat',
+        // which the listener directly above this comment already handles.
+        // Keeping both meant two competing calls to openChatWithUserInUI()
+        // for one message: the ungated call here could run before
+        // FriendManager/messagesCore were ready, caching a pending-
+        // conversation entry under whatever name was available at that
+        // instant (sometimes just the 'User' fallback) -- and later fixups
+        // never overwrite an already-cached entry's name. Removing this
+        // listener leaves message.html's gated path as the single source of
+        // truth for this postMessage type.
 
         
 

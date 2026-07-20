@@ -4860,11 +4860,21 @@ handleContactItemClick: function(e) {
             UIState.activeCallId = incomingId;
             setCallParticipants([callerParticipant], { merge: false });
             if (!window.__callOriginReturnTo || window.__callOriginReturnTo === 'calls') {
-                const _src = (callData && (callData.source || callData.returnTo)) || null;
+                // FIX (receiver-side return-to mismatch): this used to read
+                // callData.source/callData.returnTo, which describe where the
+                // CALLER placed the call from -- not where the RECEIVER (this
+                // side) actually was. chat.html already tags the receiver's
+                // real current page onto callData._receiverReturnTo before
+                // forwarding the incoming-call payload (the same field
+                // calls-core.js's POST_CALL_RESTORE path reads), so prefer
+                // that here too. Without this, this restore path could win
+                // the race against POST_CALL_RESTORE and bounce the receiver
+                // to the caller's module instead of back to their own.
+                const _src = (callData && (callData._receiverReturnTo || callData.source || callData.returnTo)) || null;
                 window.__callOriginReturnTo  = (_src && _src !== 'calls') ? _src : 'messages';
                 window.__pendingCallReturnTo = window.__callOriginReturnTo;
-                window.__callOriginChatUserId = (callData && (callData.callerId || callData.userId)) || null;
-                window.__callOriginChatUserName = _callerName;
+                window.__callOriginChatUserId = (callData && (callData._receiverReturnChatUserId || callData.callerId || callData.userId)) || null;
+                window.__callOriginChatUserName = (callData && callData._receiverReturnChatName) || _callerName;
             }
             // ✅ FIX: Re-cache elements if incomingCallModal not yet resolved
             if (!elements.incomingCallModal) {

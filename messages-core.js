@@ -5891,6 +5891,19 @@ try {
                     } catch (e) {}
                 });
             }
+            // BRIDGE FIX: EventBus was purely an in-module pub/sub (a Map of
+            // callbacks registered via EventBus.on), so any emit() call here
+            // only reached listeners that happened to call EventBus.on in this
+            // same script. messages-ui.js listens for these same event names
+            // (e.g. 'message:deleted') via document/window.addEventListener,
+            // expecting a real DOM CustomEvent -- which was never dispatched.
+            // That gap is why deletes/updates applied correctly in the data
+            // layer but the chat panel UI didn't reflect them until a full
+            // refresh reloaded state from storage. Dispatching a real
+            // CustomEvent here lets any listener, in any script, react.
+            try {
+                document.dispatchEvent(new CustomEvent(event, { detail: data }));
+            } catch (_) {}
         },
         
         once: function(event, callback) {
