@@ -29312,6 +29312,35 @@ _escapeHtml: function(text) {
         if (!callsState._acceptedCallIds) callsState._acceptedCallIds = new Set();
         if (acceptedCallId) callsState._acceptedCallIds.add(acceptedCallId);
 
+        // FIX-ACCEPT-BEFORE-ACK-RACE: if the receiver accepts fast enough
+        // that this event arrives before call:initiated_ack has come back
+        // (handleCallInitiatedAck is what normally aliases the caller's
+        // pre-ack local id to the server's real UUID), callsState has no
+        // server-confirmed id yet at all. The comment above assumed
+        // resolveCallId() already covered this — it doesn't: there's no
+        // alias to resolve through until the ack actually runs, so the raw
+        // local id and the incoming server id compare as different strings
+        // and _isStaleCallEvent below would wrongly call this "a different/
+        // previous call" and drop it, even though it's plainly this call's
+        // own first (and only) accept. When there's no server-confirmed id
+        // yet, treat this accept as the ack itself — do the same
+        // reconciliation handleCallInitiatedAck would have done — rather
+        // than rejecting a legitimately-first accept.
+        if (acceptedCallId && !callsState.serverCallId) {
+            const _priorLocalId = callsState.activeCallId || callsState.localCallId;
+            if (!callsState._callIdAliases) callsState._callIdAliases = new Map();
+            if (_priorLocalId && _priorLocalId !== acceptedCallId) {
+                callsState._callIdAliases.set(_priorLocalId, acceptedCallId);
+            }
+            callsState._callIdAliases.set(acceptedCallId, acceptedCallId);
+            callsState.serverCallId = acceptedCallId;
+            try {
+                if (typeof WebRTCManager !== 'undefined' && WebRTCManager && WebRTCManager._currentCallId && WebRTCManager._currentCallId !== acceptedCallId) {
+                    WebRTCManager._currentCallId = acceptedCallId;
+                }
+            } catch (_) {}
+        }
+
         // FIX-CALLID-RECONCILE (Phase 2): the dedup check above only catches
         // a duplicate delivery of the SAME accept event for the call
         // already being tracked. It does not catch a late-arriving accept
@@ -29849,6 +29878,31 @@ _escapeHtml: function(text) {
                     var __resolveId = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
                     if (String(__resolveId(__endedIncomingId)) !== String(__resolveId(__endedCurrentId))) {
                         logWarn(MODULE, 'handleCallEnded: ignoring stale event for a different/previous call', __endedIncomingId, __endedCurrentId);
+                        // FIX-STALE-END-SAFETY-NET: don't tear down media/session state
+                        // for what might genuinely be a different, still-healthy call —
+                        // but don't just trust that assumption forever either. If this
+                        // guard is wrong (e.g. a resolveCallId format gap rather than an
+                        // actual different call), nothing else will ever send
+                        // POST_CALL_RESTORE, and whichever side received this event is
+                        // stuck on the call screen with no way back. Check again shortly;
+                        // if the call screen is STILL showing active with no other
+                        // cleanup having happened, treat it as this call's real end after
+                        // all and run the safe, idempotent nav-restore (not the media/
+                        // session teardown above it).
+                        var __staleCallIdAtCheck = __endedCurrentId;
+                        setTimeout(function() {
+                            var __stillSameCall = window.callsState &&
+                                String((window.callsState.activeCallId || window.callsState.serverCallId || window.callsState.localCallId) || '') === String(__staleCallIdAtCheck);
+                            var __screenStillActive = window.callsUI && window.callsUI.UIState && window.callsUI.UIState.callActive;
+                            if (__stillSameCall && __screenStillActive) {
+                                logWarn(MODULE, 'handleCallEnded: stale-echo guard was likely a false positive (call still stuck active) — running nav-restore safety net for', __staleCallIdAtCheck);
+                                try {
+                                    if (window.parent && window.parent !== window) {
+                                        window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: (window.callsState.pendingCallReturnTo || window.callsState.pendingCallSource) || 'conversations', chatUserId: window.callsState.pendingCallReturnChatUserId || null, chatUserName: window.callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
+                                    }
+                                } catch (_e) {}
+                            }
+                        }, 4000);
                         return;
                     }
                 }

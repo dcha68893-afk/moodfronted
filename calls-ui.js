@@ -2381,7 +2381,24 @@ function cacheCallHistory(calls) {
             prefillCallModal(userId, userName, callType);
         }
 
-        // Open call modal — skipped when triggered from messages or friends module
+        // FIX-DUPLICATE-CALL-PIPELINE: this used to call openCallModalForUser()
+        // and attemptPendingCall() unconditionally here, regardless of
+        // isExternalSource — even though the comment above already documented
+        // the intent that this modal-confirmation pipeline should be skipped
+        // for calls started from messages/friends. In practice that meant TWO
+        // separate call pipelines (this one, and the earlier
+        // processPendingCall -> startCallWithUser listener above) both reacted
+        // to the same OPEN_CALL_WITH_USER event for every chat/friends-
+        // initiated call — this one opening/touching call-modal state for a
+        // confirmation nobody would ever give, while the other pipeline was
+        // the one actually expected to dial. Now this pipeline genuinely
+        // no-ops for external sources and leaves the dial entirely to the
+        // other listener, instead of running both at once.
+        if (isExternalSource) {
+            return;
+        }
+
+        // Open call modal — only reached for calls started from within the calls module itself
         openCallModalForUser(userId, userName, callType, callSource);
         
         // Attempt to initiate call (will retry if core not ready)
