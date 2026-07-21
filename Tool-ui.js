@@ -5442,9 +5442,7 @@ function _renderHScroll(containerId, listings, sectionId) {
 
     el.querySelectorAll('.jm-hcard').forEach(card => {
         card.addEventListener('click', () => {
-            const ecom = window.EcomMarketplace;
-            const p = ecom?.ProductEngine.getStore().products.get(card.dataset.id);
-            if (p && typeof renderers !== 'undefined') renderers.viewListingDetail(p);
+            window._jmOpenProduct?.(card.dataset.id);
         });
     });
 }
@@ -6476,26 +6474,34 @@ function _renderAccount() {
 function _renderOrders() {
     const container = document.getElementById('jmOrdersContent');
     if (!container) return;
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
 
-    const ecom = window.EcomMarketplace;
-    let orders = ecom ? ecom.OrderEngine.getLocalOrders() : _state.orders;
+    (async () => {
+        const ecom = window.EcomMarketplace;
+        // AUDIT FIX: getLocalOrders() only reads the client-side cache,
+        // which is empty unless some other page happened to populate it
+        // first. My Orders is very often the FIRST page a buyer opens in a
+        // session — fetch real orders before rendering.
+        if (ecom) { try { await ecom.OrderEngine.getOrders(); } catch(_) {} }
+        let orders = ecom ? ecom.OrderEngine.getLocalOrders() : _state.orders;
 
-    // Tab switching
-    document.querySelectorAll('.jm-orders-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.jm-orders-tab').forEach(t=>t.classList.remove('active'));
-            tab.classList.add('active');
-            const filter = tab.dataset.tab;
-            const filtered = filter==='ongoing'
-                ? orders.filter(o=>!['cancelled','refunded'].includes(o.status))
-                : orders.filter(o=>['cancelled','refunded'].includes(o.status));
-            _renderOrderList(container, filtered);
+        // Tab switching
+        document.querySelectorAll('.jm-orders-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.jm-orders-tab').forEach(t=>t.classList.remove('active'));
+                tab.classList.add('active');
+                const filter = tab.dataset.tab;
+                const filtered = filter==='ongoing'
+                    ? orders.filter(o=>!['cancelled','refunded'].includes(o.status))
+                    : orders.filter(o=>['cancelled','refunded'].includes(o.status));
+                _renderOrderList(container, filtered);
+            });
         });
-    });
 
-    // Notification promo row
-    const ongoingOrders = orders.filter(o=>!['cancelled','refunded'].includes(o.status));
-    _renderOrderList(container, ongoingOrders);
+        // Notification promo row
+        const ongoingOrders = orders.filter(o=>!['cancelled','refunded'].includes(o.status));
+        _renderOrderList(container, ongoingOrders);
+    })();
 }
 
 function _renderOrderList(container, orders) {
@@ -7092,9 +7098,7 @@ function _initSearch() {
         const item = e.target.closest('[data-q],[data-id]');
         if (!item) return;
         if (item.dataset.id) {
-            const ecom = window.EcomMarketplace;
-            const p = ecom?.ProductEngine.getStore().products.get(item.dataset.id);
-            if (p) renderers.viewListingDetail(p);
+            window._jmOpenProduct?.(item.dataset.id);
         } else if (item.dataset.q) {
             input.value = item.dataset.q;
             _doSearch(item.dataset.q);

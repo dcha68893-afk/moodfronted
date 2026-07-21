@@ -694,7 +694,7 @@ const _prev = window._jmNavMore;
 window._jmNavMore = function(page) {
     const fn = ROUTES[page];
     if (fn) {
-        document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.jm-page').forEach(p => { p.classList.remove('active'); p.style.cssText = ''; });
         window._jmHideMore?.();
         const pid = 'sdPage_' + page.replace(/-/g,'_');
         let el = document.getElementById(pid);

@@ -139,7 +139,7 @@ const ProductEngine = {
 
     async init() {
         if (_store.initialized) return;
-        // Restore cart & wishlist from localStorage
+        // Restore cart & wishlist from localStorage first (fast, offline-friendly)
         const savedCart = _lsLoad(_LS.CART, []);
         savedCart.forEach(item => _store.cart.set(item.product.id, item));
         const savedWL = _lsLoad(_LS.WISHLIST, []);
@@ -149,6 +149,16 @@ const ProductEngine = {
         const savedNotifs = _lsLoad(_LS.NOTIFS, []);
         _store.notifications = savedNotifs;
         _store.initialized = true;
+
+        // AUDIT FIX: syncFromServer() was fully built and correct but never
+        // called — the cart only ever loaded from localStorage, so a
+        // returning buyer on a new device/browser (or after clearing local
+        // storage) saw an empty cart despite having real items persisted
+        // server-side. Worse, adding anything new would then replace-sync
+        // that seemingly-empty cart to the server, silently wiping their
+        // real saved items. Server is the source of truth once reachable.
+        CartEngine.syncFromServer().catch(() => {});
+        WishlistEngine.syncFromServer().catch(() => {});
     },
 
     /** Fetch all products from backend and populate store */
@@ -285,6 +295,12 @@ const CartEngine = {
                 })).filter(i => i.product_id);
                 if (items.length > 0) {
                     await _api('POST', '/api/marketplace/cart', { items });
+                } else {
+                    // AUDIT FIX: an empty local cart must still be told to
+                    // the server, or a cleared cart would silently reappear
+                    // next time syncFromServer() hydrates from stale server
+                    // data on another device/session.
+                    await _api('DELETE', '/api/marketplace/cart/clear');
                 }
             } catch (_) { /* non-fatal */ }
         }, 800);
@@ -372,21 +388,29 @@ const CartEngine = {
         // Fetch from server
         try {
             const resp = await _api('GET', '/api/marketplace/cart');
-            const items = resp?.data?.items || resp?.items || [];
-            if (items.length >= 0) {
-                // Server truth: replace local cart entirely
-                _store.cart.clear();
-                items.forEach(item => {
-                    if (item && item.product_id) {
-                        _store.cart.set(item.product_id, {
-                            product: item.product || { id: item.product_id },
-                            quantity: item.quantity || 1,
-                            addedAt: item.added_at || new Date().toISOString(),
-                        });
-                    }
-                });
-                this._save();
-            }
+            // AUDIT FIX: real response shape is { cart: { items, ... } } —
+            // this was reading data.items directly, which never existed, so
+            // the cart was never actually hydrated from the server at all.
+            const items = resp?.data?.cart?.items || resp?.cart?.items || [];
+            _store.cart.clear();
+            items.forEach(item => {
+                if (item && item.product_id) {
+                    // AUDIT FIX: server cart items store flat fields
+                    // (title/price/image), not a nested product object —
+                    // reconstruct one so existing render code (which reads
+                    // item.product) shows real data instead of a bare id.
+                    _store.cart.set(item.product_id, {
+                        product: item.product || {
+                            id: item.product_id, title: item.title, price: item.price,
+                            image: item.image, seller_id: item.seller_id, variant: item.variant,
+                        },
+                        quantity: item.quantity || 1,
+                        addedAt: item.added_at || new Date().toISOString(),
+                    });
+                }
+            });
+            _lsSave(_LS.CART, Array.from(_store.cart.values()));
+            window.dispatchEvent(new CustomEvent('ecom:cart-updated', { detail: { cart: this.getCart() }}));
         } catch(_) {}
     },
 };
@@ -431,7 +455,7 @@ const OrderEngine = {
                 price:         i.product.price,
                 quantity:      i.quantity,
                 delivery_fee:  i.product.delivery_fee,
-                image:         i.product.images[0] || '',
+                image:         (Array.isArray(i.product.images) ? i.product.images[0] : null) || i.product.image || '',
             })),
             delivery_address: address,
             payment_method,
@@ -485,9 +509,14 @@ const OrderEngine = {
 
             return { success: true, order: confirmed };
         } else {
-            // Fallback: keep local order as pending
-            this._save();
-            return { success: true, order: localOrder, _offline: true };
+            // AUDIT FIX: previously treated this as a soft "offline" success
+            // and kept a fake local order the buyer would believe was real —
+            // there is no reconciliation/retry mechanism anywhere that ever
+            // turns these into real orders, so this was a dead end that
+            // silently misrepresented a failed checkout as successful.
+            _store.orders.delete(tempId);
+            window.dispatchEvent(new CustomEvent('ecom:order-failed', { detail: { order: localOrder }}));
+            return { success: false, message: resp?.message || 'Could not place your order — please check your connection and try again.' };
         }
     },
 
@@ -658,7 +687,17 @@ const WishlistEngine = {
     async syncFromServer() {
         const resp = await _api('GET', '/api/marketplace/wishlist');
         const items = resp?.data?.items || resp?.items || [];
-        items.forEach(item => _store.wishlist.add(item.product_id || item.id));
+        items.forEach(item => {
+            const id = item.product_id || item.id;
+            if (!id) return;
+            _store.wishlist.add(id);
+            // AUDIT FIX: the real endpoint already returns full product data
+            // per item — store it so getWishlist() (which reads from
+            // _store.products) actually has something to find, instead of
+            // silently showing nothing unless the product happened to
+            // already be cached from unrelated browsing.
+            _store.products.set(id, _normalizeProduct({ ...item, id }));
+        });
         this._save();
     },
 };

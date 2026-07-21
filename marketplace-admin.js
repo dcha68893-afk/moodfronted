@@ -963,7 +963,7 @@ const _prevNav = window._jmNavMore;
 window._jmNavMore = function(page) {
     const renderFn = ADMIN_ROUTES[page];
     if (renderFn) {
-        document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.jm-page').forEach(p => { p.classList.remove('active'); p.style.cssText = ''; });
         window._jmHideMore?.();
         const pageId = 'admPage_' + page.replace(/-/g,'_');
         const el = _getOrCreateAdminPage(pageId);

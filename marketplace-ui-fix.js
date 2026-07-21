@@ -145,7 +145,69 @@ function _renderProductFallback(product, panel, content, nameEl) {
                     </button>
                 </div>
             </div>
+            <div id="pfReviewsSection" style="padding:0 16px 16px;border-top:8px solid #f9fafb"></div>
+            <div id="pfRelatedSection" style="padding:0 0 16px;border-top:8px solid #f9fafb"></div>
         </div>`;
+
+    _loadProductReviews(product);
+    _loadRelatedProducts(product);
+}
+
+async function _loadProductReviews(product) {
+    const el = document.getElementById('pfReviewsSection');
+    if (!el) return;
+    el.innerHTML = `<div style="padding:16px 0;color:#9ca3af;font-size:13px">Loading reviews…</div>`;
+    try {
+        const r = await window._api?.('GET', `/marketplace/products/${product.id || product._id}/reviews`);
+        const reviews = r?.data?.reviews || [];
+        const avgRating = r?.data?.avgRating || 0;
+        const total = r?.data?.total || 0;
+        if (!total) {
+            el.innerHTML = `<div style="padding:16px 0">
+                <div style="font-weight:800;font-size:16px;margin-bottom:8px">Reviews</div>
+                <div style="color:#9ca3af;font-size:13px">No reviews yet — be the first to review this product after your purchase.</div>
+            </div>`;
+            return;
+        }
+        el.innerHTML = `<div style="padding:16px 0">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+                <div style="font-weight:800;font-size:16px">Reviews</div>
+                <div style="color:#f59e0b;font-weight:700;font-size:14px">★ ${avgRating.toFixed(1)}</div>
+                <div style="color:#9ca3af;font-size:13px">(${total})</div>
+            </div>
+            ${reviews.slice(0,10).map(rv => `
+                <div style="padding:10px 0;border-bottom:1px solid #f3f4f6">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <span style="font-weight:700;font-size:13px">${(rv.user?.name||'User')}</span>
+                        <span style="color:#f59e0b;font-size:12px">${'★'.repeat(rv.rating)}${'☆'.repeat(5-rv.rating)}</span>
+                        ${rv.is_verified_purchase ? `<span style="background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700">VERIFIED PURCHASE</span>` : ''}
+                    </div>
+                    ${rv.text ? `<div style="font-size:13px;color:#4b5563;line-height:1.5">${rv.text}</div>` : ''}
+                    ${rv.seller_response ? `<div style="margin-top:6px;padding:8px;background:#f9fafb;border-radius:8px;font-size:12px;color:#6b7280"><strong>Seller response:</strong> ${rv.seller_response}</div>` : ''}
+                </div>`).join('')}
+        </div>`;
+    } catch(_) { el.innerHTML = ''; }
+}
+
+async function _loadRelatedProducts(product) {
+    const el = document.getElementById('pfRelatedSection');
+    if (!el) return;
+    try {
+        const r = await window._api?.('GET', `/marketplace/recommendations?category=${encodeURIComponent(product.category||'')}&exclude=${product.id||product._id}`);
+        const related = (r?.data?.products || r?.data?.recommendations || []).filter(p => String(p.id) !== String(product.id||product._id)).slice(0,8);
+        if (!related.length) { el.innerHTML = ''; return; }
+        el.innerHTML = `<div style="padding:16px">
+            <div style="font-weight:800;font-size:16px;margin-bottom:12px">You may also like</div>
+            <div style="display:flex;gap:10px;overflow-x:auto">
+                ${related.map(p => `
+                <div onclick="window._jmOpenProduct?.('${p.id}')" style="flex-shrink:0;width:130px;cursor:pointer">
+                    ${p.images?.[0]||p.image ? `<img src="${p.images?.[0]||p.image}" style="width:130px;height:130px;object-fit:cover;border-radius:10px;background:#f3f4f6">` : `<div style="width:130px;height:130px;border-radius:10px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:32px">📦</div>`}
+                    <div style="font-size:12px;font-weight:600;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.title||''}</div>
+                    <div style="font-size:13px;font-weight:800;color:#f57224">KES ${parseFloat(p.price||0).toLocaleString()}</div>
+                </div>`).join('')}
+            </div>
+        </div>`;
+    } catch(_) { el.innerHTML = ''; }
 }
 
 // Install immediately

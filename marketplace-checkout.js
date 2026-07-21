@@ -712,18 +712,13 @@ window._jmPlaceOrder = async function() {
     _state.loading = false;
 
     if (!r) {
-        // Offline / error fallback — create local order
-        const localOrder = {
-            id: 'local_' + Date.now(),
-            status: _state.paymentMethod==='cod'?'confirmed':'pending',
-            items,
-            total_price: Math.max(0, _state.subtotal + _state.deliveryFee - _state.couponDiscount),
-            currency: 'KES',
-            payment_method: _state.paymentMethod,
-            delivery_address: _state.address,
-            created_at: new Date().toISOString(),
-        };
-        _finishOrder(localOrder);
+        // AUDIT FIX: previously created a fake local "order" here and
+        // treated it as if checkout succeeded — there is no mechanism
+        // anywhere that reconciles these into real orders, so a genuine
+        // failure (network issue, server rejection) was silently shown to
+        // the buyer as a successful purchase. Show the real failure instead.
+        _toast('Could not place your order — please check your connection and try again.', 'error', '❌');
+        _renderConfirmStep();
         return;
     }
 
