@@ -202,6 +202,7 @@ let uiInitialized = false;
 let fallbackContentShown = false; // tracks the emergency "show something" fallback; NEVER gates real init
 let currentModal = null;
 let pendingPhotoData = null;
+let pendingCoverPhotoData = null;
 let searchDebounceTimer = null;
 let sectionLoadInProgress = false;
 let uiReady = false;
@@ -715,6 +716,11 @@ function updateUserPreview() {
             userAvatarPreview.innerHTML = `<span style="color: white; font-size: 18px;">${initials}</span>`;
             userAvatarPreview.style.backgroundImage = '';
         }
+    }
+
+    const coverUrl = userData && (userData.coverPhotoURL || profileSettings?.coverPhotoUrl || profileSettings?.coverPhoto);
+    if (coverUrl) {
+        updateProfileCoverBanner(coverUrl);
     }
 }
 
@@ -1230,6 +1236,7 @@ export function setupEventListeners() {
 export function setupModalListeners() {
     const closeButtons = [
         { id: 'closePhotoModal', modal: 'changePhotoModal' },
+        { id: 'closeCoverPhotoModal', modal: 'changeCoverPhotoModal' },
         { id: 'closePasswordModal', modal: 'changePasswordModal' },
         { id: 'closeSessionsModal', modal: 'sessionsModal' },
         { id: 'closeBlockedModal', modal: 'blockedUsersModal' },
@@ -1248,6 +1255,7 @@ export function setupModalListeners() {
     
     const cancelButtons = [
         { id: 'cancelPhotoBtn', modal: 'changePhotoModal' },
+        { id: 'cancelCoverPhotoBtn', modal: 'changeCoverPhotoModal' },
         { id: 'cancelPasswordBtn', modal: 'changePasswordModal' },
         { id: 'closeSessionsBtn', modal: 'sessionsModal' },
         { id: 'closeBlockedBtn', modal: 'blockedUsersModal' },
@@ -1264,7 +1272,7 @@ export function setupModalListeners() {
         }
     });
     
-    const modals = ['changePhotoModal', 'changePasswordModal', 'sessionsModal', 'blockedUsersModal', 'confirmationModal'];
+    const modals = ['changePhotoModal', 'changeCoverPhotoModal', 'changePasswordModal', 'sessionsModal', 'blockedUsersModal', 'confirmationModal'];
     modals.forEach(modalId => {
         const modal = document.getElementById(modalId);
         if (modal) {
@@ -1879,6 +1887,93 @@ export function removePhoto() {
     }
 }
 
+// =============================================
+// COVER PHOTO FUNCTIONS (mirrors PHOTO FUNCTIONS above)
+// =============================================
+export function chooseCoverPhoto() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                pendingCoverPhotoData = event.target.result;
+                updateCoverPhotoPreview(pendingCoverPhotoData);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    input.click();
+}
+
+function updateCoverPhotoPreview(dataUrl) {
+    const preview = document.getElementById('coverPhotoPreview');
+    if (preview) {
+        preview.style.backgroundImage = `url(${dataUrl})`;
+        preview.style.backgroundSize = 'cover';
+        preview.style.backgroundPosition = 'center';
+    }
+}
+
+export function removeCoverPhoto() {
+    if (confirm('Remove your cover photo?')) {
+        SettingsState.update('profile', 'coverPhotoUrl', '').then(() => {
+            if (currentUser) {
+                currentUser.coverPhotoURL = '';
+            }
+            const coverPhotoPreview = document.getElementById('coverPhotoPreview');
+            if (coverPhotoPreview) {
+                coverPhotoPreview.style.backgroundImage = '';
+            }
+            updateProfileCoverBanner('');
+
+            unsavedChanges = true;
+            updateSaveButton();
+
+            closeModal('changeCoverPhotoModal');
+            showNotification('Cover photo removed', 'success');
+        }).catch(error => {
+            debugLog('Error removing cover photo:', error);
+            showNotification('Error removing cover photo', 'error');
+        });
+    }
+}
+
+export function saveCoverPhoto() {
+    if (pendingCoverPhotoData) {
+        SettingsState.update('profile', 'coverPhotoUrl', pendingCoverPhotoData).then(() => {
+            if (currentUser) {
+                currentUser.coverPhotoURL = pendingCoverPhotoData;
+            }
+            updateProfileCoverBanner(pendingCoverPhotoData);
+
+            unsavedChanges = true;
+            updateSaveButton();
+            pendingCoverPhotoData = null;
+
+            closeModal('changeCoverPhotoModal');
+            showNotification('Cover photo updated', 'success');
+        }).catch(error => {
+            debugLog('Error saving cover photo:', error);
+            showNotification('Error saving cover photo', 'error');
+        });
+    } else {
+        closeModal('changeCoverPhotoModal');
+    }
+}
+
+// Updates any banner-style cover photo element in the profile UI, if present
+function updateProfileCoverBanner(url) {
+    const banner = document.getElementById('profileCoverBanner');
+    if (banner) {
+        banner.style.backgroundImage = url ? `url(${url})` : '';
+    }
+}
+
 export function savePhoto() {
     if (pendingPhotoData) {
         // Update through SettingsState for REAL backend persistence
@@ -2067,6 +2162,18 @@ export function loadProfileSection(container) {
                         </button>
                     </div>
                 </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Cover Photo</div>
+                        <div class="setting-description">Banner shown at the top of your profile</div>
+                    </div>
+                    <div class="setting-control">
+                        <button class="setting-button" id="changeCoverPhotoBtn">
+                            <i class="fas fa-image"></i> Change
+                        </button>
+                    </div>
+                </div>
                 
                 <div class="setting-item">
                     <div class="setting-info">
@@ -2155,6 +2262,34 @@ function setupProfileEventListeners() {
     if (changePhotoBtn) {
         changePhotoBtn.addEventListener('click', () => {
             openModal('changePhotoModal');
+        });
+    }
+
+    const changeCoverPhotoBtn = document.getElementById('changeCoverPhotoBtn');
+    if (changeCoverPhotoBtn) {
+        changeCoverPhotoBtn.addEventListener('click', () => {
+            openModal('changeCoverPhotoModal');
+        });
+    }
+
+    const chooseCoverPhotoBtn = document.getElementById('chooseCoverPhotoBtn');
+    if (chooseCoverPhotoBtn) {
+        chooseCoverPhotoBtn.addEventListener('click', () => {
+            chooseCoverPhoto();
+        });
+    }
+
+    const removeCoverPhotoBtn = document.getElementById('removeCoverPhotoBtn');
+    if (removeCoverPhotoBtn) {
+        removeCoverPhotoBtn.addEventListener('click', () => {
+            removeCoverPhoto();
+        });
+    }
+
+    const saveCoverPhotoBtn = document.getElementById('saveCoverPhotoBtn');
+    if (saveCoverPhotoBtn) {
+        saveCoverPhotoBtn.addEventListener('click', () => {
+            saveCoverPhoto();
         });
     }
     
