@@ -2234,15 +2234,26 @@ export function loadSecuritySection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-shield-alt section-icon"></i> Account Security</h3>
             </div>
-            <div class="section-body">
+            <div class="section-body" id="securitySectionBody">
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Two-Factor Authentication</div>
-                        <div class="setting-description">Add an extra layer of security to your account</div>
+                        <div class="setting-description" id="twoFactorAuthDesc">Add an extra layer of security to your account</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="twoFactorAuthToggle" ${settings.twoFactorAuth ? 'checked' : ''}>
+                            <!-- BUG FIX (2FA audit): this checkbox used to be purely cosmetic —
+                                 toggling it only wrote a local "settings.security.twoFactorAuth"
+                                 flag via __updateSetting and never touched the backend at all.
+                                 The account's real mfaEnabled flag (the one /auth/login actually
+                                 checks) is only set by completing TOTP setup+verification via
+                                 /api/settings/2fa/setup + /2fa/verify. That real flow exists
+                                 (the panel injected by inject2FAPanel() in settings.html) but was
+                                 never reachable from here because of an anchor bug in that
+                                 function. This checkbox now reflects the REAL server state
+                                 (fetched below) and clicking it scrolls to / opens that real
+                                 panel instead of silently flipping a fake flag. -->
+                            <input type="checkbox" id="twoFactorAuthToggle" disabled>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2338,10 +2349,48 @@ function setupSecurityEventListeners() {
         });
     }
     
+    // BUG FIX (2FA audit): the toggle no longer writes a fake local setting.
+    // It reflects the account's real mfaEnabled state (from
+    // GET /api/settings/2fa/status) and, on click, opens the real TOTP
+    // setup/disable panel (inject2FAPanel(), defined in settings.html) so
+    // the user actually completes (or removes) 2FA instead of the click
+    // being silently swallowed by a cosmetic flag that /auth/login never
+    // reads.
     const twoFactorAuthToggle = document.getElementById('twoFactorAuthToggle');
     if (twoFactorAuthToggle) {
-        twoFactorAuthToggle.addEventListener('change', () => {
-            window.__updateSetting('security', 'twoFactorAuth', twoFactorAuthToggle.checked);
+        (async () => {
+            try {
+                const resp = await (window.api?.request
+                    ? window.api.request('GET', '/api/settings/2fa/status')
+                    : fetch((window.__getApiOrigin ? window.__getApiOrigin() : '') + '/api/settings/2fa/status', {
+                        headers: { Authorization: 'Bearer ' + (localStorage.getItem('authToken') || localStorage.getItem('token') || '') }
+                    }).then(r => r.json()));
+                const enabled = !!(resp?.data?.mfaEnabled ?? resp?.mfaEnabled);
+                twoFactorAuthToggle.checked = enabled;
+                const desc = document.getElementById('twoFactorAuthDesc');
+                if (desc) desc.textContent = enabled
+                    ? 'Enabled — your account requires a verification code at login'
+                    : 'Add an extra layer of security to your account';
+            } catch (e) {
+                debugLog('Could not fetch real 2FA status', e);
+            } finally {
+                twoFactorAuthToggle.disabled = false;
+            }
+        })();
+
+        twoFactorAuthToggle.addEventListener('click', (e) => {
+            // Prevent the checkbox from visually flipping on its own — its
+            // checked state should only ever reflect confirmed server state,
+            // set above or after the real setup/disable flow completes.
+            e.preventDefault();
+            const panel = document.getElementById('__p12fa') || (window.__open2FAPanel && window.__open2FAPanel());
+            const target = document.getElementById('__p12fa');
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                document.getElementById('__p12faBtn')?.focus();
+            } else {
+                window.CoreUtils?.showNotification?.('Two-Factor Authentication', 'Loading the 2FA setup panel…', 'info');
+            }
         });
     }
     

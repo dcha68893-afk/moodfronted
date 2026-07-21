@@ -3255,9 +3255,18 @@
    * ══════════════════════════════════════════════════════════════════════════*/
   function inject2FAPanel() {
     if (el('__p12fa')) return;
-    // Find best anchor: security section content, or near change-password modal
-    const anchor = document.querySelector('[data-content="security"],[id*="security"][class*="content"],[id*="security"][class*="panel"]')
-                || el('changePasswordModal')
+    // BUG FIX (2FA audit): the old anchor order tried a selector that never
+    // matches this DOM (`[id*="security"]...`), then fell back to
+    // `el('changePasswordModal')` — which exists, so it was ALWAYS chosen.
+    // That modal is a `display:none` overlay until the user explicitly
+    // clicks "Change Password", so this entire real 2FA setup/verify/
+    // disable panel was being injected somewhere the user would never see
+    // it on a normal visit to Settings → Security. settings-ui.js now gives
+    // the actual visible Security section body a stable id
+    // ("securitySectionBody") — use that first.
+    const securityBody = document.getElementById('securitySectionBody');
+    const anchor = securityBody
+                || document.querySelector('[data-content="security"],[id*="security"][class*="content"],[id*="security"][class*="panel"]')
                 || document.querySelector('.settings-main,.settings-content,.content-area');
     if (!anchor) return;
 
@@ -3299,12 +3308,22 @@
         <p id="__p12faErr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none"></p>
       </div>`;
 
-    // Insert before the anchor element so it appears at top of security section
-    anchor.insertAdjacentElement('beforebegin', div);
+    // If we anchored on the real security section body, append inside it
+    // (below the existing toggle) so it's part of the normal Security page.
+    // Otherwise fall back to the old "insert before anchor" behavior.
+    if (anchor === securityBody) {
+        anchor.appendChild(div);
+    } else {
+        anchor.insertAdjacentElement('beforebegin', div);
+    }
 
     load2FAStatus();
     wire2FA();
   }
+
+  // Exposed so settings-ui.js's (real) 2FA toggle can open/reveal this panel
+  // on demand instead of duplicating this logic.
+  window.__open2FAPanel = inject2FAPanel;
 
   async function load2FAStatus() {
     const status = el('__p12faStatus'), btn = el('__p12faBtn');
@@ -3318,6 +3337,13 @@
       if (btn) btn.textContent = on ? 'Manage 2FA' : 'Set Up 2FA';
       if (el('__p12faDisable')) el('__p12faDisable').style.display = on ? 'block' : 'none';
       if (el('__p12faSetup') && on) el('__p12faSetup').style.display = 'none';
+      // Keep the toggle rendered by settings-ui.js's loadSecuritySection in sync
+      const uiToggle = el('twoFactorAuthToggle');
+      if (uiToggle) uiToggle.checked = on;
+      const uiDesc = el('twoFactorAuthDesc');
+      if (uiDesc) uiDesc.textContent = on
+        ? 'Enabled — your account requires a verification code at login'
+        : 'Add an extra layer of security to your account';
     } catch { if (status) status.textContent = 'Unknown'; }
   }
 
