@@ -464,6 +464,37 @@ const SettingsState = {
         this.data[section][key] = value;
         this._saveToCache();
 
+        // FIX: this is the actual function that runs on every single settings
+        // change (every toggle, dropdown, theme pick, etc.) — but until now it
+        // never notified the parent window (chat.html) directly. The only
+        // function that did (saveSettings(), below) is wired only to Ctrl+S
+        // and an internal command-palette action, not the normal UI flow, so
+        // chat.html's dispatchEventToModules relay — the only mechanism that
+        // reaches EVERY module iframe, including group.html and status.html,
+        // which don't even load AppSettings.js and so can never receive its
+        // BroadcastChannel-only updates — was essentially never triggered by
+        // ordinary use. This is why changing a setting only ever visibly
+        // applied inside the Settings page itself.
+        //
+        // IMPORTANT: send the FULL current settings snapshot (this.data), not
+        // just {[section]:{[key]:value}} — chat.html's SETTINGS_UPDATED
+        // handler calls persistCachedSettings(), which REPLACES its entire
+        // settings cache with whatever object arrives here rather than
+        // merging it. A partial payload would silently wipe every other
+        // cached section (privacy, notifications, chat, etc.) on every
+        // single settings change.
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SETTINGS_UPDATED',
+                    module: MODULE_NAME,
+                    section, key, value,
+                    settings: this.data,
+                    timestamp: Date.now()
+                }, '*');
+            }
+        } catch (e) { /* no parent — that's fine */ }
+
         // STEP 3: Emit unified event for any remaining legacy listeners
         window.dispatchEvent(new CustomEvent('appSettingsChanged', {
             detail: { 

@@ -828,7 +828,14 @@ self.addEventListener('push', function(event) {
         badge:   data.badge   || '/icons/moodchat-192.png',
         tag:     data.tag     || 'moodchat-notification',
         data:    data.data    || { url: data.url || '/chat.html' },
-        vibrate: [200, 100, 200],
+        // FIX: vibrate was hardcoded to always fire regardless of the
+        // Notifications > Vibration setting, and there was no way to
+        // suppress sound for the Notifications > Sound setting either.
+        // The backend (pushNotificationService.js) now includes the
+        // recipient's actual preference in the payload — use it instead
+        // of a fixed value.
+        vibrate: Array.isArray(data.vibrate) ? data.vibrate : (data.vibrate === false ? [] : [200, 100, 200]),
+        silent:  data.silent === true,
         requireInteraction: data.requireInteraction || false
     };
 

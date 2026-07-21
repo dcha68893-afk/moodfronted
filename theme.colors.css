@@ -8,8 +8,72 @@
    using a more-specific selector.
    ============================================================ */
 
-/* ── 1. CSS Custom Properties (Dark Palette) ─────────────── */
+/* ── 1a. Light Palette (DEFAULT — :root and explicit data-theme="light") ──
+   FIX: previously the dark palette below was applied unconditionally to
+   bare `:root` (no [data-theme] qualifier), so every page showed the dark
+   palette regardless of the user's actual theme setting — light, dark, and
+   auto all looked identical. :root now gets real light-mode values; the
+   dark block further down only applies when data-theme="dark" is actually
+   set on <html>/<body>. */
 :root,
+html[data-theme="light"],
+body[data-theme="light"] {
+
+  /* Global backgrounds */
+  --kyn-bg-root:          #ffffff;
+  --kyn-bg-chat:          #efeae2;
+  --kyn-bg-panel:         #ffffff;
+  --kyn-bg-card:          #ffffff;
+  --kyn-bg-input:         #f0f2f5;
+  --kyn-bg-sidebar:       #ffffff;
+  --kyn-bg-header:        #f0f2f5;
+  --kyn-bg-modal:         #ffffff;
+  --kyn-bg-overlay:       rgba(0, 0, 0, 0.45);
+  --kyn-bg-hover:         rgba(0, 0, 0, 0.04);
+  --kyn-bg-active:        rgba(0, 0, 0, 0.08);
+
+  /* Text */
+  --kyn-text-primary:     #111b21;
+  --kyn-text-secondary:   #667781;
+  --kyn-text-muted:       #8696a0;
+  --kyn-text-inverse:     #ffffff;
+  --kyn-text-placeholder: #8696a0;
+
+  /* Borders */
+  --kyn-border:           #e9edef;
+  --kyn-border-light:     rgba(0,0,0,0.06);
+  --kyn-border-strong:    #d1d7db;
+
+  /* Accents */
+  --kyn-accent-primary:   #22c55e;
+  --kyn-accent-secondary: #2563eb;
+  --kyn-accent-danger:    #ef4444;
+  --kyn-accent-warning:   #f59e0b;
+  --kyn-accent-info:      #38bdf8;
+  --kyn-accent-purple:    #8b5cf6;
+
+  /* Chat bubbles */
+  --kyn-bubble-sent:      #d9fdd3;
+  --kyn-bubble-sent-text: #111b21;
+  --kyn-bubble-recv:      #ffffff;
+  --kyn-bubble-recv-text: #111b21;
+
+  /* Scrollbar */
+  --kyn-scrollbar-track:  #f0f2f5;
+  --kyn-scrollbar-thumb:  #d1d7db;
+
+  /* Elevation */
+  --kyn-shadow-sm:        0 2px 8px rgba(0,0,0,0.08);
+  --kyn-shadow-md:        0 8px 24px rgba(0,0,0,0.12);
+  --kyn-shadow-lg:        0 16px 48px rgba(0,0,0,0.16);
+
+  /* Gradients */
+  --kyn-gradient-primary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
+  --kyn-gradient-sidebar: linear-gradient(180deg, #ffffff 0%, #f0f2f5 100%);
+  --kyn-gradient-header:  linear-gradient(135deg, rgba(255,255,255,0.97), rgba(240,242,245,0.97));
+}
+
+/* ── 1b. Dark Palette — ONLY when data-theme="dark" is actually set ──── */
 html[data-theme="dark"],
 body[data-theme="dark"] {
 
@@ -781,4 +845,53 @@ input[type="checkbox"]:checked + .toggle {
 .settings-link-btn {
   background: var(--kyn-border) !important;
   color: var(--kyn-text-primary) !important;
+}
+
+/*
+  FIX K — Message bubble, emoji picker, poll, recording bar, edit box
+  Problem: several real chat surfaces were hardcoded to white/near-white
+  in messages.css/group.css, invisible or jarring against a dark theme:
+  received message bubbles, the message-edit input, the emoji picker
+  panel/grid, poll option rows, and the voice-recording bar.
+*/
+.msg-recv .bubble,
+.edit-message-input,
+.emoji-picker-container,
+.emoji-grid,
+.poll-option,
+.recording-bar {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+/*
+  FIX L — Status/Story creation screen
+  Problem: .status-creation-content in chat.css was hardcoded white,
+  showing a bright white screen in the middle of an otherwise dark app
+  when creating a status update.
+*/
+.status-creation-content {
+  background: var(--kyn-bg-root) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/*
+  FIX M — Marketplace/Tools cards and buttons (.jm-* classes)
+  Problem: Tool.css's marketplace card/category/follow-button surfaces
+  don't match any of the generic [class*="card"]/[class*="btn"] catch-alls
+  above (jm-cat-group, jm-cat-item, jm-follow-btn, jm-wa-btn), so they stayed
+  hardcoded white against a dark app shell.
+*/
+.jm-cat-group,
+.jm-cat-item.active {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.jm-follow-btn.following,
+.jm-wa-btn {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
 }
