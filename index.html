@@ -1596,6 +1596,14 @@
                                 </button>
                             </div>
                             
+                            <!-- GOOGLE SIGN-IN -->
+                            <div class="google-signin-divider" style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#8a8a8a;font-size:13px;">
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                                <span>or</span>
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                            </div>
+                            <div id="googleSignInLoginContainer" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+
                             <div class="text-center">
                                 <p class="mb-10">Don't have an account? <a href="#" class="footer-link" id="signup-button" data-form-toggle="register">Sign up here</a></p>
                                 <p><a href="#" class="footer-link" id="forgot-password-button" data-form-toggle="forgot">Forgot password?</a></p>
@@ -1688,6 +1696,13 @@
                                     <div class="spinner" id="registerSpinner"></div>
                                 </button>
                             </div>
+
+                            <div class="google-signin-divider" style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#8a8a8a;font-size:13px;">
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                                <span>or</span>
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                            </div>
+                            <div id="googleSignInRegisterContainer" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
                             
                             <div class="text-center">
                                 <p>Already have an account? <a href="#" class="footer-link" id="back-to-login-from-register" data-form-toggle="login">Login here</a></p>
@@ -1796,6 +1811,12 @@
     <!-- UI AUTH -->
     <!-- ====================================================================== -->
     <script type="module" src="/js/app.ui.auth.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- GOOGLE SIGN-IN -->
+    <!-- ====================================================================== -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="/js/google-auth.js"></script>
 
     <!-- ====================================================================== -->
     <!-- SESSION MANAGER - MUST BE LOADED BEFORE ANY AUTH LOGIC -->
