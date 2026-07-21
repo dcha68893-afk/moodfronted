@@ -3294,26 +3294,28 @@
    * 3. 2FA TOTP — full setup / verify / disable panel
    * ══════════════════════════════════════════════════════════════════════════*/
   function inject2FAPanel() {
-    // FIX (2FA audit): previously this bailed out completely once the panel
-    // existed, so the real enabled/disabled sync (load2FAStatus) only ever
-    // ran once per page load. Now it always re-syncs against the real
-    // /api/settings/2fa/status, even on repeat calls (from the MutationObserver
-    // below, which fires on every settings re-render) — cheap and idempotent.
+    // FIX (2FA audit, round 2): previously this bailed out completely once
+    // the panel existed, so the real enabled/disabled sync (load2FAStatus)
+    // only ever ran once per page load. Now it always re-syncs against the
+    // real /api/settings/2fa/status on repeat calls — cheap and idempotent.
     if (el('__p12fa')) { load2FAStatus(); return; }
-    // BUG FIX (2FA audit): the old anchor order tried a selector that never
-    // matches this DOM (`[id*="security"]...`), then fell back to
-    // `el('changePasswordModal')` — which exists, so it was ALWAYS chosen.
-    // That modal is a `display:none` overlay until the user explicitly
-    // clicks "Change Password", so this entire real 2FA setup/verify/
-    // disable panel was being injected somewhere the user would never see
-    // it on a normal visit to Settings → Security. settings-ui.js now gives
-    // the actual visible Security section body a stable id
-    // ("securitySectionBody") — use that first.
+    // BUG FIX (2FA audit, round 2): the old anchor chain fell all the way
+    // back to `.settings-main,.settings-content,.content-area` whenever the
+    // Security section wasn't the one currently rendered (e.g. on first
+    // page load, which defaults to Profile). `.settings-content` sits
+    // *outside* `#settingsContentBody` — the container loadSection()
+    // replaces via innerHTML on every navigation — so a panel anchored
+    // there survived every section switch and was never cleaned up: the
+    // exact "floating panel" bug. This function must now anchor ONLY inside
+    // the real Security section body (or the Two-Step Verification host
+    // that lives inside it), and do nothing otherwise — matching the fix
+    // already applied to linked-sessions-and-pin.js's _injectTwoStepPin().
     const securityBody = document.getElementById('securitySectionBody');
-    const anchor = securityBody
-                || document.querySelector('[data-content="security"],[id*="security"][class*="content"],[id*="security"][class*="panel"]')
-                || document.querySelector('.settings-main,.settings-content,.content-area');
-    if (!anchor) return;
+    if (!securityBody) return; // not viewing Security — render nowhere
+    // Prefer nesting inline inside the merged "Two-Step Verification" box
+    // (linked-sessions-and-pin.js) so it appears in that same box when the
+    // user taps "Set Up 2FA", instead of as a second separate box.
+    const anchor = document.getElementById('__kynTwoStepPinTwoFAHost') || securityBody;
 
     const div = document.createElement('div');
     div.id = '__p12fa';
@@ -3353,14 +3355,11 @@
         <p id="__p12faErr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none"></p>
       </div>`;
 
-    // If we anchored on the real security section body, append inside it
-    // (below the existing toggle) so it's part of the normal Security page.
-    // Otherwise fall back to the old "insert before anchor" behavior.
-    if (anchor === securityBody) {
-        anchor.appendChild(div);
-    } else {
-        anchor.insertAdjacentElement('beforebegin', div);
-    }
+    // anchor is always either the Two-Step Verification host div or the
+    // Security section body itself — both are inside #settingsContentBody,
+    // so this panel gets torn down for free whenever loadSection() rebuilds
+    // the content for whatever section the user navigates to next.
+    anchor.appendChild(div);
 
     load2FAStatus();
     wire2FA();
@@ -3371,14 +3370,22 @@
   window.__open2FAPanel = inject2FAPanel;
 
   async function load2FAStatus() {
-    const status = el('__p12faStatus'), btn = el('__p12faBtn');
-    if (!status) return;
+    // FIX (2FA audit, round 2): this used to bail out entirely if the full
+    // setup/verify/disable panel (`__p12faStatus`) wasn't on the page. Since
+    // inject2FAPanel() no longer auto-renders that panel outside of Security,
+    // this function must still be able to run on its own — just to sync the
+    // real enabled/disabled state into settings-ui.js's toggle — whenever
+    // the Security section is visible, panel open or not.
     try {
       const r = await api('GET', '/api/settings/2fa/status');
       const on = r.data?.mfaEnabled === true;
-      status.textContent = on ? '✓ Enabled' : 'Disabled';
-      status.style.background = on ? '#14532d' : '#3a3a4e';
-      status.style.color = on ? '#86efac' : '#aaa';
+
+      const status = el('__p12faStatus'), btn = el('__p12faBtn');
+      if (status) {
+        status.textContent = on ? '✓ Enabled' : 'Disabled';
+        status.style.background = on ? '#14532d' : '#3a3a4e';
+        status.style.color = on ? '#86efac' : '#aaa';
+      }
       if (btn) btn.textContent = on ? 'Manage 2FA' : 'Set Up 2FA';
       if (el('__p12faDisable')) el('__p12faDisable').style.display = on ? 'block' : 'none';
       if (el('__p12faSetup') && on) el('__p12faSetup').style.display = 'none';
@@ -3389,7 +3396,10 @@
       if (uiDesc) uiDesc.textContent = on
         ? 'Enabled — your account requires a verification code at login'
         : 'Add an extra layer of security to your account';
-    } catch { if (status) status.textContent = 'Unknown'; }
+    } catch {
+      const status = el('__p12faStatus');
+      if (status) status.textContent = 'Unknown';
+    }
   }
 
   function wire2FA() {
@@ -3462,16 +3472,43 @@
     });
   }
 
+  // FIX (2FA audit, round 2): this used to call inject2FAPanel()
+  // unconditionally on load and on every DOM mutation. On first load the
+  // default section is Profile, not Security, so `securitySectionBody`
+  // didn't exist yet and inject2FAPanel() fell back to anchoring on
+  // `.settings-content` — outside the container loadSection() replaces —
+  // creating the exact permanently-floating 2FA panel this audit was
+  // tracking down. The panel should only ever be built on demand (the
+  // Security toggle / the merged "Set Up 2FA" button both call
+  // window.__open2FAPanel already). All this bootstrap needs to do is keep
+  // the toggle's enabled/disabled state in sync while Security is visible,
+  // and remove any panel left orphaned outside the current section body.
+  function syncOrCleanup2FA() {
+    const securityBody = document.getElementById('securitySectionBody');
+    const panel = el('__p12fa');
+    if (securityBody) {
+      // Only sync status if the panel is already open, or just the toggle
+      // if it isn't — never creates the panel itself.
+      load2FAStatus();
+    } else if (panel) {
+      // Not on Security anymore: if the panel somehow isn't nested inside
+      // a container that already got torn down (e.g. it was appended
+      // before this fix shipped), remove it explicitly rather than leave
+      // it floating.
+      panel.remove();
+    }
+  }
+
   /* ── Bootstrap ─────────────────────────────────────────────────────────── */
   function init() {
     patchSyncCache();
     watchBlockedModal();
     patchDeleteButtons();
-    inject2FAPanel();
+    syncOrCleanup2FA();
     // Re-run when settings-core re-renders sections dynamically
     new MutationObserver(() => {
       patchDeleteButtons();
-      inject2FAPanel();
+      syncOrCleanup2FA();
     }).observe(document.body, { childList: true, subtree: true });
   }
 
