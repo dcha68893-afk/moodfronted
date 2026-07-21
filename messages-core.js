@@ -5106,8 +5106,16 @@ try {
                       || window.currentFriendName || null;
                 // Never show ".." placeholder — only set if we actually have a real name
                 const _displayName = _resolvedName && _resolvedName !== '..' ? _resolvedName : null;
+                // FIX Bug2: resolve friendId for the placeholder too. Without this, every
+                // consumer of the active conversation (getActiveChatInfo(), the call button,
+                // the CHAT_OPENED postMessage, online-status lookup) had no friendId to read
+                // and silently fell back to actualId (the conversation id), not the friend's
+                // actual user id -- causing calls/messages to target the wrong person.
+                const _resolvedFriendId = (typeof conversationId === 'object' && (conversationId.friendId || conversationId.userId || conversationId.receiverId || conversationId.otherUserId))
+                    || (options && (options.friendId || options.userId || options.receiverId || options.otherUserId))
+                    || (typeof actualId === 'string' && actualId.startsWith('pending_') ? actualId.slice(8) : null);
                 // FIX Bug4: use empty string instead of 'Loading…' so _showChatPanel keeps existing DOM name
-                const tempConversation = { id: actualId, friendName: _displayName || '', friendAvatar: '', online: false };
+                const tempConversation = { id: actualId, friendId: _resolvedFriendId, friendName: _displayName || '', friendAvatar: '', online: false };
                 ChatManager.setActiveConversation(tempConversation);
                 this._showChatPanel(tempConversation);
             }
@@ -5447,7 +5455,7 @@ try {
 
                         if (chatId) {
                             await ChatManager.fetchConversations();
-                            await ConversationManager.openConversation(chatId, options);
+                            await ConversationManager.openConversation(chatId, { ...options, friendId: numericReceiverId });
                             
                             try {
                                 window.dispatchEvent(new CustomEvent('conversationCreated', {
@@ -5460,7 +5468,7 @@ try {
                     
                     const existingPending = ChatManager.getPendingConversationByReceiverId(numericReceiverId);
                     if (existingPending) {
-                        await ConversationManager.openConversation(existingPending.id, options);
+                        await ConversationManager.openConversation(existingPending.id, { ...options, friendId: numericReceiverId });
                         return existingPending.id;
                     }
                     
@@ -5541,7 +5549,7 @@ try {
             );
             
             if (existingConversation) {
-                await this.openConversation(existingConversation.id);
+                await this.openConversation(existingConversation.id, { friendId: numericUserId });
                 return existingConversation;
             }
             

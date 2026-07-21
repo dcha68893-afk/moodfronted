@@ -6041,6 +6041,16 @@
 
             
 
+            // FIX Bug2: if none of the explicit friend-id fields are present, fall back to
+            // activeChat.id only after stripping a 'pending_<id>' prefix (the id embedded in a
+            // pending conversation IS the friend/user id). Without this, a not-yet-cached chat's
+            // placeholder conversation (which has no friendId of its own) would resolve to the
+            // conversation id itself, so calls/messages could be sent to the wrong id.
+            const _stripPendingPrefix = function(v) {
+                const s = String(v || '');
+                return s.startsWith('pending_') ? s.slice(8) : s;
+            };
+
             const receiverId = activeChat.friendId || 
 
                               activeChat.pendingReceiverId || 
@@ -6051,7 +6061,7 @@
 
                               activeChat.participantId ||
 
-                              activeChat.id;
+                              _stripPendingPrefix(activeChat.id);
 
             
 
@@ -8855,45 +8865,15 @@ Type: ${message.type || 'text'}`;
 
 
 
-            // Video call button
-
-            const videoCallBtn = UIFailsafe.safeGetElement('videoCallBtn');
-
-            if (videoCallBtn && !videoCallBtn.__kynCallBound) {
-
-                videoCallBtn.__kynCallBound = true;
-
-                videoCallBtn.addEventListener('click', () => {
-
-                    const core = getMessagesCore();
-
-                    const activeChat = core?.getCurrentConversation?.() || core?.currentChat || window.__currentActiveChat;
-
-                    if (!activeChat) { UIRenderer.showNotification('Open a chat first before calling', 'warning'); return; }
-
-                    const receiverId = activeChat.friendId || activeChat.pendingReceiverId || activeChat.otherUserId || activeChat.userId;
-
-                    const receiverName = activeChat.friendName || activeChat.name || activeChat.displayName || 'User';
-
-                    if (!receiverId) { UIRenderer.showNotification('Cannot identify call recipient', 'error'); return; }
-
-                    if (window.parent && window.parent !== window) {
-
-                        window.parent.postMessage({
-
-                            type: 'SWITCH_MODULE', module: 'calls',
-
-                            payload: { userId: receiverId, userName: receiverName, callType: 'video', returnTo: 'messages', chatUserId: receiverId, source: 'messages-module' },
-
-                            timestamp: Date.now()
-
-                        }, '*');
-
-                    }
-
-                });
-
-            }
+            // FIX Bug1: The video/voice call button click handlers used to be bound here too,
+            // guarded by videoCallBtn.__kynCallBound. But this code runs at script-parse time
+            // (via UIEventHandlers.init()), while setupCallHandlers() runs later at the bottom
+            // of this file and does cloneNode(true) + replaceChild on videoCallBtn/voiceCallBtn,
+            // which silently wipes any listener bound here. That silent wipe made this block
+            // dead weight and masked the fact that setupCallHandlers() is the only handler that
+            // actually survives. setupCallHandlers() is now the single source of truth for both
+            // call buttons (it is already idempotent: clone+replace resets listeners cleanly on
+            // repeated calls), so the duplicate binding has been removed.
 
 
 
@@ -12831,7 +12811,11 @@ Type: ${message.type || 'text'}`;
 
                 _uiLog('[messagesUI] Using core.openConversation');
 
-                core.openConversation(id);
+                // FIX Bug2: pass friendId explicitly -- `id` here IS the friend/user id
+                // (the caller builds a conversation for this user), so without this the
+                // placeholder conversation built inside openConversation() has no way to
+                // resolve friendId and getActiveChatInfo() would fall back to the wrong id.
+                core.openConversation(id, { friendId: id });
 
                 ensureChatPanelOpen(id);
 
