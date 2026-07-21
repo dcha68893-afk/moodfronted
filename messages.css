@@ -2866,19 +2866,26 @@ body {
     color: #a0a0a0;
 }
 
-/* Light theme (default) — unified to WhatsApp dark */
+/* FIX (theme audit): this block was labelled "Light theme" but assigned
+   dark values (dark bg-primary/secondary, dark body background,
+   dark-mode bubble colors) — so selecting Light in Settings > Appearance
+   actually made the Messages module render dark. Corrected to real
+   light-mode values, and --bg-color is now overridden too so the module
+   header (--header-chat, which falls back to --bg-color) turns light
+   along with everything else. */
 [data-theme="light"] {
-    --bg-primary: #111b21;
-    --bg-secondary: #202c33;
-    --text-primary: #e9edef;
-    --text-secondary: #8696a0;
-    --border-color: #2a3942;
-    --chat-bubble-sent: #005c4b;
-    --chat-bubble-received: #202c33;
-    --message-bg-sent: #005c4b;
-    --message-bg-received: #202c33;
-    --message-text-sent: #e9edef;
-    --message-text-received: #e9edef;
+    --bg-color: #ffffff;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f0f2f5;
+    --text-primary: #111b21;
+    --text-secondary: #667781;
+    --border-color: #e9edef;
+    --chat-bubble-sent: #d9fdd3;
+    --chat-bubble-received: #ffffff;
+    --message-bg-sent: #d9fdd3;
+    --message-bg-received: #ffffff;
+    --message-text-sent: #111b21;
+    --message-text-received: #111b21;
 }
 
 [data-theme="light"] body,
@@ -2886,7 +2893,7 @@ body {
 [data-theme="light"] .sidebar,
 [data-theme="light"] .chat-panel,
 [data-theme="light"] .messages-container {
-    background-color: #0b141a;
+    background-color: #ffffff;
 }
 
 /* Remove "No messages yet" text when there are actual messages */

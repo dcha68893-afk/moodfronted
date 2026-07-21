@@ -2479,6 +2479,16 @@ body[data-module="friends"] .friend-item:hover {
   --color-friend-bg: #1f2937;
   --color-friend-card: #111827;
   --color-friend-border: #374151;
+  /* FIX (theme audit): --bg-color/--text-primary/--text-secondary/
+     --border-color were only ever declared once at :root (light values,
+     e.g. --bg-color: #ffffff) with no dark counterpart here, so every
+     element using them — including the module header via --header-friends,
+     which falls back to --bg-color — stayed light no matter what theme
+     the user picked in Settings > Appearance. */
+  --text-primary: #e9edef;
+  --text-secondary: #b0b3b8;
+  --bg-color: #111b21;
+  --border-color: #2a3942;
 }
 
 [data-theme="dark"] .message-bubble.sent,

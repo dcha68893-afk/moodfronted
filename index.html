@@ -1973,9 +1973,29 @@
     <!-- MAIN AUTHENTICATION HANDLER -->
     <!-- ====================================================================== -->
     <script>
+        // FIX: index.html previously read/wrote its own localStorage key
+        // ('moodchat_theme') and toggled a `.theme-dark` class, completely
+        // disconnected from the app-wide theme system — which persists the
+        // user's Settings > Appearance choice under 'app_theme' and applies
+        // it via a `data-theme` attribute (see chat.html's getResolvedTheme()).
+        // As a result, choosing Light/Dark in Settings never affected the
+        // login screen at all. This now reads 'app_theme' first (falling
+        // back to the old key for anyone who only ever toggled dark mode
+        // from this page before), resolves 'auto' the same way chat.html
+        // does, and keeps both keys in sync going forward so this page and
+        // the rest of the app never disagree about which theme is active.
+        function resolveAppTheme() {
+            var raw = null;
+            try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
+            if (raw === 'auto') {
+                return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+            }
+            return raw === 'dark' ? 'dark' : 'light';
+        }
+
         function initThemeToggle() {
             const btns = [document.getElementById('mobileThemeToggle'), document.getElementById('desktopThemeToggle')].filter(Boolean);
-            const saved = localStorage.getItem('moodchat_theme');
+            const saved = resolveAppTheme();
             if (saved === 'dark') {
                 document.body.classList.add('theme-dark');
                 btns.forEach(btn => { if (btn) btn.innerHTML = '<i class="fas fa-sun"></i> Light Mode'; });
@@ -1985,6 +2005,7 @@
                     e.preventDefault();
                     document.body.classList.toggle('theme-dark');
                     const isDark = document.body.classList.contains('theme-dark');
+                    try { localStorage.setItem('app_theme', isDark ? 'dark' : 'light'); } catch (_) {}
                     localStorage.setItem('moodchat_theme', isDark ? 'dark' : 'light');
                     btns.forEach(b => { if (b) b.innerHTML = isDark ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });
                 });

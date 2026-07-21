@@ -1114,10 +1114,19 @@ export function setupEventListeners() {
                 updateSaveButton();
                 showNotification('Settings saved successfully', 'success');
                 
-                // On mobile: after saving, if user is on a section panel offer to go back to menu
-                // On desktop: stay in place (no nav needed)
+                // FIX: after saving a sub-feature (e.g. Profile, Privacy, Notifications),
+                // the user should land back on the main settings list instead of being
+                // stuck on the sub-panel. Previously this branch was a no-op comment, so
+                // saving never navigated anywhere — on mobile the sub-panel just sat
+                // there after "Saved" with no way back except a manual back-tap.
+                // window.__settingsNav (defined in settings.html) is the single source
+                // of truth for panel navigation; go back to the section menu through it.
                 if (isMobileView && currentMobileSection) {
-                    // Optionally show a small "Back to menu" hint — don't force navigate
+                    currentMobileSection = null;
+                    const nav = global_settingsNav();
+                    if (nav) {
+                        setTimeout(() => nav.goBack(), 400);
+                    }
                 }
                 
             } catch (error) {
