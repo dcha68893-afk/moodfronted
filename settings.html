@@ -2928,8 +2928,8 @@
                     var prev = _previousSection;
                     _previousSection = null;
                     navigateTo(prev, { replace: true, animate: true });
-                } else {
-                    /* no previous section → return to sidebar menu */
+                } else if (_currentSection) {
+                    /* inside a section with no deeper back-stack → return to the menu */
                     _currentSection  = null;
                     _previousSection = null;
                     _showSidebarOnly();
@@ -2938,6 +2938,14 @@
                     if ($subtitle) $subtitle.textContent = 'Manage your preferences';
                     /* clear active highlight */
                     if ($menu) $menu.querySelectorAll('.menu-item').forEach(function(i){ i.classList.remove('active'); });
+                } else {
+                    /* FIX: already at the top-level settings menu (no section
+                       open) — previously this branch just re-ran
+                       _showSidebarOnly(), a no-op, so pressing back while at
+                       the Settings menu on mobile did nothing and the user
+                       appeared stuck inside Settings with no way out. Now it
+                       actually exits, same as the desktop path below. */
+                    _exitSettings();
                 }
             } else {
                 /* Desktop back = exit settings */
@@ -2947,8 +2955,23 @@
 
         /* ── Exit settings entirely ─────────────────────────────────────── */
         function _exitSettings() {
+            /* Preserve the unsaved-changes guard that used to live in
+               settings-ui.js's setupAndroidBackButton(). */
+            try {
+                var dbg = window.__UI_DEBUG__ && typeof window.__UI_DEBUG__.getState === 'function'
+                    ? window.__UI_DEBUG__.getState() : null;
+                if (dbg && dbg.unsavedChanges && !window.confirm('You have unsaved changes. Leave anyway?')) {
+                    return;
+                }
+            } catch (_) {}
+
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'CLOSE_SETTINGS', source: 'settings' }, '*');
+                /* FIX: the parent shell (chat.html) only listens for
+                   'CHILD_CLOSING' (see its postMessage handler) — this used
+                   to send 'CLOSE_SETTINGS', a type the parent never checks
+                   for, so the postMessage was silently ignored and Settings
+                   never actually closed via this path. */
+                window.parent.postMessage({ type: 'CHILD_CLOSING', module: 'settings', childId: 'settings', source: 'settings', timestamp: Date.now() }, '*');
             } else if (document.referrer) {
                 window.history.back();
             } else {

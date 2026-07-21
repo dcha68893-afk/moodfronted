@@ -1058,34 +1058,39 @@
         color: var(--text-primary, #111111);
     }
 
-    /* Header — white bar */
+    /* Header — bug: this was pinned to a literal #ffffff/#e5e7eb regardless
+       of theme, which is why the Tools/Marketplace header stayed light even
+       when the rest of the app switched to dark. It now follows the same
+       live --card-bg/--text-primary/--border-color variables AppSettings.js
+       writes on every theme change (see applyToDOM in js/AppSettings.js). */
     .jm-header {
-        background: #ffffff !important;
-        border-bottom: 1px solid #e5e7eb !important;
+        background: var(--card-bg, #ffffff) !important;
+        border-bottom: 1px solid var(--border-color, #e5e7eb) !important;
     }
 
     /* Search bar */
     .jm-search-wrap {
-        background: #f3f4f6 !important;
-        border: 1px solid #e5e7eb !important;
+        background: var(--input-bg, #f3f4f6) !important;
+        border: 1px solid var(--border-color, #e5e7eb) !important;
     }
     .jm-search-input {
         background: transparent !important;
-        color: #111111 !important;
+        color: var(--text-primary, #111111) !important;
     }
-    .jm-search-input::placeholder { color: #9ca3af !important; }
+    .jm-search-input::placeholder { color: var(--text-secondary, #9ca3af) !important; }
+    .jm-search-icon, .jm-icon-btn i { color: var(--text-secondary, #667781) !important; }
 
     /* Page title bars */
     .jm-page-title {
         font-weight: 700 !important;
         font-size: 16px !important;
         padding: 14px 16px !important;
-        color: #111111 !important;
+        color: var(--text-primary, #111111) !important;
         display: flex !important;
         align-items: center !important;
         gap: 8px !important;
-        border-bottom: 1px solid #e5e7eb !important;
-        background: #ffffff !important;
+        border-bottom: 1px solid var(--border-color, #e5e7eb) !important;
+        background: var(--card-bg, #ffffff) !important;
         cursor: pointer;
     }
 
@@ -1292,10 +1297,10 @@
         background: rgba(255,255,255,0.2) !important;
     }
 
-    /* Detail panel */
-    .marketplace-detail-panel { background: #ffffff !important; color: #111111 !important; }
-    .marketplace-detail-header { background: #ffffff !important; border-bottom: 1px solid #e5e7eb !important; }
-    .marketplace-detail-name, .marketplace-detail-time { color: #111111 !important; }
+    /* Detail panel — same header-hardcoding bug as .jm-header above */
+    .marketplace-detail-panel { background: var(--card-bg, #ffffff) !important; color: var(--text-primary, #111111) !important; }
+    .marketplace-detail-header { background: var(--card-bg, #ffffff) !important; border-bottom: 1px solid var(--border-color, #e5e7eb) !important; }
+    .marketplace-detail-name, .marketplace-detail-time { color: var(--text-primary, #111111) !important; }
     .listing-price { color: #f57224 !important; }
 
     /* Misc text */

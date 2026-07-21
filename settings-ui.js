@@ -317,81 +317,62 @@ function checkMobileView() {
 
 function showMobileMenu() {
     if (!isMobileView) return;
-    
+    currentMobileSection = null;
+
+    // FIX: delegate to window.__settingsNav (settings.html) — the single
+    // system that now owns mobile panel display + the header back button +
+    // window.history for settings navigation. Previously this function
+    // toggled .style.display directly AND pushed its own history state,
+    // which fought with the equivalent logic in settings.html and could
+    // leave the two systems' idea of "what history entry are we on"
+    // out of sync, breaking the hardware/browser back button.
+    if (global_settingsNav()) { global_settingsNav().goBack(); return; }
+
     const sidebar = document.querySelector('.settings-sidebar');
     const content = document.querySelector('.settings-content');
-    
     if (sidebar && content) {
         sidebar.style.display = 'flex';
         content.style.display = 'none';
-        currentMobileSection = null;
-        
-        history.pushState({ mobileMenu: true }, null, window.location.href);
     }
 }
 
 function showMobileSection(sectionId) {
     if (!isMobileView) return;
-    
+    currentMobileSection = sectionId;
+
+    // FIX: see showMobileMenu() above — same delegation, same reason.
+    if (global_settingsNav()) { global_settingsNav().navigateTo(sectionId, { animate: true }); return; }
+
     const sidebar = document.querySelector('.settings-sidebar');
     const content = document.querySelector('.settings-content');
-    
     if (sidebar && content) {
         sidebar.style.display = 'none';
         content.style.display = 'flex';
-        currentMobileSection = sectionId;
-        
-        history.pushState({ mobileSection: sectionId }, null, window.location.href);
+        content.style.width = '100%';
     }
+}
+
+// Small helper — window.__settingsNav is defined by an inline <script> in
+// settings.html and may not exist yet the first instant this module runs.
+function global_settingsNav() {
+    return (typeof window !== 'undefined' && window.__settingsNav) ? window.__settingsNav : null;
 }
 
 // =============================================
 // ANDROID BACK BUTTON HANDLER
 // =============================================
 function setupAndroidBackButton() {
-    const notifyParentGoBack = () => {
-        // Direct postMessage is most reliable — bypasses any auth/state gates
-        try {
-            window.parent.postMessage({
-                type: 'CHILD_CLOSING',
-                module: 'settings',
-                childId: 'settings',
-                timestamp: Date.now()
-            }, '*');
-        } catch (e) {}
-        sendMessageToParent({
-            type: 'CHILD_CLOSING',
-            childId: 'settings',
-            timestamp: Date.now()
-        }).catch(() => {});
-    };
-
-    window.addEventListener('popstate', function(event) {
-        if (isMobileView) {
-            if (currentMobileSection) {
-                // User is inside a settings section panel — go back to the settings menu
-                event.preventDefault();
-                showMobileMenu();
-            } else {
-                // User is at the settings menu top level — go back to the app sidebar
-                if (unsavedChanges) {
-                    if (confirm('You have unsaved changes. Leave anyway?')) {
-                        unsavedChanges = false;
-                        notifyParentGoBack();
-                    } else {
-                        // Restore history entry so back button works again next time
-                        history.pushState({ mobileMenu: true }, null, window.location.href);
-                    }
-                } else {
-                    notifyParentGoBack();
-                }
-            }
-        }
-    });
-
-    if (isMobileView) {
-        history.replaceState({ mobileMenu: true }, null, window.location.href);
-    }
+    // FIX (theme/back-nav audit): this used to install its OWN 'popstate'
+    // listener and its own history.pushState/replaceState calls, running
+    // in parallel with the equivalent (and more complete) popstate handler
+    // in settings.html's window.__settingsNav. Two listeners independently
+    // pushing history state for the same navigation meant a single
+    // hardware/browser back press often didn't do what the user expected —
+    // sometimes requiring 2-3 presses to leave a section, sometimes
+    // jumping straight out of Settings entirely. window.__settingsNav now
+    // owns popstate handling end-to-end (including exiting Settings — see
+    // goBack()/_exitSettings() in settings.html), so this is a no-op.
+    return;
 }
 
 
@@ -826,8 +807,16 @@ export function buildSettingsMenu() {
         
         menuItem.addEventListener('click', async (e) => {
             e.preventDefault();
-            e.stopPropagation();
-            
+            // FIX (theme/back-nav audit): this handler used to also call
+            // e.stopPropagation(), which prevented the click from ever
+            // bubbling up to the delegated listener on #settingsMenu that
+            // lives in settings.html. That delegated listener is the ONLY
+            // code that reveals the mobile header back button
+            // (#backToMenuBtn stays display:none otherwise) and the only
+            // place driving window.history for mobile navigation. Blocking
+            // it meant mobile users who opened any settings section had no
+            // visible way back to the settings menu — the button existed
+            // in the DOM but could never become visible.
             try {
                 document.querySelectorAll('.menu-item').forEach(item => {
                     item.classList.remove('active');
@@ -836,8 +825,16 @@ export function buildSettingsMenu() {
                 
                 await loadSection(item.id);
                 
+                // Mirror state for the few remaining call-sites in this file
+                // that still read currentMobileSection (Escape key handler,
+                // save flow). Actual panel switching / back button / history
+                // are now owned exclusively by window.__settingsNav
+                // (settings.html), reached via this click bubbling to
+                // #settingsMenu — avoids the duplicate history.pushState()
+                // and fighting display-toggle calls that happened when both
+                // this file and settings.html tried to drive the same UI.
                 if (isMobileView) {
-                    showMobileSection(item.id);
+                    currentMobileSection = item.id;
                 }
                 
             } catch (error) {
@@ -850,25 +847,6 @@ export function buildSettingsMenu() {
     });
     
     addConnectionStatusIndicator();
-    
-    if (isMobileView) {
-        const backToMenuBtn = document.createElement('div');
-        backToMenuBtn.className = 'menu-item';
-        backToMenuBtn.style.marginTop = '10px';
-        backToMenuBtn.style.borderTop = '1px solid var(--border-color)';
-        backToMenuBtn.style.paddingTop = '15px';
-        backToMenuBtn.innerHTML = `
-            <div class="menu-icon">
-                <i class="fas fa-arrow-left"></i>
-            </div>
-            <div class="menu-text">Back to Settings</div>
-        `;
-        backToMenuBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            showMobileMenu();
-        });
-        menuContainer.appendChild(backToMenuBtn);
-    }
 }
 
 // Add connection status indicator to menu
