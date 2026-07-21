@@ -199,6 +199,7 @@ function _debounceSettingUpdate(fn, delay = 600) {
 
 let colorPicker = null;
 let uiInitialized = false;
+let fallbackContentShown = false; // tracks the emergency "show something" fallback; NEVER gates real init
 let currentModal = null;
 let pendingPhotoData = null;
 let searchDebounceTimer = null;
@@ -4156,11 +4157,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                 await UIErrorBoundary.wrap(initializeUI, 'dom_initialization')();
             } else {
                 console.log('[SettingsUI] Core not ready after timeout, using fallback');
-                // Force load with cached data
+                // Force load with cached data (content only - NOT a substitute for full init,
+                // so uiInitialized stays false and the menu/click handlers still get built
+                // for real once core becomes ready)
                 const container = document.getElementById('settingsContentBody');
-                if (container) {
+                if (container && !uiInitialized) {
                     loadProfileSection(container);
-                    uiInitialized = true;
+                    fallbackContentShown = true;
                 }
             }
         }
@@ -4173,14 +4176,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 });
 
-// Immediate fallback - don't wait too long
+// Immediate fallback - don't wait too long. This only shows *something* while we
+// keep waiting for core; it must NEVER mark uiInitialized, or the real init
+// (buildSettingsMenu + click handlers) will be skipped once core actually becomes
+// ready, leaving every menu item stuck showing whatever section loaded first.
 setTimeout(() => {
-    if (!uiInitialized) {
+    if (!uiInitialized && !fallbackContentShown) {
         console.log('[SettingsUI] ⚠️ Immediate fallback: loading profile section');
         const container = document.getElementById('settingsContentBody');
         if (container && typeof loadProfileSection === 'function') {
             loadProfileSection(container);
-            uiInitialized = true;
+            fallbackContentShown = true;
         }
     }
 }, 1000);
@@ -4193,7 +4199,11 @@ setTimeout(() => {
 window.addEventListener('parentReady', (event) => {
     if (event.detail && event.detail.ready) {
         debugLog('Parent ready - refreshing UI if needed');
-        if (currentSection && uiInitialized) {
+        if (!uiInitialized) {
+            // Core became ready after our fallback already showed placeholder content -
+            // run the real init now so the menu and its click handlers actually get built.
+            initializeUI();
+        } else if (currentSection) {
             setTimeout(() => loadSection(currentSection), 100);
         }
     }
@@ -4205,13 +4215,19 @@ window.addEventListener('lifecycleStateChange', (event) => {
     updateConnectionState(newState);
     updateSaveButton();
     
-    if (newState === LifecycleState.ACTIVE && currentSection) {
-        // Force reload from backend
-        SettingsState.load().then(() => {
-            loadSection(currentSection);
-        }).catch(() => {
-            loadSection(currentSection);
-        });
+    if (newState === LifecycleState.ACTIVE) {
+        if (!uiInitialized) {
+            // Core became ready after our fallback already showed placeholder content -
+            // run the real init now so the menu and its click handlers actually get built.
+            initializeUI();
+        } else if (currentSection) {
+            // Force reload from backend
+            SettingsState.load().then(() => {
+                loadSection(currentSection);
+            }).catch(() => {
+                loadSection(currentSection);
+            });
+        }
     }
 });
 

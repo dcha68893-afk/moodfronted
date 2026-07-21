@@ -16,6 +16,18 @@
   --text:#e8e0f0;--text-dim:#665e80;
   --radius:18px;
 }
+/* Light variant of the arcade palette - applied when the app theme
+   (Settings > Appearance) resolves to light. data-theme is set on this
+   iframe's <html>/<body> by the parent shell (chat.html) whenever the
+   user changes their theme, same mechanism every other module uses. */
+html[data-theme="light"], body[data-theme="light"]{
+  --gold:#c98a00;--gold2:#e67e22;--gold-dim:rgba(201,138,0,0.12);
+  --gem:#0891b2;--gem2:#0ea5e9;
+  --bg:#f5f3fa;--bg2:#ffffff;--bg3:#eceafb;
+  --panel:rgba(255,255,255,0.96);
+  --border:rgba(0,0,0,0.12);
+  --text:#1a1625;--text-dim:#6b6480;
+}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:'Exo 2','Trebuchet MS',sans-serif;}
 

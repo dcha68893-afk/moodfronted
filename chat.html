@@ -2614,12 +2614,43 @@
             });
         }
 
+        // ======================================================================
+        // RESOLVE ACTIVE THEME
+        // Single source of truth for "what theme is the app in right now",
+        // used before pushing colors into any child iframe. Mirrors the same
+        // 'auto' -> system-preference resolution already used elsewhere in
+        // this file for the parent document, so parent and iframes never
+        // disagree about which theme is active.
+        // ======================================================================
+        function getResolvedTheme() {
+            try {
+                var stored = null;
+                try { stored = localStorage.getItem('app_theme'); } catch (_) {}
+                var raw = document.documentElement.getAttribute('data-theme') || stored || 'light';
+                if (raw === 'auto') {
+                    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+                }
+                return raw === 'dark' ? 'dark' : 'light';
+            } catch (_) {
+                return 'light';
+            }
+        }
+
+        function reapplyThemeToAllIframes() {
+            try {
+                document.querySelectorAll('.content-iframe').forEach((iframe) => {
+                    applyParentShellToIframe(iframe, iframe.dataset && iframe.dataset.module);
+                });
+            } catch (_) {}
+        }
+
         function applyParentShellToIframe(iframe, page) {
             try {
                 if (!iframe || !iframe.contentWindow) return;
                 const doc = iframe.contentDocument || iframe.contentWindow.document;
                 if (!doc || !doc.body) return;
-                const shellVars = {
+                const isDark = getResolvedTheme() === 'dark';
+                const shellVars = isDark ? {
                     '--primary-color': '#22c55e',
                     '--primary-dark': '#16a34a',
                     '--primary-light': '#166534',
@@ -2633,6 +2664,20 @@
                     '--accent-color': '#8b5cf6',
                     '--accent-soft': '#1e293b',
                     '--header-gradient': 'linear-gradient(135deg, #0f172a 0%, #1e293b 62%, #0f172a 100%)'
+                } : {
+                    '--primary-color': '#22c55e',
+                    '--primary-dark': '#16a34a',
+                    '--primary-light': '#dcfce7',
+                    '--secondary-color': '#f0f2f5',
+                    '--background-color': '#ffffff',
+                    '--surface-color': '#ffffff',
+                    '--card-background': '#ffffff',
+                    '--border-color': '#d1d7db',
+                    '--text-primary': '#111b21',
+                    '--text-secondary': '#667781',
+                    '--accent-color': '#8b5cf6',
+                    '--accent-soft': '#f5f3ff',
+                    '--header-gradient': 'linear-gradient(135deg, #ffffff 0%, #f0f2f5 62%, #ffffff 100%)'
                 };
                 doc.body.setAttribute('data-parent-shell', 'true');
                 doc.body.setAttribute('data-parent-module', page || iframe.dataset.module || '');
@@ -2645,36 +2690,45 @@
                     doc.body?.style?.setProperty(key, value);
                 });
 
-                // Inject global dark theme into this iframe
-                injectDarkThemeIntoIframe(iframe);
+                // Inject the currently active theme into this iframe
+                injectThemeIntoIframe(iframe, isDark ? 'dark' : 'light');
             } catch (_error) {}
         }
 
+
         // ======================================================================
-        // DARK THEME INJECTION INTO IFRAMES
+        // THEME INJECTION INTO IFRAMES
         // Injects theme.colors.css + a <style> block into every child iframe
-        // so ALL modules render consistently in dark mode.
+        // so ALL modules render consistently with whichever theme (light or
+        // dark) the user actually has selected in Settings > Appearance.
         // ======================================================================
-        function injectDarkThemeIntoIframe(iframe) {
+        function injectThemeIntoIframe(iframe, theme) {
             try {
                 if (!iframe || !iframe.contentDocument) return;
                 const doc = iframe.contentDocument;
                 if (!doc || !doc.head) return;
+                const isDark = theme === 'dark';
 
-                // Avoid double-injection
-                if (doc.getElementById('kyn-dark-theme-link')) return;
+                // 1) Inject theme.colors.css link (once)
+                if (!doc.getElementById('kyn-theme-link')) {
+                    const link = doc.createElement('link');
+                    link.id = 'kyn-theme-link';
+                    link.rel = 'stylesheet';
+                    link.href = 'theme.colors.css';
+                    doc.head.insertBefore(link, doc.head.firstChild);
+                }
 
-                // 1) Inject theme.colors.css link
-                const link = doc.createElement('link');
-                link.id = 'kyn-dark-theme-link';
-                link.rel = 'stylesheet';
-                link.href = 'theme.colors.css';
-                doc.head.insertBefore(link, doc.head.firstChild);
-
-                // 2) Inject override <style> for hard-coded light values
-                const style = doc.createElement('style');
-                style.id = 'kyn-dark-theme-inline';
-                style.textContent = `
+                // 2) Inject/update override <style> for hard-coded values.
+                // Re-runs every time so a live theme toggle actually updates
+                // iframes that are already open, instead of only affecting
+                // the next fresh load.
+                let style = doc.getElementById('kyn-theme-inline');
+                if (!style) {
+                    style = doc.createElement('style');
+                    style.id = 'kyn-theme-inline';
+                    doc.head.insertBefore(style, doc.head.firstChild);
+                }
+                style.textContent = isDark ? `
                     html, body {
                         background: #0f172a !important;
                         color: #e5e7eb !important;
@@ -2701,8 +2755,41 @@
                     input::placeholder, textarea::placeholder {
                         color: #9ca3af !important;
                     }
-
-                    /* ── CALLING PANEL: never let dark theme override these ── */
+                ` : `
+                    html, body {
+                        background: #ffffff !important;
+                        color: #111b21 !important;
+                    }
+                    .app-container, .main-content, .content-area, .page-wrapper {
+                        background: #ffffff !important;
+                    }
+                    :root {
+                        --bg-color: #ffffff !important;
+                        --text-primary: #111b21 !important;
+                        --text-secondary: #667781 !important;
+                        --border-color: #d1d7db !important;
+                        --secondary-color: #f0f2f5 !important;
+                        --kynecta-light: #ffffff !important;
+                        --kynecta-dark: #111b21 !important;
+                        --kynecta-border: #d1d7db !important;
+                        --offline-overlay: rgba(255,255,255,0.97) !important;
+                    }
+                    input, textarea, select {
+                        background: #f0f2f5 !important;
+                        color: #111b21 !important;
+                        border-color: #d1d7db !important;
+                    }
+                    input::placeholder, textarea::placeholder {
+                        color: #667781 !important;
+                    }
+                `;
+                // The in-call overlay always uses the same dark, high-contrast
+                // treatment regardless of app theme (matches native call UIs),
+                // so it's appended once and never toggled.
+                if (!doc.getElementById('kyn-theme-calling')) {
+                    const callingStyle = doc.createElement('style');
+                    callingStyle.id = 'kyn-theme-calling';
+                    callingStyle.textContent = `
                     .calling-overlay,
                     .incoming-call-modal {
                         background: linear-gradient(160deg,
@@ -2749,12 +2836,13 @@
                         color: #111111 !important;
                     }
                     .calling-top-btn i { color: #111111 !important; }
-                `;
-                doc.head.insertBefore(style, doc.head.firstChild);
+                    `;
+                    doc.head.insertBefore(callingStyle, doc.head.firstChild);
+                }
 
-                // 3) Apply data-theme="dark"
-                doc.documentElement.setAttribute('data-theme', 'dark');
-                if (doc.body) doc.body.setAttribute('data-theme', 'dark');
+                // 3) Apply the actual resolved data-theme, not a hardcoded value
+                doc.documentElement.setAttribute('data-theme', theme);
+                if (doc.body) doc.body.setAttribute('data-theme', theme);
 
             } catch (err) {
                 // Cross-origin iframes throw — safe to ignore
@@ -5265,6 +5353,7 @@
                         document.documentElement.setAttribute('data-theme', theme);
                         document.body.setAttribute('data-theme', theme);
                         try { localStorage.setItem('app_theme', theme); } catch(e) {}
+                        reapplyThemeToAllIframes();
                     }
                     emitGlobalAppEvent('SETTINGS_UPDATED', {
                         settings,
@@ -5306,6 +5395,7 @@
                             document.documentElement.setAttribute('data-theme', _resolved);
                             document.body.setAttribute('data-theme', _resolved);
                             try { localStorage.setItem('app_theme', _resolved); } catch(_) {}
+                            reapplyThemeToAllIframes();
                         }
                         if (s && s.appearance && s.appearance.accentColor) {
                             document.documentElement.style.setProperty('--accent-color', s.appearance.accentColor);
@@ -5332,6 +5422,7 @@
                             document.documentElement.setAttribute('data-theme', resolvedTheme);
                             document.body.setAttribute('data-theme', resolvedTheme);
                             try { localStorage.setItem('app_theme', resolvedTheme); } catch(e) {}
+                            reapplyThemeToAllIframes();
                         }
                         if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
                         if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);

@@ -5964,7 +5964,7 @@ export async function loadCachedDataInstantly() {
 export async function initializeEnhancedMarketplace() {
     try {
         if (!isActive()) return;
-        checkDarkMode();
+        await checkDarkMode();
         await checkUserPremiumStatus();
         await loadEnhancedMarketplaceData();
         cleanupExpiredListings();
@@ -6628,11 +6628,20 @@ export function escapeHtml(text) {
     }
 }
 
-export function checkDarkMode() {
+export async function checkDarkMode() {
     try {
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.body.setAttribute('data-theme', 'dark');
+        // Never override an explicit user choice. Only fall back to the
+        // system preference when the user hasn't picked (or picked 'auto').
+        let preference = null;
+        try { preference = await safeStorage.get('user_theme_preference'); } catch {}
+        if (preference === 'light' || preference === 'dark') {
+            document.documentElement.setAttribute('data-theme', preference);
+            document.body.setAttribute('data-theme', preference);
+            return;
         }
+        const theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+        document.body.setAttribute('data-theme', theme);
     } catch {}
 }
 

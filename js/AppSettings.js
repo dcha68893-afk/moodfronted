@@ -793,16 +793,34 @@
     function applyToDOM(settings) {
         try {
             const root = document.documentElement;
-            const theme = settings.appearance?.theme || 'light';
+            const chosenTheme = settings.appearance?.theme || 'light';
+            // 'auto' isn't a real paint-able theme - resolve it against the
+            // system preference so every [data-theme="dark"|"light"] CSS
+            // selector across the app (theme.colors.css, chat.css, etc.)
+            // actually matches. Previously 'auto' was written to data-theme
+            // verbatim, which matched neither selector and silently fell
+            // back to hardcoded light values regardless of system theme.
+            const prefersDark = !!(global.matchMedia && global.matchMedia('(prefers-color-scheme: dark)').matches);
+            const theme = chosenTheme === 'auto' ? (prefersDark ? 'dark' : 'light') : chosenTheme;
 
             root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
-            root.classList.add(`theme-${theme}`);
+            root.classList.add(`theme-${chosenTheme}`);
             root.setAttribute('data-theme', theme);
+            root.setAttribute('data-theme-preference', chosenTheme);
             root.setAttribute('lang', settings.appearance?.language || 'en');
             root.style.fontSize = `${settings.appearance?.fontSize || 16}px`;
             root.style.setProperty('--base-font-size', `${settings.appearance?.fontSize || 16}px`);
             root.style.setProperty('--primary-color', settings.appearance?.accentColor || '#4F46E5');
             root.classList.toggle('reduce-motion', !!settings.appearance?.reduceMotion);
+
+            // Keep the resolved theme in sync with the OS if the user picked
+            // 'auto' and the system preference flips while the app is open.
+            if (chosenTheme === 'auto' && global.matchMedia && !root.__kynAutoThemeListenerAttached) {
+                root.__kynAutoThemeListenerAttached = true;
+                try {
+                    global.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyToDOM(_data));
+                } catch (_) {}
+            }
 
             if (theme === 'dark') {
                 root.style.setProperty('--bg-color', '#111b21');
