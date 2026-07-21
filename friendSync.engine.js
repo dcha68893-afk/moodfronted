@@ -489,6 +489,9 @@
                     displayName: raw.friendRequesterUser?.username || raw.friendReceiverUser?.username || null,
                     username:    raw.friendRequesterUser?.username || raw.friendReceiverUser?.username || null,
                     avatar:      raw.friendRequesterUser?.avatar   || raw.friendReceiverUser?.avatar   || null,
+                    // FIX (COVER-PHOTO-NOT-VISIBLE-TO-FRIENDS): backend now returns
+                    // coverPhoto on the included user records; this was dropped here.
+                    coverPhoto:  raw.friendRequesterUser?.coverPhoto || raw.friendReceiverUser?.coverPhoto || null,
                 };
             } else {
                 // Flat user object from accepted friends list
@@ -504,6 +507,7 @@
                     displayName: raw.displayName || raw.username,
                     username:    raw.username,
                     avatar:      raw.avatar,
+                    coverPhoto:  raw.coverPhoto || null,
                 };
             }
         }
@@ -616,6 +620,9 @@
                 username:    record.username    || '',
                 avatar:      record.avatar      || '',
                 photoURL:    record.avatar      || '',
+                // FIX (COVER-PHOTO-NOT-VISIBLE-TO-FRIENDS): was dropped at this
+                // last hop even after _normalizeRecord started carrying it.
+                coverPhoto:  record.coverPhoto  || '',
                 addedAt:     record.createdAt,
                 updatedAt:   record.updatedAt,
                 isLocalOnly: record.isLocalOnly,
@@ -633,6 +640,7 @@
                 displayName: record.displayName || record.username || record.friendId,
                 username:    record.username || '',
                 avatar:      record.avatar   || '',
+                coverPhoto:  record.coverPhoto || '',
                 createdAt:   record.createdAt,
                 isLocalOnly: record.isLocalOnly,
             };

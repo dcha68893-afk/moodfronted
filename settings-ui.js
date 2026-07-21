@@ -927,18 +927,18 @@ export async function loadSection(sectionId) {
             return;
         }
         
-        // Reset scroll and show loading
+        // Reset scroll
         contentContainer.scrollTop = 0;
-        contentContainer.innerHTML = `
-            <div class="settings-section" style="text-align: center; padding: 30px;">
-                <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
-                <p style="margin-top: 15px;">Loading ${sectionId} settings...</p>
-            </div>
-        `;
-        
-        // Small delay for UI feedback
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
+
+        // FIX (SETTINGS-LOAD-FLASH): this used to always wipe the container to
+        // a spinner and then `await new Promise(resolve => setTimeout(resolve, 50))`
+        // before rendering the real section — every section loader below
+        // (loadProfileSection, loadSecuritySection, etc.) is fully synchronous
+        // and reads from the already-loaded SettingsState cache, so there was
+        // never anything to actually wait for. That guaranteed a spinner-then-
+        // content flash on every single click. Render directly instead; if a
+        // section loader ever throws, the catch block below still shows a
+        // proper error state.
         // Load section based on ID - using REAL backend data from SettingsState
         let loadFunctionsMap = {
             'profile': loadProfileSection,

@@ -1498,6 +1498,7 @@ export const RenderPipeline = {
                                 username:    r.username || '',
                                 avatar:      r.avatar || '',
                                 photoURL:    r.avatar || '',
+                                coverPhoto:  r.coverPhoto || '',
                                 status:      r.status,
                                 addedAt:     r.createdAt,
                                 isLocalOnly: r.isLocalOnly,
@@ -4041,6 +4042,10 @@ export const loadFriendDetails = async function(friendData, type) {
             const username = detailedData.username ? escapeHtml(detailedData.username) : 'No username';
             const photoURL = detailedData.photoURL || detailedData.avatar;
             const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
+            // FIX (COVER-PHOTO-NOT-VISIBLE-TO-FRIENDS): this modal never rendered
+            // a cover photo at all — the backend now returns it and the friend
+            // caches now carry it through, so surface it here.
+            const coverPhotoUrl = detailedData.coverPhoto ? escapeHtml(detailedData.coverPhoto) : null;
             const email = detailedData.email ? escapeHtml(detailedData.email) : null;
             const phoneNumber = detailedData.phoneNumber ? escapeHtml(detailedData.phoneNumber) : null;
             const bio = detailedData.bio ? escapeHtml(detailedData.bio) : null;
@@ -4081,8 +4086,13 @@ export const loadFriendDetails = async function(friendData, type) {
                 categoryBadgeHtml = '<div class="friend-category-badge muted" style="width: 30px; height: 30px; font-size: 12px;"><i class="fas fa-volume-mute"></i></div>';
             }
 
+            const coverBannerHtml = coverPhotoUrl
+                ? `<div class="friend-profile-cover" style="width:100%;height:120px;border-radius:12px;background-image:url('${coverPhotoUrl}');background-size:cover;background-position:center;margin-bottom:12px;"></div>`
+                : '';
+
             detailsContent.innerHTML = `
                 <div class="friend-profile-header">
+                    ${coverBannerHtml}
                     <div class="friend-profile-avatar-wrapper">
                         ${avatarHtml}
                         ${categoryBadgeHtml}

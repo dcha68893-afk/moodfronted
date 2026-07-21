@@ -3581,6 +3581,7 @@ const OfflineFirstFriends = {
                     username:    r.username || '',
                     avatar:      r.avatar || '',
                     photoURL:    r.avatar || '',
+                    coverPhoto:  r.coverPhoto || '',
                     status:      r.status,
                     addedAt:     r.createdAt,
                     isLocalOnly: r.isLocalOnly,
@@ -3601,6 +3602,7 @@ const OfflineFirstFriends = {
                     displayName: r.displayName || r.username || r.friendId,
                     username:    r.username || '',
                     avatar:      r.avatar || '',
+                    coverPhoto:  r.coverPhoto || '',
                     createdAt:   r.createdAt,
                     isLocalOnly: r.isLocalOnly,
                 });
@@ -3619,6 +3621,7 @@ const OfflineFirstFriends = {
                     displayName: r.displayName || r.username || r.friendId,
                     username:    r.username || '',
                     avatar:      r.avatar || '',
+                    coverPhoto:  r.coverPhoto || '',
                     createdAt:   r.createdAt,
                     isLocalOnly: r.isLocalOnly,
                     optimistic:  r.isLocalOnly,
@@ -5043,37 +5046,17 @@ const UIBridge = {
                 return;
             }
             
-            const { friendId, friendName, callType } = event.detail || {};
+            const { friendId, callType } = event.detail || {};
             if (!friendId) return;
-
-            // FIX-ROOT-CAUSE-DEAD-CALL-PATH: this used to post a 'START_CALL'
-            // message to the parent (chat.html), which has no handler for
-            // that type at all — chat.html only recognizes 'SWITCH_MODULE',
-            // 'INITIATE_CALL', and 'CALL_INITIATE'. Since nothing anywhere in
-            // the codebase ever actually dispatches the 'ui:startCall' DOM
-            // event this handler listens for, this was fully dead — but a
-            // silent dead end, not an error, so a future button wired to
-            // 'ui:startCall' expecting it to place a call would fail with no
-            // indication why. Route through the exact same SWITCH_MODULE path
-            // the real, working "call" button in friend-ui.js's
-            // navigateToCallModule() uses, so this is the same one real call
-            // engine rather than a second, different, silently-broken one.
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'SWITCH_MODULE',
-                    module: 'calls',
-                    payload: {
-                        userId: friendId,
-                        userName: friendName || 'User',
-                        callType: callType === 'audio' ? 'voice' : (callType || 'voice'),
-                        returnTo: 'friends',
-                        timestamp: Date.now(),
-                        source: 'friends-module'
-                    },
-                    source: 'friend-core',
+            
+            safeSend({
+                type: 'START_CALL',
+                payload: {
+                    friendId,
+                    callType: callType || 'audio',
                     timestamp: Date.now()
-                }, '*');
-            }
+                }
+            });
         };
         
         window.addEventListener('ui:startCall', handler);
@@ -7327,6 +7310,7 @@ function loadCachedDataInstantly() {
                         id: r.friendId, localId: r.id, serverId: r.serverId,
                         displayName: r.displayName || r.username || r.friendId,
                         username: r.username || '', avatar: r.avatar || '', photoURL: r.avatar || '',
+                        coverPhoto: r.coverPhoto || '',
                         status: r.status, addedAt: r.createdAt, isLocalOnly: r.isLocalOnly,
                     }));
                     normalized.forEach(f => FriendCacheManager._cache.friends.set(String(f.id), f));
@@ -7517,6 +7501,11 @@ async function loadFriendsFromBackend() {
                 username: friend.username || '',
                 avatar: friend.avatar || friend.photoURL || '',
                 photoURL: friend.avatar || friend.photoURL || '',
+                // FIX (COVER-PHOTO-NOT-VISIBLE-TO-FRIENDS): the backend now returns
+                // coverPhoto on every friend record (friendService.js USER_ATTRS),
+                // but this normalizer dropped it, so it never reached the friend
+                // profile modal even after the backend fix.
+                coverPhoto: friend.coverPhoto || '',
                 firstName: friend.firstName || '',
                 lastName: friend.lastName || '',
                 status: friend.status || 'offline',
