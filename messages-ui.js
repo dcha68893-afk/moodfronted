@@ -2936,32 +2936,6 @@
                 stored._decrypted = true;
                 stored._decryptAttempted = true;
                 stored._decryptInFlight = false;
-
-                // FIX-ROOT-CAUSE-DECRYPT-ON-RELOAD: the in-memory update above
-                // only lasts for this page session. Without also writing the
-                // plaintext into the durable local cache, the message stays
-                // stored as ciphertext there — so every future reload (or any
-                // re-render sourced from that cache instead of a live socket
-                // event) feeds the SAME ciphertext through decryptFromChat()
-                // again. The Double Ratchet guard added alongside this fix
-                // catches that safely now instead of silently corrupting the
-                // chain, but it still means the message shows a transient
-                // "already processed" flash and wastes a decrypt cycle every
-                // single reload, forever. Persist the plaintext once, here,
-                // so a reload reads it straight from cache and never asks the
-                // ratchet to decrypt that message again at all.
-                try {
-                    if (window.KynectaLocalStore?.saveMessage && (stored.id || stored.serverId)) {
-                        window.KynectaLocalStore.saveMessage({
-                            id: stored.id,
-                            serverId: stored.serverId || stored.id,
-                            localId: stored.localId,
-                            chatId: stored.chatId || stored.conversationId,
-                            content: plaintext,
-                            encrypted: false
-                        }).catch(() => {});
-                    }
-                } catch (_) { /* best-effort only */ }
             }
         } catch (_) { /* best-effort only */ }
     };
@@ -3938,8 +3912,24 @@
 
                         <div class="message-image" onclick="window.messagesUI?.viewMedia('${message.mediaUrl || message.fileUrl || message.content}', '${message.fileName || 'image'}')">
 
-                            <img src="${message.mediaUrl || message.fileUrl || message.content}" alt="${message.fileName || 'Image'}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='flex')">
-                            <div style="display:none;align-items:center;justify-content:center;padding:12px;color:#888;font-size:13px">📷 Image unavailable</div>
+                            ${(() => {
+                                // FIX: window.__mediaAutoDownload was propagated all the way down from
+                                // Settings (chat.autoDownloadMedia) but nothing ever actually checked it —
+                                // images always loaded immediately regardless of the setting. Received
+                                // images now respect it: when auto-download is off, show a tap-to-load
+                                // placeholder instead of fetching the image. Your own sent images always
+                                // load immediately since you already have that data locally.
+                                const _mediaSrc = message.mediaUrl || message.fileUrl || message.content;
+                                const _autoDl = window.__mediaAutoDownload !== false; // default true, matches AppSettings default
+                                if (isSent || _autoDl) {
+                                    return `<img src="${_mediaSrc}" alt="${message.fileName || 'Image'}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling&&(this.nextElementSibling.style.display='flex')">
+                            <div style="display:none;align-items:center;justify-content:center;padding:12px;color:#888;font-size:13px">📷 Image unavailable</div>`;
+                                }
+                                return `<div class="message-image-placeholder" data-media-src="${_mediaSrc}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:24px;color:#888;font-size:13px;cursor:pointer;background:rgba(0,0,0,0.04);border-radius:8px" onclick="event.stopPropagation();window.messagesUI?.loadMediaOnDemand(this)">
+                                <i class="fas fa-download"></i>
+                                <span>Tap to download image</span>
+                            </div>`;
+                            })()}
 
                         </div>
 
@@ -12878,6 +12868,33 @@ Type: ${message.type || 'text'}`;
         },
 
         
+
+        // FIX: handler for the auto-download-off placeholder added to the image
+        // message template — replaces the tap-to-load placeholder with a real
+        // <img> pointed at the stored media URL, i.e. a manual, one-time
+        // download of just that image.
+        loadMediaOnDemand: (placeholderEl) => {
+            try {
+                if (!placeholderEl) return;
+                const url = placeholderEl.getAttribute('data-media-src');
+                if (!url) return;
+                const img = document.createElement('img');
+                img.src = url;
+                img.alt = 'Image';
+                img.loading = 'lazy';
+                img.onerror = function () {
+                    this.style.display = 'none';
+                    if (this.nextElementSibling) this.nextElementSibling.style.display = 'flex';
+                };
+                const fallback = document.createElement('div');
+                fallback.style.cssText = 'display:none;align-items:center;justify-content:center;padding:12px;color:#888;font-size:13px';
+                fallback.textContent = '📷 Image unavailable';
+                placeholderEl.replaceWith(img);
+                img.after(fallback);
+            } catch (e) {
+                console.warn('[MessagesUI] loadMediaOnDemand failed:', e.message);
+            }
+        },
 
         closeMediaViewer: () => {
 

@@ -330,15 +330,38 @@
         // FIX: Ignore messages that were already broadcast from parent
         if (d._noRebroadcast) return;
 
-        // Parent broadcasting a full settings update — use silent:true to suppress
-        // subscriber notifications that would cause re-broadcasts
+        // A settings.html "Save" posts SETTINGS_UPDATED UP to its parent (chat.html)
+        // with the full settings object. BUG FIX: this used silent:true unconditionally,
+        // which meant chat.html updated its own copy but never notified subscribers —
+        // so its _broadcastToFrames relay never fired and sibling iframes (messages,
+        // calls, friends, status, groups, tools) never learned the Save happened.
+        // Messages relayed back DOWN from the parent already carry _noRebroadcast:true
+        // and are filtered out at the top of this listener, so notifying here cannot loop.
         if (d.type === 'SETTINGS_UPDATED' && d.settings) {
-            global.AppSettings && global.AppSettings.merge(d.settings, { silent: true });
+            global.AppSettings && global.AppSettings.merge(d.settings, {
+                silent: false,
+                skipBroadcast: true,
+                source: 'parent-socket-relay'
+            });
         }
 
-        // Specific section update from parent
+        // Specific section update — may arrive from a CHILD iframe (e.g. settings.html
+        // posting up to its parent chat.html) or from a parent relaying down to us.
+        // BUG FIX: this previously always used { silent: true }, which suppresses
+        // notifySubscribers() — the exact call that triggers _broadcastToFrames().
+        // That meant when settings.html (a child iframe) posted SETTINGS_GLOBAL_UPDATE
+        // up to chat.html (the parent), chat.html updated its own AppSettings copy but
+        // NEVER re-broadcast the change down to sibling iframes (messages, calls,
+        // friends, status, groups, tools) — settings only ever reached the frame that
+        // changed them. We must notify subscribers (silent:false) so the parent's own
+        // _broadcastToFrames relay fires; skipBroadcast still guards against re-sending
+        // on the BroadcastChannel this message may have originated from.
         if (d.type === 'SETTINGS_GLOBAL_UPDATE' && d.section && d.key !== undefined) {
-            global.AppSettings && global.AppSettings.set(d.section + '.' + d.key, d.value, { silent: true });
+            global.AppSettings && global.AppSettings.set(d.section + '.' + d.key, d.value, {
+                silent: false,
+                skipBroadcast: true,
+                source: 'parent-socket-relay'
+            });
         }
 
         if (d.type === 'THEME_CHANGED' && d.theme) {

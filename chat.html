@@ -6818,44 +6818,38 @@
                 // ── UNIVERSAL BACK NAVIGATION ─────────────────────────────────
                 // Handles NAVIGATE_BACK postMessages from child iframes
                 // so device back button and back arrows work everywhere
+                //
+                // FIX: this used to keep its own separate _pageHistory array,
+                // filled only via a _trackedNav wrapper that nothing in the
+                // codebase actually called (every real navigation — bottom nav,
+                // center menu, header links — calls navigateToPage() directly).
+                // So _pageHistory was permanently empty and Back silently did
+                // nothing once you'd opened any module. navigateToPage() itself
+                // already maintains a correct history stack at window.__navHistory
+                // (see its definition above) — use that instead of a second,
+                // disconnected one.
                 (function() {
-                    var _pageHistory = [];
-                    var _curPage     = 'messages';
-
-                    // Override navigateToPage to track history
-                    var _origNav = window.navigateToPage || window._kynNavigate;
-                    function _trackedNav(page, opts) {
-                        if (page && page !== _curPage) {
-                            _pageHistory.push(_curPage);
-                            _curPage = page;
+                    function _goBackOnePage() {
+                        var hist = window.__navHistory;
+                        if (hist && hist.length > 0) {
+                            var prev = hist.pop();
+                            if (typeof navigateToPage === 'function') navigateToPage(prev, { fromHistory: true });
                         }
-                        if (_origNav) _origNav(page, opts);
-                        else if (typeof navigateToPage === 'function') navigateToPage(page, opts);
                     }
-                    window._kynTrackedNav = _trackedNav;
+                    window._kynTrackedNav = navigateToPage; // kept for backward compatibility with any external caller
 
                     window.addEventListener('message', function(evt) {
                         if (!evt.data || typeof evt.data !== 'object') return;
-                        if (evt.data.type === 'NAVIGATE_BACK') {
-                            if (_pageHistory.length > 0) {
-                                var prev = _pageHistory.pop();
-                                _curPage = prev;
-                                if (typeof navigateToPage === 'function') navigateToPage(prev, {});
-                            }
-                        }
+                        if (evt.data.type === 'NAVIGATE_BACK') _goBackOnePage();
                     });
 
                     // Also handle device back on parent
                     window.addEventListener('popstate', function() {
-                        if (_pageHistory.length > 0) {
-                            var prev = _pageHistory.pop();
-                            _curPage = prev;
-                            if (typeof navigateToPage === 'function') navigateToPage(prev, {});
-                        }
+                        _goBackOnePage();
                     });
                     try { history.pushState({ kyn: true }, '', window.location.href); } catch(_) {}
 
-                    _chatLog('[BackNav] ✅ Parent back navigation installed');
+                    _chatLog('[BackNav] ✅ Parent back navigation installed (using window.__navHistory)');
                 })();
 
                 // ── SMART GROUP OS REAL-TIME BRIDGE ──────────────────────────

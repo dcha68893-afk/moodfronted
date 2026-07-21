@@ -1987,14 +1987,19 @@ body.camera-active .top-bar {
   --color-friend-border: #e5e7eb;
   --color-friend-muted: #9ca3af;
 
-  /* ── HEADER GRADIENTS per module ── */
-  --header-chat:    linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  --header-calls:   linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-  --header-groups:  linear-gradient(135deg, #22c55e 0%, #059669 100%);
-  --header-friends: linear-gradient(135deg, #f9fafb 0%, #e5e7eb 100%);
-  --header-status:  linear-gradient(135deg, #facc15 0%, #ec4899 60%, #8b5cf6 100%);
-  --header-marketplace: linear-gradient(135deg, #8b5cf6 0%, #f97316 100%);
-  --header-settings: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  /* FIX: these used to be fixed per-module gradient colors (blue for chat,
+     green for calls, yellow/pink/purple for status, etc.) applied !important,
+     completely independent of the theme the user picked in Settings — so
+     headers never matched whatever idle/panel screens correctly followed.
+     Now every module's header just uses the live page background, same as
+     the rest of that module. */
+  --header-chat:    var(--bg-color, #ffffff);
+  --header-calls:   var(--bg-color, #ffffff);
+  --header-groups:  var(--bg-color, #ffffff);
+  --header-friends: var(--bg-color, #ffffff);
+  --header-status:  var(--bg-color, #ffffff);
+  --header-marketplace: var(--bg-color, #ffffff);
+  --header-settings: var(--bg-color, #ffffff);
 
   /* ── CALL BUTTONS (green, per spec) ── */
   --call-accept-bg: #22c55e;

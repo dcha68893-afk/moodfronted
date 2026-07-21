@@ -822,6 +822,20 @@
                 root.style.setProperty('--hover-bg', '#f5f6f6');
             }
 
+            // FIX: several pages (settings.html, friend.html, status.html,
+            // chat.html, admin-calls.html, game.html, index.html) style panels
+            // and cards using var(--surface, ...), var(--accent, ...) and
+            // var(--border, ...) — variable names this function never actually
+            // set. Every one of those elements was silently using its
+            // hardcoded fallback color forever, regardless of theme, which is
+            // why some cards/panels within a module didn't match the rest of
+            // the page once dark/light actually started working elsewhere.
+            // Alias the real variables under these names so existing var()
+            // references resolve correctly without editing every call site.
+            root.style.setProperty('--surface', root.style.getPropertyValue('--card-bg'));
+            root.style.setProperty('--accent', root.style.getPropertyValue('--primary-color'));
+            root.style.setProperty('--border', root.style.getPropertyValue('--border-color'));
+
             Object.entries(settings.notifications || {}).forEach(([key, value]) => {
                 if (typeof value !== 'object') {
                     root.setAttribute(`data-notification-${key}`, String(value));

@@ -1038,22 +1038,24 @@
     <link rel="stylesheet" href="/css/suppress-webgl.css">
     <style>
     /* ═══════════════════════════════════════════════════════════
-       UNIFIED WHITE THEME — Matches Jumia's clean light UI
-       One theme, one color scheme, fully readable text everywhere
+       FIX: this used to force a permanent white theme via !important
+       on html/body/.app-container/.sidebar, and defined its own
+       --background-color variable that AppSettings.js never writes to
+       (it writes --bg-color) — so this page ignored the theme setting
+       completely regardless of what the user picked. Now follows the
+       same live --bg-color/--text-primary variables as the rest of
+       the app, with the same light values as the previous default so
+       nothing changes visually until the user actually switches theme.
        ═══════════════════════════════════════════════════════════ */
     :root {
-        --background-color: #f5f5f5;
-        --surface-color: #ffffff;
-        --text-primary: #111111;
-        --text-secondary: #6b7280;
-        --border-color: #e5e7eb;
-        --hover-bg: #f9fafb;
+        --background-color: var(--bg-color, #f5f5f5);
+        --surface-color: var(--card-bg, #ffffff);
     }
 
-    /* Full app white background */
+    /* Full app background now follows the live theme */
     html, body, .app-container, .sidebar, .sidebar.active {
-        background: #f5f5f5 !important;
-        color: #111111 !important;
+        background: var(--bg-color, #f5f5f5);
+        color: var(--text-primary, #111111);
     }
 
     /* Header — white bar */
@@ -1329,6 +1331,9 @@
     /* ── Flash countdown on cards ───────────────────────────────────── */
     .jm-countdown { font-variant-numeric:tabular-nums; }
     </style>
+<script src="/js/AppSettings.js"></script>
+<script src="/js/settings-global-propagation.js"></script>
+<script src="/js/settings-module-subscriptions.js"></script>
 <script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
 <body>

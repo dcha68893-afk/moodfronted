@@ -4314,6 +4314,15 @@ handleContactItemClick: function(e) {
                     // FIX for Bug 6: Refresh call history after call ends
                     this.refreshCallHistory();
                     break;
+                case 'call_error':
+                    // FIX: server-side call:error (e.g. whoCanCallMe privacy rejection)
+                    // reached this far and reset the UI via the call_failed path above,
+                    // but the caller never saw WHY — no toast was shown for this event.
+                    showNotification(
+                        (data && data.message) || 'This call could not be completed',
+                        'error'
+                    );
+                    break;
                 case 'call_timeout':
                     // CRITICAL: 3-min ring timer must NOT end an already-accepted call.
                     // Once receiver accepts, in-call screen is active — skip the reset.
@@ -4694,7 +4703,20 @@ handleContactItemClick: function(e) {
                         showNotification('Call connection failed', 'error');
                     } else if (data && data.reason === 'connection_failed') {
                         showNotification('Connection failed', 'error');
+                    } else if (data && data.message) {
+                        // FIX: server-side call:error (e.g. whoCanCallMe privacy
+                        // rejection) arrives here with reason set to the server's
+                        // error code and no matching branch above — fall back to
+                        // showing whatever message the server sent rather than
+                        // silently doing nothing.
+                        showNotification(data.message, 'error');
                     }
+                    break;
+                case 'call_error':
+                    showNotification(
+                        (data && data.message) || 'This call could not be completed',
+                        'error'
+                    );
                     break;
                 case 'call_timeout':
                     showNotification('Call connection timeout', 'error');
@@ -5007,6 +5029,29 @@ handleContactItemClick: function(e) {
                 }
                 if (elements.incomingCallIntention) {
                     elements.incomingCallIntention.dataset.intention = callData.callerIntention || 'quick';
+                }
+
+                // ── AUTO-ANSWER: settings.calls.autoAnswer ───────────────────
+                // FIX: this setting existed in Settings, saved fine, and even
+                // propagated down to this page as window.AppSettings data /
+                // data-calls-auto-answer — but nothing ever actually checked it.
+                // All the state this needs (callId, caller name, call type) is
+                // already populated above, so we can accept immediately via the
+                // exact same path the Accept button uses, and skip the ring
+                // timer/modal/ringtone entirely.
+                try {
+                    const _callsCfg = (window.AppSettings && window.AppSettings.get('calls')) || {};
+                    const _autoAnswer = _callsCfg.autoAnswer === true
+                        || document.documentElement.getAttribute('data-calls-auto-answer') === 'true';
+                    if (_autoAnswer) {
+                        showNotification(`Auto-answering call from ${_callerName || 'Caller'}...`, 'info');
+                        setTimeout(() => {
+                            UIEventHandlers.acceptIncomingCallGeneric(incomingType === 'video');
+                        }, 400);
+                        return;
+                    }
+                } catch (_autoAnswerErr) {
+                    // Fail open — fall through to the normal ring UI below
                 }
 
                 // ── Clear any old timer ──────────────────────────────────────

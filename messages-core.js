@@ -7974,7 +7974,7 @@ function applySettingToMessagesModule(section, key, value) {
     }
     if (section === 'chat') {
         if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
-        if (key === 'messageFontSize') {
+        if (key === 'messageFontSize' || key === 'fontSize') {
             var sizeMap = { small: '13px', medium: '15px', large: '18px' };
             document.documentElement.style.setProperty('--message-font-size', sizeMap[value] || '15px');
         }
@@ -7982,7 +7982,12 @@ function applySettingToMessagesModule(section, key, value) {
         if (key === 'messagePreviews') window.__messagePreviews = value;
         if (key === 'confirmSend') window.__confirmSend = value;
         if (key === 'autoCorrect') window.__autoCorrect = value;
-        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+        if (key === 'mediaAutoDownload' || key === 'autoDownloadMedia') {
+            window.__mediaAutoDownload = value;
+            document.documentElement.setAttribute('data-chat-auto-download', value ? 'true' : 'false');
+        }
+        if (key === 'wallpaper') document.documentElement.setAttribute('data-chat-wallpaper', value);
+        if (key === 'bubbleStyle') document.documentElement.setAttribute('data-chat-bubble-style', value);
         if (key === 'messageHistory') window.__messageHistory = value;
         if (key === 'showReadReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
         if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }

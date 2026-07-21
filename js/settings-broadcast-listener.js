@@ -89,9 +89,29 @@
         var ch = settings.chat || {};
         if (ch.enterToSend !== undefined || ch.enterKeySends !== undefined)
             window.__enterToSend = ch.enterToSend !== undefined ? ch.enterToSend : ch.enterKeySends;
-        if (ch.messageFontSize !== undefined) {
+        // FIX: 'fontSize' is the canonical AppSettings key (chat.fontSize); 'messageFontSize'
+        // was the only key recognized here and AppSettings never sends it, so this branch
+        // never actually ran from a real settings change.
+        var chatFontSize = ch.fontSize !== undefined ? ch.fontSize : ch.messageFontSize;
+        if (chatFontSize !== undefined) {
             var mfmap = { small: '13px', medium: '15px', large: '18px' };
-            root.style.setProperty('--message-font-size', mfmap[ch.messageFontSize] || '15px');
+            root.style.setProperty('--message-font-size', mfmap[chatFontSize] || '15px');
+        }
+        // FIX: 'autoDownloadMedia' is the canonical AppSettings key; the legacy alias
+        // 'mediaAutoDownload' was never populated by AppSettings, so this flag — which
+        // the messages module reads before auto-downloading media — was never set here.
+        var autoDownload = ch.autoDownloadMedia !== undefined ? ch.autoDownloadMedia : ch.mediaAutoDownload;
+        if (autoDownload !== undefined) {
+            window.__mediaAutoDownload = autoDownload;
+            root.setAttribute('data-chat-auto-download', autoDownload ? 'true' : 'false');
+        }
+        if (ch.wallpaper !== undefined) {
+            window.__chatWallpaper = ch.wallpaper;
+            root.setAttribute('data-chat-wallpaper', ch.wallpaper);
+        }
+        if (ch.bubbleStyle !== undefined) {
+            window.__chatBubbleStyle = ch.bubbleStyle;
+            root.setAttribute('data-chat-bubble-style', ch.bubbleStyle);
         }
         if (ch.showTimestamps !== undefined) { window.__showTimestamps = ch.showTimestamps; root.setAttribute('data-show-timestamps', ch.showTimestamps ? 'true' : 'false'); }
         if (ch.messagePreviews !== undefined) window.__messagePreviews = ch.messagePreviews;
@@ -165,7 +185,7 @@
     // Run immediately
     bootstrap();
 
-    // ── BroadcastChannel listener ────────────────────────────────────────────
+    // ── BroadcastChannel listener (legacy 'kynecta_settings' channel) ────────
     try {
         if (typeof BroadcastChannel !== 'undefined') {
             var bc = new BroadcastChannel('kynecta_settings');
@@ -174,6 +194,32 @@
                 if (e.data.type === 'SETTINGS_CHANGED' && e.data.settings) applyFull(e.data.settings);
                 if (e.data.type === 'SETTING_CHANGED' && e.data.section && e.data.key !== undefined)
                     applySingle(e.data.section, e.data.key, e.data.value);
+            };
+        }
+    } catch (_) {}
+
+    // ── BroadcastChannel listener (REAL channel — AppSettings.js) ────────────
+    // FIX: AppSettings.js is the actual source of truth and broadcasts on channel
+    // 'app_settings_global' with shape {type:'set', path, value} or
+    // {type:'merge', settings}. This listener previously only knew about the
+    // legacy 'kynecta_settings' channel/shape above, which nothing writes to
+    // during normal use — so pages relying solely on this file for real-time
+    // updates never actually got any until the slower storage-event fallback
+    // below fired. If window.AppSettings is also loaded on this page it will
+    // already handle this channel itself; this listener stays useful as a
+    // fallback for pages where AppSettings.js failed to load for any reason.
+    try {
+        if (typeof BroadcastChannel !== 'undefined') {
+            var bcReal = new BroadcastChannel('app_settings_global');
+            bcReal.onmessage = function (e) {
+                var msg = e.data;
+                if (!msg || msg.source !== 'AppSettings') return;
+                if (window.AppSettings) return; // AppSettings.js already applies this itself
+                if (msg.type === 'set' && msg.path) {
+                    var parts = String(msg.path).split('.');
+                    applySingle(parts[0], parts.slice(1).join('.') || parts[0], msg.value);
+                }
+                if (msg.type === 'merge' && msg.settings) applyFull(msg.settings);
             };
         }
     } catch (_) {}

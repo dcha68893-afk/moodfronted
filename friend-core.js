@@ -11165,7 +11165,7 @@ function applySettingToFriendModule(section, key, value) {
         if (key === 'showTimestamps') { window.__showTimestamps = value; document.documentElement.setAttribute('data-show-timestamps', value ? 'true' : 'false'); }
         if (key === 'messagePreviews') window.__messagePreviews = value;
         if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
-        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+        if (key === 'mediaAutoDownload' || key === 'autoDownloadMedia') window.__mediaAutoDownload = value;
     }
     if (section === 'profile') {
         if (key === 'displayName') window.__currentUserDisplayName = value;

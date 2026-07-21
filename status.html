@@ -1719,15 +1719,6 @@
             transition-duration: 0.01ms !important;
         }
 
-        /* Dark Mode — DISABLED: status module always uses light theme */
-        .dark-mode {
-            --bg-color: #ffffff;
-            --text-primary: #050505;
-            --text-secondary: #65676b;
-            --border-color: #dddfe2;
-            --secondary-color: #f0f2f5;
-        }
-
         /* Compact Mode */
         .compact .status-item {
             padding: 8px;
@@ -1788,31 +1779,15 @@
             --primary-color: #00a884;
         }
 
+        /* FIX: previously hardcoded to #111b21/#e9edef with !important, which
+           permanently forced this page dark and completely ignored whatever
+           theme the user actually picked in Settings (AppSettings.js updates
+           the --bg-color/--text-primary custom properties on <html>, not these
+           literal values). Using var() here means the page shell now actually
+           follows the live theme, same as the rest of the app. */
         html, body, .app-container {
-            background-color: #111b21 !important;
-            color: #e9edef !important;
-        }
-
-        /* Dark-mode class also stays dark */
-        html.dark-mode,
-        html.dark-mode body {
-            background-color: #111b21 !important;
-            color: #e9edef !important;
-            --bg-color: #111b21 !important;
-            --text-primary: #e9edef !important;
-            --text-secondary: #8696a0 !important;
-            --border-color: #2a3942 !important;
-            --secondary-color: #2a3942 !important;
-        }
-
-        /* Honour OS dark preference */
-        @media (prefers-color-scheme: dark) {
-            html, body, .app-container, .sidebar,
-            .status-item, .status-list-content,
-            .status-categories, .quick-action-btn {
-                background-color: #111b21 !important;
-                color: #e9edef !important;
-            }
+            background-color: var(--bg-color);
+            color: var(--text-primary);
         }
     </style>
     
@@ -2482,6 +2457,9 @@ body.viewer-owner-mode #viewerControls  { display:none !important; }
 body.viewer-friend-mode #viewerControls { display:flex !important; }
 </style>
 
+<script src="/js/AppSettings.js"></script>
+<script src="/js/settings-global-propagation.js"></script>
+<script src="/js/settings-module-subscriptions.js"></script>
 <script src="/js/settings-broadcast-listener.js" defer></script>
 </head>
 <body>

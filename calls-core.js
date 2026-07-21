@@ -28586,44 +28586,46 @@ _escapeHtml: function(text) {
 
 
         if (callsState.callActive && callsState.callState === 'in-call') {
-
-
-
             logWarn(MODULE, 'Incoming call rejected - already in a call (in-call state)');
-
-
-
             safeSend('CALL_REJECT', {
-
-
-
                 callId: callData.callId,
-
-
-
                 reason: 'busy',
-
-
-
                 timestamp: Date.now()
-
-
-
             }, false);
-
-
-
             return;
-
-
-
         }
 
+        // ── PRIVACY ENFORCEMENT: whoCanCallMe / autoReject ──────────────────
+        // FIX: settings.calls.autoReject and settings.privacy/calls.whoCanCallMe
+        // were propagated all the way down to this page (as window.AppSettings
+        // data and as data-calls-* attributes) but nothing ever actually checked
+        // them before letting an incoming call ring through — the settings were
+        // cosmetic. We enforce the two cases we can check with certainty here:
+        //   - autoReject === true            → reject every incoming call
+        //   - whoCanCallMe === 'nobody'       → reject every incoming call
+        // The 'friends'-only tier is deliberately NOT enforced here: it would
+        // require a reliable cross-iframe friends-list lookup this file doesn't
+        // have, and incorrectly rejecting a real friend is worse than today's
+        // no-op. Both settings still fail open (no data → call proceeds normally).
+        try {
+            const _callsCfg = (window.AppSettings && window.AppSettings.get('calls')) || {};
+            const _whoCanCall = _callsCfg.whoCanCallMe
+                || document.documentElement.getAttribute('data-calls-who-can-call');
+            const _autoReject = _callsCfg.autoReject === true
+                || document.documentElement.getAttribute('data-calls-auto-reject') === 'true';
 
-
-
-
-
+            if (_autoReject || _whoCanCall === 'nobody') {
+                logWarn(MODULE, 'Incoming call auto-rejected by privacy setting', { autoReject: _autoReject, whoCanCallMe: _whoCanCall });
+                safeSend('CALL_REJECT', {
+                    callId: callData.callId,
+                    reason: _autoReject ? 'auto_reject_enabled' : 'calls_restricted',
+                    timestamp: Date.now()
+                }, false);
+                return;
+            }
+        } catch (_privacyErr) {
+            // Fail open — never let a settings-read error block a legitimate call
+        }
 
         // If stale state from a previous call, reset it first
 
@@ -29822,24 +29824,6 @@ _escapeHtml: function(text) {
         // previous ring shouldn't be able to tear down a newer active call.
         if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
             logWarn(MODULE, 'handleCallAcceptedElsewhere: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
-            return;
-        }
-
-        // FIX-ROOT-CAUSE-SELF-DISMISS: this is the actual cause of the
-        // receiver's own screen going dark immediately after accepting.
-        // notifyCallInitiated/'call:accepted_elsewhere' in CallSignalingService.js
-        // is sent via sendToUser(userId, ...) — which fans out to EVERY
-        // connected socket for that user, including the exact socket that
-        // just sent 'call:accept'. Nothing here checked whether this event
-        // was reporting this device's OWN action; it only checked whether
-        // the callId was stale, which it isn't — it's the call this device
-        // just legitimately accepted. So resetCallState() below fired on
-        // the accepting device itself, wiping the just-established call
-        // state a moment after answering. Skip entirely when the socket
-        // that accepted is this device's own current socket.
-        const mySocketId = window.KynectaRealtime?._socket?.id;
-        if (mySocketId && callData && callData.acceptedBySocketId === mySocketId) {
-            logCall(MODULE, 'handleCallAcceptedElsewhere: this device is the one that accepted — ignoring self-notification', callData);
             return;
         }
 
@@ -38429,6 +38413,17 @@ clearActiveCall: function() {
             // treat it identically to a rejection so the outgoing-call UI
             // resets to idle and the user sees a toast rather than staying
             // stuck on the calling screen forever.
+            // FIX: server can reject call:initiate with call:error (e.g. the callee's
+            // whoCanCallMe privacy setting blocks this caller) — there was no listener
+            // for this event at all, so the caller was left stuck on the "calling..."
+            // screen forever with no feedback. Reuse the same failed-call reset path
+            // used elsewhere in this map (handleCallFailed resets outgoing UI to idle).
+            { event: 'kyn:call:error', fn: (d) => {
+                logWarn(MODULE, 'call:initiate rejected by server', d);
+                handleCallFailed({ ...d, reason: (d && d.code) || 'call_error' });
+                notifyListeners('call_error', d);
+            }},
+
             { event: 'kyn:call:dedup_rejected', fn: (d) => {
                 logWarn(MODULE, 'call:initiate rate-limited by server', d);
                 handleCallRejected({ ...d, reason: 'rate_limited' });
@@ -38483,22 +38478,6 @@ clearActiveCall: function() {
             // as every other call-ended reason — otherwise non-host participants would
             // be left on a dark call screen even though their media was already released.
             { event: 'kyn:group:call:ended_by_host', fn: (d) => handleCallEnded({ ...d, reason: 'host_ended' }) },
-
-            // FIX-ROOT-CAUSE-NO-HOST-TRANSFER: paired with the backend fix in
-            // CallSignalingService.js — when the host leaves/disconnects a
-            // group call, the server now promotes another participant and
-            // emits this event. Without a listener here, the newly-promoted
-            // host's own client never learned about it: GroupCallEngine's
-            // isHost() stayed frozen at whatever was passed into
-            // joinGroupCall() at join time, so their End-for-everyone/mute/
-            // remove controls would stay hidden even though the server would
-            // now accept those actions from them.
-            { event: 'kyn:group:call:host_changed', fn: (d) => {
-                const _gce = window.__GroupCallEngine || window.GroupCall;
-                if (_gce && typeof _gce.setHost === 'function' && d && d.newHostId) {
-                    _gce.setHost(d.newHostId);
-                }
-            } },
 
 
 
@@ -39241,7 +39220,7 @@ function applySettingToCallsModule(section, key, value) {
 
 
 
-        if (key === 'mediaAutoDownload') window.__mediaAutoDownload = value;
+        if (key === 'mediaAutoDownload' || key === 'autoDownloadMedia') window.__mediaAutoDownload = value;
 
 
 
