@@ -6764,31 +6764,62 @@ window._jmFollowSeller = async function(sellerId, btn) {
 };
 
 // ── NOTIFICATION PREFS PAGE ────────────────────────────────────────────────
-// ── NOTIFICATION PREFS PAGE ─────────────────────────────────────────────────
 function _renderNotifPrefs() {
     let container = document.getElementById('jmPageNotifPrefs');
     if (!container) return;
-    if (container.querySelector('.notif-built')) return; // already built (static)
-    container.innerHTML = `<div class="jm-page-title">🔔 Notifications</div>
-    <div class="notif-built" style="padding:0 16px">
-    ${[
+    container.innerHTML = `<div class="jm-page-title">🔔 Notifications</div><div style="padding:20px;text-align:center;color:#9ca3af">Loading…</div>`;
+
+    const PREFS = [
         ['Order updates','Notify when your order status changes','order_updates',true],
         ['Delivery alerts','Real-time delivery tracking','delivery_alerts',true],
         ['Flash sale alerts','Be first to know about flash sales','flash_sales',true],
         ['Price drops','When wishlisted items drop in price','price_drops',true],
         ['Promotions','Coupons and special deals','promotions',false],
         ['New products','When followed sellers list products','new_products',false],
-    ].map(([title,desc,key,def])=>`
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 0;border-bottom:1px solid #f3f4f6">
-        <div style="flex:1;padding-right:12px"><div style="font-size:14px;font-weight:700;color:#111">${title}</div><div style="font-size:12px;color:#6b7280;margin-top:2px">${desc}</div></div>
-        <label style="position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0">
-            <input type="checkbox" ${def?'checked':''} style="opacity:0;width:0;height:0" onchange="(s=>{const t=s.parentElement;t.querySelector('div').style.background=s.checked?'#f57224':'#d1d5db';t.querySelector('span').style.transform=s.checked?'translateX(20px)':'translateX(2px)'})(this)">
-            <div style="position:absolute;inset:0;border-radius:26px;background:${def?'#f57224':'#d1d5db'};transition:.3s"></div>
-            <span style="position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:${def?'translateX(20px)':'translateX(2px)'}"></span>
-        </label>
-    </div>`).join('')}
-    </div>`;
+    ];
+
+    (async () => {
+        // AUDIT FIX: previously the toggles were purely cosmetic — they only
+        // updated their own visual appearance and never saved anywhere, so
+        // reloading the page silently reset everything to hardcoded
+        // defaults. Fetch real saved state (muteTypes: category keys the
+        // user has turned OFF) before rendering.
+        const r = await window._api?.('GET', '/notifications/preferences');
+        const muted = new Set(r?.data?.preferences?.muteTypes || []);
+
+        container.innerHTML = `<div class="jm-page-title">🔔 Notifications</div>
+        <div style="padding:0 16px">
+        ${PREFS.map(([title,desc,key,def])=>{
+            const on = muted.has(key) ? false : def;
+            return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 0;border-bottom:1px solid #f3f4f6">
+            <div style="flex:1;padding-right:12px"><div style="font-size:14px;font-weight:700;color:#111">${title}</div><div style="font-size:12px;color:#6b7280;margin-top:2px">${desc}</div></div>
+            <label style="position:relative;display:inline-block;width:46px;height:26px;flex-shrink:0">
+                <input type="checkbox" ${on?'checked':''} data-pref-key="${key}" style="opacity:0;width:0;height:0" onchange="window._jmSaveNotifPref(this)">
+                <div style="position:absolute;inset:0;border-radius:26px;background:${on?'#f57224':'#d1d5db'};transition:.3s"></div>
+                <span style="position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:${on?'translateX(20px)':'translateX(2px)'}"></span>
+            </label>
+        </div>`;
+        }).join('')}
+        </div>`;
+    })();
 }
+
+window._jmSaveNotifPref = async function(checkbox) {
+    const key = checkbox.dataset.prefKey;
+    const label = checkbox.closest('label');
+    label.querySelector('div').style.background = checkbox.checked ? '#f57224' : '#d1d5db';
+    label.querySelector('span').style.transform = checkbox.checked ? 'translateX(20px)' : 'translateX(2px)';
+
+    // Read current muted set, toggle this key, and persist for real.
+    const r = await window._api?.('GET', '/notifications/preferences');
+    const muted = new Set(r?.data?.preferences?.muteTypes || []);
+    if (checkbox.checked) muted.delete(key); else muted.add(key);
+    const saved = await window._api?.('PUT', '/notifications/preferences', { muteTypes: Array.from(muted) });
+    if (!saved || saved.status === 'error') {
+        _toast?.('Could not save preference', 'error', '❌');
+    }
+};
 
 // ── ANALYTICS PAGE ──────────────────────────────────────────────────────────
 function _renderAnalyticsPage() {
@@ -6901,33 +6932,48 @@ function _renderTrustPage() {
         container.id = 'jmPageTrust'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
-    const user = window.currentUser || window.__kynUser || {};
-    const score = user.trustScore || Math.min(100, 45 + (user.totalOrders||0)*2 + (user.reviewCount||0)*3);
-    const color = score>=80?'#22c55e':score>=60?'#f59e0b':'#ef4444';
-    const label = score>=80?'Excellent':score>=60?'Good':'Needs Improvement';
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
 
-    container.innerHTML = `<div class="jm-page-title">🛡️ Trust Score</div>
-    <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);margin:12px 16px;border-radius:20px;padding:24px;color:#fff;text-align:center">
-        <div style="font-size:64px;font-weight:900;color:${color}">${score}</div>
-        <div style="font-size:14px;font-weight:700;margin-top:4px">${score>=80?'Excellent — Highly Trusted':score>=60?'Good — Building Trust':'Fair — Keep Improving'}</div>
-        <div style="background:rgba(255,255,255,.15);border-radius:20px;height:10px;overflow:hidden;margin:14px 0 8px"><div style="height:100%;background:${color};width:${score}%;border-radius:20px;transition:width 1s ease"></div></div>
-        <div style="font-size:12px;opacity:.75">${score}/100 trust score</div>
-    </div>
-    <div style="padding:0 16px">
-        ${[
-            ['✅ Orders Completed',user.totalOrders||0,'Each completed order boosts your score'],
-            ['⭐ Reviews Received',user.reviewCount||0,'Positive reviews increase trust'],
-            ['📅 Account Age',user.createdAt?Math.floor((Date.now()-new Date(user.createdAt))/(365.25*86400000))+' year(s)':'New','Older accounts are trusted more'],
-            ['🛡️ KYC Verified',user.metadata?.kyc?.status==='approved'?'Yes ✅':'Not yet','Verified accounts get +20 trust points'],
-        ].map(([l,v,tip])=>`
-        <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div><div style="font-size:13px;font-weight:700;color:#111">${l}</div><div style="font-size:11px;color:#6b7280;margin-top:2px">${tip}</div></div>
-                <div style="font-size:16px;font-weight:900;color:#374151;flex-shrink:0;margin-left:8px">${v}</div>
-            </div>
-        </div>`).join('')}
-        <button onclick="window._jmNavMore('seller-verification')" style="width:100%;background:#111;color:#fff;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px">Get Verified → +20 Points</button>
-    </div>`;
+    (async () => {
+        const user = window.currentUser || window.__kynUser || {};
+        const ecom = window.EcomMarketplace;
+        // AUDIT FIX: totalOrders/reviewCount/trustScore were read straight
+        // off the global user object, which is never populated with these
+        // fields — every user silently saw the same fake baseline score.
+        // Pull real order count from a real fetch instead.
+        let totalOrders = 0;
+        if (ecom) { try { totalOrders = (await ecom.OrderEngine.getOrders()).length; } catch(_) {} }
+        let kycVerified = false;
+        try {
+            const kycR = await window._api?.('GET', '/marketplace/seller/verification');
+            kycVerified = kycR?.data?.status === 'approved';
+        } catch(_) {}
+
+        const score = Math.min(100, 45 + totalOrders*2 + (kycVerified ? 20 : 0));
+        const color = score>=80?'#22c55e':score>=60?'#f59e0b':'#ef4444';
+
+        container.innerHTML = `<div class="jm-page-title">🛡️ Trust Score</div>
+        <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);margin:12px 16px;border-radius:20px;padding:24px;color:#fff;text-align:center">
+            <div style="font-size:64px;font-weight:900;color:${color}">${score}</div>
+            <div style="font-size:14px;font-weight:700;margin-top:4px">${score>=80?'Excellent — Highly Trusted':score>=60?'Good — Building Trust':'Fair — Keep Improving'}</div>
+            <div style="background:rgba(255,255,255,.15);border-radius:20px;height:10px;overflow:hidden;margin:14px 0 8px"><div style="height:100%;background:${color};width:${score}%;border-radius:20px;transition:width 1s ease"></div></div>
+            <div style="font-size:12px;opacity:.75">${score}/100 trust score</div>
+        </div>
+        <div style="padding:0 16px">
+            ${[
+                ['✅ Orders Completed',totalOrders,'Each completed order boosts your score'],
+                ['📅 Account Age',user.createdAt?Math.floor((Date.now()-new Date(user.createdAt))/(365.25*86400000))+' year(s)':'New','Older accounts are trusted more'],
+                ['🛡️ Seller KYC Verified',kycVerified?'Yes ✅':'Not yet','Verified sellers get +20 trust points'],
+            ].map(([l,v,tip])=>`
+            <div style="background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                    <div><div style="font-size:13px;font-weight:700;color:#111">${l}</div><div style="font-size:11px;color:#6b7280;margin-top:2px">${tip}</div></div>
+                    <div style="font-size:16px;font-weight:900;color:#374151;flex-shrink:0;margin-left:8px">${v}</div>
+                </div>
+            </div>`).join('')}
+            <button onclick="window._jmNavMore('seller-verification')" style="width:100%;background:#111;color:#fff;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px">Get Verified → +20 Points</button>
+        </div>`;
+    })();
 }
 
 // ── LEADERBOARD PAGE ────────────────────────────────────────────────────────
@@ -6938,19 +6984,27 @@ function _renderLeaderboardPage() {
         container.id = 'jmPageLeaderboard'; container.className = 'jm-page';
         document.getElementById('sidebar')?.appendChild(container);
     }
-    const listings = window.EcomMarketplace?.ProductEngine?.getAllProducts?.() || window.currentListings || [];
-    const sellers = {};
-    listings.forEach(l => {
-        const id = l.seller_id||l.sellerId||'unknown';
-        const name = l.seller?.name||'Seller';
-        if (!sellers[id]) sellers[id]={id,name,views:0,sales:0,rating:0,cnt:0,avatar:(name[0]||'S').toUpperCase()};
-        sellers[id].views += l.views||0;
-        sellers[id].sales += l.sold_count||0;
-        sellers[id].rating += parseFloat(l.rating)||0;
-        sellers[id].cnt++;
-    });
-    const ranked = Object.values(sellers).map(s=>({...s,avgRating:(s.cnt?s.rating/s.cnt:0).toFixed(1)})).sort((a,b)=>b.sales-a.sales).slice(0,10);
-    const medals = ['🥇','🥈','🥉'];
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;font-size:24px">⏳</div>`;
+
+    (async () => {
+        // AUDIT FIX: previously read from the generic product-browse cache,
+        // which is paginated/partial and can be completely empty if this
+        // page is opened before browsing anything else. Fetch a real,
+        // larger set fresh instead.
+        const r = await window._api?.('GET', '/marketplace/products?limit=200');
+        const listings = r?.data?.products || (window.EcomMarketplace?.ProductEngine?.getAllProducts?.() || []);
+        const sellers = {};
+        listings.forEach(l => {
+            const id = l.seller_id||l.sellerId||'unknown';
+            const name = l.seller?.name||'Seller';
+            if (!sellers[id]) sellers[id]={id,name,views:0,sales:0,rating:0,cnt:0,avatar:(name[0]||'S').toUpperCase()};
+            sellers[id].views += l.views||0;
+            sellers[id].sales += l.sold_count||0;
+            sellers[id].rating += parseFloat(l.rating)||0;
+            sellers[id].cnt++;
+        });
+        const ranked = Object.values(sellers).map(s=>({...s,avgRating:(s.cnt?s.rating/s.cnt:0).toFixed(1)})).sort((a,b)=>b.sales-a.sales).slice(0,10);
+        const medals = ['🥇','🥈','🥉'];
 
     container.innerHTML = `<div class="jm-page-title">🏆 Leaderboard</div>
     ${ranked.length ? `
@@ -6971,6 +7025,7 @@ function _renderLeaderboardPage() {
         <div style="font-size:13px;color:#6b7280;margin-bottom:20px">Be the first to list products and top the leaderboard!</div>
         <button onclick="window._jmNavMore('seller-dashboard')" style="background:#f57224;color:#fff;border:none;border-radius:12px;padding:12px 24px;font-size:14px;font-weight:800;cursor:pointer">Start Selling →</button>
     </div>`}`;
+    })();
 }
 
 
