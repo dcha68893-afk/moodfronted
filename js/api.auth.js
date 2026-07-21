@@ -1172,6 +1172,7 @@
             getCurrentUser,
             getUser: getUser || getCurrentUser,
             login,
+            verifyMfaChallenge,
             logout,
             isAuthenticated,
             waitForReady,
@@ -2851,6 +2852,202 @@
     /**
      * PUBLIC: Login with credentials - ENHANCED TOKEN EXTRACTION & FIXED BASE URL
      */
+    // FIX (2FA audit): shared by login() and verifyMfaChallenge() so both
+    // paths persist the session (storage, events, legacy keys) identically.
+    // Previously this logic lived only inside login(), which meant the 2FA
+    // challenge path (added below) had nothing to reuse.
+    function _completeSession(token, data, identifierUsed, payloadType) {
+        const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
+
+        let user = data.user || data.data?.user || data.data;
+        if (!user) {
+            console.warn('⚠️ [AUTH] No user object in response, deriving minimal user from identifier');
+            user = {
+                email: identifierUsed && identifierUsed.includes('@') ? identifierUsed : null,
+                username: identifierUsed && identifierUsed.includes('@') ? identifierUsed.split('@')[0] : identifierUsed,
+                id: 'user_' + Date.now()
+            };
+        }
+
+        const refreshToken = data.refreshToken || data.data?.refreshToken || null;
+
+        // ===== Persist session (unified storage helper) =====
+        const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
+        if (!persisted) {
+            console.error('❌ [AUTH] Failed to persist auth data');
+            return {
+                success: false,
+                error: 'Failed to store authentication data',
+                code: 'STORAGE_ERROR',
+                status: 500,
+                message: 'Authentication succeeded but data could not be stored'
+            };
+        }
+
+        // Compatibility mirror into AuthStorage, if present
+        if (window.AuthStorage && window.AuthStorage.saveSession) {
+            try {
+                window.AuthStorage.saveSession({
+                    token,
+                    refreshToken,
+                    user,
+                    expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
+                });
+            } catch (storageError) {
+                console.warn('⚠️ [AUTH] Failed to save to authStorage:', storageError.message);
+            }
+        }
+
+        // Prevent background validation flicker right after login
+        window.__LAST_LOGIN_TIME__ = Date.now();
+
+        // Legacy/compat keys consumed by chat.html, sockets, sync manager, etc.
+        localStorage.setItem('auth_token', token);
+        localStorage.setItem('authToken', token);
+        localStorage.setItem('accessToken', token);
+        localStorage.setItem('moodchat_token', token);
+        localStorage.setItem('auth_user', JSON.stringify(user));
+
+        const tokenStored = setUserToken(token, expiresIn);
+        if (!tokenStored) {
+            console.error('❌ [AUTH] Failed to store token');
+            return {
+                success: false,
+                error: 'Failed to store authentication token',
+                code: 'TOKEN_STORAGE_ERROR',
+                status: 500,
+                message: 'Authentication succeeded but token could not be stored'
+            };
+        }
+
+        if (refreshToken) {
+            _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
+        }
+
+        _safeStorageSet('USER_DATA', JSON.stringify(user));
+        window.currentUser = user;
+
+        _initCrossTabSync();
+        _initIframeSync();
+
+        _emitEvent('login', {
+            user,
+            token,
+            timestamp: new Date().toISOString(),
+            payloadType,
+            backendPayload: { identifier: identifierUsed }
+        });
+
+        try {
+            window.dispatchEvent(new CustomEvent('user-logged-in', {
+                detail: {
+                    user, token,
+                    timestamp: new Date().toISOString(),
+                    source: 'api.auth.js',
+                    version: VERSION,
+                    payloadType
+                }
+            }));
+            window.dispatchEvent(new CustomEvent('auth:token:ready', { detail: { token, timestamp: Date.now() } }));
+            window.dispatchEvent(new CustomEvent('session:ready', { detail: { token, user, timestamp: Date.now() } }));
+        } catch (dispatchError) {
+            console.warn('⚠️ [AUTH] Failed to dispatch login events:', dispatchError);
+        }
+
+        console.log('✅ [AUTH] Login successful with token storage');
+
+        return {
+            success: true,
+            user,
+            token,
+            expiresIn,
+            message: 'Login successful',
+            payloadType,
+            identifierUsed
+        };
+    }
+
+    // FIX (2FA audit): exchanges a tempToken (returned by login() when the
+    // account has 2FA enabled) plus a TOTP/backup code for real tokens, by
+    // calling POST /api/auth/2fa/challenge. On success this persists the
+    // session exactly like a normal login (via _completeSession) so every
+    // downstream consumer (chat.html, sockets, E2E key derivation, etc.)
+    // behaves identically whether or not 2FA was involved.
+    async function verifyMfaChallenge(tempToken, code) {
+        console.log('🔐 [AUTH] Verifying 2FA challenge');
+        const baseUrl = _getBaseUrl();
+
+        if (!tempToken || !code) {
+            return {
+                success: false,
+                error: 'A verification code is required',
+                code: 'MISSING_MFA_CODE',
+                message: 'Please enter your 6-digit authenticator code or a backup code'
+            };
+        }
+
+        try {
+            const response = await fetch(`${baseUrl}/api/auth/2fa/challenge`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tempToken, token: String(code).trim() })
+            });
+
+            const rawText = await response.text();
+            let data;
+            try {
+                data = rawText ? JSON.parse(rawText) : {};
+            } catch (parseError) {
+                data = { message: rawText || `HTTP ${response.status}` };
+            }
+
+            if (!response.ok) {
+                let errCode = 'MFA_CHALLENGE_FAILED';
+                if (response.status === 401) errCode = 'INVALID_MFA_CODE';
+                else if (response.status >= 500) errCode = 'SERVER_ERROR';
+                return {
+                    success: false,
+                    error: data.message || `Verification failed (HTTP ${response.status})`,
+                    code: errCode,
+                    status: response.status,
+                    message: data.message || 'Invalid or expired code'
+                };
+            }
+
+            const token = _extractTokenFromResponse(data);
+            if (!token) {
+                return {
+                    success: false,
+                    error: 'Verification succeeded but no token was provided',
+                    code: 'NO_TOKEN',
+                    status: response.status,
+                    message: 'Verification succeeded but no token was provided',
+                    data
+                };
+            }
+
+            return _completeSession(token, data, data.user?.email || data.user?.username || null, 'mfa-challenge');
+        } catch (error) {
+            console.error('🔐 [AUTH] MFA challenge error:', error);
+            if (error.message === 'Failed to fetch' || (error.message && error.message.includes('NetworkError'))) {
+                return {
+                    success: false,
+                    error: 'Cannot connect to authentication server',
+                    code: 'CORS_OR_NETWORK_ERROR',
+                    message: 'Unable to reach the server. Please check your connection and try again.',
+                    status: 0,
+                    isCorsError: true
+                };
+            }
+            return {
+                success: false,
+                error: error.message || 'Verification failed',
+                code: 'MFA_CHALLENGE_ERROR',
+                message: error.message || 'Verification failed'
+            };
+        }
+    }
+
    async function login(...args) {
     console.log('🔐 [AUTH] Login attempt');
 
@@ -2935,6 +3132,25 @@
             };
         }
 
+        // ===== 2FA / MFA challenge =====
+        // FIX (2FA audit): when the account has 2FA enabled, the backend does
+        // NOT issue a real token — it returns { requiresMfa: true, tempToken }
+        // and expects a follow-up call to verifyMfaChallenge() (which POSTs
+        // to /api/auth/2fa/challenge) before real tokens are issued. Without
+        // this check, that response fell through to the token-extraction
+        // logic below, found no token, and returned a confusing "no token
+        // received from server" error — making 2FA look completely broken.
+        if (data.requiresMfa === true && data.tempToken) {
+            console.log('🔐 [AUTH] 2FA challenge required');
+            return {
+                success: false,
+                requiresMfa: true,
+                tempToken: data.tempToken,
+                message: 'Two-factor authentication code required',
+                payload: { identifier: payload.identifier }
+            };
+        }
+
         // ===== Token extraction =====
         const token = _extractTokenFromResponse(data);
         if (!token) {
@@ -2950,114 +3166,7 @@
             };
         }
 
-        const expiresIn = data.expiresIn || data.data?.expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY;
-
-        let user = data.user || data.data?.user || data.data;
-        if (!user) {
-            console.warn('⚠️ [AUTH] No user object in response, deriving minimal user from identifier');
-            user = {
-                email: normalized.identifier.includes('@') ? normalized.identifier : null,
-                username: normalized.identifier.includes('@') ? normalized.identifier.split('@')[0] : normalized.identifier,
-                id: 'user_' + Date.now()
-            };
-        }
-
-        const refreshToken = data.refreshToken || data.data?.refreshToken || null;
-
-        // ===== Persist session (unified storage helper) =====
-        const persisted = _persistAuthData(token, user, refreshToken, expiresIn);
-        if (!persisted) {
-            console.error('❌ [AUTH] Failed to persist auth data');
-            return {
-                success: false,
-                error: 'Failed to store authentication data',
-                code: 'STORAGE_ERROR',
-                status: 500,
-                message: 'Authentication succeeded but data could not be stored'
-            };
-        }
-
-        // Compatibility mirror into AuthStorage, if present
-        if (window.AuthStorage && window.AuthStorage.saveSession) {
-            try {
-                window.AuthStorage.saveSession({
-                    token,
-                    refreshToken,
-                    user,
-                    expiresAt: Date.now() + (expiresIn || CONFIG.DEFAULT_TOKEN_EXPIRY)
-                });
-            } catch (storageError) {
-                console.warn('⚠️ [AUTH] Failed to save to authStorage:', storageError.message);
-            }
-        }
-
-        // Prevent background validation flicker right after login
-        window.__LAST_LOGIN_TIME__ = Date.now();
-
-        // Legacy/compat keys consumed by chat.html, sockets, sync manager, etc.
-        localStorage.setItem('auth_token', token);
-        localStorage.setItem('authToken', token);
-        localStorage.setItem('accessToken', token);
-        localStorage.setItem('moodchat_token', token);
-        localStorage.setItem('auth_user', JSON.stringify(user));
-
-        const tokenStored = setUserToken(token, expiresIn);
-        if (!tokenStored) {
-            console.error('❌ [AUTH] Failed to store token');
-            return {
-                success: false,
-                error: 'Failed to store authentication token',
-                code: 'TOKEN_STORAGE_ERROR',
-                status: 500,
-                message: 'Authentication succeeded but token could not be stored'
-            };
-        }
-
-        if (refreshToken) {
-            _safeStorageSet(CONFIG.REFRESH_TOKEN_KEY, refreshToken);
-        }
-
-        _safeStorageSet('USER_DATA', JSON.stringify(user));
-        window.currentUser = user;
-
-        _initCrossTabSync();
-        _initIframeSync();
-
-        _emitEvent('login', {
-            user,
-            token,
-            timestamp: new Date().toISOString(),
-            payloadType: args.length > 1 ? 'legacy-args' : 'object',
-            backendPayload: { identifier: payload.identifier }
-        });
-
-        try {
-            window.dispatchEvent(new CustomEvent('user-logged-in', {
-                detail: {
-                    user, token,
-                    timestamp: new Date().toISOString(),
-                    source: 'api.auth.js',
-                    version: VERSION,
-                    payloadType: args.length > 1 ? 'legacy-args' : 'object'
-                }
-            }));
-            window.dispatchEvent(new CustomEvent('auth:token:ready', { detail: { token, timestamp: Date.now() } }));
-            window.dispatchEvent(new CustomEvent('session:ready', { detail: { token, user, timestamp: Date.now() } }));
-        } catch (dispatchError) {
-            console.warn('⚠️ [AUTH] Failed to dispatch login events:', dispatchError);
-        }
-
-        console.log('✅ [AUTH] Login successful with token storage');
-
-        return {
-            success: true,
-            user,
-            token,
-            expiresIn,
-            message: 'Login successful',
-            payloadType: args.length > 1 ? 'legacy-args' : 'object',
-            identifierUsed: normalized.identifier
-        };
+        return _completeSession(token, data, normalized.identifier, args.length > 1 ? 'legacy-args' : 'object');
 
     } catch (error) {
         _safeLogError('LOGIN', 'Login error', {
@@ -4009,6 +4118,7 @@
             
             // Core authentication functions
             login,
+            verifyMfaChallenge,
             register,
             logout,
             autoLogin,

@@ -2124,7 +2124,107 @@
             // No hideLoading() needed — nothing was shown
         }
         
+        // FIX (2FA audit): completes the redirect-to-chat flow shared by a
+        // normal password-only login AND a login that required a 2FA
+        // challenge. Extracted from the login click handler so the MFA
+        // modal's "Verify" button can reuse it instead of duplicating it.
+        function finalizeLoginSuccess(response, password) {
+            const token = response.token || response.data?.token || response.accessToken;
+            const user = response.user || response.data?.user;
+            if (token) {
+                window.AppRuntimeAuthority?.persistSession?.({
+                    token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
+                    user: user || null, expiresAt: response.expiresAt || response.data?.expiresAt || null
+                });
+                ['authToken','moodchat_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                    try { localStorage.setItem(k, token); } catch(_) {}
+                });
+                if (user) {
+                    try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch(_) {}
+                    try { localStorage.setItem('moodchat_user', JSON.stringify(user)); } catch(_) {}
+                }
+            }
+            window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+            // See FIX-E2E-WIRING note below (unchanged) — persist plaintext
+            // password for the tab session so any iframe can derive the E2E key.
+            try { sessionStorage.setItem('kyn_e2e_pw_session', password); } catch (_) {}
+            setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
+        }
+
+        // FIX (2FA audit): state + UI wiring for the 2FA challenge modal.
+        // Previously there was no code path at all that handled the
+        // { requiresMfa: true, tempToken } response from login() — users
+        // with 2FA enabled just saw a confusing "no token received" error.
+        let __mfaPending = null; // { tempToken, password }
+
+        function showMfaModal(tempToken, password) {
+            __mfaPending = { tempToken, password };
+            const overlay = document.getElementById('mfaModalOverlay');
+            const input = document.getElementById('mfaCodeInput');
+            const err = document.getElementById('mfaModalError');
+            if (err) { err.style.display = 'none'; err.textContent = ''; }
+            if (input) { input.value = ''; }
+            if (overlay) overlay.classList.add('open');
+            setTimeout(() => input?.focus(), 100);
+        }
+
+        function hideMfaModal() {
+            __mfaPending = null;
+            document.getElementById('mfaModalOverlay')?.classList.remove('open');
+        }
+
+        function setupMfaModal() {
+            const submitBtn = document.getElementById('mfaSubmitBtn');
+            const cancelBtn = document.getElementById('mfaCancelBtn');
+            if (!submitBtn || !cancelBtn) return;
+
+            // Clone-and-replace so re-calling setupMfaModal() (e.g. if
+            // bindAuthButtons runs more than once) never double-binds.
+            const newSubmit = submitBtn.cloneNode(true);
+            submitBtn.parentNode.replaceChild(newSubmit, submitBtn);
+            const newCancel = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+            const doVerify = async () => {
+                if (!__mfaPending) return;
+                const input = document.getElementById('mfaCodeInput');
+                const err = document.getElementById('mfaModalError');
+                const code = input?.value.trim();
+                if (!code) {
+                    if (err) { err.textContent = 'Enter your 6-digit code or a backup code'; err.style.display = 'block'; }
+                    return;
+                }
+                newSubmit.disabled = true;
+                newSubmit.textContent = 'Verifying…';
+                try {
+                    const result = await window.api.auth.verifyMfaChallenge(__mfaPending.tempToken, code);
+                    if (result?.success) {
+                        const password = __mfaPending.password;
+                        hideMfaModal();
+                        finalizeLoginSuccess(result, password);
+                    } else {
+                        if (err) { err.textContent = result?.message || result?.error || 'Invalid code — please try again'; err.style.display = 'block'; }
+                    }
+                } catch (verifyErr) {
+                    if (err) { err.textContent = verifyErr.message || 'Verification failed'; err.style.display = 'block'; }
+                } finally {
+                    newSubmit.disabled = false;
+                    newSubmit.textContent = 'Verify';
+                }
+            };
+
+            newSubmit.addEventListener('click', doVerify);
+            newCancel.addEventListener('click', () => {
+                hideMfaModal();
+                setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
+            });
+            document.getElementById('mfaCodeInput')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); doVerify(); }
+            });
+        }
+
         function bindAuthButtons() {
+            setupMfaModal();
             // Login Button
             const loginBtn = document.getElementById('login-button');
             if (loginBtn) {
@@ -2207,24 +2307,14 @@
                         }
 
                         clearTimeout(wakeTimer);
-                        if (response?.success || response?.token || response?.data?.token) {
-                            const token = response.token || response.data?.token || response.accessToken;
-                            const user = response.user || response.data?.user;
-                            if (token) {
-                                window.AppRuntimeAuthority?.persistSession?.({
-                                    token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
-                                    user: user || null, expiresAt: response.expiresAt || response.data?.expiresAt || null
-                                });
-                                // Store token in all known keys for module compatibility
-                                ['authToken','moodchat_token','token','accessToken','USER_TOKEN'].forEach(k => {
-                                    try { localStorage.setItem(k, token); } catch(_) {}
-                                });
-                                if (user) {
-                                    try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch(_) {}
-                                    try { localStorage.setItem('moodchat_user', JSON.stringify(user)); } catch(_) {}
-                                }
-                            }
-                            window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+                        // FIX (2FA audit): the backend returns requiresMfa+tempToken
+                        // instead of a token when the account has 2FA enabled. This
+                        // must be checked BEFORE the generic success/failure branch,
+                        // or it falls through to the "invalid credentials" error.
+                        if (response?.requiresMfa && response?.tempToken) {
+                            setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
+                            showMfaModal(response.tempToken, password);
+                        } else if (response?.success || response?.token || response?.data?.token) {
                             // FIX-E2E-WIRING: js/e2e-encryption.js (KynectaE2E) needs the
                             // plaintext password to derive the key that wraps/unwraps the
                             // user's private encryption key, but it only ever runs inside
@@ -2242,8 +2332,7 @@
                             // any point can independently call KynectaE2E.init(password).
                             // Cleared on explicit logout (see logout handler) rather than
                             // after one use.
-                            try { sessionStorage.setItem('kyn_e2e_pw_session', password); } catch (_) {}
-                            setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
+                            finalizeLoginSuccess(response, password);
                         } else {
                             const errorMsg = response?.message || response?.data?.message || 'Invalid email or password. Please check your credentials.';
                             window.CoreUtils.showNotification('Error', errorMsg, 'error');
@@ -2864,6 +2953,101 @@
         }
         .help-item.open .help-answer { display: block; }
     </style>
+
+    <!-- ====================================================================== -->
+    <!-- 2FA CHALLENGE MODAL (FIX: 2FA audit — shown when login() returns       -->
+    <!-- requiresMfa; previously there was no UI for this at all, so users     -->
+    <!-- with 2FA enabled were locked out with a generic "no token" error)     -->
+    <!-- ====================================================================== -->
+    <style>
+        .mfa-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .mfa-modal-overlay.open { display: flex; }
+        .mfa-modal-card {
+            background: var(--bg-secondary, #1e1e2e);
+            color: var(--text-primary, #fff);
+            border-radius: 14px;
+            width: 100%;
+            max-width: 360px;
+            padding: 24px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+        }
+        .mfa-modal-card h3 {
+            margin: 0 0 6px;
+            font-size: 17px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .mfa-modal-card p {
+            margin: 0 0 18px;
+            font-size: 13px;
+            color: var(--text-secondary, #aaa);
+            line-height: 1.5;
+        }
+        .mfa-modal-card input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color, #3a3a4e);
+            background: var(--input-bg, #2a2a3e);
+            color: var(--text-primary, #fff);
+            font-size: 18px;
+            letter-spacing: 3px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .mfa-modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 6px;
+        }
+        .mfa-modal-actions button {
+            flex: 1;
+            padding: 11px 16px;
+            border-radius: 10px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #mfaSubmitBtn { background: var(--accent, #4F46E5); color: #fff; }
+        #mfaCancelBtn { background: transparent; color: var(--text-secondary, #aaa); border: 1px solid var(--border-color, #3a3a4e) !important; }
+        .mfa-modal-error {
+            display: none;
+            color: #ef4444;
+            font-size: 12.5px;
+            margin: -4px 0 12px;
+        }
+        .mfa-modal-hint {
+            font-size: 11.5px;
+            color: var(--text-secondary, #888);
+            margin-top: 14px;
+            text-align: center;
+        }
+    </style>
+    <div class="mfa-modal-overlay" id="mfaModalOverlay" role="dialog" aria-modal="true" aria-labelledby="mfaModalTitle">
+        <div class="mfa-modal-card">
+            <h3 id="mfaModalTitle"><i class="fas fa-shield-alt"></i> Two-Factor Verification</h3>
+            <p>Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+            <input type="text" id="mfaCodeInput" inputmode="numeric" maxlength="11" placeholder="123456" autocomplete="one-time-code">
+            <div class="mfa-modal-error" id="mfaModalError"></div>
+            <div class="mfa-modal-actions">
+                <button type="button" id="mfaCancelBtn">Cancel</button>
+                <button type="button" id="mfaSubmitBtn">Verify</button>
+            </div>
+            <div class="mfa-modal-hint">Lost access to your device? Use one of your saved backup codes instead.</div>
+        </div>
+    </div>
 
     <!-- Modal overlay container -->
     <div class="info-modal-overlay" id="infoModalOverlay" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">

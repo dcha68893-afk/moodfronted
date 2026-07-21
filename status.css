@@ -55,6 +55,27 @@
     --status-bg-8: #c8d6e5;
 }
 
+/* FIX (theme audit): :root above declares dark colors (bg-color: #111b21,
+   etc.) as the unconditional default with no light counterpart anywhere
+   in this file — every element correctly using var(--bg-color) etc. was
+   still stuck dark regardless of what theme the user selected in
+   Settings > Appearance, because there was nothing here for
+   data-theme="light" to actually override. This block restores the
+   light palette (same convention Tool.css and theme.colors.css use:
+   :root/light = light values, [data-theme="dark"] = dark override). */
+html[data-theme="light"],
+body[data-theme="light"],
+[data-theme="light"] {
+    --secondary-color: #f0f2f5;
+    --text-primary: #111b21;
+    --text-secondary: #667781;
+    --bg-color: #ffffff;
+    --surface-color: #ffffff;
+    --surface-alt: #f0f2f5;
+    --border-color: #e9edef;
+    --viewed-story-ring: #8696a0;
+}
+
 body {
     background-color: var(--bg-color);
     color: var(--text-primary);
@@ -3380,38 +3401,44 @@ html, body, .app-container {
    ================================================================ */
 
 @media (max-width: 768px) {
+  /* FIX (theme audit): this whole block previously hardcoded dark hex
+     colors with !important and no [data-theme] qualification at all,
+     so the Status module was permanently dark on mobile — the most
+     common viewport for this PWA — no matter what theme was selected.
+     Now driven by the same CSS variables the rest of the module uses,
+     which correctly resolve per data-theme after the fix above. */
   html, body {
-    background-color: #111b21 !important;
+    background-color: var(--bg-color) !important;
   }
 
   .sidebar-header {
     background: var(--header-status, linear-gradient(135deg, #facc15 0%, #ec4899 60%, #8b5cf6 100%)) !important;
-    color: #ffffff !important;
+    color: var(--text-primary) !important;
   }
 
   .status-list-content {
-    background-color: #111b21 !important;
+    background-color: var(--bg-color) !important;
   }
 
   .status-item {
-    background-color: #111b21 !important;
-    border-bottom: 1px solid #2a3942 !important;
+    background-color: var(--bg-color) !important;
+    border-bottom: 1px solid var(--border-color) !important;
   }
 
   .status-name-text {
-    color: #e9edef !important;
+    color: var(--text-primary) !important;
     font-weight: 600;
   }
 
   .status-time,
   .status-preview {
-    color: #8696a0 !important;
+    color: var(--text-secondary) !important;
   }
 
   /* Quick action grid cards on mobile */
   .quick-action-btn {
-    background-color: #1f2c34 !important;
-    border: 1px solid #2a3942 !important;
+    background-color: var(--surface-color) !important;
+    border: 1px solid var(--border-color) !important;
     border-radius: 12px !important;
     box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
   }
@@ -3421,14 +3448,14 @@ html, body, .app-container {
   }
 
   .quick-action-text {
-    color: #8696a0 !important;
+    color: var(--text-secondary) !important;
     font-size: 12px !important;
   }
 
   /* Category tabs */
   .category-btn {
     background: transparent !important;
-    color: #8696a0 !important;
+    color: var(--text-secondary) !important;
   }
   .category-btn.active {
     color: #00a884 !important;
