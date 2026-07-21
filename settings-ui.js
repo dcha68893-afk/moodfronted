@@ -2234,15 +2234,25 @@ export function loadSecuritySection(container) {
             <div class="section-header">
                 <h3><i class="fas fa-shield-alt section-icon"></i> Account Security</h3>
             </div>
-            <div class="section-body">
+            <div class="section-body" id="securitySectionBody">
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Two-Factor Authentication</div>
-                        <div class="setting-description">Add an extra layer of security to your account</div>
+                        <div class="setting-description" id="twoFactorAuthDesc">Add an extra layer of security to your account</div>
                     </div>
                     <div class="setting-control">
                         <label class="toggle-switch">
-                            <input type="checkbox" id="twoFactorAuthToggle" ${settings.twoFactorAuth ? 'checked' : ''}>
+                            <!-- FIX (2FA audit): this checkbox used to write to a fake
+                                 generic "twoFactorAuth" preference that had nothing to
+                                 do with real TOTP 2FA — toggling it did nothing to your
+                                 actual account, and every re-render of this section
+                                 stomped the real enabled/disabled state shown elsewhere.
+                                 It's now driven entirely by the real /api/settings/2fa/*
+                                 status (synced by settings.html's load2FAStatus()) and
+                                 clicking it opens the real setup/disable panel instead
+                                 of flipping an inert flag. Starts unchecked; the real
+                                 sync corrects it immediately after render. -->
+                            <input type="checkbox" id="twoFactorAuthToggle">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -2340,8 +2350,18 @@ function setupSecurityEventListeners() {
     
     const twoFactorAuthToggle = document.getElementById('twoFactorAuthToggle');
     if (twoFactorAuthToggle) {
-        twoFactorAuthToggle.addEventListener('change', () => {
-            window.__updateSetting('security', 'twoFactorAuth', twoFactorAuthToggle.checked);
+        // FIX (2FA audit): this toggle no longer owns any state of its own.
+        // Revert whatever the click did to the checkbox (its real value is
+        // only ever set by the real 2FA panel's load2FAStatus() sync) and
+        // instead open/reveal the real setup-or-manage panel so the user
+        // goes through the actual TOTP setup/disable flow.
+        twoFactorAuthToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (typeof window.__open2FAPanel === 'function') {
+                window.__open2FAPanel();
+                const realPanel = document.getElementById('__p12fa');
+                if (realPanel) realPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
         });
     }
     

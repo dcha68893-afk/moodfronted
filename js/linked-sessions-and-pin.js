@@ -27,7 +27,22 @@
       headers: { Authorization: `Bearer ${_token()}`, 'Content-Type': 'application/json', ...opts.headers },
       ...opts,
     });
-    return res.json();
+    const data = await res.json().catch(() => ({}));
+    // FIX (PIN audit): this used to return the parsed body unconditionally,
+    // even on 401/expired-token or validation failures — callers only
+    // checked for a thrown network error, so a failed save still showed
+    // "PIN saved ✓" and the next status check silently read as "No PIN set"
+    // (undefined enabled field), making it look like the save never
+    // happened. Now a non-OK response or an explicit success:false/status:
+    // 'error' body throws, so callers' catch blocks show the real reason.
+    if (!res.ok || data.success === false || data.status === 'error') {
+      const message = data.message || `Request failed (${res.status})`;
+      const err = new Error(message);
+      err.status = res.status;
+      err.body = data;
+      throw err;
+    }
+    return data;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -270,8 +285,12 @@
           : '<i class="fas fa-times-circle" style="color:#ef4444"></i> No PIN set';
       }
       if (btn) btn.textContent = enabled ? 'Change / Disable PIN' : 'Set Up PIN';
-    } catch {
-      if (statusEl) statusEl.textContent = '';
+    } catch (e) {
+      if (statusEl) {
+        statusEl.innerHTML = e.status === 401
+          ? '<i class="fas fa-exclamation-circle" style="color:#f59e0b"></i> Sign in again to check your PIN'
+          : '<i class="fas fa-exclamation-circle" style="color:#f59e0b"></i> Could not check PIN status';
+      }
     }
   }
 

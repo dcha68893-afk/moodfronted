@@ -3254,7 +3254,12 @@
    * 3. 2FA TOTP — full setup / verify / disable panel
    * ══════════════════════════════════════════════════════════════════════════*/
   function inject2FAPanel() {
-    if (el('__p12fa')) return;
+    // FIX (2FA audit): previously this bailed out completely once the panel
+    // existed, so the real enabled/disabled sync (load2FAStatus) only ever
+    // ran once per page load. Now it always re-syncs against the real
+    // /api/settings/2fa/status, even on repeat calls (from the MutationObserver
+    // below, which fires on every settings re-render) — cheap and idempotent.
+    if (el('__p12fa')) { load2FAStatus(); return; }
     // BUG FIX (2FA audit): the old anchor order tried a selector that never
     // matches this DOM (`[id*="security"]...`), then fell back to
     // `el('changePasswordModal')` — which exists, so it was ALWAYS chosen.
