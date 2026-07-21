@@ -1274,114 +1274,124 @@
             --app-text-secondary: #9ca3af;
         }
 
+        /* FIX (theme audit): every rule in this block used to apply
+           unconditionally with !important — #globalHeader (the app's main
+           header bar), the loading screen, profile card/menu, and the
+           marketplace nav pills were always forced dark no matter what
+           theme was selected in Settings > Appearance. Gating each
+           selector behind [data-theme="dark"] restores the light-mode
+           defaults already declared earlier in this file (e.g. the light
+           #globalHeader gradient near the top of this <style> block) and
+           only applies these dark values when dark mode is actually active. */
+
         /* Override loading screen to dark */
-        #loadingScreen {
+        [data-theme="dark"] #loadingScreen {
             background: #0f172a !important;
         }
-        #loadingScreen h2 {
+        [data-theme="dark"] #loadingScreen h2 {
             color: #e5e7eb !important;
         }
-        #loadingScreen p {
+        [data-theme="dark"] #loadingScreen p {
             color: #9ca3af !important;
         }
 
         /* Override global header to dark */
-        #globalHeader {
+        [data-theme="dark"] #globalHeader {
             background:
                 linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.97)),
                 linear-gradient(90deg, rgba(17,24,39,0.2), rgba(14,165,233,0.06)) !important;
             border-bottom: 1px solid rgba(255,255,255,0.08) !important;
         }
 
-        .header-module-title {
+        [data-theme="dark"] .header-module-title {
             color: #e5e7eb !important;
         }
 
-        .header-module-subtitle {
+        [data-theme="dark"] .header-module-subtitle {
             color: #9ca3af !important;
         }
 
-        .header-action-btn {
+        [data-theme="dark"] .header-action-btn {
             background: rgba(255,255,255,0.08) !important;
             border: 1px solid rgba(255,255,255,0.12) !important;
             color: #e5e7eb !important;
         }
 
-        .header-action-btn:hover {
+        [data-theme="dark"] .header-action-btn:hover {
             background: rgba(255,255,255,0.15) !important;
             color: #ffffff !important;
         }
 
-        .profile-trigger {
+        [data-theme="dark"] .profile-trigger {
             background: rgba(30,41,59,0.8) !important;
             border-color: rgba(139,92,246,0.4) !important;
         }
 
-        .profile-trigger:hover {
+        [data-theme="dark"] .profile-trigger:hover {
             background: rgba(30,41,59,0.95) !important;
         }
 
         /* Profile modal dark */
-        .profile-card {
+        [data-theme="dark"] .profile-card {
             background: #1e293b !important;
             color: #e5e7eb !important;
         }
 
-        .profile-username {
+        [data-theme="dark"] .profile-username {
             color: #e5e7eb !important;
         }
 
-        .profile-bio {
+        [data-theme="dark"] .profile-bio {
             color: #9ca3af !important;
         }
 
-        .settings-link-btn {
+        [data-theme="dark"] .settings-link-btn {
             background: #374151 !important;
             color: #e5e7eb !important;
         }
 
         /* Profile edit sheet dark */
-        .profile-edit-sheet {
+        [data-theme="dark"] .profile-edit-sheet {
             background: #1e293b !important;
         }
 
-        .profile-edit-header {
+        [data-theme="dark"] .profile-edit-header {
             background: #1e293b !important;
             border-color: #374151 !important;
         }
 
-        .profile-edit-header h3 {
+        [data-theme="dark"] .profile-edit-header h3 {
             color: #e5e7eb !important;
         }
 
-        .profile-edit-close {
+        [data-theme="dark"] .profile-edit-close {
             background: #374151 !important;
             color: #9ca3af !important;
         }
 
-        .profile-edit-avatar-hint {
+        [data-theme="dark"] .profile-edit-avatar-hint {
             color: #9ca3af !important;
         }
 
-        .profile-edit-field label {
+        [data-theme="dark"] .profile-edit-field label {
             color: #9ca3af !important;
         }
 
-        .profile-edit-field input,
-        .profile-edit-field textarea {
+        [data-theme="dark"] .profile-edit-field input,
+        [data-theme="dark"] .profile-edit-field textarea {
             background: #0f172a !important;
             color: #e5e7eb !important;
             border-color: #374151 !important;
         }
 
-        .profile-edit-field input:focus,
-        .profile-edit-field textarea:focus {
+        [data-theme="dark"] .profile-edit-field input:focus,
+        [data-theme="dark"] .profile-edit-field textarea:focus {
             border-color: #2563eb !important;
             background: #0f172a !important;
         }
 
         /* Iframe containers dark bg */
-        .iframe-container {
+        [data-theme="dark"] .iframe-container {
             background: #0f172a !important;
         }
 
@@ -1390,17 +1400,27 @@
             display: flex; align-items: center; gap: 4px;
         }
         #toolsHeaderNav.hidden { display: none !important; }
+        /* FIX (theme audit): these pills only had translucent-white/light-gray
+           values (background rgba(255,255,255,0.07), text #9ca3af) meant to
+           sit on the header's old permanently-dark background — now that
+           #globalHeader correctly goes light in light mode, that combination
+           is close to invisible (near-white on white). Base styles below are
+           now readable on a light header; [data-theme="dark"] restores the
+           original dark-mode look. */
         .jm-parent-nav-tab {
             display: inline-flex; flex-direction: column;
             align-items: center; justify-content: center;
             gap: 2px; padding: 4px 8px;
-            border: none; background: rgba(255,255,255,0.07);
-            border-radius: 10px; color: #9ca3af;
+            border: none; background: rgba(15,23,42,0.06);
+            border-radius: 10px; color: #475569;
             cursor: pointer; transition: background .18s, color .18s;
             min-height: 44px; min-width: 44px;
         }
-        .jm-parent-nav-tab:hover { background: rgba(255,255,255,0.14); color: #e5e7eb; }
-        .jm-parent-nav-tab.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
+        .jm-parent-nav-tab:hover { background: rgba(15,23,42,0.12); color: #111b21; }
+        .jm-parent-nav-tab.active { background: rgba(37,99,235,0.14); color: #2563eb; }
+        [data-theme="dark"] .jm-parent-nav-tab { background: rgba(255,255,255,0.07); color: #9ca3af; }
+        [data-theme="dark"] .jm-parent-nav-tab:hover { background: rgba(255,255,255,0.14); color: #e5e7eb; }
+        [data-theme="dark"] .jm-parent-nav-tab.active { background: rgba(37,99,235,0.25); color: #60a5fa; }
         /* toolsBackBtn removed — back navigation handled inside the tools iframe */
     </style>
 </head>
