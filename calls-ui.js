@@ -10156,68 +10156,13 @@ window.addEventListener('message', function(event) {
             allCallsList.innerHTML = `<div class="offline-state"><i class="fas fa-phone-slash"></i><p>No recent calls</p><p class="subtext">Your call history will appear here</p></div>`;
             return;
         }
-        
-        allCallsList.innerHTML = '';
-        
-        calls.forEach(function(call) {
-            const otherParticipant = (call.otherParticipants && call.otherParticipants[0]) || call.caller;
-            const currentUserId = window.__CHILD_SESSION__?.userId;
-            const otherId = call.callerId == currentUserId ? call.receiverId : call.callerId;
-            const contactMatch = (UIState.contacts || window.__cachedCallContacts || []).find(c => c.id == otherId || c.userId == otherId);
-            const name = (otherParticipant && (otherParticipant.displayName || otherParticipant.username))
-                || (contactMatch && (contactMatch.displayName || contactMatch.username || contactMatch.name))
-                || (call.callerInfo?.username) || (call.calleeInfo?.username)
-                || ('User #' + (otherId || '?'));
-            const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
-            const isOutgoing = call.callerId == currentUserId;
-            // Missed ONLY applies to receiver (incoming side); outgoing unanswered = "No Answer"
-            const isMissed = call.status === 'missed' && !isOutgoing;
-            const isNoAnswer = call.status === 'missed' && isOutgoing;
-            const direction = isOutgoing ? 'outgoing' : (isMissed ? 'missed' : 'incoming');
-            const iconClass = call.type === 'video' ? 'fa-video' : 'fa-phone';
-            const statusIconClass = isMissed ? 'fa-phone-slash' : isNoAnswer ? 'fa-phone-slash' : (isOutgoing ? 'fa-arrow-up' : 'fa-arrow-down');
-            
-            const item = document.createElement('div');
-            item.className = 'call-history-item ' + direction;
-            
-            let timeDisplay = '';
-            try { timeDisplay = new Date(call.startedAt).toLocaleString(); } catch(e) { timeDisplay = ''; }
-            const directionLabel = isMissed ? 'Missed' : isNoAnswer ? 'No Answer' : (isOutgoing ? 'Outgoing' : 'Incoming');
-            
-            item.innerHTML = `
-                <div class="call-avatar" style="background-color: #6c5ce7">
-                    <span>${escapeHtmlForCall(initials)}</span>
-                </div>
-                <div class="call-info">
-                    <div class="call-name">
-                        ${escapeHtmlForCall(name)}
-                        <span class="call-status-icon ${escapeHtmlForCall(direction)}" title="${escapeHtmlForCall(directionLabel)}" style="margin-left:6px;font-size:11px">
-                            <i class="fas ${statusIconClass}"></i>
-                        </span>
-                    </div>
-                    <div class="call-details">
-                        <i class="fas ${iconClass}"></i>
-                        <span>${call.type === 'video' ? 'Video call' : 'Voice call'}</span>
-                        <span>•</span>
-                        <span>${call.displayDuration || '0:00'}</span>
-                    </div>
-                    <div class="call-time">${escapeHtmlForCall(timeDisplay)}</div>
-                </div>
-                <button class="call-action-btn" data-user-id="${escapeHtmlForCall(String(otherParticipant?.id || otherId || ''))}" data-user-name="${escapeHtmlForCall(name)}" data-call-type="${call.type || 'voice'}" title="Call back">
-                    <i class="fas fa-phone"></i>
-                </button>
-            `;
-            allCallsList.appendChild(item);
-        });
-        
-        document.querySelectorAll('.call-action-btn').forEach(function(btn) {
-            btn.removeEventListener('click', handleCallActionClick);
-            btn.addEventListener('click', function(e) {
-                window.__pendingCallReturnTo = 'calls';
-                window.__pendingCallChatUserId = null;
-                handleCallActionClick.call(btn, e);
-            });
-        });
+
+        // FIX: previously duplicated the row-rendering logic here without the
+        // message (chat-action-btn) icon, which silently clobbered the
+        // full-featured rows from displayCallHistory() on every update and
+        // made the message icon disappear/stop working intermittently.
+        // displayCallHistory() is now the single source of truth for this list.
+        displayCallHistory(calls);
     }
 });
 
@@ -12430,4 +12375,40 @@ registerProcessor('noise-gate-processor', NoiseGateProcessor);
     clear: _clearSession,
     load:  _loadSession,
   };
+})();
+// ==================== CALLS LIST "MORE" MENU (list-level 3-dot) ====================
+// Distinct from the in-call screen's own 3-dot menu (#menuDotsBtn / #menuDotsDropdown
+// in calls.html, which shows Record/Participants/Chat/Whiteboard/Notes/Polls/
+// Relationship — that one stays in-call only). This menu just shows/hides the
+// Call Settings panel that used to be a separate always-expanded section in the
+// scrollable list.
+(function () {
+    function _wireCallsListMoreMenu() {
+        const btn = document.getElementById('callsListMoreBtn');
+        const menu = document.getElementById('callsListMoreMenu');
+        if (!btn || !menu) return;
+        if (btn.dataset.wired === '1') return;
+        btn.dataset.wired = '1';
+
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            e.preventDefault();
+            const isOpen = menu.style.display === 'block';
+            menu.style.display = isOpen ? 'none' : 'block';
+        });
+
+        // Close when tapping anywhere else, but never treat a tap inside the
+        // menu itself as "outside" (avoids fighting with the toggle switches).
+        document.addEventListener('click', function (e) {
+            if (menu.style.display !== 'block') return;
+            if (menu.contains(e.target) || e.target === btn || btn.contains(e.target)) return;
+            menu.style.display = 'none';
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _wireCallsListMoreMenu);
+    } else {
+        _wireCallsListMoreMenu();
+    }
 })();

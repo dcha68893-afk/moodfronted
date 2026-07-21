@@ -964,13 +964,24 @@
         qsa('.category-btn').forEach(btn => {
             const fresh = freshClone(btn);
             fresh.addEventListener('click', () => {
+                // Discover is a sheet/overlay (same as the old Discover quick-
+                // action), not a section to switch to — leave tab/section
+                // active state untouched and just open the panel on top.
+                if (fresh.id === 'discoverTab') {
+                    const panel = qs('#discoverPanel');
+                    if (panel) {
+                        panel.style.display = 'flex';
+                        loadDiscoverPanel();
+                    }
+                    return;
+                }
+
                 qsa('.category-btn').forEach(b => b.classList.remove('active'));
                 qsa('.groups-section').forEach(s => s.classList.remove('active'));
                 fresh.classList.add('active');
                 // Map button ID to section ID
                 const sectionMap = {
                     allTab       : 'allGroupsSection',
-                    myGroupsTab  : 'myGroupsSection',
                     joinedTab    : 'joinedSection',
                     invitesTab   : 'invitesSection',
                     adminTab     : 'adminSection',

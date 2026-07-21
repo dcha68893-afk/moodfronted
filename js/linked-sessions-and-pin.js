@@ -239,12 +239,19 @@
   // ════════════════════════════════════════════════════════════════════════════
 
   function _injectTwoStepPin() {
-    if (document.getElementById('__kynTwoStepPin')) return;
+    const secBody = document.getElementById('securitySectionBody');
+    const existing = document.getElementById('__kynTwoStepPin');
 
-    const secAnchor = document.querySelector('[data-content="security"]') ||
-                      document.getElementById('__kynDevices')?.parentElement ||
-                      document.querySelector('.settings-main, .settings-content, .content-area');
-    if (!secAnchor) return;
+    if (!secBody) {
+      // Not currently viewing the Security section — don't leave this
+      // floating on top of whatever section IS showing (Privacy, Chat, etc).
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) {
+      if (existing.parentElement === secBody) return; // already correctly placed
+      existing.remove();
+    }
 
     const div = document.createElement('div');
     div.id = '__kynTwoStepPin';
@@ -252,11 +259,12 @@
     div.innerHTML = `
       <div style="font-weight:600;font-size:15px;color:var(--text-primary,#fff);margin-bottom:4px">
         <i class="fas fa-lock" style="color:var(--accent,#4F46E5);margin-right:8px"></i>
-        Two-Step Verification PIN
+        Two-Step Verification
       </div>
       <div style="font-size:12px;color:var(--text-muted,#888);margin-bottom:12px">
-        Set a PIN that's required whenever you register your phone number again.
-        Adds an extra layer of protection even if someone gets your verification code.
+        Set a PIN that's required whenever you register your phone number again,
+        and optionally add an authenticator-app code (2FA) on top of it for
+        extra protection even if someone gets your verification code.
       </div>
       <div id="__kynPinStatus" style="font-size:12px;color:var(--text-muted,#888);margin-bottom:10px">
         Checking status…
@@ -266,11 +274,20 @@
         background:var(--accent,#4F46E5);color:#fff;cursor:pointer;
         font-size:14px;font-weight:600;width:100%;
       ">Set Up PIN</button>
+      <button id="__kynOpen2FABtn" style="
+        margin-top:8px;padding:10px 20px;border-radius:10px;
+        border:1px solid var(--accent,#4F46E5);background:none;color:var(--accent,#4F46E5);
+        cursor:pointer;font-size:14px;font-weight:600;width:100%;
+      ">Set Up 2FA</button>
+      <div id="__kynTwoStepPinTwoFAHost"></div>
     `;
-    secAnchor.appendChild(div);
+    secBody.appendChild(div);
 
     _loadPinStatus();
     document.getElementById('__kynPinBtn').addEventListener('click', _openPinModal);
+    document.getElementById('__kynOpen2FABtn').addEventListener('click', function () {
+      if (typeof window.__open2FAPanel === 'function') window.__open2FAPanel();
+    });
   }
 
   async function _loadPinStatus() {
@@ -420,7 +437,9 @@
     _injectTwoStepPin();
     _wireSessionsModal();
 
-    // Re-inject when settings-core re-renders panels
+    // Re-run when settings-core re-renders panels — _injectTwoStepPin() now
+    // removes the box when Security isn't the active section, so this stays
+    // in sync with navigation instead of leaking onto other sections.
     new MutationObserver(() => {
       _injectTwoStepPin();
     }).observe(document.body, { childList: true, subtree: true });

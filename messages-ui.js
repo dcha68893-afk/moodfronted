@@ -4922,8 +4922,6 @@
 
                                 <span class="chat-name">${(chat.friendName || 'User').replace(/\s+User$/i, '').trim() || (chat.friendName || 'User')}</span>
 
-                                <span class="chat-time">${time}</span>
-
                             </div>
 
                             <div class="chat-last-message">
@@ -4940,11 +4938,17 @@
 
                         </div>
 
-                        <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
-                            onclick="event.stopPropagation();event.preventDefault();window.messagesUI?._showChatContextMenu('${chat.id}', event);"
-                            style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;">
-                            <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
-                        </button>
+                        <div class="chat-item-right">
+
+                            <span class="chat-time">${time}</span>
+
+                            <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
+                                onclick="event.stopPropagation();event.preventDefault();window.messagesUI?._showChatContextMenu('${chat.id}', event);"
+                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;">
+                                <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
+                            </button>
+
+                        </div>
 
                     </div>
 

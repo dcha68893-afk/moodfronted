@@ -1694,7 +1694,7 @@
     <button id="fabAddFriend"
         onclick="navigateToPage('friends')"
         title="Add Friend"
-        style="display:none;position:fixed;top:12px;right:180px;z-index:400;
+        style="display:none;position:fixed;top:112px;right:14px;z-index:400;
                width:36px;height:36px;border-radius:50%;border:none;cursor:pointer;
                background:linear-gradient(135deg,#667eea,#764ba2);
                color:#fff;display:none;align-items:center;justify-content:center;
@@ -1727,16 +1727,18 @@
             transition: transform .15s ease, box-shadow .15s ease;
         }
         #fabAddFriend:hover {
-            transform: translateY(-50%) scale(1.1);
+            transform: scale(1.1);
             box-shadow: 0 6px 24px rgba(102,126,234,.65) !important;
         }
-        #fabAddFriend:active { transform: translateY(-50%) scale(.94); }
+        #fabAddFriend:active { transform: scale(.94); }
         /* Hide FAB while a call is active */
         body.call-active #fabAddFriend,
         body.in-call-screen #fabAddFriend { display: none !important; }
-        /* Desktop: sit left of sidebar, still vertically centered */
+        /* Desktop: sit left of sidebar, vertically centered */
         @media (min-width: 768px) {
-            #fabAddFriend { top: 50% !important; left: 80px !important; bottom: auto !important; transform: translateY(-50%) !important; }
+            #fabAddFriend { top: 50% !important; left: 80px !important; right: auto !important; bottom: auto !important; transform: translateY(-50%) !important; }
+            #fabAddFriend:hover { transform: translateY(-50%) scale(1.1) !important; }
+            #fabAddFriend:active { transform: translateY(-50%) scale(.94) !important; }
         }
     </style>
 

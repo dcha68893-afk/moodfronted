@@ -927,7 +927,7 @@
             
             <div class="group-categories">
                 <button class="category-btn active" id="allTab">All Groups</button>
-                <button class="category-btn" id="myGroupsTab">My Groups <span class="badge" id="myGroupsCount">0</span></button>
+                <button class="category-btn" id="discoverTab" title="Discover groups by friends, communities, region or world"><i class="fas fa-compass" style="margin-right:4px;"></i>Discover</button>
                 <button class="category-btn" id="joinedTab">Joined <span class="badge" id="joinedCount">0</span></button>
                 <button class="category-btn" id="invitesTab">Invites <span class="badge" id="invitesCount">0</span></button>
                 <button class="category-btn" id="adminTab">Admin <span class="badge" id="adminCount">0</span></button>
@@ -954,27 +954,17 @@
                         </div>
                         <div class="quick-action-text">Discover</div>
                     </button>
-                    <button class="quick-action-btn" id="groupInvitesBtn" title="Group invites">
-                        <div class="quick-action-icon">
-                            <i class="fas fa-user-plus"></i>
-                        </div>
-                        <div class="quick-action-text">Invites</div>
-                    </button>
-                    <button class="quick-action-btn" id="groupEventsBtn" title="Group events">
-                        <div class="quick-action-icon">
-                            <i class="fas fa-calendar-alt"></i>
-                        </div>
-                        <div class="quick-action-text">Events</div>
-                    </button>
-                    <!-- Priority 1 FIX: Smart Group OS accessible from sidebar (not just inside chat) -->
-                    <button class="quick-action-btn" id="smartGroupOsBtn" title="Smart Group Tools — Open, Create or Join a Group for Tasks, Events, Polls, Notes, Files, Analytics, AI" onclick="window._openSmartGroupOSFromSidebar()" style="position:relative">
-                        <div class="quick-action-icon" style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:10px;padding:6px">
-                            <i id="smartGroupOsIcon" class="fas fa-layer-group" style="color:#fff"></i>
-                        </div>
-                        <div class="quick-action-text" style="font-weight:700">Smart Tools</div>
-                        <!-- PHASE15 FIX: badge shows + (create/join) or OS (tools), updated by _updateSmartBadge() -->
-                        <span id="smartGroupOsBadge" style="position:absolute;top:4px;right:4px;background:#48bb78;color:#fff;font-size:8px;font-weight:900;border-radius:4px;padding:1px 4px;letter-spacing:.3px">+</span>
-                    </button>
+                    <!-- REMOVED: Invites quick-action — already reachable via the
+                         "Invites" tab above and from inside group creation/chat.
+                         REMOVED: Events quick-action — already reachable from
+                         inside the group chat panel. Kept #groupInvitesBtn and
+                         #groupEventsBtn out of the DOM entirely (not just hidden)
+                         so no dangling click handlers remain.
+                         REMOVED: Smart Tools quick-action — already reachable
+                         from inside the group chat panel. window._openSmartGroupOSFromSidebar()
+                         itself is left intact since it's still called
+                         elsewhere (auto-opened right after creating/joining
+                         a group). -->
                 </div>
                 
                 <!-- ========== EXISTING: Group Stats ========== -->

@@ -3102,12 +3102,109 @@ window.__CALLS_IFRAME__ = {
                 </button>
             </div>
             
-            <div class="call-categories">
+            <div class="call-categories" style="display:flex;align-items:center;">
                 <button class="category-btn active" data-category="all">All</button>
                 <button class="category-btn" data-category="missed">Missed</button>
                 <button class="category-btn" data-category="group">Group</button>
+                <button id="callsListMoreBtn" title="More"
+                    style="margin-left:auto;background:none;border:none;color:var(--text-secondary,#9ca3af);cursor:pointer;font-size:16px;padding:6px 10px;border-radius:8px;flex-shrink:0;">
+                    <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
+                </button>
             </div>
-            
+
+            <!-- List-level "more" menu: Call Settings live here now, instead of a
+                 separate always-expanded section taking up scroll space in the
+                 list. The in-call three-dot menu (Record/Participants/Chat/...)
+                 is a completely different menu on the in-call screen and is
+                 untouched by this. -->
+            <div class="call-settings" id="callsListMoreMenu" style="display:none;position:absolute;z-index:50;right:8px;top:96px;width:calc(100% - 16px);max-width:340px;">
+                <div class="settings-panel" id="settingsPanel" style="display:block;">
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-laugh settings-item-icon"></i>
+                            <span>Emotional Context</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="emotionalContextToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-bullseye settings-item-icon"></i>
+                            <span>Call Intention</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="callIntentionToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-comment-dots settings-item-icon"></i>
+                            <span>In-Call Chat</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="inCallChatToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-paint-brush settings-item-icon"></i>
+                            <span>Shared Whiteboard</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="whiteboardToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-poll settings-item-icon"></i>
+                            <span>Polls</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="pollsToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-sticky-note settings-item-icon"></i>
+                            <span>Shared Notes</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="notesToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-eye settings-item-icon"></i>
+                            <span>Focus Mode</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="focusModeToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-item">
+                        <div class="settings-item-label">
+                            <i class="fas fa-sync settings-item-icon"></i>
+                            <span>Live Reactions</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="liveReactionsToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="payment-buttons" style="margin-top: 15px;">
+                        <button class="payment-btn secondary" id="resetSettingsBtn">Reset Settings</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="call-list">
                 <div class="call-list-content">
                     <div class="quick-actions">
@@ -3125,102 +3222,7 @@ window.__CALLS_IFRAME__ = {
                             <span class="quick-action-text">Group Call</span>
                         </button>
                     </div>
-                    
-                    <div class="call-settings">
-                        <div class="settings-toggle" id="settingsToggle">
-                            <div class="settings-toggle-title">
-                                <i class="fas fa-cog settings-toggle-icon"></i>
-                                <span>Call Settings</span>
-                            </div>
-                            <i class="fas fa-chevron-down" id="settingsToggleIcon"></i>
-                        </div>
-                        <div class="settings-panel" id="settingsPanel">
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-laugh settings-item-icon"></i>
-                                    <span>Emotional Context</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="emotionalContextToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-bullseye settings-item-icon"></i>
-                                    <span>Call Intention</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="callIntentionToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-comment-dots settings-item-icon"></i>
-                                    <span>In-Call Chat</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="inCallChatToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-paint-brush settings-item-icon"></i>
-                                    <span>Shared Whiteboard</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="whiteboardToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-poll settings-item-icon"></i>
-                                    <span>Polls</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="pollsToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-sticky-note settings-item-icon"></i>
-                                    <span>Shared Notes</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="notesToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-eye settings-item-icon"></i>
-                                    <span>Focus Mode</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="focusModeToggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-item">
-                                <div class="settings-item-label">
-                                    <i class="fas fa-sync settings-item-icon"></i>
-                                    <span>Live Reactions</span>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="liveReactionsToggle" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="payment-buttons" style="margin-top: 15px;">
-                                <button class="payment-btn secondary" id="resetSettingsBtn">Reset Settings</button>
-                            </div>
-                        </div>
-                    </div>
-                    
+
                     <div class="recent-calls">
                         <div class="section-title">
                             <span>Recent Calls</span>
