@@ -353,6 +353,19 @@
 
     isHost() { return !!this._isHost; }
 
+    // FIX-ROOT-CAUSE-NO-HOST-TRANSFER (frontend half): the backend now
+    // reassigns hostId when the host leaves/disconnects and emits
+    // 'group:call:host_changed' (see calls-core.js's RT_MAP). Without this,
+    // isHost() would stay frozen at whatever was passed into
+    // joinGroupCall() for the rest of the call — the newly-promoted host's
+    // own client would still hide their End-for-everyone/mute/remove
+    // controls even though the server now accepts those actions from them.
+    setHost(newHostId) {
+        const iAmNewHost = String(newHostId) === this._localUserId;
+        this._isHost = iAmNewHost;
+        this._notify('host_changed', { newHostId: String(newHostId), isLocalHost: iAmNewHost });
+    }
+
     // ── Host controls ────────────────────────────────────────────────────────
 
     muteParticipant(userId) {

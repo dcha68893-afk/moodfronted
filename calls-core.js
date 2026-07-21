@@ -29825,6 +29825,24 @@ _escapeHtml: function(text) {
             return;
         }
 
+        // FIX-ROOT-CAUSE-SELF-DISMISS: this is the actual cause of the
+        // receiver's own screen going dark immediately after accepting.
+        // notifyCallInitiated/'call:accepted_elsewhere' in CallSignalingService.js
+        // is sent via sendToUser(userId, ...) — which fans out to EVERY
+        // connected socket for that user, including the exact socket that
+        // just sent 'call:accept'. Nothing here checked whether this event
+        // was reporting this device's OWN action; it only checked whether
+        // the callId was stale, which it isn't — it's the call this device
+        // just legitimately accepted. So resetCallState() below fired on
+        // the accepting device itself, wiping the just-established call
+        // state a moment after answering. Skip entirely when the socket
+        // that accepted is this device's own current socket.
+        const mySocketId = window.KynectaRealtime?._socket?.id;
+        if (mySocketId && callData && callData.acceptedBySocketId === mySocketId) {
+            logCall(MODULE, 'handleCallAcceptedElsewhere: this device is the one that accepted — ignoring self-notification', callData);
+            return;
+        }
+
         resetCallState();
 
         notifyListeners('call_accepted_elsewhere', callData);
@@ -38465,6 +38483,22 @@ clearActiveCall: function() {
             // as every other call-ended reason — otherwise non-host participants would
             // be left on a dark call screen even though their media was already released.
             { event: 'kyn:group:call:ended_by_host', fn: (d) => handleCallEnded({ ...d, reason: 'host_ended' }) },
+
+            // FIX-ROOT-CAUSE-NO-HOST-TRANSFER: paired with the backend fix in
+            // CallSignalingService.js — when the host leaves/disconnects a
+            // group call, the server now promotes another participant and
+            // emits this event. Without a listener here, the newly-promoted
+            // host's own client never learned about it: GroupCallEngine's
+            // isHost() stayed frozen at whatever was passed into
+            // joinGroupCall() at join time, so their End-for-everyone/mute/
+            // remove controls would stay hidden even though the server would
+            // now accept those actions from them.
+            { event: 'kyn:group:call:host_changed', fn: (d) => {
+                const _gce = window.__GroupCallEngine || window.GroupCall;
+                if (_gce && typeof _gce.setHost === 'function' && d && d.newHostId) {
+                    _gce.setHost(d.newHostId);
+                }
+            } },
 
 
 

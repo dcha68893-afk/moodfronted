@@ -333,6 +333,26 @@
       return _aesgcmDecrypt(aesKey, iv, ct, ad);
     }
 
+    // FIX-ROOT-CAUSE-RATCHET-REPLAY-CORRUPTION: this is the actual source of
+    // messages permanently going "[Decryption failed]" starting from some
+    // point in a conversation and never recovering. If this same message
+    // number arrives a second time on the chain we're already past — e.g.
+    // duplicate socket delivery (the message-delivery duplication fixed
+    // elsewhere in this pass), or a page reload re-feeding a message that's
+    // cached as ciphertext through the decrypt pipeline again — it isn't in
+    // skippedKeys (it was never skipped; it was consumed directly as the
+    // expected next message the first time). Without this check, execution
+    // falls through to "decrypt current message" below, which unconditionally
+    // derives the NEXT key from wherever the chain currently sits and
+    // advances/persists that as real state — silently stealing and consuming
+    // the key that the genuine next message needs. That message then fails
+    // to decrypt too, and the corruption compounds for every message after
+    // it until the chain happens to rotate again. Detect the replay here and
+    // fail closed without touching state at all.
+    if (senderEphPub === state.theirEphPubB64 && msgNum < state.recvMsgNum) {
+      return '[Decryption failed — message already processed]';
+    }
+
     // DH ratchet: if sender's ephemeral key changed, perform ratchet step
     if (senderEphPub !== state.theirEphPubB64) {
       // Skip any messages on current receiving chain

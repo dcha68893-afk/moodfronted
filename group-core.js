@@ -567,6 +567,30 @@ function sendChildReady() {
 // =============================================
 const processedMessages = new Set();
 
+// FIX-DUPLICATE-GROUP-RENDER: `processedMessages`/`isDuplicate` above only
+// dedupes the postMessage *envelope* id (a fresh id generated every time the
+// parent forwards something into this iframe), not the actual group chat
+// message's own id. A single real message can arrive through more than one
+// envelope (different socket event names, group:localSync relay, etc.), each
+// with a different envelope id, so the envelope-level check never caught it.
+// This is a second, independent dedup keyed on the real message's own id.
+const processedGroupChatMessageIds = new Set();
+
+function isDuplicateGroupChatMessage(messageId) {
+    if (!messageId) return false;
+    if (processedGroupChatMessageIds.has(messageId)) return true;
+    processedGroupChatMessageIds.add(messageId);
+
+    if (processedGroupChatMessageIds.size > 300) {
+        const iterator = processedGroupChatMessageIds.values();
+        for (let i = 0; i < 50; i++) {
+            const value = iterator.next().value;
+            if (value) processedGroupChatMessageIds.delete(value);
+        }
+    }
+    return false;
+}
+
 function isDuplicate(messageId) {
     if (!messageId) return false;
     if (processedMessages.has(messageId)) return true;
@@ -1662,6 +1686,20 @@ handleSettingsChange(message) {
         
         if (payload.groupId && payload.message) {
             const { groupId, message: messageData } = payload;
+
+            // FIX-DUPLICATE-GROUP-RENDER: The backend used to (and in some
+            // paths still legitimately can, e.g. genuine reconnect resync)
+            // deliver the same real message more than once — via different
+            // socket event names, duplicate room membership, or the
+            // group:localSync relay each independently reaching this
+            // handler. The envelope-level dedup in ParentMessaging.handleIncoming
+            // doesn't catch this because each delivery gets a fresh envelope
+            // id. Check the actual message's own id/messageId here, before
+            // it's ever pushed into state or rendered.
+            const realMessageId = messageData && (messageData.id || messageData.messageId);
+            if (realMessageId && isDuplicateGroupChatMessage(realMessageId)) {
+                return;
+            }
 
             // FIX-GROUP-ENCRYPTION: decrypt before this message is ever
             // stored or rendered — mirrors the 1:1 chat decrypt-at-the-

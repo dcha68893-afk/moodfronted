@@ -45,9 +45,16 @@
 
     // In-memory CryptoKey cache — localStorage only ever holds the wrapped
     // (encrypted-at-rest) bytes; imported CryptoKeys live here per session.
-    const _liveKeys = new Map(); // `${groupId}:${ownerUserId}` -> { key, gen }
+    const _liveKeys = new Map(); // `${groupId}:${ownerUserId}` -> { key, gen }  (used for OUR OWN current key only)
+
+    // FIX-ROOT-CAUSE-GROUP-DECRYPT-STALE-GENERATION: received keys need one
+    // entry PER GENERATION, not one slot per owner — see _persistReceivedKey
+    // above for why. Separate map so this never interferes with the "my own
+    // key" entries above, which correctly only ever need the current one.
+    const _liveReceivedKeys = new Map(); // `${groupId}:${ownerUserId}:${gen}` -> { key, gen }
 
     function _liveKeyCacheKey(groupId, ownerUserId) { return `${groupId}:${ownerUserId}`; }
+    function _liveReceivedKeyCacheKey(groupId, ownerUserId, gen) { return `${groupId}:${ownerUserId}:${gen}`; }
 
     async function _persistMyKey(groupId, gen, rawB64) {
         const wrapped = await E2E().wrapForLocalStorage(rawB64);
@@ -58,10 +65,50 @@
 
     async function _persistReceivedKey(groupId, ownerUserId, gen, rawB64) {
         const wrapped = await E2E().wrapForLocalStorage(rawB64);
+        if (!wrapped) return;
         const cache = _loadCache(groupId);
         if (!cache.received) cache.received = {};
-        if (wrapped) cache.received[ownerUserId] = { gen, rawB64Wrapped: wrapped };
+
+        // FIX-ROOT-CAUSE-GROUP-DECRYPT-STALE-GENERATION: this used to be
+        // `cache.received[ownerUserId] = { gen, rawB64Wrapped }` — a single
+        // slot, overwritten every time a newer generation came in. A message
+        // encrypted under generation N (still perfectly decryptable — this
+        // device already fetched and cached that exact key once) would
+        // permanently show "[Decryption failed]" the moment generation N+1
+        // arrived and silently discarded it, e.g. right after any membership
+        // change triggers a rotation while messages sent just before it are
+        // still being delivered/rendered. Keep a small bounded history per
+        // owner instead of a single entry, so an already-fetched generation
+        // is never thrown away just because a newer one showed up.
+        let history = cache.received[ownerUserId];
+        if (!Array.isArray(history)) {
+            // Upgrade older single-object cache shape in place, if present.
+            history = history ? [history] : [];
+        }
+        history = history.filter(h => h.gen !== gen);
+        history.push({ gen, rawB64Wrapped: wrapped });
+        history.sort((a, b) => a.gen - b.gen);
+        if (history.length > 5) history = history.slice(history.length - 5);
+        cache.received[ownerUserId] = history;
         _saveCache(groupId, cache);
+    }
+
+    // Look up one exact generation's wrapped key for an owner from the
+    // persisted history (companion to _persistReceivedKey's bounded array).
+    async function _loadReceivedKeyGeneration(groupId, ownerUserId, gen) {
+        const cache = _loadCache(groupId);
+        let history = cache.received?.[ownerUserId];
+        if (!history) return null;
+        if (!Array.isArray(history)) history = [history]; // old single-object shape
+        const match = history.find(h => h.gen === gen);
+        if (!match) return null;
+        try {
+            const rawB64 = await E2E().unwrapFromLocalStorage(match.rawB64Wrapped);
+            const key = await E2E().importSenderKey(rawB64);
+            return { key, gen };
+        } catch (_) {
+            return null;
+        }
     }
 
     // Fetch + decrypt every Sender Key distributed to us in this group, and
@@ -89,14 +136,13 @@
         const keys = data?.data?.keys || [];
 
         for (const entry of keys) {
-            const cacheKey = _liveKeyCacheKey(groupId, entry.ownerUserId);
-            const existing = _liveKeys.get(cacheKey);
-            if (existing && existing.gen >= entry.keyGeneration) continue; // already have this or newer
+            const cacheKey = _liveReceivedKeyCacheKey(groupId, entry.ownerUserId, entry.keyGeneration);
+            if (_liveReceivedKeys.has(cacheKey)) continue; // already have this exact generation cached
 
             try {
                 const rawB64 = await E2E().decryptSenderKeyFrom(entry.encryptedSenderKey, entry.ownerUserId);
                 const cryptoKey = await E2E().importSenderKey(rawB64);
-                _liveKeys.set(cacheKey, { key: cryptoKey, gen: entry.keyGeneration });
+                _liveReceivedKeys.set(cacheKey, { key: cryptoKey, gen: entry.keyGeneration });
                 await _persistReceivedKey(groupId, entry.ownerUserId, entry.keyGeneration, rawB64);
             } catch (e) {
                 console.warn(`[GroupE2E] Failed to decrypt sender key from owner ${entry.ownerUserId}:`, e.message);
@@ -137,22 +183,6 @@
         }
         const others = (memberUserIds || []).filter(id => String(id) !== String(myUserId));
 
-        // Determine next generation number (server is authoritative for what
-        // we've distributed before, in case localStorage was cleared).
-        let nextGen = 1;
-        try {
-            const baseUrl = global.__API_BASE_URL || global.API_BASE_URL || '';
-            const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-            const resp = await fetch(`${baseUrl}/api/group-encryption/${groupId}/my-generation`, {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-                credentials: 'include',
-            });
-            if (resp.ok) {
-                const data = await resp.json();
-                nextGen = (data?.data?.currentGeneration || 0) + 1;
-            }
-        } catch (_) { /* fall back to gen 1 if the check fails */ }
-
         const { key, rawB64 } = await E2E().generateSenderKey();
 
         const distributions = [];
@@ -169,25 +199,60 @@
             }
         }
 
+        // FIX-ROOT-CAUSE-GROUP-KEY-GENERATION-RACE: this used to GET
+        // /my-generation first, compute "current + 1" locally, and send that
+        // guess to /distribute. Two calls close together (two tabs/devices,
+        // both sending a first message in a new group around the same
+        // moment) could both read the same "current" value and guess the
+        // same "next" number for genuinely different key material — nothing
+        // caught that. /distribute now atomically claims the authoritative
+        // generation number server-side and returns it; adopt THAT value
+        // rather than guessing, so this device's local cache always matches
+        // exactly what was actually persisted and distributed for this call.
+        let assignedGen = null;
         if (distributions.length > 0) {
             try {
                 const baseUrl = global.__API_BASE_URL || global.API_BASE_URL || '';
                 const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-                await fetch(`${baseUrl}/api/group-encryption/${groupId}/distribute`, {
+                const resp = await fetch(`${baseUrl}/api/group-encryption/${groupId}/distribute`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                     credentials: 'include',
-                    body: JSON.stringify({ keyGeneration: nextGen, distributions }),
+                    body: JSON.stringify({ distributions }),
                 });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    assignedGen = data?.data?.keyGeneration ?? null;
+                }
             } catch (e) {
                 console.warn('[GroupE2E] Distribution request failed:', e.message);
             }
         }
 
-        _liveKeys.set(_liveKeyCacheKey(groupId, myUserId), { key, gen: nextGen });
-        await _persistMyKey(groupId, nextGen, rawB64);
-        return { key, gen: nextGen };
+        if (assignedGen == null) {
+            // We couldn't confirm what generation number (if any) the server
+            // assigned — most likely a solo group (no other members yet) or
+            // a failed request. Do NOT cache a guessed number as if it were
+            // real; the caller gets null back and the next send attempt will
+            // retry cleanly instead of operating on an unconfirmed generation.
+            if (others.length === 0) {
+                // No one to distribute to yet (solo group) — gen 1 is safe
+                // to use locally for our own messages; there's no recipient
+                // whose cache could ever disagree with it.
+                assignedGen = 1;
+            } else {
+                return null;
+            }
+        }
+
+        _liveKeys.set(_liveKeyCacheKey(groupId, myUserId), { key, gen: assignedGen });
+        await _persistMyKey(groupId, assignedGen, rawB64);
+        return { key, gen: assignedGen };
     }
+
+    // In-flight generate+distribute promises, keyed the same way as
+    // _liveKeys. See ensureSenderKey below for why this exists.
+    const _inFlightEnsure = new Map();
 
     // Ensure we have a usable Sender Key for sending in this group. Reuses
     // the cached one if present; generates+distributes a new one otherwise
@@ -200,28 +265,58 @@
 
         if (_liveKeys.has(cacheKey)) return _liveKeys.get(cacheKey);
 
-        // Try loading our own previously-generated key from local storage first.
-        const cache = _loadCache(groupId);
-        if (cache.myKey) {
-            try {
-                const rawB64 = await E2E().unwrapFromLocalStorage(cache.myKey.rawB64Wrapped);
-                const key = await E2E().importSenderKey(rawB64);
-                const entry = { key, gen: cache.myKey.gen };
-                _liveKeys.set(cacheKey, entry);
-                return entry;
-            } catch (e) {
-                console.warn('[GroupE2E] Could not unwrap cached sender key, generating a new one:', e.message);
-            }
-        }
+        // FIX-ROOT-CAUSE-GROUP-KEY-GENERATION-RACE: two calls to this
+        // function close together (e.g. sending two messages back to back in
+        // a brand new group chat, before the first generate+distribute round
+        // trip — a few sequential network calls — has finished) would both
+        // pass the cache check above while it's still empty, and each go on
+        // to independently generate a DIFFERENT random key. Both would then
+        // typically compute the same "next generation" number and distribute
+        // under it; whichever distribution request reached the server last
+        // would silently overwrite the other's rows for recipients, leaving
+        // any message encrypted with the losing call's key — including any
+        // message already sent from this very tab using it — permanently
+        // undecryptable by everyone, despite being tagged with a generation
+        // number that "should" be valid. Share one in-flight promise instead.
+        if (_inFlightEnsure.has(cacheKey)) return _inFlightEnsure.get(cacheKey);
 
-        if (!memberUserIds || memberUserIds.length === 0) {
-            memberUserIds = await _fetchGroupMemberIds(groupId);
+        const promise = (async () => {
+            // Try loading our own previously-generated key from local storage first.
+            const cache = _loadCache(groupId);
+            if (cache.myKey) {
+                try {
+                    const rawB64 = await E2E().unwrapFromLocalStorage(cache.myKey.rawB64Wrapped);
+                    const key = await E2E().importSenderKey(rawB64);
+                    const entry = { key, gen: cache.myKey.gen };
+                    _liveKeys.set(cacheKey, entry);
+                    return entry;
+                } catch (e) {
+                    console.warn('[GroupE2E] Could not unwrap cached sender key, generating a new one:', e.message);
+                }
+            }
+
+            let members = memberUserIds;
+            if (!members || members.length === 0) {
+                members = await _fetchGroupMemberIds(groupId);
+            }
+            return _generateAndDistribute(groupId, members);
+        })();
+
+        _inFlightEnsure.set(cacheKey, promise);
+        try {
+            return await promise;
+        } finally {
+            _inFlightEnsure.delete(cacheKey);
         }
-        return _generateAndDistribute(groupId, memberUserIds);
     }
 
     async function rotateSenderKey(groupId, memberUserIds) {
-        const { gen } = await _generateAndDistribute(groupId, memberUserIds);
+        const result = await _generateAndDistribute(groupId, memberUserIds);
+        if (!result) {
+            console.warn(`[GroupE2E] Rotation for group ${groupId} did not complete — distribution failed; will retry on next send.`);
+            return;
+        }
+        const { gen } = result;
 
         // Tell the server our previous-generation distribution rows are now
         // superseded, so GET /keys stops serving them to anyone.
@@ -264,12 +359,20 @@
 
         const ownerUserId = message.senderId;
         const wantedGen = message.metadata.keyGeneration;
-        const cacheKey = _liveKeyCacheKey(groupId, ownerUserId);
+        const cacheKey = _liveReceivedKeyCacheKey(groupId, ownerUserId, wantedGen);
 
-        let entry = _liveKeys.get(cacheKey);
-        if (!entry || entry.gen !== wantedGen) {
-            await syncReceivedKeys(groupId); // pull any we're missing
-            entry = _liveKeys.get(cacheKey);
+        let entry = _liveReceivedKeys.get(cacheKey);
+        if (!entry) {
+            await syncReceivedKeys(groupId); // pull any we're missing from the server
+            entry = _liveReceivedKeys.get(cacheKey);
+        }
+        if (!entry) {
+            // Server may only serve the current generation (rotate-notify
+            // deprecates old distribution rows), but this device could well
+            // have already fetched and locally saved this exact generation
+            // earlier — before it was superseded. Check there before giving up.
+            entry = await _loadReceivedKeyGeneration(groupId, ownerUserId, wantedGen);
+            if (entry) _liveReceivedKeys.set(cacheKey, entry);
         }
 
         if (!entry) {
