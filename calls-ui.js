@@ -5608,6 +5608,20 @@ handleContactItemClick: function(e) {
                     var idle = document.getElementById('idleScreen');
                     if (idle) { idle.classList.add('active'); idle.style.setProperty('display','block','important'); }
                 }
+                // FIX (post-call stuck-on-calls-screen audit): this point in
+                // handleCallEnded is the one place that unconditionally runs on
+                // EVERY termination path (local end button, remote hangup,
+                // decline, timeout) with no debounce/stale-echo guard above it —
+                // every other "tell the parent to restore nav + navigate back"
+                // signal (CALL_ENDED, CALL_ENDED_RETURN) is sent later in this
+                // function and can be dropped by one of several timing guards on
+                // the parent (chat.html) side. Notify the parent right here too,
+                // as an independent, always-fires signal it can't miss.
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'CALLS_IDLE_SCREEN_SHOWN', timestamp: Date.now() }, '*');
+                    }
+                } catch (_) {}
             })();
 
             // ── LOCAL-FIRST: finalize call record ─────────────────────────────

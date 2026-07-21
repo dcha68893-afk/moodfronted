@@ -5121,6 +5121,23 @@
                     }
                 }
 
+                if (data.type === 'CALLS_IDLE_SCREEN_SHOWN') {
+                    // FIX (post-call stuck-on-calls-screen audit): see calls-ui.js
+                    // for the full rationale — this fires unconditionally every
+                    // time the calls iframe resets to its own idle screen after a
+                    // call ends, regardless of whether CALL_ENDED/CALL_ENDED_RETURN
+                    // got through. If we're still showing the full-screen call UI
+                    // at this point, the iframe clearly isn't in a call anymore —
+                    // restore nav and navigate back now instead of waiting for the
+                    // 1500ms watchdog poll (or, if some other guard swallowed every
+                    // other signal, at all).
+                    if (document.body.classList.contains('call-screen-active')) {
+                        window.__activeCallInProgress = false;
+                        document.body.classList.remove('call-screen-active');
+                        _kynReturnFromCallToOrigin();
+                    }
+                }
+
                 if (data.type === 'CALL_ENDED_RETURN' || data.type === 'CALL_ENDED_NAVIGATE_BACK') {
                     // ── GUARD: ignore if a call was just dispatched in the last 3s ───────
                     // CALL_ENDED_RETURN fires from stale WS echoes during call SETUP, not
