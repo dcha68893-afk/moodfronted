@@ -119,8 +119,10 @@ const NETWORK_FIRST_PATTERNS = [
   /\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,
 
-  // ✅ NEW: Messages module
-  /\/messages-core\.js/i,
+  // ✅ NEW: Messages module (messages-core.js replaced by 3 companion files)
+  /\/messages-core\.bootstrap\.js/i,
+  /\/messages-core\.operations\.js/i,
+  /\/messages-core\.ui-bridge\.js/i,
   /\/messages-ui\.js/i,
 
   // ✅ NEW: Safety layer (handles localStorage, used by token reading)

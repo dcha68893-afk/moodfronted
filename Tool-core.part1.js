@@ -3,6 +3,10 @@
  * Module guard, lifecycle state machine, auth handlers,
  * session management, core state, logging, security
  */
+// onModuleActive is declared in part3 (UI bridge / public API); part3 also imports
+// heavily from this file. Safe circular import: only called from inside transitionTo(),
+// never during top-level module evaluation.
+import { onModuleActive } from './Tool-core.part3.js';
 // =============================================
 // TOOLS-CORE.JS - COMPLETE PRODUCTION MODULE (FIXED)
 // =============================================
@@ -12,15 +16,15 @@
 // =============================================
 // MODULE IDENTIFIER - MUST MATCH PARENT EXPECTATIONS
 // =============================================
-const MODULE_NAME = 'tools'; // EXACT match required
-const MODULE_VERSION = '10.2.3'; // FIXED VERSION
-const MODULE_CAPABILITIES = ['marketplace', 'storage', 'heartbeat', 'ui'];
+export const MODULE_NAME = 'tools'; // EXACT match required
+export const MODULE_VERSION = '10.2.3'; // FIXED VERSION
+export const MODULE_CAPABILITIES = ['marketplace', 'storage', 'heartbeat', 'ui'];
 
 // =============================================
 // LIFECYCLE STATE MACHINE (SINGLE SOURCE OF TRUTH - STRICT)
 // =============================================
 
-const LIFECYCLE_STATE = {
+export const LIFECYCLE_STATE = {
     BOOT: 'BOOT',
     INITIALIZING: 'INITIALIZING',
     READY: 'READY',
@@ -29,7 +33,7 @@ const LIFECYCLE_STATE = {
     ACTIVE: 'ACTIVE'
 };
 
-let currentState = LIFECYCLE_STATE.BOOT;
+export let currentState = LIFECYCLE_STATE.BOOT;
 
 // Enable debug logging when in iframe (tools is always in an iframe)
 if (window.parent && window.parent !== window && !window.__TOOLS_DEBUG__) {
@@ -37,7 +41,7 @@ if (window.parent && window.parent !== window && !window.__TOOLS_DEBUG__) {
 }
 
 // Deep token extractor — searches all known payload shapes
-function _deepExtractToken(data) {
+export function _deepExtractToken(data) {
     if (!data || typeof data !== 'object') return null;
     // Direct fields
     const direct = data.userToken || data.token || data.accessToken || data.jwtToken;
@@ -70,7 +74,7 @@ function _deepExtractToken(data) {
     return null;
 }
 
-function _deepExtractUserId(data) {
+export function _deepExtractUserId(data) {
     if (!data || typeof data !== 'object') return null;
     const direct = data.userId || data.user_id || data.userid || data.id;
     if (direct && direct !== 'user' && direct !== 'null') return direct;
@@ -88,7 +92,7 @@ function _deepExtractUserId(data) {
 }
 
 // Background token harvester — defined here, started after sessionClient is ready
-function _harvestToken() {
+export function _harvestToken() {
     if (window.__kynToken) return;
     let found = false;
     
@@ -159,13 +163,13 @@ function _harvestToken() {
         setTimeout(_harvestToken, 1500);
     }
 }
-let childReadySent = false;
-let parentReadyReceived = false;
-let initializationLock = false;
-let activationComplete = false;
+export let childReadySent = false;
+export let parentReadyReceived = false;
+export let initializationLock = false;
+export let activationComplete = false;
 
 // State transition validation matrix - STRICT
-const VALID_TRANSITIONS = {
+export const VALID_TRANSITIONS = {
     [LIFECYCLE_STATE.BOOT]: [LIFECYCLE_STATE.INITIALIZING],
     [LIFECYCLE_STATE.INITIALIZING]: [LIFECYCLE_STATE.READY],
     [LIFECYCLE_STATE.READY]: [LIFECYCLE_STATE.WAIT_PARENT],
@@ -174,7 +178,7 @@ const VALID_TRANSITIONS = {
     [LIFECYCLE_STATE.ACTIVE]: []
 };
 
-function transitionTo(nextState, reason = '') {
+export function transitionTo(nextState, reason = '') {
     // Prevent duplicate transitions
     if (currentState === nextState) {
         if (window.__TOOLS_DEBUG__) console.log(`[Tools][Lifecycle] Already in ${nextState} - ignoring transition request`);
@@ -204,7 +208,7 @@ function transitionTo(nextState, reason = '') {
     return true;
 }
 
-function assertActive(actionName) {
+export function assertActive(actionName) {
     // Non-blocking: always allow, just warn in debug mode
     // secureApiCall handles actual auth — don't gate on lifecycle state
     if (currentState !== LIFECYCLE_STATE.ACTIVE && window.__TOOLS_DEBUG__) {
@@ -221,7 +225,7 @@ export function isActive() {
 // =============================================
 // SESSION VALIDATION UTILITY (MANDATORY)
 // =============================================
-function __isValidSession(session) {
+export function __isValidSession(session) {
     if (!session || typeof session !== 'object') return false;
     
     // Check for userId in any common format (including nested user object)
@@ -267,7 +271,7 @@ function __isValidSession(session) {
 // STORAGE PROXY - SANDBOX-COMPLIANT (NO DIRECT STORAGE)
 // =============================================
 
-const StorageProxy = {
+export const StorageProxy = {
     pendingRequests: new Map(),
     requestCounter: 0,
 
@@ -391,7 +395,7 @@ const StorageProxy = {
 // SESSION CLIENT - PARENT-AUTHORITATIVE
 // =============================================
 
-const SessionClient = {
+export const SessionClient = {
     session: null,
     sessionPromise: null,
     sessionResolvers: [],
@@ -575,7 +579,7 @@ const SessionClient = {
 // MESSAGE DEDUPLICATION (ENHANCED - STRICT)
 // =============================================
 
-const MessageGuard = {
+export const MessageGuard = {
     seen: new Set(),
     processed: new Set(),
     maxSize: 1000,
@@ -632,7 +636,7 @@ let currentLogLevel = LOG_LEVELS.INFO;
 const loggedMessages = new Set();
 const DEBUG = false;
 
-function logOnce(level, message, data = null) {
+export function logOnce(level, message, data = null) {
     const key = `${level}:${message}`;
     if (loggedMessages.has(key)) return;
     loggedMessages.add(key);
@@ -648,11 +652,11 @@ function logOnce(level, message, data = null) {
     if (window.__TOOLS_DEBUG__) console.log(`${LOG_PREFIX} ${prefix} - ${message}`, data ? data : '');
 }
 
-function logError(module, error, context = '') {
+export function logError(module, error, context = '') {
     logOnce('error', `${module} failed: ${error?.message || error}`, { context });
 }
 
-function debugLog(...args) {
+export function debugLog(...args) {
     if (DEBUG) console.log(...args);
 }
 
@@ -660,17 +664,17 @@ function debugLog(...args) {
 // MESSAGE QUEUE SYSTEM (STRICT - PRE-ACTIVE ONLY)
 // =============================================
 
-const messageQueue = [];
+export const messageQueue = [];
 
 // =============================================
 // ID GENERATION (MANDATORY)
 // =============================================
 
-function generateMessageId() {
+export function generateMessageId() {
     return `msg_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
 }
 
-function generateRequestId() {
+export function generateRequestId() {
     return `req_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
 }
 
@@ -719,7 +723,7 @@ function sendMessage(message) {
     }
 }
 
-function safeSend(type, payload = {}) {
+export function safeSend(type, payload = {}) {
     // STRICT RULE: Only CHILD_READY allowed before WAIT_PARENT
     if (!parentReadyReceived && type !== 'CHILD_READY') {
         if (currentState === LIFECYCLE_STATE.WAIT_PARENT || currentState === LIFECYCLE_STATE.WAITING_AUTH) {
@@ -739,7 +743,7 @@ function safeSend(type, payload = {}) {
     return sendMessage(message);
 }
 
-function flushMessageQueue() {
+export function flushMessageQueue() {
     if (!parentReadyReceived || messageQueue.length === 0) return;
     
     if (window.__TOOLS_DEBUG__) console.log(`[Tools][Queue] Flushing ${messageQueue.length} queued messages`);
@@ -754,7 +758,7 @@ function flushMessageQueue() {
 // =============================================
 // MESSAGE VALIDATION (STRICT SCHEMA)
 // =============================================
-function validateMessage(msg) {
+export function validateMessage(msg) {
     if (!msg || typeof msg !== 'object') return false;
     
     // For handshake/AUTH messages, be very permissive
@@ -810,7 +814,7 @@ function isValidOrigin(origin) {
     return false;
 }
 
-function isMessageFromParent(event) {
+export function isMessageFromParent(event) {
     if (!expectedParentOrigin && event.source === window.parent) {
         expectedParentOrigin = event.origin;
     }
@@ -827,7 +831,7 @@ function isMessageFromParent(event) {
 // MODULE STATE (PRESERVED)
 // =============================================
 
-const moduleState = {
+export const moduleState = {
     initialized: false,
     parentDetected: false,
     sessionActive: false,
@@ -1265,7 +1269,7 @@ class SafeStorage {
     }
 }
 
-const safeStorage = new SafeStorage();
+export const safeStorage = new SafeStorage();
 
 // =============================================
 // MODULE 1 - ENVIRONMENT DETECTOR (PRESERVED)
@@ -1360,7 +1364,7 @@ class EnvironmentDetector {
     }
 }
 
-const environmentDetector = new EnvironmentDetector();
+export const environmentDetector = new EnvironmentDetector();
 environmentDetector.initialize();
 
 // =============================================
@@ -1448,10 +1452,53 @@ class ParentCommunicator {
     }
 }
 
-const parentComm = new ParentCommunicator();
+export const parentComm = new ParentCommunicator();
 
 // =============================================
 // MODULE 3 - SESSION CLIENT WRAPPER (UPDATED - NO STORAGE)
 // =============================================
 
 
+
+// =============================================
+// CROSS-MODULE STATE SETTERS (added for the part1/part2/part3 split)
+// These variables are declared here (single source of truth) but are
+// mutated from Tool-core.part2.js and Tool-core.part3.js. ES module
+// imports are live-read-only bindings, so external files cannot do
+// `import { x } from './Tool-core.part1.js'; x = 5;` directly — they
+// must call the matching setter below instead. Reads still work via
+// the normal named import since those bindings are live.
+// =============================================
+export function __set_activationComplete(value) { activationComplete = value; return activationComplete; }
+export function __set_allListings(value) { allListings = value; return allListings; }
+export function __set_analyticsData(value) { analyticsData = value; return analyticsData; }
+export function __set_backgroundJobsStarted(value) { backgroundJobsStarted = value; return backgroundJobsStarted; }
+export function __set_childReadySent(value) { childReadySent = value; return childReadySent; }
+export function __set_currentMoodFilter(value) { currentMoodFilter = value; return currentMoodFilter; }
+export function __set_dataFetchInProgress(value) { dataFetchInProgress = value; return dataFetchInProgress; }
+export function __set_directAPILoaded(value) { directAPILoaded = value; return directAPILoaded; }
+export function __set_handshakeComplete(value) { handshakeComplete = value; return handshakeComplete; }
+export function __set_initializationLock(value) { initializationLock = value; return initializationLock; }
+export function __set_isAuthReady(value) { isAuthReady = value; return isAuthReady; }
+export function __set_isBootstrapped(value) { isBootstrapped = value; return isBootstrapped; }
+export function __set_isInitializing(value) { isInitializing = value; return isInitializing; }
+export function __set_isProcessingQueue(value) { isProcessingQueue = value; return isProcessingQueue; }
+export function __set_isReady(value) { isReady = value; return isReady; }
+export function __set_leaderboardData(value) { leaderboardData = value; return leaderboardData; }
+export function __set_loadingMessageElement(value) { loadingMessageElement = value; return loadingMessageElement; }
+export function __set_myListings(value) { myListings = value; return myListings; }
+export function __set_offlineDrafts(value) { offlineDrafts = value; return offlineDrafts; }
+export function __set_parentDataLoaded(value) { parentDataLoaded = value; return parentDataLoaded; }
+export function __set_parentReadyReceived(value) { parentReadyReceived = value; return parentReadyReceived; }
+export function __set_premiumFeatures(value) { premiumFeatures = value; return premiumFeatures; }
+export function __set_privateNotes(value) { privateNotes = value; return privateNotes; }
+export function __set_savedItems(value) { savedItems = value; return savedItems; }
+export function __set_sessionData(value) { sessionData = value; return sessionData; }
+export function __set_sessionValid(value) { sessionValid = value; return sessionValid; }
+export function __set_streakData(value) { streakData = value; return streakData; }
+export function __set_teamMembers(value) { teamMembers = value; return teamMembers; }
+export function __set_tokenInitializationPromise(value) { tokenInitializationPromise = value; return tokenInitializationPromise; }
+export function __set_trustStats(value) { trustStats = value; return trustStats; }
+export function __set_userFriends(value) { userFriends = value; return userFriends; }
+export function __set_userGroups(value) { userGroups = value; return userGroups; }
+export function __set_userSubscription(value) { userSubscription = value; return userSubscription; }

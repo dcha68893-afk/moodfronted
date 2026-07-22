@@ -147,7 +147,7 @@ import {
     myListings as coreMyListings,
     savedItems as coreSavedItems
     
-} from './Tool-core.js';
+} from './Tool-core.part3.js';
 
 // Make sure showCreateListingModal is defined and works - SIMPLIFIED: removed isActive check
 if (typeof showCreateListingModal !== 'function') {

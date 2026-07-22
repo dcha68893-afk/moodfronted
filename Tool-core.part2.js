@@ -3,6 +3,20 @@
  * API gateway, data loading, marketplace core operations,
  * listing management, ecommerce integration
  */
+import {
+    ENVIRONMENT_TYPES, LIFECYCLE_STATE, MODULE_CAPABILITIES, MODULE_NAME, MODULE_VERSION,
+    SessionClient, __isValidSession, _harvestToken, assertActive, currentState, debugLog,
+    environmentDetector, flushMessageQueue, isActive, logError, logOnce, moduleState,
+    parentComm, safeSend, safeStorage, transitionTo,
+    activationComplete, handshakeComplete, isReady, parentReadyReceived,
+    __set_activationComplete, __set_handshakeComplete, __set_isReady, __set_parentReadyReceived
+} from './Tool-core.part1.js';
+// marketplace / onModuleActive live in part3; part3 in turn imports the API helpers
+// below from this file. This circular import is safe because both sides only use
+// each other's bindings from inside functions that run after the whole module
+// graph has finished loading (never during top-level module evaluation).
+import { marketplace, onModuleActive } from './Tool-core.part3.js';
+
 class SessionClientWrapper {
     constructor() {
         this.currentSession = null;
@@ -187,7 +201,7 @@ acceptParentSession(sessionData) {
     }
 }
 
-const sessionClient = new SessionClientWrapper();
+export const sessionClient = new SessionClientWrapper();
 
 // Start background token harvester NOW that sessionClient exists
 _harvestToken();
@@ -236,7 +250,7 @@ class HeartbeatResponder {
     }
 }
 
-const heartbeatResponder = new HeartbeatResponder();
+export const heartbeatResponder = new HeartbeatResponder();
 
 // =============================================
 // MODULE 5 - DIAGNOSTICS AGENT (PRESERVED)
@@ -336,7 +350,7 @@ class DiagnosticsAgent {
     }
 }
 
-const diagnostics = new DiagnosticsAgent();
+export const diagnostics = new DiagnosticsAgent();
 
 // =============================================
 // MODULE 6 - MESSAGE HANDLER (REFACTORED FOR DETERMINISTIC HANDSHAKE - STRICT)
@@ -429,7 +443,7 @@ class MessageHandler {
         flushMessageQueue();
         if (!activationComplete) {
             onModuleActive();
-            activationComplete = true;
+            __set_activationComplete(true);
         }
     } else {
         if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] AUTH_READY: no valid session yet, waiting');
@@ -758,7 +772,7 @@ this.registerHandler('SETTINGS_UPDATED', (message) => {
     }
 
 handleParentReady(message) {
-    parentReadyReceived = true;
+    __set_parentReadyReceived(true);
     moduleState.parentDetected = true;
     moduleState.handshakeState.parentReadyReceived = true;
 
@@ -831,7 +845,7 @@ handleParentReady(message) {
         flushMessageQueue();
         if (!activationComplete) {
             onModuleActive();
-            activationComplete = true;
+            __set_activationComplete(true);
         }
     } else {
         if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] PARENT_READY: no valid session yet, waiting for AUTH_READY or SESSION_DATA');
@@ -854,7 +868,7 @@ handleParentReady(message) {
                 flushMessageQueue();
                 if (!activationComplete) {
                     onModuleActive();
-                    activationComplete = true;
+                    __set_activationComplete(true);
                 }
             }
             this.parentReadyTimeout = null;
@@ -953,7 +967,7 @@ handleParentReady(message) {
             flushMessageQueue();
             if (!activationComplete) {
                 onModuleActive();
-                activationComplete = true;
+                __set_activationComplete(true);
             }
         }
         
@@ -967,8 +981,8 @@ handleParentReady(message) {
     completeActivation() {
         moduleState.ready = true;
         moduleState.initialized = true;
-        isReady = true;
-        handshakeComplete = true;
+        __set_isReady(true);
+        __set_handshakeComplete(true);
         
         window.__MODULE_READY__ = true;
         if (moduleState.sessionActive) {
@@ -1033,7 +1047,7 @@ handleParentReady(message) {
     }
 }
 
-const messageHandler = new MessageHandler();
+export const messageHandler = new MessageHandler();
 
 // =============================================
 // MODULE 7 - SECURITY VALIDATOR (PRESERVED)
@@ -1318,7 +1332,7 @@ class ResourceManager {
     }
 }
 
-const resourceManager = new ResourceManager();
+export const resourceManager = new ResourceManager();
 
 // =============================================
 // MODULE 10 - UI BRIDGE (PRESERVED)
@@ -1513,7 +1527,7 @@ class UIBridge {
     }
 }
 
-const uiBridge = new UIBridge();
+export const uiBridge = new UIBridge();
 
 // =============================================
 // MARKETPLACE CORE IMPLEMENTATION (PRESERVED - UPDATED STORAGE)

@@ -1835,27 +1835,17 @@
     <script src="/js/status-websocket.js" defer onerror="console.warn('[Status] status-websocket.js not found')"></script>
 
     <!-- CRITICAL: NOT type="module" — regular scripts share window scope so     -->
-    <!-- status-core.js can call window.renderStatusListInstantlyUI from         -->
+    <!-- status-core-*.js can call window.renderStatusListInstantlyUI from       -->
     <!-- status-ui.js, and status-ui.js can access window.StatusCore from core.  -->
-    <!-- status-core: try as module first (handles ES export syntax); fallback to classic -->
-    <script>
-    (function() {
-        // Attempt to load status-core.js as a module so ES `export` syntax works.
-        // If it loads as classic script elsewhere, the exports are already on window.
-        var s = document.createElement('script');
-        s.src = 'status-core.js';
-        s.type = 'module';
-        s.onerror = function() {
-            // Module load failed — try classic (server may serve it without CORS/module headers)
-            var s2 = document.createElement('script');
-            s2.src = 'status-core.js';
-            s2.defer = true;
-            s2.onerror = function() { console.warn('[Status] status-core.js not found'); };
-            document.head.appendChild(s2);
-        };
-        document.head.appendChild(s);
-    })();
-    </script>
+    <!-- status-core.js was split into 3 files. They must load in this exact    -->
+    <!-- order (state -> transport -> runtime) as plain classic scripts, since  -->
+    <!-- later files reference top-level consts/functions declared in earlier   -->
+    <!-- ones via shared global scope. None of them use ES `export`/`import`,   -->
+    <!-- so no type="module" is needed (or wanted — modules do NOT share scope  -->
+    <!-- across separate <script> tags the way classic scripts do). -->
+    <script src="status-core-state.js" defer onerror="console.warn('[Status] status-core-state.js not found')"></script>
+    <script src="status-core-transport.js" defer onerror="console.warn('[Status] status-core-transport.js not found')"></script>
+    <script src="status-core-runtime.js" defer onerror="console.warn('[Status] status-core-runtime.js not found')"></script>
     <script src="status-ui.js" defer onerror="console.warn('[Status] status-ui.js not found')"></script>
     <script>
         // =============================================

@@ -3,6 +3,41 @@
  * UI bridge, public API, initialization,
  * exports, settings bootstrap, ecom patch
  */
+import {
+    AVAILABILITY, DATA_TYPES, LIFECYCLE_STATE, LISTING_TYPES, LOCAL_STORAGE_KEYS, MODULE_NAME,
+    MODULE_VERSION, MOOD_CONTEXTS, MessageGuard, SessionClient, StorageProxy, TEMPLATE_TYPES,
+    TRUST_CIRCLES, TRUST_INDICATORS, VALID_TRANSITIONS, __isValidSession, _deepExtractToken, _deepExtractUserId,
+    activationComplete, allListings, analyticsData, apiCallQueue, assertActive, backgroundJobsStarted,
+    childReadySent, currentMoodFilter, currentState, currentUser, dataCache, dataFetchInProgress,
+    directAPILoaded, environmentDetector, flushMessageQueue, generateMessageId, generateRequestId, handshakeComplete,
+    initializationLock, isActive, isAuthReady, isBootstrapped, isInitializing, isMessageFromParent,
+    isProcessingQueue, isReady, leaderboardData, loadingMessageElement, logError, logOnce,
+    messageQueue, moduleState, myListings, offlineDrafts, parentComm, parentDataLoaded,
+    parentReadyReceived, premiumFeatures, privateNotes, safeSend, safeStorage, savedItems,
+    sessionData, sessionValid, streakData, teamMembers, tokenInitializationPromise, transitionTo,
+    trustStats, userData, userFriends, userGroups, userSubscription, validateMessage,
+    __set_activationComplete, __set_allListings, __set_analyticsData, __set_backgroundJobsStarted, __set_childReadySent, __set_currentMoodFilter,
+    __set_dataFetchInProgress, __set_directAPILoaded, __set_handshakeComplete, __set_initializationLock, __set_isAuthReady, __set_isBootstrapped,
+    __set_isInitializing, __set_isProcessingQueue, __set_isReady, __set_leaderboardData, __set_loadingMessageElement, __set_myListings,
+    __set_offlineDrafts, __set_parentDataLoaded, __set_parentReadyReceived, __set_premiumFeatures, __set_privateNotes, __set_savedItems,
+    __set_sessionData, __set_sessionValid, __set_streakData, __set_teamMembers, __set_tokenInitializationPromise, __set_trustStats,
+    __set_userFriends, __set_userGroups, __set_userSubscription
+} from './Tool-core.part1.js';
+// sessionClient / heartbeatResponder / diagnostics / resourceManager / messageHandler / uiBridge
+// live in part2; part2 in turn imports `marketplace` / `onModuleActive` (declared below) from
+// this file. Safe circular import: both sides only touch these bindings from inside functions
+// that run after the whole module graph has finished its initial (synchronous) evaluation.
+import {
+    sessionClient, heartbeatResponder, diagnostics, messageHandler, resourceManager, uiBridge
+} from './Tool-core.part2.js';
+
+// Re-export everything from part1 and part2 so consumers (e.g. Tool-ui.js) can import
+// the full public API from this single file instead of reaching into all three.
+export * from './Tool-core.part1.js';
+export {
+    sessionClient, heartbeatResponder, diagnostics, messageHandler, resourceManager, uiBridge
+} from './Tool-core.part2.js';
+
 class MarketplaceCoreImpl {
     constructor() {
         this.listings = [];
@@ -996,7 +1031,7 @@ class MarketplaceCoreImpl {
     }
 }
 
-const marketplace = new MarketplaceCoreImpl();
+export const marketplace = new MarketplaceCoreImpl();
 
 // =============================================
 // CRITICAL FIX: AUTHORIZED FETCH FUNCTION (UPDATED)
@@ -1186,7 +1221,7 @@ function sendChildReady() {
         return;
     }
 
-    childReadySent = true;
+    __set_childReadySent(true);
     moduleState.handshakeState.childReadySent = true;
 
     parent.postMessage({
@@ -1213,12 +1248,12 @@ function sendChildReady() {
 // MODULE ACTIVATION HOOK
 // =============================================
 
-function onModuleActive() {
+export function onModuleActive() {
     if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Module ACTIVE - all systems go');
 
     moduleState.ready = true;
     moduleState.initialized = true;
-    isReady = true;
+    __set_isReady(true);
     
     heartbeatResponder.start();
     loadUserSettings().catch(() => {});
@@ -1226,7 +1261,7 @@ function onModuleActive() {
     // FIX: Always initialize marketplace on ACTIVE regardless of session state
     // The marketplace.initialize() is guarded internally; it just won't show data
     // until a session arrives, but it MUST start now.
-    isAuthReady = true; // FIX: Unblock all API calls immediately on ACTIVE
+    __set_isAuthReady(true); // FIX: Unblock all API calls immediately on ACTIVE
     marketplace.initialize().catch(() => {});
     
     window.dispatchEvent(new CustomEvent('tools:active', {
@@ -1459,11 +1494,11 @@ function initializeModule() {
         return;
     }
     
-    initializationLock = true;
+    __set_initializationLock(true);
     
     // Start initialization
     if (!transitionTo(LIFECYCLE_STATE.INITIALIZING, 'module_start')) {
-        initializationLock = false;
+        __set_initializationLock(false);
         return;
     }
     
@@ -1614,7 +1649,7 @@ window.addEventListener('message', function directSessionListener(event) {
                 flushMessageQueue();
                 if (!activationComplete) {
                     onModuleActive();
-                    activationComplete = true;
+                    __set_activationComplete(true);
                 }
             }
         }
@@ -1671,7 +1706,7 @@ window.addEventListener('message', function directSessionListener(event) {
                 flushMessageQueue();
                 if (!activationComplete) {
                     onModuleActive();
-                    activationComplete = true;
+                    __set_activationComplete(true);
                 }
             }
         }
@@ -1689,32 +1724,32 @@ window.addEventListener('message', function directSessionListener(event) {
         if (!inIframe) {
             logOnce('info', 'Not in iframe, running standalone');
             if (!transitionTo(LIFECYCLE_STATE.READY, 'standalone_mode')) {
-                initializationLock = false;
+                __set_initializationLock(false);
                 return;
             }
-            childReadySent = true; // Mark as sent (no parent to send to)
+            __set_childReadySent(true); // Mark as sent (no parent to send to)
             if (!transitionTo(LIFECYCLE_STATE.WAIT_PARENT, 'standalone')) {
-                initializationLock = false;
+                __set_initializationLock(false);
                 return;
             }
-            parentReadyReceived = true;
+            __set_parentReadyReceived(true);
             if (!transitionTo(LIFECYCLE_STATE.ACTIVE, 'standalone_active')) {
-                initializationLock = false;
+                __set_initializationLock(false);
                 return;
             }
             moduleState.ready = true;
             moduleState.initialized = true;
-            isReady = true;
+            __set_isReady(true);
             window.__MODULE_READY__ = true;
             flushMessageQueue();
             onModuleActive();
-            initializationLock = false;
+            __set_initializationLock(false);
             return;
         }
         
         // Complete setup and move to READY
         if (!transitionTo(LIFECYCLE_STATE.READY, 'setup_complete')) {
-            initializationLock = false;
+            __set_initializationLock(false);
             return;
         }
         
@@ -1723,14 +1758,14 @@ window.addEventListener('message', function directSessionListener(event) {
 setTimeout(() => {
     if (currentState !== LIFECYCLE_STATE.ACTIVE) {
         if (window.__TOOLS_DEBUG__) console.log('[Tools][Lifecycle] Activation timeout: forcing ACTIVE state');
-        parentReadyReceived = true;
+        __set_parentReadyReceived(true);
         moduleState.parentDetected = true;
         moduleState.handshakeState.parentReadyReceived = true;
         transitionTo(LIFECYCLE_STATE.ACTIVE, 'activation_timeout');
         flushMessageQueue();
         if (!activationComplete) {
             onModuleActive();
-            activationComplete = true;
+            __set_activationComplete(true);
         }
         // Force UI binding after activation
         setTimeout(() => {
@@ -1745,7 +1780,7 @@ setTimeout(() => {
         
     } catch (error) {
         logError('Module initialization', error);
-        initializationLock = false;
+        __set_initializationLock(false);
     }
 }
 
@@ -1765,7 +1800,7 @@ initializeCore = async function(options = {}) {
     if (moduleState.initialized) return moduleState;
     if (isInitializing) return moduleState;
 
-    isInitializing = true;
+    __set_isInitializing(true);
 
     try {
         if (options.debug) {
@@ -1793,12 +1828,12 @@ initializeCore = async function(options = {}) {
         await checkActive();
 
         moduleState.ready = isActive();
-        isReady = moduleState.ready;
-        isInitializing = false;
-        isBootstrapped = true;
-        handshakeComplete = moduleState.handshakeComplete;
-        sessionValid = sessionClient.isValid();
-        sessionData = sessionClient.getSession();
+        __set_isReady(moduleState.ready);
+        __set_isInitializing(false);
+        __set_isBootstrapped(true);
+        __set_handshakeComplete(moduleState.handshakeComplete);
+        __set_sessionValid(sessionClient.isValid());
+        __set_sessionData(sessionClient.getSession());
 
         if (sessionData && !sessionData.isGuest && !sessionData.isDemo && __isValidSession(sessionData)) {
             window.currentUser = {
@@ -1836,9 +1871,9 @@ initializeCore = async function(options = {}) {
         logError('initializeCore', error);
         moduleState.ready = true;
         moduleState.initialized = true;
-        isReady = true;
-        isInitializing = false;
-        isBootstrapped = true;
+        __set_isReady(true);
+        __set_isInitializing(false);
+        __set_isBootstrapped(true);
         window.__MODULE_READY__ = true;
         logOnce('warn', 'Tools module initialization failed - using fallback');
         return moduleState;
@@ -1882,18 +1917,18 @@ shutdownCore = function() {
     moduleState.handshakeComplete = false;
     moduleState.sessionActive = false;
     
-    isReady = false;
-    isInitializing = false;
-    handshakeComplete = false;
-    sessionValid = false;
-    parentDataLoaded = false;
-    directAPILoaded = false;
-    isBootstrapped = false;
-    isAuthReady = false;
-    parentReadyReceived = false;
-    childReadySent = false;
-    initializationLock = false;
-    activationComplete = false;
+    __set_isReady(false);
+    __set_isInitializing(false);
+    __set_handshakeComplete(false);
+    __set_sessionValid(false);
+    __set_parentDataLoaded(false);
+    __set_directAPILoaded(false);
+    __set_isBootstrapped(false);
+    __set_isAuthReady(false);
+    __set_parentReadyReceived(false);
+    __set_childReadySent(false);
+    __set_initializationLock(false);
+    __set_activationComplete(false);
 
     heartbeatResponder.stop();
     parentComm.cleanup();
@@ -2001,7 +2036,7 @@ export function hasValidUser() {
 export function showStatusMessage(message, type = 'info') {
     try {
         if (!loadingMessageElement) {
-            loadingMessageElement = document.createElement('div');
+            __set_loadingMessageElement(document.createElement('div'));
             loadingMessageElement.id = 'marketplaceStatusMessage';
             loadingMessageElement.style.cssText = `
                 position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
@@ -2087,11 +2122,11 @@ export function updateData(dataType, payload) {
         
         switch(dataType) {
             case DATA_TYPES.FRIENDS:
-                userFriends = payload;
+                __set_userFriends(payload);
                 safeStorage.set(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
                 break;
             case DATA_TYPES.GROUPS:
-                userGroups = payload;
+                __set_userGroups(payload);
                 safeStorage.set(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
                 break;
             case DATA_TYPES.CHAT_HISTORY:
@@ -2197,7 +2232,7 @@ export const pageCore = {
     init: async () => {
         if (isInitializing || isReady || moduleState.initialized) return;
         
-        isInitializing = true;
+        __set_isInitializing(true);
         logOnce('init', 'pageCore initialization started');
         
         try {
@@ -2213,8 +2248,8 @@ export const pageCore = {
             try { await pageCore.loadEssentialData(); } catch(e) { console.warn('[pageCore] loadEssentialData:', e.message); }
             try { pageCore.setupEventListeners(); } catch(e) {}
             
-            isReady = true;
-            isInitializing = false;
+            __set_isReady(true);
+            __set_isInitializing(false);
             
             // Always force ACTIVE so API calls work
             if (!isActive()) {
@@ -2225,8 +2260,8 @@ export const pageCore = {
             if (statusEl) statusEl.style.display = 'none';
             logOnce('success', 'pageCore initialization complete');
         } catch (error) {
-            isInitializing = false;
-            isReady = true; // Mark ready even on error so retries work
+            __set_isInitializing(false);
+            __set_isReady(true); // Mark ready even on error so retries work
             // Force ACTIVE regardless
             try { transitionTo(LIFECYCLE_STATE.ACTIVE, 'pagecore_error_recovery'); } catch {}
             const statusEl = document.getElementById('marketplaceStatusMessage');
@@ -2287,14 +2322,14 @@ export const pageCore = {
                 // FIX: First check session data for friends
                 const session = sessionClient.getSession();
                 if (session && session.friends && Array.isArray(session.friends)) {
-                    userFriends = session.friends;
+                    __set_userFriends(session.friends);
                     window.userFriends = userFriends;
                     safeStorage.set(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
                     dataCache.set(DATA_TYPES.FRIENDS, userFriends);
                 } else {
                     const friends = await getUserFriends();
                     if (friends && Array.isArray(friends)) {
-                        userFriends = friends;
+                        __set_userFriends(friends);
                         window.userFriends = userFriends;
                         safeStorage.set(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
                         dataCache.set(DATA_TYPES.FRIENDS, friends);
@@ -2305,7 +2340,7 @@ export const pageCore = {
             const cachedFriends = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_FRIENDS);
             if (cachedFriends) {
                 try {
-                    userFriends = cachedFriends;
+                    __set_userFriends(cachedFriends);
                     window.userFriends = userFriends;
                     dataCache.set(DATA_TYPES.FRIENDS, userFriends);
                 } catch {}
@@ -2319,14 +2354,14 @@ export const pageCore = {
                 // FIX: First check session data for groups
                 const session = sessionClient.getSession();
                 if (session && session.groups && Array.isArray(session.groups)) {
-                    userGroups = session.groups;
+                    __set_userGroups(session.groups);
                     window.userGroups = userGroups;
                     safeStorage.set(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
                     dataCache.set(DATA_TYPES.GROUPS, userGroups);
                 } else {
                     const groups = await getUserGroups();
                     if (groups && Array.isArray(groups)) {
-                        userGroups = groups;
+                        __set_userGroups(groups);
                         window.userGroups = userGroups;
                         safeStorage.set(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
                         dataCache.set(DATA_TYPES.GROUPS, groups);
@@ -2337,7 +2372,7 @@ export const pageCore = {
             const cachedGroups = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_GROUPS);
             if (cachedGroups) {
                 try {
-                    userGroups = cachedGroups;
+                    __set_userGroups(cachedGroups);
                     window.userGroups = userGroups;
                     dataCache.set(DATA_TYPES.GROUPS, userGroups);
                 } catch {}
@@ -2350,11 +2385,11 @@ export const pageCore = {
             if ((sessionClient.isValid()) && isActive()) {
                 const response = await authorizedFetch('/api/marketplace/listings', { method: 'GET' });
                 if (response && response.data?.listings) {
-                    allListings = response.data.listings;
+                    __set_allListings(response.data.listings);
                     window.allListings = allListings;
                     safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
                 } else if (response && response.listings) {
-                    allListings = response.listings;
+                    __set_allListings(response.listings);
                     window.allListings = allListings;
                     safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
                 }
@@ -2363,7 +2398,7 @@ export const pageCore = {
             const allListingsData = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
             if (allListingsData) {
                 try {
-                    allListings = allListingsData;
+                    __set_allListings(allListingsData);
                     window.allListings = allListings;
                 } catch {}
             }
@@ -2375,7 +2410,7 @@ export const pageCore = {
             if ((sessionClient.isValid()) && userSubscription && (userSubscription.plan === 'business' || userSubscription.plan === 'team') && isActive()) {
                 const members = await getTeamMembers();
                 if (members && Array.isArray(members)) {
-                    teamMembers = members;
+                    __set_teamMembers(members);
                     safeStorage.set(LOCAL_STORAGE_KEYS.TEAM_MEMBERS, teamMembers);
                 }
             }
@@ -2387,10 +2422,10 @@ export const pageCore = {
             if ((sessionClient.isValid()) && isActive()) {
                 const response = await authorizedFetch('/api/marketplace/leaderboard', { method: 'GET' });
                 if (response && response.data?.leaderboard) {
-                    leaderboardData = response.data.leaderboard;
+                    __set_leaderboardData(response.data.leaderboard);
                     safeStorage.set(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
                 } else if (response && response.leaderboard) {
-                    leaderboardData = response.leaderboard;
+                    __set_leaderboardData(response.leaderboard);
                     safeStorage.set(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
                 }
             }
@@ -2402,7 +2437,7 @@ export const pageCore = {
             if ((sessionClient.isValid()) && isUserPremium() && isActive()) {
                 const analytics = await getAnalyticsData();
                 if (analytics) {
-                    analyticsData = analytics;
+                    __set_analyticsData(analytics);
                     safeStorage.set(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
                 }
             }
@@ -2414,7 +2449,7 @@ export const pageCore = {
             if ((sessionClient.isValid()) && isActive()) {
                 const response = await authorizedFetch('/api/premium/features', { method: 'GET' });
                 if (response && response.features) {
-                    premiumFeatures = response.features;
+                    __set_premiumFeatures(response.features);
                     safeStorage.set(LOCAL_STORAGE_KEYS.PREMIUM_FEATURES, JSON.stringify(premiumFeatures));
                 }
             }
@@ -2473,9 +2508,9 @@ export function handleSessionDataFromParent(sessionDataFromParent) {
         
         processSessionData(sessionDataFromParent);
         
-        handshakeComplete = true;
+        __set_handshakeComplete(true);
         moduleState.handshakeComplete = true;
-        sessionData = sessionDataFromParent;
+        __set_sessionData(sessionDataFromParent);
         sessionClient.acceptParentSession(sessionDataFromParent);
         updateLocalStateFromSession(sessionData);
         
@@ -2560,8 +2595,8 @@ export function processSessionData(sessionDataFromParent) {
         window.currentUser = userDataFromSession;
         window.userData = userDataFromSession;
         
-        parentDataLoaded = true;
-        dataFetchInProgress = false;
+        __set_parentDataLoaded(true);
+        __set_dataFetchInProgress(false);
     } catch {}
 }
 
@@ -2574,15 +2609,15 @@ export function storeCentralizedToken(token) {
 export function updateLocalStateFromSession(session) {
     try {
         if (session.groups && Array.isArray(session.groups)) {
-            userGroups = session.groups;
+            __set_userGroups(session.groups);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
         }
         if (session.friends && Array.isArray(session.friends)) {
-            userFriends = session.friends;
+            __set_userFriends(session.friends);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
         }
         if (session.subscription) {
-            userSubscription = session.subscription;
+            __set_userSubscription(session.subscription);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
         }
     } catch {}
@@ -2621,7 +2656,7 @@ export function handleSessionUpdate(updatedData) {
         // Merge only valid data
         const mergedSession = { ...currentSession, ...updatedData };
         if (__isValidSession(mergedSession)) {
-            sessionData = mergedSession;
+            __set_sessionData(mergedSession);
             sessionClient.acceptParentSession(mergedSession);
         } else {
             if (window.__TOOLS_DEBUG__) console.warn('[Tools] Session update would create invalid session - rejected');
@@ -2636,7 +2671,7 @@ export function handleSessionUpdate(updatedData) {
             if (updatedData.displayName || updatedData.photoURL || updatedData.isPremium) {
                 // Removed localStorage set
             }
-            if (updatedData.subscription) userSubscription = updatedData.subscription;
+            if (updatedData.subscription) __set_userSubscription(updatedData.subscription);
         }
     } catch {}
 }
@@ -2650,22 +2685,22 @@ export function handleParentLogout() {
 
 export function clearSessionData() {
     try {
-        sessionData = null;
+        __set_sessionData(null);
         window.currentUser = null;
         window.userData = null;
-        userSubscription = null;
-        handshakeComplete = false;
+        __set_userSubscription(null);
+        __set_handshakeComplete(false);
         moduleState.handshakeComplete = false;
-        sessionValid = false;
+        __set_sessionValid(false);
         moduleState.sessionActive = false;
         
         safeStorage.remove(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         
-        parentDataLoaded = false;
-        directAPILoaded = false;
+        __set_parentDataLoaded(false);
+        __set_directAPILoaded(false);
         
-        isReady = moduleState.ready;
-        isInitializing = false;
+        __set_isReady(moduleState.ready);
+        __set_isInitializing(false);
         messageQueue.length = 0;
         dataCache.clear();
         
@@ -2955,7 +2990,7 @@ export function setupConnectivityListeners() {
 export function initializeTokenSystem() {
     if (tokenInitializationPromise) return tokenInitializationPromise;
     
-    tokenInitializationPromise = new Promise(async (resolve, reject) => {
+    __set_tokenInitializationPromise(new Promise(async (resolve, reject) => {
         try {
             if (!(sessionClient.isValid())) {
                 throw new Error('No session data available for token initialization');
@@ -2971,13 +3006,13 @@ export function initializeTokenSystem() {
                 throw new Error('Invalid session data format');
             }
             
-            isAuthReady = true;
+            __set_isAuthReady(true);
             resolve();
         } catch (error) {
-            isAuthReady = true;
+            __set_isAuthReady(true);
             reject(error);
         }
-    });
+    }));
     
     return tokenInitializationPromise;
 }
@@ -3002,9 +3037,9 @@ export async function bootstrapIframe() {
         if ((sessionClient.isValid()) && isActive() && __isValidSession(sessionClient.getSession())) {
             try { await authorizedFetch('/api/auth/verify', { method: 'GET' }); } catch {}
         }
-        isBootstrapped = true;
+        __set_isBootstrapped(true);
     } catch {
-        isBootstrapped = true;
+        __set_isBootstrapped(true);
     }
 }
 
@@ -3012,52 +3047,52 @@ export async function loadCachedDataInstantly() {
     try {
         const cachedMyListings = await safeStorage.get(LOCAL_STORAGE_KEYS.MY_LISTINGS);
         if (cachedMyListings) {
-            try { myListings = cachedMyListings; } catch {}
+            try { __set_myListings(cachedMyListings); } catch {}
         }
         
         const cachedAllListings = await safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS);
         if (cachedAllListings) {
-            try { allListings = cachedAllListings; } catch {}
+            try { __set_allListings(cachedAllListings); } catch {}
         }
         
         const cachedSaved = await safeStorage.get(LOCAL_STORAGE_KEYS.SAVED_ITEMS);
         if (cachedSaved) {
-            try { savedItems = cachedSaved; } catch {}
+            try { __set_savedItems(cachedSaved); } catch {}
         }
         
         const cachedNotes = await safeStorage.get(LOCAL_STORAGE_KEYS.PRIVATE_NOTES);
         if (cachedNotes) {
-            try { privateNotes = cachedNotes; } catch {}
+            try { __set_privateNotes(cachedNotes); } catch {}
         }
         
         const cachedDrafts = await safeStorage.get(LOCAL_STORAGE_KEYS.OFFLINE_DRAFTS);
         if (cachedDrafts) {
-            try { offlineDrafts = cachedDrafts; } catch {}
+            try { __set_offlineDrafts(cachedDrafts); } catch {}
         }
         
         const cachedTrust = await safeStorage.get(LOCAL_STORAGE_KEYS.TRUST_STATS);
         if (cachedTrust) {
-            try { trustStats = cachedTrust; } catch {}
+            try { __set_trustStats(cachedTrust); } catch {}
         }
         
         const cachedGroups = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_GROUPS);
         if (cachedGroups) {
-            try { userGroups = cachedGroups; } catch {}
+            try { __set_userGroups(cachedGroups); } catch {}
         }
         
         const cachedFriends = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_FRIENDS);
         if (cachedFriends) {
-            try { userFriends = cachedFriends; } catch {}
+            try { __set_userFriends(cachedFriends); } catch {}
         }
         
         const cachedSubscription = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         if (cachedSubscription) {
-            try { userSubscription = cachedSubscription; } catch {}
+            try { __set_userSubscription(cachedSubscription); } catch {}
         }
         
         const cachedTeam = await safeStorage.get(LOCAL_STORAGE_KEYS.TEAM_MEMBERS);
         if (cachedTeam) {
-            try { teamMembers = cachedTeam; } catch {}
+            try { __set_teamMembers(cachedTeam); } catch {}
         }
     } catch {}
 }
@@ -3079,9 +3114,9 @@ export async function checkUserPremiumStatus() {
         const localSubscription = await safeStorage.get(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         if (localSubscription) {
             try {
-                userSubscription = localSubscription;
+                __set_userSubscription(localSubscription);
                 if (userSubscription.expiresAt && new Date(userSubscription.expiresAt) < new Date()) {
-                    userSubscription = null;
+                    __set_userSubscription(null);
                     safeStorage.remove(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
                 } else {
                     return;
@@ -3090,7 +3125,7 @@ export async function checkUserPremiumStatus() {
         }
         const response = await safeApiCall('GET', '/api/user/subscription');
         if (response && response.subscription) {
-            userSubscription = response.subscription;
+            __set_userSubscription(response.subscription);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
         }
     } catch {}
@@ -3102,12 +3137,12 @@ export async function loadEnhancedMarketplaceData() {
         
         const promises = [
             loadListingsFromBackend(),
-            loadUserGroups(),
-            loadUserFriends(),
-            loadTeamMembers(),
+            pageCore.loadUserGroups(),
+            pageCore.loadUserFriends(),
+            pageCore.loadTeamMembers(),
             loadLeaderboard(),
             loadAnalyticsData(),
-            loadPremiumFeatures(),
+            pageCore.loadPremiumFeatures(),
             loadSpotlightListingsFromBackend()
         ];
         await Promise.allSettled(promises);
@@ -3125,14 +3160,14 @@ export async function loadListingsFromBackend() {
         if (LST && typeof LST.getAllListings === 'function') {
             const cached = LST.getAllListings();
             if (cached && cached.length) {
-                allListings = cached;
+                __set_allListings(cached);
                 window.allListings = allListings;
                 window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings, source: 'cache' } }));
             }
         }
         if (!allListings || !allListings.length) {
             const cached = safeStorage.get ? safeStorage.get(LOCAL_STORAGE_KEYS.ALL_LISTINGS) : null;
-            if (cached) { allListings = cached; window.allListings = allListings; }
+            if (cached) { __set_allListings(cached); window.allListings = allListings; }
         }
 
         // Step 2 — attempt server fetch (skip if no token yet but still return cached data)
@@ -3141,13 +3176,13 @@ export async function loadListingsFromBackend() {
 
         const response = await safeApiCall('GET', '/api/marketplace/listings');
         if (response && response.data?.listings) {
-            allListings = response.data.listings;
+            __set_allListings(response.data.listings);
             window.allListings = allListings;
             safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
             if (LST) LST.saveMany(allListings, LST.STORES.LISTINGS).catch(()=>{});
             window.dispatchEvent(new CustomEvent('marketplace:data-updated', { detail: { listings: allListings, source: 'server' } }));
         } else if (response && response.listings) {
-            allListings = response.listings;
+            __set_allListings(response.listings);
             window.allListings = allListings;
             safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
             if (LST) LST.saveMany(allListings, LST.STORES.LISTINGS).catch(()=>{});
@@ -3503,7 +3538,7 @@ export function updateListingStreak() {
         const yesterday = new Date(Date.now() - 86400000).toDateString();
         
         if (!streakData.lastListingDate) {
-            streakData = { currentStreak: 1, longestStreak: 1, lastListingDate: today, totalListings: 1 };
+            __set_streakData({ currentStreak: 1, longestStreak: 1, lastListingDate: today, totalListings: 1 });
         } else if (streakData.lastListingDate === today) {
             streakData.totalListings++;
         } else if (streakData.lastListingDate === yesterday) {
@@ -3540,7 +3575,7 @@ export function checkStreakRewards() {
 export function awardTemporaryPremium(days) {
     try {
         const tempPremium = { status: 'active', plan: 'temporary', expiresAt: new Date(Date.now() + days * 86400000).toISOString() };
-        userSubscription = tempPremium;
+        __set_userSubscription(tempPremium);
         safeStorage.set(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, tempPremium);
     } catch {}
 }
@@ -3642,13 +3677,13 @@ export async function restoreMarketplaceData(file) {
             try {
                 const backupData = JSON.parse(e.target.result);
                 if (!backupData.timestamp || !backupData.myListings) throw new Error('Invalid backup file');
-                myListings = backupData.myListings || [];
-                savedItems = backupData.savedItems || [];
-                privateNotes = backupData.privateNotes || [];
-                offlineDrafts = backupData.offlineDrafts || [];
-                trustStats = backupData.trustStats || {};
-                analyticsData = backupData.analyticsData || {};
-                premiumFeatures = backupData.premiumFeatures || {};
+                __set_myListings(backupData.myListings || []);
+                __set_savedItems(backupData.savedItems || []);
+                __set_privateNotes(backupData.privateNotes || []);
+                __set_offlineDrafts(backupData.offlineDrafts || []);
+                __set_trustStats(backupData.trustStats || {});
+                __set_analyticsData(backupData.analyticsData || {});
+                __set_premiumFeatures(backupData.premiumFeatures || {});
                 safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
                 safeStorage.set(LOCAL_STORAGE_KEYS.SAVED_ITEMS, savedItems);
                 safeStorage.set(LOCAL_STORAGE_KEYS.PRIVATE_NOTES, privateNotes);
@@ -3678,9 +3713,9 @@ export function cleanupExpiredListings() {
     try {
         const expiredListings = allListings.filter(l => isListingExpired(l));
         if (expiredListings.length > 0) {
-            allListings = allListings.filter(l => !isListingExpired(l));
+            __set_allListings(allListings.filter(l => !isListingExpired(l)));
             safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
-            myListings = myListings.filter(l => !isListingExpired(l));
+            __set_myListings(myListings.filter(l => !isListingExpired(l)));
             safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS, myListings);
         }
     } catch {}
@@ -3896,8 +3931,8 @@ export async function createServiceListing(title, description, options = {}) {
 
         // Replace fake entry with the real DB-confirmed listing
         const committed = { ...optimistic, ...confirmed, id: confirmed.id, user: userObj, _isOptimistic: false };
-        allListings = allListings.map(l => l.id === fakeId ? committed : l);
-        myListings  = myListings.map(l =>  l.id === fakeId ? committed : l);
+        __set_allListings(allListings.map(l => l.id === fakeId ? committed : l));
+        __set_myListings(myListings.map(l =>  l.id === fakeId ? committed : l));
         window.allListings = allListings;
         window.myListings  = myListings;
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  myListings);
@@ -3915,8 +3950,8 @@ export async function createServiceListing(title, description, options = {}) {
     } catch (err) {
         // Rollback optimistic update — do NOT leave ghost listing in UI or cache
         if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createServiceListing failed — rolling back', err.message);
-        allListings = prevAll;
-        myListings  = prevMy;
+        __set_allListings(prevAll);
+        __set_myListings(prevMy);
         window.allListings = allListings;
         window.myListings  = myListings;
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  prevMy);
@@ -3952,7 +3987,7 @@ export async function createDigitalListing(title, description, fileData, options
     }
 
     // Build user object from resolved auth
-    const userId = _uid;
+    const userId = _uid2;
     const _u = sessionClient.getUser?.() || window.currentUser || {};
     const userObj = {
         id: userId,
@@ -4028,8 +4063,8 @@ export async function createDigitalListing(title, description, fileData, options
 
         // Replace fake entry with real DB-confirmed listing
         const committed = { ...optimistic, ...confirmed, id: confirmed.id, user: userObj, _isOptimistic: false };
-        allListings = allListings.map(l => l.id === fakeId ? committed : l);
-        myListings  = myListings.map(l =>  l.id === fakeId ? committed : l);
+        __set_allListings(allListings.map(l => l.id === fakeId ? committed : l));
+        __set_myListings(myListings.map(l =>  l.id === fakeId ? committed : l));
         window.allListings = allListings;
         window.myListings  = myListings;
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  myListings);
@@ -4047,8 +4082,8 @@ export async function createDigitalListing(title, description, fileData, options
     } catch (err) {
         // Rollback
         if (window.__TOOLS_DEBUG__) console.error('[TOOLS FLOW] createDigitalListing failed — rolling back', err.message);
-        allListings = prevAll;
-        myListings  = prevMy;
+        __set_allListings(prevAll);
+        __set_myListings(prevMy);
         window.allListings = allListings;
         window.myListings  = myListings;
         safeStorage.set(LOCAL_STORAGE_KEYS.MY_LISTINGS,  prevMy);
@@ -4087,6 +4122,11 @@ export async function downloadDigitalFile(listingId, fileUrl, fileName) {
         `;
         downloadIndicator.innerHTML = `<i class="fas fa-spinner fa-spin"></i><span>Downloading ${escapeHtml(fileName)}...</span>`;
         document.body.appendChild(downloadIndicator);
+        
+        const link = document.createElement('a');
+        link.href = fileUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
         
         requestAnimationFrame(() => {
             link.click();
@@ -4178,7 +4218,7 @@ export function generateSampleMarketplaceData() {
                 }
             ];
             
-            allListings = sampleListings;
+            __set_allListings(sampleListings);
             safeStorage.set(LOCAL_STORAGE_KEYS.ALL_LISTINGS, allListings);
         }
     } catch {}
@@ -4239,7 +4279,7 @@ export function queueApiCall(method, endpoint, data, options) {
 
 export async function processApiCallQueue() {
     if (isProcessingQueue || apiCallQueue.length === 0) return;
-    isProcessingQueue = true;
+    __set_isProcessingQueue(true);
     
     try {
         if (tokenInitializationPromise) {
@@ -4248,7 +4288,7 @@ export async function processApiCallQueue() {
             } catch {
                 apiCallQueue.forEach(call => call.reject(new Error('Token initialization failed')));
                 apiCallQueue.length = 0;
-                isProcessingQueue = false;
+                __set_isProcessingQueue(false);
                 return;
             }
         }
@@ -4264,7 +4304,7 @@ export async function processApiCallQueue() {
             await new Promise(resolve => setTimeout(resolve, 50));
         }
     } finally {
-        isProcessingQueue = false;
+        __set_isProcessingQueue(false);
     }
 }
 
@@ -4287,7 +4327,7 @@ export async function makeApiCall(method, endpoint, data = null) {
 export function startBackgroundJobs() {
     if (!isAuthReady || backgroundJobsStarted) return;
     if (!isActive()) return;
-    backgroundJobsStarted = true;
+    __set_backgroundJobsStarted(true);
     
     try {
         setTimeout(() => loadEnhancedMarketplaceData().catch(() => {}), 1000);
@@ -4320,7 +4360,7 @@ export function requestParentUserData() {
 
 export async function fetchUserDataDirectly() {
     if (dataFetchInProgress) return;
-    dataFetchInProgress = true;
+    __set_dataFetchInProgress(true);
     
     try {
         const token = getCentralToken();
@@ -4331,16 +4371,16 @@ export async function fetchUserDataDirectly() {
         const response = await authorizedFetch('/api/profile', { method: 'GET' });
         
         if (response && response.user) {
-            directAPILoaded = true;
-            parentDataLoaded = false;
-            dataFetchInProgress = false;
+            __set_directAPILoaded(true);
+            __set_parentDataLoaded(false);
+            __set_dataFetchInProgress(false);
             processUserData(response.user, 'api');
             safeSend('USER_DATA_LOADED', { source: 'direct_api', userId: response.user.id });
         } else {
             throw new Error('Invalid response from user profile API');
         }
     } catch {
-        dataFetchInProgress = false;
+        __set_dataFetchInProgress(false);
         if (window.parent !== window && !parentDataLoaded) {} else {
             // Removed localStorage fallback
         }
@@ -4390,8 +4430,8 @@ export function handleParentUserData(userDataFromParent) {
             if (!dataFetchInProgress) fetchUserDataDirectly();
             return;
         }
-        parentDataLoaded = true;
-        dataFetchInProgress = false;
+        __set_parentDataLoaded(true);
+        __set_dataFetchInProgress(false);
         processUserData(userDataFromParent, 'parent');
     } catch {}
 }
@@ -4408,7 +4448,7 @@ export function updateUserDataFromParent(updatedData) {
         } else {
             window.userData = updatedData;
         }
-        if (updatedData.subscription) userSubscription = updatedData.subscription;
+        if (updatedData.subscription) __set_userSubscription(updatedData.subscription);
         
         const sessionUpdate = {
             userId: updatedData.id || updatedData.userId,
@@ -4430,7 +4470,7 @@ export function handleUserLogout() {
     try {
         window.currentUser = null;
         window.userData = null;
-        userSubscription = null;
+        __set_userSubscription(null);
         safeStorage.remove(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION);
         sessionClient.clear();
         showNotification('You have been logged out.', 'warning');
@@ -4513,15 +4553,15 @@ export function migrateLegacyUserData(data) {
         }
         
         if (data.groups) {
-            userGroups = data.groups;
+            __set_userGroups(data.groups);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_GROUPS, userGroups);
         }
         if (data.friends) {
-            userFriends = data.friends;
+            __set_userFriends(data.friends);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_FRIENDS, userFriends);
         }
         if (data.subscription) {
-            userSubscription = data.subscription;
+            __set_userSubscription(data.subscription);
             safeStorage.set(LOCAL_STORAGE_KEYS.USER_SUBSCRIPTION, userSubscription);
         }
     } catch {}
@@ -4529,7 +4569,7 @@ export function migrateLegacyUserData(data) {
 
 export function clearMoodFilter() {
     try {
-        currentMoodFilter = null;
+        __set_currentMoodFilter(null);
         safeStorage.remove(LOCAL_STORAGE_KEYS.MOOD_FILTER);
         window.dispatchEvent(new CustomEvent('moodFilterCleared', { detail: { timestamp: Date.now() } }));
         return true;
@@ -4775,7 +4815,7 @@ export async function loadAnalyticsData() {
         if ((sessionClient.isValid()) && isUserPremium() && isActive()) {
             const analytics = await getAnalyticsData();
             if (analytics) {
-                analyticsData = analytics;
+                __set_analyticsData(analytics);
                 safeStorage.set(LOCAL_STORAGE_KEYS.ANALYTICS, JSON.stringify(analyticsData));
                 return analyticsData;
             }
@@ -4791,11 +4831,11 @@ export async function loadLeaderboard() {
         if ((sessionClient.isValid()) && isActive()) {
             const response = await authorizedFetch('/api/marketplace/leaderboard', { method: 'GET' });
             if (response && response.data?.leaderboard) {
-                leaderboardData = response.data.leaderboard;
+                __set_leaderboardData(response.data.leaderboard);
                 safeStorage.set(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
                 return leaderboardData;
             } else if (response && response.leaderboard) {
-                leaderboardData = response.leaderboard;
+                __set_leaderboardData(response.leaderboard);
                 safeStorage.set(LOCAL_STORAGE_KEYS.LEADERBOARD, JSON.stringify(leaderboardData));
                 return leaderboardData;
             }

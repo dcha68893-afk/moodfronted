@@ -2998,7 +2998,11 @@
     <script type="module" src="localstore.tools.js"></script>
 
     <!-- ✅ FIX: Load core BEFORE patches so patches can safely wrap originals -->
-    <script type="module" src="Tool-core.js"></script>
+    <!-- Tool-core.js was split into Tool-core.part1.js (bootstrap/lifecycle),
+         Tool-core.part2.js (API/operations) and Tool-core.part3.js (UI bridge/public API).
+         part3 imports from part1+part2 and re-exports everything, so loading it here
+         is enough for the browser to pull in all three via its own import graph. -->
+    <script type="module" src="Tool-core.part3.js"></script>
     <script type="module" src="Tool-ui.js"></script>
     <script type="module" src="tool-core-patch.js"></script>
     <script type="module" src="tool-ui-patch.js"></script>
