@@ -2721,7 +2721,18 @@ function hookRT(){
         if(!gid||!msg)return;var cur=window.__gcCurGroup;if(!cur||String(cur.id)!==String(gid))return;
         var box=document.getElementById('chatMessages');if(!box)return;var me=myId();
         var sid=String(msg.senderId||msg.userId||(msg.sender&&msg.sender.id)||'');
-        if(sid===me&&msg.id){if(box._seen&&box._seen.has('id:'+String(msg.id)))return;var tmp=box.querySelector('[data-tmp]');if(tmp){tmp.removeAttribute('data-tmp');tmp.dataset.mid=String(msg.id);if(box._seen)box._seen.add('id:'+String(msg.id));var t2=tmp.querySelector('.message-time');if(t2)t2.textContent=fmt(msg.createdAt||msg.created_at||new Date().toISOString());return;}}
+        if(!box._seen)box._seen=new Set();
+        if(sid===me&&msg.id){if(box._seen.has('id:'+String(msg.id)))return;var tmp=box.querySelector('[data-tmp]');if(tmp){tmp.removeAttribute('data-tmp');tmp.dataset.mid=String(msg.id);box._seen.add('id:'+String(msg.id));var t2=tmp.querySelector('.message-time');if(t2)t2.textContent=fmt(msg.createdAt||msg.created_at||new Date().toISOString());return;}}
+        // FIX-DUPLICATE-GROUP-RENDER: the check above only protected the sender's
+        // own optimistic bubble from being duplicated. Messages from every OTHER
+        // member had no id-based guard at all before falling through to
+        // appendBubble() below, so this handler being wired to 3 separate
+        // triggers (g.on('group:message-received'), g.on('group:message'), and
+        // the window 'message'/GROUP_MESSAGE postMessage listener further down)
+        // meant a single real message could render 2-3 times. Guard every
+        // message, not just self-sent ones, using the same box._seen set the
+        // bulk history renderer already relies on.
+        if(msg.id){var _key='id:'+String(msg.id);if(box._seen.has(_key))return;box._seen.add(_key);}
         /* FIX-GROUP-ENCRYPTION: same gap as renderMsgs above -- this is the
            realtime single-message path in this separate implementation.
            Decrypt msg.content in place before appendBubble ever sees it. */

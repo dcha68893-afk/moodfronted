@@ -14511,6 +14511,27 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
+        // FIX-ROOT-CAUSE-45S-FORCE-END: no counterpart to setConnectionTimeout
+        // existed anywhere — the only thing that could stop this timer from
+        // firing was the reactive callState/__callReceiverAccepted check
+        // above running at the exact moment it fired, 45 seconds after being
+        // set. That's fragile: anything that transiently left callState out
+        // of _acceptedStates around that moment (confirmed live: duplicate
+        // 'call:incoming' delivery re-running handleIncomingCall mid-call and
+        // resetting callState back to 'incoming' after the receiver had
+        // already accepted) would force-end an already-connected call with no
+        // direct way to prevent it. Call this explicitly the moment accept
+        // actually succeeds, so the timer is cancelled outright instead of
+        // hoping the reactive check saves it later.
+        clearConnectionTimeout: function() {
+            if (this._connectionTimeout) {
+                clearTimeout(this._connectionTimeout);
+                this._connectionTimeout = null;
+            }
+        },
+
+
+
         
 
 
@@ -14992,6 +15013,10 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
             _cmTimerDelegated = false;
         }
     } catch(_crErr) {}
+    // FIX-ROOT-CAUSE-45S-FORCE-END: reset the accepted flag here too, or it
+    // would stay stuck true for every subsequent call, permanently disabling
+    // the no-answer timeout guard's second layer of protection.
+    window.__callReceiverAccepted = false;
     callsState.callActive = false;
     callsState.callState = 'idle';
     callsState.activeCallId = null;
@@ -18239,6 +18264,16 @@ initiateCall: async function(callType, participants = [], options = {}) {
 
 
                 // Set up WebRTC
+
+
+
+                // FIX-ROOT-CAUSE-45S-FORCE-END (2nd layer): this flag is read
+                // by WebRTCManager's connection-timeout guard but was never
+                // set anywhere in the codebase, so it could never actually
+                // protect anything. Set it now that acceptance has genuinely
+                // reached WebRTC setup, independent of whatever callsState
+                // says at the moment the timer happens to fire.
+                window.__callReceiverAccepted = true;
 
 
 
@@ -38478,6 +38513,22 @@ clearActiveCall: function() {
             // as every other call-ended reason — otherwise non-host participants would
             // be left on a dark call screen even though their media was already released.
             { event: 'kyn:group:call:ended_by_host', fn: (d) => handleCallEnded({ ...d, reason: 'host_ended' }) },
+
+            // FIX-ROOT-CAUSE-NO-HOST-TRANSFER: paired with the backend fix in
+            // CallSignalingService.js — when the host leaves/disconnects a
+            // group call, the server now promotes another participant and
+            // emits this event. Without a listener here, the newly-promoted
+            // host's own client never learned about it: GroupCallEngine's
+            // isHost() stayed frozen at whatever was passed into
+            // joinGroupCall() at join time, so their End-for-everyone/mute/
+            // remove controls would stay hidden even though the server would
+            // now accept those actions from them.
+            { event: 'kyn:group:call:host_changed', fn: (d) => {
+                const _gce = window.__GroupCallEngine || window.GroupCall;
+                if (_gce && typeof _gce.setHost === 'function' && d && d.newHostId) {
+                    _gce.setHost(d.newHostId);
+                }
+            } },
 
 
 

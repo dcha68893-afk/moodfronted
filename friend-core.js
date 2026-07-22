@@ -5046,17 +5046,37 @@ const UIBridge = {
                 return;
             }
             
-            const { friendId, callType } = event.detail || {};
+            const { friendId, friendName, callType } = event.detail || {};
             if (!friendId) return;
-            
-            safeSend({
-                type: 'START_CALL',
-                payload: {
-                    friendId,
-                    callType: callType || 'audio',
+
+            // FIX-ROOT-CAUSE-DEAD-CALL-PATH: this used to post a 'START_CALL'
+            // message to the parent (chat.html), which has no handler for
+            // that type at all — chat.html only recognizes 'SWITCH_MODULE',
+            // 'INITIATE_CALL', and 'CALL_INITIATE'. Since nothing anywhere in
+            // the codebase ever actually dispatches the 'ui:startCall' DOM
+            // event this handler listens for, this was fully dead — but a
+            // silent dead end, not an error, so a future button wired to
+            // 'ui:startCall' expecting it to place a call would fail with no
+            // indication why. Route through the exact same SWITCH_MODULE path
+            // the real, working "call" button in friend-ui.js's
+            // navigateToCallModule() uses, so this is the same one real call
+            // engine rather than a second, different, silently-broken one.
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'SWITCH_MODULE',
+                    module: 'calls',
+                    payload: {
+                        userId: friendId,
+                        userName: friendName || 'User',
+                        callType: callType === 'audio' ? 'voice' : (callType || 'voice'),
+                        returnTo: 'friends',
+                        timestamp: Date.now(),
+                        source: 'friends-module'
+                    },
+                    source: 'friend-core',
                     timestamp: Date.now()
-                }
-            });
+                }, '*');
+            }
         };
         
         window.addEventListener('ui:startCall', handler);

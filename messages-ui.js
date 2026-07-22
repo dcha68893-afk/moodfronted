@@ -2936,6 +2936,32 @@
                 stored._decrypted = true;
                 stored._decryptAttempted = true;
                 stored._decryptInFlight = false;
+
+                // FIX-ROOT-CAUSE-DECRYPT-ON-RELOAD: the in-memory update above
+                // only lasts for this page session. Without also writing the
+                // plaintext into the durable local cache, the message stays
+                // stored as ciphertext there — so every future reload (or any
+                // re-render sourced from that cache instead of a live socket
+                // event) feeds the SAME ciphertext through decryptFromChat()
+                // again. The Double Ratchet guard added alongside this fix
+                // catches that safely now instead of silently corrupting the
+                // chain, but it still means the message shows a transient
+                // "already processed" flash and wastes a decrypt cycle every
+                // single reload, forever. Persist the plaintext once, here,
+                // so a reload reads it straight from cache and never asks the
+                // ratchet to decrypt that message again at all.
+                try {
+                    if (window.KynectaLocalStore?.saveMessage && (stored.id || stored.serverId)) {
+                        window.KynectaLocalStore.saveMessage({
+                            id: stored.id,
+                            serverId: stored.serverId || stored.id,
+                            localId: stored.localId,
+                            chatId: stored.chatId || stored.conversationId,
+                            content: plaintext,
+                            encrypted: false
+                        }).catch(() => {});
+                    }
+                } catch (_) { /* best-effort only */ }
             }
         } catch (_) { /* best-effort only */ }
     };

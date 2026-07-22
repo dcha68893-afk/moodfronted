@@ -25,8 +25,40 @@
     }
 
     // ── 2. Call delivery to iframes ───────────────────────────────────────────
+    // FIX-ROOT-CAUSE-CALL-INCOMING-STORM: this used to fan out 3 different
+    // message types (call:incoming, incoming_call, REALTIME_EVENT:call:incoming)
+    // to every iframe, AND was wired to run again for each of 3 different real
+    // socket event name aliases below — so a single real incoming call, if the
+    // backend ever emits under more than one of those alias names (a pattern
+    // this exact codebase has done elsewhere for legacy compatibility), caused
+    // _ensureCallDelivery to run multiple times, each time re-posting 3 message
+    // types to every iframe. Live console logs confirmed this actually
+    // happening ("postMessage storm detected: call:incoming (5 in 2000ms)"),
+    // and directly downstream of it: calls-core.js's handleIncomingCall
+    // re-running mid-call reset call state back to "incoming" *after* the
+    // receiver had already accepted, which meant the 45-second no-answer
+    // timeout guard (which checks callState) no longer recognized the call as
+    // accepted and force-ended an already-connected, in-progress call ~45s
+    // after it first started ringing. Collapse to one canonical delivery,
+    // deduplicated by the call's own id so repeat arrivals under any alias are
+    // dropped instead of re-processed.
+    var _recentCallDeliveries = new Map(); // callId -> timestamp
     function _ensureCallDelivery(payload) {
         if (!payload) return;
+
+        var callId = payload.callId || payload.id;
+        if (callId) {
+            var _lastSeen = _recentCallDeliveries.get(callId);
+            if (_lastSeen && (Date.now() - _lastSeen) < 5000) {
+                return; // already delivered this exact call within the last 5s
+            }
+            _recentCallDeliveries.set(callId, Date.now());
+            if (_recentCallDeliveries.size > 50) {
+                var _oldestKey = _recentCallDeliveries.keys().next().value;
+                _recentCallDeliveries.delete(_oldestKey);
+            }
+        }
+
         // Normalize callerName before fan-out
         if (!payload.callerName || payload.callerName === 'Unknown') {
             var c = payload.caller || payload.callerInfo || {};
@@ -41,12 +73,9 @@
 
         var iframes = document.querySelectorAll('iframe');
         iframes.forEach(function(f) {
-            try { f.contentWindow.postMessage({ type: 'call:incoming',  payload: payload }, '*'); } catch(_) {}
-            try { f.contentWindow.postMessage({ type: 'incoming_call',  payload: payload }, '*'); } catch(_) {}
-            try { f.contentWindow.postMessage({ type: 'REALTIME_EVENT:call:incoming', payload: payload }, '*'); } catch(_) {}
+            try { f.contentWindow.postMessage({ type: 'call:incoming', payload: payload }, '*'); } catch(_) {}
         });
         window.dispatchEvent(new CustomEvent('kyn:call:incoming', { detail: payload }));
-        window.dispatchEvent(new CustomEvent('kyn:incoming_call',  { detail: payload }));
     }
 
     // ── 3. Hook into KynectaRealtime after it initialises ────────────────────
