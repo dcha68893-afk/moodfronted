@@ -677,11 +677,29 @@ const GlobalCallHistory = {
                     clearInterval(window._currentCallTimer);
                     window._currentCallTimer = null;
                 }
-                if (window.callCore && window.callCore.endCall) {
-                    window.callCore.endCall();
+                const cid = UIState.activeCallId;
+                // 1. Tell core to close WebRTC + signal backend
+                const core = window.callCore || (window.coreInstance && window.coreInstance.endCall ? window.coreInstance : null);
+                if (core && core.endCall) { try { core.endCall(cid); } catch(e) {} }
+                // 2. Tell parent so it can broadcast to other iframes and restore
+                //    the sidebar/bottom-nav icons — this was the missing piece:
+                //    cancelling before answer never told the parent anything, so
+                //    nav icons stayed hidden and the remote side never reset.
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'CALL_CANCELLED',
+                        payload: { callId: cid, reason: 'cancelled', status: 'cancelled' },
+                        source: 'end-btn'
+                    }, '*');
                 }
-                showIdleScreen(true);
                 showNotificationInCalls('Call cancelled', 'info');
+                // 3. Run the same full local cleanup every other termination path
+                //    uses (media, timers, UIState, nav-restore, navigate back).
+                if (typeof UIEventHandlers !== 'undefined' && UIEventHandlers.handleCallEnded) {
+                    UIEventHandlers.handleCallEnded({ callId: cid, reason: 'cancelled', status: 'cancelled' });
+                } else {
+                    showIdleScreen(true);
+                }
             };
         }
     } else {
@@ -947,6 +965,11 @@ function transitionToInCall(callInfo) {
     const endHandler = function () {
         if (this._ending) return;
         this._ending = true;
+        // FIX: this guard is only meant to block a double-click on the SAME
+        // call — it was never cleared, so End Call silently did nothing on
+        // every call after the first one on a given page load. Clear it once
+        // this click's teardown has had time to run.
+        setTimeout(() => { this._ending = false; }, 1500);
         if (window._currentCallTimer) { clearInterval(window._currentCallTimer); window._currentCallTimer = null; }
 
         const cid = UIState.activeCallId;
@@ -9093,6 +9116,19 @@ declineIncomingCall: async function() {
         UIEventHandlers.handleCallEnded({ reason: 'ended', status: 'ended' });
     };
 
+    // FIX-PROXY-BRIDGE: the top-of-file `var UIEventHandlers = new Proxy(...)`
+    // guard exists so code that runs BEFORE this IIFE (module top-level —
+    // e.g. the outgoing Cancel button in showCallingScreen, endCallBtn,
+    // callHeaderEndBtn) can safely call UIEventHandlers.* without a
+    // ReferenceError. Its get-trap forwards unknown calls to
+    // window.__UIEventHandlersReal — but nothing ever assigned that global,
+    // so every call through the Proxy (i.e. every call from outside this
+    // IIFE) silently returned undefined and did nothing. That's why End
+    // Call / Cancel could appear to do nothing and leave the nav icons
+    // hidden: the real handleCallEnded (with the nav-icon/sidebar restore)
+    // was never actually reached from those buttons. Complete the bridge.
+    window.__UIEventHandlersReal = UIEventHandlers;
+
     // ==================== UI PANEL HANDLERS ====================
     const UIPanelHandlers = {
         openParticipantsPanel: function() {
@@ -10791,9 +10827,17 @@ if (detectExistingCore()) {
             // setState() already captured — the CALL_ENDED mismatch guard
             // in the message listener above depends on it surviving every
             // transition, not just the first one.
-            const _prevCallId = _callInfo && _callInfo.callId;
+            // FIX-NAME-DROP: this used to be a wholesale replace
+            // (`_callInfo = callInfo || _callInfo || {}`), so any later call
+            // with a partial update (a status tick, anything that didn't
+            // re-send userName/userAvatar/callType) silently wiped the
+            // previously-correct values, and the UI fell back to the
+            // generic "User" label. Merge instead, so fields an update
+            // doesn't mention are preserved from the prior call info.
+            const _prevInfo   = _callInfo;
+            const _prevCallId = _prevInfo && _prevInfo.callId;
             _state    = newState;
-            _callInfo = callInfo || _callInfo || {};
+            _callInfo = Object.assign({}, _prevInfo || {}, callInfo || {});
             if (!_callInfo.callId && _prevCallId) _callInfo.callId = _prevCallId;
             _minimized = false;
             _expanded  = false;
