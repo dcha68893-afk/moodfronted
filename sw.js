@@ -98,7 +98,15 @@ self.addEventListener('push', (event) => {
     requireInteraction: payload.requireInteraction ?? false,
     data:             payload.data    || {},
     actions:          payload.actions || [],
-    vibrate:          [200, 100, 200],
+    // FIX (Notifications audit): pushNotificationService.js on the backend
+    // already computes these correctly from the recipient's
+    // notificationSound/notificationVibration settings (see
+    // _getRecipientNotificationPrefs there) and sends them in the payload —
+    // but this handler was hardcoding vibrate on and never reading
+    // payload.silent at all, so both settings had zero effect on real
+    // background push notifications regardless of what the backend sent.
+    vibrate:          Array.isArray(payload.vibrate) ? payload.vibrate : [200, 100, 200],
+    silent:           payload.silent === true,
     timestamp:        Date.now(),
   };
 

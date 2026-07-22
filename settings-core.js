@@ -7415,6 +7415,9 @@ const DEFAULT_SETTINGS = {
         changePassword: false
     },
     notifications: {
+        enableNotifications: true,
+        notificationSound: true,
+        notificationVibration: true,
         messageNotifications: true,
         groupNotifications: true,
         callNotifications: true,

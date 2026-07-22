@@ -2200,7 +2200,11 @@ try {
                 } catch (_e) {}
             }
             
-            if (UIFeatures) {
+            // FIX (Notifications audit): this used to fire unconditionally.
+            // window.__messageNotificationsEnabled already gets kept current by
+            // this file's own settings listener (folding in the master
+            // "enableNotifications" toggle too) — it was just never read.
+            if (UIFeatures && window.__messageNotificationsEnabled !== false) {
                 UIFeatures.playNotificationSound();
             }
             
@@ -5783,33 +5787,43 @@ try {
     // =============================================
     const UIFeatures = {
         playNotificationSound: function() {
+            // FIX (Notifications audit): this always played audio regardless of
+            // the "Notification Sound" toggle — the setting saved fine but had
+            // no effect. This function is now only called when
+            // messageNotifications/enableNotifications are on (see call sites);
+            // notificationSound specifically controls the audible beep here.
+            const soundOn = window.__notificationSoundEnabled !== false;
+            
             // FIX: Old code used truncated base64 WAV ('UklGR...') that never played.
             // Use Web Audio API to synthesize a short notification beep instead —
             // works in all browsers without any asset dependency.
-            try {
-                const AudioCtx = window.AudioContext || window.webkitAudioContext;
-                if (AudioCtx) {
-                    const ctx = new AudioCtx();
-                    const oscillator = ctx.createOscillator();
-                    const gainNode   = ctx.createGain();
-                    oscillator.connect(gainNode);
-                    gainNode.connect(ctx.destination);
-                    oscillator.type = 'sine';
-                    oscillator.frequency.setValueAtTime(880, ctx.currentTime);       // A5
-                    oscillator.frequency.setValueAtTime(1100, ctx.currentTime + 0.1); // ~C#6
-                    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-                    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-                    oscillator.start(ctx.currentTime);
-                    oscillator.stop(ctx.currentTime + 0.3);
-                    // Auto-close AudioContext after sound plays to free resources
-                    oscillator.onended = () => { try { ctx.close(); } catch(_) {} };
-                    return;
-                }
-            } catch (_audioErr) { /* fall through to Notification */ }
-            // Fallback: browser notification if audio fails
+            if (soundOn) {
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) {
+                        const ctx = new AudioCtx();
+                        const oscillator = ctx.createOscillator();
+                        const gainNode   = ctx.createGain();
+                        oscillator.connect(gainNode);
+                        gainNode.connect(ctx.destination);
+                        oscillator.type = 'sine';
+                        oscillator.frequency.setValueAtTime(880, ctx.currentTime);       // A5
+                        oscillator.frequency.setValueAtTime(1100, ctx.currentTime + 0.1); // ~C#6
+                        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                        oscillator.start(ctx.currentTime);
+                        oscillator.stop(ctx.currentTime + 0.3);
+                        // Auto-close AudioContext after sound plays to free resources
+                        oscillator.onended = () => { try { ctx.close(); } catch(_) {} };
+                        return;
+                    }
+                } catch (_audioErr) { /* fall through to Notification */ }
+            }
+            // Fallback: browser notification if audio fails or sound is off
+            // (still shows the OS popup — notificationSound only controls audio)
             try {
                 if (Notification.permission === 'granted') {
-                    new Notification('New message', { body: 'You have a new message', silent: false });
+                    new Notification('New message', { body: 'You have a new message', silent: !soundOn });
                 }
             } catch (_) {}
         },
@@ -6832,8 +6846,19 @@ try {
                     const _sid = normalizedMessage.senderId;
                     const _mid = SessionManager && SessionManager.getUserId && SessionManager.getUserId();
                     if (!_sid || String(_sid) !== String(_mid)) {
-                        if (UIFeatures && typeof UIFeatures.playNotificationSound === 'function') UIFeatures.playNotificationSound();
+                        if (window.__messageNotificationsEnabled !== false && UIFeatures && typeof UIFeatures.playNotificationSound === 'function') UIFeatures.playNotificationSound();
                         window.dispatchEvent(new CustomEvent('kyn:incomingMessage', { detail: { message: normalizedMessage, chatId: chatId } }));
+                        // FIX (Notifications audit): chat.html's parent-level listener
+                        // expects a postMessage (it listens on 'message', checking
+                        // evt.data.type) — the dispatchEvent above only fires within
+                        // this iframe's own window and never reaches the parent, so
+                        // the "native OS notification when the app is backgrounded"
+                        // feature has never actually fired. Relaying it here.
+                        if (window.__messageNotificationsEnabled !== false && window.parent && window.parent !== window) {
+                            try {
+                                window.parent.postMessage({ type: 'kyn:incomingMessage', detail: { message: normalizedMessage, chatId: chatId } }, '*');
+                            } catch (_relayErr) {}
+                        }
                     }
                 } catch (_e) {}
             }

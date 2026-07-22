@@ -324,7 +324,20 @@
 
     // Auto-dismiss after 30 seconds (caller hangs up)
     setTimeout(_dismissWaiting, 30_000);
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+    // FIX (Notifications audit): this vibrated unconditionally regardless of
+    // Settings > Notifications > "Call Notifications". Reading the settings
+    // cache directly here (rather than a window.__callNotificationsEnabled
+    // global) since there's no guarantee this iframe's settings listener has
+    // run yet by the time a waiting-call banner shows.
+    let _callVibrateOn = true;
+    try {
+        const raw = localStorage.getItem('knecta_settings_cache');
+        const n = raw && JSON.parse(raw)?.data?.notifications;
+        if (n) {
+            _callVibrateOn = n.callNotifications !== false && n.notificationVibration !== false;
+        }
+    } catch (_) {}
+    if (navigator.vibrate && _callVibrateOn) navigator.vibrate([200, 100, 200, 100, 200]);
   }
 
   function _dismissWaiting() {

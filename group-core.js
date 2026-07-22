@@ -1743,6 +1743,66 @@ handleSettingsChange(message) {
                     if (typeof incrementGroupUnreadCount === 'function') {
                         incrementGroupUnreadCount(groupId);
                     }
+
+                    // FIX (Notifications audit): group messages previously had
+                    // NO notification pathway at all — no sound, no OS
+                    // notification, no backend push (group.js's message route
+                    // never calls pushNotificationService, unlike messages.js).
+                    // The "Group Notifications" toggle in Settings had nothing
+                    // to actually control. This reuses the same
+                    // kyn:incomingMessage event and native-notification listener
+                    // chat.html already has wired up for 1:1 messages, gated on
+                    // the settings this file already tracks (enableNotifications/
+                    // groupNotifications/notificationSound), and skips it for
+                    // your own messages echoing back.
+                    try {
+                        const _me = getCurrentUserLocal()?.id || getCurrentUserLocal()?.uid;
+                        const _sender = messageData && (messageData.senderId || messageData.userId);
+                        const _isSelf = _me && _sender && String(_me) === String(_sender);
+                        // group-core.js's settings listener already folds the master
+                        // "enableNotifications" toggle into __groupNotificationsEnabled
+                        // (both keys write to the same global), so this one check covers
+                        // both "notifications off entirely" and "group notifications off".
+                        const _groupNotifsOn = window.__groupNotificationsEnabled !== false;
+                        if (!_isSelf && _groupNotifsOn) {
+                            if (window.__notificationSoundEnabled !== false) {
+                                // group-core.js runs as its own iframe module — it has no
+                                // access to messages-core.js's UIFeatures object (a separate
+                                // iframe), so this mirrors that file's Web Audio beep rather
+                                // than referencing something that doesn't exist here.
+                                try {
+                                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                                    if (AudioCtx) {
+                                        const ctx = new AudioCtx();
+                                        const osc = ctx.createOscillator();
+                                        const gain = ctx.createGain();
+                                        osc.connect(gain);
+                                        gain.connect(ctx.destination);
+                                        osc.type = 'sine';
+                                        osc.frequency.setValueAtTime(880, ctx.currentTime);
+                                        osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+                                        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                                        osc.start(ctx.currentTime);
+                                        osc.stop(ctx.currentTime + 0.3);
+                                        osc.onended = () => { try { ctx.close(); } catch(_) {} };
+                                    }
+                                } catch (_soundErr) {}
+                            }
+                            window.dispatchEvent(new CustomEvent('kyn:incomingMessage', {
+                                detail: { message: messageData, chatId: groupId, isGroup: true }
+                            }));
+                            // dispatchEvent alone only fires within this iframe's own
+                            // window — nothing local listens for it (group UI updates
+                            // go through GroupCore's own emit/on system instead), and
+                            // chat.html's parent-level listener needs a postMessage.
+                            if (window.parent && window.parent !== window) {
+                                try {
+                                    window.parent.postMessage({ type: 'kyn:incomingMessage', detail: { message: messageData, chatId: groupId, isGroup: true } }, '*');
+                                } catch (_relayErr) {}
+                            }
+                        }
+                    } catch (_notifErr) {}
                 }
             }
         }

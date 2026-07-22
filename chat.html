@@ -3508,15 +3508,38 @@
     
     <script>
         // ── FIX: Receiver notification + badge when message arrives off-screen ─
-        // messages-core fires 'kyn:incomingMessage' when the receiver gets a new
-        // message but is NOT currently viewing that chat. This listener in the
-        // parent shell handles the badge update and browser notification.
+        // messages-core / group-core postMessage 'kyn:incomingMessage' to this
+        // parent shell when the receiver gets a new message but is NOT
+        // currently viewing that chat. This listener handles the badge update
+        // and browser notification.
+        //
+        // FIX (Notifications audit): this used to fire unconditionally aside
+        // from document.hidden + permission — added a settings check reading
+        // the same localStorage cache the rest of the settings system uses,
+        // since this parent frame has no iframe-local __xEnabled globals of
+        // its own. (Also: this listener never actually received anything
+        // before today, because the iframes only ever dispatchEvent'd locally
+        // instead of posting to window.parent — see messages-core.js /
+        // group-core.js for the relay fix.)
+        function _kynNotificationsAllowed(isGroup) {
+            try {
+                const raw = localStorage.getItem('knecta_settings_cache');
+                if (!raw) return true;
+                const n = JSON.parse(raw)?.data?.notifications;
+                if (!n) return true;
+                if (n.enableNotifications === false) return false;
+                if (isGroup && n.groupNotifications === false) return false;
+                if (!isGroup && n.messageNotifications === false) return false;
+                return true;
+            } catch (_) { return true; }
+        }
         window.addEventListener('message', function(evt) {
             if (!isTrustedOrigin(evt.origin)) return;
             const d = evt.data || {};
             if (d.type !== 'kyn:incomingMessage') return;
             const msg = d.detail || d.payload || d;
             if (!msg) return;
+            if (!_kynNotificationsAllowed(!!(d.detail && d.detail.isGroup))) return;
 
             // Show / update the unread dot on the messages nav icon
             document.querySelectorAll('.mobile-nav-icon[data-page="messages"], .nav-icon[data-page="messages"]').forEach(function(icon) {
