@@ -1492,6 +1492,45 @@ body {
     gap: 8px;
 }
 
+/* Collapsible settings sections (Create Status > Settings) — each section
+   (Mood, Category, Privacy, Duration, Advanced, Templates, etc.) starts
+   collapsed and only takes up space once the user taps into it, instead of
+   dumping every option on screen at once. */
+.metadata-section.collapsible > .metadata-title {
+    cursor: pointer;
+    justify-content: space-between;
+    user-select: none;
+    margin-bottom: 0;
+    padding: 4px 0;
+}
+
+.metadata-section.collapsible > .metadata-title .metadata-title-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.metadata-section.collapsible > .metadata-title .metadata-chevron {
+    font-size: 12px;
+    opacity: 0.5;
+    transition: transform 0.2s ease;
+}
+
+.metadata-section.collapsible.expanded > .metadata-title .metadata-chevron {
+    transform: rotate(180deg);
+}
+
+.metadata-section.collapsible > .metadata-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+}
+
+.metadata-section.collapsible.expanded > .metadata-body {
+    max-height: 1000px;
+    margin-top: 10px;
+}
+
 /* Intent Selector */
 .intent-options {
     display: grid;

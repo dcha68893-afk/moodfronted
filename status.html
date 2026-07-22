@@ -2705,61 +2705,73 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                     
                     <div class="status-metadata">
                         <!-- Intent -->
-                        <div class="metadata-section">
-                            <div class="metadata-title">
-                                <i class="fas fa-bullseye"></i>
-                                <span>Status Intent</span>
+                        <div class="metadata-section collapsible expanded" data-accordion="intent">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="true">
+                                <span class="metadata-title-left"><i class="fas fa-bullseye"></i><span>Status Intent</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            <div class="intent-options" id="intentOptions">
-                                <!-- Intent options will be loaded here -->
+                            <div class="metadata-body">
+                                <div class="intent-options" id="intentOptions">
+                                    <!-- Intent options will be loaded here -->
+                                </div>
                             </div>
                         </div>
                         
                         <!-- Mood -->
-                        <div class="metadata-section">
-                            <div class="metadata-title">
-                                <i class="fas fa-brain"></i>
-                                <span>Current Mood</span>
+                        <div class="metadata-section collapsible" data-accordion="mood">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                                <span class="metadata-title-left"><i class="fas fa-brain"></i><span>Current Mood</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            <div class="mood-options" id="moodOptions">
-                                <!-- Mood options will be loaded here -->
+                            <div class="metadata-body">
+                                <div class="mood-options" id="moodOptions">
+                                    <!-- Mood options will be loaded here -->
+                                </div>
                             </div>
                         </div>
                         
                         <!-- Category -->
-                        <div class="metadata-section">
-                            <div class="metadata-title">
-                                <i class="fas fa-tag"></i>
-                                <span>Category</span>
+                        <div class="metadata-section collapsible" data-accordion="category">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                                <span class="metadata-title-left"><i class="fas fa-tag"></i><span>Category</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            <div class="category-options" id="categoryOptions">
-                                <!-- Category options will be loaded here -->
+                            <div class="metadata-body">
+                                <div class="category-options" id="categoryOptions">
+                                    <!-- Category options will be loaded here -->
+                                </div>
                             </div>
                         </div>
                         
                         <!-- Action Buttons -->
-                        <div class="metadata-section">
-                            <div class="metadata-title">
-                                <i class="fas fa-hand-pointer"></i>
-                                <span>Action Buttons</span>
+                        <div class="metadata-section collapsible" data-accordion="actionButtons">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                                <span class="metadata-title-left"><i class="fas fa-hand-pointer"></i><span>Action Buttons</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            <div class="action-buttons-selector" id="actionButtonsSelector">
-                                <!-- Action button options will be loaded here -->
+                            <div class="metadata-body">
+                                <div class="action-buttons-selector" id="actionButtonsSelector">
+                                    <!-- Action button options will be loaded here -->
+                                </div>
                             </div>
                         </div>
                         
                         <!-- Privacy -->
-                        <div class="metadata-section">
-                            <div class="metadata-title">
-                                <i class="fas fa-lock"></i>
-                                <span>Privacy</span>
+                        <div class="metadata-section collapsible" data-accordion="privacy">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                                <span class="metadata-title-left"><i class="fas fa-lock"></i><span>Privacy</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            <div class="privacy-options" id="privacyOptions">
-                                <!-- Privacy options will be loaded here -->
+                            <div class="metadata-body">
+                                <div class="privacy-options" id="privacyOptions">
+                                    <!-- Privacy options will be loaded here -->
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Friends List Container (visible when 'specific' or 'micro-circle' privacy is selected) -->
+                        <!-- Friends List Container (visible when 'specific' or 'micro-circle' privacy is selected) —
+                             left as its own always-in-flow section since its visibility is already
+                             conditional/on-demand via existing JS, not part of the accordion. -->
                         <div class="metadata-section" id="friendsListSection" style="display: none;">
                             <div class="metadata-title">
                                 <i class="fas fa-user-friends"></i>
@@ -2785,80 +2797,92 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                         </div>
                         
                         <!-- Duration -->
-                        <div class="metadata-section">
-                            <div class="metadata-title">
-                                <i class="fas fa-hourglass-half"></i>
-                                <span>Status Duration</span>
+                        <div class="metadata-section collapsible" data-accordion="duration">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                                <span class="metadata-title-left"><i class="fas fa-hourglass-half"></i><span>Status Duration</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            <div class="duration-options" id="durationOptions">
-                                <!-- Duration options will be loaded here -->
+                            <div class="metadata-body">
+                                <div class="duration-options" id="durationOptions">
+                                    <!-- Duration options will be loaded here -->
+                                </div>
                             </div>
                         </div>
                         
                         <!-- Advanced Options -->
-                        <div class="advanced-options">
-                            <div class="advanced-option">
-                                <div class="advanced-option-label">
-                                    <div>
-                                        <div class="advanced-option-name">Sensitive Content</div>
-                                        <div class="advanced-option-description">Blur media for sensitive content</div>
-                                    </div>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="sensitiveContentToggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
+                        <div class="metadata-section collapsible" data-accordion="advanced">
+                            <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                                <span class="metadata-title-left"><i class="fas fa-sliders-h"></i><span>Advanced Options</span></span>
+                                <i class="fas fa-chevron-down metadata-chevron"></i>
                             </div>
-                            
-                            <div class="advanced-option">
-                                <div class="advanced-option-label">
-                                    <div>
-                                        <div class="advanced-option-name">Silent Mode</div>
-                                        <div class="advanced-option-description">Post without notifications</div>
+                            <div class="metadata-body">
+                                <div class="advanced-options">
+                                    <div class="advanced-option">
+                                        <div class="advanced-option-label">
+                                            <div>
+                                                <div class="advanced-option-name">Sensitive Content</div>
+                                                <div class="advanced-option-description">Blur media for sensitive content</div>
+                                            </div>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="sensitiveContentToggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="advanced-option">
+                                        <div class="advanced-option-label">
+                                            <div>
+                                                <div class="advanced-option-name">Silent Mode</div>
+                                                <div class="advanced-option-description">Post without notifications</div>
+                                            </div>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="silentModeToggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="advanced-option">
+                                        <div class="advanced-option-label">
+                                            <div>
+                                                <div class="advanced-option-name">Auto-Translate</div>
+                                                <div class="advanced-option-description">Automatically translate text</div>
+                                            </div>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="autoTranslateToggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <div class="advanced-option">
+                                        <div class="advanced-option-label">
+                                            <div>
+                                                <div class="advanced-option-name">Offline Queue</div>
+                                                <div class="advanced-option-description">Save for posting when online</div>
+                                            </div>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="offlineQueueToggle">
+                                            <span class="toggle-slider"></span>
+                                        </label>
                                     </div>
                                 </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="silentModeToggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            
-                            <div class="advanced-option">
-                                <div class="advanced-option-label">
-                                    <div>
-                                        <div class="advanced-option-name">Auto-Translate</div>
-                                        <div class="advanced-option-description">Automatically translate text</div>
-                                    </div>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="autoTranslateToggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            
-                            <div class="advanced-option">
-                                <div class="advanced-option-label">
-                                    <div>
-                                        <div class="advanced-option-name">Offline Queue</div>
-                                        <div class="advanced-option-description">Save for posting when online</div>
-                                    </div>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="offlineQueueToggle">
-                                    <span class="toggle-slider"></span>
-                                </label>
                             </div>
                         </div>
                     </div>
                     
                     <!-- Template Section -->
-                    <div class="metadata-section" style="margin-top: 20px;">
-                        <div class="metadata-title">
-                            <i class="fas fa-layer-group"></i>
-                            <span>Templates</span>
+                    <div class="metadata-section collapsible" style="margin-top: 20px;" data-accordion="templates">
+                        <div class="metadata-title" role="button" tabindex="0" aria-expanded="false">
+                            <span class="metadata-title-left"><i class="fas fa-layer-group"></i><span>Templates</span></span>
+                            <i class="fas fa-chevron-down metadata-chevron"></i>
                         </div>
-                        <div class="category-options" id="templateOptions">
-                            <!-- Template options will be loaded here -->
+                        <div class="metadata-body">
+                            <div class="category-options" id="templateOptions">
+                                <!-- Template options will be loaded here -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2868,6 +2892,7 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                  legacy tab buttons above via real .click() calls, so the
                  exact same tab/content-active logic in status-ui.js runs
                  unchanged. Video and Photo both map to the existing media
+
                  tab; the file input's accept attribute is narrowed per mode. -->
             <div class="composer-bottombar" id="composerBottombar">
                 <button class="composer-mode-btn" data-mode="media" data-accept="video/*" title="Video">
@@ -3095,6 +3120,27 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             if (moreSettings) moreSettings.addEventListener('click', function () { moveOnce(); openPanel('composerSettingsPanel'); });
             var moreAddons = document.getElementById('composerMoreAddons');
             if (moreAddons) moreAddons.addEventListener('click', function () { moveOnce(); openPanel('composerAddonsPanel'); });
+
+            // Collapsible settings sections — Mood/Category/Privacy/Duration/
+            // Advanced/Templates each start collapsed and expand on tap,
+            // instead of all being visible at once inside Settings.
+            var settingsTabEl = document.getElementById('settingsTab');
+            if (settingsTabEl) {
+                settingsTabEl.addEventListener('click', function (e) {
+                    var title = e.target.closest('.metadata-section.collapsible > .metadata-title');
+                    if (!title) return;
+                    var section = title.closest('.metadata-section.collapsible');
+                    var isOpen = section.classList.toggle('expanded');
+                    title.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                });
+                settingsTabEl.addEventListener('keydown', function (e) {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    var title = e.target.closest('.metadata-section.collapsible > .metadata-title');
+                    if (!title) return;
+                    e.preventDefault();
+                    title.click();
+                });
+            }
 
             // Bottom mode switcher — drives the original (now hidden) tab
             // buttons via a real click(), so status-ui.js's own tab-switch

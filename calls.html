@@ -1967,7 +1967,14 @@ window.__CALLS_IFRAME__ = {
             width: 44px;
             height: 44px;
             cursor: pointer;
-            z-index: 1000;
+            /* FIX (in-call-more-menu-hidden): #inCallScreen renders at
+               z-index:999999 (see calls.css) as a fullscreen fixed overlay.
+               This button/dropdown live outside #inCallScreen in the DOM, so
+               at the old z-index (1000/1001) they were painted BEHIND the
+               call screen during an active call — clicking moreBtn correctly
+               toggled .active on the dropdown, but it was invisible and
+               unreachable underneath the call UI. Must stay above 999999. */
+            z-index: 1000001;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1988,7 +1995,8 @@ window.__CALLS_IFRAME__ = {
             border-radius: 12px;
             box-shadow: var(--shadow-lg);
             width: 250px;
-            z-index: 1001;
+            /* FIX (in-call-more-menu-hidden): see .menu-dots-btn comment above */
+            z-index: 1000001;
             display: none;
             overflow: hidden;
         }

@@ -4719,6 +4719,23 @@
 
             if (!container) return;
 
+            // FIX (chat-more-btn-tap-swallowed): a re-render here replaces every
+            // .chat-item / .chat-more-btn DOM node. If that happens between a
+            // user's press-down and their click (e.g. a socket event triggers
+            // refreshChatsList() while they're tapping the three-dot button),
+            // the element they pressed is gone by the time the click event
+            // would fire — the tap silently does nothing, and re-tapping lands
+            // on the freshly-rendered row instead and opens the chat. Defer the
+            // rebuild slightly while a context menu is open or a press/long-
+            // press is in flight, rather than yanking the DOM out mid-tap.
+            if (document.getElementById('chatContextMenu') || document.body.classList.contains('chat-item-pressing')) {
+                clearTimeout(this._renderChatsListRetry);
+                this._renderChatsListRetry = setTimeout(() => {
+                    this.renderChatsList(chats, currentChat, category, messageDrafts);
+                }, 400);
+                return;
+            }
+
             let normalizedChats = ensureSafeArray(chats);
 
             // Apply hidden filtering + pin-first sorting
@@ -6095,14 +6112,25 @@
 
             
 
+            // FIX (calling-screen-shows-User): activeChat.friendName can briefly be ''
+            // — openConversation() seeds a temp placeholder with an empty friendName
+            // while the real conversation is still loading, specifically so the header
+            // never flashes "Loading...". If the call button is pressed in that window,
+            // every field in the chain below was empty and this fell straight to the
+            // literal 'User' placeholder — which is exactly what showed on the outgoing
+            // calling screen. The header (#chatFriendName) is populated from the same
+            // real name as soon as it's known, so check it before giving up.
+            const _headerNameEl = document.getElementById('chatFriendName');
+            const _headerName = _headerNameEl && _headerNameEl.textContent &&
+                                 _headerNameEl.textContent.trim() &&
+                                 _headerNameEl.textContent.trim() !== 'Select a chat'
+                                 ? _headerNameEl.textContent.trim() : null;
+
             const receiverName = activeChat.friendName || 
-
                                 activeChat.name || 
-
                                 activeChat.displayName || 
-
                                 activeChat.userName || 
-
+                                _headerName ||
                                 'User';
 
             
@@ -13637,6 +13665,7 @@ Type: ${message.type || 'text'}`;
         // Long press helpers
         window.messagesUI._chatLongPressStart = function(e, chatId) {
             _lpActive = false;
+            document.body.classList.add('chat-item-pressing');
             _lpTimer = setTimeout(function() {
                 _lpActive = true;
                 window.messagesUI._showChatContextMenu(chatId, e);
@@ -13644,11 +13673,13 @@ Type: ${message.type || 'text'}`;
         };
         window.messagesUI._chatLongPressEnd = function(e, chatId) {
             if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+            document.body.classList.remove('chat-item-pressing');
             // if long press fired, prevent the click
             if (_lpActive) { e.preventDefault(); e.stopPropagation(); _lpActive = false; }
         };
         window.messagesUI._chatLongPressCancel = function() {
             if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+            document.body.classList.remove('chat-item-pressing');
             _lpActive = false;
         };
         // Normal click (fires only when NOT long-press)

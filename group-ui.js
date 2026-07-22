@@ -2689,8 +2689,13 @@ async function _fetchTabData(section) {
             const result = await GC.requestGroupList();
             if (result && result.success) {
                 _hydrateFromStore();
-                _rerenderActiveSection();
+                // FIX (all-groups-empty-counts-zero): updateGroupCounts() is what
+                // copies GroupCore.groups/.myGroups/.joinedGroups/.adminGroups into
+                // the bare module-level variables that the render functions below
+                // actually read — it must run BEFORE the re-render, not after, or
+                // the list/counts reflect whatever was there before this fetch.
                 if (typeof updateGroupCounts === 'function') updateGroupCounts();
+                _rerenderActiveSection();
             }
         }
     } catch(e) {}

@@ -9,7 +9,7 @@
 
 'use strict';
 
-const CACHE_NAME    = 'kynecta-v3';
+const CACHE_NAME    = 'kynecta-v4';
 const API_CACHE     = 'kynecta-api-v1';
 const STATIC_ASSETS = [
   '/',
