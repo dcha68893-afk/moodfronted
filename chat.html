@@ -1683,10 +1683,10 @@
         <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" allow="camera; microphone"></iframe>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
-        <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
+        <iframe id="settingsIframe" class="content-iframe" data-lazy-src="settings.html" data-module="settings"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
-        <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
+        <iframe id="toolsIframe" class="content-iframe" data-lazy-src="Tools.html" data-module="tools"></iframe>
     </div>
 
     <!-- ── Add Friend FAB (fixed, top-right near header call/video/options icons) ── -->
@@ -1703,7 +1703,7 @@
         <i class="fas fa-user-plus" style="font-size:14px;pointer-events:none;"></i>
     </button>
     <div id="gamesContent" class="iframe-container hidden">
-        <iframe id="gamesIframe" class="content-iframe" src="game.html" data-module="games"></iframe>
+        <iframe id="gamesIframe" class="content-iframe" data-lazy-src="game.html" data-module="games"></iframe>
     </div>
     <style>
         .mobile-nav-icon[data-page="tools"] .ecom-nav-badge,
@@ -3000,6 +3000,28 @@
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
+            }
+            // FIX (perf audit — deferred module loading): settings/tools/games were
+            // previously given a real `src` in the markup like every other module,
+            // so all 8 module iframes (messages/status/group/friends/calls/settings/
+            // tools/games) fetched, parsed and ran their full init sequence in
+            // parallel immediately after login — regardless of which one the user
+            // actually wanted to see. Between them that's several MB of HTML+JS all
+            // competing for the same main thread and network connection pool at once,
+            // which is why the visible module (usually Messages) took a long time to
+            // feel interactive even though the outer #loadingScreen had already been
+            // dismissed. Messages/Calls/Friends/Groups/Status stay eager — each
+            // receives live real-time events that must reach it even while closed
+            // (incoming calls, new messages, friend requests, etc.), and deferring
+            // them risks silently dropping one before the module has ever loaded.
+            // Settings/Tools/Games have no such requirement — nothing needs to reach
+            // them before the user opens that tab (Tools' one exception, a direct
+            // marketplace-event bridge, was rerouted through the existing queue-and-
+            // flush mechanism below so it's safe too) — so they're deferred: promote
+            // data-lazy-src to src the first time they're actually navigated to.
+            var _lazyIframe = document.getElementById(`${page}Iframe`);
+            if (_lazyIframe && !_lazyIframe.getAttribute('src') && _lazyIframe.dataset.lazySrc) {
+                _lazyIframe.setAttribute('src', _lazyIframe.dataset.lazySrc);
             }
             // ── FAB visibility: show only on messages + calls modules ──
             var _fab = document.getElementById('fabAddFriend');
@@ -6346,10 +6368,15 @@
                     'order:created','order:status_changed','payment:confirmed','review:new','delivery:updated'
                 ]);
                 if (_mpEvTypes.has(data.type)) {
-                    const toolsIframe = document.getElementById('toolsIframe');
-                    if (toolsIframe && toolsIframe.contentWindow) {
-                        toolsIframe.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + data.type, payload: data.payload || {}, source: 'parent-mp-bridge' }, '*');
-                    }
+                    // FIX (perf audit — enable deferred Tools loading): this used to
+                    // postMessage directly to toolsIframe.contentWindow, bypassing the
+                    // _postToModule() queue-and-flush mechanism every other module uses.
+                    // That meant an event arriving before Tools.html had ever been
+                    // opened was silently lost — which is exactly why Tools couldn't be
+                    // safely deferred like Settings/Games. Routing through the queue
+                    // means any event that arrives while Tools is lazy/not-yet-loaded is
+                    // held and delivered the moment it opens, same as every other module.
+                    _postToModule('tools', 'toolsIframe', { type: 'REALTIME_EVENT:' + data.type, payload: data.payload || {}, source: 'parent-mp-bridge' });
                     try { window.dispatchEvent(new CustomEvent('realtime:' + data.type, { detail: data.payload || {} })); } catch(_) {}
                     return;
                 }

@@ -2190,7 +2190,14 @@
             // See FIX-E2E-WIRING note below (unchanged) — persist plaintext
             // password for the tab session so any iframe can derive the E2E key.
             try { sessionStorage.setItem('kyn_e2e_pw_session', password); } catch (_) {}
-            setTimeout(() => { window.location.href = 'chat.html'; }, 1000);
+            // FIX (perf audit): this was `setTimeout(..., 1000)` — a full second of
+            // pure dead time on EVERY login before the browser even starts requesting
+            // chat.html, let alone anything inside it. The toast above is purely
+            // cosmetic and provides no value once the page is about to navigate away;
+            // nothing here depends on the delay (session/token are already persisted
+            // synchronously above). This was the single biggest fixed-cost contributor
+            // to "login completes instantly but the app takes a long time to open."
+            window.location.href = 'chat.html';
         }
 
         // FIX (2FA audit): state + UI wiring for the 2FA challenge modal.
