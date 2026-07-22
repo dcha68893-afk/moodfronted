@@ -8008,7 +8008,14 @@ function applySettingToMessagesModule(section, key, value) {
         if (key === 'currentMood') window.__currentMood = value;
     }
     if (section === 'security') {
-        if (key === 'sessionTimeout') window.__sessionTimeout = value;
+        // FIX (Security settings audit): this module runs inside an
+        // iframe and has no access to the auth session or logout — writing
+        // __sessionTimeout here did nothing because nothing (in this frame
+        // or any other) ever read it. The actual inactivity timeout is now
+        // enforced by SESSION_COORDINATOR in the parent frame's
+        // app.core.session.js, which reads the saved value straight from
+        // localStorage('knecta_settings_cache').security.sessionTimeout.
+        if (key === 'sessionTimeout') window.__sessionTimeout = value; // kept for any legacy readers; not the enforcement path
     }
     if (section === 'mood') {
         if (key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }

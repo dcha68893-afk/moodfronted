@@ -154,6 +154,24 @@ function authorizedRequest(endpoint, options = {}) {
                     return;
                 }
                 
+                // FIX (live-testing audit): this used to resolve() unconditionally for
+                // every response type other than a 401 — including a 400 "Current
+                // password is incorrect", a 500, or any other backend error. chat.html's
+                // directApiRequest() already correctly sets payload.success = false and
+                // payload.statusCode to the real HTTP status for those cases (see
+                // `if (!response.ok) return { success: false, ... }` there), but nothing
+                // here ever looked at it. The result: password changes, settings restores,
+                // and any other write action that failed on the backend still showed
+                // "success" in the UI because the promise resolved instead of rejecting.
+                const isFailure = response.success === false ||
+                    (typeof response.statusCode === 'number' && response.statusCode >= 400) ||
+                    response.status === 'error';
+                if (isFailure) {
+                    console.error(`[${MODULE_NAME}] ❌ Request failed: ${method} ${endpoint}`, response);
+                    reject(new Error(response.message || response.error || `Request failed (${response.statusCode || 'unknown'})`));
+                    return;
+                }
+                
                 if (DEBUG) {
                     console.log(`[${MODULE_NAME}] ✅ Response: ${method} ${endpoint}`);
                 }
@@ -804,8 +822,15 @@ const SettingsState = {
                 version: MODULE_VERSION
             };
             localStorage.setItem('knecta_settings_cache', JSON.stringify(cacheData));
-            // FIX-009: Keep canonical kyn_app_settings key in sync for other modules
-            try { localStorage.setItem('kyn_app_settings', JSON.stringify(data)); } catch(_) {}
+            // FIX-009 (corrected): was referencing an undefined `data` variable
+            // (should be `this.data`), so this write ReferenceError'd on every
+            // single save and was silently swallowed by the inner try/catch —
+            // 'kyn_app_settings' was never actually kept in sync from here.
+            // (AppSettings.js's own .set()/.merge() already keeps this key
+            // correct as the primary path, so this was a harmless-but-dead
+            // redundant write — fixed anyway since it's still read by
+            // chat.html, AppSettings.js, and settings-broadcast-listener.js.)
+            try { localStorage.setItem('kyn_app_settings', JSON.stringify(this.data)); } catch(_) {}
         } catch (error) {}
     },
     

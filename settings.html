@@ -3156,7 +3156,16 @@
 
   /* ── helpers ──────────────────────────────────────────────────────────────── */
   function tok() {
-    return localStorage.getItem('authToken') || localStorage.getItem('token') ||
+    // FIX (live-testing audit): 'authToken'/'token' are written once at the
+    // very first login (index.html's login handler) and never touched again.
+    // The session coordinator (app.core.session.js _saveToStorage) keeps
+    // 'accessToken' current on every token refresh, but never touches
+    // 'authToken'/'token'. Checking those two first meant this file kept
+    // sending an increasingly stale token on every 2FA/blocked-users call
+    // after the first refresh — silently 401ing with no clear error, which
+    // is why 2FA setup/verify looked broken. Check 'accessToken' first now.
+    return localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken') ||
+           localStorage.getItem('authToken') || localStorage.getItem('token') ||
            sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
   }
   async function api(method, url, body) {

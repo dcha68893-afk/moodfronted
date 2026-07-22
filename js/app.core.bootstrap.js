@@ -6178,21 +6178,17 @@
           this.checkSessionValidity();
         }, 5 * 60 * 1000);
 
-        let activityTimeout;
-        const resetActivityTimeout = () => {
-          clearTimeout(activityTimeout);
-          activityTimeout = setTimeout(() => {
-            this.handleUserInactivity();
-          }, 30 * 60 * 1000);
-        };
-
-        ["mousedown", "keydown", "touchstart", "mousemove"].forEach((event) => {
-          window.addEventListener(event, resetActivityTimeout, { passive: true });
-        });
-
-        resetActivityTimeout();
-
-        console.log("✅ Session monitoring setup complete");
+        // FIX (Security settings audit): inactivity tracking + the actual
+        // logout-on-timeout is now owned entirely by SESSION_COORDINATOR in
+        // app.core.session.js (loaded right after this file), which reads
+        // the real Settings > Security > Session Timeout value and stays in
+        // sync when it changes. This file used to run its own separate,
+        // hardcoded-at-30-minutes copy of the same timer — never wired to
+        // the setting, and never actually logging anyone out (see the old
+        // handleUserInactivity below) — which would also have fired a
+        // second, out-of-sync warning toast alongside the real one. Left as
+        // a no-op here rather than duplicated to avoid exactly that.
+        console.log("✅ Session monitoring setup complete (inactivity timeout handled by SESSION_COORDINATOR)");
 
         if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSetup) {
           const sessionIndex = window.app._dependencyGraph.coordinationSetup.systems.findIndex(

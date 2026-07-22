@@ -1192,27 +1192,15 @@ export function setupEventListeners() {
     setupPhotoModalListeners();
     setupPasswordModalListeners();
     
-    const terminateAllSessionsBtn = document.getElementById('terminateAllSessionsBtn');
-    if (terminateAllSessionsBtn) {
-        terminateAllSessionsBtn.addEventListener('click', async () => {
-            if (!confirm('Terminate all other sessions?')) return;
-            // FIX: previously called terminateAllSessions(), which POSTs to
-            // /api/auth/terminate-all-sessions — a route that does not exist
-            // anywhere in the backend — and swallowed the resulting error
-            // with .catch(() => {}), so this button silently did nothing.
-            // /api/devices/revoke-all is the real, working endpoint (also
-            // used by the linked-devices "logout all" flow).
-            terminateAllSessionsBtn.disabled = true;
-            try {
-                await secureFetchWrapper('/api/devices/revoke-all', 'DELETE');
-                showNotification('All other sessions terminated', 'success');
-            } catch (error) {
-                showNotification('Failed to terminate sessions: ' + (error.message || 'Unknown error'), 'error');
-            } finally {
-                terminateAllSessionsBtn.disabled = false;
-            }
-        });
-    }
+    // FIX (live-testing audit): this used to also attach its own click handler
+    // to #terminateAllSessionsBtn, duplicating linked-sessions-and-pin.js's
+    // handler on the exact same button. Both fired on every click — two
+    // stacked confirm() dialogs, two DELETE /api/devices/revoke-all calls —
+    // and this one never refreshed the rendered device list afterward, so
+    // revoked sessions appeared to still be there even though they'd
+    // actually been deleted. linked-sessions-and-pin.js's handler already
+    // does the DELETE *and* reloads the list, so it's the single source of
+    // truth now.
     
     window.addEventListener('beforeunload', (e) => {
         if (unsavedChanges) {
@@ -2037,11 +2025,24 @@ export async function changePassword() {
         // (settings.js), which also requires confirmPassword in the body (it
         // re-validates the match server-side). Every password change attempt
         // was failing before this fix.
-        await makeSafeRequest('/api/settings/change-password', 'POST', {
+        //
+        // FIX (live-testing audit): makeSafeRequest()/secureFetchWrapper() are
+        // designed to resolve to { success:false, message } rather than throw
+        // on a backend error, so awaiting this without checking `.success`
+        // meant a wrong-current-password (or any other backend failure) still
+        // fell through to the success branch below — the modal closed and
+        // showed "Password changed successfully" even though nothing was
+        // actually changed. That's why the old password kept working after
+        // "changing" it. Now the result is checked explicitly.
+        const response = await makeSafeRequest('/api/settings/change-password', 'POST', {
             currentPassword: currentPassword.value,
             newPassword: newPassword.value,
             confirmPassword: confirmPassword.value
         });
+        
+        if (!response || response.success === false || response.status === 'error') {
+            throw new Error(response?.message || 'Failed to change password');
+        }
         
         closeModal('changePasswordModal');
         showNotification('Password changed successfully', 'success');
@@ -2472,14 +2473,32 @@ function setupSecurityEventListeners() {
             // Prefer the real device list (linked-sessions-and-pin.js, backed by
             // /api/devices + linked_devices) over the legacy showActiveSessions()
             // below, which reads stale data from /api/auth/sessions and whose
-            // terminate button duplicated/fought with this same #sessionsList.
+            // terminate button posts to /api/auth/terminate-session — a route
+            // that does not exist anywhere in the backend.
+            //
+            // FIX (live-testing audit): this used to fall back to the fake
+            // showActiveSessions() immediately if linked-sessions-and-pin.js's
+            // loader wasn't registered *yet* (a load-order race, not an actual
+            // unavailability) — showing a fabricated "Current Session: Active"
+            // entry that had nothing to do with the user's real devices, with
+            // no way to tell it apart from the real modal. Now it waits briefly
+            // for the real loader before giving up.
             const modal = document.getElementById('sessionsModal');
-            if (window.__kynLoadDevices && modal) {
-                modal.classList.add('active');
-                window.__kynLoadDevices();
-            } else {
-                showActiveSessions();
-            }
+            if (!modal) return;
+            
+            let attempts = 0;
+            const tryOpen = () => {
+                if (window.__kynLoadDevices) {
+                    modal.classList.add('active');
+                    window.__kynLoadDevices();
+                } else if (attempts++ < 20) {
+                    setTimeout(tryOpen, 100);
+                } else {
+                    console.error('[Settings] Real device list never became available; not falling back to fake session data');
+                    showNotification('Could not load sessions — please try again', 'error');
+                }
+            };
+            tryOpen();
         });
     }
     
@@ -3931,7 +3950,11 @@ export function loadBackupSection(container) {
                 if (!settingsToRestore || typeof settingsToRestore !== 'object') {
                     throw new Error('Invalid backup file');
                 }
-                await secureFetchWrapper('/api/settings', 'PUT', settingsToRestore);
+                await secureFetchWrapper('/api/settings', 'PUT', settingsToRestore).then(response => {
+                    if (!response || response.success === false || response.status === 'error') {
+                        throw new Error(response?.message || 'Restore failed on the server');
+                    }
+                });
                 showNotification('Settings restored — reloading…', 'success');
                 setTimeout(() => window.location.reload(), 1000);
             } catch (error) {

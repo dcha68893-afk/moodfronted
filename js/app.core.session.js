@@ -3781,45 +3781,123 @@
           }, refreshTime);
         },
         
+        // FIX (Security settings audit): this whole feature was a placeholder.
+        // Three problems, all fixed here:
+        //  1. `_config.inactivityTimeout` was a hardcoded 30-minute constant.
+        //     Settings > Security > "Session Timeout" (15min/30min/1hr/8hr)
+        //     saved fine and even set `window.__sessionTimeout` in five
+        //     different *iframe* module files (messages-core.js, group-core.js,
+        //     friend-core.js, calls-core.js, status-core.js) — but this
+        //     coordinator lives in the parent frame (index.html), so that
+        //     global was invisible to it. The setting had no path into the
+        //     one place that could actually act on it.
+        //  2. Even at the fixed 30 minutes, `handleUserInactivity` only ever
+        //     showed a "session will expire soon" toast and dispatched a
+        //     `moodchat-user-inactivity` event that nothing in the codebase
+        //     ever listens for — no logout ever actually happened.
+        //  3. app.core.bootstrap.js runs a second, fully independent,
+        //     also-hardcoded 30-minute inactivity timer in parallel (see
+        //     its own setupSessionMonitoring/handleUserInactivity). That one
+        //     is left to only show its warning toast; this coordinator is now
+        //     the single source of truth for the actual logout so the two
+        //     timers can't race and log the user out twice.
+        _getConfiguredInactivityTimeoutMs: function() {
+          const TIMEOUT_MS = { '15min': 15 * 60 * 1000, '30min': 30 * 60 * 1000, '1hr': 60 * 60 * 1000, '8hr': 8 * 60 * 60 * 1000 };
+          try {
+            const raw = localStorage.getItem('knecta_settings_cache');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              const choice = parsed && parsed.data && parsed.data.security && parsed.data.security.sessionTimeout;
+              if (choice && TIMEOUT_MS[choice]) return TIMEOUT_MS[choice];
+            }
+          } catch (_) { /* fall through to default */ }
+          return this._config.inactivityTimeout || TIMEOUT_MS['30min'];
+        },
+
         setupActivityMonitoring: function() {
           this._lastActivity = Date.now();
+          this._config.inactivityTimeout = this._getConfiguredInactivityTimeoutMs();
           
           const resetActivityTimeout = () => {
             this._lastActivity = Date.now();
             
             if (this._inactivityTimeout) {
               clearTimeout(this._inactivityTimeout);
+              this._inactivityTimeout = null;
+            }
+            if (this._warningTimeout) {
+              clearTimeout(this._warningTimeout);
+              this._warningTimeout = null;
             }
             
-            this._inactivityTimeout = setTimeout(() => {
-              executeSafely('SESSION_COORDINATOR.handleInactivity', () => {
+            const fullTimeout = this._config.inactivityTimeout;
+            const warnAfter = Math.max(0, fullTimeout - this._config.warningThreshold);
+            
+            this._warningTimeout = setTimeout(() => {
+              executeSafely('SESSION_COORDINATOR.handleInactivityWarning', () => {
                 this.handleUserInactivity();
               });
-            }, this._config.inactivityTimeout);
+            }, warnAfter);
+            
+            this._inactivityTimeout = setTimeout(() => {
+              executeSafely('SESSION_COORDINATOR.handleInactivityLogout', () => {
+                this.handleInactivityLogout();
+              });
+            }, fullTimeout);
           };
           
           ['mousedown', 'keydown', 'touchstart', 'mousemove', 'click', 'scroll'].forEach(event => {
             window.addEventListener(event, resetActivityTimeout, { passive: true });
           });
           
+          // Keep the timer in sync when the user changes Session Timeout in
+          // Settings, without needing a page reload. settings-core.js's
+          // SettingsState.update() already posts this message to window.parent
+          // on every change; the Settings page runs as an iframe of index.html,
+          // so this coordinator (running in the index.html parent) receives it.
+          window.addEventListener('message', (event) => {
+            const msg = event.data;
+            if (!msg || msg.type !== 'SETTINGS_UPDATED') return;
+            if (msg.section !== 'security' || msg.key !== 'sessionTimeout') return;
+            executeSafely('SESSION_COORDINATOR.applySessionTimeoutChange', () => {
+              this._config.inactivityTimeout = this._getConfiguredInactivityTimeoutMs();
+              resetActivityTimeout();
+            });
+          });
+          
           resetActivityTimeout();
         },
         
         handleUserInactivity: function() {
+          const minutesLeft = Math.round(this._config.warningThreshold / 60000);
           if (typeof window.showNotification === 'function') {
             executeSafely('showNotification.inactivity', () => {
-              window.showNotification('You have been inactive for 30 minutes. Session will expire soon.', 'warning', 10000);
+              window.showNotification(`You've been inactive. You'll be logged out in about ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'} unless you interact with the app.`, 'warning', 10000);
             });
           }
           
           executeSafely('SESSION_COORDINATOR.dispatchInactivity', () => {
             window.dispatchEvent(new CustomEvent('moodchat-user-inactivity', {
               detail: {
-                duration: '30m',
+                minutesUntilLogout: minutesLeft,
                 timestamp: new Date().toISOString()
               }
             }));
           });
+        },
+        
+        // The real enforcement step: Settings > Security > Session Timeout
+        // now actually logs the user out (and every open module iframe/tab,
+        // via handleLogout's existing broadcastSessionChange +
+        // propagateLogoutToIframes) once the chosen duration of inactivity
+        // elapses, instead of the setting being a no-op after saving.
+        handleInactivityLogout: function() {
+          if (typeof window.showNotification === 'function') {
+            executeSafely('showNotification.inactivityLogout', () => {
+              window.showNotification('You were logged out due to inactivity.', 'info', 8000);
+            });
+          }
+          this.handleLogout({ reason: 'Session timed out due to inactivity' });
         },
         
         setupCrossTabSync: function() {
