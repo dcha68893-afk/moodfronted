@@ -1693,18 +1693,23 @@
         <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
     </div>
 
-    <!-- ── Add Friend FAB (fixed, top-right near header call/video/options icons) ── -->
-    <!-- Shown only on messages and calls modules via JS below -->
+    <!-- ── Add Friend FAB (fixed, bottom-right, above the bottom nav) ── -->
+    <!-- Shown only on messages and calls modules via JS below.
+         FIX-FAB-POSITION: previously pinned at top:112px;right:14px, which sat
+         directly on top of the calls-module's quick-actions row (Voice/Video/
+         Group Call) and category tabs, overlapping real content. A standard
+         bottom-right FAB position clears every module's own header regardless
+         of that module's individual header height. -->
     <button id="fabAddFriend"
         onclick="navigateToPage('friends')"
         title="Add Friend"
-        style="display:none;position:fixed;top:112px;right:14px;z-index:400;
-               width:36px;height:36px;border-radius:50%;border:none;cursor:pointer;
+        style="display:none;position:fixed;bottom:78px;right:16px;z-index:400;
+               width:44px;height:44px;border-radius:50%;border:none;cursor:pointer;
                background:linear-gradient(135deg,#667eea,#764ba2);
                color:#fff;display:none;align-items:center;justify-content:center;
                box-shadow:0 4px 16px rgba(102,126,234,.5);
                transition:transform .15s,box-shadow .15s;">
-        <i class="fas fa-user-plus" style="font-size:14px;pointer-events:none;"></i>
+        <i class="fas fa-user-plus" style="font-size:16px;pointer-events:none;"></i>
     </button>
     <div id="gamesContent" class="iframe-container hidden">
         <iframe id="gamesIframe" class="content-iframe" src="game.html" data-module="games"></iframe>
@@ -5981,6 +5986,22 @@
                     __dispatchCallToIframe(p.userId, p.userName || p.name || 'User', p.callType || 'voice', 'friends', p.userId, 'friends-module');
                 }
 
+                // FIX-INCALL-CHAT-BROKEN (send side): calls.html's in-call chat
+                // falls back to posting this message up when it has no direct
+                // socket (which is always, inside that iframe). Relay it out
+                // through the one real socket connection, which lives here.
+                if (data.type === 'CALL_CHAT_MESSAGE') {
+                    const p = data.payload || {};
+                    if (window.wsService && typeof window.wsService.emit === 'function') {
+                        window.wsService.emit('call:chat_message', p);
+                    } else if (window.KynectaRealtime && window.KynectaRealtime._socket) {
+                        window.KynectaRealtime._socket.emit('call:chat_message', p);
+                    } else {
+                        console.warn('[Parent] CALL_CHAT_MESSAGE: no socket available to send');
+                    }
+                }
+
+
                 // ── GROUP CALL — triggered by parent header call/video buttons ──────────
                 // postToGroup sends PARENT_GROUP_CALL to group iframe, which re-posts
                 // INITIATE_CALL to parent. But we also handle it directly here so the
@@ -6699,6 +6720,17 @@
                 window.wsService.on('call:no_answer',      d => _fwdToCallsIframe('CALL_NO_ANSWER', d));
                 window.wsService.on('call:receiver_ack',   d => _fwdToCallsIframe('CALL_RECEIVER_ACK', d));
 
+                // FIX-INCALL-CHAT-BROKEN: in-call text chat was fully non-functional.
+                // calls.html tries to send/receive via a direct socket.io connection
+                // (`sock.emit('call:chat_message', ...)`), but no such connection
+                // exists inside the calls.html iframe at all — the only real socket
+                // lives here in chat.html (app.realtime.socket.js is never loaded in
+                // the iframe). The send side already had a postMessage fallback for
+                // this reason, but nothing here ever listened for it, and the
+                // receive side had no bridge whatsoever. Both directions now go
+                // through the same iframe bridge everything else in this app uses.
+                window.wsService.on('call:chat_message', d => _fwdToCallsIframe('CALL_CHAT_MESSAGE', d));
+
                 // ── REAL-TIME MESSAGE BRIDGE ──────────────────────────────────
                 // Forward incoming chat messages from WebSocket to the messages iframe.
                 // This is what makes the receiver's screen update instantly without polling.
@@ -7235,6 +7267,37 @@
                 }
             }); // ✅ { once: true } REMOVED — must fire on every reconnect
 
+            // FIX-STALE-CALL-REPLAY: pending_call was being replayed to the calls
+            // iframe from TWO independent places on every page load — this listener
+            // (fires on callsIframe 'load') and a second, separate handler further
+            // below. Both read sessionStorage.getItem('pending_call') with no check
+            // on how old the entry was, and neither guarded against the other also
+            // firing. Since sessionStorage persists across a same-tab refresh, ANY
+            // earlier call — including one that had already ended — left this key
+            // behind whenever normal call-end cleanup didn't get a chance to run
+            // before the page reloaded, silently re-dialing that old call on
+            // refresh (sometimes twice). Fixed by routing both call sites through a
+            // single, idempotent, staleness-checked replay function.
+            window.__kynReplayPendingCall = function(callsIframeEl) {
+                if (window.__pendingCallReplayDone) return; // only one of the two triggers may act
+                const raw = sessionStorage.getItem('pending_call');
+                if (!raw) return;
+                sessionStorage.removeItem('pending_call'); // consume immediately either way
+                let callData;
+                try { callData = JSON.parse(raw); } catch (e) { return; }
+                // Staleness guard: only makes sense if written moments ago (the brief
+                // window while the calls iframe was still loading right after the
+                // user tapped "call"). 15s covers slow iframe loads with margin.
+                const age = Date.now() - (callData && callData.timestamp || 0);
+                if (!callData || !callData.timestamp || age > 15000 || age < 0) {
+                    _chatLog && _chatLog('[Parent] Discarding stale pending_call (age=' + age + 'ms) — not replaying');
+                    return;
+                }
+                if (!callsIframeEl || !callsIframeEl.contentWindow) return;
+                window.__pendingCallReplayDone = true;
+                callsIframeEl.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
+            };
+
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');
             if (callsIframe) {
@@ -7243,14 +7306,7 @@
                         callsIframe.contentWindow.postMessage({ type: 'SESSION_DATA', payload: { token: cachedToken, userId: cachedUserId, user: cachedUser, authenticated: true }, timestamp: Date.now() }, '*');
                     }
                     setTimeout(() => sendFriendsToCallsIframe(), 500);
-                    const pendingCall = sessionStorage.getItem('pending_call');
-                    if (pendingCall) {
-                        try {
-                            const callData = JSON.parse(pendingCall);
-                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
-                            sessionStorage.removeItem('pending_call');
-                        } catch(e) {}
-                    }
+                    window.__kynReplayPendingCall(callsIframe);
                 });
             }
 
@@ -7505,19 +7561,12 @@
                     setTimeout(_postPending, 600);
                 } catch(e) {}
             }
-            const pendingCall = sessionStorage.getItem('pending_call');
-            if (pendingCall) {
-                try {
-                    const callData = JSON.parse(pendingCall);
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        setTimeout(() => {
-                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
-                            sessionStorage.removeItem('pending_call');
-                        }, 1000);
-                    }
-                } catch(e) {}
-            }
+            // FIX-STALE-CALL-REPLAY: routed through the single guarded helper above
+            // instead of independently re-reading/re-posting/re-deleting the key.
+            setTimeout(() => {
+                const _ci = document.getElementById('callsIframe');
+                if (_ci && window.__kynReplayPendingCall) window.__kynReplayPendingCall(_ci);
+            }, 1000);
         });
         
     </script>

@@ -6092,22 +6092,20 @@ window.__CALLS_IFRAME__ = {
       var isMine = String(msg.senderId) === String(myId);
       if (!isMine) _appendMessage(msg, false); // own echo via ack only
     });
-    // Also direct socket attachment
-    var _tryHookSocket = function () {
-      var sock = _getSocket();
-      if (!sock) { setTimeout(_tryHookSocket, 1000); return; }
-      if (sock._inCallChatHooked) return;
-      sock._inCallChatHooked = true;
-      sock.on('call:chat_message', function (msg) {
-        var myId = _getMyId();
-        if (String(msg.senderId) === String(myId)) return; // skip own
-        window.dispatchEvent(new CustomEvent('kyn:call:chat_message', { detail: msg }));
-      });
-      sock.on('call:chat_message_ack', function (msg) {
-        // Server ack — message was delivered; already rendered optimistically
-      });
-    };
-    _tryHookSocket();
+    // FIX-INCALL-CHAT-BROKEN (receive side): this iframe has no direct socket.io
+    // connection at all (app.realtime.socket.js only runs in the parent
+    // chat.html document), so _tryHookSocket() below could never find one and
+    // was retrying every second forever, silently. Real-time chat messages
+    // from the other participant are relayed by chat.html's wsService bridge
+    // as a CALL_CHAT_MESSAGE postMessage — listen for that instead.
+    window.addEventListener('message', function (e) {
+      var d = e.data || {};
+      if (d.type !== 'CALL_CHAT_MESSAGE') return;
+      var msg = d.payload || {};
+      var myId = _getMyId();
+      if (String(msg.senderId) === String(myId)) return; // skip own echo
+      _appendMessage(msg, false);
+    });
 
     // ── Participant name resolution for hand raise toasts ─────────────────
     window.addEventListener('kyn:group:call:participant_joined', function (e) {

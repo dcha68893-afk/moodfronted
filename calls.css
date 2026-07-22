@@ -4288,17 +4288,27 @@ body.call-active #idleScreen {
 .incall-top-bar {
     position: relative; z-index: 10;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 16px 8px;
+    padding: 16px 16px 14px;
+    /* FIX-INCALL-HEADER-THEME: previously fully transparent, so the header
+       row (peer name, timer, minimise/add-participant icons) just floated
+       directly over the dark patterned call background with no visual
+       separation — inconsistent with the themed bottom control bar. */
+    background: linear-gradient(180deg, rgba(10,13,22,.62) 0%, rgba(10,13,22,.28) 70%, transparent 100%);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    box-shadow: 0 4px 18px rgba(0,0,0,.25);
 }
 .incall-top-center { text-align: center; flex: 1; }
-.incall-peer-name  { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: .2px; }
-.incall-timer      { font-size: 13px; color: rgba(255,255,255,.68); margin-top: 3px;
+.incall-peer-name  { font-size: 20px; font-weight: 700; color: #fff; letter-spacing: .2px;
+                     text-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.incall-timer      { font-size: 13px; color: rgba(255,255,255,.72); margin-top: 3px;
                      font-variant-numeric: tabular-nums; letter-spacing: .5px; }
 .incall-icon-btn   { width: 42px; height: 42px; border-radius: 50%; border: none;
-                     background: rgba(255,255,255,.13); color: #fff; font-size: 17px;
+                     background: rgba(255,255,255,.14); color: #fff; font-size: 17px;
                      cursor: pointer; display: flex; align-items: center; justify-content: center;
-                     transition: background .18s; flex-shrink: 0; }
-.incall-icon-btn:hover { background: rgba(255,255,255,.23); }
+                     transition: background .18s, transform .15s; flex-shrink: 0; }
+.incall-icon-btn:hover  { background: rgba(255,255,255,.26); transform: scale(1.06); }
+.incall-icon-btn:active { transform: scale(.94); }
 
 /* ── CENTRE ─── */
 .incall-centre {
@@ -4340,7 +4350,17 @@ body.call-active #idleScreen {
     display: flex; align-items: center; justify-content: center; gap: 14px;
     padding: 16px 20px 36px;
     background: rgba(0,0,0,.58); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    /* FIX-ICON-GRID-ONE-ROW: this bar could hold 7-10 buttons (static ones plus
+       ones appended at runtime for recording/noise-cancel/polls/etc.), each with
+       flex-shrink:0. With no wrap/overflow rule, narrow phones rendered it as an
+       uneven multi-row grid instead of the intended single scrollable row. */
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    max-width: 100vw;
 }
+.incall-controls-bar::-webkit-scrollbar { display: none; }
 .incall-ctrl-btn {
     width: 58px; height: 58px; border-radius: 50%; border: none;
     background: rgba(255,255,255,.16); color: #fff; font-size: 22px; cursor: pointer;
@@ -4355,9 +4375,17 @@ body.call-active #idleScreen {
 
 @media (max-width: 480px) {
     .incall-avatar       { width: 128px; height: 128px; font-size: 54px; }
-    .incall-ctrl-btn     { width: 50px;  height: 50px;  font-size: 19px; }
-    .incall-end-btn      { width: 58px;  height: 58px;  font-size: 21px; }
-    .incall-controls-bar { gap: 10px; padding: 14px 12px 30px; }
+    .incall-ctrl-btn     { width: 46px;  height: 46px;  font-size: 17px; }
+    .incall-end-btn      { width: 52px;  height: 52px;  font-size: 19px; }
+    .incall-controls-bar { gap: 6px; padding: 12px 8px 28px; flex-wrap: nowrap; }
+}
+
+/* Even narrower devices (small phones in portrait): shrink further still so a
+   full 8-9 button set fits one row without needing horizontal scroll. */
+@media (max-width: 360px) {
+    .incall-ctrl-btn     { width: 40px;  height: 40px;  font-size: 15px; }
+    .incall-end-btn      { width: 46px;  height: 46px;  font-size: 17px; }
+    .incall-controls-bar { gap: 4px; padding: 10px 6px 24px; }
 }
 /* ── CALL PANEL (incomingCallModal) HIDE FIX ─────────────────────────────────
    When the in-call screen becomes active the incoming modal MUST be fully gone.
