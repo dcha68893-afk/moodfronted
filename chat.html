@@ -2,51 +2,6 @@
 <html lang="en">
 <head>
     <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com";</script>
-    <!--
-        ─────────────────────────────────────────────────────────────────
-        THEME FLASH PREVENTION — must be the very first thing in <head>,
-        before any <style>/<link> or other script, so the correct theme
-        is applied to <html> before the browser's first paint. Without
-        this the page always renders with default light styles first,
-        then "sparks" to dark once app.core.ui.js finishes loading
-        settings later in the page lifecycle.
-        Reads the same canonical keys the rest of the app writes to
-        (app_theme is the source of truth set by getResolvedTheme()/the
-        SETTINGS_UPDATED handlers below; the others are fallbacks for
-        settings cached before a user's first explicit theme choice).
-        ─────────────────────────────────────────────────────────────────
-    -->
-    <script>
-    (function () {
-        function resolveEarlyTheme() {
-            var raw = null;
-            try { raw = localStorage.getItem('app_theme'); } catch (_) {}
-            if (!raw) {
-                try {
-                    var g = localStorage.getItem('kyn_app_settings');
-                    if (g) { var gp = JSON.parse(g); raw = gp && gp.appearance && gp.appearance.theme; }
-                } catch (_) {}
-            }
-            if (!raw) {
-                try {
-                    var c = localStorage.getItem('knecta_settings_cache');
-                    if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
-                } catch (_) {}
-            }
-            if (!raw) { try { raw = localStorage.getItem('moodchat_theme'); } catch (_) {} }
-            if (raw === 'auto') {
-                try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
-            }
-            return raw === 'dark' ? 'dark' : 'light';
-        }
-        var _theme = resolveEarlyTheme();
-        document.documentElement.setAttribute('data-theme', _theme);
-        try {
-            var savedColor = localStorage.getItem('moodchat_dashboard_color');
-            if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
-        } catch (_) {}
-    })();
-    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kynecta - Advanced Mood-Based Chat</title>
@@ -1551,6 +1506,10 @@
 
         <!-- TOOLS NAV TABS — shown only when tools page is active -->
         <div id="toolsHeaderNav" class="hidden" aria-label="Tools navigation">
+            <button class="jm-parent-nav-tab" data-tools-page="home" title="Home" onclick="toolsNavTo('home')">
+                <i class="fas fa-home" style="font-size:15px"></i>
+                <span style="font-size:10px;line-height:1">Home</span>
+            </button>
             <button class="jm-parent-nav-tab" data-tools-page="categories" title="Categories" onclick="toolsNavTo('categories')">
                 <i class="fas fa-th-list" style="font-size:15px"></i>
                 <span style="font-size:10px;line-height:1">Categories</span>
@@ -1728,10 +1687,10 @@
         <iframe id="callsIframe" class="content-iframe" src="calls.html" data-module="calls" allow="camera; microphone"></iframe>
     </div>
     <div id="settingsContent" class="iframe-container hidden">
-        <iframe id="settingsIframe" class="content-iframe" data-lazy-src="settings.html" data-module="settings"></iframe>
+        <iframe id="settingsIframe" class="content-iframe" src="settings.html" data-module="settings"></iframe>
     </div>
     <div id="toolsContent" class="iframe-container hidden">
-        <iframe id="toolsIframe" class="content-iframe" data-lazy-src="Tools.html" data-module="tools"></iframe>
+        <iframe id="toolsIframe" class="content-iframe" src="Tools.html" data-module="tools"></iframe>
     </div>
 
     <!-- ── Add Friend FAB (fixed, top-right near header call/video/options icons) ── -->
@@ -1748,7 +1707,7 @@
         <i class="fas fa-user-plus" style="font-size:14px;pointer-events:none;"></i>
     </button>
     <div id="gamesContent" class="iframe-container hidden">
-        <iframe id="gamesIframe" class="content-iframe" data-lazy-src="game.html" data-module="games"></iframe>
+        <iframe id="gamesIframe" class="content-iframe" src="game.html" data-module="games"></iframe>
     </div>
     <style>
         .mobile-nav-icon[data-page="tools"] .ecom-nav-badge,
@@ -3040,74 +2999,11 @@
             } catch (_) {}
         }
 
-        // FIX (perf audit follow-up): the first version of deferred loading only
-        // promoted data-lazy-src → src the moment the user clicked into
-        // Settings/Tools/Games — correct for avoiding the login-time pileup, but
-        // it meant that FIRST click always had to wait for a fresh fetch+parse+run
-        // of that module, which felt like "still not loading instantly" even
-        // though every other module was already warm. The fix: still don't load
-        // them at login, but quietly warm them up in the background once the
-        // critical modules have had the main thread to themselves — using
-        // requestIdleCallback (falling back to a fixed delay) after window 'load'
-        // — so that by the time someone actually taps Settings/Tools/Games, it's
-        // very likely already loaded and switching to it is instant, exactly like
-        // every other module.
-        (function _prefetchDeferredModulesInBackground() {
-            function _promote(iframeId) {
-                var el = document.getElementById(iframeId);
-                if (el && !el.getAttribute('src') && el.dataset.lazySrc) {
-                    el.setAttribute('src', el.dataset.lazySrc);
-                }
-            }
-            function _prefetchAll() {
-                // Small stagger between each so they don't themselves dogpile the
-                // main thread/network all at once — still far cheaper than doing
-                // this at login alongside the 5 critical modules.
-                _promote('settingsIframe');
-                setTimeout(function() { _promote('toolsIframe'); }, 400);
-                setTimeout(function() { _promote('gamesIframe'); }, 800);
-            }
-            function _schedule() {
-                if ('requestIdleCallback' in window) {
-                    requestIdleCallback(_prefetchAll, { timeout: 4000 });
-                } else {
-                    setTimeout(_prefetchAll, 3000);
-                }
-            }
-            if (document.readyState === 'complete') {
-                _schedule();
-            } else {
-                window.addEventListener('load', _schedule, { once: true });
-            }
-        })();
-
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
             if (!page) {
                 console.warn('[Navigation] No page provided to navigateToPage');
                 return;
-            }
-            // FIX (perf audit — deferred module loading): settings/tools/games were
-            // previously given a real `src` in the markup like every other module,
-            // so all 8 module iframes (messages/status/group/friends/calls/settings/
-            // tools/games) fetched, parsed and ran their full init sequence in
-            // parallel immediately after login — regardless of which one the user
-            // actually wanted to see. Between them that's several MB of HTML+JS all
-            // competing for the same main thread and network connection pool at once,
-            // which is why the visible module (usually Messages) took a long time to
-            // feel interactive even though the outer #loadingScreen had already been
-            // dismissed. Messages/Calls/Friends/Groups/Status stay eager — each
-            // receives live real-time events that must reach it even while closed
-            // (incoming calls, new messages, friend requests, etc.), and deferring
-            // them risks silently dropping one before the module has ever loaded.
-            // Settings/Tools/Games have no such requirement — nothing needs to reach
-            // them before the user opens that tab (Tools' one exception, a direct
-            // marketplace-event bridge, was rerouted through the existing queue-and-
-            // flush mechanism below so it's safe too) — so they're deferred: promote
-            // data-lazy-src to src the first time they're actually navigated to.
-            var _lazyIframe = document.getElementById(`${page}Iframe`);
-            if (_lazyIframe && !_lazyIframe.getAttribute('src') && _lazyIframe.dataset.lazySrc) {
-                _lazyIframe.setAttribute('src', _lazyIframe.dataset.lazySrc);
             }
             // ── FAB visibility: show only on messages + calls modules ──
             var _fab = document.getElementById('fabAddFriend');
@@ -6454,15 +6350,10 @@
                     'order:created','order:status_changed','payment:confirmed','review:new','delivery:updated'
                 ]);
                 if (_mpEvTypes.has(data.type)) {
-                    // FIX (perf audit — enable deferred Tools loading): this used to
-                    // postMessage directly to toolsIframe.contentWindow, bypassing the
-                    // _postToModule() queue-and-flush mechanism every other module uses.
-                    // That meant an event arriving before Tools.html had ever been
-                    // opened was silently lost — which is exactly why Tools couldn't be
-                    // safely deferred like Settings/Games. Routing through the queue
-                    // means any event that arrives while Tools is lazy/not-yet-loaded is
-                    // held and delivered the moment it opens, same as every other module.
-                    _postToModule('tools', 'toolsIframe', { type: 'REALTIME_EVENT:' + data.type, payload: data.payload || {}, source: 'parent-mp-bridge' });
+                    const toolsIframe = document.getElementById('toolsIframe');
+                    if (toolsIframe && toolsIframe.contentWindow) {
+                        toolsIframe.contentWindow.postMessage({ type: 'REALTIME_EVENT:' + data.type, payload: data.payload || {}, source: 'parent-mp-bridge' }, '*');
+                    }
                     try { window.dispatchEvent(new CustomEvent('realtime:' + data.type, { detail: data.payload || {} })); } catch(_) {}
                     return;
                 }
@@ -7321,47 +7212,6 @@
                 }
             }); // ✅ { once: true } REMOVED — must fire on every reconnect
 
-            // FIX-STALE-CALL-REPLAY: pending_call was being replayed to the calls
-            // iframe from TWO independent places on every page load — this listener
-            // (fires on callsIframe 'load') and a second, separate DOMContentLoaded
-            // handler further below. Both read sessionStorage.getItem('pending_call')
-            // with no check on how old the entry was or whether the call it describes
-            // was still relevant, and neither guarded against the other also firing.
-            // Since sessionStorage persists across a same-tab refresh, ANY earlier
-            // call — including one that had already ended, or one that ended itself
-            // prematurely due to a separate bug — left this key behind whenever the
-            // normal call-end cleanup (calls-ui.js handleCallEnded) didn't get a
-            // chance to run before the page reloaded. The result: refreshing the app
-            // would silently re-dial that old call, sometimes twice (once from each
-            // listener), which is exactly the "old call triggers itself again on
-            // refresh" symptom. Fixed by routing both call sites through a single,
-            // idempotent, staleness-checked replay function.
-            window.__kynReplayPendingCall = function(callsIframeEl) {
-                if (window.__pendingCallReplayDone) return; // only one of the two triggers may act
-                const raw = sessionStorage.getItem('pending_call');
-                if (!raw) return;
-                // Always consume it immediately so a second trigger (or a later
-                // reload) can never re-read the same stale entry.
-                sessionStorage.removeItem('pending_call');
-                let callData;
-                try { callData = JSON.parse(raw); } catch (e) { return; }
-                // Staleness guard: a pending_call entry only makes sense if it was
-                // written moments ago (the brief window while the calls iframe was
-                // still loading right after the user tapped "call"). Anything older
-                // means the page was reloaded well after that — the call has long
-                // since connected, ended, or timed out server-side, and blindly
-                // reopening it is always wrong. 15s covers slow iframe loads with
-                // margin, without ever looking like a "resume".
-                const age = Date.now() - (callData && callData.timestamp || 0);
-                if (!callData || !callData.timestamp || age > 15000 || age < 0) {
-                    _chatLog && _chatLog('[Parent] Discarding stale pending_call (age=' + age + 'ms) — not replaying');
-                    return;
-                }
-                if (!callsIframeEl || !callsIframeEl.contentWindow) return;
-                window.__pendingCallReplayDone = true;
-                callsIframeEl.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
-            };
-
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');
             if (callsIframe) {
@@ -7370,7 +7220,14 @@
                         callsIframe.contentWindow.postMessage({ type: 'SESSION_DATA', payload: { token: cachedToken, userId: cachedUserId, user: cachedUser, authenticated: true }, timestamp: Date.now() }, '*');
                     }
                     setTimeout(() => sendFriendsToCallsIframe(), 500);
-                    window.__kynReplayPendingCall(callsIframe);
+                    const pendingCall = sessionStorage.getItem('pending_call');
+                    if (pendingCall) {
+                        try {
+                            const callData = JSON.parse(pendingCall);
+                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
+                            sessionStorage.removeItem('pending_call');
+                        } catch(e) {}
+                    }
                 });
             }
 
@@ -7625,14 +7482,19 @@
                     setTimeout(_postPending, 600);
                 } catch(e) {}
             }
-            // FIX-STALE-CALL-REPLAY: this used to independently re-read and re-post
-            // pending_call, racing with the callsIframe 'load' handler above and
-            // capable of dialing the same stale call a second time. Now routed
-            // through the single guarded/staleness-checked helper defined above.
-            setTimeout(() => {
-                const _ci = document.getElementById('callsIframe');
-                if (_ci && window.__kynReplayPendingCall) window.__kynReplayPendingCall(_ci);
-            }, 1000);
+            const pendingCall = sessionStorage.getItem('pending_call');
+            if (pendingCall) {
+                try {
+                    const callData = JSON.parse(pendingCall);
+                    const callsIframe = document.getElementById('callsIframe');
+                    if (callsIframe && callsIframe.contentWindow) {
+                        setTimeout(() => {
+                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
+                            sessionStorage.removeItem('pending_call');
+                        }, 1000);
+                    }
+                } catch(e) {}
+            }
         });
         
     </script>

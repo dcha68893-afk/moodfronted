@@ -5292,7 +5292,16 @@ function _navBack() {
 // Internal: navigate and optionally push to stack
 function _navDirect(page, subpage, _pushHistory) {
     _state.page = page;
-    document.querySelectorAll('.jm-page').forEach(p => p.classList.remove('active'));
+    // FIX (2026-07-22): Seller Dashboard / Admin / Advanced sub-pages force
+    // themselves visible with an inline style.cssText (display:flex !important
+    // — see marketplace-seller.js, marketplace-admin.js, marketplace-advanced.js).
+    // An inline style always beats the stylesheet's .jm-page{display:none} rule,
+    // no matter what class is removed. Previously only the 'active' class was
+    // cleared here, so leaving a seller/admin sub-page via a header icon
+    // (Account, Categories, Home, etc.) left it rendered on top of whatever
+    // page just "opened" underneath it. Clearing the inline style too fixes
+    // that for every page, regardless of which subsystem created it.
+    document.querySelectorAll('.jm-page').forEach(p => { p.classList.remove('active'); p.style.cssText = ''; });
     document.querySelectorAll('.jm-nav-tab').forEach(t => t.classList.remove('active'));
 
     const pageEl = document.getElementById('jmPage' + page.charAt(0).toUpperCase() + page.slice(1));
