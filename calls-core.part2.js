@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PART 2/8 — HANDSHAKE & MESSAGING PLUMBING
  * Message dedup, lifecycle state defs, strict state management, CHILD_READY/PARENT_READY handshake, module activation, safe UI init, async data loading, message queue, ID generation, endpoint normalization, standardized message sender, safe API request, queue flush, module registration, session request.
  *
@@ -3108,6 +3108,7 @@ function applySession(sessionData) {
 
 
     
+
 
 
 

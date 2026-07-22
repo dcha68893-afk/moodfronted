@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PART 3/8 — CORE STATE & LOGGING
  * Global call state structure (callsState), clean logging system, the calls state machine, and message type constants shared by every other part.
  *
@@ -1785,4 +1785,5 @@
 
     // Helper: should this tab handle a call event?
     function _isActiveCallTab() { return _isCallLeader; }
+
 

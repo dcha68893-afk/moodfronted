@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PART 5/8 — MEDIA & WEBRTC
  * Permission manager, media manager, the real WebRTC manager, and single-active-call enforcement.
  *
@@ -3895,6 +3895,7 @@
     }
     // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────
 }
+
 
 
 

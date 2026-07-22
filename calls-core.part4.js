@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PART 4/8 — TRANSPORT & SIGNALING
  * Configuration, environment detection, helpers, origin security, safe storage, message registry, iframe transport layer, and the real call-signaling message handlers that ride on top of it.
  *
@@ -4980,6 +4980,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
     
+
 
 
 

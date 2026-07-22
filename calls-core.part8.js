@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PART 8/8 — UI BRIDGE, PUBLIC API & INIT
  * Notification system, UI bridge, initialization sequence, top-level message handler (with its own PARENT_READY/signaling handling), the public API surface, the module core controller, final initialization, and the closing of the outer IIFE.
  *
@@ -7964,3 +7964,4 @@ function applySettingToCallsModule(section, key, value) {
 
 
 })()
+

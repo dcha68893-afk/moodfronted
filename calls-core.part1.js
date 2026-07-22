@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PART 1/8 — BOOTSTRAP & SESSION
  * Module guard/registration, session validation (__isValidSession), sandbox StorageProxy, sandbox SessionClient. Establishes the module's identity and secure session handling before anything else runs.
  *
@@ -1448,6 +1448,7 @@ function __isValidSession(session) {
 
 
     
+
 
 
 
