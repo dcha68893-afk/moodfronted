@@ -4986,8 +4986,12 @@
                             <span class="chat-time">${time}</span>
 
                             <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
+                                onmousedown="event.stopPropagation();"
+                                ontouchstart="event.stopPropagation();"
+                                onmouseup="event.stopPropagation();"
+                                ontouchend="event.stopPropagation();"
                                 onclick="event.stopPropagation();event.preventDefault();window.messagesUI?._showChatContextMenu('${chat.id}', event);"
-                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;">
+                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;">
                                 <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                             </button>
 

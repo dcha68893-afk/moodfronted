@@ -1,6 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- THEME FLASH PREVENTION — see chat.html for the full rationale. This
+     iframe document is (re)loaded fresh every time it's opened, so it
+     needs its own copy of the same early data-theme application rather
+     than waiting for the parent's postMessage-based injectThemeIntoIframe,
+     which only arrives after this document has already parsed/painted. -->
+<script>
+(function () {
+    function resolveEarlyTheme() {
+        var raw = null;
+        try { raw = localStorage.getItem('app_theme'); } catch (_) {}
+        if (!raw) {
+            try {
+                var c = localStorage.getItem('knecta_settings_cache');
+                if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
+            } catch (_) {}
+        }
+        if (raw === 'auto') {
+            try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
+        }
+        return raw === 'dark' ? 'dark' : 'light';
+    }
+    document.documentElement.setAttribute('data-theme', resolveEarlyTheme());
+})();
+</script>
+
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <title>Arcade Games — Premium Platform</title>

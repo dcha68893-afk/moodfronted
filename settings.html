@@ -1908,19 +1908,32 @@
             return null;
         }
         var theme = _readTheme();
-        if (theme) {
-            var root = document.documentElement;
-            root.setAttribute('data-theme', theme);
-            root.classList.add('theme-' + theme);
-            if (theme === 'dark') {
-                root.style.setProperty('--bg-color', '#1a1a1a');
-                root.style.setProperty('--text-color', '#ffffff');
-                root.style.setProperty('--text-primary', '#ffffff');
-                root.style.setProperty('--sidebar-bg', '#252525');
-                root.style.setProperty('--card-bg', '#2d2d2d');
-                root.style.setProperty('--border-color', '#404040');
-                root.style.setProperty('--hover-color', '#363636');
+        // FIX (theme flash audit): 'auto' used to be written straight to
+        // data-theme with no resolved light/dark variables, so the page
+        // painted once as unstyled "auto", then again once settings-core.js's
+        // _applyTheme() resolved prefers-color-scheme and dispatched
+        // themeApplied — that double-paint was the visible flash between
+        // auto/dark/light. Resolve 'auto' here too, the same way
+        // _applyTheme() does, so the very first paint already matches.
+        var resolvedTheme = theme;
+        if (!resolvedTheme || resolvedTheme === 'auto') {
+            try {
+                resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            } catch (_) {
+                resolvedTheme = 'light';
             }
+        }
+        var root = document.documentElement;
+        root.setAttribute('data-theme', resolvedTheme);
+        root.classList.add('theme-' + resolvedTheme);
+        if (resolvedTheme === 'dark') {
+            root.style.setProperty('--bg-color', '#1a1a1a');
+            root.style.setProperty('--text-color', '#ffffff');
+            root.style.setProperty('--text-primary', '#ffffff');
+            root.style.setProperty('--sidebar-bg', '#252525');
+            root.style.setProperty('--card-bg', '#2d2d2d');
+            root.style.setProperty('--border-color', '#404040');
+            root.style.setProperty('--hover-color', '#363636');
         }
         // Also read accent color
         try {

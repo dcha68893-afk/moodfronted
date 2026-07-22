@@ -8121,10 +8121,57 @@ function renderAllGroups() {
     try {
         const allGroupsList = safeGetElement('#allGroupsList');
         if (!allGroupsList) return;
-        
+
+        // FIX (all-groups-empty-real-data): this used to read the bare
+        // `groups` module variable, which requestGroupList() never touches
+        // directly and which only got backfilled as a side effect of
+        // updateGroupCounts() having already run. If this rendered first —
+        // e.g. on initial tab load — it saw an empty array and showed "No
+        // groups yet" even though the server had real groups, while the
+        // Discover modal's "My Groups" tab (which reads window.GroupCore
+        // directly, with its own API fallback) displayed them correctly.
+        // Mirror that: prefer live GroupCore data and de-dupe across
+        // groups/myGroups/joinedGroups like Discover does.
+        const GC = (typeof window !== 'undefined' && window.GroupCore) ? window.GroupCore : null;
+        const seenAll = new Set();
+        const liveAll = [
+            ...((GC && GC.groups) || groups || []),
+            ...((GC && GC.myGroups) || myGroups || []),
+            ...((GC && GC.joinedGroups) || joinedGroups || []),
+        ].filter(g => {
+            if (!g || !g.id) return false;
+            const key = String(g.id);
+            if (seenAll.has(key)) return false;
+            seenAll.add(key);
+            return true;
+        });
+
         allGroupsList.innerHTML = '';
-        
-        if (groups.length === 0) {
+
+        if (liveAll.length === 0) {
+            if (GC && typeof GC.requestGroupList === 'function' && !GC._allGroupsFetchInFlight) {
+                GC._allGroupsFetchInFlight = true;
+                allGroupsList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-spinner fa-spin"></i>
+                        <p>Loading groups…</p>
+                    </div>
+                `;
+                GC.requestGroupList().then(() => {
+                    GC._allGroupsFetchInFlight = false;
+                    renderAllGroups();
+                }).catch(() => {
+                    GC._allGroupsFetchInFlight = false;
+                    allGroupsList.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-users"></i>
+                            <p>No groups yet</p>
+                            <p class="subtext">Create or join groups to start connecting</p>
+                        </div>
+                    `;
+                });
+                return;
+            }
             allGroupsList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-users"></i>
@@ -8135,7 +8182,7 @@ function renderAllGroups() {
             return;
         }
         
-        groups.forEach(group => {
+        liveAll.forEach(group => {
             if (matchesFilters(group)) {
                 addGroupItem(group, allGroupsList, 'group');
             }
@@ -8159,8 +8206,13 @@ function renderMyGroups() {
         if (!myGroupsList) return;
         
         myGroupsList.innerHTML = '';
-        
-        if (myGroups.length === 0) {
+
+        // FIX (all-groups-empty-real-data): prefer live GroupCore data over
+        // the bare module variable — see renderAllGroups() above for why.
+        const GC_my = (typeof window !== 'undefined' && window.GroupCore) ? window.GroupCore : null;
+        const liveMyGroups = (GC_my && Array.isArray(GC_my.myGroups)) ? GC_my.myGroups : myGroups;
+
+        if (liveMyGroups.length === 0) {
             myGroupsList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-users"></i>
@@ -8171,7 +8223,7 @@ function renderMyGroups() {
             return;
         }
         
-        myGroups.forEach(group => {
+        liveMyGroups.forEach(group => {
             if (matchesFilters(group)) {
                 addGroupItem(group, myGroupsList, 'my_group');
             }
@@ -8185,8 +8237,13 @@ function renderJoinedGroups() {
         if (!joinedList) return;
         
         joinedList.innerHTML = '';
-        
-        if (joinedGroups.length === 0) {
+
+        // FIX (all-groups-empty-real-data): prefer live GroupCore data over
+        // the bare module variable — see renderAllGroups() above for why.
+        const GC_joined = (typeof window !== 'undefined' && window.GroupCore) ? window.GroupCore : null;
+        const liveJoinedGroups = (GC_joined && Array.isArray(GC_joined.joinedGroups)) ? GC_joined.joinedGroups : joinedGroups;
+
+        if (liveJoinedGroups.length === 0) {
             joinedList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-user-plus"></i>
@@ -8197,7 +8254,7 @@ function renderJoinedGroups() {
             return;
         }
         
-        joinedGroups.forEach(group => {
+        liveJoinedGroups.forEach(group => {
             if (matchesFilters(group)) {
                 addGroupItem(group, joinedList, 'joined');
             }
@@ -8237,8 +8294,13 @@ function renderAdminGroups() {
         if (!adminList) return;
         
         adminList.innerHTML = '';
-        
-        if (adminGroups.length === 0) {
+
+        // FIX (all-groups-empty-real-data): prefer live GroupCore data over
+        // the bare module variable — see renderAllGroups() above for why.
+        const GC_admin = (typeof window !== 'undefined' && window.GroupCore) ? window.GroupCore : null;
+        const liveAdminGroups = (GC_admin && Array.isArray(GC_admin.adminGroups)) ? GC_admin.adminGroups : adminGroups;
+
+        if (liveAdminGroups.length === 0) {
             adminList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-crown"></i>
@@ -8249,7 +8311,7 @@ function renderAdminGroups() {
             return;
         }
         
-        adminGroups.forEach(group => {
+        liveAdminGroups.forEach(group => {
             if (matchesFilters(group)) {
                 addGroupItem(group, adminList, 'admin');
             }

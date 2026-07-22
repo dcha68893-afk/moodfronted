@@ -972,13 +972,15 @@
             
             <div class="group-list">
                 <div class="quick-actions">
-                    <button class="quick-action-btn" id="discoverGroupsBtn" title="Discover groups">
-                        <div class="quick-action-icon">
-                            <i class="fas fa-compass"></i>
-                        </div>
-                        <div class="quick-action-text">Discover</div>
-                    </button>
-                    <!-- REMOVED: Invites quick-action — already reachable via the
+                    <!-- REMOVED: Discover quick-action — already reachable via the
+                         "Discover" tab (#discoverTab) in the category row above.
+                         Having both was confusing/redundant duplicate UI. Kept
+                         #discoverGroupsBtn out of the DOM entirely (not just
+                         hidden) so no dangling click handlers remain; the JS
+                         that wires it up (group-ui.js / group-ui-patch.js)
+                         already no-ops safely when the element isn't found,
+                         same as the removed Invites/Events buttons below.
+                         REMOVED: Invites quick-action — already reachable via the
                          "Invites" tab above and from inside group creation/chat.
                          REMOVED: Events quick-action — already reachable from
                          inside the group chat panel. Kept #groupInvitesBtn and
