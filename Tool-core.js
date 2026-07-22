@@ -3976,7 +3976,24 @@ function normalizeToolsEndpoint(url) {
         return exactAliases[url];
     }
 
-    if (url.startsWith('/api/marketplace/')) {
+    // BUG FIX (2026-07-22): this used to rewrite EVERY /api/marketplace/* call
+    // to /api/tools/marketplace/*. That's wrong — there are two separate backend
+    // route files: routes/tools.js (mounted at /api/tools, owns listings,
+    // spotlight, boost, leaderboard, tips) and routes/marketplace.routes.js
+    // (mounted at /api/marketplace, owns products, cart, orders, wishlist,
+    // categories, seller dashboard, payments). Blanket-rewriting sent
+    // marketplace-ecommerce.js's product/cart/wishlist/category calls to
+    // /api/tools/marketplace/products etc., which don't exist there — that's
+    // what caused the "Internal server error" / missing categories / empty
+    // "My Listings" bugs. Only the paths below actually live under /api/tools.
+    const TOOLS_ONLY_MARKETPLACE_PATHS = [
+        /^\/api\/marketplace\/listings(\/|$|\?)/,
+        /^\/api\/marketplace\/spotlight(\/|$|\?)/,
+        /^\/api\/marketplace\/boost(\/|$|\?)/,
+        /^\/api\/marketplace\/leaderboard(\/|$|\?)/,
+        /^\/api\/marketplace\/tips(\/|$|\?)/,
+    ];
+    if (url.startsWith('/api/marketplace/') && TOOLS_ONLY_MARKETPLACE_PATHS.some(re => re.test(url))) {
         return url.replace('/api/marketplace/', '/api/tools/marketplace/');
     }
 
@@ -4198,8 +4215,34 @@ function forceBindAllUIEvents() {
         _bindLogShown = true;
     }
 
+    // ── FIX (2026-07-22): single-panel-at-a-time controller ─────────────
+    // Previously each header icon (Analytics, Saved, Notes, Trust Stats,
+    // Premium, Team, Leaderboard, Create Listing) opened its own modal
+    // without closing any other one that was already open, so clicking
+    // through several features stacked overlays on top of each other.
+    // This closes every known panel (clearing both the .active class AND
+    // any leftover inline display style) before a new one opens, and is
+    // shared with Tool-ui.js via window so both binding paths stay in sync
+    // regardless of which one wins the load-order race.
+    if (!window.__closeAllMoodMarketPanels) {
+        window.__ALL_MOODMARKET_MODAL_IDS = [
+            'analyticsModal', 'createListingModal', 'leaderboardModal',
+            'myNotesModal', 'premiumOptionsModal', 'purchaseModal',
+            'reactionPickerModal', 'savedItemsModal', 'teamManagementModal',
+            'trustStatsModal', 'marketplaceDetailPanel'
+        ];
+        window.__closeAllMoodMarketPanels = function(exceptId) {
+            window.__ALL_MOODMARKET_MODAL_IDS.forEach(function(mid) {
+                if (mid === exceptId) return;
+                var m = document.getElementById(mid);
+                if (m) { m.classList.remove('active'); m.style.display = ''; }
+            });
+        };
+    }
+
     // ── Helper: open a modal by ID ──────────────────────────────────────
     function openModal(id) {
+        window.__closeAllMoodMarketPanels(id);
         var el = document.getElementById(id);
         if (el) { el.classList.add('active'); el.style.display = 'flex'; }
     }
@@ -4294,7 +4337,16 @@ function forceBindAllUIEvents() {
         publishBtn.onclick = async function(e) {
             e.preventDefault();
             try {
-                if (typeof window.publishListingFromModal === 'function') {
+                // BUG FIX (2026-07-22): Tool-ui.js exposes this as
+                // window._publishListingFromModal (underscore prefix). This
+                // was checking the name without the underscore, which is never
+                // defined, so it always fell through to the dead custom event
+                // below — making the Publish button silently do nothing
+                // whenever this handler (bound ~300ms after load) won the race
+                // against Tool-ui.js's own binding.
+                if (typeof window._publishListingFromModal === 'function') {
+                    await window._publishListingFromModal();
+                } else if (typeof window.publishListingFromModal === 'function') {
                     await window.publishListingFromModal();
                 } else {
                     window.dispatchEvent(new CustomEvent('marketplace:publish-listing'));
@@ -4309,14 +4361,25 @@ function forceBindAllUIEvents() {
     }
 
     // ── Create-listing inner tabs ─────────────────────────────────────────
+    // FIX (2026-07-22): 'premiumTab'/'digitalTab' collide with the main
+    // marketplace filter buttons' element IDs, so plain getElementById grabbed
+    // the wrong element and the Premium/Digital Item panels never showed.
+    var CREATE_TAB_CONTENT_ID_MAP = { digital: 'digitalItemTab' };
     document.querySelectorAll('.create-listing-tab').forEach(function(tab) {
         tab.onclick = function() {
             var tabName = tab.dataset.tab;
             if (!tabName) return;
+            // Prefer the single source-of-truth implementation in Tool-ui.js
+            // (it also tracks UIState.lastDataEntryTab, needed by Publish).
+            if (typeof window.switchCreateTab === 'function') {
+                window.switchCreateTab(tabName);
+                return;
+            }
             document.querySelectorAll('.create-listing-tab').forEach(function(t){ t.classList.remove('active'); });
             tab.classList.add('active');
             document.querySelectorAll('.create-listing-tab-content').forEach(function(c){ c.classList.remove('active'); });
-            var content = document.getElementById(tabName + 'Tab') || document.querySelector('.create-listing-tab-content[id="' + tabName + 'Tab"]');
+            var contentId = CREATE_TAB_CONTENT_ID_MAP[tabName] || (tabName + 'Tab');
+            var content = document.querySelector('.create-listing-tab-content[id="' + contentId + '"]') || document.getElementById(contentId);
             if (content) content.classList.add('active');
         };
     });
@@ -6246,7 +6309,10 @@ export async function createPremiumServiceListing(title, description, premiumOpt
         }
         
         return listing;
-    } catch {
+    } catch (err) {
+        // FIX (2026-07-22): was a bare catch that silently swallowed
+        // auth/state errors with zero diagnostic info.
+        console.error('[createPremiumServiceListing] Failed:', err?.message || err);
         return null;
     }
 }
@@ -6321,7 +6387,10 @@ export async function createPremiumDigitalListing(title, description, fileData, 
         }
         
         return listing;
-    } catch {
+    } catch (err) {
+        // FIX (2026-07-22): was a bare catch that silently swallowed
+        // auth/state errors with zero diagnostic info.
+        console.error('[createPremiumDigitalListing] Failed:', err?.message || err);
         return null;
     }
 }

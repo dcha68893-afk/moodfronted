@@ -2785,18 +2785,11 @@ const renderers = {
             tab.onclick = function() {
                 const tabName = this.dataset.tab;
                 if (!tabName) return;
-                document.querySelectorAll('.create-listing-tab').forEach(t => t.classList.remove('active'));
-                this.classList.add('active');
-                // Update content visibility - support both tab naming conventions
-                const contentId = `${tabName}Tab`;
-                const altContentId = tabName === 'digital' ? 'digitalTabContent' : contentId;
-                document.querySelectorAll('.create-listing-tab-content').forEach(c => c.classList.remove('active'));
-                let content = document.getElementById(contentId);
-                if (!content) content = document.getElementById(altContentId);
-                if (content) content.classList.add('active');
-                // FIX: Update UIState.createListingActiveTab when tab changes
-                UIState.createListingActiveTab = tabName;
-                renderers.togglePublishButtons(tabName);
+                // FIX (2026-07-22): this used to duplicate the tab-switching
+                // logic (with the same 'premiumTab'/'digitalTab' duplicate-ID
+                // collision bug fixed elsewhere, and no lastDataEntryTab
+                // tracking). Delegate to the single correct implementation.
+                switchCreateTab(tabName);
             };
         });
     }, null),
@@ -2923,6 +2916,11 @@ const renderers = {
 // =============================================
 // SIMPLIFIED: Removed isActive() checks from showCreateListingModal
 function showCreateListingModal() {
+    // FIX (2026-07-22): close any other open header panel first so features
+    // don't stack on top of each other. Shared with Tool-core.js's openModal.
+    if (typeof window.__closeAllMoodMarketPanels === 'function') {
+        window.__closeAllMoodMarketPanels('createListingModal');
+    }
     // Direct DOM access - don't rely on DOM cache
     const modal = document.getElementById('createListingModal');
     if (modal) {
@@ -2938,6 +2936,7 @@ function showCreateListingModal() {
 function hideCreateListingModal() {
     if (DOM.createListingModal) {
         DOM.createListingModal.classList.remove('active');
+        DOM.createListingModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
@@ -2955,6 +2954,13 @@ function resetCreateListingForm() {
     if (DOM.verifiedBadgeCheckbox) DOM.verifiedBadgeCheckbox.checked = false;
 }
 
+// FIX (2026-07-22): 'premiumTab' and 'digitalTab' are also used as element
+// IDs by the main marketplace category-filter buttons elsewhere in Tools.html
+// (duplicate IDs). document.getElementById() always returns the FIRST match
+// in the document, which was the filter button — so clicking "Premium" or
+// "Digital Item" in Create Listing never actually revealed the right panel.
+const CREATE_TAB_CONTENT_ID_MAP = { digital: 'digitalItemTab' };
+
 function switchCreateTab(tab) {
     document.querySelectorAll('.create-listing-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.create-listing-tab-content').forEach(c => c.classList.remove('active'));
@@ -2962,14 +2968,29 @@ function switchCreateTab(tab) {
     const tabBtn = document.querySelector(`.create-listing-tab[data-tab="${tab}"]`);
     if (tabBtn) tabBtn.classList.add('active');
     
-    // Support both naming conventions
-    let content = document.getElementById(`${tab}Tab`);
-    if (!content && tab === 'digital') content = document.getElementById('digitalTabContent');
+    // Scope the lookup to the Create Listing container so we never
+    // accidentally grab a same-ID element from elsewhere on the page.
+    const contentId = CREATE_TAB_CONTENT_ID_MAP[tab] || `${tab}Tab`;
+    const scopeEl = document.querySelector('.create-listing-content');
+    let content = scopeEl
+        ? scopeEl.querySelector(`.create-listing-tab-content#${contentId}`)
+        : null;
+    if (!content) content = document.querySelector(`.create-listing-tab-content[id="${contentId}"]`);
     if (content) content.classList.add('active');
     
     UIState.createListingActiveTab = tab;
+    // FIX (2026-07-22): remember the last real data-entry tab so Publish can
+    // still work correctly if the user is currently viewing a modifier tab
+    // (Templates / Trust Circles / Options) when they click it.
+    if (['service', 'digital', 'physical', 'premium'].includes(tab)) {
+        UIState.lastDataEntryTab = tab;
+    }
     renderers.togglePublishButtons(tab);
 }
+// FIX (2026-07-22): expose so Tool-core.js's own tab-click binding (a
+// separate binding path that can win the load-order race) delegates to this
+// single implementation instead of running its own out-of-sync copy.
+window.switchCreateTab = switchCreateTab;
 
 function updateTrustCircleSelection() {
     const groupContainer = DOM.groupSelectionContainer;
@@ -3037,7 +3058,18 @@ function handleBulkUpload(e) {
 // Expose on window for emergency handler fallback
 window._publishListingFromModal = function() { return publishListingFromModal(); };
 async function publishListingFromModal() {
-    const activeTab = UIState.createListingActiveTab || 'service';
+    // FIX (2026-07-22): Templates / Trust Circles / Options are modifier
+    // tabs that set extra fields on a Service or Digital listing (template
+    // choice, visibility, checkboxes) — they were never meant to be their
+    // own listing type. Previously, if the user left one of those tabs
+    // active and clicked Publish, it hit the "Tab is not yet supported"
+    // dead end even though a fully-filled Service/Digital form was sitting
+    // right there. Fall back to whichever data-entry tab was last used.
+    const MODIFIER_TABS = ['templates', 'circles', 'options'];
+    let activeTab = UIState.createListingActiveTab || 'service';
+    if (MODIFIER_TABS.includes(activeTab)) {
+        activeTab = UIState.lastDataEntryTab || 'service';
+    }
     console.log('[PUBLISH] Starting publish, activeTab:', activeTab);
     
     // Check we have a function to call
@@ -3314,6 +3346,7 @@ function getTeamMembersList() {
 }
 
 function showAnalyticsModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('analyticsModal');
     if (DOM.analyticsModal) {
         DOM.analyticsModal.classList.add('active');
         updateAnalyticsDashboard();
@@ -3324,10 +3357,12 @@ function showAnalyticsModal() {
 function hideAnalyticsModal() {
     if (DOM.analyticsModal) {
         DOM.analyticsModal.classList.remove('active');
+        DOM.analyticsModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
 function showPremiumOptionsModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('premiumOptionsModal');
     if (DOM.premiumOptionsModal) {
         DOM.premiumOptionsModal.classList.add('active');
     }
@@ -3336,10 +3371,12 @@ function showPremiumOptionsModal() {
 function hidePremiumOptionsModal() {
     if (DOM.premiumOptionsModal) {
         DOM.premiumOptionsModal.classList.remove('active');
+        DOM.premiumOptionsModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
 function showTeamManagementModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('teamManagementModal');
     if (DOM.teamManagementModal) {
         DOM.teamManagementModal.classList.add('active');
         renderers.teamMembers();
@@ -3349,10 +3386,12 @@ function showTeamManagementModal() {
 function hideTeamManagementModal() {
     if (DOM.teamManagementModal) {
         DOM.teamManagementModal.classList.remove('active');
+        DOM.teamManagementModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
 function showLeaderboardModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('leaderboardModal');
     if (DOM.leaderboardModal) {
         DOM.leaderboardModal.classList.add('active');
         // FIX: Load data first, then render
@@ -3370,10 +3409,12 @@ function showLeaderboardModal() {
 function hideLeaderboardModal() {
     if (DOM.leaderboardModal) {
         DOM.leaderboardModal.classList.remove('active');
+        DOM.leaderboardModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
 function showReactionPicker() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('reactionPickerModal');
     if (DOM.reactionPickerModal) {
         DOM.reactionPickerModal.classList.add('active');
     }
@@ -3382,10 +3423,12 @@ function showReactionPicker() {
 function hideReactionPicker() {
     if (DOM.reactionPickerModal) {
         DOM.reactionPickerModal.classList.remove('active');
+        DOM.reactionPickerModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
 function showSavedItemsModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('savedItemsModal');
     if (DOM.savedItemsModal) {
         DOM.savedItemsModal.classList.add('active');
         _loadSavedItems();
@@ -3396,6 +3439,7 @@ function showSavedItemsModal() {
 function hideSavedItemsModal() {
     if (DOM.savedItemsModal) {
         DOM.savedItemsModal.classList.remove('active');
+        DOM.savedItemsModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
@@ -3423,6 +3467,7 @@ function renderSavedItems() {
 }
 
 function showMyNotesModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('myNotesModal');
     if (DOM.myNotesModal) {
         DOM.myNotesModal.classList.add('active');
         _loadNotes(); // Reload from storage each time
@@ -3433,6 +3478,7 @@ function showMyNotesModal() {
 function hideMyNotesModal() {
     if (DOM.myNotesModal) {
         DOM.myNotesModal.classList.remove('active');
+        DOM.myNotesModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
@@ -3480,6 +3526,7 @@ function renderMyNotes() {
 }
 
 function showTrustStatsModal() {
+    if (typeof window.__closeAllMoodMarketPanels === 'function') window.__closeAllMoodMarketPanels('trustStatsModal');
     if (DOM.trustStatsModal) {
         DOM.trustStatsModal.classList.add('active');
         renderTrustStats();
@@ -3489,6 +3536,7 @@ function showTrustStatsModal() {
 function hideTrustStatsModal() {
     if (DOM.trustStatsModal) {
         DOM.trustStatsModal.classList.remove('active');
+        DOM.trustStatsModal.style.display = ''; // FIX: clear leftover inline display set by Tool-core.js's openModal()
     }
 }
 
