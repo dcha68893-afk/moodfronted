@@ -2995,6 +2995,47 @@
             } catch (_) {}
         }
 
+        // FIX (perf audit follow-up): the first version of deferred loading only
+        // promoted data-lazy-src → src the moment the user clicked into
+        // Settings/Tools/Games — correct for avoiding the login-time pileup, but
+        // it meant that FIRST click always had to wait for a fresh fetch+parse+run
+        // of that module, which felt like "still not loading instantly" even
+        // though every other module was already warm. The fix: still don't load
+        // them at login, but quietly warm them up in the background once the
+        // critical modules have had the main thread to themselves — using
+        // requestIdleCallback (falling back to a fixed delay) after window 'load'
+        // — so that by the time someone actually taps Settings/Tools/Games, it's
+        // very likely already loaded and switching to it is instant, exactly like
+        // every other module.
+        (function _prefetchDeferredModulesInBackground() {
+            function _promote(iframeId) {
+                var el = document.getElementById(iframeId);
+                if (el && !el.getAttribute('src') && el.dataset.lazySrc) {
+                    el.setAttribute('src', el.dataset.lazySrc);
+                }
+            }
+            function _prefetchAll() {
+                // Small stagger between each so they don't themselves dogpile the
+                // main thread/network all at once — still far cheaper than doing
+                // this at login alongside the 5 critical modules.
+                _promote('settingsIframe');
+                setTimeout(function() { _promote('toolsIframe'); }, 400);
+                setTimeout(function() { _promote('gamesIframe'); }, 800);
+            }
+            function _schedule() {
+                if ('requestIdleCallback' in window) {
+                    requestIdleCallback(_prefetchAll, { timeout: 4000 });
+                } else {
+                    setTimeout(_prefetchAll, 3000);
+                }
+            }
+            if (document.readyState === 'complete') {
+                _schedule();
+            } else {
+                window.addEventListener('load', _schedule, { once: true });
+            }
+        })();
+
         function navigateToPage(page, options = {}) {
             _chatLog('[Navigation] navigateToPage called with:', page, options);
             if (!page) {
