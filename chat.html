@@ -2,6 +2,51 @@
 <html lang="en">
 <head>
     <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com";</script>
+    <!--
+        ─────────────────────────────────────────────────────────────────
+        THEME FLASH PREVENTION — must be the very first thing in <head>,
+        before any <style>/<link> or other script, so the correct theme
+        is applied to <html> before the browser's first paint. Without
+        this the page always renders with default light styles first,
+        then "sparks" to dark once app.core.ui.js finishes loading
+        settings later in the page lifecycle.
+        Reads the same canonical keys the rest of the app writes to
+        (app_theme is the source of truth set by getResolvedTheme()/the
+        SETTINGS_UPDATED handlers below; the others are fallbacks for
+        settings cached before a user's first explicit theme choice).
+        ─────────────────────────────────────────────────────────────────
+    -->
+    <script>
+    (function () {
+        function resolveEarlyTheme() {
+            var raw = null;
+            try { raw = localStorage.getItem('app_theme'); } catch (_) {}
+            if (!raw) {
+                try {
+                    var g = localStorage.getItem('kyn_app_settings');
+                    if (g) { var gp = JSON.parse(g); raw = gp && gp.appearance && gp.appearance.theme; }
+                } catch (_) {}
+            }
+            if (!raw) {
+                try {
+                    var c = localStorage.getItem('knecta_settings_cache');
+                    if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
+                } catch (_) {}
+            }
+            if (!raw) { try { raw = localStorage.getItem('moodchat_theme'); } catch (_) {} }
+            if (raw === 'auto') {
+                try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
+            }
+            return raw === 'dark' ? 'dark' : 'light';
+        }
+        var _theme = resolveEarlyTheme();
+        document.documentElement.setAttribute('data-theme', _theme);
+        try {
+            var savedColor = localStorage.getItem('moodchat_dashboard_color');
+            if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
+        } catch (_) {}
+    })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Kynecta - Advanced Mood-Based Chat</title>

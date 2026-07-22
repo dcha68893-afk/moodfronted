@@ -495,6 +495,12 @@
                 // Reset to Basic tab for a fresh feel
                 qsa('.create-group-tab', modal).forEach((t, i) => t.classList.toggle('active', i === 0));
                 qsa('.create-group-tab-content', modal).forEach((s, i) => s.classList.toggle('active', i === 0));
+                // BUG FIX: if the user previously left this modal (Cancel/X) while
+                // a Settings/Purpose/Theme/Members full-screen sub-panel was open,
+                // that panel's .open class was never cleared. Reopening the modal
+                // would then immediately show the stale sub-panel on top instead
+                // of the fresh Basic tab reset just above.
+                qsa('.groupc-fullscreen-panel.open', modal).forEach(p => p.classList.remove('open'));
             }, true); // capture = true fires before any bubbling handler
         }
     }
@@ -511,6 +517,9 @@
         // Reset to first tab
         qsa('.create-group-tab', modal).forEach((b, i) => b.classList.toggle('active', i === 0));
         qsa('.create-group-tab-content', modal).forEach((s, i) => s.classList.toggle('active', i === 0));
+        // BUG FIX: clear any open Settings/Purpose/Theme/Members full-screen
+        // sub-panel too — see matching comment in patchCreateGroupModal().
+        qsa('.groupc-fullscreen-panel.open', modal).forEach(p => p.classList.remove('open'));
         // Clear friends selection
         qsa('.friend-pick-item.selected', modal).forEach(el => el.classList.remove('selected'));
         window.__pendingGroupInvites = [];

@@ -2,6 +2,30 @@
 <html lang="en">
 <head>
     <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
+<!-- THEME FLASH PREVENTION — see chat.html for the full rationale. This
+     iframe document is (re)loaded fresh every time it's opened, so it
+     needs its own copy of the same early data-theme application rather
+     than waiting for the parent's postMessage-based injectThemeIntoIframe,
+     which only arrives after this document has already parsed/painted. -->
+<script>
+(function () {
+    function resolveEarlyTheme() {
+        var raw = null;
+        try { raw = localStorage.getItem('app_theme'); } catch (_) {}
+        if (!raw) {
+            try {
+                var c = localStorage.getItem('knecta_settings_cache');
+                if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
+            } catch (_) {}
+        }
+        if (raw === 'auto') {
+            try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
+        }
+        return raw === 'dark' ? 'dark' : 'light';
+    }
+    document.documentElement.setAttribute('data-theme', resolveEarlyTheme());
+})();
+</script>
 
 <script>
 // Suppress iframe sandbox warnings (usually from extensions)
@@ -1637,6 +1661,21 @@
 
             function closeAllPanels() {
                 document.querySelectorAll('.groupc-fullscreen-panel.open').forEach(function (p) { p.classList.remove('open'); });
+                // BUG FIX: closing a sub-panel (Settings/Purpose/Theme/Members) via
+                // the back arrow used to only hide the full-screen overlay. It never
+                // restored the "basic" tab's active state, which the tab-switch
+                // handler in group-ui-patch.js had cleared when the sub-panel was
+                // opened (openCard() -> legacyTab.click()). With no tab-content
+                // marked .active, the underlying create-group-container rendered
+                // with nothing in it except the top bar and the Cancel/Create Group
+                // footer — the group name/description/topic fields and the More
+                // options cards all disappeared. Re-clicking the Basic tab button
+                // (only if it isn't already the active one, to avoid retriggering
+                // the MutationObserver below in a loop) restores that content.
+                var basicBtn = document.querySelector('.create-group-tab[data-tab="basic"]');
+                if (basicBtn && !basicBtn.classList.contains('active')) {
+                    basicBtn.click();
+                }
             }
             document.querySelectorAll('.groupc-panel-back').forEach(function (btn) {
                 btn.addEventListener('click', closeAllPanels);

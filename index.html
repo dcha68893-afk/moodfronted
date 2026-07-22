@@ -2,6 +2,33 @@
 <html lang="en">
 <head>
     <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
+    <!--
+        THEME FLASH PREVENTION — first thing in <head>, before any CSS.
+        Applies the saved theme class to <html> immediately so the page
+        never paints light-then-dark on load/refresh. initThemeToggle()
+        further down still runs on DOMContentLoaded to wire up the
+        toggle buttons, but the visual theme itself is already correct
+        by the time anything is drawn.
+    -->
+    <script>
+    (function () {
+        function resolveEarlyTheme() {
+            var raw = null;
+            try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
+            if (raw === 'auto') {
+                try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
+            }
+            return raw === 'dark' ? 'dark' : 'light';
+        }
+        if (resolveEarlyTheme() === 'dark') {
+            document.documentElement.classList.add('theme-dark');
+        }
+        try {
+            var savedColor = localStorage.getItem('moodchat_dashboard_color');
+            if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
+        } catch (_) {}
+    })();
+    </script>
 
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#4F46E5">
@@ -2017,15 +2044,20 @@
         function initThemeToggle() {
             const btns = [document.getElementById('mobileThemeToggle'), document.getElementById('desktopThemeToggle')].filter(Boolean);
             const saved = resolveAppTheme();
+            // NOTE: the actual theme class is already applied to <html> by the
+            // inline flash-prevention script at the very top of <head> (runs
+            // before first paint). We only sync the button labels here and
+            // keep <html> as the single source of truth going forward instead
+            // of also toggling a separate class on <body>, which previously
+            // caused the two to drift out of sync after a manual toggle.
             if (saved === 'dark') {
-                document.body.classList.add('theme-dark');
                 btns.forEach(btn => { if (btn) btn.innerHTML = '<i class="fas fa-sun"></i> Light Mode'; });
             }
             btns.forEach(btn => {
                 if (btn) btn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    document.body.classList.toggle('theme-dark');
-                    const isDark = document.body.classList.contains('theme-dark');
+                    document.documentElement.classList.toggle('theme-dark');
+                    const isDark = document.documentElement.classList.contains('theme-dark');
                     try { localStorage.setItem('app_theme', isDark ? 'dark' : 'light'); } catch (_) {}
                     localStorage.setItem('moodchat_theme', isDark ? 'dark' : 'light');
                     btns.forEach(b => { if (b) b.innerHTML = isDark ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });

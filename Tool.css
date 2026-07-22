@@ -833,6 +833,90 @@
             display: block;
             animation: fadeIn 0.3s ease;
         }
+
+        /* REDESIGN: Create Listing — cards + full-screen sub-panels,
+           replacing the old always-visible 8-tab bar. Same pattern used
+           for Create Group in group.css. The legacy tab bar/buttons stay
+           in the DOM (visually hidden, not display:none) so every
+           existing switchCreateTab()/tab.click()-based code path keeps
+           working unchanged. */
+        #createListingModal .create-listing-tabs {
+            position: absolute; width: 1px; height: 1px; overflow: hidden;
+            clip: rect(0 0 0 0); white-space: nowrap;
+        }
+        .cl-more-title {
+            margin: 22px 0 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+        .cl-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .cl-card:hover, .cl-card:active { background: var(--secondary-color); }
+        .cl-card-icon {
+            width: 38px; height: 38px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 10px;
+            background: var(--secondary-color);
+            font-size: 17px;
+            flex-shrink: 0;
+        }
+        .cl-card-text { flex: 1; min-width: 0; }
+        .cl-card-title { font-weight: 600; font-size: 15px; color: var(--text-primary); }
+        .cl-card-subtitle { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+        .cl-card > i.fa-chevron-right { color: var(--text-secondary); font-size: 13px; }
+
+        .cl-fullscreen-panel {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-color);
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.25s ease;
+            z-index: 5;
+        }
+        .cl-fullscreen-panel.open { transform: translateX(0); }
+        .cl-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--marketplace-gradient);
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .cl-panel-back {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: white;
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .cl-panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .cl-panel-body .create-listing-tab-content {
+            display: block !important;
+            animation: none !important;
+        }
         
         /* Premium Tab Styles */
         .premium-feature-tag {
