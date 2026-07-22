@@ -7276,6 +7276,47 @@
                 }
             }); // ✅ { once: true } REMOVED — must fire on every reconnect
 
+            // FIX-STALE-CALL-REPLAY: pending_call was being replayed to the calls
+            // iframe from TWO independent places on every page load — this listener
+            // (fires on callsIframe 'load') and a second, separate DOMContentLoaded
+            // handler further below. Both read sessionStorage.getItem('pending_call')
+            // with no check on how old the entry was or whether the call it describes
+            // was still relevant, and neither guarded against the other also firing.
+            // Since sessionStorage persists across a same-tab refresh, ANY earlier
+            // call — including one that had already ended, or one that ended itself
+            // prematurely due to a separate bug — left this key behind whenever the
+            // normal call-end cleanup (calls-ui.js handleCallEnded) didn't get a
+            // chance to run before the page reloaded. The result: refreshing the app
+            // would silently re-dial that old call, sometimes twice (once from each
+            // listener), which is exactly the "old call triggers itself again on
+            // refresh" symptom. Fixed by routing both call sites through a single,
+            // idempotent, staleness-checked replay function.
+            window.__kynReplayPendingCall = function(callsIframeEl) {
+                if (window.__pendingCallReplayDone) return; // only one of the two triggers may act
+                const raw = sessionStorage.getItem('pending_call');
+                if (!raw) return;
+                // Always consume it immediately so a second trigger (or a later
+                // reload) can never re-read the same stale entry.
+                sessionStorage.removeItem('pending_call');
+                let callData;
+                try { callData = JSON.parse(raw); } catch (e) { return; }
+                // Staleness guard: a pending_call entry only makes sense if it was
+                // written moments ago (the brief window while the calls iframe was
+                // still loading right after the user tapped "call"). Anything older
+                // means the page was reloaded well after that — the call has long
+                // since connected, ended, or timed out server-side, and blindly
+                // reopening it is always wrong. 15s covers slow iframe loads with
+                // margin, without ever looking like a "resume".
+                const age = Date.now() - (callData && callData.timestamp || 0);
+                if (!callData || !callData.timestamp || age > 15000 || age < 0) {
+                    _chatLog && _chatLog('[Parent] Discarding stale pending_call (age=' + age + 'ms) — not replaying');
+                    return;
+                }
+                if (!callsIframeEl || !callsIframeEl.contentWindow) return;
+                window.__pendingCallReplayDone = true;
+                callsIframeEl.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
+            };
+
             // Calls iframe load handler
             const callsIframe = document.getElementById('callsIframe');
             if (callsIframe) {
@@ -7284,14 +7325,7 @@
                         callsIframe.contentWindow.postMessage({ type: 'SESSION_DATA', payload: { token: cachedToken, userId: cachedUserId, user: cachedUser, authenticated: true }, timestamp: Date.now() }, '*');
                     }
                     setTimeout(() => sendFriendsToCallsIframe(), 500);
-                    const pendingCall = sessionStorage.getItem('pending_call');
-                    if (pendingCall) {
-                        try {
-                            const callData = JSON.parse(pendingCall);
-                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
-                            sessionStorage.removeItem('pending_call');
-                        } catch(e) {}
-                    }
+                    window.__kynReplayPendingCall(callsIframe);
                 });
             }
 
@@ -7546,19 +7580,14 @@
                     setTimeout(_postPending, 600);
                 } catch(e) {}
             }
-            const pendingCall = sessionStorage.getItem('pending_call');
-            if (pendingCall) {
-                try {
-                    const callData = JSON.parse(pendingCall);
-                    const callsIframe = document.getElementById('callsIframe');
-                    if (callsIframe && callsIframe.contentWindow) {
-                        setTimeout(() => {
-                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload: callData, source: 'parent-frame', timestamp: Date.now() }, '*');
-                            sessionStorage.removeItem('pending_call');
-                        }, 1000);
-                    }
-                } catch(e) {}
-            }
+            // FIX-STALE-CALL-REPLAY: this used to independently re-read and re-post
+            // pending_call, racing with the callsIframe 'load' handler above and
+            // capable of dialing the same stale call a second time. Now routed
+            // through the single guarded/staleness-checked helper defined above.
+            setTimeout(() => {
+                const _ci = document.getElementById('callsIframe');
+                if (_ci && window.__kynReplayPendingCall) window.__kynReplayPendingCall(_ci);
+            }, 1000);
         });
         
     </script>

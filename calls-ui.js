@@ -5462,15 +5462,34 @@ handleContactItemClick: function(e) {
             UIState.callState     = 'connected';
             UIState.callActive    = true;
             UIState.callStartTime = UIState.callStartTime || Date.now();
+
+            // FIX-NAME-FLASH-2: resolve the known-good name FIRST (same chain
+            // handleCallAccepted already uses), then apply it as a floor so
+            // setCallParticipants() below can never downgrade an already-correct
+            // display name to a generic one just because this particular payload's
+            // participants[] entry came in with a weaker/missing name field.
+            const _knownName = window.__activePeerName
+                || window.__incomingCallerName
+                || (callData && (callData.callerName || callData.userName || callData.calleeName))
+                || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+                || null;
+
             if (callData && callData.participants && callData.participants.length) {
-                setCallParticipants(callData.participants, { merge: false });
+                const _patched = callData.participants.map(p => {
+                    if (_knownName && (!p || !p.name || p.name === 'User' || /^User\s*#?\d*$/.test(p.name))) {
+                        return { ...(p || {}), name: _knownName };
+                    }
+                    return p;
+                });
+                setCallParticipants(_patched, { merge: false });
             }
 
             // Only transition if in-call screen isn't already showing
             const inCallEl = document.getElementById('inCallScreen');
             if (!inCallEl || !inCallEl.classList.contains('active')) {
-                const name = (callData && (callData.callerName || callData.userName || callData.calleeName))
-                    || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name) || 'User';
+                const name = _knownName
+                    || (UIState.callParticipants && UIState.callParticipants[0] && UIState.callParticipants[0].name)
+                    || 'User';
                 const type = (callData && callData.callType) || UIState.callType || 'voice';
                 transitionToInCall({ userName: name, callType: type });
             }
