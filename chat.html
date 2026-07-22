@@ -2088,17 +2088,30 @@
                 const formData = new FormData();
                 formData.append('avatar', avatarFile);
                 try {
-                    const res = await fetch(`${baseUrl}/users/avatar`, {
+                    // BUG FIX: this used to POST to `${baseUrl}/users/avatar`, which
+                    // doesn't exist — the backend only mounts avatar upload under
+                    // `/api/profile/avatar` (src/routes/profiles.js). The 404 was
+                    // silently swallowed by the catch below, so saving an avatar
+                    // looked like it worked but nothing was ever persisted, and it
+                    // reverted to the placeholder on every refresh.
+                    const res = await fetch(`${baseUrl}/profile/avatar`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}` },
                         body: formData
                     });
                     if (res.ok) {
                         const data = await res.json();
-                        if (data.avatarUrl) {
-                            currentUserProfile.avatar = data.avatarUrl;
-                            localStorage.setItem('user_avatar', data.avatarUrl);
+                        // BUG FIX: the backend response shape is
+                        // { success, data: { profile, pictureUrl } } — not a
+                        // top-level `avatarUrl` — so this was always reading
+                        // undefined even on a successful upload.
+                        const avatarUrl = data?.data?.pictureUrl || data?.data?.profile?.profilePicture;
+                        if (avatarUrl) {
+                            currentUserProfile.avatar = avatarUrl;
+                            localStorage.setItem('user_avatar', avatarUrl);
                         }
+                    } else {
+                        console.warn('Avatar upload failed:', res.status, await res.text().catch(() => ''));
                     }
                 } catch(e) { console.warn('Avatar upload failed:', e); }
             }
@@ -2107,30 +2120,45 @@
                 const formData = new FormData();
                 formData.append('cover', coverFile);
                 try {
-                    const res = await fetch(`${baseUrl}/users/cover`, {
+                    // BUG FIX: same endpoint-path issue as avatar above — the real
+                    // route is `/api/profile/cover`, not `/api/users/cover`.
+                    const res = await fetch(`${baseUrl}/profile/cover`, {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}` },
                         body: formData
                     });
                     if (res.ok) {
                         const data = await res.json();
-                        if (data.coverUrl) {
-                            currentUserProfile.cover = data.coverUrl;
-                            localStorage.setItem('user_cover', data.coverUrl);
+                        // BUG FIX: same nested-response issue as avatar above —
+                        // read data.data.coverUrl, not a top-level data.coverUrl.
+                        const coverUrl = data?.data?.coverUrl || data?.data?.profile?.coverPhoto;
+                        if (coverUrl) {
+                            currentUserProfile.cover = coverUrl;
+                            localStorage.setItem('user_cover', coverUrl);
                         }
+                    } else {
+                        console.warn('Cover upload failed:', res.status, await res.text().catch(() => ''));
                     }
                 } catch(e) { console.warn('Cover upload failed:', e); }
             }
             
             if (bioText !== undefined) {
                 try {
-                    await fetch(`${baseUrl}/users/profile`, {
-                        method: 'PATCH',
+                    // BUG FIX: same nonexistent-endpoint issue as avatar/cover above
+                    // (was PATCH `${baseUrl}/users/profile`; the real route is
+                    // PUT `/api/profile`). Also now actually checks res.ok instead
+                    // of unconditionally treating the save as successful.
+                    const res = await fetch(`${baseUrl}/profile`, {
+                        method: 'PUT',
                         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                         body: JSON.stringify({ bio: bioText })
                     });
-                    currentUserProfile.bio = bioText;
-                    localStorage.setItem('user_bio', bioText);
+                    if (res.ok) {
+                        currentUserProfile.bio = bioText;
+                        localStorage.setItem('user_bio', bioText);
+                    } else {
+                        console.warn('Bio update failed:', res.status, await res.text().catch(() => ''));
+                    }
                 } catch(e) { console.warn('Bio update failed:', e); }
             }
             updateProfileUI();
