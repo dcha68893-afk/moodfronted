@@ -9,11 +9,15 @@
 
 'use strict';
 
-// FIX v18.0.0: Bumped from v17 — new cache name forces cache eviction on deploy.
-// skipWaiting() in install + clients.claim() in activate = new SW takes control
-// within seconds of deploy, both in browser tabs AND installed PWA.
-const SW_VERSION = '18.0.0';
-const CACHE_NAME = 'moodchat-static-v18'; // Bumped — old v17 cache auto-deleted on activate
+// FIX v19.0.0: Bumped from v18 — messages-core.js was replaced by 3 companion
+// files (messages-core.bootstrap.js/.operations.js/.ui-bridge.js) and
+// message.html's script tags changed to load them. Without a version bump,
+// browsers that already installed the v18 service worker keep it (and its
+// cached message.html / old network-first list) until their own periodic
+// update check happens, so this deploy could look broken/unchanged for a
+// while after shipping. Bumping forces immediate cache eviction + control.
+const SW_VERSION = '19.0.0';
+const CACHE_NAME = 'moodchat-static-v19'; // Bumped — old v18 cache auto-deleted on activate
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -119,8 +123,10 @@ const NETWORK_FIRST_PATTERNS = [
   /\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,
 
-  // ✅ NEW: Messages module
-  /\/messages-core\.js/i,
+  // ✅ NEW: Messages module (messages-core.js replaced by 3 companion files)
+  /\/messages-core\.bootstrap\.js/i,
+  /\/messages-core\.operations\.js/i,
+  /\/messages-core\.ui-bridge\.js/i,
   /\/messages-ui\.js/i,
 
   // ✅ NEW: Safety layer (handles localStorage, used by token reading)

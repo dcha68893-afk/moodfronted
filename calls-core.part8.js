@@ -1,4 +1,20 @@
-﻿/**
+/**
+ * calls-core.part8.js — PART 8/8 — UI BRIDGE, PUBLIC API & INIT
+ * Notification system, UI bridge, initialization sequence, top-level message handler (with its own PARENT_READY/signaling handling), the public API surface, and the module core controller.
+ *
+ * This file is SELF-CONTAINED: it runs in its own IIFE and shares state with
+ * the other 7 calls-core.partN.js files through window.__CallsCoreShared, not
+ * through a JS closure. Load all 8 files, in numeric order, as plain classic
+ * <script> tags (no type="module", no defer/async) — see calls.html.
+ */
+(function () {
+
+    'use strict';
+
+    var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
+    if (__CC.__aborted) { return; }
+
+/**
  * PART 8/8 — UI BRIDGE, PUBLIC API & INIT
  * Notification system, UI bridge, initialization sequence, top-level message handler (with its own PARENT_READY/signaling handling), the public API surface, the module core controller, final initialization, and the closing of the outer IIFE.
  *
@@ -20,7 +36,7 @@
 
 
 
-    function notifyListeners(event, data) {
+    window.__CallsCoreShared.notifyListeners = function notifyListeners(event, data) {
 
 
 
@@ -36,7 +52,7 @@
 
 
 
-    }
+    };
 
 
 
@@ -48,7 +64,7 @@
 
 
 
-    const UIBridge = {
+    window.__CallsCoreShared.UIBridge = {
 
 
 
@@ -152,7 +168,7 @@ _videoCallHandler: null,
 
 
 
-            logReady(MODULE, 'UIBridge initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'UIBridge initialized');
 
 
 
@@ -228,11 +244,11 @@ _videoCallHandler: null,
 
 
 
-                    if (!assertActive('start-call')) {
+                    if (!window.__CallsCoreShared.assertActive('start-call')) {
 
 
 
-                        notifyListeners('session_required', { action: 'start-call' });
+                        window.__CallsCoreShared.notifyListeners('session_required', { action: 'start-call' });
 
 
 
@@ -244,11 +260,11 @@ _videoCallHandler: null,
 
 
 
-                    if (!callsState.session || !__isValidSession(callsState.session)) {
+                    if (!window.__CallsCoreShared.callsState.session || !window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
-                        notifyListeners('session_required', { action: 'start-call' });
+                        window.__CallsCoreShared.notifyListeners('session_required', { action: 'start-call' });
 
 
 
@@ -264,11 +280,11 @@ _videoCallHandler: null,
 
 
 
-                        logError(MODULE, 'Call initiation failed', error);
+                        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Call initiation failed', error);
 
 
 
-                        notifyListeners('call_error', { error: error.message });
+                        window.__CallsCoreShared.notifyListeners('call_error', { error: error.message });
 
 
 
@@ -360,7 +376,7 @@ _videoCallHandler: null,
 
 
 
-            const callId = window._currentIncomingCallId || callsState.activeCallId;
+            const callId = window._currentIncomingCallId || window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -460,7 +476,7 @@ _videoCallHandler: null,
 
 
 
-            const callId = window._currentIncomingCallId || callsState.activeCallId;
+            const callId = window._currentIncomingCallId || window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -568,7 +584,7 @@ _videoCallHandler: null,
 
 
 
-            const callId = callsState.activeCallId;
+            const callId = window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -680,7 +696,7 @@ _videoCallHandler: null,
 
 
 
-                const isMuted = !callsState.micEnabled;
+                const isMuted = !window.__CallsCoreShared.callsState.micEnabled;
 
 
 
@@ -756,7 +772,7 @@ _videoCallHandler: null,
 
 
 
-                const isVideoOn = callsState.cameraEnabled;
+                const isVideoOn = window.__CallsCoreShared.callsState.cameraEnabled;
 
 
 
@@ -932,7 +948,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('toggle-mic')) return;
+                    if (!window.__CallsCoreShared.assertActive('toggle-mic')) return;
 
 
 
@@ -980,7 +996,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('toggle-camera')) return;
+                    if (!window.__CallsCoreShared.assertActive('toggle-camera')) return;
 
 
 
@@ -1028,7 +1044,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('switch-camera')) return;
+                    if (!window.__CallsCoreShared.assertActive('switch-camera')) return;
 
 
 
@@ -1076,11 +1092,11 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('screen-share')) return;
+                    if (!window.__CallsCoreShared.assertActive('screen-share')) return;
 
 
 
-                    if (callsState.screenSharing) {
+                    if (window.__CallsCoreShared.callsState.screenSharing) {
 
 
 
@@ -1160,7 +1176,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('set-mood')) return;
+                    if (!window.__CallsCoreShared.assertActive('set-mood')) return;
 
 
 
@@ -1220,7 +1236,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('set-intention')) return;
+                    if (!window.__CallsCoreShared.assertActive('set-intention')) return;
 
 
 
@@ -1268,7 +1284,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('toggle-focus')) return;
+                    if (!window.__CallsCoreShared.assertActive('toggle-focus')) return;
 
 
 
@@ -1328,7 +1344,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('send-reaction')) return;
+                    if (!window.__CallsCoreShared.assertActive('send-reaction')) return;
 
 
 
@@ -1388,7 +1404,7 @@ _closeCallUI: function() {
 
 
 
-                        if (!assertActive('send-message')) return;
+                        if (!window.__CallsCoreShared.assertActive('send-message')) return;
 
 
 
@@ -1456,7 +1472,7 @@ _closeCallUI: function() {
 
 
 
-                    if (!assertActive('send-chat')) return;
+                    if (!window.__CallsCoreShared.assertActive('send-chat')) return;
 
 
 
@@ -1584,7 +1600,7 @@ _closeCallUI: function() {
 
 
 
-    UIBridge.initialize();
+    window.__CallsCoreShared.UIBridge.initialize();
 
 
 
@@ -1600,11 +1616,11 @@ _closeCallUI: function() {
 
 
 
-        if (initializationLock) {
+        if (window.__CallsCoreShared.initializationLock) {
 
 
 
-            console.warn(`[${MODULE_NAME}][LIFECYCLE] Initialization already in progress`);
+            console.warn(`[${window.__CallsCoreShared.MODULE_NAME}][LIFECYCLE] Initialization already in progress`);
 
 
 
@@ -1620,7 +1636,7 @@ _closeCallUI: function() {
 
 
 
-        initializationLock = true;
+        window.__CallsCoreShared.initializationLock;
 
 
 
@@ -1628,7 +1644,7 @@ _closeCallUI: function() {
 
 
 
-        console.log(`[${MODULE_NAME}][LIFECYCLE] Starting initialization`);
+        console.log(`[${window.__CallsCoreShared.MODULE_NAME}][LIFECYCLE] Starting initialization`);
 
 
 
@@ -1640,11 +1656,11 @@ _closeCallUI: function() {
 
 
 
-        if (currentState === LifecycleState.BOOT) {
+        if (window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.BOOT) {
 
 
 
-            transitionTo(LifecycleState.INITIALIZING, 'module_start');
+            window.__CallsCoreShared.transitionTo(window.__CallsCoreShared.LifecycleState.INITIALIZING, 'module_start');
 
 
 
@@ -1656,7 +1672,7 @@ _closeCallUI: function() {
 
 
 
-        logInfo(MODULE_NAME, 'Initializing module');
+        window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE_NAME, 'Initializing module');
 
 
 
@@ -1676,15 +1692,15 @@ _closeCallUI: function() {
 
 
 
-        if (currentState === LifecycleState.INITIALIZING) {
+        if (window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.INITIALIZING) {
 
 
 
-            transitionTo(LifecycleState.READY, 'init_complete');
+            window.__CallsCoreShared.transitionTo(window.__CallsCoreShared.LifecycleState.READY, 'init_complete');
 
 
 
-            logSuccess(MODULE_NAME, 'READY');
+            window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE_NAME, 'READY');
 
 
 
@@ -1700,11 +1716,11 @@ _closeCallUI: function() {
 
 
 
-        if (currentState === LifecycleState.READY && !childReadySent) {
+        if (window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.READY && !window.__CallsCoreShared.childReadySent) {
 
 
 
-            sendChildReady();
+            window.__CallsCoreShared.sendChildReady();
 
 
 
@@ -1712,7 +1728,7 @@ _closeCallUI: function() {
 
 
 
-            console.warn(`[${MODULE_NAME}][LIFECYCLE] Cannot send CHILD_READY - not in READY state (current: ${currentState})`);
+            console.warn(`[${window.__CallsCoreShared.MODULE_NAME}][LIFECYCLE] Cannot send CHILD_READY - not in READY state (current: ${window.__CallsCoreShared.currentState})`);
 
 
 
@@ -1724,7 +1740,7 @@ _closeCallUI: function() {
 
 
 
-        initializationLock = false;
+        window.__CallsCoreShared.initializationLock;
 
 
 
@@ -1732,7 +1748,7 @@ _closeCallUI: function() {
 
 
 
-        logSuccess(MODULE_NAME, `Initialization complete - state: ${currentState}`);
+        window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE_NAME, `Initialization complete - state: ${window.__CallsCoreShared.currentState}`);
 
 
 
@@ -1760,11 +1776,11 @@ _closeCallUI: function() {
 
 
 
-                if (!isValidOrigin(event.origin)) {
+                if (!window.__CallsCoreShared.isValidOrigin(event.origin)) {
 
 
 
-                    logWarn(MODULE_NAME, 'Invalid origin', { origin: event.origin });
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE_NAME, 'Invalid origin', { origin: event.origin });
 
 
 
@@ -1800,7 +1816,7 @@ _closeCallUI: function() {
 
 
 
-                    logInfo(MODULE_NAME, 'Received HANDSHAKE_RETRY - ignoring');
+                    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE_NAME, 'Received HANDSHAKE_RETRY - ignoring');
 
 
 
@@ -1816,11 +1832,11 @@ _closeCallUI: function() {
 
 
 
-                if (!validateMessage(msg)) {
+                if (!window.__CallsCoreShared.validateMessage(msg)) {
 
 
 
-                    logWarn(MODULE_NAME, 'Invalid message format', msg);
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE_NAME, 'Invalid message format', msg);
 
 
 
@@ -1836,11 +1852,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.messageId && MessageGuard.isDuplicate(msg.messageId)) {
+                if (msg.messageId && window.__CallsCoreShared.MessageGuard.isDuplicate(msg.messageId)) {
 
 
 
-                    logInfo(MODULE_NAME, 'Duplicate message ignored', { messageId: msg.messageId });
+                    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE_NAME, 'Duplicate message ignored', { messageId: msg.messageId });
 
 
 
@@ -1876,7 +1892,7 @@ _closeCallUI: function() {
 
 
 
-                if (StorageProxy.handleStorageResponse(event)) {
+                if (window.__CallsCoreShared.StorageProxy.handleStorageResponse(event)) {
 
 
 
@@ -1896,7 +1912,7 @@ _closeCallUI: function() {
 
 
 
-                if (SessionClient.handleSessionMessage(event)) {
+                if (window.__CallsCoreShared.SessionClient.handleSessionMessage(event)) {
 
 
 
@@ -1916,11 +1932,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.PARENT_READY) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.PARENT_READY) {
 
 
 
-                    handleParentReady(msg);
+                    window.__CallsCoreShared.handleParentReady(msg);
 
 
 
@@ -1936,15 +1952,15 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.HEARTBEAT) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.HEARTBEAT) {
 
 
 
-                    logHeartbeat(MODULE_NAME, 'Heartbeat received');
+                    window.__CallsCoreShared.logHeartbeat(window.__CallsCoreShared.MODULE_NAME, 'Heartbeat received');
 
 
 
-                    sendHeartbeatAck(msg.messageId);
+                    window.__CallsCoreShared.sendHeartbeatAck(msg.messageId);
 
 
 
@@ -1964,7 +1980,7 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.API_RESPONSE) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.API_RESPONSE) {
 
 
 
@@ -1972,11 +1988,11 @@ _closeCallUI: function() {
 
 
 
-                    if (requestId && MessageRegistry._pendingMessages.has(requestId)) {
+                    if (requestId && window.__CallsCoreShared.MessageRegistry._pendingMessages.has(requestId)) {
 
 
 
-                        const pending = MessageRegistry._pendingMessages.get(requestId);
+                        const pending = window.__CallsCoreShared.MessageRegistry._pendingMessages.get(requestId);
 
 
 
@@ -2016,7 +2032,7 @@ _closeCallUI: function() {
 
 
 
-                            MessageRegistry._pendingMessages.delete(requestId);
+                            window.__CallsCoreShared.MessageRegistry._pendingMessages.delete(requestId);
 
 
 
@@ -2044,11 +2060,11 @@ _closeCallUI: function() {
 
 
 
-                    logSuccess(MODULE_NAME, 'MODULE_REGISTERED received');
+                    window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE_NAME, 'MODULE_REGISTERED received');
 
 
 
-                    callsState.registered = true;
+                    window.__CallsCoreShared.callsState.registered = true;
 
 
 
@@ -2060,7 +2076,7 @@ _closeCallUI: function() {
 
 
 
-                        detail: { module: MODULE_NAME, timestamp: Date.now() }
+                        detail: { module: window.__CallsCoreShared.MODULE_NAME, timestamp: Date.now() }
 
 
 
@@ -2084,11 +2100,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.MODULE_INIT_DATA) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.MODULE_INIT_DATA) {
 
 
 
-                    handleInitData(msg);
+                    window.__CallsCoreShared.handleInitData(msg);
 
 
 
@@ -2104,15 +2120,15 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.SESSION_ACTIVE || 
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_ACTIVE || 
 
 
 
-                    msg.type === MESSAGE_TYPES.SESSION_DATA ||
+                    msg.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_DATA ||
 
 
 
-                    msg.type === MESSAGE_TYPES.SESSION_SYNC) {
+                    msg.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_SYNC) {
 
 
 
@@ -2136,11 +2152,11 @@ _closeCallUI: function() {
 
 
 
-                        if (sessionId && callsState.lastSessionId === sessionId) {
+                        if (sessionId && window.__CallsCoreShared.callsState.lastSessionId === sessionId) {
 
 
 
-                            logInfo(MODULE, 'Duplicate session message ignored', { sessionId });
+                            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Duplicate session message ignored', { sessionId });
 
 
 
@@ -2196,11 +2212,11 @@ _closeCallUI: function() {
 
 
 
-                        if (!__isValidSession(candidateSession)) {
+                        if (!window.__CallsCoreShared.__isValidSession(candidateSession)) {
 
 
 
-                            logWarn(MODULE, 'Session message rejected - invalid session data');
+                            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Session message rejected - invalid session data');
 
 
 
@@ -2220,7 +2236,7 @@ _closeCallUI: function() {
 
 
 
-                            callsState.lastSessionId = sessionId;
+                            window.__CallsCoreShared.callsState.lastSessionId = sessionId;
 
 
 
@@ -2232,27 +2248,27 @@ _closeCallUI: function() {
 
 
 
-                        callsState.session = candidateSession;
+                        window.__CallsCoreShared.callsState.session = candidateSession;
 
 
 
-                        callsState.token = candidateSession.token;
+                        window.__CallsCoreShared.callsState.token = candidateSession.token;
 
 
 
-                        callsState.sessionReceived = true;
+                        window.__CallsCoreShared.callsState.sessionReceived = true;
 
 
 
-                        callsState.sessionStatus = 'valid';
+                        window.__CallsCoreShared.callsState.sessionStatus = 'valid';
 
 
 
-                        validSessionConfirmed = true;
+                        window.__CallsCoreShared.validSessionConfirmed;
 
 
 
-                        logSession(MODULE_NAME, 'Session received', { sessionId });
+                        window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE_NAME, 'Session received', { sessionId });
 
 
 
@@ -2260,7 +2276,7 @@ _closeCallUI: function() {
 
 
 
-                        sessionRequestAttempts = 0;
+                        window.__CallsCoreShared.sessionRequestAttempts;
 
 
 
@@ -2300,35 +2316,35 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.SESSION_NULL) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_NULL) {
 
 
 
-                    callsState.session = null;
+                    window.__CallsCoreShared.callsState.session = null;
 
 
 
-                    callsState.token = null;
+                    window.__CallsCoreShared.callsState.token = null;
 
 
 
-                    callsState.sessionReceived = false;
+                    window.__CallsCoreShared.callsState.sessionReceived = false;
 
 
 
-                    callsState.sessionStatus = 'invalid';
+                    window.__CallsCoreShared.callsState.sessionStatus = 'invalid';
 
 
 
-                    callsState.lastSessionId = null;
+                    window.__CallsCoreShared.callsState.lastSessionId = null;
 
 
 
-                    validSessionConfirmed = false;
+                    window.__CallsCoreShared.validSessionConfirmed;
 
 
 
-                    logSession(MODULE_NAME, 'SESSION_NULL received');
+                    window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE_NAME, 'SESSION_NULL received');
 
 
 
@@ -2352,7 +2368,7 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.CALL_INCOMING ||
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_INCOMING ||
 
 
 
@@ -2372,7 +2388,7 @@ _closeCallUI: function() {
 
 
 
-                    handleIncomingCall(msg.payload || msg.data || msg);
+                    window.__CallsCoreShared.handleIncomingCall(msg.payload || msg.data || msg);
 
 
 
@@ -2388,31 +2404,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.CALL_INITIATED) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_INITIATED) {
 
 
 
-                    handleCallInitiated(msg.payload || msg.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (msg.type === MESSAGE_TYPES.CALL_ACCEPT) {
-
-
-
-                    handleCallAccepted(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallInitiated(msg.payload || msg.data);
 
 
 
@@ -2428,31 +2424,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.CALL_STARTED) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_ACCEPT) {
 
 
 
-                    handleCallStarted(msg.payload || msg.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (msg.type === MESSAGE_TYPES.CALL_CONNECTED) {
-
-
-
-                    handleCallConnected(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallAccepted(msg.payload || msg.data);
 
 
 
@@ -2468,31 +2444,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.CALL_REJECTED) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_STARTED) {
 
 
 
-                    handleCallRejected(msg.payload || msg.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (msg.type === MESSAGE_TYPES.CALL_ENDED) {
-
-
-
-                    handleCallEnded(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallStarted(msg.payload || msg.data);
 
 
 
@@ -2508,31 +2464,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.CALL_FAILED) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_CONNECTED) {
 
 
 
-                    handleCallFailed(msg.payload || msg.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (msg.type === MESSAGE_TYPES.CALL_TIMEOUT) {
-
-
-
-                    handleCallTimeout(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallConnected(msg.payload || msg.data);
 
 
 
@@ -2548,39 +2484,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.CALL_BUSY) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_REJECTED) {
 
 
 
-                    handleCallBusy(msg.payload || msg.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (msg.type === MESSAGE_TYPES.CALL_INITIATED_ACK) {
-
-                    handleCallInitiatedAck(msg.payload || msg.data);
-
-                    return;
-
-                }
-
-                if (msg.type === MESSAGE_TYPES.SIGNAL_OFFER) {
-
-
-
-                    handleSignalOffer(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallRejected(msg.payload || msg.data);
 
 
 
@@ -2596,31 +2504,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.SIGNAL_ANSWER) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_ENDED) {
 
 
 
-                    handleSignalAnswer(msg.payload || msg.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (msg.type === MESSAGE_TYPES.ICE_CANDIDATE) {
-
-
-
-                    handleIceCandidate(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallEnded(msg.payload || msg.data);
 
 
 
@@ -2636,11 +2524,11 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                    handleRemoteStreamAdded(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallFailed(msg.payload || msg.data);
 
 
 
@@ -2656,11 +2544,139 @@ _closeCallUI: function() {
 
 
 
-                if (msg.type === MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_TIMEOUT) {
 
 
 
-                    handleRemoteStreamRemoved(msg.payload || msg.data);
+                    window.__CallsCoreShared.handleCallTimeout(msg.payload || msg.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_BUSY) {
+
+
+
+                    window.__CallsCoreShared.handleCallBusy(msg.payload || msg.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_INITIATED_ACK) {
+
+                    window.__CallsCoreShared.handleCallInitiatedAck(msg.payload || msg.data);
+
+                    return;
+
+                }
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.SIGNAL_OFFER) {
+
+
+
+                    window.__CallsCoreShared.handleSignalOffer(msg.payload || msg.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.SIGNAL_ANSWER) {
+
+
+
+                    window.__CallsCoreShared.handleSignalAnswer(msg.payload || msg.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.ICE_CANDIDATE) {
+
+
+
+                    window.__CallsCoreShared.handleIceCandidate(msg.payload || msg.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
+
+
+
+                    window.__CallsCoreShared.handleRemoteStreamAdded(msg.payload || msg.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (msg.type === window.__CallsCoreShared.MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
+
+
+
+                    window.__CallsCoreShared.handleRemoteStreamRemoved(msg.payload || msg.data);
 
 
 
@@ -2680,7 +2696,7 @@ _closeCallUI: function() {
 
 
 
-                    notifyListeners('contacts_update', msg.payload || msg.data);
+                    window.__CallsCoreShared.notifyListeners('contacts_update', msg.payload || msg.data);
 
 
 
@@ -2700,7 +2716,7 @@ _closeCallUI: function() {
 
 
 
-                    notifyListeners('call_history_update', msg.payload || msg.data);
+                    window.__CallsCoreShared.notifyListeners('call_history_update', msg.payload || msg.data);
 
 
 
@@ -2744,11 +2760,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (data.premium !== undefined) callsState.isPremium = data.premium;
+        if (data.premium !== undefined) window.__CallsCoreShared.callsState.isPremium = data.premium;
 
 
 
-        if (data.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
+        if (data.premiumFeatures) window.__CallsCoreShared.callsState.premiumFeatures = { ...window.__CallsCoreShared.callsState.premiumFeatures, ...data.premiumFeatures };
 
 
 
@@ -2756,7 +2772,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        notifyListeners('setting_changed', { section, key, value });
+        window.__CallsCoreShared.notifyListeners('setting_changed', { section, key, value });
 
 
 
@@ -2796,11 +2812,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (s.premium !== undefined) callsState.isPremium = s.premium;
+        if (s.premium !== undefined) window.__CallsCoreShared.callsState.isPremium = s.premium;
 
 
 
-        if (s.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...s.premiumFeatures };
+        if (s.premiumFeatures) window.__CallsCoreShared.callsState.premiumFeatures = { ...window.__CallsCoreShared.callsState.premiumFeatures, ...s.premiumFeatures };
 
 
 
@@ -2808,7 +2824,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        notifyListeners('settings_update', s);
+        window.__CallsCoreShared.notifyListeners('settings_update', s);
 
 
 
@@ -2836,39 +2852,39 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                    resetCallState();
+                    window.__CallsCoreShared.resetCallState();
 
 
 
-                    callsState.session = null;
+                    window.__CallsCoreShared.callsState.session = null;
 
 
 
-                    callsState.token = null;
+                    window.__CallsCoreShared.callsState.token = null;
 
 
 
-                    callsState.verified = false;
+                    window.__CallsCoreShared.callsState.verified = false;
 
 
 
-                    callsState.sessionReceived = false;
+                    window.__CallsCoreShared.callsState.sessionReceived = false;
 
 
 
-                    callsState.sessionStatus = 'invalid';
+                    window.__CallsCoreShared.callsState.sessionStatus = 'invalid';
 
 
 
-                    callsState.lastSessionId = null;
+                    window.__CallsCoreShared.callsState.lastSessionId = null;
 
 
 
-                    validSessionConfirmed = false;
+                    window.__CallsCoreShared.validSessionConfirmed;
 
 
 
-                    notifyListeners('logout', {});
+                    window.__CallsCoreShared.notifyListeners('logout', {});
 
 
 
@@ -2900,19 +2916,19 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                        if (validSessionConfirmed && callsState.session && __isValidSession(callsState.session)) {
+                        if (window.__CallsCoreShared.validSessionConfirmed && window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
-                            callsState.token = data.token;
+                            window.__CallsCoreShared.callsState.token = data.token;
 
 
 
-                            if (callsState.session) {
+                            if (window.__CallsCoreShared.callsState.session) {
 
 
 
-                                callsState.session.token = data.token;
+                                window.__CallsCoreShared.callsState.session.token = data.token;
 
 
 
@@ -2920,7 +2936,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                            DiagnosticsAgent.record('session_refresh');
+                            window.__CallsCoreShared.DiagnosticsAgent.record('session_refresh');
 
 
 
@@ -2948,7 +2964,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('new_message', msg.payload || msg.data);
+                    window.__CallsCoreShared.notifyListeners('new_message', msg.payload || msg.data);
 
 
 
@@ -2968,7 +2984,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('status_update', msg.payload || msg.data);
+                    window.__CallsCoreShared.notifyListeners('status_update', msg.payload || msg.data);
 
 
 
@@ -2988,7 +3004,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('group_update', msg.payload || msg.data);
+                    window.__CallsCoreShared.notifyListeners('group_update', msg.payload || msg.data);
 
 
 
@@ -3008,11 +3024,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                    logWarn(MODULE, 'Auth error received, refreshing session');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Auth error received, refreshing session');
 
 
 
-                    refreshSession();
+                    window.__CallsCoreShared.refreshSession();
 
 
 
@@ -3032,7 +3048,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                logError(MODULE_NAME, 'Error handling message', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE_NAME, 'Error handling message', error);
 
 
 
@@ -3060,11 +3076,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        moduleName: MODULE_NAME,
+        moduleName: window.__CallsCoreShared.MODULE_NAME,
 
 
 
-        version: CONFIG.VERSION,
+        version: window.__CallsCoreShared.CONFIG.VERSION,
 
 
 
@@ -3076,7 +3092,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-            return currentState;
+            return window.__CallsCoreShared.currentState;
 
 
 
@@ -3092,31 +3108,31 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-            return currentState === LifecycleState.ACTIVE &&
+            return window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.ACTIVE &&
 
 
 
-                   callsState.registered && 
+                   window.__CallsCoreShared.callsState.registered && 
 
 
 
-                   callsState.sessionReceived && 
+                   window.__CallsCoreShared.callsState.sessionReceived && 
 
 
 
-                   callsState.sessionStatus === 'valid' &&
+                   window.__CallsCoreShared.callsState.sessionStatus === 'valid' &&
 
 
 
-                   callsState.parentReady &&
+                   window.__CallsCoreShared.callsState.parentReady &&
 
 
 
-                   validSessionConfirmed &&
+                   window.__CallsCoreShared.validSessionConfirmed &&
 
 
 
-                   __isValidSession(callsState.session);
+                   window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session);
 
 
 
@@ -3136,19 +3152,19 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                lifecycleState: currentState,
+                lifecycleState: window.__CallsCoreShared.currentState,
 
 
 
-                registered: callsState.registered,
+                registered: window.__CallsCoreShared.callsState.registered,
 
 
 
-                initialized: callsState.initialized,
+                initialized: window.__CallsCoreShared.callsState.initialized,
 
 
 
-                parentReady: callsState.parentReady,
+                parentReady: window.__CallsCoreShared.callsState.parentReady,
 
 
 
@@ -3156,127 +3172,127 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                callState: callsState.callState,
+                callState: window.__CallsCoreShared.callsState.callState,
 
 
 
-                callActive: callsState.callActive,
+                callActive: window.__CallsCoreShared.callsState.callActive,
 
 
 
-                activeCallId: callsState.activeCallId,
+                activeCallId: window.__CallsCoreShared.callsState.activeCallId,
 
 
 
-                micEnabled: callsState.micEnabled,
+                micEnabled: window.__CallsCoreShared.callsState.micEnabled,
 
 
 
-                cameraEnabled: callsState.cameraEnabled,
+                cameraEnabled: window.__CallsCoreShared.callsState.cameraEnabled,
 
 
 
-                cameraFacingMode: callsState.cameraFacingMode,
+                cameraFacingMode: window.__CallsCoreShared.callsState.cameraFacingMode,
 
 
 
-                screenSharing: callsState.screenSharing,
+                screenSharing: window.__CallsCoreShared.callsState.screenSharing,
 
 
 
-                hasLocalStream: !!callsState.localStream,
+                hasLocalStream: !!window.__CallsCoreShared.callsState.localStream,
 
 
 
-                hasRemoteStream: !!callsState.remoteStream,
+                hasRemoteStream: !!window.__CallsCoreShared.callsState.remoteStream,
 
 
 
-                deviceInitialized: MediaManager._deviceCheckDone,
+                deviceInitialized: window.__CallsCoreShared.MediaManager._deviceCheckDone,
 
 
 
-                isPremium: callsState.isPremium,
+                isPremium: window.__CallsCoreShared.callsState.isPremium,
 
 
 
-                currentMood: callsState.currentMood,
+                currentMood: window.__CallsCoreShared.callsState.currentMood,
 
 
 
-                currentIntention: callsState.currentIntention,
+                currentIntention: window.__CallsCoreShared.callsState.currentIntention,
 
 
 
-                currentFocusMode: callsState.currentFocusMode,
+                currentFocusMode: window.__CallsCoreShared.callsState.currentFocusMode,
 
 
 
-                callParticipants: callsState.callParticipants,
+                callParticipants: window.__CallsCoreShared.callsState.callParticipants,
 
 
 
-                callStartTime: callsState.callStartTime,
+                callStartTime: window.__CallsCoreShared.callsState.callStartTime,
 
 
 
-                callDuration: callsState.callStartTime ? Math.floor((Date.now() - callsState.callStartTime) / 1000) : 0,
+                callDuration: window.__CallsCoreShared.callsState.callStartTime ? Math.floor((Date.now() - window.__CallsCoreShared.callsState.callStartTime) / 1000) : 0,
 
 
 
-                callType: callsState.callType,
+                callType: window.__CallsCoreShared.callsState.callType,
 
 
 
-                sessionReceived: callsState.sessionReceived,
+                sessionReceived: window.__CallsCoreShared.callsState.sessionReceived,
 
 
 
-                sessionStatus: callsState.sessionStatus,
+                sessionStatus: window.__CallsCoreShared.callsState.sessionStatus,
 
 
 
-                degraded: callsState.degraded,
+                degraded: window.__CallsCoreShared.callsState.degraded,
 
 
 
-                governorState: CallsStateGovernor.getState(),
+                governorState: window.__CallsCoreShared.CallsStateGovernor.getState(),
 
 
 
-                webRTC: WebRTCManager.getStatus(),
+                webRTC: window.__CallsCoreShared.WebRTCManager.getStatus(),
 
 
 
-                childReadySent: callsState.childReadySent,
+                childReadySent: window.__CallsCoreShared.callsState.childReadySent,
 
 
 
-                registrationSent: callsState.registrationSent,
+                registrationSent: window.__CallsCoreShared.callsState.registrationSent,
 
 
 
-                parentReady: parentReady,
+                parentReady: window.__CallsCoreShared.parentReady,
 
 
 
-                queuedMessages: messageQueue.length,
+                queuedMessages: window.__CallsCoreShared.messageQueue.length,
 
 
 
-                signalingState: callsState.signalingState,
+                signalingState: window.__CallsCoreShared.callsState.signalingState,
 
 
 
-                connectionState: callsState.connectionState,
+                connectionState: window.__CallsCoreShared.callsState.connectionState,
 
 
 
-                sessionValid: validSessionConfirmed && __isValidSession(callsState.session),
+                sessionValid: window.__CallsCoreShared.validSessionConfirmed && window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session),
 
 
 
-                callData: callsState.callData
+                callData: window.__CallsCoreShared.callsState.callData
 
 
 
@@ -3296,7 +3312,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-            return { ...callsState };
+            return { ...window.__CallsCoreShared.callsState };
 
 
 
@@ -3312,11 +3328,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-            resetCallState();
+            window.__CallsCoreShared.resetCallState();
 
 
 
-            logInfo(MODULE, 'Call state manually reset');
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Call state manually reset');
 
 
 
@@ -3340,31 +3356,31 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                callActive: callsState.callActive,
+                callActive: window.__CallsCoreShared.callsState.callActive,
 
 
 
-                callState: callsState.callState,
+                callState: window.__CallsCoreShared.callsState.callState,
 
 
 
-                activeCallId: callsState.activeCallId,
+                activeCallId: window.__CallsCoreShared.callsState.activeCallId,
 
 
 
-                callType: callsState.callType,
+                callType: window.__CallsCoreShared.callsState.callType,
 
 
 
-                callStartTime: callsState.callStartTime,
+                callStartTime: window.__CallsCoreShared.callsState.callStartTime,
 
 
 
-                callParticipants: [...callsState.callParticipants],
+                callParticipants: [...window.__CallsCoreShared.callsState.callParticipants],
 
 
 
-                callData: callsState.callData
+                callData: window.__CallsCoreShared.callsState.callData
 
 
 
@@ -3396,55 +3412,55 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-    resetCallState();
+    window.__CallsCoreShared.resetCallState();
 
 
 
-    callsState.callActive = false;
+    window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-    callsState.callState = 'idle';
+    window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-    callsState.activeCallId = null;
+    window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-    callsState.activeCall = null;
+    window.__CallsCoreShared.callsState.activeCall = null;
 
 
 
-    callsState.callType = null;
+    window.__CallsCoreShared.callsState.callType = null;
 
 
 
-    callsState.callParticipants = [];
+    window.__CallsCoreShared.callsState.callParticipants = [];
 
 
 
-    callsState.callStartTime = null;
+    window.__CallsCoreShared.callsState.callStartTime = null;
 
 
 
-    callsState.connectionState = 'new';
+    window.__CallsCoreShared.callsState.connectionState = 'new';
 
 
 
-    callsState.signalingState = 'new';
+    window.__CallsCoreShared.callsState.signalingState = 'new';
 
 
 
-    callsState.callData = null;
+    window.__CallsCoreShared.callsState.callData = null;
 
 
 
-    callsState.serverCallId = null;
+    window.__CallsCoreShared.callsState.serverCallId = null;
 
 
 
-    callsState.localCallId = null;
+    window.__CallsCoreShared.callsState.localCallId = null;
 
 
 
@@ -3456,15 +3472,15 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-    if (callsState.callInvitationTimer) {
+    if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-        clearTimeout(callsState.callInvitationTimer);
+        clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-        callsState.callInvitationTimer = null;
+        window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -3480,11 +3496,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-    if (MediaManager && MediaManager.stopLocalStream) {
+    if (window.__CallsCoreShared.MediaManager && window.__CallsCoreShared.MediaManager.stopLocalStream) {
 
 
 
-        MediaManager.stopLocalStream();
+        window.__CallsCoreShared.MediaManager.stopLocalStream();
 
 
 
@@ -3492,11 +3508,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-    if (WebRTCManager && WebRTCManager.close) {
+    if (window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager.close) {
 
 
 
-        WebRTCManager.close();
+        window.__CallsCoreShared.WebRTCManager.close();
 
 
 
@@ -3520,11 +3536,11 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-    if (CallsStateGovernor) {
+    if (window.__CallsCoreShared.CallsStateGovernor) {
 
 
 
-        CallsStateGovernor._transitionLock = false;
+        window.__CallsCoreShared.CallsStateGovernor._transitionLock = false;
 
 
 
@@ -3540,19 +3556,19 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-            CALLS_STATE.CALL_READY,
+            window.__CallsCoreShared.CALLS_STATE.CALL_READY,
 
 
 
-            CALLS_STATE.IN_CALL,
+            window.__CallsCoreShared.CALLS_STATE.IN_CALL,
 
 
 
-            CALLS_STATE.TERMINATED,
+            window.__CallsCoreShared.CALLS_STATE.TERMINATED,
 
 
 
-            CALLS_STATE.ACTIVE
+            window.__CallsCoreShared.CALLS_STATE.ACTIVE
 
 
 
@@ -3560,19 +3576,19 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (nonTerminalStates.includes(CallsStateGovernor._currentState) ||
+        if (nonTerminalStates.includes(window.__CallsCoreShared.CallsStateGovernor._currentState) ||
 
 
 
-            CallsStateGovernor._currentState === CALLS_STATE.INIT) {
+            window.__CallsCoreShared.CallsStateGovernor._currentState === window.__CallsCoreShared.CALLS_STATE.INIT) {
 
 
 
-            CallsStateGovernor._previousState = CallsStateGovernor._currentState;
+            window.__CallsCoreShared.CallsStateGovernor._previousState = window.__CallsCoreShared.CallsStateGovernor._currentState;
 
 
 
-            CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+            window.__CallsCoreShared.CallsStateGovernor._currentState = window.__CallsCoreShared.CALLS_STATE.ACTIVE;
 
 
 
@@ -3600,43 +3616,43 @@ clearActiveCall: function() {
 
 
 
-    callsState.callActive = false;
+    window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-    callsState.callState = 'idle';
+    window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-    callsState.activeCallId = null;
+    window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-    callsState.activeCall = null;
+    window.__CallsCoreShared.callsState.activeCall = null;
 
 
 
-    callsState.callType = null;
+    window.__CallsCoreShared.callsState.callType = null;
 
 
 
-    callsState.callParticipants = [];
+    window.__CallsCoreShared.callsState.callParticipants = [];
 
 
 
-    callsState.callStartTime = null;
+    window.__CallsCoreShared.callsState.callStartTime = null;
 
 
 
-    callsState.connectionState = 'new';
+    window.__CallsCoreShared.callsState.connectionState = 'new';
 
 
 
-    callsState.signalingState = 'new';
+    window.__CallsCoreShared.callsState.signalingState = 'new';
 
 
 
-    callsState.callData = null;
+    window.__CallsCoreShared.callsState.callData = null;
 
 
 
@@ -3644,15 +3660,15 @@ clearActiveCall: function() {
 
 
 
-    if (callsState.callInvitationTimer) {
+    if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-        clearTimeout(callsState.callInvitationTimer);
+        clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-        callsState.callInvitationTimer = null;
+        window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -3664,11 +3680,11 @@ clearActiveCall: function() {
 
 
 
-    if (WebRTCManager && WebRTCManager.close) WebRTCManager.close();
+    if (window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager.close) window.__CallsCoreShared.WebRTCManager.close();
 
 
 
-    if (MediaManager && MediaManager.stopLocalStream) MediaManager.stopLocalStream();
+    if (window.__CallsCoreShared.MediaManager && window.__CallsCoreShared.MediaManager.stopLocalStream) window.__CallsCoreShared.MediaManager.stopLocalStream();
 
 
 
@@ -3696,7 +3712,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.session && __isValidSession(callsState.session) ? { ...callsState.session } : null;
+            return window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session) ? { ...window.__CallsCoreShared.callsState.session } : null;
 
 
 
@@ -3712,7 +3728,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.sessionStatus;
+            return window.__CallsCoreShared.callsState.sessionStatus;
 
 
 
@@ -3728,11 +3744,11 @@ clearActiveCall: function() {
 
 
 
-            return callsState.sessionStatus === 'valid' && 
+            return window.__CallsCoreShared.callsState.sessionStatus === 'valid' && 
 
 
 
-                   !!(callsState.session && __isValidSession(callsState.session) && callsState.session.authenticated);
+                   !!(window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session) && window.__CallsCoreShared.callsState.session.authenticated);
 
 
 
@@ -3748,11 +3764,11 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.session || !__isValidSession(callsState.session)) {
+            if (!window.__CallsCoreShared.callsState.session || !window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
-                logWarn(MODULE, 'Blocking API call: session not ready');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Blocking API call: session not ready');
 
 
 
@@ -3772,7 +3788,7 @@ clearActiveCall: function() {
 
 
 
-                logWarn(MODULE, 'Blocking API call: core not ready');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Blocking API call: core not ready');
 
 
 
@@ -3796,7 +3812,7 @@ clearActiveCall: function() {
 
 
 
-                'Authorization': `Bearer ${callsState.session.token}`,
+                'Authorization': `Bearer ${window.__CallsCoreShared.callsState.session.token}`,
 
 
 
@@ -3832,11 +3848,11 @@ clearActiveCall: function() {
 
 
 
-                    logWarn(MODULE, 'Received 401 Unauthorized, refreshing session');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Received 401 Unauthorized, refreshing session');
 
 
 
-                    refreshSession();
+                    window.__CallsCoreShared.refreshSession();
 
 
 
@@ -3864,7 +3880,7 @@ clearActiveCall: function() {
 
 
 
-            return PermissionManager.checkPermissions(required);
+            return window.__CallsCoreShared.PermissionManager.checkPermissions(required);
 
 
 
@@ -3880,7 +3896,7 @@ clearActiveCall: function() {
 
 
 
-            return PermissionManager.requestPermissions(required);
+            return window.__CallsCoreShared.PermissionManager.requestPermissions(required);
 
 
 
@@ -3896,7 +3912,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('startCall')) {
+            if (!window.__CallsCoreShared.assertActive('startCall')) {
 
 
 
@@ -3912,7 +3928,7 @@ clearActiveCall: function() {
 
 
 
-            if (callsState.callActive) {
+            if (window.__CallsCoreShared.callsState.callActive) {
 
 
 
@@ -3928,19 +3944,19 @@ clearActiveCall: function() {
 
 
 
-                const callAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
+                const callAge = window.__CallsCoreShared.callsState.callStartTime ? Date.now() - window.__CallsCoreShared.callsState.callStartTime : Infinity;
 
 
 
-                const hasLiveMedia = !!callsState.localStream || !!callsState.remoteStream;
+                const hasLiveMedia = !!window.__CallsCoreShared.callsState.localStream || !!window.__CallsCoreShared.callsState.remoteStream;
 
 
 
-                const looksDisconnected = !['connected', 'connecting'].includes(callsState.connectionState) &&
+                const looksDisconnected = !['connected', 'connecting'].includes(window.__CallsCoreShared.callsState.connectionState) &&
 
 
 
-                    !['connected', 'ongoing', 'active', 'in_call', 'initiating', 'ringing', 'incoming'].includes(callsState.callState);
+                    !['connected', 'ongoing', 'active', 'in_call', 'initiating', 'ringing', 'incoming'].includes(window.__CallsCoreShared.callsState.callState);
 
 
 
@@ -3948,7 +3964,7 @@ clearActiveCall: function() {
 
 
 
-                    logWarn(MODULE, 'Stale callActive detected (>90s), auto-resetting before new call', { callAge, callId: callsState.activeCallId });
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Stale callActive detected (>90s), auto-resetting before new call', { callAge, callId: window.__CallsCoreShared.callsState.activeCallId });
 
 
 
@@ -3964,31 +3980,31 @@ clearActiveCall: function() {
 
 
 
-                        resetCallState();
+                        window.__CallsCoreShared.resetCallState();
 
 
 
-                        callsState.callActive = false;
+                        window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-                        callsState.callState = 'idle';
+                        window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-                        callsState.activeCallId = null;
+                        window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-                        if (CallsStateGovernor) {
+                        if (window.__CallsCoreShared.CallsStateGovernor) {
 
 
 
-                            CallsStateGovernor._transitionLock = false;
+                            window.__CallsCoreShared.CallsStateGovernor._transitionLock = false;
 
 
 
-                            CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+                            window.__CallsCoreShared.CallsStateGovernor._currentState = window.__CallsCoreShared.CALLS_STATE.ACTIVE;
 
 
 
@@ -4004,7 +4020,7 @@ clearActiveCall: function() {
 
 
 
-                    logWarn(MODULE, 'Cannot start call - another call already active');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Cannot start call - another call already active');
 
 
 
@@ -4024,11 +4040,11 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.session || !__isValidSession(callsState.session)) {
+            if (!window.__CallsCoreShared.callsState.session || !window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
-                logWarn(MODULE, 'Cannot start call - no valid session');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Cannot start call - no valid session');
 
 
 
@@ -4044,7 +4060,7 @@ clearActiveCall: function() {
 
 
 
-            DiagnosticsAgent.record('call_start');
+            window.__CallsCoreShared.DiagnosticsAgent.record('call_start');
 
 
 
@@ -4066,7 +4082,7 @@ clearActiveCall: function() {
 
             // FIX-GROUP-CALL-NOTICE: thread options (groupId/isGroupCall) through
             // instead of dropping them, so group calls keep their group context.
-            return CallsStateGovernor.initiateCall(callType, participants, options);
+            return window.__CallsCoreShared.CallsStateGovernor.initiateCall(callType, participants, options);
 
 
 
@@ -4082,7 +4098,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('startGroupCall')) {
+            if (!window.__CallsCoreShared.assertActive('startGroupCall')) {
 
 
 
@@ -4098,11 +4114,11 @@ clearActiveCall: function() {
 
 
 
-            if (callsState.callActive) {
+            if (window.__CallsCoreShared.callsState.callActive) {
 
 
 
-                const callAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
+                const callAge = window.__CallsCoreShared.callsState.callStartTime ? Date.now() - window.__CallsCoreShared.callsState.callStartTime : Infinity;
 
 
 
@@ -4110,27 +4126,27 @@ clearActiveCall: function() {
 
 
 
-                    logWarn(MODULE, 'Stale callActive on group call (>90s), auto-resetting');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Stale callActive on group call (>90s), auto-resetting');
 
 
 
-                    resetCallState();
+                    window.__CallsCoreShared.resetCallState();
 
 
 
-                    callsState.callActive = false;
+                    window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-                    callsState.callState = 'idle';
+                    window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-                    callsState.activeCallId = null;
+                    window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-                    if (CallsStateGovernor) { CallsStateGovernor._transitionLock = false; CallsStateGovernor._currentState = CALLS_STATE.ACTIVE; }
+                    if (window.__CallsCoreShared.CallsStateGovernor) { window.__CallsCoreShared.CallsStateGovernor._transitionLock = false; window.__CallsCoreShared.CallsStateGovernor._currentState = window.__CallsCoreShared.CALLS_STATE.ACTIVE; }
 
 
 
@@ -4154,7 +4170,7 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.session || !__isValidSession(callsState.session)) {
+            if (!window.__CallsCoreShared.callsState.session || !window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
@@ -4172,7 +4188,7 @@ clearActiveCall: function() {
 
             // FIX (Forensic Audit P1): Premium gate removed. groupCalls.enabled=true by default.
             // Keep gate logic for future premium-only features but not group calls.
-            if (!callsState.isPremium && !callsState.premiumFeatures.groupCalls) {
+            if (!window.__CallsCoreShared.callsState.isPremium && !window.__CallsCoreShared.callsState.premiumFeatures.groupCalls) {
                 // groupCalls is now always true; this branch should not be reached.
                 // Log warning in case premiumFeatures gets set externally to false.
                 console.warn('[Calls] groupCalls gate triggered but should be open — check premiumFeatures state');
@@ -4191,7 +4207,7 @@ clearActiveCall: function() {
 
 
 
-            DiagnosticsAgent.record('call_start');
+            window.__CallsCoreShared.DiagnosticsAgent.record('call_start');
 
 
 
@@ -4199,7 +4215,7 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.initiateCall(callType, participants);
+            return window.__CallsCoreShared.CallsStateGovernor.initiateCall(callType, participants);
 
 
 
@@ -4215,7 +4231,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('answerCall')) {
+            if (!window.__CallsCoreShared.assertActive('answerCall')) {
 
 
 
@@ -4245,7 +4261,7 @@ clearActiveCall: function() {
             // and the call died shortly after. Match the same, more precise
             // check enforceSingleActiveCall() already uses elsewhere: only
             // block when a genuinely DIFFERENT call is already active.
-            if (callsState.callActive && callsState.activeCall && callsState.activeCallId && callsState.activeCallId !== callId) {
+            if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.activeCall && window.__CallsCoreShared.callsState.activeCallId && window.__CallsCoreShared.callsState.activeCallId !== callId) {
 
 
 
@@ -4261,7 +4277,7 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.session || !__isValidSession(callsState.session)) {
+            if (!window.__CallsCoreShared.callsState.session || !window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
@@ -4277,7 +4293,7 @@ clearActiveCall: function() {
 
 
 
-            DiagnosticsAgent.record('call_accept');
+            window.__CallsCoreShared.DiagnosticsAgent.record('call_accept');
 
 
 
@@ -4285,7 +4301,7 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.acceptCall(callId);
+            return window.__CallsCoreShared.CallsStateGovernor.acceptCall(callId);
 
 
 
@@ -4301,7 +4317,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('declineCall')) {
+            if (!window.__CallsCoreShared.assertActive('declineCall')) {
 
 
 
@@ -4317,7 +4333,7 @@ clearActiveCall: function() {
 
 
 
-            DiagnosticsAgent.record('call_reject');
+            window.__CallsCoreShared.DiagnosticsAgent.record('call_reject');
 
 
 
@@ -4325,7 +4341,7 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.rejectCall(callId, reason);
+            return window.__CallsCoreShared.CallsStateGovernor.rejectCall(callId, reason);
 
 
 
@@ -4341,7 +4357,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('endCall')) {
+            if (!window.__CallsCoreShared.assertActive('endCall')) {
 
 
 
@@ -4357,7 +4373,7 @@ clearActiveCall: function() {
 
 
 
-            DiagnosticsAgent.record('call_end', { reason: 'user_ended' });
+            window.__CallsCoreShared.DiagnosticsAgent.record('call_end', { reason: 'user_ended' });
 
 
 
@@ -4365,7 +4381,7 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.endCall(callId);
+            return window.__CallsCoreShared.CallsStateGovernor.endCall(callId);
 
 
 
@@ -4381,7 +4397,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('toggleMic')) {
+            if (!window.__CallsCoreShared.assertActive('toggleMic')) {
 
 
 
@@ -4397,11 +4413,11 @@ clearActiveCall: function() {
 
 
 
-            const newState = !callsState.micEnabled;
+            const newState = !window.__CallsCoreShared.callsState.micEnabled;
 
 
 
-            const result = MediaManager.toggleMic(newState);
+            const result = window.__CallsCoreShared.MediaManager.toggleMic(newState);
 
 
 
@@ -4413,7 +4429,7 @@ clearActiveCall: function() {
 
 
 
-                IframeTransport.sendAction('TOGGLE_MIC', {
+                window.__CallsCoreShared.IframeTransport.sendAction('TOGGLE_MIC', {
 
 
 
@@ -4453,7 +4469,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('toggleCamera')) {
+            if (!window.__CallsCoreShared.assertActive('toggleCamera')) {
 
 
 
@@ -4469,11 +4485,11 @@ clearActiveCall: function() {
 
 
 
-            const newState = !callsState.cameraEnabled;
+            const newState = !window.__CallsCoreShared.callsState.cameraEnabled;
 
 
 
-            const result = MediaManager.toggleCamera(newState);
+            const result = window.__CallsCoreShared.MediaManager.toggleCamera(newState);
 
 
 
@@ -4485,7 +4501,7 @@ clearActiveCall: function() {
 
 
 
-                IframeTransport.sendAction('TOGGLE_CAMERA', {
+                window.__CallsCoreShared.IframeTransport.sendAction('TOGGLE_CAMERA', {
 
 
 
@@ -4525,7 +4541,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('switchCamera')) {
+            if (!window.__CallsCoreShared.assertActive('switchCamera')) {
 
 
 
@@ -4541,7 +4557,7 @@ clearActiveCall: function() {
 
 
 
-            return MediaManager.switchCamera().then(result => {
+            return window.__CallsCoreShared.MediaManager.switchCamera().then(result => {
 
 
 
@@ -4558,7 +4574,7 @@ clearActiveCall: function() {
 
 
 
-                    IframeTransport.sendAction('SWITCH_CAMERA', {
+                    window.__CallsCoreShared.IframeTransport.sendAction('SWITCH_CAMERA', {
 
 
 
@@ -4598,7 +4614,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('startScreenShare')) {
+            if (!window.__CallsCoreShared.assertActive('startScreenShare')) {
 
 
 
@@ -4614,11 +4630,11 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.isPremium && !callsState.premiumFeatures.screenSharing) {
+            if (!window.__CallsCoreShared.callsState.isPremium && !window.__CallsCoreShared.callsState.premiumFeatures.screenSharing) {
 
 
 
-                notifyListeners('premium_required', { feature: 'screenSharing' });
+                window.__CallsCoreShared.notifyListeners('premium_required', { feature: 'screenSharing' });
 
 
 
@@ -4634,7 +4650,7 @@ clearActiveCall: function() {
 
 
 
-            return MediaManager.startScreenShare().then(result => {
+            return window.__CallsCoreShared.MediaManager.startScreenShare().then(result => {
 
                 if (result.success) {
 
@@ -4646,7 +4662,7 @@ clearActiveCall: function() {
                         window.callsCoreReplaceVideoTrack(result.track);
                     }
 
-                    IframeTransport.sendAction('START_SCREEN_SHARE', {
+                    window.__CallsCoreShared.IframeTransport.sendAction('START_SCREEN_SHARE', {
 
                         timestamp: Date.now()
 
@@ -4669,7 +4685,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('stopScreenShare')) return;
+            if (!window.__CallsCoreShared.assertActive('stopScreenShare')) return;
 
 
 
@@ -4677,7 +4693,7 @@ clearActiveCall: function() {
 
 
 
-            var _stopResult = MediaManager.stopScreenShare();
+            var _stopResult = window.__CallsCoreShared.MediaManager.stopScreenShare();
 
             // FIX-SCREENSHARE-NEVER-SENT: revert the peer connection's video
             // sender back to the camera track that was active before sharing
@@ -4687,7 +4703,7 @@ clearActiveCall: function() {
                 window.callsCoreReplaceVideoTrack(_stopResult.revertTrack);
             }
 
-            IframeTransport.sendAction('STOP_SCREEN_SHARE', {
+            window.__CallsCoreShared.IframeTransport.sendAction('STOP_SCREEN_SHARE', {
 
                 timestamp: Date.now()
 
@@ -4707,7 +4723,7 @@ clearActiveCall: function() {
 
 
 
-            return MediaManager.getLocalStream(constraints);
+            return window.__CallsCoreShared.MediaManager.getLocalStream(constraints);
 
 
 
@@ -4723,7 +4739,7 @@ clearActiveCall: function() {
 
 
 
-            MediaManager.stopLocalStream();
+            window.__CallsCoreShared.MediaManager.stopLocalStream();
 
 
 
@@ -4739,7 +4755,7 @@ clearActiveCall: function() {
 
 
 
-            return MediaManager.enumerateDevices();
+            return window.__CallsCoreShared.MediaManager.enumerateDevices();
 
 
 
@@ -4755,7 +4771,7 @@ clearActiveCall: function() {
 
 
 
-            return WebRTCManager;
+            return window.__CallsCoreShared.WebRTCManager;
 
 
 
@@ -4771,7 +4787,7 @@ clearActiveCall: function() {
 
 
 
-            return WebRTCManager.sendData(data);
+            return window.__CallsCoreShared.WebRTCManager.sendData(data);
 
 
 
@@ -4787,7 +4803,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('setMood')) return;
+            if (!window.__CallsCoreShared.assertActive('setMood')) return;
 
 
 
@@ -4795,11 +4811,11 @@ clearActiveCall: function() {
 
 
 
-            callsState.currentMood = mood;
+            window.__CallsCoreShared.callsState.currentMood = mood;
 
 
 
-            IframeTransport.sendAction('SET_MOOD', {
+            window.__CallsCoreShared.IframeTransport.sendAction('SET_MOOD', {
 
 
 
@@ -4815,7 +4831,7 @@ clearActiveCall: function() {
 
 
 
-            notifyListeners('mood_updated', { mood });
+            window.__CallsCoreShared.notifyListeners('mood_updated', { mood });
 
 
 
@@ -4831,7 +4847,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('setIntention')) return;
+            if (!window.__CallsCoreShared.assertActive('setIntention')) return;
 
 
 
@@ -4839,11 +4855,11 @@ clearActiveCall: function() {
 
 
 
-            callsState.currentIntention = intention;
+            window.__CallsCoreShared.callsState.currentIntention = intention;
 
 
 
-            IframeTransport.sendAction('SET_INTENTION', {
+            window.__CallsCoreShared.IframeTransport.sendAction('SET_INTENTION', {
 
 
 
@@ -4859,7 +4875,7 @@ clearActiveCall: function() {
 
 
 
-            notifyListeners('intention_updated', { intention });
+            window.__CallsCoreShared.notifyListeners('intention_updated', { intention });
 
 
 
@@ -4875,7 +4891,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('toggleFocusMode')) return;
+            if (!window.__CallsCoreShared.assertActive('toggleFocusMode')) return;
 
 
 
@@ -4883,15 +4899,15 @@ clearActiveCall: function() {
 
 
 
-            const newState = !callsState.currentFocusMode;
+            const newState = !window.__CallsCoreShared.callsState.currentFocusMode;
 
 
 
-            callsState.currentFocusMode = newState;
+            window.__CallsCoreShared.callsState.currentFocusMode = newState;
 
 
 
-            IframeTransport.sendAction('TOGGLE_FOCUS_MODE', {
+            window.__CallsCoreShared.IframeTransport.sendAction('TOGGLE_FOCUS_MODE', {
 
 
 
@@ -4907,7 +4923,7 @@ clearActiveCall: function() {
 
 
 
-            notifyListeners('focus_mode_toggled', { enabled: newState });
+            window.__CallsCoreShared.notifyListeners('focus_mode_toggled', { enabled: newState });
 
 
 
@@ -4923,7 +4939,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('sendReaction')) return;
+            if (!window.__CallsCoreShared.assertActive('sendReaction')) return;
 
 
 
@@ -4931,7 +4947,7 @@ clearActiveCall: function() {
 
 
 
-            IframeTransport.sendAction('SEND_REACTION', {
+            window.__CallsCoreShared.IframeTransport.sendAction('SEND_REACTION', {
 
 
 
@@ -4957,13 +4973,13 @@ clearActiveCall: function() {
 
         sendChatMessage: function(message) {
 
-            if (!assertActive('sendChatMessage')) return;
+            if (!window.__CallsCoreShared.assertActive('sendChatMessage')) return;
 
             var _chatTs = Date.now();
-            var _chatCallId = callsState.activeCallId || callsState.serverCallId;
+            var _chatCallId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId;
 
             // Primary: data channel (low-latency real-time)
-            IframeTransport.sendAction('SEND_CHAT_MESSAGE', {
+            window.__CallsCoreShared.IframeTransport.sendAction('SEND_CHAT_MESSAGE', {
                 message: message,
                 timestamp: _chatTs
             });
@@ -4977,7 +4993,7 @@ clearActiveCall: function() {
                         callId:    _chatCallId,
                         message:   message,
                         timestamp: _chatTs,
-                        senderId:  callsState.userId || (callsState.session && callsState.session.userId)
+                        senderId:  window.__CallsCoreShared.callsState.userId || (window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.userId)
                     });
                 }
             } catch (_e) {}
@@ -4993,7 +5009,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('saveNotes')) return;
+            if (!window.__CallsCoreShared.assertActive('saveNotes')) return;
 
 
 
@@ -5001,7 +5017,7 @@ clearActiveCall: function() {
 
 
 
-            IframeTransport.sendAction('SAVE_NOTES', {
+            window.__CallsCoreShared.IframeTransport.sendAction('SAVE_NOTES', {
 
 
 
@@ -5027,22 +5043,22 @@ clearActiveCall: function() {
 
         startWhiteboard: function() {
 
-            if (!assertActive('startWhiteboard')) return;
+            if (!window.__CallsCoreShared.assertActive('startWhiteboard')) return;
 
             // Whiteboard: draw-over-canvas, synced via data channel
             // Creates an overlay canvas, sends draw events as data channel messages.
-            if (callsState._whiteboardActive) {
+            if (window.__CallsCoreShared.callsState._whiteboardActive) {
                 // Toggle off
-                callsState._whiteboardActive = false;
+                window.__CallsCoreShared.callsState._whiteboardActive = false;
                 var existing = document.getElementById('kyn-whiteboard-overlay');
                 if (existing) existing.remove();
-                IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'stop', timestamp: Date.now() });
-                notifyListeners('whiteboard_stopped', {});
+                window.__CallsCoreShared.IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'stop', timestamp: Date.now() });
+                window.__CallsCoreShared.notifyListeners('whiteboard_stopped', {});
                 return;
             }
 
-            callsState._whiteboardActive = true;
-            IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'start', timestamp: Date.now() });
+            window.__CallsCoreShared.callsState._whiteboardActive = true;
+            window.__CallsCoreShared.IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'start', timestamp: Date.now() });
 
             // Build the whiteboard overlay
             var videoContainer = document.getElementById('remoteVideo') ||
@@ -5124,7 +5140,7 @@ clearActiveCall: function() {
             function _sendDrawEvent(x0, y0, x1, y1) {
                 var evt = { action: 'draw', x0: x0, y0: y0, x1: x1, y1: y1,
                             color: ctx.strokeStyle, width: ctx.lineWidth, tool: _tool };
-                IframeTransport.sendAction('WHITEBOARD_EVENT', evt);
+                window.__CallsCoreShared.IframeTransport.sendAction('WHITEBOARD_EVENT', evt);
             }
 
             canvas.addEventListener('pointerdown', function(e) {
@@ -5149,7 +5165,7 @@ clearActiveCall: function() {
             document.getElementById('wb-color')  .addEventListener('input', function(e) { ctx.strokeStyle = e.target.value; });
             document.getElementById('wb-clear')  .addEventListener('click', function() {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'clear' });
+                window.__CallsCoreShared.IframeTransport.sendAction('WHITEBOARD_EVENT', { action: 'clear' });
             });
             document.getElementById('wb-close')  .addEventListener('click', function() {
                 window.callCore && window.callCore.startWhiteboard(); // toggle off
@@ -5166,7 +5182,7 @@ clearActiveCall: function() {
             };
             window.addEventListener('kyn:datachannel:message', _wbListener);
 
-            notifyListeners('whiteboard_started', {});
+            window.__CallsCoreShared.notifyListeners('whiteboard_started', {});
         },
 
 
@@ -5177,10 +5193,10 @@ clearActiveCall: function() {
 
         createPoll: function(question, options) {
 
-            if (!assertActive('createPoll')) return;
+            if (!window.__CallsCoreShared.assertActive('createPoll')) return;
 
             if (!question || !Array.isArray(options) || options.length < 2) {
-                logError(MODULE, 'createPoll: question and at least 2 options are required');
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'createPoll: question and at least 2 options are required');
                 return;
             }
 
@@ -5191,41 +5207,41 @@ clearActiveCall: function() {
                 options:   options.slice(0, 8).map(function(o, idx) {
                     return { id: String(idx), text: String(o).substring(0, 120), votes: [] };
                 }),
-                createdBy: callsState.userId || callsState.session && callsState.session.userId,
+                createdBy: window.__CallsCoreShared.callsState.userId || window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.userId,
                 createdAt: Date.now(),
                 active:    true,
             };
 
             // Store locally
-            if (!callsState.polls) callsState.polls = {};
-            callsState.polls[pollId] = poll;
+            if (!window.__CallsCoreShared.callsState.polls) window.__CallsCoreShared.callsState.polls = {};
+            window.__CallsCoreShared.callsState.polls[pollId] = poll;
 
             // Broadcast via data channel (real-time) AND socket (persistence)
-            IframeTransport.sendAction('POLL_EVENT', { action: 'create', poll: poll });
+            window.__CallsCoreShared.IframeTransport.sendAction('POLL_EVENT', { action: 'create', poll: poll });
 
             try {
                 var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
-                var cid  = callsState.activeCallId || callsState.serverCallId;
+                var cid  = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId;
                 if (sock && sock.connected && cid) {
                     sock.emit('call:poll_event', { callId: cid, action: 'create', poll: poll });
                 }
             } catch(_e) {}
 
-            notifyListeners('poll_created', { poll: poll });
+            window.__CallsCoreShared.notifyListeners('poll_created', { poll: poll });
             return pollId;
         },
 
         votePoll: function(pollId, optionId) {
 
-            if (!assertActive('votePoll')) return;
+            if (!window.__CallsCoreShared.assertActive('votePoll')) return;
 
-            var poll = callsState.polls && callsState.polls[pollId];
-            if (!poll || !poll.active) { logWarn(MODULE, 'votePoll: poll not found or inactive'); return; }
+            var poll = window.__CallsCoreShared.callsState.polls && window.__CallsCoreShared.callsState.polls[pollId];
+            if (!poll || !poll.active) { window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'votePoll: poll not found or inactive'); return; }
 
             var option = poll.options.find(function(o) { return o.id === String(optionId); });
-            if (!option) { logWarn(MODULE, 'votePoll: invalid optionId'); return; }
+            if (!option) { window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'votePoll: invalid optionId'); return; }
 
-            var myId = String(callsState.userId || (callsState.session && callsState.session.userId));
+            var myId = String(window.__CallsCoreShared.callsState.userId || (window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.userId));
 
             // Remove previous vote from all options (one vote per person)
             poll.options.forEach(function(o) {
@@ -5238,42 +5254,42 @@ clearActiveCall: function() {
             var votePayload = { pollId: pollId, optionId: String(optionId), voterId: myId, timestamp: Date.now() };
 
             // Broadcast vote
-            IframeTransport.sendAction('POLL_EVENT', { action: 'vote', vote: votePayload });
+            window.__CallsCoreShared.IframeTransport.sendAction('POLL_EVENT', { action: 'vote', vote: votePayload });
 
             try {
                 var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
-                var cid  = callsState.activeCallId || callsState.serverCallId;
+                var cid  = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId;
                 if (sock && sock.connected && cid) {
                     sock.emit('call:poll_event', { callId: cid, action: 'vote', vote: votePayload });
                 }
             } catch(_e) {}
 
-            notifyListeners('poll_voted', { poll: poll, votePayload: votePayload });
+            window.__CallsCoreShared.notifyListeners('poll_voted', { poll: poll, votePayload: votePayload });
         },
 
         closePoll: function(pollId) {
 
-            if (!assertActive('closePoll')) return;
+            if (!window.__CallsCoreShared.assertActive('closePoll')) return;
 
-            var poll = callsState.polls && callsState.polls[pollId];
+            var poll = window.__CallsCoreShared.callsState.polls && window.__CallsCoreShared.callsState.polls[pollId];
             if (!poll) return;
             poll.active = false;
 
-            IframeTransport.sendAction('POLL_EVENT', { action: 'close', pollId: pollId });
+            window.__CallsCoreShared.IframeTransport.sendAction('POLL_EVENT', { action: 'close', pollId: pollId });
 
             try {
                 var sock = (window.KynectaRealtime && window.KynectaRealtime._socket) || window.__appSocket;
-                var cid  = callsState.activeCallId || callsState.serverCallId;
+                var cid  = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId;
                 if (sock && sock.connected && cid) {
                     sock.emit('call:poll_event', { callId: cid, action: 'close', pollId: pollId });
                 }
             } catch(_e) {}
 
-            notifyListeners('poll_closed', { pollId: pollId, results: poll });
+            window.__CallsCoreShared.notifyListeners('poll_closed', { pollId: pollId, results: poll });
         },
 
         getPolls: function() {
-            return callsState.polls ? Object.values(callsState.polls) : [];
+            return window.__CallsCoreShared.callsState.polls ? Object.values(window.__CallsCoreShared.callsState.polls) : [];
         },
 
 
@@ -5287,7 +5303,7 @@ clearActiveCall: function() {
 
 
 
-            return { ...callsState.mediaDevices };
+            return { ...window.__CallsCoreShared.callsState.mediaDevices };
 
 
 
@@ -5303,7 +5319,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.mediaDevices.audioInput.length > 0;
+            return window.__CallsCoreShared.callsState.mediaDevices.audioInput.length > 0;
 
 
 
@@ -5319,7 +5335,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.mediaDevices.videoInput.length > 0;
+            return window.__CallsCoreShared.callsState.mediaDevices.videoInput.length > 0;
 
 
 
@@ -5335,7 +5351,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.isPremium;
+            return window.__CallsCoreShared.callsState.isPremium;
 
 
 
@@ -5351,7 +5367,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.isPremium || callsState.premiumFeatures[feature];
+            return window.__CallsCoreShared.callsState.isPremium || window.__CallsCoreShared.callsState.premiumFeatures[feature];
 
 
 
@@ -5367,7 +5383,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('createCallLink')) return;
+            if (!window.__CallsCoreShared.assertActive('createCallLink')) return;
 
 
 
@@ -5375,11 +5391,11 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.isPremium && !callsState.premiumFeatures.callLinks) {
+            if (!window.__CallsCoreShared.callsState.isPremium && !window.__CallsCoreShared.callsState.premiumFeatures.callLinks) {
 
 
 
-                notifyListeners('premium_required', { feature: 'callLinks' });
+                window.__CallsCoreShared.notifyListeners('premium_required', { feature: 'callLinks' });
 
 
 
@@ -5391,7 +5407,7 @@ clearActiveCall: function() {
 
 
 
-            IframeTransport.sendAction('CREATE_CALL_LINK', {
+            window.__CallsCoreShared.IframeTransport.sendAction('CREATE_CALL_LINK', {
 
 
 
@@ -5451,7 +5467,7 @@ clearActiveCall: function() {
 
 
 
-            MediaManager.addListener(listener);
+            window.__CallsCoreShared.MediaManager.addListener(listener);
 
 
 
@@ -5467,7 +5483,7 @@ clearActiveCall: function() {
 
 
 
-            MediaManager.removeListener(listener);
+            window.__CallsCoreShared.MediaManager.removeListener(listener);
 
 
 
@@ -5483,7 +5499,7 @@ clearActiveCall: function() {
 
 
 
-            WebRTCManager.addListener(listener);
+            window.__CallsCoreShared.WebRTCManager.addListener(listener);
 
 
 
@@ -5499,7 +5515,7 @@ clearActiveCall: function() {
 
 
 
-            WebRTCManager.removeListener(listener);
+            window.__CallsCoreShared.WebRTCManager.removeListener(listener);
 
 
 
@@ -5515,7 +5531,7 @@ clearActiveCall: function() {
 
 
 
-            callsState.recoveryMode = mode;
+            window.__CallsCoreShared.callsState.recoveryMode = mode;
 
 
 
@@ -5531,7 +5547,7 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.verifySession(true);
+            return window.__CallsCoreShared.CallsStateGovernor.verifySession(true);
 
 
 
@@ -5547,7 +5563,7 @@ clearActiveCall: function() {
 
 
 
-            return SessionPipeline ? SessionPipeline.getStatus() : null;
+            return window.__CallsCoreShared.SessionPipeline ? window.__CallsCoreShared.SessionPipeline.getStatus() : null;
 
 
 
@@ -5563,7 +5579,7 @@ clearActiveCall: function() {
 
 
 
-            return DiagnosticsAgent.getReport();
+            return window.__CallsCoreShared.DiagnosticsAgent.getReport();
 
 
 
@@ -5575,15 +5591,15 @@ clearActiveCall: function() {
 
 
 
-        StateGovernor: StateGovernor,
+        StateGovernor: window.__CallsCoreShared.StateGovernor,
 
 
 
-        V5StateGovernor: V5StateGovernor,
+        V5StateGovernor: window.__CallsCoreShared.V5StateGovernor,
 
 
 
-        CallsStateGovernor: CallsStateGovernor,
+        CallsStateGovernor: window.__CallsCoreShared.CallsStateGovernor,
 
 
 
@@ -5595,7 +5611,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('sendToParent')) {
+            if (!window.__CallsCoreShared.assertActive('sendToParent')) {
 
 
 
@@ -5607,7 +5623,7 @@ clearActiveCall: function() {
 
 
 
-            return safeSend(type, payload, options?.requireAck || false);
+            return window.__CallsCoreShared.safeSend(type, payload, options?.requireAck || false);
 
 
 
@@ -5623,7 +5639,7 @@ clearActiveCall: function() {
 
 
 
-            if (!assertActive('sendAction')) {
+            if (!window.__CallsCoreShared.assertActive('sendAction')) {
 
 
 
@@ -5635,7 +5651,7 @@ clearActiveCall: function() {
 
 
 
-            return IframeTransport.sendAction(action, payload);
+            return window.__CallsCoreShared.IframeTransport.sendAction(action, payload);
 
 
 
@@ -5651,7 +5667,7 @@ clearActiveCall: function() {
 
 
 
-            return CallsStateGovernor.initiateCall(callType, participants);
+            return window.__CallsCoreShared.CallsStateGovernor.initiateCall(callType, participants);
 
 
 
@@ -5667,7 +5683,7 @@ clearActiveCall: function() {
 
 
 
-            logInfo(MODULE_NAME, 'Cleaning up call core');
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE_NAME, 'Cleaning up call core');
 
 
 
@@ -5675,47 +5691,39 @@ clearActiveCall: function() {
 
 
 
-            resetCallState();
+            window.__CallsCoreShared.resetCallState();
 
 
 
-            MediaManager.stopLocalStream();
+            window.__CallsCoreShared.MediaManager.stopLocalStream();
 
 
 
-            WebRTCManager.close();
+            window.__CallsCoreShared.WebRTCManager.close();
 
 
 
-            IframeTransport.cleanup();
+            window.__CallsCoreShared.IframeTransport.cleanup();
 
 
 
-            IframeSessionClient.cleanup();
+            window.__CallsCoreShared.IframeSessionClient.cleanup();
 
 
 
-            RecoveryManager.cancelRecovery();
+            window.__CallsCoreShared.RecoveryManager.cancelRecovery();
 
 
 
-            UIBridge.cleanup();
+            window.__CallsCoreShared.UIBridge.cleanup();
 
 
 
-            StorageProxy.cleanup();
+            window.__CallsCoreShared.StorageProxy.cleanup();
 
 
 
-            MessageGuard.cleanup();
-
-
-
-            
-
-
-
-            messageQueue.length = 0;
+            window.__CallsCoreShared.MessageGuard.cleanup();
 
 
 
@@ -5723,7 +5731,15 @@ clearActiveCall: function() {
 
 
 
-            resetCallState();
+            window.__CallsCoreShared.messageQueue.length = 0;
+
+
+
+            
+
+
+
+            window.__CallsCoreShared.resetCallState();
 
 
 
@@ -5863,7 +5879,7 @@ clearActiveCall: function() {
 
 
 
-            return parentReady;
+            return window.__CallsCoreShared.parentReady;
 
 
 
@@ -5879,7 +5895,7 @@ clearActiveCall: function() {
 
 
 
-            return [...messageQueue];
+            return [...window.__CallsCoreShared.messageQueue];
 
 
 
@@ -5895,7 +5911,7 @@ clearActiveCall: function() {
 
 
 
-            flushQueue();
+            window.__CallsCoreShared.flushQueue();
 
 
 
@@ -5907,91 +5923,91 @@ clearActiveCall: function() {
 
 
 
-        MessageRegistry: MessageRegistry,
+        MessageRegistry: window.__CallsCoreShared.MessageRegistry,
 
 
 
-        IframeTransport: IframeTransport,
+        IframeTransport: window.__CallsCoreShared.IframeTransport,
 
 
 
-        OriginSecurity: OriginSecurity,
+        OriginSecurity: window.__CallsCoreShared.OriginSecurity,
 
 
 
-        SafeStorage: SafeStorage,
+        SafeStorage: window.__CallsCoreShared.SafeStorage,
 
 
 
-        PermissionManager: PermissionManager,
+        PermissionManager: window.__CallsCoreShared.PermissionManager,
 
 
 
-        WebRTCManager: WebRTCManager,
+        WebRTCManager: window.__CallsCoreShared.WebRTCManager,
 
 
 
-        MediaManager: MediaManager,
+        MediaManager: window.__CallsCoreShared.MediaManager,
 
 
 
-        CallsStateGovernor: CallsStateGovernor,
+        CallsStateGovernor: window.__CallsCoreShared.CallsStateGovernor,
 
 
 
-        SessionClient: IframeSessionClient,
+        SessionClient: window.__CallsCoreShared.IframeSessionClient,
 
 
 
-        NavigationGuard: NavigationGuard,
+        NavigationGuard: window.__CallsCoreShared.NavigationGuard,
 
 
 
-        ReliabilityEngine: ReliabilityEngine,
+        ReliabilityEngine: window.__CallsCoreShared.ReliabilityEngine,
 
 
 
-        RecoveryManager: RecoveryManager,
+        RecoveryManager: window.__CallsCoreShared.RecoveryManager,
 
 
 
-        CompatibilityBridge: CompatibilityBridge,
+        CompatibilityBridge: window.__CallsCoreShared.CompatibilityBridge,
 
 
 
-        DiagnosticsAgent: DiagnosticsAgent,
+        DiagnosticsAgent: window.__CallsCoreShared.DiagnosticsAgent,
 
 
 
-        MultiModuleCoordinator: MultiModuleCoordinator,
+        MultiModuleCoordinator: window.__CallsCoreShared.MultiModuleCoordinator,
 
 
 
-        UIFailsafe: UIFailsafe,
+        UIFailsafe: window.__CallsCoreShared.UIFailsafe,
 
 
 
-        LifecycleController: LifecycleController,
+        LifecycleController: window.__CallsCoreShared.LifecycleController,
 
 
 
-        SessionPipeline: SessionPipeline,
+        SessionPipeline: window.__CallsCoreShared.SessionPipeline,
 
 
 
-        UIBridge: UIBridge,
+        UIBridge: window.__CallsCoreShared.UIBridge,
 
 
 
-        StorageProxy: StorageProxy,
+        StorageProxy: window.__CallsCoreShared.StorageProxy,
 
 
 
-        MessageGuard: MessageGuard,
+        MessageGuard: window.__CallsCoreShared.MessageGuard,
 
 
 
-        SessionClientLegacy: SessionClient,
+        SessionClientLegacy: window.__CallsCoreShared.SessionClient,
 
 
 
@@ -6007,7 +6023,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.callActive && callsState.callState === 'connected';
+            return window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.callState === 'connected';
 
 
 
@@ -6023,11 +6039,11 @@ clearActiveCall: function() {
 
 
 
-            if (!callsState.callStartTime) return 0;
+            if (!window.__CallsCoreShared.callsState.callStartTime) return 0;
 
 
 
-            return Math.floor((Date.now() - callsState.callStartTime) / 1000);
+            return Math.floor((Date.now() - window.__CallsCoreShared.callsState.callStartTime) / 1000);
 
 
 
@@ -6043,7 +6059,7 @@ clearActiveCall: function() {
 
 
 
-            return callsState.activeCallId;
+            return window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -6059,7 +6075,7 @@ clearActiveCall: function() {
 
 
 
-            return [...callsState.callParticipants];
+            return [...window.__CallsCoreShared.callsState.callParticipants];
 
 
 
@@ -6079,7 +6095,7 @@ clearActiveCall: function() {
 
 
 
-            return sendApiRequest(endpoint, method, data, options);
+            return window.__CallsCoreShared.sendApiRequest(endpoint, method, data, options);
 
 
 
@@ -6099,7 +6115,7 @@ clearActiveCall: function() {
 
 
 
-            return normalizeEndpoint(endpoint);
+            return window.__CallsCoreShared.normalizeEndpoint(endpoint);
 
 
 
@@ -6179,7 +6195,7 @@ clearActiveCall: function() {
 
 
 
-                logInfo(MODULE, 'ModuleCoreController starting initialization sequence');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'ModuleCoreController starting initialization sequence');
 
 
 
@@ -6187,7 +6203,7 @@ clearActiveCall: function() {
 
 
 
-                OriginSecurity.initialize();
+                window.__CallsCoreShared.OriginSecurity.initialize();
 
 
 
@@ -6199,7 +6215,7 @@ clearActiveCall: function() {
 
 
 
-                IframeTransport.initialize();
+                window.__CallsCoreShared.IframeTransport.initialize();
 
 
 
@@ -6211,7 +6227,7 @@ clearActiveCall: function() {
 
 
 
-                MessageRegistry.initialize();
+                window.__CallsCoreShared.MessageRegistry.initialize();
 
 
 
@@ -6223,7 +6239,7 @@ clearActiveCall: function() {
 
 
 
-                ReliabilityEngine.initialize();
+                window.__CallsCoreShared.ReliabilityEngine.initialize();
 
 
 
@@ -6235,7 +6251,7 @@ clearActiveCall: function() {
 
 
 
-                IframeSessionClient.initialize();
+                window.__CallsCoreShared.IframeSessionClient.initialize();
 
 
 
@@ -6247,7 +6263,7 @@ clearActiveCall: function() {
 
 
 
-                UIBridge.initialize();
+                window.__CallsCoreShared.UIBridge.initialize();
 
 
 
@@ -6259,7 +6275,7 @@ clearActiveCall: function() {
 
 
 
-                LifecycleController.initialize();
+                window.__CallsCoreShared.LifecycleController.initialize();
 
 
 
@@ -6275,7 +6291,7 @@ clearActiveCall: function() {
 
 
 
-                logSuccess(MODULE, 'ModuleCoreController initialization complete');
+                window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'ModuleCoreController initialization complete');
 
 
 
@@ -6295,7 +6311,7 @@ clearActiveCall: function() {
 
 
 
-                logError(MODULE, 'ModuleCoreController initialization failed', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'ModuleCoreController initialization failed', error);
 
 
 
@@ -6411,11 +6427,11 @@ clearActiveCall: function() {
 
     // ── Expose WebRTC signal entry points that calls.html calls directly ──
     // These MUST exist on window.callCore or video signals are silently dropped
-    window.callCore.handleRemoteOffer  = function(payload) { handleSignalOffer(payload);  };
-    window.callCore.handleRemoteAnswer = function(payload) { handleSignalAnswer(payload); };
-    window.callCore.resolveCallId = resolveCallId;
+    window.callCore.handleRemoteOffer  = function(payload) { window.__CallsCoreShared.handleSignalOffer(payload);  };
+    window.callCore.handleRemoteAnswer = function(payload) { window.__CallsCoreShared.handleSignalAnswer(payload); };
+    window.callCore.resolveCallId = window.__CallsCoreShared.resolveCallId;
     window.callCore.handleIceCandidate = window.callCore.handleIceCandidate ||
-                                         function(payload) { handleIceCandidate(payload); };
+                                         function(payload) { window.__CallsCoreShared.handleIceCandidate(payload); };
 
 
 
@@ -6431,7 +6447,7 @@ clearActiveCall: function() {
 
 
 
-        logInfo(MODULE, 'Initializing call core module');
+        window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Initializing call core module');
 
 
 
@@ -6439,11 +6455,11 @@ clearActiveCall: function() {
 
 
 
-        MediaManager.initialize().catch(error => {
+        window.__CallsCoreShared.MediaManager.initialize().catch(error => {
 
 
 
-            logError(MODULE, 'Media manager initialization failed', error);
+            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Media manager initialization failed', error);
 
 
 
@@ -6455,7 +6471,7 @@ clearActiveCall: function() {
 
 
 
-        logSuccess(MODULE, 'Call core module initialized');
+        window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Call core module initialized');
 
 
 
@@ -6543,23 +6559,23 @@ clearActiveCall: function() {
 
 
 
-            { event: 'kyn:call:incoming',   fn: (d) => handleIncomingCall(d) },
+            { event: 'kyn:call:incoming',   fn: (d) => window.__CallsCoreShared.handleIncomingCall(d) },
 
 
 
-            { event: 'kyn:incoming_call',    fn: (d) => handleIncomingCall(d) },
+            { event: 'kyn:incoming_call',    fn: (d) => window.__CallsCoreShared.handleIncomingCall(d) },
 
 
 
-            { event: 'kyn:call_incoming',    fn: (d) => handleIncomingCall(d) },
+            { event: 'kyn:call_incoming',    fn: (d) => window.__CallsCoreShared.handleIncomingCall(d) },
 
 
 
-            { event: 'kyn:call:initiated',   fn: (d) => handleCallInitiated(d) },
+            { event: 'kyn:call:initiated',   fn: (d) => window.__CallsCoreShared.handleCallInitiated(d) },
 
 
 
-            { event: 'kyn:call_initiated',   fn: (d) => handleCallInitiated(d) },
+            { event: 'kyn:call_initiated',   fn: (d) => window.__CallsCoreShared.handleCallInitiated(d) },
 
 
 
@@ -6567,23 +6583,23 @@ clearActiveCall: function() {
 
 
 
-            { event: 'kyn:call:accepted',    fn: (d) => handleCallAccepted(d) },
+            { event: 'kyn:call:accepted',    fn: (d) => window.__CallsCoreShared.handleCallAccepted(d) },
 
 
 
-            { event: 'kyn:call_accepted',    fn: (d) => handleCallAccepted(d) },
+            { event: 'kyn:call_accepted',    fn: (d) => window.__CallsCoreShared.handleCallAccepted(d) },
 
 
 
-            { event: 'kyn:call_answered',    fn: (d) => handleCallAccepted(d) },
+            { event: 'kyn:call_answered',    fn: (d) => window.__CallsCoreShared.handleCallAccepted(d) },
 
 
 
-            { event: 'kyn:call:started',     fn: (d) => handleCallStarted(d) },
+            { event: 'kyn:call:started',     fn: (d) => window.__CallsCoreShared.handleCallStarted(d) },
 
 
 
-            { event: 'kyn:call:connected',   fn: (d) => handleCallConnected(d) },
+            { event: 'kyn:call:connected',   fn: (d) => window.__CallsCoreShared.handleCallConnected(d) },
 
 
 
@@ -6591,11 +6607,11 @@ clearActiveCall: function() {
 
 
 
-            { event: 'kyn:call:rejected',    fn: (d) => handleCallRejected(d) },
+            { event: 'kyn:call:rejected',    fn: (d) => window.__CallsCoreShared.handleCallRejected(d) },
 
 
 
-            { event: 'kyn:call_rejected',    fn: (d) => handleCallRejected(d) },
+            { event: 'kyn:call_rejected',    fn: (d) => window.__CallsCoreShared.handleCallRejected(d) },
 
             // C-09 FIX: server-side dedup window blocked the call:initiate;
             // treat it identically to a rejection so the outgoing-call UI
@@ -6607,56 +6623,56 @@ clearActiveCall: function() {
             // screen forever with no feedback. Reuse the same failed-call reset path
             // used elsewhere in this map (handleCallFailed resets outgoing UI to idle).
             { event: 'kyn:call:error', fn: (d) => {
-                logWarn(MODULE, 'call:initiate rejected by server', d);
-                handleCallFailed({ ...d, reason: (d && d.code) || 'call_error' });
-                notifyListeners('call_error', d);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'call:initiate rejected by server', d);
+                window.__CallsCoreShared.handleCallFailed({ ...d, reason: (d && d.code) || 'call_error' });
+                window.__CallsCoreShared.notifyListeners('call_error', d);
             }},
 
             { event: 'kyn:call:dedup_rejected', fn: (d) => {
-                logWarn(MODULE, 'call:initiate rate-limited by server', d);
-                handleCallRejected({ ...d, reason: 'rate_limited' });
-                notifyListeners('call_dedup_rejected', d);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'call:initiate rate-limited by server', d);
+                window.__CallsCoreShared.handleCallRejected({ ...d, reason: 'rate_limited' });
+                window.__CallsCoreShared.notifyListeners('call_dedup_rejected', d);
             }},
 
             // FEAT-01 FIX: call:busy was dispatched by server but had no
             // registered CustomEvent listener, so handleCallBusy was only
             // reachable via postMessage (not the WebSocket path). Register it
             // here so the outgoing call UI resets immediately on busy signal.
-            { event: 'kyn:call:busy',      fn: (d) => handleCallBusy(d) },
-            { event: 'kyn:call_busy',      fn: (d) => handleCallBusy(d) },
+            { event: 'kyn:call:busy',      fn: (d) => window.__CallsCoreShared.handleCallBusy(d) },
+            { event: 'kyn:call_busy',      fn: (d) => window.__CallsCoreShared.handleCallBusy(d) },
             // FEAT-01: call:waiting lets the callee UI show "Tap to switch" banner
-            { event: 'kyn:call:waiting',   fn: (d) => { notifyListeners('call_waiting', d); } },
-            { event: 'kyn:call_waiting',   fn: (d) => { notifyListeners('call_waiting', d); } },
+            { event: 'kyn:call:waiting',   fn: (d) => { window.__CallsCoreShared.notifyListeners('call_waiting', d); } },
+            { event: 'kyn:call_waiting',   fn: (d) => { window.__CallsCoreShared.notifyListeners('call_waiting', d); } },
 
             // FEAT-02 FIX: this device is a second logged-in device. The user
             // accepted the call on their other device. Dismiss the incoming
             // call ring UI here without doing anything else (the other device
             // owns the actual WebRTC session).
             { event: 'kyn:call:accepted_elsewhere', fn: (d) => {
-                logInfo && logInfo(MODULE, 'Call accepted on another device — dismissing ring', d);
+                window.__CallsCoreShared.logInfo && window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Call accepted on another device — dismissing ring', d);
                 const _callId = d && d.callId;
                 // Use handleCallRejected to reset the incoming call UI cleanly
                 // (it clears the ringing overlay, stops ringtone, resets state)
                 // but we pass reason='accepted_elsewhere' so the UX copy differs.
-                handleCallRejected({ ...d, reason: 'accepted_elsewhere' });
-                notifyListeners('call_accepted_elsewhere', d);
+                window.__CallsCoreShared.handleCallRejected({ ...d, reason: 'accepted_elsewhere' });
+                window.__CallsCoreShared.notifyListeners('call_accepted_elsewhere', d);
             }},
 
 
 
-            { event: 'kyn:call:cancelled',   fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call:cancelled',   fn: (d) => window.__CallsCoreShared.handleCallEnded(d) },
 
 
 
-            { event: 'kyn:call_cancelled',   fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call_cancelled',   fn: (d) => window.__CallsCoreShared.handleCallEnded(d) },
 
 
 
-            { event: 'kyn:call:ended',       fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call:ended',       fn: (d) => window.__CallsCoreShared.handleCallEnded(d) },
 
 
 
-            { event: 'kyn:call_ended',       fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call_ended',       fn: (d) => window.__CallsCoreShared.handleCallEnded(d) },
 
 
 
@@ -6665,7 +6681,7 @@ clearActiveCall: function() {
             // and bottom-nav restore still go through the same handleCallEnded() path
             // as every other call-ended reason — otherwise non-host participants would
             // be left on a dark call screen even though their media was already released.
-            { event: 'kyn:group:call:ended_by_host', fn: (d) => handleCallEnded({ ...d, reason: 'host_ended' }) },
+            { event: 'kyn:group:call:ended_by_host', fn: (d) => window.__CallsCoreShared.handleCallEnded({ ...d, reason: 'host_ended' }) },
 
             // FIX-ROOT-CAUSE-NO-HOST-TRANSFER: paired with the backend fix in
             // CallSignalingService.js — when the host leaves/disconnects a
@@ -6685,7 +6701,7 @@ clearActiveCall: function() {
 
 
 
-            { event: 'kyn:call_force_ended', fn: (d) => handleCallEnded(d) },
+            { event: 'kyn:call_force_ended', fn: (d) => window.__CallsCoreShared.handleCallEnded(d) },
 
 
 
@@ -6693,7 +6709,7 @@ clearActiveCall: function() {
 
 
 
-            { event: 'kyn:call:failed',      fn: (d) => handleCallFailed(d) },
+            { event: 'kyn:call:failed',      fn: (d) => window.__CallsCoreShared.handleCallFailed(d) },
 
 
 
@@ -6717,7 +6733,7 @@ clearActiveCall: function() {
 
 
 
-                console.log(`[${MODULE_NAME}] 📞 DOM bridge event [${event}]`, evt.detail);
+                console.log(`[${window.__CallsCoreShared.MODULE_NAME}] 📞 DOM bridge event [${event}]`, evt.detail);
 
 
 
@@ -6725,7 +6741,7 @@ clearActiveCall: function() {
 
 
 
-                    console.warn(`[${MODULE_NAME}] Call event bridge error (${event}):`, e.message);
+                    console.warn(`[${window.__CallsCoreShared.MODULE_NAME}] Call event bridge error (${event}):`, e.message);
 
 
 
@@ -6787,9 +6803,9 @@ clearActiveCall: function() {
                     // down, with no path back to a correct idle state short of
                     // the user manually hanging up.
                     try {
-                        var _resyncCallId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
-                        if (_resyncCallId && callsState.callActive) {
-                            logCall(MODULE, 'Reconnected mid-call — requesting state resync', _resyncCallId);
+                        var _resyncCallId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId || window.__CallsCoreShared.callsState.localCallId;
+                        if (_resyncCallId && window.__CallsCoreShared.callsState.callActive) {
+                            window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Reconnected mid-call — requesting state resync', _resyncCallId);
                             rt.emit('call:resync', { callId: _resyncCallId });
                         }
                     } catch (_) {}
@@ -6801,25 +6817,25 @@ clearActiveCall: function() {
                         // Ignore a resync response for a call we've since moved
                         // on from (e.g. it arrived late, after the user already
                         // hung up and started a new call).
-                        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(resp)) return;
+                        if (typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent(resp)) return;
 
                         var roomActive = resp.roomState && resp.roomState.active;
                         if (!roomActive) {
-                            logWarn(MODULE, 'call:resync_response — server reports call no longer active, force-ending locally', resp.callId);
-                            handleCallForceEnd({ callId: resp.callId, reason: 'resync_call_ended' });
+                            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'call:resync_response — server reports call no longer active, force-ending locally', resp.callId);
+                            window.__CallsCoreShared.handleCallForceEnd({ callId: resp.callId, reason: 'resync_call_ended' });
                             return;
                         }
 
-                        var myId = callsState.session && callsState.session.userId;
+                        var myId = window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.userId;
                         var stillParticipant = !myId || !Array.isArray(resp.participants)
                             || resp.participants.some(function(p) { return String(p && (p.userId || p.id || p)) === String(myId); });
                         if (!stillParticipant) {
-                            logWarn(MODULE, 'call:resync_response — server no longer lists us as a participant, force-ending locally', resp.callId);
-                            handleCallForceEnd({ callId: resp.callId, reason: 'resync_removed' });
+                            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'call:resync_response — server no longer lists us as a participant, force-ending locally', resp.callId);
+                            window.__CallsCoreShared.handleCallForceEnd({ callId: resp.callId, reason: 'resync_removed' });
                             return;
                         }
 
-                        logCall(MODULE, 'call:resync_response — state confirmed consistent', resp.callId);
+                        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'call:resync_response — state confirmed consistent', resp.callId);
                     } catch (_) {}
                 });
             }
@@ -6834,74 +6850,74 @@ clearActiveCall: function() {
 
 
 
-                ['call:incoming',  (p) => handleIncomingCall(p)],
+                ['call:incoming',  (p) => window.__CallsCoreShared.handleIncomingCall(p)],
 
 
 
-                ['incoming_call',  (p) => handleIncomingCall(p)],
+                ['incoming_call',  (p) => window.__CallsCoreShared.handleIncomingCall(p)],
 
 
 
-                ['call:initiated', (p) => handleCallInitiated(p)],
+                ['call:initiated', (p) => window.__CallsCoreShared.handleCallInitiated(p)],
 
 
 
-                ['call:accepted',  (p) => handleCallAccepted(p)],
+                ['call:accepted',  (p) => window.__CallsCoreShared.handleCallAccepted(p)],
 
 
 
-                ['call_accepted',  (p) => handleCallAccepted(p)],
+                ['call_accepted',  (p) => window.__CallsCoreShared.handleCallAccepted(p)],
 
 
 
-                ['call_answered',  (p) => handleCallAccepted(p)],
+                ['call_answered',  (p) => window.__CallsCoreShared.handleCallAccepted(p)],
 
 
 
-                ['call:started',   (p) => handleCallStarted(p)],
+                ['call:started',   (p) => window.__CallsCoreShared.handleCallStarted(p)],
 
 
 
-                ['call:connected', (p) => handleCallConnected(p)],
+                ['call:connected', (p) => window.__CallsCoreShared.handleCallConnected(p)],
 
 
 
-                ['call:rejected',  (p) => handleCallRejected(p)],
+                ['call:rejected',  (p) => window.__CallsCoreShared.handleCallRejected(p)],
 
 
 
-                ['call_rejected',  (p) => handleCallRejected(p)],
+                ['call_rejected',  (p) => window.__CallsCoreShared.handleCallRejected(p)],
 
 
 
-                ['call:ended',     (p) => handleCallEnded(p)],
+                ['call:ended',     (p) => window.__CallsCoreShared.handleCallEnded(p)],
 
 
 
-                ['call_ended',     (p) => handleCallEnded(p)],
+                ['call_ended',     (p) => window.__CallsCoreShared.handleCallEnded(p)],
 
 
 
-                ['call_force_ended',(p) => handleCallEnded(p)],
+                ['call_force_ended',(p) => window.__CallsCoreShared.handleCallEnded(p)],
 
 
 
-                ['call_cancelled', (p) => handleCallEnded(p)],
+                ['call_cancelled', (p) => window.__CallsCoreShared.handleCallEnded(p)],
 
 
 
-                ['call:failed',    (p) => handleCallFailed(p)],
+                ['call:failed',    (p) => window.__CallsCoreShared.handleCallFailed(p)],
 
                 // FIX-CALL-ACK: New signaling events from patched backend
                 ['call:no_answer',      (p) => {
                     console.warn('[CallsCore] 📵 call:no_answer — user did not answer', p);
-                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'no_answer' });
-                    else if (typeof resetCallState === 'function') resetCallState();
+                    if (typeof window.__CallsCoreShared.handleCallFailed === 'function') window.__CallsCoreShared.handleCallFailed({ ...p, reason: 'no_answer' });
+                    else if (typeof window.__CallsCoreShared.resetCallState === 'function') window.__CallsCoreShared.resetCallState();
                 }],
                 ['call:receiver_offline', (p) => {
                     console.warn('[CallsCore] 📵 call:receiver_offline', p);
-                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'receiver_offline' });
-                    else if (typeof resetCallState === 'function') resetCallState();
+                    if (typeof window.__CallsCoreShared.handleCallFailed === 'function') window.__CallsCoreShared.handleCallFailed({ ...p, reason: 'receiver_offline' });
+                    else if (typeof window.__CallsCoreShared.resetCallState === 'function') window.__CallsCoreShared.resetCallState();
                 }],
                 ['call:receiver_ack', (p) => {
                     // Receiver confirmed ring is showing — stop "failed to reach" guard
@@ -6912,7 +6928,7 @@ clearActiveCall: function() {
                     // Direct Socket.IO WebRTC offer (bypassed postMessage)
                     console.log('[CallsCore] 📡 call:webrtc_offer received via Socket.IO');
                     if (typeof handleRemoteOffer === 'function') handleRemoteOffer(p.offer || p, p.callerId);
-                    else if (typeof handleSignalOffer === 'function') handleSignalOffer(p);
+                    else if (typeof window.__CallsCoreShared.handleSignalOffer === 'function') window.__CallsCoreShared.handleSignalOffer(p);
                 }],
                 ['user_online_status', (p) => {
                     // Response to check_user_online — used by UI before sending a message
@@ -6928,17 +6944,17 @@ clearActiveCall: function() {
                 // both (2) and (3) the outgoing-call UI stayed stuck indefinitely.
                 ['call:accepted_elsewhere', (p) => {
                     console.log('[CallsCore] 📴 call:accepted_elsewhere — dismissing ring on this device', p);
-                    handleCallAcceptedElsewhere(p);
+                    window.__CallsCoreShared.handleCallAcceptedElsewhere(p);
                 }],
                 ['call:busy', (p) => {
                     console.warn('[CallsCore] 📵 call:busy — target is in another call', p);
-                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'busy' });
-                    else if (typeof resetCallState === 'function') resetCallState();
+                    if (typeof window.__CallsCoreShared.handleCallFailed === 'function') window.__CallsCoreShared.handleCallFailed({ ...p, reason: 'busy' });
+                    else if (typeof window.__CallsCoreShared.resetCallState === 'function') window.__CallsCoreShared.resetCallState();
                 }],
                 ['call:dedup_rejected', (p) => {
                     console.warn('[CallsCore] 📵 call:dedup_rejected — rate limited', p);
-                    if (typeof handleCallFailed === 'function') handleCallFailed({ ...p, reason: 'rate_limited' });
-                    else if (typeof resetCallState === 'function') resetCallState();
+                    if (typeof window.__CallsCoreShared.handleCallFailed === 'function') window.__CallsCoreShared.handleCallFailed({ ...p, reason: 'rate_limited' });
+                    else if (typeof window.__CallsCoreShared.resetCallState === 'function') window.__CallsCoreShared.resetCallState();
                 }],
                 ['call:waiting', (p) => {
                     // Informational: callee is already in a call and could optionally
@@ -6974,11 +6990,11 @@ clearActiveCall: function() {
 
                 const wrapped = (payload) => {
 
-                    console.log(`[${MODULE_NAME}] 📞 KynectaRealtime event [${evtName}]`, payload);
+                    console.log(`[${window.__CallsCoreShared.MODULE_NAME}] 📞 KynectaRealtime event [${evtName}]`, payload);
 
                     try { handler(payload); } catch (e) {
 
-                        console.warn(`[${MODULE_NAME}] KynectaRealtime call handler error (${evtName}):`, e.message);
+                        console.warn(`[${window.__CallsCoreShared.MODULE_NAME}] KynectaRealtime call handler error (${evtName}):`, e.message);
 
                     }
 
@@ -6991,7 +7007,7 @@ clearActiveCall: function() {
 
 
 
-            console.log(`[${MODULE_NAME}] ✅ Bound to KynectaRealtime call events`);
+            console.log(`[${window.__CallsCoreShared.MODULE_NAME}] ✅ Bound to KynectaRealtime call events`);
 
 
 
@@ -7060,10 +7076,10 @@ clearActiveCall: function() {
             } catch(_) {}
         }
         window.addEventListener('sessionUpdated', function(e) {
-            var token = (e.detail && e.detail.token) || (callsState && callsState.session && callsState.session.token) || null;
+            var token = (e.detail && e.detail.token) || (window.__CallsCoreShared.callsState && window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.token) || null;
             _prefetchIceConfig(token);
         });
-        var _existingToken = (callsState && callsState.session && callsState.session.token) || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token);
+        var _existingToken = (window.__CallsCoreShared.callsState && window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.token) || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token);
         if (_existingToken) setTimeout(function() { _prefetchIceConfig(_existingToken); }, 2000);
 
 
@@ -7072,7 +7088,7 @@ clearActiveCall: function() {
 
 
 
-        console.log(`[${MODULE_NAME}] ✅ Call event DOM bridge installed`);
+        console.log(`[${window.__CallsCoreShared.MODULE_NAME}] ✅ Call event DOM bridge installed`);
 
 
 
@@ -7128,840 +7144,10 @@ clearActiveCall: function() {
 
 
 
-    logSuccess(MODULE, 'Call core module loaded');
+    window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Call core module loaded');
 
 
 
     
 
-
-
 })();
-
-
-
-
-
-
-
-
-
-
-
-// ── TOP-LEVEL: accessible from all closures ──────────────────────────────────
-
-
-
-function applySettingToCallsModule(section, key, value) {
-
-
-
-    if (section === 'appearance') {
-
-
-
-        if (key === 'theme') {
-
-
-
-            var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
-
-
-
-            document.documentElement.setAttribute('data-theme', theme);
-
-
-
-            document.body.setAttribute('data-theme', theme);
-
-
-
-        }
-
-
-
-        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
-
-
-
-        if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
-
-
-
-        if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
-
-
-
-        if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
-
-
-
-        if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }
-
-
-
-    }
-
-
-
-    if (section === 'notifications') {
-
-
-
-        if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
-
-
-
-        if (key === 'vibrationEnabled' || key === 'notificationVibration') window.__vibrationEnabled = value;
-
-
-
-        if (key === 'callNotifications' || key === 'enableNotifications') window.__callNotificationsEnabled = value;
-
-
-
-        if (key === 'messageNotifications') window.__messageNotificationsEnabled = value;
-
-
-
-        if (key === 'groupNotifications') window.__groupNotificationsEnabled = value;
-
-
-
-        if (key === 'mentionNotifications') window.__mentionNotificationsEnabled = value;
-
-
-
-        if (key === 'desktopEnabled') window.__desktopNotificationsEnabled = value;
-
-
-
-    }
-
-
-
-    if (section === 'privacy') {
-
-
-
-        if (key === 'onlineStatus') window.__showOnlineStatus = value;
-
-
-
-        if (key === 'lastSeen') window.__showLastSeen = value;
-
-
-
-        if (key === 'readReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
-
-
-
-        if (key === 'typingIndicators') { window.__typingIndicatorsEnabled = value; document.documentElement.setAttribute('data-typing-indicators', value ? 'true' : 'false'); }
-
-
-
-        if (key === 'whoCanAddMe') window.__whoCanAddMe = value;
-
-
-
-        if (key === 'canMessageMe') window.__canMessageMe = value;
-
-
-
-        if (key === 'contactDiscovery') window.__contactDiscovery = value;
-
-
-
-    }
-
-
-
-    if (section === 'calls') {
-
-
-
-        if (key === 'ringtone' || key === 'callRingtone') window.__callRingtone = value;
-
-
-
-        if (key === 'videoEnabled' || key === 'cameraOnStart') window.__videoEnabled = value;
-
-
-
-        if (key === 'audioEnabled') window.__audioEnabled = value;
-
-
-
-        if (key === 'allowIncomingCalls' || key === 'whoCanCallMe') window.__allowIncomingCalls = value;
-
-
-
-        if (key === 'vibrateOnCall' || key === 'callVibration') window.__callVibration = value;
-
-
-
-        if (key === 'videoQuality') window.__videoQuality = value;
-
-
-
-        if (key === 'voiceQuality') window.__voiceQuality = value;
-
-
-
-        if (key === 'allowScreenShare') window.__allowScreenShare = value;
-
-
-
-        // Sync the in-page settings panel toggle checkboxes
-
-
-
-        const callsToggleMap = {
-
-
-
-            emotionalContext: 'emotionalContextToggle',
-
-
-
-            emotionalContextEnabled: 'emotionalContextToggle',
-
-
-
-            callIntention: 'callIntentionToggle',
-
-
-
-            callIntentionEnabled: 'callIntentionToggle',
-
-
-
-            inCallChat: 'inCallChatToggle',
-
-
-
-            inCallChatEnabled: 'inCallChatToggle',
-
-
-
-            whiteboard: 'whiteboardToggle',
-
-
-
-            whiteboardEnabled: 'whiteboardToggle',
-
-
-
-            polls: 'pollsToggle',
-
-
-
-            pollsEnabled: 'pollsToggle',
-
-
-
-            sharedNotes: 'notesToggle',
-
-
-
-            notesEnabled: 'notesToggle',
-
-
-
-            focusMode: 'focusModeToggle',
-
-
-
-            focusModeEnabled: 'focusModeToggle',
-
-
-
-            liveReactions: 'liveReactionsToggle',
-
-
-
-            liveReactionsEnabled: 'liveReactionsToggle'
-
-
-
-        };
-
-
-
-        var toggleId = callsToggleMap[key];
-
-
-
-        if (toggleId) {
-
-
-
-            var toggleEl = document.getElementById(toggleId);
-
-
-
-            if (toggleEl) toggleEl.checked = !!value;
-
-
-
-        }
-
-
-
-    }
-
-
-
-    if (section === 'chat') {
-
-
-
-        if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
-
-
-
-        if (key === 'showTimestamps') { window.__showTimestamps = value; document.documentElement.setAttribute('data-show-timestamps', value ? 'true' : 'false'); }
-
-
-
-        if (key === 'mediaAutoDownload' || key === 'autoDownloadMedia') window.__mediaAutoDownload = value;
-
-
-
-        if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
-
-
-
-    }
-
-
-
-    if (section === 'profile') {
-
-
-
-        if (key === 'displayName') window.__currentUserDisplayName = value;
-
-
-
-        if (key === 'photoUrl') window.__currentUserAvatar = value;
-
-
-
-        if (key === 'lastSeen') window.__showLastSeen = value;
-
-
-
-        if (key === 'profileVisibility') window.__profileVisibility = value;
-
-
-
-        if (key === 'currentMood') window.__currentMood = value;
-
-
-
-    }
-
-
-
-    if (section === 'security') {
-
-
-
-        // FIX (Security settings audit): this module runs inside an
-        // iframe and has no access to the auth session or logout — writing
-        // __sessionTimeout here did nothing because nothing (in this frame
-        // or any other) ever read it. The actual inactivity timeout is now
-        // enforced by SESSION_COORDINATOR in the parent frame's
-        // app.core.session.js, which reads the saved value straight from
-        // localStorage('knecta_settings_cache').security.sessionTimeout.
-        if (key === 'sessionTimeout') window.__sessionTimeout = value; // kept for any legacy readers; not the enforcement path
-
-
-
-    }
-
-
-
-    if (section === 'mood') {
-
-
-
-        if (key === 'currentMood') { window.__currentMood = value; document.documentElement.setAttribute('data-mood', value); }
-
-
-
-        if (key === 'autoMoodDetection') window.__autoMoodDetection = value;
-
-
-
-        if (key === 'shareMoodStatus') window.__shareMoodStatus = value;
-
-
-
-        if (key === 'showMoodTo') window.__showMoodTo = value;
-
-
-
-    }
-
-
-
-    if (section === 'advanced') {
-
-
-
-        if (key === 'developerMode' || key === 'developerTools') window.__developerMode = value;
-
-
-
-        if (key === 'debugLogging' || key === 'debugMode') window.__debugLogging = value;
-
-
-
-        if (key === 'performanceMode') { window.__performanceMode = value; document.documentElement.setAttribute('data-performance-mode', value ? 'true' : 'false'); }
-
-
-
-        if (key === 'dataSaver') window.__dataSaver = value;
-
-
-
-        if (key === 'offlineMode') window.__offlineMode = value;
-
-
-
-        if (key === 'reduceMotion') { document.documentElement.setAttribute('data-reduce-motion', value ? 'true' : 'false'); document.body.classList.toggle('reduce-motion', !!value); }
-
-
-
-        if (key === 'experimentalFeatures') window.__experimentalFeatures = value;
-
-
-
-    }
-
-
-
-    if (section === 'storage') {
-
-
-
-        if (key === 'autoClearCache') window.__autoClearCache = value;
-
-
-
-    }
-
-
-
-    if (section === 'status') {
-
-
-
-        if (key === 'whoCanViewMyStatus') window.__whoCanViewMyStatus = value;
-
-
-
-        if (key === 'autoExpireStatus') window.__autoExpireStatus = value;
-
-
-
-        if (key === 'allowStatusReplies') window.__allowStatusReplies = value;
-
-
-
-        if (key === 'showStatusTo') window.__showStatusTo = value;
-
-
-
-    }
-
-
-
-    if (section === 'friends') {
-
-
-
-        if (key === 'showOnlineStatus') window.__showOnlineStatus = value;
-
-
-
-    }
-
-
-
-}
-
-
-
-// =============================================
-
-
-
-// SETTINGS CACHE BOOTSTRAP - OFFLINE-FIRST
-
-
-
-// =============================================
-
-
-
-(function bootstrapSettingsFromCache() {
-
-
-
-    try {
-
-
-
-        var cached = localStorage.getItem('knecta_settings_cache');
-
-
-
-        if (!cached) return;
-
-
-
-        var parsed = JSON.parse(cached);
-
-
-
-        var settings = (parsed && parsed.data) ? parsed.data : parsed;
-
-
-
-        if (!settings || typeof settings !== 'object') return;
-
-
-
-        if (parsed.timestamp && (Date.now() - parsed.timestamp) > 86400000) return;
-
-
-
-        Object.entries(settings).forEach(function(sectionEntry) {
-
-
-
-            var section = sectionEntry[0], sectionVal = sectionEntry[1];
-
-
-
-            if (!sectionVal || typeof sectionVal !== 'object') return;
-
-
-
-            Object.entries(sectionVal).forEach(function(keyEntry) {
-
-
-
-                try { applySettingToCallsModule(section, keyEntry[0], keyEntry[1]); } catch(e) {}
-
-
-
-            });
-
-
-
-        });
-
-
-
-        console.log('[calls-core] ✅ Settings bootstrapped from cache');
-
-
-
-    } catch(e) {}
-
-
-
-    window.addEventListener('online', function() {
-
-
-
-        try {
-
-
-
-            window.parent && window.parent.postMessage({ type: 'CHILD_READY', module: 'calls', source: 'calls', timestamp: Date.now() }, '*');
-
-
-
-        } catch(e) {}
-
-
-
-    });
-
-
-
-})();
-
-
-
-// =============================================
-
-
-
-// JOIN-VIA-LINK HANDLER
-
-
-
-// When user opens a call link (?call=xxx&type=video), auto-initiate the call
-
-
-
-// =============================================
-
-
-
-(function handleJoinViaLink() {
-
-
-
-    try {
-
-
-
-        const params = new URLSearchParams(window.location.search);
-
-
-
-        const callParam = params.get('call');
-
-
-
-        const typeParam = params.get('type') || 'audio';
-
-
-
-        const tokenParam = params.get('token');
-
-
-
-        const callIdParam = params.get('callId');
-
-
-
-
-
-
-
-        if (!callParam && !callIdParam) return; // Not a join-via-link page load
-
-
-
-
-
-
-
-        // Wait for module to be fully initialized before acting
-
-
-
-        function attemptJoin(attempts) {
-
-
-
-            if (attempts <= 0) {
-
-
-
-                console.warn('[calls-core] Join-via-link: module not ready after waiting');
-
-
-
-                return;
-
-
-
-            }
-
-
-
-            const core = window.callCore;
-
-
-
-            if (!core || !core.isReady || !core.isReady()) {
-
-
-
-                setTimeout(() => attemptJoin(attempts - 1), 500);
-
-
-
-                return;
-
-
-
-            }
-
-
-
-
-
-
-
-            if (callIdParam) {
-
-
-
-                // Joining an existing in-progress call by callId
-
-
-
-                console.log('[calls-core] Join-via-link: joining existing call', callIdParam);
-
-
-
-                // Notify parent to handle the join API call
-
-
-
-                try {
-
-
-
-                    window.parent.postMessage({
-
-
-
-                        type: 'JOIN_CALL_VIA_LINK',
-
-
-
-                        payload: {
-
-
-
-                            callId: callIdParam,
-
-
-
-                            token: tokenParam,
-
-
-
-                            callType: typeParam,
-
-
-
-                            timestamp: Date.now()
-
-
-
-                        }
-
-
-
-                    }, '*');
-
-
-
-                } catch(e) {}
-
-
-
-            } else if (callParam) {
-
-
-
-                // callParam is a generated random ID — we need to start a new call
-
-
-
-                // This path handles when recipient opens a link that just has a random ID
-
-
-
-                // The link holder will already be waiting in the call
-
-
-
-                console.log('[calls-core] Join-via-link: starting call from link', callParam, typeParam);
-
-
-
-                // Notify parent / chat.html to orchestrate the call start
-
-
-
-                try {
-
-
-
-                    window.parent.postMessage({
-
-
-
-                        type: 'JOIN_CALL_VIA_LINK',
-
-
-
-                        payload: {
-
-
-
-                            linkCallId: callParam,
-
-
-
-                            callType: typeParam,
-
-
-
-                            token: tokenParam,
-
-
-
-                            timestamp: Date.now()
-
-
-
-                        }
-
-
-
-                    }, '*');
-
-
-
-                } catch(e) {}
-
-
-
-            }
-
-
-
-        }
-
-
-
-
-
-
-
-        // Start trying after 1s to allow module init
-
-
-
-        setTimeout(() => attemptJoin(10), 1000);
-
-
-
-    } catch(e) {
-
-
-
-        console.warn('[calls-core] Join-via-link error:', e.message);
-
-
-
-    }
-
-
-
-})()
-

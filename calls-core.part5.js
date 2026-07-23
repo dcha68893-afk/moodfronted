@@ -1,4 +1,20 @@
-﻿/**
+/**
+ * calls-core.part5.js — PART 5/8 — MEDIA & WEBRTC
+ * Permission manager, media manager, the real WebRTC manager, and single-active-call enforcement.
+ *
+ * This file is SELF-CONTAINED: it runs in its own IIFE and shares state with
+ * the other 7 calls-core.partN.js files through window.__CallsCoreShared, not
+ * through a JS closure. Load all 8 files, in numeric order, as plain classic
+ * <script> tags (no type="module", no defer/async) — see calls.html.
+ */
+(function () {
+
+    'use strict';
+
+    var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
+    if (__CC.__aborted) { return; }
+
+/**
  * PART 5/8 — MEDIA & WEBRTC
  * Permission manager, media manager, the real WebRTC manager, and single-active-call enforcement.
  *
@@ -12,7 +28,7 @@
 
 
 
-    const PermissionManager = {
+    window.__CallsCoreShared.PermissionManager = {
 
 
 
@@ -292,7 +308,7 @@
 
 
 
-                logError(MODULE, 'Permission check failed', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Permission check failed', error);
 
 
 
@@ -388,7 +404,7 @@
 
 
 
-    const MediaManager = {
+    window.__CallsCoreShared.MediaManager = {
 
 
 
@@ -436,7 +452,7 @@
 
 
 
-                logInfo(MODULE, 'Initializing media manager');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Initializing media manager');
 
 
 
@@ -448,7 +464,7 @@
 
 
 
-                    logWarn(MODULE, 'Media devices not fully supported');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Media devices not fully supported');
 
 
 
@@ -480,7 +496,7 @@
 
 
 
-                logError(MODULE, 'Media manager initialization failed', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Media manager initialization failed', error);
 
 
 
@@ -516,7 +532,7 @@
 
 
 
-                callsState.mediaDevices = {
+                window.__CallsCoreShared.callsState.mediaDevices = {
 
 
 
@@ -548,15 +564,15 @@
 
 
 
-                logSuccess(MODULE, 'Media devices enumerated', {
+                window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Media devices enumerated', {
 
 
 
-                    audioInput: callsState.mediaDevices.audioInput.length,
+                    audioInput: window.__CallsCoreShared.callsState.mediaDevices.audioInput.length,
 
 
 
-                    videoInput: callsState.mediaDevices.videoInput.length
+                    videoInput: window.__CallsCoreShared.callsState.mediaDevices.videoInput.length
 
 
 
@@ -568,7 +584,7 @@
 
 
 
-                return { success: true, devices: callsState.mediaDevices };
+                return { success: true, devices: window.__CallsCoreShared.callsState.mediaDevices };
 
 
 
@@ -576,7 +592,7 @@
 
 
 
-                logError(MODULE, 'Device enumeration failed', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Device enumeration failed', error);
 
 
 
@@ -604,7 +620,7 @@
 
 
 
-                logInfo(MODULE, 'Getting local media stream', constraints);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Getting local media stream', constraints);
 
 
 
@@ -660,15 +676,15 @@
 
 
 
-                callsState.localStream = stream;
+                window.__CallsCoreShared.callsState.localStream = stream;
 
 
 
-                callsState.micEnabled = this._audioTracks.length > 0;
+                window.__CallsCoreShared.callsState.micEnabled = this._audioTracks.length > 0;
 
 
 
-                callsState.cameraEnabled = this._videoTracks.length > 0;
+                window.__CallsCoreShared.callsState.cameraEnabled = this._videoTracks.length > 0;
 
 
 
@@ -676,7 +692,7 @@
 
 
 
-                logSuccess(MODULE, 'Local media stream acquired', {
+                window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Local media stream acquired', {
 
 
 
@@ -716,7 +732,7 @@
 
 
 
-                logError(MODULE, 'Failed to get local media stream', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to get local media stream', error);
 
 
 
@@ -792,7 +808,7 @@
 
 
 
-                logWarn(MODULE, 'No audio tracks to toggle');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'No audio tracks to toggle');
 
 
 
@@ -828,7 +844,7 @@
 
 
 
-                callsState.micEnabled = enabled;
+                window.__CallsCoreShared.callsState.micEnabled = enabled;
 
 
 
@@ -836,7 +852,7 @@
 
 
 
-                logInfo(MODULE, `Microphone ${enabled ? 'enabled' : 'disabled'}`);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Microphone ${enabled ? 'enabled' : 'disabled'}`);
 
 
 
@@ -860,7 +876,7 @@
 
 
 
-                logError(MODULE, 'Failed to toggle microphone', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to toggle microphone', error);
 
 
 
@@ -888,7 +904,7 @@
 
 
 
-                logWarn(MODULE, 'No video tracks to toggle');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'No video tracks to toggle');
 
 
 
@@ -924,7 +940,7 @@
 
 
 
-                callsState.cameraEnabled = enabled;
+                window.__CallsCoreShared.callsState.cameraEnabled = enabled;
 
 
 
@@ -932,7 +948,7 @@
 
 
 
-                logInfo(MODULE, `Camera ${enabled ? 'enabled' : 'disabled'}`);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Camera ${enabled ? 'enabled' : 'disabled'}`);
 
 
 
@@ -956,7 +972,7 @@
 
 
 
-                logError(MODULE, 'Failed to toggle camera', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to toggle camera', error);
 
 
 
@@ -984,7 +1000,7 @@
 
 
 
-                logWarn(MODULE, 'No video tracks to switch');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'No video tracks to switch');
 
 
 
@@ -1004,7 +1020,7 @@
 
 
 
-                const newMode = callsState.cameraFacingMode === 'user' ? 'environment' : 'user';
+                const newMode = window.__CallsCoreShared.callsState.cameraFacingMode === 'user' ? 'environment' : 'user';
 
 
 
@@ -1112,7 +1128,7 @@
 
 
 
-                callsState.cameraFacingMode = newMode;
+                window.__CallsCoreShared.callsState.cameraFacingMode = newMode;
 
 
 
@@ -1120,7 +1136,7 @@
 
 
 
-                logSuccess(MODULE, `Camera switched to ${newMode} mode`);
+                window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, `Camera switched to ${newMode} mode`);
 
 
 
@@ -1151,7 +1167,7 @@
 
 
 
-                logError(MODULE, 'Failed to switch camera', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to switch camera', error);
 
 
 
@@ -1215,7 +1231,7 @@
 
 
 
-                callsState.screenSharing = true;
+                window.__CallsCoreShared.callsState.screenSharing = true;
 
                 // FIX-SCREENSHARE-NEVER-SENT: previously this just captured the
                 // screen and returned it -- nothing ever pushed the screen track
@@ -1233,8 +1249,8 @@
                 // button does: release the capture and revert to camera.
                 if (screenTrack) {
                     screenTrack.addEventListener('ended', () => {
-                        if (callsState.screenSharing) {
-                            MediaManager.stopScreenShare();
+                        if (window.__CallsCoreShared.callsState.screenSharing) {
+                            window.__CallsCoreShared.MediaManager.stopScreenShare();
                             if (typeof window.callsCoreReplaceVideoTrack === 'function' && this._preShareCameraTrack) {
                                 window.callsCoreReplaceVideoTrack(this._preShareCameraTrack);
                             }
@@ -1257,7 +1273,7 @@
 
 
 
-                logError(MODULE, 'Failed to start screen share', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to start screen share', error);
 
 
 
@@ -1279,7 +1295,7 @@
 
         stopScreenShare: function() {
 
-            callsState.screenSharing = false;
+            window.__CallsCoreShared.callsState.screenSharing = false;
 
             // FIX-SCREENSHARE-NEVER-SENT: previously this never actually
             // stopped the getDisplayMedia capture tracks -- the browser's
@@ -1342,19 +1358,19 @@
 
 
 
-                callsState.localStream = null;
+                window.__CallsCoreShared.callsState.localStream = null;
 
 
 
-                callsState.micEnabled = true;
+                window.__CallsCoreShared.callsState.micEnabled = true;
 
 
 
-                callsState.cameraEnabled = false;
+                window.__CallsCoreShared.callsState.cameraEnabled = false;
 
 
 
-                callsState.screenSharing = false;
+                window.__CallsCoreShared.callsState.screenSharing = false;
 
 
 
@@ -1362,7 +1378,7 @@
 
 
 
-                logInfo(MODULE, 'Local stream stopped');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Local stream stopped');
 
 
 
@@ -1458,23 +1474,23 @@
 
 
 
-                micEnabled: callsState.micEnabled,
+                micEnabled: window.__CallsCoreShared.callsState.micEnabled,
 
 
 
-                cameraEnabled: callsState.cameraEnabled,
+                cameraEnabled: window.__CallsCoreShared.callsState.cameraEnabled,
 
 
 
-                cameraFacingMode: callsState.cameraFacingMode,
+                cameraFacingMode: window.__CallsCoreShared.callsState.cameraFacingMode,
 
 
 
-                screenSharing: callsState.screenSharing,
+                screenSharing: window.__CallsCoreShared.callsState.screenSharing,
 
 
 
-                devices: callsState.mediaDevices,
+                devices: window.__CallsCoreShared.callsState.mediaDevices,
 
 
 
@@ -1502,11 +1518,11 @@
 
 
 
-    MediaManager.initialize().catch(error => {
+    window.__CallsCoreShared.MediaManager.initialize().catch(error => {
 
 
 
-        logError(MODULE, 'Media manager initialization failed', error);
+        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Media manager initialization failed', error);
 
 
 
@@ -1522,7 +1538,7 @@
 
 
 
-    const WebRTCManager = {
+    window.__CallsCoreShared.WebRTCManager = {
 
 
 
@@ -1578,7 +1594,7 @@
 
 
 
-            logInfo(MODULE, 'WebRTC manager initialized');
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'WebRTC manager initialized');
 
 
 
@@ -1621,7 +1637,7 @@
                 if (this._peerConnection) {
                     var _existingState = this._peerConnection.connectionState || this._peerConnection.iceConnectionState;
                     if (_existingState && _existingState !== 'closed' && _existingState !== 'failed') {
-                        logWarn(MODULE, 'createPeerConnection: a live connection already exists for this call -- reusing it instead of creating a duplicate', { state: _existingState });
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'createPeerConnection: a live connection already exists for this call -- reusing it instead of creating a duplicate', { state: _existingState });
                         return this._peerConnection;
                     }
                     try { this._peerConnection.close(); } catch (_) {}
@@ -1676,10 +1692,10 @@
                 // network-change, socket-reconnect recovery) to trigger a restart on THIS real
                 // connection, rather than a separate/unused WebRTC engine creating its own.
                 window.callsCoreRestartICE = function(callId) {
-                    if (callId && WebRTCManager._currentCallId && String(callId) !== String(WebRTCManager._currentCallId)) {
+                    if (callId && window.__CallsCoreShared.WebRTCManager._currentCallId && String(callId) !== String(window.__CallsCoreShared.WebRTCManager._currentCallId)) {
                         return Promise.resolve(); // stale request for a call that's no longer active
                     }
-                    return Promise.resolve(WebRTCManager.handleIceFailure());
+                    return Promise.resolve(window.__CallsCoreShared.WebRTCManager.handleIceFailure());
                 };
                 // FIX-CAMERA-SWITCH-FROZEN-REMOTE: MediaManager.switchCamera() only
                 // ever updated the local stream/preview. This pushes the freshly
@@ -1688,7 +1704,7 @@
                 // new camera instead of a frozen frame from the old (stopped) one.
                 window.callsCoreReplaceVideoTrack = function(newTrack) {
                     if (!newTrack) return;
-                    var pc = WebRTCManager._peerConnection;
+                    var pc = window.__CallsCoreShared.WebRTCManager._peerConnection;
                     if (!pc) return;
                     pc.getSenders().forEach(function(sender) {
                         if (sender.track && sender.track.kind === 'video') {
@@ -1716,7 +1732,7 @@
                         var hasAudio = stream.getAudioTracks().length > 0;
                         var newStream = await navigator.mediaDevices.getUserMedia({ audio: hasAudio, video: hasVideo });
 
-                        var pc = WebRTCManager._peerConnection;
+                        var pc = window.__CallsCoreShared.WebRTCManager._peerConnection;
                         if (pc) {
                             pc.getSenders().forEach(function(sender) {
                                 if (!sender.track) return;
@@ -1729,9 +1745,9 @@
 
                         stream.getTracks().forEach(function(t) { if (t.readyState === 'ended') t.stop(); });
                         ui.localStream = newStream;
-                        logInfo(MODULE, 'Recovered local media tracks after backgrounding/device interruption');
+                        window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Recovered local media tracks after backgrounding/device interruption');
                     } catch (err) {
-                        logWarn(MODULE, 'Media recovery failed', err && err.message);
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Media recovery failed', err && err.message);
                     }
                 };
                 window.dispatchEvent(new CustomEvent('call:connected', { detail: { pc: this._peerConnection } }));
@@ -1750,7 +1766,7 @@
 
 
 
-                logSuccess(MODULE, 'Peer connection created');
+                window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Peer connection created');
 
 
 
@@ -1770,7 +1786,7 @@
 
 
 
-                logError(MODULE, 'Failed to create peer connection', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to create peer connection', error);
 
 
 
@@ -1842,15 +1858,15 @@
         // Resolve remote user from callsState so backend can route to correct peer.
         if (this._currentCallId) {
             var _iceRemoteUserId = (function() {
-                if (callsState._isCaller) {
+                if (window.__CallsCoreShared.callsState._isCaller) {
                     // Caller sends ICE to receiver (participants[0])
-                    if (callsState.activeCall && callsState.activeCall.participants && callsState.activeCall.participants.length > 0) {
-                        var p = callsState.activeCall.participants[0];
+                    if (window.__CallsCoreShared.callsState.activeCall && window.__CallsCoreShared.callsState.activeCall.participants && window.__CallsCoreShared.callsState.activeCall.participants.length > 0) {
+                        var p = window.__CallsCoreShared.callsState.activeCall.participants[0];
                         return typeof p === 'object' ? (p.id || p.userId) : p;
                     }
                 } else {
                     // Receiver sends ICE back to caller
-                    return (callsState.callData && callsState.callData.callerId) || null;
+                    return (window.__CallsCoreShared.callsState.callData && window.__CallsCoreShared.callsState.callData.callerId) || null;
                 }
                 return null;
             })();
@@ -1859,7 +1875,7 @@
             // local id, so ICE candidates carry the same id the remote
             // side's active call is keyed on instead of a stale pre-ack
             // local id that the far end has no way to recognize.
-            var _iceCallId = (typeof resolveCallId === 'function') ? resolveCallId(this._currentCallId) : this._currentCallId;
+            var _iceCallId = (typeof window.__CallsCoreShared.resolveCallId === 'function') ? window.__CallsCoreShared.resolveCallId(this._currentCallId) : this._currentCallId;
             var _icePayload = {
                 callId: _iceCallId,
                 candidate: _iceCandidateJSON,
@@ -1875,7 +1891,7 @@
                     window.parent.postMessage({ type: 'ICE_CANDIDATE', payload: _icePayload, source: 'calls-core-direct' }, '*');
                 }
             } catch (_postErr) {
-                logWarn(MODULE, 'ICE_CANDIDATE postMessage failed, relying on socket transport', _postErr && _postErr.message);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'ICE_CANDIDATE postMessage failed, relying on socket transport', _postErr && _postErr.message);
             }
             // Also emit directly via socket for lowest latency
             var _iceSock = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
@@ -1884,7 +1900,7 @@
                     callId: _iceCallId, targetUserId: _iceRemoteUserId, candidate: _iceCandidateJSON,
                 });
             } else {
-                safeSend('ICE_CANDIDATE', _icePayload, false);
+                window.__CallsCoreShared.safeSend('ICE_CANDIDATE', _icePayload, false);
             }
         }
 
@@ -1910,11 +1926,11 @@
 
 
 
-                callsState.signalingState = state;
+                window.__CallsCoreShared.callsState.signalingState = state;
 
 
 
-                logInfo(MODULE, `ICE connection state: ${state}`);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `ICE connection state: ${state}`);
 
 
 
@@ -1966,9 +1982,9 @@
                     // FIX: also fire 'call_connected' so UIEventHandlers.handleCallConnected
                     // runs on BOTH sides and transitions them to the in-call screen
                     this._notifyListeners('call_connected', {
-                        callId: callsState.activeCallId,
-                        callType: callsState.callType || 'voice',
-                        callerName: (callsState.callData && (callsState.callData.callerName || callsState.callData.fromUserName)) || ''
+                        callId: window.__CallsCoreShared.callsState.activeCallId,
+                        callType: window.__CallsCoreShared.callsState.callType || 'voice',
+                        callerName: (window.__CallsCoreShared.callsState.callData && (window.__CallsCoreShared.callsState.callData.callerName || window.__CallsCoreShared.callsState.callData.fromUserName)) || ''
                     });
 
                 } else if (state === 'failed') {
@@ -1994,7 +2010,7 @@
 
 
                 } else if (state === 'disconnected') {
-                    logWarn(MODULE, 'ICE disconnected - attempting PHASE10 recovery');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'ICE disconnected - attempting PHASE10 recovery');
                     this._notifyListeners('ice_disconnected', { state });
                     // PHASE10-FIX: Attempt ICE restart on disconnect (not just on failed)
                     // Give 5s for transient network hiccup before escalating to restart
@@ -2003,7 +2019,7 @@
                             this._iceDisconnectTimer = null;
                             const currentIceState = this._peerConnection?.iceConnectionState;
                             if (currentIceState === 'disconnected' || currentIceState === 'failed') {
-                                logWarn(MODULE, 'PHASE10: ICE still disconnected after 5s — triggering restart');
+                                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'PHASE10: ICE still disconnected after 5s — triggering restart');
                                 this.handleIceFailure();
                             }
                         }, 5000);
@@ -2039,11 +2055,11 @@
 
 
 
-                callsState.connectionState = state;
+                window.__CallsCoreShared.callsState.connectionState = state;
 
 
 
-                logInfo(MODULE, `Connection state: ${state}`);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Connection state: ${state}`);
 
 
 
@@ -2059,11 +2075,11 @@
 
 
 
-                    callsState.callState = 'connected';
+                    window.__CallsCoreShared.callsState.callState = 'connected';
 
 
 
-                    callsState.callActive = true;
+                    window.__CallsCoreShared.callsState.callActive = true;
 
 
 
@@ -2079,7 +2095,7 @@
 
 
 
-                    notifyListeners('call_connected', { callId: this._currentCallId });
+                    window.__CallsCoreShared.notifyListeners('call_connected', { callId: this._currentCallId });
 
 
 
@@ -2115,7 +2131,7 @@
 
 
 
-                    notifyListeners('call_failed', { reason: 'connection_failed', callId: this._currentCallId });
+                    window.__CallsCoreShared.notifyListeners('call_failed', { reason: 'connection_failed', callId: this._currentCallId });
 
 
 
@@ -2155,7 +2171,7 @@
 
 
 
-                logInfo(MODULE, `Signaling state: ${state}`);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Signaling state: ${state}`);
 
 
 
@@ -2311,19 +2327,19 @@
 
 
 
-                    callsState.remoteStreams.set(stream.id, stream);
+                    window.__CallsCoreShared.callsState.remoteStreams.set(stream.id, stream);
 
 
 
-                    callsState.remoteStream = stream;
+                    window.__CallsCoreShared.callsState.remoteStream = stream;
 
-                    logSuccess(MODULE, 'Remote stream added');
+                    window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Remote stream added');
 
                     this._notifyListeners('remote_stream_added', { stream, track: event.track });
 
 
 
-                    notifyListeners('remote_stream_added', { stream });
+                    window.__CallsCoreShared.notifyListeners('remote_stream_added', { stream });
 
 
 
@@ -2375,7 +2391,7 @@
 
 
 
-                logInfo(MODULE, 'Data channel opened');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Data channel opened');
 
 
 
@@ -2395,7 +2411,7 @@
 
 
 
-                logInfo(MODULE, 'Data channel closed');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Data channel closed');
 
 
 
@@ -2431,7 +2447,7 @@
 
 
 
-                    logError(MODULE, 'Failed to parse data channel message', e);
+                    window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to parse data channel message', e);
 
 
 
@@ -2451,7 +2467,7 @@
 
 
 
-                logError(MODULE, 'Data channel error', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Data channel error', error);
 
 
 
@@ -2479,7 +2495,7 @@
 
 
 
-                logError(MODULE, 'No peer connection to create data channel');
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'No peer connection to create data channel');
 
 
 
@@ -2515,7 +2531,7 @@
 
 
 
-                logError(MODULE, 'Failed to create data channel', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to create data channel', error);
 
 
 
@@ -2543,7 +2559,7 @@
 
 
 
-                logWarn(MODULE, 'Data channel not open');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Data channel not open');
 
 
 
@@ -2575,7 +2591,7 @@
 
 
 
-                logError(MODULE, 'Failed to send data', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to send data', error);
 
 
 
@@ -2622,7 +2638,7 @@
                 return true;
 
             } catch (error) {
-                logError(MODULE, 'Failed to add stream to peer connection', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to add stream to peer connection', error);
                 return false;
             }
 
@@ -2682,7 +2698,7 @@
 
 
 
-                logError(MODULE, 'Failed to remove stream from peer connection', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to remove stream from peer connection', error);
 
 
 
@@ -2744,7 +2760,7 @@
 
 
 
-                logError(MODULE, 'Failed to create offer', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to create offer', error);
 
 
 
@@ -2796,7 +2812,7 @@
 
 
 
-                logError(MODULE, 'Failed to create answer', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to create answer', error);
 
 
 
@@ -2832,7 +2848,7 @@
 
 
 
-                logInfo(MODULE, 'Remote description set');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Remote description set');
 
 
 
@@ -2848,7 +2864,7 @@
 
 
 
-                    logInfo(MODULE, `Draining ${queued.length} queued ICE candidates`);
+                    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Draining ${queued.length} queued ICE candidates`);
 
 
 
@@ -2872,7 +2888,7 @@
 
 
 
-                logError(MODULE, 'Failed to set remote description', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to set remote description', error);
 
 
 
@@ -2924,7 +2940,7 @@
 
 
 
-                logInfo(MODULE, 'ICE candidate queued (waiting for remoteDescription)');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'ICE candidate queued (waiting for remoteDescription)');
 
 
 
@@ -2944,7 +2960,7 @@
 
 
 
-                logInfo(MODULE, 'ICE candidate added');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'ICE candidate added');
 
 
 
@@ -2952,7 +2968,7 @@
 
 
 
-                logError(MODULE, 'Failed to add ICE candidate', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to add ICE candidate', error);
 
 
 
@@ -2976,13 +2992,13 @@
             // call is ending). Without this, createOffer() always threw "No
             // peer connection" and logged it as a spurious error.
             if (!this._peerConnection) {
-                logInfo(MODULE, 'ICE restart skipped — no active peer connection');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'ICE restart skipped — no active peer connection');
                 return;
             }
 
 
 
-            logWarn(MODULE, 'ICE connection failed');
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'ICE connection failed');
 
 
 
@@ -2990,7 +3006,7 @@
 
 
 
-            if (this._iceRestartCount < CONFIG.MAX_ICE_RESTARTS) {
+            if (this._iceRestartCount < window.__CallsCoreShared.CONFIG.MAX_ICE_RESTARTS) {
 
 
 
@@ -3002,7 +3018,7 @@
 
 
 
-                logInfo(MODULE, `Attempting ICE restart (${this._iceRestartCount}/${CONFIG.MAX_ICE_RESTARTS})`);
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Attempting ICE restart (${this._iceRestartCount}/${window.__CallsCoreShared.CONFIG.MAX_ICE_RESTARTS})`);
 
 
 
@@ -3018,7 +3034,7 @@
 
 
 
-                        IframeTransport.sendAction('SIGNAL_OFFER', {
+                        window.__CallsCoreShared.IframeTransport.sendAction('SIGNAL_OFFER', {
 
 
 
@@ -3046,7 +3062,7 @@
 
 
 
-                        logError(MODULE, 'ICE restart failed', error);
+                        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'ICE restart failed', error);
 
 
 
@@ -3058,7 +3074,7 @@
 
 
 
-                logError(MODULE, 'Max ICE restarts reached, call may fail');
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Max ICE restarts reached, call may fail');
 
 
 
@@ -3066,7 +3082,7 @@
 
 
 
-                notifyListeners('call_failed', { reason: 'ice_failed', callId: this._currentCallId });
+                window.__CallsCoreShared.notifyListeners('call_failed', { reason: 'ice_failed', callId: this._currentCallId });
 
 
 
@@ -3120,14 +3136,14 @@
                 try { locVideo.load(); } catch(_) {}
             }
             // Stop local stream tracks if not already done by MediaManager
-            if (callsState && callsState.localStream) {
-                try { callsState.localStream.getTracks().forEach(function(t){ try{t.stop();}catch(_){} }); } catch(_) {}
-                callsState.localStream = null;
+            if (window.__CallsCoreShared.callsState && window.__CallsCoreShared.callsState.localStream) {
+                try { window.__CallsCoreShared.callsState.localStream.getTracks().forEach(function(t){ try{t.stop();}catch(_){} }); } catch(_) {}
+                window.__CallsCoreShared.callsState.localStream = null;
             }
             // Stop remote stream tracks
-            if (callsState && callsState.remoteStream) {
-                try { callsState.remoteStream.getTracks().forEach(function(t){ try{t.stop();}catch(_){} }); } catch(_) {}
-                callsState.remoteStream = null;
+            if (window.__CallsCoreShared.callsState && window.__CallsCoreShared.callsState.remoteStream) {
+                try { window.__CallsCoreShared.callsState.remoteStream.getTracks().forEach(function(t){ try{t.stop();}catch(_){} }); } catch(_) {}
+                window.__CallsCoreShared.callsState.remoteStream = null;
             }
 
             this._iceCandidates = [];
@@ -3194,11 +3210,11 @@
 
                 // Don't timeout if receiver has accepted — TURN relay may need more time
                 const _acceptedStates = ['connected','in-call','in_call','connecting'];
-                if (!_acceptedStates.includes(callsState.callState) && !window.__callReceiverAccepted) {
+                if (!_acceptedStates.includes(window.__CallsCoreShared.callsState.callState) && !window.__callReceiverAccepted) {
 
 
 
-                    logWarn(MODULE, 'Connection timeout reached');
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Connection timeout reached');
 
 
 
@@ -3206,7 +3222,7 @@
 
 
 
-                    notifyListeners('call_timeout', { callId: this._currentCallId });
+                    window.__CallsCoreShared.notifyListeners('call_timeout', { callId: this._currentCallId });
 
 
 
@@ -3371,7 +3387,7 @@
 
 
 
-    WebRTCManager.initialize();
+    window.__CallsCoreShared.WebRTCManager.initialize();
 
 
 
@@ -3387,15 +3403,15 @@
 
 
 
-    function enforceSingleActiveCall() {
+    window.__CallsCoreShared.enforceSingleActiveCall = function enforceSingleActiveCall() {
 
 
 
-        if (callsState.callActive && callsState.activeCall) {
+        if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.activeCall) {
 
 
 
-            logWarn(MODULE, 'Call blocked - another call already active', { activeCallId: callsState.activeCallId });
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Call blocked - another call already active', { activeCallId: window.__CallsCoreShared.callsState.activeCallId });
 
 
 
@@ -3411,7 +3427,7 @@
 
 
 
-    }
+    };
 
 
 
@@ -3419,7 +3435,7 @@
 
 
 
-    function setActiveCall(callId, callType, participants) {
+    window.__CallsCoreShared.setActiveCall = function setActiveCall(callId, callType, participants) {
 
 
 
@@ -3443,7 +3459,7 @@
 
 
 
-    if (callsState.callActive && callsState.activeCallId && callsState.activeCallId !== callId) {
+    if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.activeCallId && window.__CallsCoreShared.callsState.activeCallId !== callId) {
 
 
 
@@ -3451,7 +3467,7 @@
 
 
 
-        const staleAge = callsState.callStartTime ? Date.now() - callsState.callStartTime : Infinity;
+        const staleAge = window.__CallsCoreShared.callsState.callStartTime ? Date.now() - window.__CallsCoreShared.callsState.callStartTime : Infinity;
 
 
 
@@ -3459,7 +3475,7 @@
 
 
 
-            logWarn(MODULE, 'Cannot set active call - another call already active', { existing: callsState.activeCallId });
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Cannot set active call - another call already active', { existing: window.__CallsCoreShared.callsState.activeCallId });
 
 
 
@@ -3471,19 +3487,19 @@
 
 
 
-        logWarn(MODULE, 'Stale call detected (>60s old) — force-clearing before new call', { existing: callsState.activeCallId });
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Stale call detected (>60s old) — force-clearing before new call', { existing: window.__CallsCoreShared.callsState.activeCallId });
 
 
 
-        resetCallState();
+        window.__CallsCoreShared.resetCallState();
 
 
 
-        callsState.callActive = false;
+        window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-        callsState.activeCallId = null;
+        window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
@@ -3509,31 +3525,31 @@
 
 
 
-    if (callsState.callActive && !callsState.activeCallId) {
+    if (window.__CallsCoreShared.callsState.callActive && !window.__CallsCoreShared.callsState.activeCallId) {
 
 
 
-        logWarn(MODULE, 'Stale call state detected (orphaned callActive flag), resetting before new call', { callId });
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Stale call state detected (orphaned callActive flag), resetting before new call', { callId });
 
 
 
-        resetCallState();
+        window.__CallsCoreShared.resetCallState();
 
 
 
-        callsState.callActive = false;
+        window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-        callsState.activeCallId = null;
+        window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-    } else if (callsState.activeCallId === callId && callsState.callActive) {
+    } else if (window.__CallsCoreShared.callsState.activeCallId === callId && window.__CallsCoreShared.callsState.callActive) {
 
 
 
-        logCall(MODULE, 'Continuing existing active call session (not stale) — skipping teardown', { callId });
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Continuing existing active call session (not stale) — skipping teardown', { callId });
 
 
 
@@ -3545,7 +3561,7 @@
 
 
 
-    callsState.activeCall = {
+    window.__CallsCoreShared.callsState.activeCall = {
 
 
 
@@ -3573,27 +3589,27 @@
 
 
 
-    callsState.activeCallId = callId;
+    window.__CallsCoreShared.callsState.activeCallId = callId;
 
 
 
-    callsState.callActive = true;
+    window.__CallsCoreShared.callsState.callActive = true;
 
 
 
-    callsState.callType = callType;
+    window.__CallsCoreShared.callsState.callType = callType;
 
 
 
-    callsState.callParticipants = participants;
+    window.__CallsCoreShared.callsState.callParticipants = participants;
 
 
 
-    callsState.callStartTime = Date.now();
+    window.__CallsCoreShared.callsState.callStartTime = Date.now();
 
 
 
-    callsState.callState = 'initiating';
+    window.__CallsCoreShared.callsState.callState = 'initiating';
 
     // CALLMANAGER BRIDGE: create CM session for outgoing call
     try {
@@ -3612,7 +3628,7 @@
 
 
 
-    logCall(MODULE, 'Active call set', { callId, callType });
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Active call set', { callId, callType });
 
 
 
@@ -3620,7 +3636,7 @@
 
 
 
-}
+};
 
 
 
@@ -3632,39 +3648,39 @@
 
 
 
-        callsState.activeCall = null;
+        window.__CallsCoreShared.callsState.activeCall = null;
 
 
 
-        callsState.activeCallId = null;
+        window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-        callsState.callActive = false;
+        window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-        callsState.callType = null;
+        window.__CallsCoreShared.callsState.callType = null;
 
 
 
-        callsState.callParticipants = [];
+        window.__CallsCoreShared.callsState.callParticipants = [];
 
 
 
-        callsState.callStartTime = null;
+        window.__CallsCoreShared.callsState.callStartTime = null;
 
 
 
-        callsState.callState = 'idle';
+        window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-        callsState.connectionState = 'new';
+        window.__CallsCoreShared.callsState.connectionState = 'new';
 
 
 
-        callsState.signalingState = 'new';
+        window.__CallsCoreShared.callsState.signalingState = 'new';
 
 
 
@@ -3676,15 +3692,15 @@
 
 
 
-        if (callsState.callInvitationTimer) {
+        if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-            clearTimeout(callsState.callInvitationTimer);
+            clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-            callsState.callInvitationTimer = null;
+            window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -3696,7 +3712,7 @@
 
 
 
-        logCall(MODULE, 'Active call cleared');
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Active call cleared');
 
 
 
@@ -3708,12 +3724,12 @@
 
 
 
-    function resetCallState() {
+    window.__CallsCoreShared.resetCallState = function resetCallState() {
     // CALLMANAGER BRIDGE: notify CM to clean up before we reset local state
     try {
         var _cmReset = window.__CallManager;
         if (_cmReset) {
-            var _resetId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+            var _resetId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId || window.__CallsCoreShared.callsState.localCallId;
             if (_resetId) {
                 var _resetSession = window.__CallStateMachine && window.__CallStateMachine.getSession(_resetId);
                 if (_resetSession && !_resetSession.isTerminal()) {
@@ -3721,56 +3737,56 @@
                 }
             }
             if (typeof _cmReset._stopCallTimer === 'function') _cmReset._stopCallTimer();
-            _cmTimerDelegated = false;
+            window.__CallsCoreShared._cmTimerDelegated;
         }
     } catch(_crErr) {}
     // FIX-ROOT-CAUSE-45S-FORCE-END: reset the accepted flag here too, or it
     // would stay stuck true for every subsequent call, permanently disabling
     // the no-answer timeout guard's second layer of protection.
     window.__callReceiverAccepted = false;
-    callsState.callActive = false;
-    callsState.callState = 'idle';
-    callsState.activeCallId = null;
-    callsState.activeCall = null;
-    callsState.callType = null;
-    callsState.callParticipants = [];
-    callsState.callStartTime = null;
-    callsState.connectionState = 'new';
-    callsState.signalingState = 'new';
+    window.__CallsCoreShared.callsState.callActive = false;
+    window.__CallsCoreShared.callsState.callState = 'idle';
+    window.__CallsCoreShared.callsState.activeCallId = null;
+    window.__CallsCoreShared.callsState.activeCall = null;
+    window.__CallsCoreShared.callsState.callType = null;
+    window.__CallsCoreShared.callsState.callParticipants = [];
+    window.__CallsCoreShared.callsState.callStartTime = null;
+    window.__CallsCoreShared.callsState.connectionState = 'new';
+    window.__CallsCoreShared.callsState.signalingState = 'new';
     // ✅ FIX: Clear caller flags and pending queues on reset
-    callsState._isCaller = false;
+    window.__CallsCoreShared.callsState._isCaller = false;
     window.__callerCallId = null;
     window.__pendingOfferPayload = null;
     window.__pendingAnswerPayload = null;
 
 
 
-    callsState.callData = null;
+    window.__CallsCoreShared.callsState.callData = null;
 
 
 
-    callsState.pendingCallReturnTo = null;
+    window.__CallsCoreShared.callsState.pendingCallReturnTo = null;
 
 
 
-    callsState.pendingCallSource = null;
+    window.__CallsCoreShared.callsState.pendingCallSource = null;
 
 
 
-    callsState.serverCallId = null;
+    window.__CallsCoreShared.callsState.serverCallId = null;
 
 
 
-    callsState.localCallId = null;
+    window.__CallsCoreShared.callsState.localCallId = null;
     // FIX: clear the handleCallAccepted dedup set (see that function) here
     // so it doesn't grow forever and a fresh call always starts clean.
-    if (callsState._acceptedCallIds) callsState._acceptedCallIds.clear();
+    if (window.__CallsCoreShared.callsState._acceptedCallIds) window.__CallsCoreShared.callsState._acceptedCallIds.clear();
     // FIX: clear the handleCallConnected dedup set (see that function) too.
-    if (callsState._connectedCallIds) callsState._connectedCallIds.clear();
+    if (window.__CallsCoreShared.callsState._connectedCallIds) window.__CallsCoreShared.callsState._connectedCallIds.clear();
     // FIX: clear the handleSignalOffer dedup set (see that function) too.
-    if (callsState._processedOfferKeys) callsState._processedOfferKeys.clear();
-    if (callsState._processedAnswerKeys) callsState._processedAnswerKeys.clear();
-    if (callsState._processedIceKeys) callsState._processedIceKeys.clear();
+    if (window.__CallsCoreShared.callsState._processedOfferKeys) window.__CallsCoreShared.callsState._processedOfferKeys.clear();
+    if (window.__CallsCoreShared.callsState._processedAnswerKeys) window.__CallsCoreShared.callsState._processedAnswerKeys.clear();
+    if (window.__CallsCoreShared.callsState._processedIceKeys) window.__CallsCoreShared.callsState._processedIceKeys.clear();
 
 
 
@@ -3778,15 +3794,15 @@
 
 
 
-    if (callsState.callInvitationTimer) {
+    if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-        clearTimeout(callsState.callInvitationTimer);
+        clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-        callsState.callInvitationTimer = null;
+        window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -3798,11 +3814,11 @@
 
 
 
-    if (MediaManager && MediaManager.stopLocalStream) { try { MediaManager.stopLocalStream(); } catch(e) {} }
+    if (window.__CallsCoreShared.MediaManager && window.__CallsCoreShared.MediaManager.stopLocalStream) { try { window.__CallsCoreShared.MediaManager.stopLocalStream(); } catch(e) {} }
 
 
 
-    if (WebRTCManager && WebRTCManager.close) { try { WebRTCManager.close(); } catch(e) {} }
+    if (window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager.close) { try { window.__CallsCoreShared.WebRTCManager.close(); } catch(e) {} }
 
 
 
@@ -3810,19 +3826,19 @@
 
 
 
-    callsState.remoteStream = null;
+    window.__CallsCoreShared.callsState.remoteStream = null;
 
 
 
-    if (callsState.remoteStreams) callsState.remoteStreams.clear();
+    if (window.__CallsCoreShared.callsState.remoteStreams) window.__CallsCoreShared.callsState.remoteStreams.clear();
 
 
 
-    callsState.iceCandidates = [];
+    window.__CallsCoreShared.callsState.iceCandidates = [];
 
 
 
-    callsState.iceRestartCount = 0;
+    window.__CallsCoreShared.callsState.iceRestartCount = 0;
 
 
 
@@ -3856,8 +3872,8 @@
 
     // Unlock governor transition lock so next call isn't blocked
 
-    if (typeof CallsStateGovernor !== 'undefined' && CallsStateGovernor) {
-        CallsStateGovernor._transitionLock = false;
+    if (typeof window.__CallsCoreShared.CallsStateGovernor !== 'undefined' && window.__CallsCoreShared.CallsStateGovernor) {
+        window.__CallsCoreShared.CallsStateGovernor._transitionLock = false;
     }
 
     // ── PHASE15 FIX-PHASE-C: Post-call UI restoration ──────────────────────
@@ -3883,10 +3899,10 @@
         // Remove in-call body class
         try { document.body.classList.remove('call-screen-active', 'in-call-active'); } catch(_) {}
         // Tell parent frame to restore the pre-call screen
-        var _returnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
+        var _returnTarget = (window.__CallsCoreShared.callsState && (window.__CallsCoreShared.callsState.pendingCallReturnTo || window.__CallsCoreShared.callsState.pendingCallSource)) || 'conversations';
         try {
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _returnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _returnTarget, chatUserId: window.__CallsCoreShared.callsState.pendingCallReturnChatUserId || null, chatUserName: window.__CallsCoreShared.callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
             }
         } catch(_) {}
         console.log('[CallsCore] PHASE15 ✅ Post-call UI restored to: ' + _returnTarget);
@@ -3894,12 +3910,6 @@
         console.warn('[CallsCore] Post-call restore error:', _restoreErr && _restoreErr.message);
     }
     // ── END PHASE15 FIX-PHASE-C ──────────────────────────────────────────────
-}
+};
 
-
-
-
-
-
-
-
+})();

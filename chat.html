@@ -5997,6 +5997,14 @@
                         timestamp: Date.now()
                     };
                     navigateToPage('messages');
+                    // FIX-HEADER-ICON-CONFLICT: navigateToPage('messages') only shows the
+                    // chat LIST — it deliberately never sets chat-panel-active on its own
+                    // (see the comment on that flag inside navigateToPage). Every other
+                    // code path that opens one specific chat sets this flag right after
+                    // navigating; this path was missing it, so #globalHeader (the sidebar's
+                    // own header) stayed visible instead of message.html's chat header,
+                    // making it look like the sidebar's icons had leaked into the chat panel.
+                    document.body.classList.add('chat-panel-active');
                     
                     // Fix infinite loop - use proper counter and acknowledgment
                     if (!window.__dcAttempts) window.__dcAttempts = 0;
@@ -6095,6 +6103,10 @@
                     };
 
                     navigateToPage('messages');
+                    // FIX-HEADER-ICON-CONFLICT: see identical fix/comment on the
+                    // DIRECT_CHAT_REQUEST handler above — this path opens one specific
+                    // chat too, so it needs the same explicit chat-panel-active flag.
+                    document.body.classList.add('chat-panel-active');
 
                     let _srAttempts = 0;
                     const _postStatusReplyOpen = () => {
@@ -6503,6 +6515,9 @@
                         timestamp: Date.now()
                     };
                     navigateToPage('messages');
+                    // FIX-HEADER-ICON-CONFLICT: see identical fix/comment on the
+                    // DIRECT_CHAT_REQUEST handler above.
+                    document.body.classList.add('chat-panel-active');
                     setTimeout(function() {
                         const msgIframe = document.getElementById('messagesIframe');
                         if (msgIframe && msgIframe.contentWindow) {

@@ -174,7 +174,7 @@ import {
     setCurrentCategoryFilter,
     setCurrentSearchTerm
 
-} from './friend-core.js';
+} from './friend-core.ui-bridge.js';
 
 // =============================================
 // [2B] CHAT NAVIGATION FIX - FIXED with proper event
@@ -1989,6 +1989,22 @@ export const updateFriendCounts = function() {
         set('requestsSectionCount', requestArray.length);
         set('sentRequestsCount', sentArray.length);
         set('temporaryCount', temporaryArray.length);
+
+        // SETTINGS WIRING: friends.friendLimitWarning — default true. There was previously no
+        // limit defined anywhere to warn about; FRIEND_SOFT_LIMIT is a client-side soft ceiling
+        // (not backend-enforced) used purely to give the user a heads-up. Warn once per session
+        // at 90% and again at 100%, rather than on every render.
+        if (window.__friendLimitWarning !== false) {
+            const FRIEND_SOFT_LIMIT = 1000;
+            const count = friendArray.length;
+            if (count >= FRIEND_SOFT_LIMIT && !window.__friendLimitWarnedFull) {
+                window.__friendLimitWarnedFull = true;
+                showNotification?.(`You've reached ${FRIEND_SOFT_LIMIT} friends — the app may slow down beyond this point`, 'warning');
+            } else if (count >= Math.floor(FRIEND_SOFT_LIMIT * 0.9) && !window.__friendLimitWarnedNear) {
+                window.__friendLimitWarnedNear = true;
+                showNotification?.(`You're approaching the recommended friend limit (${count}/${FRIEND_SOFT_LIMIT})`, 'info');
+            }
+        }
     } catch(e) {
         console.warn('[updateFriendCounts] Error:', e);
     }
@@ -2336,11 +2352,33 @@ export const renderFriends = function() {
             }
         }
 
+        // SETTINGS WIRING: friends.sortFriendsBy — 'name' | 'status' | 'recent' (default 'recent').
+        // Pinned friends always float to the top regardless of sort mode; that's a separate
+        // feature, not something the sort-order setting is meant to override.
+        const sortMode = window.__sortFriendsBy || 'recent';
+        function lastActivityTime(f) {
+            const t = f.lastSeen || f.lastActive || f.lastInteraction || f.createdAt || 0;
+            const parsed = t ? new Date(t).getTime() : 0;
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
         const sortedFriends = [...friendArray].sort((a, b) => {
             if (!a || !b) return 0;
             const aPinned = pinnedArray.some(f => f && f.id === a.id);
             const bPinned = pinnedArray.some(f => f && f.id === b.id);
             if (aPinned !== bPinned) return bPinned ? 1 : -1;
+
+            if (sortMode === 'name') {
+                return (a.displayName || '').localeCompare(b.displayName || '');
+            }
+
+            if (sortMode === 'recent') {
+                const diff = lastActivityTime(b) - lastActivityTime(a);
+                if (diff !== 0) return diff;
+                return (a.displayName || '').localeCompare(b.displayName || '');
+            }
+
+            // 'status' (also the fallback if an unrecognized value is stored) — online first,
+            // then alphabetical. This was the original hardcoded behavior.
             const aOnline = a.online === true || a.status === 'online';
             const bOnline = b.online === true || b.status === 'online';
             if (aOnline !== bOnline) return bOnline ? 1 : -1;
@@ -3344,6 +3382,11 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             ? getUserOnlineStatusText(friendData) 
             : 'Offline';
 
+        // SETTINGS WIRING: friends.showOnlineStatus — default true. When disabled, hide the
+        // online/offline status dot entirely rather than always rendering it.
+        const showOnlineStatusSetting = window.__showOnlineStatus !== false;
+        const statusDotHtml = showOnlineStatusSetting ? `<div class="friend-status ${statusClass}"></div>` : '';
+
         // Safe last interaction fallback
         const lastInteraction = typeof getLastInteraction === 'function' 
             ? getLastInteraction(friendId) 
@@ -3463,7 +3506,7 @@ function createFriendItemElement(friendData, type, instantMode = false) {
         friendItem.innerHTML = `
             <div class="friend-avatar-wrapper">
                 ${avatarHtml}
-                <div class="friend-status ${statusClass}"></div>
+                ${statusDotHtml}
                 ${categoryBadgeHtml}
             </div>
             <div class="friend-info">
@@ -5387,7 +5430,9 @@ const handleSendFriendRequest = async function() {
             const categorySelect = document.getElementById('friendCategorySelect');
             const category = categorySelect?.value || 'friend';
             const noteInput = document.getElementById('friendNote');
-            const note = noteInput?.value.trim() || '';
+            // SETTINGS WIRING: friends.allowRequestMessage — default true. When disabled, never
+            // send a personal note along with a friend request, even if the field has stale text in it.
+            const note = (window.__allowRequestMessage !== false) ? (noteInput?.value.trim() || '') : '';
             const isBusiness = category === 'business';
 
             const result = await sendFriendRequest(user.id, category, note, false, null, isBusiness);
@@ -6413,6 +6458,18 @@ function initializeUI() {
         }, { once: true });
     }
 
+    // SETTINGS WIRING: friends.allowRequestMessage — default true. Hides the optional note
+    // field on the Add Friend form entirely when the user has turned this off, instead of
+    // silently ignoring whatever they type into it.
+    function applyFriendNoteFieldVisibility() {
+        const noteField = document.getElementById('friendNote');
+        const container = noteField?.closest('.input-group');
+        if (container) {
+            container.style.display = (window.__allowRequestMessage === false) ? 'none' : '';
+        }
+    }
+    applyFriendNoteFieldVisibility();
+
     // Legacy event listeners for backwards compatibility
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
@@ -6424,6 +6481,31 @@ function initializeUI() {
                 void document.documentElement.offsetHeight;
                 document.documentElement.style.display = '';
             }
+        }
+    });
+
+    // SETTINGS WIRING: the friend module previously stored settings changes on `window.__xxx`
+    // but never reacted to them — a change only took effect the next time something else
+    // happened to trigger a render (e.g. switching sections). This makes the friends list,
+    // status dots, and request form respond immediately when a relevant setting changes.
+    window.addEventListener('settingChanged', function(e) {
+        const { section, key } = e.detail || {};
+        if (section !== 'friends') return;
+        if (key === 'sortFriendsBy' || key === 'showOnlineStatus') {
+            renderFriends();
+        }
+        if (key === 'friendLimitWarning') {
+            updateFriendCounts();
+        }
+        if (key === 'allowRequestMessage') {
+            applyFriendNoteFieldVisibility();
+        }
+    });
+    window.addEventListener('settingsUpdated', function(e) {
+        const { settings } = e.detail || {};
+        if (settings && settings.friends && typeof settings.friends === 'object') {
+            renderFriends();
+            updateFriendCounts();
         }
     });
     window.addEventListener('settingsUpdated', function(e) {

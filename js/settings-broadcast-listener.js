@@ -147,6 +147,7 @@
         if (st.whoCanViewMyStatus !== undefined) window.__whoCanViewMyStatus = st.whoCanViewMyStatus;
         if (st.autoExpireStatus !== undefined)   window.__autoExpireStatus   = st.autoExpireStatus;
         if (st.allowStatusReplies !== undefined) window.__allowStatusReplies = st.allowStatusReplies;
+        if (st.showStatusTo !== undefined)       window.__showStatusTo       = st.showStatusTo;
 
         // Store and notify
         window.__cachedSettings = settings;

@@ -4166,7 +4166,10 @@ html, body, .app-container {
 #createStatusModal .composer-topbar-right {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
+    background: rgba(0,0,0,0.4);
+    border-radius: 24px;
+    padding: 4px;
 }
 #createStatusModal .composer-icon-btn {
     width: 40px;

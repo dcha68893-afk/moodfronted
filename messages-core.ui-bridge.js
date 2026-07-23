@@ -1368,6 +1368,32 @@ const UIStateManager = {
                     // Fall through and add it normally so it appears in the current session.
                 }
 
+                // FIX-DM-DECRYPT-AT-WRITE (mirrors FIX-GROUP-ENCRYPTION in group-core.js):
+                // decrypt now, once, and store the plaintext — don't leave the ciphertext
+                // as the message-of-record and re-derive the plaintext on every render.
+                // That render-time-only approach means a message becomes unreadable forever
+                // the moment the E2E session isn't available (e.g. right after an app
+                // restart, before KynectaE2E.init() has a chance to run again) even though
+                // nothing about the message itself changed. Decrypting here means the
+                // stored copy is readable regardless of session state on any later load.
+                if (window.KynectaE2E && window.KynectaE2E.enabled &&
+                    typeof message.content === 'string' &&
+                    message.content.charAt(0) === '{' && message.content.indexOf('"v"') !== -1) {
+                    try {
+                        const _plaintext = await window.KynectaE2E.decryptFromChat(
+                            message.content, chatId, message.senderId
+                        );
+                        if (_plaintext && _plaintext !== message.content &&
+                            _plaintext.indexOf('[Decryption failed') !== 0) {
+                            message.content = _plaintext;
+                            message.encrypted = false;
+                        }
+                        // On failure, leave message.content as the ciphertext envelope —
+                        // messages-ui.js's render-time decrypt still gets a chance to
+                        // retry later (e.g. once the ratchet session catches up).
+                    } catch (_) {}
+                }
+
                 // FIX: always numeric ms — ISO strings compare as NaN in sort
                 const _sca = message.createdAt
                     ? (typeof message.createdAt === 'string' ? new Date(message.createdAt).getTime() : Number(message.createdAt))
@@ -2349,6 +2375,10 @@ function applySettingToMessagesModule(section, key, value) {
         if (key === 'whoCanAddMe') window.__whoCanAddMe = value;
         if (key === 'canMessageMe') window.__canMessageMe = value;
         if (key === 'contactDiscovery') window.__contactDiscovery = value;
+        // FIX-SETTINGS-AUDIT: privacy.messageForwarding is supposed to gate the
+        // messages module's own "forward message" action — it was in the schema
+        // but never read anywhere in this module.
+        if (key === 'messageForwarding') window.__messageForwardingEnabled = value;
     }
     if (section === 'notifications') {
         if (key === 'soundEnabled' || key === 'notificationSound') window.__notificationSoundEnabled = value;
@@ -2358,6 +2388,13 @@ function applySettingToMessagesModule(section, key, value) {
         if (key === 'callNotifications') window.__callNotificationsEnabled = value;
         if (key === 'mentionNotifications') window.__mentionNotificationsEnabled = value;
         if (key === 'desktopEnabled') window.__desktopNotificationsEnabled = value;
+        // FIX-SETTINGS-AUDIT: these 3 exist in the settings schema
+        // (notifications.enabled / .popupNotifications / .doNotDisturb) but the
+        // messages module never read any of them — a master "notifications off"
+        // or an active Do Not Disturb window had no effect on message notifications.
+        if (key === 'enabled') window.__notificationsMasterEnabled = value;
+        if (key === 'popupNotifications') window.__popupNotificationsEnabled = value;
+        if (key === 'doNotDisturb') window.__doNotDisturb = value;
     }
     if (section === 'chat') {
         if (key === 'enterToSend' || key === 'enterKeySends') window.__enterToSend = value;
@@ -2378,6 +2415,28 @@ function applySettingToMessagesModule(section, key, value) {
         if (key === 'messageHistory') window.__messageHistory = value;
         if (key === 'showReadReceipts') { window.__readReceiptsEnabled = value; document.documentElement.setAttribute('data-read-receipts', value ? 'true' : 'false'); }
         if (key === 'allowReactions') { window.__allowReactions = value; document.documentElement.setAttribute('data-allow-reactions', value ? 'true' : 'false'); }
+        // FIX-SETTINGS-AUDIT: these were all in the chat settings schema but
+        // never read anywhere in the messages module.
+        if (key === 'mediaDownload') window.__mediaDownloadPref = value; // 'wifi' | 'always' | 'never'
+        if (key === 'saveMedia') window.__saveMediaToDevice = value;
+        if (key === 'disappearingMessages') {
+            window.__disappearingMessages = value; // 'off' | '24h' | '7d' | ...
+            document.documentElement.setAttribute('data-disappearing-messages', value);
+        }
+        // chat.aiFeatures is a nested object — SETTINGS_UPDATED delivers it as a
+        // single key ('aiFeatures') whose value is the whole sub-object, while a
+        // single-toggle SETTING_CHANGED may deliver it as a dotted key
+        // ('aiFeatures.smartReplies'). Handle both shapes.
+        if (key === 'aiFeatures' && value && typeof value === 'object') {
+            window.__aiSmartReplies       = value.smartReplies;
+            window.__aiMessageTranslation = value.messageTranslation;
+            window.__aiChatSummarization  = value.chatSummarization;
+            window.__aiSpamDetection      = value.spamDetection;
+        }
+        if (key === 'aiFeatures.smartReplies')       window.__aiSmartReplies       = value;
+        if (key === 'aiFeatures.messageTranslation')  window.__aiMessageTranslation = value;
+        if (key === 'aiFeatures.chatSummarization')   window.__aiChatSummarization  = value;
+        if (key === 'aiFeatures.spamDetection')       window.__aiSpamDetection      = value;
     }
     if (section === 'profile') {
         if (key === 'displayName') window.__currentUserDisplayName = value;

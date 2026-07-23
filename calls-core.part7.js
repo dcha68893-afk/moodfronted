@@ -1,4 +1,20 @@
-﻿/**
+/**
+ * calls-core.part7.js — PART 7/8 — RELIABILITY & ORCHESTRATION
+ * Reliability engine, recovery manager, compatibility bridge, diagnostics agent, multi-module coordinator, navigation guard, lifecycle controller, session pipeline, and another set of real call-signaling handlers used during orchestration.
+ *
+ * This file is SELF-CONTAINED: it runs in its own IIFE and shares state with
+ * the other 7 calls-core.partN.js files through window.__CallsCoreShared, not
+ * through a JS closure. Load all 8 files, in numeric order, as plain classic
+ * <script> tags (no type="module", no defer/async) — see calls.html.
+ */
+(function () {
+
+    'use strict';
+
+    var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
+    if (__CC.__aborted) { return; }
+
+/**
  * PART 7/8 — RELIABILITY & ORCHESTRATION
  * Reliability engine, recovery manager, compatibility bridge, diagnostics agent, multi-module coordinator, navigation guard, lifecycle controller, session pipeline, and another set of real call-signaling handlers used during orchestration.
  *
@@ -12,7 +28,7 @@
 
 
 
-    const ReliabilityEngine = {
+    window.__CallsCoreShared.ReliabilityEngine = {
 
 
 
@@ -60,7 +76,7 @@
 
 
 
-            logReady(MODULE, 'ReliabilityEngine initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'ReliabilityEngine initialized');
 
 
 
@@ -328,7 +344,7 @@
 
 
 
-                            logWarn(MODULE, 'Offline operation failed', { type: operation.type });
+                            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Offline operation failed', { type: operation.type });
 
 
 
@@ -344,7 +360,7 @@
 
 
 
-                    logWarn(MODULE, 'Offline operation error', e);
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Offline operation error', e);
 
 
 
@@ -640,7 +656,7 @@
 
 
 
-    ReliabilityEngine.initialize();
+    window.__CallsCoreShared.ReliabilityEngine.initialize();
 
 
 
@@ -652,7 +668,7 @@
 
 
 
-    const RecoveryManager = {
+    window.__CallsCoreShared.RecoveryManager = {
 
 
 
@@ -712,7 +728,7 @@
 
 
 
-            logReady(MODULE, 'RecoveryManager initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'RecoveryManager initialized');
 
 
 
@@ -748,11 +764,11 @@
 
 
 
-                state: StateGovernor.getState(),
+                state: window.__CallsCoreShared.StateGovernor.getState(),
 
 
 
-                sessionValid: IframeSessionClient.isValid(),
+                sessionValid: window.__CallsCoreShared.IframeSessionClient.isValid(),
 
 
 
@@ -796,7 +812,7 @@
 
 
 
-            logInfo(MODULE, `Checkpoint created: ${name}`);
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Checkpoint created: ${name}`);
 
 
 
@@ -840,7 +856,7 @@
 
 
 
-                SafeStorage.set('checkpoint', safeCheckpoint);
+                window.__CallsCoreShared.SafeStorage.set('checkpoint', safeCheckpoint);
 
 
 
@@ -864,7 +880,7 @@
 
 
 
-                SafeStorage.get('checkpoint').then(stored => {
+                window.__CallsCoreShared.SafeStorage.get('checkpoint').then(stored => {
 
 
 
@@ -876,7 +892,7 @@
 
 
 
-                        logInfo(MODULE, 'Loaded last checkpoint', stored);
+                        window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Loaded last checkpoint', stored);
 
 
 
@@ -892,7 +908,7 @@
 
 
 
-                logWarn(MODULE, 'Failed to load checkpoint', error);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Failed to load checkpoint', error);
 
 
 
@@ -940,7 +956,7 @@
 
 
 
-                logWarn(MODULE, 'Max recovery attempts reached');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Max recovery attempts reached');
 
 
 
@@ -968,7 +984,7 @@
 
 
 
-            logInfo(MODULE, `Starting recovery (attempt ${this._recoveryAttempts})`);
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Starting recovery (attempt ${this._recoveryAttempts})`);
 
 
 
@@ -992,7 +1008,7 @@
 
 
 
-                        logWarn(MODULE, 'Recovery: Offline, waiting for network');
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Recovery: Offline, waiting for network');
 
 
 
@@ -1012,7 +1028,7 @@
 
 
 
-                        logWarn(MODULE, 'Recovery: No parent window');
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Recovery: No parent window');
 
 
 
@@ -1036,11 +1052,11 @@
 
 
 
-                    safeSend('RECOVERY_REQUEST', {
+                    window.__CallsCoreShared.safeSend('RECOVERY_REQUEST', {
 
 
 
-                        module: MODULE_NAME,
+                        module: window.__CallsCoreShared.MODULE_NAME,
 
 
 
@@ -1060,7 +1076,7 @@
 
 
 
-                    logInfo(MODULE, 'Recovery request sent, waiting for parent');
+                    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Recovery request sent, waiting for parent');
 
 
 
@@ -1080,7 +1096,7 @@
 
 
 
-                    logSuccess(MODULE, 'Recovery request sent');
+                    window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Recovery request sent');
 
 
 
@@ -1104,7 +1120,7 @@
 
 
 
-                    logError(MODULE, 'Recovery failed', error);
+                    window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Recovery failed', error);
 
 
 
@@ -1240,7 +1256,7 @@
 
 
 
-                if (currentState !== LifecycleState.ACTIVE && !callsState.inPassiveMode) {
+                if (window.__CallsCoreShared.currentState !== window.__CallsCoreShared.LifecycleState.ACTIVE && !window.__CallsCoreShared.callsState.inPassiveMode) {
 
 
 
@@ -1412,7 +1428,7 @@
 
 
 
-    RecoveryManager.initialize();
+    window.__CallsCoreShared.RecoveryManager.initialize();
 
 
 
@@ -1424,7 +1440,7 @@
 
 
 
-    const CompatibilityBridge = {
+    window.__CallsCoreShared.CompatibilityBridge = {
 
 
 
@@ -1440,7 +1456,7 @@
 
 
 
-        _version: CONFIG.VERSION,
+        _version: window.__CallsCoreShared.CONFIG.VERSION,
 
 
 
@@ -1484,7 +1500,7 @@
 
 
 
-                    logInfo(MODULE, 'Modern parent protocol detected', { version: parentProtocol });
+                    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Modern parent protocol detected', { version: parentProtocol });
 
 
 
@@ -1524,7 +1540,7 @@
 
 
 
-            logInfo(MODULE, `Compatibility bridge: ${this._legacyMode ? 'legacy' : 'modern'} mode`);
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Compatibility bridge: ${this._legacyMode ? 'legacy' : 'modern'} mode`);
 
 
 
@@ -1632,7 +1648,7 @@
 
 
 
-    CompatibilityBridge.detect();
+    window.__CallsCoreShared.CompatibilityBridge.detect();
 
 
 
@@ -1644,7 +1660,7 @@
 
 
 
-    const DiagnosticsAgent = {
+    window.__CallsCoreShared.DiagnosticsAgent = {
 
 
 
@@ -1776,7 +1792,7 @@
 
 
 
-            logInfo(MODULE, 'DiagnosticsAgent enabled');
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'DiagnosticsAgent enabled');
 
 
 
@@ -1960,11 +1976,11 @@
 
 
 
-                    coreState: StateGovernor.getState(),
+                    coreState: window.__CallsCoreShared.StateGovernor.getState(),
 
 
 
-                    sessionValid: IframeSessionClient.isValid(),
+                    sessionValid: window.__CallsCoreShared.IframeSessionClient.isValid(),
 
 
 
@@ -1976,23 +1992,23 @@
 
 
 
-                    v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
+                    v5State: window.__CallsCoreShared.V5StateGovernor ? window.__CallsCoreShared.V5StateGovernor.getState() : 'unknown',
 
 
 
-                    tokenValid: !!callsState.token,
+                    tokenValid: !!window.__CallsCoreShared.callsState.token,
 
 
 
-                    lifecycleState: currentState,
+                    lifecycleState: window.__CallsCoreShared.currentState,
 
 
 
-                    callActive: callsState.callActive,
+                    callActive: window.__CallsCoreShared.callsState.callActive,
 
 
 
-                    callState: callsState.callState,
+                    callState: window.__CallsCoreShared.callsState.callState,
 
 
 
@@ -2060,11 +2076,11 @@
 
 
 
-                    coreState: StateGovernor.getState(),
+                    coreState: window.__CallsCoreShared.StateGovernor.getState(),
 
 
 
-                    sessionValid: IframeSessionClient.isValid(),
+                    sessionValid: window.__CallsCoreShared.IframeSessionClient.isValid(),
 
 
 
@@ -2076,23 +2092,23 @@
 
 
 
-                    v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
+                    v5State: window.__CallsCoreShared.V5StateGovernor ? window.__CallsCoreShared.V5StateGovernor.getState() : 'unknown',
 
 
 
-                    tokenValid: !!callsState.token,
+                    tokenValid: !!window.__CallsCoreShared.callsState.token,
 
 
 
-                    lifecycleState: currentState,
+                    lifecycleState: window.__CallsCoreShared.currentState,
 
 
 
-                    callActive: callsState.callActive,
+                    callActive: window.__CallsCoreShared.callsState.callActive,
 
 
 
-                    callState: callsState.callState,
+                    callState: window.__CallsCoreShared.callsState.callState,
 
 
 
@@ -2104,11 +2120,11 @@
 
 
 
-                environment: { environment: ENVIRONMENT.current },
+                environment: { environment: window.__CallsCoreShared.ENVIRONMENT.current },
 
 
 
-                transport: IframeTransport.getStatus(),
+                transport: window.__CallsCoreShared.IframeTransport.getStatus(),
 
 
 
@@ -2116,7 +2132,7 @@
 
 
 
-                session: IframeSessionClient.isValid() ? {
+                session: window.__CallsCoreShared.IframeSessionClient.isValid() ? {
 
 
 
@@ -2124,7 +2140,7 @@
 
 
 
-                    timeRemaining: IframeSessionClient.getTimeRemaining()
+                    timeRemaining: window.__CallsCoreShared.IframeSessionClient.getTimeRemaining()
 
 
 
@@ -2132,7 +2148,7 @@
 
 
 
-                recovery: RecoveryManager.getStatus(),
+                recovery: window.__CallsCoreShared.RecoveryManager.getStatus(),
 
 
 
@@ -2140,19 +2156,19 @@
 
 
 
-                    ...callsState,
+                    ...window.__CallsCoreShared.callsState,
 
 
 
-                    localStream: !!callsState.localStream,
+                    localStream: !!window.__CallsCoreShared.callsState.localStream,
 
 
 
-                    remoteStream: !!callsState.remoteStream,
+                    remoteStream: !!window.__CallsCoreShared.callsState.remoteStream,
 
 
 
-                    remoteStreams: callsState.remoteStreams.size
+                    remoteStreams: window.__CallsCoreShared.callsState.remoteStreams.size
 
 
 
@@ -2220,11 +2236,11 @@
 
 
 
-                    coreState: StateGovernor.getState(),
+                    coreState: window.__CallsCoreShared.StateGovernor.getState(),
 
 
 
-                    sessionValid: IframeSessionClient.isValid(),
+                    sessionValid: window.__CallsCoreShared.IframeSessionClient.isValid(),
 
 
 
@@ -2236,23 +2252,23 @@
 
 
 
-                    v5State: V5StateGovernor ? V5StateGovernor.getState() : 'unknown',
+                    v5State: window.__CallsCoreShared.V5StateGovernor ? window.__CallsCoreShared.V5StateGovernor.getState() : 'unknown',
 
 
 
-                    tokenValid: !!callsState.token,
+                    tokenValid: !!window.__CallsCoreShared.callsState.token,
 
 
 
-                    lifecycleState: currentState,
+                    lifecycleState: window.__CallsCoreShared.currentState,
 
 
 
-                    callActive: callsState.callActive,
+                    callActive: window.__CallsCoreShared.callsState.callActive,
 
 
 
-                    callState: callsState.callState,
+                    callState: window.__CallsCoreShared.callsState.callState,
 
 
 
@@ -2264,15 +2280,15 @@
 
 
 
-                environment: { environment: ENVIRONMENT.current },
+                environment: { environment: window.__CallsCoreShared.ENVIRONMENT.current },
 
 
 
-                transport: IframeTransport.getStatus(),
+                transport: window.__CallsCoreShared.IframeTransport.getStatus(),
 
 
 
-                session: IframeSessionClient.isValid() ? {
+                session: window.__CallsCoreShared.IframeSessionClient.isValid() ? {
 
 
 
@@ -2280,7 +2296,7 @@
 
 
 
-                    timeRemaining: IframeSessionClient.getTimeRemaining()
+                    timeRemaining: window.__CallsCoreShared.IframeSessionClient.getTimeRemaining()
 
 
 
@@ -2288,7 +2304,7 @@
 
 
 
-                recovery: RecoveryManager.getStatus(),
+                recovery: window.__CallsCoreShared.RecoveryManager.getStatus(),
 
 
 
@@ -2296,19 +2312,19 @@
 
 
 
-                    ...callsState,
+                    ...window.__CallsCoreShared.callsState,
 
 
 
-                    localStream: !!callsState.localStream,
+                    localStream: !!window.__CallsCoreShared.callsState.localStream,
 
 
 
-                    remoteStream: !!callsState.remoteStream,
+                    remoteStream: !!window.__CallsCoreShared.callsState.remoteStream,
 
 
 
-                    remoteStreams: callsState.remoteStreams.size
+                    remoteStreams: window.__CallsCoreShared.callsState.remoteStreams.size
 
 
 
@@ -2444,7 +2460,7 @@
 
 
 
-    if (window.__IFRAME_DEBUG__) DiagnosticsAgent.enable();
+    if (window.__IFRAME_DEBUG__) window.__CallsCoreShared.DiagnosticsAgent.enable();
 
 
 
@@ -2456,7 +2472,7 @@
 
 
 
-    const MultiModuleCoordinator = {
+    window.__CallsCoreShared.MultiModuleCoordinator = {
 
 
 
@@ -2492,63 +2508,63 @@
 
 
 
-                environment: ENVIRONMENT,
+                environment: window.__CallsCoreShared.ENVIRONMENT,
 
 
 
-                storage: SafeStorage,
+                storage: window.__CallsCoreShared.SafeStorage,
 
 
 
-                transport: IframeTransport,
+                transport: window.__CallsCoreShared.IframeTransport,
 
 
 
-                session: IframeSessionClient,
+                session: window.__CallsCoreShared.IframeSessionClient,
 
 
 
-                reliability: ReliabilityEngine,
+                reliability: window.__CallsCoreShared.ReliabilityEngine,
 
 
 
-                recovery: RecoveryManager,
+                recovery: window.__CallsCoreShared.RecoveryManager,
 
 
 
-                compatibility: CompatibilityBridge,
+                compatibility: window.__CallsCoreShared.CompatibilityBridge,
 
 
 
-                diagnostics: DiagnosticsAgent,
+                diagnostics: window.__CallsCoreShared.DiagnosticsAgent,
 
 
 
-                origin: OriginSecurity,
+                origin: window.__CallsCoreShared.OriginSecurity,
 
 
 
-                state: StateGovernor,
+                state: window.__CallsCoreShared.StateGovernor,
 
 
 
-                v5State: V5StateGovernor,
+                v5State: window.__CallsCoreShared.V5StateGovernor,
 
 
 
-                callsState: callsState,
+                callsState: window.__CallsCoreShared.callsState,
 
 
 
-                webRTC: WebRTCManager,
+                webRTC: window.__CallsCoreShared.WebRTCManager,
 
 
 
-                media: MediaManager,
+                media: window.__CallsCoreShared.MediaManager,
 
 
 
-                callsGovernor: CallsStateGovernor
+                callsGovernor: window.__CallsCoreShared.CallsStateGovernor
 
 
 
@@ -2564,7 +2580,7 @@
 
 
 
-            logReady(MODULE, 'MultiModuleCoordinator initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'MultiModuleCoordinator initialized');
 
 
 
@@ -2592,7 +2608,7 @@
 
 
 
-                logWarn(MODULE, `Module ${name} already registered, overriding`);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, `Module ${name} already registered, overriding`);
 
 
 
@@ -2604,7 +2620,7 @@
 
 
 
-            logInfo(MODULE, `Module registered: ${name}`);
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Module registered: ${name}`);
 
 
 
@@ -2744,7 +2760,7 @@
 
 
 
-    MultiModuleCoordinator.initialize();
+    window.__CallsCoreShared.MultiModuleCoordinator.initialize();
 
 
 
@@ -2760,7 +2776,7 @@
 
 
 
-const UIFailsafe = {
+window.__CallsCoreShared.UIFailsafe = {
 
 
 
@@ -2812,7 +2828,7 @@ const UIFailsafe = {
 
 
 
-        logReady(MODULE, 'UIFailsafe initialized');
+        window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'UIFailsafe initialized');
 
 
 
@@ -3596,7 +3612,7 @@ _escapeHtml: function(text) {
 
 
 
-        logWarn(MODULE, 'UI fallback mode enabled');
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'UI fallback mode enabled');
 
 
 
@@ -3628,7 +3644,7 @@ _escapeHtml: function(text) {
 
 
 
-        logInfo(MODULE, 'UI fallback mode disabled');
+        window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'UI fallback mode disabled');
 
 
 
@@ -3952,7 +3968,7 @@ _escapeHtml: function(text) {
 
 
 
-    UIFailsafe.initialize();
+    window.__CallsCoreShared.UIFailsafe.initialize();
 
 
 
@@ -4000,11 +4016,11 @@ _escapeHtml: function(text) {
 
 
 
-            if (typeof UIFailsafe !== 'undefined' && UIFailsafe && typeof UIFailsafe.showFallbackMessage === 'function') {
+            if (typeof window.__CallsCoreShared.UIFailsafe !== 'undefined' && window.__CallsCoreShared.UIFailsafe && typeof window.__CallsCoreShared.UIFailsafe.showFallbackMessage === 'function') {
 
 
 
-                UIFailsafe.showFallbackMessage(message, type);
+                window.__CallsCoreShared.UIFailsafe.showFallbackMessage(message, type);
 
 
 
@@ -4112,7 +4128,7 @@ _escapeHtml: function(text) {
 
 
 
-    const NavigationGuard = {
+    window.__CallsCoreShared.NavigationGuard = {
 
 
 
@@ -4148,7 +4164,7 @@ _escapeHtml: function(text) {
 
 
 
-            logReady(MODULE, 'NavigationGuard initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'NavigationGuard initialized');
 
 
 
@@ -4308,7 +4324,7 @@ _escapeHtml: function(text) {
 
 
 
-            return callsState.callActive === true;
+            return window.__CallsCoreShared.callsState.callActive === true;
 
 
 
@@ -4500,7 +4516,7 @@ _escapeHtml: function(text) {
 
 
 
-                blockActive: callsState.callActive
+                blockActive: window.__CallsCoreShared.callsState.callActive
 
 
 
@@ -4520,7 +4536,7 @@ _escapeHtml: function(text) {
 
 
 
-    NavigationGuard.initialize();
+    window.__CallsCoreShared.NavigationGuard.initialize();
 
 
 
@@ -4532,7 +4548,7 @@ _escapeHtml: function(text) {
 
 
 
-    const LifecycleController = {
+    window.__CallsCoreShared.LifecycleController = {
 
 
 
@@ -4588,7 +4604,7 @@ _escapeHtml: function(text) {
 
 
 
-            logReady(MODULE, 'LifecycleController initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'LifecycleController initialized');
 
 
 
@@ -4628,7 +4644,7 @@ _escapeHtml: function(text) {
 
 
 
-                logWarn(MODULE, 'Pipeline already running, waiting');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Pipeline already running, waiting');
 
 
 
@@ -4680,7 +4696,7 @@ _escapeHtml: function(text) {
 
 
 
-                logWarn(MODULE, 'Max pipeline attempts reached, completing');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Max pipeline attempts reached, completing');
 
 
 
@@ -4748,7 +4764,7 @@ _escapeHtml: function(text) {
 
 
 
-                logInfo(MODULE, 'Starting deterministic pipeline');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Starting deterministic pipeline');
 
 
 
@@ -4756,7 +4772,7 @@ _escapeHtml: function(text) {
 
 
 
-                StateGovernor.enableTransitions();
+                window.__CallsCoreShared.StateGovernor.enableTransitions();
 
 
 
@@ -4764,7 +4780,7 @@ _escapeHtml: function(text) {
 
 
 
-                const pipelineResult = await SessionPipeline.run();
+                const pipelineResult = await window.__CallsCoreShared.SessionPipeline.run();
 
 
 
@@ -4792,7 +4808,7 @@ _escapeHtml: function(text) {
 
 
 
-                    logSuccess(MODULE, `Deterministic pipeline completed in ${pipelineResult.duration || 0}ms`, { degraded: pipelineResult.degraded });
+                    window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, `Deterministic pipeline completed in ${pipelineResult.duration || 0}ms`, { degraded: pipelineResult.degraded });
 
 
 
@@ -4812,11 +4828,11 @@ _escapeHtml: function(text) {
 
 
 
-                            version: CONFIG.VERSION,
+                            version: window.__CallsCoreShared.CONFIG.VERSION,
 
 
 
-                            environment: ENVIRONMENT.current,
+                            environment: window.__CallsCoreShared.ENVIRONMENT.current,
 
 
 
@@ -4864,7 +4880,7 @@ _escapeHtml: function(text) {
 
 
 
-                logError(MODULE, 'Pipeline execution failed', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Pipeline execution failed', error);
 
 
 
@@ -4872,11 +4888,11 @@ _escapeHtml: function(text) {
 
 
 
-                StateGovernor._currentState = STATE.ERROR_FATAL;
+                window.__CallsCoreShared.StateGovernor._currentState = window.__CallsCoreShared.STATE.ERROR_FATAL;
 
 
 
-                RecoveryManager.scheduleRecovery();
+                window.__CallsCoreShared.RecoveryManager.scheduleRecovery();
 
 
 
@@ -4900,7 +4916,7 @@ _escapeHtml: function(text) {
 
 
 
-                StateGovernor.disableTransitions();
+                window.__CallsCoreShared.StateGovernor.disableTransitions();
 
 
 
@@ -5068,7 +5084,7 @@ _escapeHtml: function(text) {
 
 
 
-    LifecycleController.initialize();
+    window.__CallsCoreShared.LifecycleController.initialize();
 
 
 
@@ -5080,7 +5096,7 @@ _escapeHtml: function(text) {
 
 
 
-    const SessionPipeline = {
+    window.__CallsCoreShared.SessionPipeline = {
 
 
 
@@ -5172,7 +5188,7 @@ _escapeHtml: function(text) {
 
 
 
-            logReady(MODULE, 'SessionPipeline initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'SessionPipeline initialized');
 
 
 
@@ -5232,7 +5248,7 @@ _escapeHtml: function(text) {
 
 
 
-                logPipeline(MODULE, 'pipeline', 'already in progress');
+                logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'already in progress');
 
 
 
@@ -5252,7 +5268,7 @@ _escapeHtml: function(text) {
 
 
 
-                logPipeline(MODULE, 'pipeline', 'already completed', { degraded: this._pipelineDegraded });
+                logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'already completed', { degraded: this._pipelineDegraded });
 
 
 
@@ -5284,7 +5300,7 @@ _escapeHtml: function(text) {
 
 
 
-            logPipeline(MODULE, 'pipeline', 'start');
+            logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'start');
 
 
 
@@ -5308,7 +5324,7 @@ _escapeHtml: function(text) {
 
 
 
-                logPipeline(MODULE, stage, 'start');
+                logPipeline(window.__CallsCoreShared.MODULE, stage, 'start');
 
 
 
@@ -5332,7 +5348,7 @@ _escapeHtml: function(text) {
 
 
 
-                    logPipeline(MODULE, stage, 'success', { attempt: stageResult.attempt });
+                    logPipeline(window.__CallsCoreShared.MODULE, stage, 'success', { attempt: stageResult.attempt });
 
 
 
@@ -5340,7 +5356,7 @@ _escapeHtml: function(text) {
 
 
 
-                    logPipeline(MODULE, stage, 'fail', { attempt: stageResult.attempt, error: stageResult.error });
+                    logPipeline(window.__CallsCoreShared.MODULE, stage, 'fail', { attempt: stageResult.attempt, error: stageResult.error });
 
 
 
@@ -5360,7 +5376,7 @@ _escapeHtml: function(text) {
 
 
 
-                        logPipeline(MODULE, 'pipeline', 'critical failure', { stage });
+                        logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'critical failure', { stage });
 
 
 
@@ -5392,7 +5408,7 @@ _escapeHtml: function(text) {
 
 
 
-                        logPipeline(MODULE, 'pipeline', 'continuing in degraded mode', { stage });
+                        logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'continuing in degraded mode', { stage });
 
 
 
@@ -5400,7 +5416,7 @@ _escapeHtml: function(text) {
 
 
 
-                        logPipeline(MODULE, 'pipeline', 'continuing despite failure', { stage });
+                        logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'continuing despite failure', { stage });
 
 
 
@@ -5444,7 +5460,7 @@ _escapeHtml: function(text) {
 
 
 
-            logPipeline(MODULE, 'pipeline', 'complete', { 
+            logPipeline(window.__CallsCoreShared.MODULE, 'pipeline', 'complete', { 
 
 
 
@@ -5524,7 +5540,7 @@ _escapeHtml: function(text) {
 
 
 
-                logWarn(MODULE, 'Preflight: missing capabilities', { missing });
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Preflight: missing capabilities', { missing });
 
 
 
@@ -5684,7 +5700,7 @@ _escapeHtml: function(text) {
 
 
 
-            logInfo(MODULE, 'Parent detection', { parentDetected, sameOrigin, parentOrigin });
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Parent detection', { parentDetected, sameOrigin, parentOrigin });
 
 
 
@@ -5732,7 +5748,7 @@ _escapeHtml: function(text) {
 
 
 
-                sendChildReady();
+                window.__CallsCoreShared.sendChildReady();
 
 
 
@@ -5744,7 +5760,7 @@ _escapeHtml: function(text) {
 
 
 
-                logError(MODULE, 'Handshake failed', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Handshake failed', error);
 
 
 
@@ -5768,11 +5784,11 @@ _escapeHtml: function(text) {
 
 
 
-            if (IframeSessionClient && IframeSessionClient.isValid()) {
+            if (window.__CallsCoreShared.IframeSessionClient && window.__CallsCoreShared.IframeSessionClient.isValid()) {
 
 
 
-                logSession(MODULE, 'already valid');
+                window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'already valid');
 
 
 
@@ -5792,7 +5808,7 @@ _escapeHtml: function(text) {
 
 
 
-                SessionClient.requestSession();
+                window.__CallsCoreShared.SessionClient.requestSession();
 
 
 
@@ -5800,7 +5816,7 @@ _escapeHtml: function(text) {
 
 
 
-                const sessionResult = await StateGovernor.waitForSession(5000);
+                const sessionResult = await window.__CallsCoreShared.StateGovernor.waitForSession(5000);
 
 
 
@@ -5812,7 +5828,7 @@ _escapeHtml: function(text) {
 
 
 
-                    logSession(MODULE, 'acquired');
+                    window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'acquired');
 
 
 
@@ -5828,7 +5844,7 @@ _escapeHtml: function(text) {
 
 
 
-                logSession(MODULE, 'failed', error.message);
+                window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'failed', error.message);
 
 
 
@@ -6092,7 +6108,7 @@ _escapeHtml: function(text) {
 
 
 
-        console.log(`[${module}] ${icon} Pipeline stage: ${stage} - ${status}`, data ? data : '', _buildStructuredLog(module, `pipeline:${stage}:${status}`, data));
+        console.log(`[${module}] ${icon} Pipeline stage: ${stage} - ${status}`, data ? data : '', window.__CallsCoreShared._buildStructuredLog(module, `pipeline:${stage}:${status}`, data));
 
 
 
@@ -6104,7 +6120,7 @@ _escapeHtml: function(text) {
 
 
 
-    SessionPipeline.initialize();
+    window.__CallsCoreShared.SessionPipeline.initialize();
 
 
 
@@ -6120,32 +6136,32 @@ _escapeHtml: function(text) {
 
 
 
-    function handleIncomingCall(callData) {
+    window.__CallsCoreShared.handleIncomingCall = function handleIncomingCall(callData) {
 
         // ── FIX: Capture the receiver's origin page (tagged by chat.html as
         // _receiverReturnTo) so that after this call ends, POST_CALL_RESTORE
         // navigates back to where the receiver actually was — not always
         // 'conversations'/'messages'. Only set once per call (first message wins).
         try {
-            if (callData && callData._receiverReturnTo && !callsState.pendingCallReturnTo) {
-                callsState.pendingCallReturnTo = callData._receiverReturnTo;
+            if (callData && callData._receiverReturnTo && !window.__CallsCoreShared.callsState.pendingCallReturnTo) {
+                window.__CallsCoreShared.callsState.pendingCallReturnTo = callData._receiverReturnTo;
             }
             // FIX (call-end return navigation — receiver side): also carry the
             // SPECIFIC chat that was open, if any, so returning after the call
             // reopens that exact conversation instead of just the chat list.
-            if (callData && callData._receiverReturnChatUserId && !callsState.pendingCallReturnChatUserId) {
-                callsState.pendingCallReturnChatUserId = callData._receiverReturnChatUserId;
-                callsState.pendingCallReturnChatName = callData._receiverReturnChatName || null;
+            if (callData && callData._receiverReturnChatUserId && !window.__CallsCoreShared.callsState.pendingCallReturnChatUserId) {
+                window.__CallsCoreShared.callsState.pendingCallReturnChatUserId = callData._receiverReturnChatUserId;
+                window.__CallsCoreShared.callsState.pendingCallReturnChatName = callData._receiverReturnChatName || null;
             }
         } catch (_e) {}
 
         // ── Multi-tab guard: only the leader tab handles incoming calls ────────
         // Other tabs suppress the UI but keep the call record for history.
-        if (typeof _isActiveCallTab === 'function' && !_isActiveCallTab()) {
-            logInfo(MODULE, '[multi-tab] Suppressing call:incoming — not the active call tab');
+        if (typeof window.__CallsCoreShared._isActiveCallTab === 'function' && !window.__CallsCoreShared._isActiveCallTab()) {
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, '[multi-tab] Suppressing call:incoming — not the active call tab');
             // Notify the call broadcast channel so the leader knows another tab received it
-            if (_callBroadcast) {
-                try { _callBroadcast.postMessage({ type: 'CALL_INCOMING_SUPPRESSED', callId: callData && callData.callId, tabId: _tabId }); } catch(_e) {}
+            if (window.__CallsCoreShared._callBroadcast) {
+                try { window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_INCOMING_SUPPRESSED', callId: callData && callData.callId, tabId: window.__CallsCoreShared._tabId }); } catch(_e) {}
             }
             return;
         }
@@ -6153,7 +6169,7 @@ _escapeHtml: function(text) {
 
 
 
-        logCall(MODULE, 'handleIncomingCall', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleIncomingCall', callData);
 
 
 
@@ -6173,7 +6189,7 @@ _escapeHtml: function(text) {
 
 
 
-            state: currentState
+            state: window.__CallsCoreShared.currentState
 
 
 
@@ -6197,15 +6213,15 @@ _escapeHtml: function(text) {
 
 
 
-        const blockedStates = [LifecycleState.BOOT, LifecycleState.INITIALIZING];
+        const blockedStates = [window.__CallsCoreShared.LifecycleState.BOOT, window.__CallsCoreShared.LifecycleState.INITIALIZING];
 
 
 
-        if (blockedStates.includes(currentState)) {
+        if (blockedStates.includes(window.__CallsCoreShared.currentState)) {
 
 
 
-            logWarn(MODULE, `Incoming call ignored — module not yet initialised (state: ${currentState})`);
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, `Incoming call ignored — module not yet initialised (state: ${window.__CallsCoreShared.currentState})`);
 
 
 
@@ -6233,11 +6249,11 @@ _escapeHtml: function(text) {
 
 
 
-        if (currentState !== LifecycleState.ACTIVE) {
+        if (window.__CallsCoreShared.currentState !== window.__CallsCoreShared.LifecycleState.ACTIVE) {
 
 
 
-            const sess = callsState.session || (CallsStateGovernor && CallsStateGovernor._session);
+            const sess = window.__CallsCoreShared.callsState.session || (window.__CallsCoreShared.CallsStateGovernor && window.__CallsCoreShared.CallsStateGovernor._session);
 
 
 
@@ -6245,11 +6261,11 @@ _escapeHtml: function(text) {
 
 
 
-                logWarn(MODULE, `Auto-promoting ${currentState} → ACTIVE to handle incoming call`);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, `Auto-promoting ${window.__CallsCoreShared.currentState} → ACTIVE to handle incoming call`);
 
 
 
-                currentState = LifecycleState.ACTIVE;
+                window.__CallsCoreShared.currentStatered.LifecycleState.ACTIVE;
 
 
 
@@ -6257,7 +6273,7 @@ _escapeHtml: function(text) {
 
 
 
-                logWarn(MODULE, `Cannot auto-promote — no valid session (state: ${currentState}). Incoming call dropped.`);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, `Cannot auto-promote — no valid session (state: ${window.__CallsCoreShared.currentState}). Incoming call dropped.`);
 
 
 
@@ -6285,7 +6301,7 @@ _escapeHtml: function(text) {
 
 
 
-        if (callsState.activeCallId && callsState.activeCallId === incomingId && callsState.callState === 'incoming') {
+        if (window.__CallsCoreShared.callsState.activeCallId && window.__CallsCoreShared.callsState.activeCallId === incomingId && window.__CallsCoreShared.callsState.callState === 'incoming') {
 
 
 
@@ -6309,9 +6325,9 @@ _escapeHtml: function(text) {
 
 
 
-        if (callsState.callActive && callsState.callState === 'in-call') {
-            logWarn(MODULE, 'Incoming call rejected - already in a call (in-call state)');
-            safeSend('CALL_REJECT', {
+        if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.callState === 'in-call') {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Incoming call rejected - already in a call (in-call state)');
+            window.__CallsCoreShared.safeSend('CALL_REJECT', {
                 callId: callData.callId,
                 reason: 'busy',
                 timestamp: Date.now()
@@ -6339,8 +6355,8 @@ _escapeHtml: function(text) {
                 || document.documentElement.getAttribute('data-calls-auto-reject') === 'true';
 
             if (_autoReject || _whoCanCall === 'nobody') {
-                logWarn(MODULE, 'Incoming call auto-rejected by privacy setting', { autoReject: _autoReject, whoCanCallMe: _whoCanCall });
-                safeSend('CALL_REJECT', {
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Incoming call auto-rejected by privacy setting', { autoReject: _autoReject, whoCanCallMe: _whoCanCall });
+                window.__CallsCoreShared.safeSend('CALL_REJECT', {
                     callId: callData.callId,
                     reason: _autoReject ? 'auto_reject_enabled' : 'calls_restricted',
                     timestamp: Date.now()
@@ -6355,23 +6371,23 @@ _escapeHtml: function(text) {
 
 
 
-        if (callsState.callActive && callsState.callState !== 'in-call') {
+        if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.callState !== 'in-call') {
 
 
 
-            logWarn(MODULE, 'Resetting stale call state before incoming call');
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Resetting stale call state before incoming call');
 
 
 
-            callsState.callActive = false;
+            window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-            callsState.callState = 'idle';
+            window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-            callsState.activeCallId = null;
+            window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
@@ -6406,11 +6422,11 @@ _escapeHtml: function(text) {
         }
         if (!callData.callType && callData.type) callData.callType = callData.type;
 
-        callsState.callData = callData;
+        window.__CallsCoreShared.callsState.callData = callData;
 
 
 
-        callsState.callState = 'incoming';
+        window.__CallsCoreShared.callsState.callState = 'incoming';
 
 
         // CALLMANAGER BRIDGE: create CM session for incoming call
@@ -6418,7 +6434,7 @@ _escapeHtml: function(text) {
             var _smInc = window.__CallStateMachine;
             var _CSInc = window.CALL_STATE;
             if (_smInc && _CSInc) {
-                var _incId = callsState.activeCallId;
+                var _incId = window.__CallsCoreShared.callsState.activeCallId;
                 if (_incId && !_smInc.getSession(_incId)) {
                     _smInc.createSession(_incId, (callData && callData.callType) || 'audio', (callData && callData.callerId), false);
                     _smInc.transition(_incId, _CSInc.INCOMING);
@@ -6427,7 +6443,7 @@ _escapeHtml: function(text) {
             }
         } catch(_incBE) {}
 
-        callsState.activeCallId = callData.callId || callData.id || callsState.activeCallId;  // ← CRITICAL: Set activeCallId for incoming calls
+        window.__CallsCoreShared.callsState.activeCallId = callData.callId || callData.id || window.__CallsCoreShared.callsState.activeCallId;  // ← CRITICAL: Set activeCallId for incoming calls
 
 
 
@@ -6535,7 +6551,7 @@ _escapeHtml: function(text) {
 
 
 
-                receiverId: callsState.session?.userId || null,
+                receiverId: window.__CallsCoreShared.callsState.session?.userId || null,
 
 
 
@@ -6582,7 +6598,7 @@ _escapeHtml: function(text) {
             callerAvatar: callData.callerAvatar || (callData.caller && callData.caller.avatar) || null,
             callType:     callData.callType     || callData.type || 'audio',
         });
-        notifyListeners('incoming_call', _enrichedCall);
+        window.__CallsCoreShared.notifyListeners('incoming_call', _enrichedCall);
 
         // FIX-CALL-ACK: Emit call:received to backend so caller gets confirmation
         // and the 20-second no-answer timer is cleared on the server side.
@@ -6596,15 +6612,15 @@ _escapeHtml: function(text) {
                 console.log('[CallsCore] ✅ call:received ack sent to server');
             }
         } catch(_ackErr) { console.warn('[CallsCore] call:received ack failed', _ackErr); }
-    }
+    };
 
 
 
-    function handleCallInitiated(callData) {
+    window.__CallsCoreShared.handleCallInitiated = function handleCallInitiated(callData) {
 
 
 
-    logCall(MODULE, 'handleCallInitiated', callData);
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallInitiated', callData);
 
 
 
@@ -6624,7 +6640,7 @@ _escapeHtml: function(text) {
 
 
 
-        logWarn(MODULE, 'Receiver is offline - showing call UI for 3 minutes', callData);
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Receiver is offline - showing call UI for 3 minutes', callData);
 
 
 
@@ -6684,7 +6700,7 @@ _escapeHtml: function(text) {
 
 
 
-        logWarn(MODULE, 'Call initiation failed, cleaning up', { 
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Call initiation failed, cleaning up', { 
 
 
 
@@ -6708,31 +6724,31 @@ _escapeHtml: function(text) {
 
 
 
-        if (callsState.activeCallId === callData.callId || callsState.callActive) {
+        if (window.__CallsCoreShared.callsState.activeCallId === callData.callId || window.__CallsCoreShared.callsState.callActive) {
 
 
 
-            resetCallState();
+            window.__CallsCoreShared.resetCallState();
 
 
 
-            callsState.callActive = false;
+            window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-            callsState.callState = 'idle';
+            window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-            callsState.activeCallId = null;
+            window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-            callsState.serverCallId = null;
+            window.__CallsCoreShared.callsState.serverCallId = null;
 
 
 
-            callsState.localCallId = null;
+            window.__CallsCoreShared.callsState.localCallId = null;
 
 
 
@@ -6748,19 +6764,19 @@ _escapeHtml: function(text) {
 
 
 
-        if (CallsStateGovernor) {
+        if (window.__CallsCoreShared.CallsStateGovernor) {
 
 
 
-            CallsStateGovernor._transitionLock = false;
+            window.__CallsCoreShared.CallsStateGovernor._transitionLock = false;
 
 
 
-            CallsStateGovernor._previousState = CallsStateGovernor._currentState;
+            window.__CallsCoreShared.CallsStateGovernor._previousState = window.__CallsCoreShared.CallsStateGovernor._currentState;
 
 
 
-            CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+            window.__CallsCoreShared.CallsStateGovernor._currentState = window.__CallsCoreShared.CALLS_STATE.ACTIVE;
 
 
 
@@ -6776,15 +6792,15 @@ _escapeHtml: function(text) {
 
 
 
-        if (callsState.callInvitationTimer) {
+        if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-            clearTimeout(callsState.callInvitationTimer);
+            clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-            callsState.callInvitationTimer = null;
+            window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -6800,7 +6816,7 @@ _escapeHtml: function(text) {
 
 
 
-        notifyListeners('call_initiation_failed', { 
+        window.__CallsCoreShared.notifyListeners('call_initiation_failed', { 
 
 
 
@@ -6844,11 +6860,11 @@ _escapeHtml: function(text) {
 
 
 
-    callsState.callData = callData;
+    window.__CallsCoreShared.callsState.callData = callData;
 
 
 
-    callsState.callState = 'initiated';
+    window.__CallsCoreShared.callsState.callState = 'initiated';
 
 
 
@@ -6860,19 +6876,19 @@ _escapeHtml: function(text) {
 
 
 
-    const localCallId = callData.localCallId || callsState.activeCallId;
+    const localCallId = callData.localCallId || window.__CallsCoreShared.callsState.activeCallId;
 
 
 
-    callsState.activeCallId = serverCallId || localCallId;
+    window.__CallsCoreShared.callsState.activeCallId = serverCallId || localCallId;
 
 
 
-    callsState.localCallId = localCallId;   // keep local id for reference
+    window.__CallsCoreShared.callsState.localCallId = localCallId;   // keep local id for reference
 
 
 
-    callsState.serverCallId = serverCallId; // real DB UUID
+    window.__CallsCoreShared.callsState.serverCallId = serverCallId; // real DB UUID
 
 
 
@@ -6920,19 +6936,19 @@ _escapeHtml: function(text) {
 
 
 
-    callsState.callParticipants = callData.participants || callData.call?.participants || [];
+    window.__CallsCoreShared.callsState.callParticipants = callData.participants || callData.call?.participants || [];
 
 
 
-    callsState.callStartTime = Date.now();
+    window.__CallsCoreShared.callsState.callStartTime = Date.now();
 
 
 
-    callsState.callType = callData.callType || callData.call?.type;
+    window.__CallsCoreShared.callsState.callType = callData.callType || callData.call?.type;
 
 
 
-    callsState.callActive = true;
+    window.__CallsCoreShared.callsState.callActive = true;
 
 
 
@@ -6940,15 +6956,15 @@ _escapeHtml: function(text) {
 
 
 
-    if (callsState.callInvitationTimer) {
+    if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-        clearTimeout(callsState.callInvitationTimer);
+        clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-        callsState.callInvitationTimer = null;
+        window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -6960,7 +6976,7 @@ _escapeHtml: function(text) {
 
 
 
-    notifyListeners('call_initiated', callData);
+    window.__CallsCoreShared.notifyListeners('call_initiated', callData);
 
 
 
@@ -7002,7 +7018,7 @@ _escapeHtml: function(text) {
 
 
 
-}
+};
 
 
 
@@ -7010,9 +7026,9 @@ _escapeHtml: function(text) {
 
 
 
-    function handleCallAccepted(callData) {
+    window.__CallsCoreShared.handleCallAccepted = function handleCallAccepted(callData) {
 
-        logCall(MODULE, 'handleCallAccepted', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallAccepted', callData);
 
         const acceptedCallId = callData && (callData.callId || callData.id);
 
@@ -7031,12 +7047,12 @@ _escapeHtml: function(text) {
         // briefly shown, then caller goes dark / receiver drops to idle).
         // Once acceptance for a given callId has been processed once, treat
         // any further delivery of the same event as a duplicate and no-op.
-        if (acceptedCallId && callsState._acceptedCallIds && callsState._acceptedCallIds.has(acceptedCallId)) {
-            logWarn(MODULE, 'handleCallAccepted: duplicate delivery for already-accepted call, ignoring', acceptedCallId);
+        if (acceptedCallId && window.__CallsCoreShared.callsState._acceptedCallIds && window.__CallsCoreShared.callsState._acceptedCallIds.has(acceptedCallId)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallAccepted: duplicate delivery for already-accepted call, ignoring', acceptedCallId);
             return;
         }
-        if (!callsState._acceptedCallIds) callsState._acceptedCallIds = new Set();
-        if (acceptedCallId) callsState._acceptedCallIds.add(acceptedCallId);
+        if (!window.__CallsCoreShared.callsState._acceptedCallIds) window.__CallsCoreShared.callsState._acceptedCallIds = new Set();
+        if (acceptedCallId) window.__CallsCoreShared.callsState._acceptedCallIds.add(acceptedCallId);
 
         // FIX-ACCEPT-BEFORE-ACK-RACE: if the receiver accepts fast enough
         // that this event arrives before call:initiated_ack has come back
@@ -7052,17 +7068,17 @@ _escapeHtml: function(text) {
         // yet, treat this accept as the ack itself — do the same
         // reconciliation handleCallInitiatedAck would have done — rather
         // than rejecting a legitimately-first accept.
-        if (acceptedCallId && !callsState.serverCallId) {
-            const _priorLocalId = callsState.activeCallId || callsState.localCallId;
-            if (!callsState._callIdAliases) callsState._callIdAliases = new Map();
+        if (acceptedCallId && !window.__CallsCoreShared.callsState.serverCallId) {
+            const _priorLocalId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.localCallId;
+            if (!window.__CallsCoreShared.callsState._callIdAliases) window.__CallsCoreShared.callsState._callIdAliases = new Map();
             if (_priorLocalId && _priorLocalId !== acceptedCallId) {
-                callsState._callIdAliases.set(_priorLocalId, acceptedCallId);
+                window.__CallsCoreShared.callsState._callIdAliases.set(_priorLocalId, acceptedCallId);
             }
-            callsState._callIdAliases.set(acceptedCallId, acceptedCallId);
-            callsState.serverCallId = acceptedCallId;
+            window.__CallsCoreShared.callsState._callIdAliases.set(acceptedCallId, acceptedCallId);
+            window.__CallsCoreShared.callsState.serverCallId = acceptedCallId;
             try {
-                if (typeof WebRTCManager !== 'undefined' && WebRTCManager && WebRTCManager._currentCallId && WebRTCManager._currentCallId !== acceptedCallId) {
-                    WebRTCManager._currentCallId = acceptedCallId;
+                if (typeof window.__CallsCoreShared.WebRTCManager !== 'undefined' && window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._currentCallId && window.__CallsCoreShared.WebRTCManager._currentCallId !== acceptedCallId) {
+                    window.__CallsCoreShared.WebRTCManager._currentCallId = acceptedCallId;
                 }
             } catch (_) {}
         }
@@ -7080,24 +7096,24 @@ _escapeHtml: function(text) {
         // legitimate first accept (where activeCallId is still the
         // pre-ack local id) is correctly recognized as the same call, not
         // rejected as stale.
-        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
-            logWarn(MODULE, 'handleCallAccepted: ignoring stale accept for a different/previous call', acceptedCallId);
+        if (typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent(callData)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallAccepted: ignoring stale accept for a different/previous call', acceptedCallId);
             return;
         }
 
         if (acceptedCallId) {
-            callsState.activeCallId = acceptedCallId;
-            callsState.serverCallId = callsState.serverCallId || acceptedCallId;
+            window.__CallsCoreShared.callsState.activeCallId = acceptedCallId;
+            window.__CallsCoreShared.callsState.serverCallId = window.__CallsCoreShared.callsState.serverCallId || acceptedCallId;
         }
         if (callData && (callData.callType || callData.type)) {
-            callsState.callType = callData.callType || callData.type;
+            window.__CallsCoreShared.callsState.callType = callData.callType || callData.type;
         }
-        callsState.callState = 'connecting';
-        callsState.callActive = true;
+        window.__CallsCoreShared.callsState.callState = 'connecting';
+        window.__CallsCoreShared.callsState.callActive = true;
 
 
 
-        notifyListeners('call_accepted', callData);
+        window.__CallsCoreShared.notifyListeners('call_accepted', callData);
 
 
 
@@ -7122,7 +7138,7 @@ _escapeHtml: function(text) {
 
 
         // ✅ FIX: Use multiple sources for currentUserId
-        const currentUserId = (callsState.session && callsState.session.userId)
+        const currentUserId = (window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.userId)
             || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId)
             || (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.user && window.__CHILD_SESSION__.user.id)
             || null;
@@ -7130,7 +7146,7 @@ _escapeHtml: function(text) {
         // ✅ FIX: isCaller with robust fallbacks
         const _isCallerByUserId = !!(currentUserId && callData && callData.callerId &&
             String(callData.callerId) === String(currentUserId));
-        const _isCallerByState  = !!(callsState._isCaller === true);
+        const _isCallerByState  = !!(window.__CallsCoreShared.callsState._isCaller === true);
         const _isCallerByInit   = !!(window.__callerCallId && callData &&
             (callData.callId || callData.id) &&
             String(window.__callerCallId) === String(callData.callId || callData.id));
@@ -7158,10 +7174,10 @@ _escapeHtml: function(text) {
             if (callData && (callData.isGroupCall || callData.type === 'group')) {
                 const _gce = window.__GroupCallEngine || window.GroupCall;
                 if (_gce && typeof _gce.joinGroupCall === 'function') {
-                    const _gcCallId   = callData.callId || callsState.activeCallId;
+                    const _gcCallId   = callData.callId || window.__CallsCoreShared.callsState.activeCallId;
                     const _gcGroupId  = callData.groupId || _gcCallId;
                     const _gcLocalUid = String(
-                        (callsState.session && callsState.session.userId) ||
+                        (window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.callsState.session.userId) ||
                         (window.__CHILD_SESSION__ && window.__CHILD_SESSION__.userId) || ''
                     );
                     if (_gcCallId && _gcLocalUid) {
@@ -7196,7 +7212,7 @@ _escapeHtml: function(text) {
         if (callData && (callData.isGroupCall || callData.type === 'group') && isCaller) {
             var _gce2 = window.__GroupCallEngine || window.GroupCall;
             if (_gce2 && typeof _gce2.joinGroupCall === 'function') {
-                var _gcCallId2   = callData.callId || callsState.activeCallId || callsState.serverCallId;
+                var _gcCallId2   = callData.callId || window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId;
                 var _gcGroupId2  = callData.groupId || _gcCallId2;
                 var _gcLocalUid2 = String(currentUserId || '');
                 if (_gcCallId2 && _gcLocalUid2) {
@@ -7218,7 +7234,7 @@ _escapeHtml: function(text) {
             console.warn('[CallsCore] GroupCallEngine not available for group call — degrading to single-peer');
         }
 
-        if (WebRTCManager._peerConnection && callsState.callActive) {
+        if (window.__CallsCoreShared.WebRTCManager._peerConnection && window.__CallsCoreShared.callsState.callActive) {
 
             console.log('[CallsCore] ✅ CALL ACCEPTED — creating SDP offer for WebRTC');
 
@@ -7226,26 +7242,26 @@ _escapeHtml: function(text) {
             // callsState.activeCall.participants[0] is set when startCall() is called.
             // Also check callData fields as fallback.
             var _resolveOfferTarget = function() {
-                if (callsState.activeCall && callsState.activeCall.participants && callsState.activeCall.participants.length > 0) {
-                    var p = callsState.activeCall.participants[0];
+                if (window.__CallsCoreShared.callsState.activeCall && window.__CallsCoreShared.callsState.activeCall.participants && window.__CallsCoreShared.callsState.activeCall.participants.length > 0) {
+                    var p = window.__CallsCoreShared.callsState.activeCall.participants[0];
                     return typeof p === 'object' ? (p.id || p.userId) : p;
                 }
                 return callData && (callData.receiverId || callData.calleeId || callData.targetUserId || callData.remoteUserId) || null;
             };
 
-            WebRTCManager.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+            window.__CallsCoreShared.WebRTCManager.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
 
 
 
                 .then(function(offer) {
 
-                    const callId = callsState.serverCallId || callsState.activeCallId || (callData && callData.callId);
+                    const callId = window.__CallsCoreShared.callsState.serverCallId || window.__CallsCoreShared.callsState.activeCallId || (callData && callData.callId);
 
                     // FIX: targetUserId MUST be in the payload — backend silently drops offer if missing.
                     // Resolve from participants (set at startCall) or callData fields.
                     var _resolvedTarget = (function() {
-                        if (callsState.activeCall && callsState.activeCall.participants && callsState.activeCall.participants.length > 0) {
-                            var p = callsState.activeCall.participants[0];
+                        if (window.__CallsCoreShared.callsState.activeCall && window.__CallsCoreShared.callsState.activeCall.participants && window.__CallsCoreShared.callsState.activeCall.participants.length > 0) {
+                            var p = window.__CallsCoreShared.callsState.activeCall.participants[0];
                             return typeof p === 'object' ? (p.id || p.userId) : p;
                         }
                         return (callData && (callData.receiverId || callData.calleeId || callData.targetUserId || callData.remoteUserId)) || null;
@@ -7283,12 +7299,12 @@ _escapeHtml: function(text) {
                             _directSocket.emit('call:webrtc_offer', _payload, function(ackResp) {
                                 _acked = true;
                                 if (ackResp && ackResp.delivered) {
-                                    logCall(MODULE, 'Offer delivery confirmed by server', { callId: _offerId, attempt: attempt });
+                                    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Offer delivery confirmed by server', { callId: _offerId, attempt: attempt });
                                 }
                             });
                             setTimeout(function() {
                                 if (_acked) return;
-                                var stillRelevant = typeof _isStaleCallEvent !== 'function' || !_isStaleCallEvent({ callId: _offerId });
+                                var stillRelevant = typeof window.__CallsCoreShared._isStaleCallEvent !== 'function' || !window.__CallsCoreShared._isStaleCallEvent({ callId: _offerId });
                                 // FIX-SIGNALING-ACK: don't retry into an already-connected
                                 // call. An ack can go missing (network blip on the way
                                 // back) even though the offer itself was delivered and
@@ -7297,22 +7313,22 @@ _escapeHtml: function(text) {
                                 // already-stable peer connection and break it, per the
                                 // documented InvalidStateError failure mode elsewhere in
                                 // this file (see handleSignalOffer's duplicate-delivery fix).
-                                var alreadyConnected = callsState.callState === 'connected' || callsState.callState === 'in-call';
+                                var alreadyConnected = window.__CallsCoreShared.callsState.callState === 'connected' || window.__CallsCoreShared.callsState.callState === 'in-call';
                                 if (!stillRelevant || alreadyConnected) {
-                                    logWarn(MODULE, 'Offer ack timeout — not retrying (call no longer pending)', { callId: _offerId, state: callsState.callState });
+                                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Offer ack timeout — not retrying (call no longer pending)', { callId: _offerId, state: window.__CallsCoreShared.callsState.callState });
                                     return;
                                 }
                                 if (attempt < 3) {
-                                    logWarn(MODULE, `Offer ack timeout — retrying (attempt ${attempt + 1}/3)`, _offerId);
+                                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, `Offer ack timeout — retrying (attempt ${attempt + 1}/3)`, _offerId);
                                     sendOfferWithRetry(attempt + 1);
                                 } else {
-                                    logError(MODULE, 'Offer delivery failed after 3 attempts — target may be unreachable', null, { callId: _offerId });
+                                    window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Offer delivery failed after 3 attempts — target may be unreachable', null, { callId: _offerId });
                                 }
                             }, 3000);
                         })(1);
                         console.log('[CallsCore] ✅ OFFER sent via Socket.IO to targetUserId:', _offTarget);
                     } else {
-                        safeSend('SIGNAL_OFFER', _offerPayload, false);
+                        window.__CallsCoreShared.safeSend('SIGNAL_OFFER', _offerPayload, false);
                         console.log('[CallsCore] ✅ OFFER sent via safeSend (no direct socket). targetUserId:', _offTarget);
                     }
 
@@ -7326,7 +7342,7 @@ _escapeHtml: function(text) {
 
 
 
-                    logError(MODULE, 'createOffer failed after call_accepted', e);
+                    window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'createOffer failed after call_accepted', e);
 
 
 
@@ -7338,15 +7354,15 @@ _escapeHtml: function(text) {
 
 
 
-            logWarn(MODULE, 'handleCallAccepted: no peer connection — offer NOT sent', {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallAccepted: no peer connection — offer NOT sent', {
 
 
 
-                hasPeerConn: !!WebRTCManager._peerConnection,
+                hasPeerConn: !!window.__CallsCoreShared.WebRTCManager._peerConnection,
 
 
 
-                callActive:  callsState.callActive
+                callActive:  window.__CallsCoreShared.callsState.callActive
 
 
 
@@ -7358,7 +7374,7 @@ _escapeHtml: function(text) {
 
 
 
-    }
+    };
 
 
 
@@ -7366,14 +7382,14 @@ _escapeHtml: function(text) {
 
 
 
-    function handleCallStarted(callData) {
+    window.__CallsCoreShared.handleCallStarted = function handleCallStarted(callData) {
             // SCREEN MANAGER: switch to calling screen
             if (typeof window.showScreen === "function") { window.showScreen("calling"); }
             var __ov = document.getElementById("callOverlay"); if (__ov) __ov.setAttribute("data-state", "idle");
 
 
 
-        logCall(MODULE, 'handleCallStarted', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallStarted', callData);
 
 
 
@@ -7381,15 +7397,15 @@ _escapeHtml: function(text) {
 
 
 
-        callsState.callState = 'starting';
+        window.__CallsCoreShared.callsState.callState = 'starting';
 
 
 
-        notifyListeners('call_started', callData);
+        window.__CallsCoreShared.notifyListeners('call_started', callData);
 
 
 
-    }
+    };
 
 
 
@@ -7397,7 +7413,7 @@ _escapeHtml: function(text) {
 
 
 
-    function handleCallConnected(callData) {
+    window.__CallsCoreShared.handleCallConnected = function handleCallConnected(callData) {
             // FIX: dedup, mirroring the same protection already on
             // handleCallAccepted (callsState._acceptedCallIds). This file has
             // multiple independent delivery paths for the same logical event
@@ -7406,15 +7422,15 @@ _escapeHtml: function(text) {
             // handleCallConnected for the same call) and nothing here stopped
             // a second/third delivery from re-running this function's side
             // effects for a call that was already marked connected.
-            var __connectedId = (callData && (callData.callId || callData.id)) || callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
-            var __resolveConn = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
+            var __connectedId = (callData && (callData.callId || callData.id)) || window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId || window.__CallsCoreShared.callsState.localCallId;
+            var __resolveConn = (typeof window.__CallsCoreShared.resolveCallId === 'function') ? window.__CallsCoreShared.resolveCallId : function(x){ return x; };
             if (__connectedId) __connectedId = __resolveConn(__connectedId);
-            if (__connectedId && callsState._connectedCallIds && callsState._connectedCallIds.has(__connectedId)) {
-                logCall(MODULE, 'handleCallConnected: duplicate delivery ignored', __connectedId);
+            if (__connectedId && window.__CallsCoreShared.callsState._connectedCallIds && window.__CallsCoreShared.callsState._connectedCallIds.has(__connectedId)) {
+                window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallConnected: duplicate delivery ignored', __connectedId);
                 return;
             }
-            if (!callsState._connectedCallIds) callsState._connectedCallIds = new Set();
-            if (__connectedId) callsState._connectedCallIds.add(__connectedId);
+            if (!window.__CallsCoreShared.callsState._connectedCallIds) window.__CallsCoreShared.callsState._connectedCallIds = new Set();
+            if (__connectedId) window.__CallsCoreShared.callsState._connectedCallIds.add(__connectedId);
 
             // SCREEN MANAGER: switch to in-call screen
             if (typeof window.showScreen === "function") { window.showScreen("in-call"); }
@@ -7422,7 +7438,7 @@ _escapeHtml: function(text) {
 
 
 
-        logCall(MODULE, 'handleCallConnected', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallConnected', callData);
 
 
 
@@ -7430,15 +7446,15 @@ _escapeHtml: function(text) {
 
 
 
-        callsState.callState = 'connected';
+        window.__CallsCoreShared.callsState.callState = 'connected';
 
 
 
-        callsState.callActive = true;
+        window.__CallsCoreShared.callsState.callActive = true;
 
 
 
-        callsState.callStartTime = callsState.callStartTime || Date.now();
+        window.__CallsCoreShared.callsState.callStartTime = window.__CallsCoreShared.callsState.callStartTime || Date.now();
 
         // CALLMANAGER BRIDGE: delegate connected event so CM owns the timer
         try {
@@ -7446,16 +7462,16 @@ _escapeHtml: function(text) {
             var _sm2 = window.__CallStateMachine;
             var _CS2 = window.CALL_STATE;
             if (_cm2 && _sm2 && _CS2) {
-                var _cid2 = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+                var _cid2 = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId || window.__CallsCoreShared.callsState.localCallId;
                 if (_cid2) {
                     if (!_sm2.getSession(_cid2)) {
-                        _sm2.createSession(_cid2, callsState.callType || 'audio', (callsState.callParticipants && callsState.callParticipants[0]) || (callsState.callData && callsState.callData.callerId) || null, !!callsState._isCaller);
+                        _sm2.createSession(_cid2, window.__CallsCoreShared.callsState.callType || 'audio', (window.__CallsCoreShared.callsState.callParticipants && window.__CallsCoreShared.callsState.callParticipants[0]) || (window.__CallsCoreShared.callsState.callData && window.__CallsCoreShared.callsState.callData.callerId) || null, !!window.__CallsCoreShared.callsState._isCaller);
                         _sm2.transition(_cid2, _CS2.OUTGOING);
                         _sm2.transition(_cid2, _CS2.CONNECTING);
                     }
-                    var _isVid2 = !!(callsState.callType === 'video');
+                    var _isVid2 = !!(window.__CallsCoreShared.callsState.callType === 'video');
                     _cm2.onConnected(_cid2, _isVid2);
-                    _cmTimerDelegated = true;
+                    window.__CallsCoreShared._cmTimerDelegated;
                 }
             }
         } catch(_be2) {}
@@ -7498,7 +7514,7 @@ _escapeHtml: function(text) {
 
 
 
-            const id = callData.callId || callsState.activeCallId;
+            const id = callData.callId || window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -7518,11 +7534,11 @@ _escapeHtml: function(text) {
 
 
 
-        notifyListeners('call_connected', callData);
+        window.__CallsCoreShared.notifyListeners('call_connected', callData);
 
 
 
-    }
+    };
 
 
 
@@ -7538,28 +7554,28 @@ _escapeHtml: function(text) {
     // answered elsewhere. resetCallState() only clears local state — it does
     // not emit any reject/end signal to the server — so calling it here is
     // safe: the server already knows the call was accepted on the other device.
-    function handleCallAcceptedElsewhere(callData) {
+    window.__CallsCoreShared.handleCallAcceptedElsewhere = function handleCallAcceptedElsewhere(callData) {
 
-        logCall(MODULE, 'handleCallAcceptedElsewhere', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallAcceptedElsewhere', callData);
 
         // FIX-CALLID-RECONCILE (Phase 2): added retroactively — this handler
         // was modeled on the (at-the-time-also-unguarded) handleCallRejected
         // and inherited the same gap. A stale accepted_elsewhere for a
         // previous ring shouldn't be able to tear down a newer active call.
-        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
-            logWarn(MODULE, 'handleCallAcceptedElsewhere: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        if (typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent(callData)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallAcceptedElsewhere: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
             return;
         }
 
-        resetCallState();
+        window.__CallsCoreShared.resetCallState();
 
-        notifyListeners('call_accepted_elsewhere', callData);
+        window.__CallsCoreShared.notifyListeners('call_accepted_elsewhere', callData);
 
-    }
+    };
 
-    function handleCallRejected(callData) {
+    window.__CallsCoreShared.handleCallRejected = function handleCallRejected(callData) {
 
-        logCall(MODULE, 'handleCallRejected', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallRejected', callData);
 
         // FIX-CALLID-RECONCILE (Phase 2): this handler had no staleness/
         // callId-match check at all, unlike its sibling handlers
@@ -7569,16 +7585,16 @@ _escapeHtml: function(text) {
         // attempt was declined, or a duplicate delivery racing a newer,
         // already-connected call -- would unconditionally call
         // resetCallState(), tearing down a perfectly healthy different call.
-        if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
-            logWarn(MODULE, 'handleCallRejected: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+        if (typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent(callData)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallRejected: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
             return;
         }
 
-        resetCallState();
+        window.__CallsCoreShared.resetCallState();
 
-        notifyListeners('call_rejected', callData);
+        window.__CallsCoreShared.notifyListeners('call_rejected', callData);
 
-    }
+    };
 
 
 
@@ -7586,7 +7602,7 @@ _escapeHtml: function(text) {
 
 
 
-    function handleCallEnded(callData) {
+    window.__CallsCoreShared.handleCallEnded = function handleCallEnded(callData) {
             // FIX: validate this event actually belongs to the call that's
             // currently active before doing ANY teardown. Previously this ran
             // unconditionally — stopping local media tracks and forcing the
@@ -7601,9 +7617,9 @@ _escapeHtml: function(text) {
             if (__endedIncomingId) {
                 var __endedCurrentId = (window.callsState && (window.callsState.activeCallId || window.callsState.serverCallId || window.callsState.localCallId)) || null;
                 if (__endedCurrentId) {
-                    var __resolveId = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
+                    var __resolveId = (typeof window.__CallsCoreShared.resolveCallId === 'function') ? window.__CallsCoreShared.resolveCallId : function(x){ return x; };
                     if (String(__resolveId(__endedIncomingId)) !== String(__resolveId(__endedCurrentId))) {
-                        logWarn(MODULE, 'handleCallEnded: ignoring stale event for a different/previous call', __endedIncomingId, __endedCurrentId);
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallEnded: ignoring stale event for a different/previous call', __endedIncomingId, __endedCurrentId);
                         // FIX-STALE-END-SAFETY-NET: don't tear down media/session state
                         // for what might genuinely be a different, still-healthy call —
                         // but don't just trust that assumption forever either. If this
@@ -7621,7 +7637,7 @@ _escapeHtml: function(text) {
                                 String((window.callsState.activeCallId || window.callsState.serverCallId || window.callsState.localCallId) || '') === String(__staleCallIdAtCheck);
                             var __screenStillActive = window.callsUI && window.callsUI.UIState && window.callsUI.UIState.callActive;
                             if (__stillSameCall && __screenStillActive) {
-                                logWarn(MODULE, 'handleCallEnded: stale-echo guard was likely a false positive (call still stuck active) — running nav-restore safety net for', __staleCallIdAtCheck);
+                                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallEnded: stale-echo guard was likely a false positive (call still stuck active) — running nav-restore safety net for', __staleCallIdAtCheck);
                                 try {
                                     if (window.parent && window.parent !== window) {
                                         window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: (window.callsState.pendingCallReturnTo || window.callsState.pendingCallSource) || 'conversations', chatUserId: window.callsState.pendingCallReturnChatUserId || null, chatUserName: window.callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
@@ -7670,7 +7686,7 @@ _escapeHtml: function(text) {
 
 
 
-        logCall(MODULE, 'handleCallEnded', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallEnded', callData);
 
 
 
@@ -7730,7 +7746,7 @@ _escapeHtml: function(text) {
 
 
 
-            const id = callData.callId || callsState.activeCallId;
+            const id = callData.callId || window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -7746,7 +7762,7 @@ _escapeHtml: function(text) {
 
 
 
-                (callsState.callStartTime ? Math.floor((Date.now() - callsState.callStartTime) / 1000) : 0);
+                (window.__CallsCoreShared.callsState.callStartTime ? Math.floor((Date.now() - window.__CallsCoreShared.callsState.callStartTime) / 1000) : 0);
 
 
 
@@ -7767,21 +7783,21 @@ _escapeHtml: function(text) {
         // resetCallState() wiped pendingCallReturnTo without ever telling the
         // parent to navigate — so whichever side received this event (caller
         // if receiver hung up, or vice versa) was left stuck on the call screen.
-        var _hceReturnTarget = (callsState && (callsState.pendingCallReturnTo || callsState.pendingCallSource)) || 'conversations';
+        var _hceReturnTarget = (window.__CallsCoreShared.callsState && (window.__CallsCoreShared.callsState.pendingCallReturnTo || window.__CallsCoreShared.callsState.pendingCallSource)) || 'conversations';
 
-        resetCallState();
+        window.__CallsCoreShared.resetCallState();
 
         try {
             if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _hceReturnTarget, chatUserId: callsState.pendingCallReturnChatUserId || null, chatUserName: callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
+                window.parent.postMessage({ type: 'POST_CALL_RESTORE', returnTo: _hceReturnTarget, chatUserId: window.__CallsCoreShared.callsState.pendingCallReturnChatUserId || null, chatUserName: window.__CallsCoreShared.callsState.pendingCallReturnChatName || null, timestamp: Date.now() }, '*');
             }
         } catch (_e) {}
 
-        notifyListeners('call_ended', callData);
+        window.__CallsCoreShared.notifyListeners('call_ended', callData);
 
 
 
-    }
+    };
 
 
 
@@ -7793,19 +7809,19 @@ _escapeHtml: function(text) {
 
 
 
-function handleCallForceEnd(callData) {
+window.__CallsCoreShared.handleCallForceEnd = function handleCallForceEnd(callData) {
 
 
 
-    logCall(MODULE, 'Force ending call', callData);
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Force ending call', callData);
 
     // FIX-CALLID-RECONCILE (Phase 2): both real-world triggers for this
     // function (CALL_CANCELLED, CALL_FORCE_END) carry a specific callId and
     // should be validated like every other terminal event -- a stale
     // force-end/cancel for an old call attempt shouldn't be able to nuke a
     // newer, genuinely active call's state.
-    if (typeof _isStaleCallEvent === 'function' && _isStaleCallEvent(callData)) {
-        logWarn(MODULE, 'handleCallForceEnd: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+    if (typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent(callData)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallForceEnd: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
         return;
     }
 
@@ -7820,47 +7836,47 @@ function handleCallForceEnd(callData) {
 
 
 
-    resetCallState();
+    window.__CallsCoreShared.resetCallState();
 
 
 
-    callsState.callActive = false;
+    window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-    callsState.callState = 'idle';
+    window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-    callsState.activeCallId = null;
+    window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-    callsState.activeCall = null;
+    window.__CallsCoreShared.callsState.activeCall = null;
 
 
 
-    callsState.callType = null;
+    window.__CallsCoreShared.callsState.callType = null;
 
 
 
-    callsState.callParticipants = [];
+    window.__CallsCoreShared.callsState.callParticipants = [];
 
 
 
-    callsState.callStartTime = null;
+    window.__CallsCoreShared.callsState.callStartTime = null;
 
 
 
-    callsState.connectionState = 'new';
+    window.__CallsCoreShared.callsState.connectionState = 'new';
 
 
 
-    callsState.signalingState = 'new';
+    window.__CallsCoreShared.callsState.signalingState = 'new';
 
 
 
-    callsState.callData = null;
+    window.__CallsCoreShared.callsState.callData = null;
 
 
 
@@ -7872,15 +7888,15 @@ function handleCallForceEnd(callData) {
 
 
 
-    if (callsState.callInvitationTimer) {
+    if (window.__CallsCoreShared.callsState.callInvitationTimer) {
 
 
 
-        clearTimeout(callsState.callInvitationTimer);
+        clearTimeout(window.__CallsCoreShared.callsState.callInvitationTimer);
 
 
 
-        callsState.callInvitationTimer = null;
+        window.__CallsCoreShared.callsState.callInvitationTimer = null;
 
 
 
@@ -7896,11 +7912,11 @@ function handleCallForceEnd(callData) {
 
 
 
-    if (MediaManager && MediaManager.stopLocalStream) {
+    if (window.__CallsCoreShared.MediaManager && window.__CallsCoreShared.MediaManager.stopLocalStream) {
 
 
 
-        MediaManager.stopLocalStream();
+        window.__CallsCoreShared.MediaManager.stopLocalStream();
 
 
 
@@ -7908,11 +7924,11 @@ function handleCallForceEnd(callData) {
 
 
 
-    if (WebRTCManager && WebRTCManager.close) {
+    if (window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager.close) {
 
 
 
-        WebRTCManager.close();
+        window.__CallsCoreShared.WebRTCManager.close();
 
 
 
@@ -7928,11 +7944,11 @@ function handleCallForceEnd(callData) {
 
 
 
-    notifyListeners('call_force_ended', callData);
+    window.__CallsCoreShared.notifyListeners('call_force_ended', callData);
 
 
 
-    notifyListeners('call_ended', callData);
+    window.__CallsCoreShared.notifyListeners('call_ended', callData);
 
 
 
@@ -7944,11 +7960,11 @@ function handleCallForceEnd(callData) {
 
 
 
-    if (typeof UIBridge !== 'undefined' && UIBridge._closeCallUI) {
+    if (typeof window.__CallsCoreShared.UIBridge !== 'undefined' && window.__CallsCoreShared.UIBridge._closeCallUI) {
 
 
 
-        UIBridge._closeCallUI();
+        window.__CallsCoreShared.UIBridge._closeCallUI();
 
 
 
@@ -7964,7 +7980,7 @@ function handleCallForceEnd(callData) {
 
 
 
-}
+};
 
 
 
@@ -7984,49 +8000,49 @@ function handleCallForceEnd(callData) {
 // "shows in-call then disappears" pattern being reported. Also resolves
 // through resolveCallId() so a locally-generated id and its server-assigned
 // UUID (see handleCallInitiatedAck above) are recognized as the same call.
-function _isStaleCallEvent(callData) {
+window.__CallsCoreShared._isStaleCallEvent = function _isStaleCallEvent(callData) {
     var incomingId = callData && (callData.callId || callData.id);
     if (!incomingId) return false;
-    var currentId = callsState.activeCallId || callsState.serverCallId || callsState.localCallId;
+    var currentId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId || window.__CallsCoreShared.callsState.localCallId;
     if (!currentId) return false;
-    var resolve = (typeof resolveCallId === 'function') ? resolveCallId : function(x){ return x; };
+    var resolve = (typeof window.__CallsCoreShared.resolveCallId === 'function') ? window.__CallsCoreShared.resolveCallId : function(x){ return x; };
     return String(resolve(incomingId)) !== String(resolve(currentId));
-}
+};
 
-function handleCallFailed(callData) {
+window.__CallsCoreShared.handleCallFailed = function handleCallFailed(callData) {
 
-    logCall(MODULE, 'handleCallFailed', callData);
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallFailed', callData);
 
-    if (_isStaleCallEvent(callData)) {
-        logWarn(MODULE, 'handleCallFailed: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+    if (window.__CallsCoreShared._isStaleCallEvent(callData)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallFailed: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
         return;
     }
 
-    resetCallState();
+    window.__CallsCoreShared.resetCallState();
 
-    notifyListeners('call_failed', callData);
+    window.__CallsCoreShared.notifyListeners('call_failed', callData);
 
-}
+};
 
 // De-duplicated: this used to be a second, full copy of handleCallFailed
 // (identical body) rather than a genuine second implementation — collapsed
 // to a thin alias so there's only one place to fix/maintain the logic above.
-function handleCallFailed2(callData) { return handleCallFailed(callData); }
+function handleCallFailed2(callData) { return window.__CallsCoreShared.handleCallFailed(callData); }
 
-function handleCallTimeout(callData) {
+window.__CallsCoreShared.handleCallTimeout = function handleCallTimeout(callData) {
 
-    logCall(MODULE, 'handleCallTimeout', callData);
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallTimeout', callData);
 
-    if (_isStaleCallEvent(callData)) {
-        logWarn(MODULE, 'handleCallTimeout: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
+    if (window.__CallsCoreShared._isStaleCallEvent(callData)) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleCallTimeout: ignoring stale event for a different/previous call', callData && (callData.callId || callData.id));
         return;
     }
 
-    resetCallState();
+    window.__CallsCoreShared.resetCallState();
 
-    notifyListeners('call_timeout', callData);
+    window.__CallsCoreShared.notifyListeners('call_timeout', callData);
 
-}
+};
 
 // Real-time message handlers for instant messaging and status updates
 
@@ -8124,11 +8140,11 @@ function _handleUserStatus(statusData) {
 
 
 
-    if (callsState.activeCallId && callsState.participants) {
+    if (window.__CallsCoreShared.callsState.activeCallId && window.__CallsCoreShared.callsState.participants) {
 
 
 
-        const participant = callsState.participants.find(p => p.id === statusData.userId);
+        const participant = window.__CallsCoreShared.callsState.participants.find(p => p.id === statusData.userId);
 
 
 
@@ -8200,7 +8216,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleCallInitiated(callData);
+            window.__CallsCoreShared.handleCallInitiated(callData);
 
 
 
@@ -8212,7 +8228,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleCallAccepted(callData);
+            window.__CallsCoreShared.handleCallAccepted(callData);
             // SCREEN MANAGER: directly switch to in-call screen, bypassing callOverlay
             if (typeof window.showScreen === "function") { window.showScreen("in-call"); }
             var __ov = document.getElementById("callOverlay"); if (__ov) __ov.setAttribute("data-state", "idle");
@@ -8227,7 +8243,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleCallStarted(callData);
+            window.__CallsCoreShared.handleCallStarted(callData);
 
 
 
@@ -8239,7 +8255,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleCallConnected(callData);
+            window.__CallsCoreShared.handleCallConnected(callData);
 
 
 
@@ -8251,7 +8267,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleCallRejected(callData);
+            window.__CallsCoreShared.handleCallRejected(callData);
 
 
 
@@ -8263,7 +8279,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleCallEnded(callData);
+            window.__CallsCoreShared.handleCallEnded(callData);
 
 
 
@@ -8275,7 +8291,7 @@ function _handleCallStatus(callData) {
 
 
 
-            handleIncomingCall(callData);
+            window.__CallsCoreShared.handleIncomingCall(callData);
 
 
 
@@ -8617,11 +8633,11 @@ window.CallHandlers = {
 
 
 
-    function handleCallBusy(callData) {
+    window.__CallsCoreShared.handleCallBusy = function handleCallBusy(callData) {
 
 
 
-        logCall(MODULE, 'handleCallBusy', callData);
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallBusy', callData);
 
 
 
@@ -8629,15 +8645,15 @@ window.CallHandlers = {
 
 
 
-        resetCallState();
+        window.__CallsCoreShared.resetCallState();
 
 
 
-        notifyListeners('call_busy', callData);
+        window.__CallsCoreShared.notifyListeners('call_busy', callData);
 
 
 
-    }
+    };
 
 
 
@@ -8649,13 +8665,13 @@ window.CallHandlers = {
 
 
 
-    function resolveCallId(id) {
+    window.__CallsCoreShared.resolveCallId = function resolveCallId(id) {
         if (!id) return id;
-        if (callsState._callIdAliases && callsState._callIdAliases.has(id)) {
-            return callsState._callIdAliases.get(id);
+        if (window.__CallsCoreShared.callsState._callIdAliases && window.__CallsCoreShared.callsState._callIdAliases.has(id)) {
+            return window.__CallsCoreShared.callsState._callIdAliases.get(id);
         }
         return id;
-    }
+    };
 
     // FIX: root cause of "mismatched callId" call-ending across every call
     // path (traced directly from console logs showing e.g. handleCallEnded
@@ -8674,20 +8690,20 @@ window.CallHandlers = {
     // reconciles the two ids the moment the ack arrives, and keeps the old
     // local id mapped as an alias so anything still holding a reference to
     // it resolves correctly instead of breaking.
-    function handleCallInitiatedAck(payload) {
+    window.__CallsCoreShared.handleCallInitiatedAck = function handleCallInitiatedAck(payload) {
         const serverCallId = payload && payload.callId;
-        const localCallId = callsState.activeCallId || callsState.localCallId;
-        logCall(MODULE, 'handleCallInitiatedAck', { serverCallId, localCallId });
+        const localCallId = window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.localCallId;
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleCallInitiatedAck', { serverCallId, localCallId });
         if (!serverCallId) return;
 
-        if (!callsState._callIdAliases) callsState._callIdAliases = new Map();
+        if (!window.__CallsCoreShared.callsState._callIdAliases) window.__CallsCoreShared.callsState._callIdAliases = new Map();
         if (localCallId && localCallId !== serverCallId) {
-            callsState._callIdAliases.set(localCallId, serverCallId);
+            window.__CallsCoreShared.callsState._callIdAliases.set(localCallId, serverCallId);
         }
-        callsState._callIdAliases.set(serverCallId, serverCallId);
+        window.__CallsCoreShared.callsState._callIdAliases.set(serverCallId, serverCallId);
 
-        callsState.serverCallId = serverCallId;
-        callsState.activeCallId = serverCallId;
+        window.__CallsCoreShared.callsState.serverCallId = serverCallId;
+        window.__CallsCoreShared.callsState.activeCallId = serverCallId;
 
         // FIX-CALLID-RECONCILE: WebRTCManager keeps its own copy of the call
         // id (_currentCallId) separately from callsState, set once when the
@@ -8701,19 +8717,19 @@ window.CallHandlers = {
         // stays in-call": the caller's own end-of-call/failure signal never
         // matched anything on the receiver's side.
         try {
-            if (typeof WebRTCManager !== 'undefined' && WebRTCManager && WebRTCManager._currentCallId && WebRTCManager._currentCallId !== serverCallId) {
-                WebRTCManager._currentCallId = serverCallId;
+            if (typeof window.__CallsCoreShared.WebRTCManager !== 'undefined' && window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._currentCallId && window.__CallsCoreShared.WebRTCManager._currentCallId !== serverCallId) {
+                window.__CallsCoreShared.WebRTCManager._currentCallId = serverCallId;
             }
         } catch (_) {}
 
-        try { notifyListeners('call_initiated_ack', { callId: serverCallId, calleeName: payload.calleeName }); } catch (_) {}
+        try { window.__CallsCoreShared.notifyListeners('call_initiated_ack', { callId: serverCallId, calleeName: payload.calleeName }); } catch (_) {}
 
         // FIX: also fixes the outgoing-call screen showing "User" instead of
         // the real callee name when calling from the Calls module — the
         // resolved name lives in this same payload and was never applied
         // because nothing was listening for this event at all.
         if (payload.calleeName) {
-            callsState.remoteUserName = payload.calleeName;
+            window.__CallsCoreShared.callsState.remoteUserName = payload.calleeName;
             try {
                 const nameEl = document.getElementById('callerName') || document.getElementById('outgoingCallName') || document.querySelector('.call-name');
                 if (nameEl && (!nameEl.textContent || nameEl.textContent.trim() === 'User')) {
@@ -8721,13 +8737,13 @@ window.CallHandlers = {
                 }
             } catch (_) {}
         }
-    }
+    };
 
-    async function handleSignalOffer(payload) {
+    window.__CallsCoreShared.handleSignalOffer = async function handleSignalOffer(payload) {
 
 
 
-    logCall(MODULE, 'handleSignalOffer', { callId: payload.callId });
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleSignalOffer', { callId: payload.callId });
 
     // FIX: this function is reachable from two independent window 'message'
     // listeners in this file, both of which forward MESSAGE_TYPES.SIGNAL_OFFER
@@ -8742,12 +8758,12 @@ window.CallHandlers = {
     const _offerSdpKey = payload && payload.offer && payload.offer.sdp ? payload.offer.sdp.length : (payload && payload.sdp ? String(payload.sdp).length : 0);
     const _offerDedupKey = _offerCallId ? (String(_offerCallId) + ':' + _offerSdpKey) : null;
     if (_offerDedupKey) {
-        if (!callsState._processedOfferKeys) callsState._processedOfferKeys = new Set();
-        if (callsState._processedOfferKeys.has(_offerDedupKey)) {
-            logWarn(MODULE, 'handleSignalOffer: duplicate delivery of same offer, ignoring', _offerDedupKey);
+        if (!window.__CallsCoreShared.callsState._processedOfferKeys) window.__CallsCoreShared.callsState._processedOfferKeys = new Set();
+        if (window.__CallsCoreShared.callsState._processedOfferKeys.has(_offerDedupKey)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleSignalOffer: duplicate delivery of same offer, ignoring', _offerDedupKey);
             return;
         }
-        callsState._processedOfferKeys.add(_offerDedupKey);
+        window.__CallsCoreShared.callsState._processedOfferKeys.add(_offerDedupKey);
     }
 
     // FIX-CALLID-RECONCILE (Phase 2): call:offer is explicitly one of the
@@ -8763,8 +8779,8 @@ window.CallHandlers = {
     // first offer legitimately arrives before any prior local id exists,
     // and _isStaleCallEvent() already returns false — "not stale" — in
     // that case, so this doesn't block the normal flow).
-    if (_offerCallId && typeof _isStaleCallEvent === 'function' && _isStaleCallEvent({ callId: _offerCallId })) {
-        logWarn(MODULE, 'handleSignalOffer: ignoring stale offer for a different/previous call', _offerCallId);
+    if (_offerCallId && typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent({ callId: _offerCallId })) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleSignalOffer: ignoring stale offer for a different/previous call', _offerCallId);
         return;
     }
 
@@ -8780,30 +8796,30 @@ window.CallHandlers = {
                                'starting','ringing','connected','in_call','in-progress',
                                'accepted','answering','call_ready'];
     // ✅ FIX: Queue offer if call not active yet — receiver may get offer before acceptCall completes
-    if (!callsState.callActive && !_validOfferStates.includes(callsState.callState)) {
+    if (!window.__CallsCoreShared.callsState.callActive && !_validOfferStates.includes(window.__CallsCoreShared.callsState.callState)) {
         if (!window.__pendingOfferPayload) {
             window.__pendingOfferPayload = payload;
             window.__pendingOfferRetries = 0;
             var _offerRetryInterval = setInterval(function() {
                 window.__pendingOfferRetries = (window.__pendingOfferRetries || 0) + 1;
-                if (callsState.callActive || _validOfferStates.includes(callsState.callState)) {
+                if (window.__CallsCoreShared.callsState.callActive || _validOfferStates.includes(window.__CallsCoreShared.callsState.callState)) {
                     clearInterval(_offerRetryInterval);
                     var _q = window.__pendingOfferPayload; window.__pendingOfferPayload = null;
-                    if (_q) handleSignalOffer(_q);
+                    if (_q) window.__CallsCoreShared.handleSignalOffer(_q);
                 } else if (window.__pendingOfferRetries >= 15) {
                     clearInterval(_offerRetryInterval);
-                    callsState.callActive = true;
+                    window.__CallsCoreShared.callsState.callActive = true;
                     var _q2 = window.__pendingOfferPayload; window.__pendingOfferPayload = null;
-                    if (_q2) handleSignalOffer(_q2);
+                    if (_q2) window.__CallsCoreShared.handleSignalOffer(_q2);
                 }
             }, 200);
         }
-        logWarn(MODULE, 'Signal offer queued — callState:', callsState.callState);
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Signal offer queued — callState:', window.__CallsCoreShared.callsState.callState);
         return;
     }
-    if (!callsState.callActive && _validOfferStates.includes(callsState.callState)) {
-        callsState.callActive = true;
-        console.log('[CallsCore] handleSignalOffer: forced callActive=true (state:', callsState.callState, ')');
+    if (!window.__CallsCoreShared.callsState.callActive && _validOfferStates.includes(window.__CallsCoreShared.callsState.callState)) {
+        window.__CallsCoreShared.callsState.callActive = true;
+        console.log('[CallsCore] handleSignalOffer: forced callActive=true (state:', window.__CallsCoreShared.callsState.callState, ')');
     }
 
 
@@ -8812,7 +8828,7 @@ window.CallHandlers = {
 
 
 
-    if (!WebRTCManager._peerConnection) {
+    if (!window.__CallsCoreShared.WebRTCManager._peerConnection) {
 
 
 
@@ -8820,7 +8836,7 @@ window.CallHandlers = {
 
 
 
-        logWarn(MODULE, 'No peer connection for signal offer — attempting to create one');
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'No peer connection for signal offer — attempting to create one');
 
 
 
@@ -8828,11 +8844,11 @@ window.CallHandlers = {
 
 
 
-            const constraints = { audio: CONFIG.AUDIO_CONSTRAINTS, video: callsState.callType === 'video' };
+            const constraints = { audio: window.__CallsCoreShared.CONFIG.AUDIO_CONSTRAINTS, video: window.__CallsCoreShared.callsState.callType === 'video' };
 
 
 
-            const streamResult = await MediaManager.getLocalStream(constraints);
+            const streamResult = await window.__CallsCoreShared.MediaManager.getLocalStream(constraints);
 
 
 
@@ -8840,15 +8856,15 @@ window.CallHandlers = {
 
 
 
-                WebRTCManager.createPeerConnection();
+                window.__CallsCoreShared.WebRTCManager.createPeerConnection();
 
 
 
-                WebRTCManager.addStream(streamResult.stream);
+                window.__CallsCoreShared.WebRTCManager.addStream(streamResult.stream);
 
 
 
-                WebRTCManager.setCurrentCallId(callsState.activeCallId);
+                window.__CallsCoreShared.WebRTCManager.setCurrentCallId(window.__CallsCoreShared.callsState.activeCallId);
 
 
 
@@ -8860,7 +8876,7 @@ window.CallHandlers = {
 
 
 
-                logError(MODULE, 'Could not get local stream for offer handling');
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Could not get local stream for offer handling');
 
 
 
@@ -8876,7 +8892,7 @@ window.CallHandlers = {
 
 
 
-            logError(MODULE, 'Failed to create peer connection for offer', e);
+            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to create peer connection for offer', e);
 
 
 
@@ -8900,7 +8916,7 @@ window.CallHandlers = {
 
 
 
-        await WebRTCManager.setRemoteDescription(payload.offer);
+        await window.__CallsCoreShared.WebRTCManager.setRemoteDescription(payload.offer);
 
 
 
@@ -8912,7 +8928,7 @@ window.CallHandlers = {
 
 
 
-        const answer = await WebRTCManager.createAnswer();
+        const answer = await window.__CallsCoreShared.WebRTCManager.createAnswer();
 
 
 
@@ -8927,9 +8943,9 @@ window.CallHandlers = {
         // FIX: targetUserId MUST be in the answer payload — the backend routes the
         // answer back to the original caller. payload.callerId is the caller's ID.
         var _answerTargetId = (payload && (payload.callerId || payload.callerId)) ||
-                              (callsState.callData && callsState.callData.callerId) || null;
+                              (window.__CallsCoreShared.callsState.callData && window.__CallsCoreShared.callsState.callData.callerId) || null;
         var _answerPayload = {
-            callId: payload.callId || callsState.activeCallId,
+            callId: payload.callId || window.__CallsCoreShared.callsState.activeCallId,
             answer: answer,
             targetUserId: _answerTargetId,
             remoteUserId: _answerTargetId,
@@ -8946,10 +8962,10 @@ window.CallHandlers = {
             });
             console.log('[CallsCore] ✅ ANSWER sent via Socket.IO to caller:', _answerTargetId);
         } else {
-            safeSend('SIGNAL_ANSWER', _answerPayload, false);
+            window.__CallsCoreShared.safeSend('SIGNAL_ANSWER', _answerPayload, false);
             console.log('[CallsCore] ✅ ANSWER sent via safeSend. targetUserId:', _answerTargetId);
         }
-        DiagnosticsAgent.record('signaling_send');
+        window.__CallsCoreShared.DiagnosticsAgent.record('signaling_send');
 
 
 
@@ -8961,7 +8977,7 @@ window.CallHandlers = {
 
 
 
-        logError(MODULE, 'Failed to handle signal offer', error);
+        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to handle signal offer', error);
 
 
 
@@ -8969,15 +8985,15 @@ window.CallHandlers = {
 
 
 
-}
+};
 
 
 
-    async function handleSignalAnswer(payload) {
+    window.__CallsCoreShared.handleSignalAnswer = async function handleSignalAnswer(payload) {
 
 
 
-        logCall(MODULE, 'handleSignalAnswer', { callId: payload.callId });
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleSignalAnswer', { callId: payload.callId });
 
     // FIX: same duplicate-delivery problem as handleSignalOffer above, but on
     // the CALLER's side this time — this function is also reachable from the
@@ -8991,12 +9007,12 @@ window.CallHandlers = {
     const _ansSdpKey = payload && payload.answer && payload.answer.sdp ? payload.answer.sdp.length : (payload && payload.sdp ? String(payload.sdp).length : 0);
     const _ansDedupKey = _ansCallId ? (String(_ansCallId) + ':' + _ansSdpKey) : null;
     if (_ansDedupKey) {
-        if (!callsState._processedAnswerKeys) callsState._processedAnswerKeys = new Set();
-        if (callsState._processedAnswerKeys.has(_ansDedupKey)) {
-            logWarn(MODULE, 'handleSignalAnswer: duplicate delivery of same answer, ignoring', _ansDedupKey);
+        if (!window.__CallsCoreShared.callsState._processedAnswerKeys) window.__CallsCoreShared.callsState._processedAnswerKeys = new Set();
+        if (window.__CallsCoreShared.callsState._processedAnswerKeys.has(_ansDedupKey)) {
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleSignalAnswer: duplicate delivery of same answer, ignoring', _ansDedupKey);
             return;
         }
-        callsState._processedAnswerKeys.add(_ansDedupKey);
+        window.__CallsCoreShared.callsState._processedAnswerKeys.add(_ansDedupKey);
     }
 
     // FIX-CALLID-RECONCILE (Phase 2): call:answer is explicitly one of the
@@ -9006,8 +9022,8 @@ window.CallHandlers = {
     // attempt arriving late would otherwise be applied via
     // setRemoteDescription() to whatever peer connection is CURRENTLY
     // active, corrupting the real negotiation.
-    if (_ansCallId && typeof _isStaleCallEvent === 'function' && _isStaleCallEvent({ callId: _ansCallId })) {
-        logWarn(MODULE, 'handleSignalAnswer: ignoring stale answer for a different/previous call', _ansCallId);
+    if (_ansCallId && typeof window.__CallsCoreShared._isStaleCallEvent === 'function' && window.__CallsCoreShared._isStaleCallEvent({ callId: _ansCallId })) {
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'handleSignalAnswer: ignoring stale answer for a different/previous call', _ansCallId);
         return;
     }
 
@@ -9021,11 +9037,11 @@ window.CallHandlers = {
         const _validAnsStates = ['initiating','initiated','connecting','in-call',
                                   'in_call','starting','ringing','connected',
                                   'in-progress','accepted','answering','call_ready','incoming'];
-        if (!callsState.callActive && !_validAnsStates.includes(callsState.callState)) {
+        if (!window.__CallsCoreShared.callsState.callActive && !_validAnsStates.includes(window.__CallsCoreShared.callsState.callState)) {
 
 
 
-            logWarn(MODULE, 'Signal answer received but no active call');
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Signal answer received but no active call');
 
 
 
@@ -9042,24 +9058,24 @@ window.CallHandlers = {
 
 
         // ✅ FIX: Queue answer if no peer connection yet (timing issue)
-        if (!WebRTCManager._peerConnection) {
+        if (!window.__CallsCoreShared.WebRTCManager._peerConnection) {
             if (!window.__pendingAnswerPayload) {
                 window.__pendingAnswerPayload = payload;
                 var _ansRetries = 0;
                 var _ansInterval = setInterval(function() {
                     _ansRetries++;
-                    if (WebRTCManager._peerConnection) {
+                    if (window.__CallsCoreShared.WebRTCManager._peerConnection) {
                         clearInterval(_ansInterval);
                         var q = window.__pendingAnswerPayload; window.__pendingAnswerPayload = null;
-                        if (q) handleSignalAnswer(q);
+                        if (q) window.__CallsCoreShared.handleSignalAnswer(q);
                     } else if (_ansRetries >= 15) {
                         clearInterval(_ansInterval);
                         window.__pendingAnswerPayload = null;
-                        logWarn(MODULE, 'Answer dropped: no peer connection after 3s');
+                        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Answer dropped: no peer connection after 3s');
                     }
                 }, 200);
             }
-            logWarn(MODULE, 'Signal answer queued — waiting for peer connection');
+            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Signal answer queued — waiting for peer connection');
             return;
         }
 
@@ -9073,11 +9089,11 @@ window.CallHandlers = {
 
 
 
-            await WebRTCManager.setRemoteDescription(payload.answer);
+            await window.__CallsCoreShared.WebRTCManager.setRemoteDescription(payload.answer);
 
 
 
-            DiagnosticsAgent.record('signaling_recv');
+            window.__CallsCoreShared.DiagnosticsAgent.record('signaling_recv');
 
 
 
@@ -9093,15 +9109,15 @@ window.CallHandlers = {
 
 
 
-            if (callsState.iceCandidates && callsState.iceCandidates.length > 0) {
+            if (window.__CallsCoreShared.callsState.iceCandidates && window.__CallsCoreShared.callsState.iceCandidates.length > 0) {
 
 
 
-                console.log('[CallsCore] Flushing', callsState.iceCandidates.length, 'queued ICE candidates');
+                console.log('[CallsCore] Flushing', window.__CallsCoreShared.callsState.iceCandidates.length, 'queued ICE candidates');
 
 
 
-                const queued = callsState.iceCandidates.splice(0);
+                const queued = window.__CallsCoreShared.callsState.iceCandidates.splice(0);
 
 
 
@@ -9109,7 +9125,7 @@ window.CallHandlers = {
 
 
 
-                    try { await WebRTCManager.addIceCandidate(candidate); } catch (_) {}
+                    try { await window.__CallsCoreShared.WebRTCManager.addIceCandidate(candidate); } catch (_) {}
 
 
 
@@ -9125,7 +9141,7 @@ window.CallHandlers = {
 
 
 
-            logError(MODULE, 'Failed to handle signal answer', error);
+            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to handle signal answer', error);
 
 
 
@@ -9133,7 +9149,7 @@ window.CallHandlers = {
 
 
 
-    }
+    };
 
 
 
@@ -9141,11 +9157,11 @@ window.CallHandlers = {
 
 
 
-    async function handleIceCandidate(payload) {
+    window.__CallsCoreShared.handleIceCandidate = async function handleIceCandidate(payload) {
 
 
 
-    logCall(MODULE, 'handleIceCandidate', { callId: payload.callId });
+    window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'handleIceCandidate', { callId: payload.callId });
 
     // FIX: same dual-listener duplicate-delivery pattern as handleSignalOffer
     // and handleSignalAnswer above. Duplicate ICE candidates are usually
@@ -9155,11 +9171,11 @@ window.CallHandlers = {
     const _iceCandKey = payload && payload.candidate ? JSON.stringify(payload.candidate).length + ':' + (payload.candidate.sdpMLineIndex || 0) : 0;
     const _iceDedupKey = _iceCallId ? (String(_iceCallId) + ':' + _iceCandKey) : null;
     if (_iceDedupKey) {
-        if (!callsState._processedIceKeys) callsState._processedIceKeys = new Set();
-        if (callsState._processedIceKeys.has(_iceDedupKey)) {
+        if (!window.__CallsCoreShared.callsState._processedIceKeys) window.__CallsCoreShared.callsState._processedIceKeys = new Set();
+        if (window.__CallsCoreShared.callsState._processedIceKeys.has(_iceDedupKey)) {
             return;
         }
-        callsState._processedIceKeys.add(_iceDedupKey);
+        window.__CallsCoreShared.callsState._processedIceKeys.add(_iceDedupKey);
     }
 
 
@@ -9170,11 +9186,11 @@ window.CallHandlers = {
 
     // ✅ FIX: Accept ICE candidates in all transitional states including 'incoming' and 'ringing'
     const _validIceStates = ['initiating','initiated','incoming','ringing','connecting','in-call','in_call','connected','starting'];
-    if (!callsState.callActive && !_validIceStates.includes(callsState.callState)) {
+    if (!window.__CallsCoreShared.callsState.callActive && !_validIceStates.includes(window.__CallsCoreShared.callsState.callState)) {
         // Queue the candidate for later rather than dropping it
-        if (!callsState.iceCandidates) callsState.iceCandidates = [];
-        callsState.iceCandidates.push(payload.candidate);
-        logWarn(MODULE, 'ICE candidate queued (no active call yet) — state:', callsState.callState);
+        if (!window.__CallsCoreShared.callsState.iceCandidates) window.__CallsCoreShared.callsState.iceCandidates = [];
+        window.__CallsCoreShared.callsState.iceCandidates.push(payload.candidate);
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'ICE candidate queued (no active call yet) — state:', window.__CallsCoreShared.callsState.callState);
         return;
     }
 
@@ -9184,11 +9200,11 @@ window.CallHandlers = {
 
 
 
-    if (!WebRTCManager._peerConnection) {
+    if (!window.__CallsCoreShared.WebRTCManager._peerConnection) {
 
 
 
-        logWarn(MODULE, 'No peer connection for ICE candidate — queueing');
+        window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'No peer connection for ICE candidate — queueing');
 
 
 
@@ -9196,7 +9212,7 @@ window.CallHandlers = {
 
 
 
-        callsState.iceCandidates.push(payload.candidate);
+        window.__CallsCoreShared.callsState.iceCandidates.push(payload.candidate);
 
 
 
@@ -9216,11 +9232,11 @@ window.CallHandlers = {
 
 
 
-        await WebRTCManager.addIceCandidate(payload.candidate);
+        await window.__CallsCoreShared.WebRTCManager.addIceCandidate(payload.candidate);
 
 
 
-        DiagnosticsAgent.record('signaling_recv');
+        window.__CallsCoreShared.DiagnosticsAgent.record('signaling_recv');
 
 
 
@@ -9244,7 +9260,7 @@ window.CallHandlers = {
 
 
 
-        logError(MODULE, 'Failed to add ICE candidate', error);
+        window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Failed to add ICE candidate', error);
 
 
 
@@ -9252,7 +9268,7 @@ window.CallHandlers = {
 
 
 
-}
+};
 
 
 
@@ -9260,7 +9276,7 @@ window.CallHandlers = {
 
 
 
-    function handleRemoteStreamAdded(payload) {
+    window.__CallsCoreShared.handleRemoteStreamAdded = function handleRemoteStreamAdded(payload) {
 
 
 
@@ -9268,15 +9284,15 @@ window.CallHandlers = {
 
 
 
-            callsState.remoteStream = payload.stream;
+            window.__CallsCoreShared.callsState.remoteStream = payload.stream;
 
 
 
-            logCall(MODULE, 'Remote stream added');
+            window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Remote stream added');
 
 
 
-            notifyListeners('remote_stream_added', payload);
+            window.__CallsCoreShared.notifyListeners('remote_stream_added', payload);
 
 
 
@@ -9284,7 +9300,7 @@ window.CallHandlers = {
 
 
 
-    }
+    };
 
 
 
@@ -9292,23 +9308,23 @@ window.CallHandlers = {
 
 
 
-    function handleRemoteStreamRemoved(payload) {
+    window.__CallsCoreShared.handleRemoteStreamRemoved = function handleRemoteStreamRemoved(payload) {
 
 
 
-        callsState.remoteStream = null;
+        window.__CallsCoreShared.callsState.remoteStream = null;
 
 
 
-        logCall(MODULE, 'Remote stream removed');
+        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'Remote stream removed');
 
 
 
-        notifyListeners('remote_stream_removed', payload);
+        window.__CallsCoreShared.notifyListeners('remote_stream_removed', payload);
 
 
 
-    }
+    };
 
 
 
@@ -9316,7 +9332,7 @@ window.CallHandlers = {
 
 
 
-    function handleInitData(message) {
+    window.__CallsCoreShared.handleInitData = function handleInitData(message) {
 
 
 
@@ -9328,7 +9344,7 @@ window.CallHandlers = {
 
 
 
-        logSuccess(MODULE, 'Received module init data', {
+        window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Received module init data', {
 
 
 
@@ -9352,27 +9368,27 @@ window.CallHandlers = {
 
 
 
-            if (__isValidSession(data.session)) {
+            if (window.__CallsCoreShared.__isValidSession(data.session)) {
 
 
 
-                callsState.session = data.session;
+                window.__CallsCoreShared.callsState.session = data.session;
 
 
 
-                if (data.session.token) callsState.token = data.session.token;
+                if (data.session.token) window.__CallsCoreShared.callsState.token = data.session.token;
 
 
 
-                callsState.sessionReceived = true;
+                window.__CallsCoreShared.callsState.sessionReceived = true;
 
 
 
-                callsState.sessionStatus = 'valid';
+                window.__CallsCoreShared.callsState.sessionStatus = 'valid';
 
 
 
-                validSessionConfirmed = true;
+                window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -9380,7 +9396,7 @@ window.CallHandlers = {
 
 
 
-                logWarn(MODULE, 'Init data session rejected - invalid', data.session);
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Init data session rejected - invalid', data.session);
 
 
 
@@ -9420,15 +9436,15 @@ window.CallHandlers = {
 
 
 
-            if (__isValidSession(candidateSession)) {
+            if (window.__CallsCoreShared.__isValidSession(candidateSession)) {
 
 
 
-                callsState.session = candidateSession;
+                window.__CallsCoreShared.callsState.session = candidateSession;
 
 
 
-                if (data.token) callsState.token = data.token;
+                if (data.token) window.__CallsCoreShared.callsState.token = data.token;
 
 
 
@@ -9436,15 +9452,15 @@ window.CallHandlers = {
 
 
 
-                    callsState.sessionReceived = true;
+                    window.__CallsCoreShared.callsState.sessionReceived = true;
 
 
 
-                    callsState.sessionStatus = 'valid';
+                    window.__CallsCoreShared.callsState.sessionStatus = 'valid';
 
 
 
-                    validSessionConfirmed = true;
+                    window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -9456,7 +9472,7 @@ window.CallHandlers = {
 
 
 
-                logWarn(MODULE, 'Init data session rejected - invalid user data');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Init data session rejected - invalid user data');
 
 
 
@@ -9476,7 +9492,7 @@ window.CallHandlers = {
 
 
 
-            callsState.isPremium = data.isPremium;
+            window.__CallsCoreShared.callsState.isPremium = data.isPremium;
 
 
 
@@ -9492,7 +9508,7 @@ window.CallHandlers = {
 
 
 
-            callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
+            window.__CallsCoreShared.callsState.premiumFeatures = { ...window.__CallsCoreShared.callsState.premiumFeatures, ...data.premiumFeatures };
 
 
 
@@ -9504,7 +9520,7 @@ window.CallHandlers = {
 
 
 
-        callsState.initialized = true;
+        window.__CallsCoreShared.callsState.initialized = true;
 
 
 
@@ -9512,15 +9528,15 @@ window.CallHandlers = {
 
 
 
-        notifyListeners('module_ready', {
+        window.__CallsCoreShared.notifyListeners('module_ready', {
 
 
 
-            session: callsState.session,
+            session: window.__CallsCoreShared.callsState.session,
 
 
 
-            isPremium: callsState.isPremium
+            isPremium: window.__CallsCoreShared.callsState.isPremium
 
 
 
@@ -9532,16 +9548,14 @@ window.CallHandlers = {
 
 
 
-        logSuccess(MODULE, 'Module initialization complete');
+        window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'Module initialization complete');
 
 
 
-    }
+    };
 
 
 
     
 
-
-
-
+})();

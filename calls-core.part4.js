@@ -1,4 +1,20 @@
-﻿/**
+/**
+ * calls-core.part4.js — PART 4/8 — TRANSPORT & SIGNALING
+ * Configuration, environment detection, helpers, origin security, safe storage, message registry, iframe transport layer, and the real call-signaling message handlers that ride on top of it.
+ *
+ * This file is SELF-CONTAINED: it runs in its own IIFE and shares state with
+ * the other 7 calls-core.partN.js files through window.__CallsCoreShared, not
+ * through a JS closure. Load all 8 files, in numeric order, as plain classic
+ * <script> tags (no type="module", no defer/async) — see calls.html.
+ */
+(function () {
+
+    'use strict';
+
+    var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
+    if (__CC.__aborted) { return; }
+
+/**
  * PART 4/8 — TRANSPORT & SIGNALING
  * Configuration, environment detection, helpers, origin security, safe storage, message registry, iframe transport layer, and the real call-signaling message handlers that ride on top of it.
  *
@@ -12,7 +28,7 @@
 
 
 
-    const CONFIG = {
+    window.__CallsCoreShared.CONFIG = {
 
 
 
@@ -196,7 +212,7 @@
 
 
 
-    const ENVIRONMENT = {
+    window.__CallsCoreShared.ENVIRONMENT = {
 
 
 
@@ -296,7 +312,7 @@
 
 
 
-            logInfo(MODULE, `Environment detected: ${this.current}`);
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `Environment detected: ${this.current}`);
 
 
 
@@ -316,7 +332,7 @@
 
 
 
-    ENVIRONMENT.detect();
+    window.__CallsCoreShared.ENVIRONMENT.detect();
 
 
 
@@ -328,7 +344,7 @@
 
 
 
-    function isValidOrigin(origin) {
+    window.__CallsCoreShared.isValidOrigin = function isValidOrigin(origin) {
 
 
 
@@ -340,11 +356,11 @@
 
 
 
-        if (typeof currentState !== 'undefined' && currentState !== LifecycleState.ACTIVE) return true;
+        if (typeof window.__CallsCoreShared.currentState !== 'undefined' && window.__CallsCoreShared.currentState !== window.__CallsCoreShared.LifecycleState.ACTIVE) return true;
 
 
 
-        return CONFIG.TRUSTED_DOMAINS.some(domain => 
+        return window.__CallsCoreShared.CONFIG.TRUSTED_DOMAINS.some(domain => 
 
 
 
@@ -356,7 +372,7 @@
 
 
 
-    }
+    };
 
 
 
@@ -384,7 +400,7 @@
 
 
 
-        if (processedMessages.size > CONFIG.MESSAGE_CACHE_MAX_SIZE) {
+        if (processedMessages.size > window.__CallsCoreShared.CONFIG.MESSAGE_CACHE_MAX_SIZE) {
 
 
 
@@ -408,7 +424,7 @@
 
 
 
-    function validateMessage(msg) {
+    window.__CallsCoreShared.validateMessage = function validateMessage(msg) {
 
 
 
@@ -436,7 +452,7 @@
 
 
 
-    }
+    };
 
 
 
@@ -448,7 +464,7 @@
 
 
 
-    const OriginSecurity = {
+    window.__CallsCoreShared.OriginSecurity = {
 
 
 
@@ -456,7 +472,7 @@
 
 
 
-        _trustedDomains: new Set(CONFIG.TRUSTED_DOMAINS),
+        _trustedDomains: new Set(window.__CallsCoreShared.CONFIG.TRUSTED_DOMAINS),
 
 
 
@@ -504,7 +520,7 @@
 
 
 
-            CONFIG.TRUSTED_DOMAINS.forEach(domain => {
+            window.__CallsCoreShared.CONFIG.TRUSTED_DOMAINS.forEach(domain => {
 
 
 
@@ -520,7 +536,7 @@
 
 
 
-            logReady(MODULE, 'OriginSecurity initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'OriginSecurity initialized');
 
 
 
@@ -712,7 +728,7 @@
 
 
 
-            if (typeof currentState !== 'undefined' && currentState !== LifecycleState.ACTIVE) return true;
+            if (typeof window.__CallsCoreShared.currentState !== 'undefined' && window.__CallsCoreShared.currentState !== window.__CallsCoreShared.LifecycleState.ACTIVE) return true;
 
 
 
@@ -732,19 +748,19 @@
 
 
 
-            if (!callsState.parentOriginLocked && origin) {
+            if (!window.__CallsCoreShared.callsState.parentOriginLocked && origin) {
 
 
 
-                callsState.parentOrigin = origin;
+                window.__CallsCoreShared.callsState.parentOrigin = origin;
 
 
 
-                callsState.parentOriginLocked = true;
+                window.__CallsCoreShared.callsState.parentOriginLocked = true;
 
 
 
-                logInfo(MODULE, 'Parent origin locked', { origin });
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Parent origin locked', { origin });
 
 
 
@@ -764,11 +780,11 @@
 
 
 
-            if (callsState.parentOriginLocked && callsState.parentOrigin) {
+            if (window.__CallsCoreShared.callsState.parentOriginLocked && window.__CallsCoreShared.callsState.parentOrigin) {
 
 
 
-                return callsState.parentOrigin;
+                return window.__CallsCoreShared.callsState.parentOrigin;
 
 
 
@@ -828,7 +844,7 @@
 
 
 
-                parentLocked: callsState.parentOriginLocked
+                parentLocked: window.__CallsCoreShared.callsState.parentOriginLocked
 
 
 
@@ -848,7 +864,7 @@
 
 
 
-    OriginSecurity.initialize();
+    window.__CallsCoreShared.OriginSecurity.initialize();
 
 
 
@@ -868,7 +884,7 @@
 
 
 
-    const SafeStorage = {
+    window.__CallsCoreShared.SafeStorage = {
 
 
 
@@ -892,7 +908,7 @@
 
 
 
-            logReady(MODULE, `SafeStorage initialized (${this._strategy})`);
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, `SafeStorage initialized (${this._strategy})`);
 
 
 
@@ -920,7 +936,7 @@
 
 
 
-                console.warn(`[${MODULE}] SafeStorage.get('${key}') blocked - use session/call from memory only`);
+                console.warn(`[${window.__CallsCoreShared.MODULE}] SafeStorage.get('${key}') blocked - use session/call from memory only`);
 
 
 
@@ -936,7 +952,7 @@
 
 
 
-            const fullKey = CONFIG.STORAGE_PREFIX + key;
+            const fullKey = window.__CallsCoreShared.CONFIG.STORAGE_PREFIX + key;
 
 
 
@@ -952,7 +968,7 @@
 
 
 
-                const value = await StorageProxy.get(fullKey);
+                const value = await window.__CallsCoreShared.StorageProxy.get(fullKey);
 
 
 
@@ -964,7 +980,7 @@
 
 
 
-                console.warn(`[${MODULE}] SafeStorage.get failed for ${key}:`, e);
+                console.warn(`[${window.__CallsCoreShared.MODULE}] SafeStorage.get failed for ${key}:`, e);
 
 
 
@@ -996,7 +1012,7 @@
 
 
 
-                console.warn(`[${MODULE}] SafeStorage.set('${key}') blocked - use session/call from memory only`);
+                console.warn(`[${window.__CallsCoreShared.MODULE}] SafeStorage.set('${key}') blocked - use session/call from memory only`);
 
 
 
@@ -1012,7 +1028,7 @@
 
 
 
-            const fullKey = CONFIG.STORAGE_PREFIX + key;
+            const fullKey = window.__CallsCoreShared.CONFIG.STORAGE_PREFIX + key;
 
 
 
@@ -1028,7 +1044,7 @@
 
 
 
-                StorageProxy.set(fullKey, serialized);
+                window.__CallsCoreShared.StorageProxy.set(fullKey, serialized);
 
 
 
@@ -1040,7 +1056,7 @@
 
 
 
-                console.warn(`[${MODULE}] SafeStorage.set failed for ${key}:`, e);
+                console.warn(`[${window.__CallsCoreShared.MODULE}] SafeStorage.set failed for ${key}:`, e);
 
 
 
@@ -1064,7 +1080,7 @@
 
 
 
-            const fullKey = CONFIG.STORAGE_PREFIX + key;
+            const fullKey = window.__CallsCoreShared.CONFIG.STORAGE_PREFIX + key;
 
 
 
@@ -1072,7 +1088,7 @@
 
 
 
-                StorageProxy.remove(fullKey);
+                window.__CallsCoreShared.StorageProxy.remove(fullKey);
 
 
 
@@ -1084,7 +1100,7 @@
 
 
 
-                console.warn(`[${MODULE}] SafeStorage.remove failed for ${key}:`, e);
+                console.warn(`[${window.__CallsCoreShared.MODULE}] SafeStorage.remove failed for ${key}:`, e);
 
 
 
@@ -1112,7 +1128,7 @@
 
 
 
-                StorageProxy.clear();
+                window.__CallsCoreShared.StorageProxy.clear();
 
 
 
@@ -1128,7 +1144,7 @@
 
 
 
-                console.warn(`[${MODULE}] SafeStorage.clear failed:`, e);
+                console.warn(`[${window.__CallsCoreShared.MODULE}] SafeStorage.clear failed:`, e);
 
 
 
@@ -1244,7 +1260,7 @@
 
 
 
-    SafeStorage.initialize();
+    window.__CallsCoreShared.SafeStorage.initialize();
 
 
 
@@ -1256,7 +1272,7 @@
 
 
 
-    const MessageRegistry = {
+    window.__CallsCoreShared.MessageRegistry = {
 
 
 
@@ -1300,7 +1316,7 @@
 
 
 
-            logReady(MODULE, 'MessageRegistry initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'MessageRegistry initialized');
 
 
 
@@ -1356,7 +1372,7 @@
 
 
 
-            }, CONFIG.MESSAGE_WINDOW_MS);
+            }, window.__CallsCoreShared.CONFIG.MESSAGE_WINDOW_MS);
 
 
 
@@ -1436,7 +1452,7 @@
 
 
 
-            if (this._processedMessages.size > CONFIG.MESSAGE_CACHE_MAX_SIZE) {
+            if (this._processedMessages.size > window.__CallsCoreShared.CONFIG.MESSAGE_CACHE_MAX_SIZE) {
 
 
 
@@ -1452,11 +1468,11 @@
 
 
 
-            if (callsState.processedMessageIds.size > CONFIG.MESSAGE_CACHE_MAX_SIZE) {
+            if (window.__CallsCoreShared.callsState.processedMessageIds.size > window.__CallsCoreShared.CONFIG.MESSAGE_CACHE_MAX_SIZE) {
 
 
 
-                callsState.processedMessageIds.clear();
+                window.__CallsCoreShared.callsState.processedMessageIds.clear();
 
 
 
@@ -1492,11 +1508,11 @@
 
 
 
-            if (this._messageRateCounter >= CONFIG.MAX_MESSAGES_PER_SECOND) {
+            if (this._messageRateCounter >= window.__CallsCoreShared.CONFIG.MAX_MESSAGES_PER_SECOND) {
 
 
 
-                logWarn(MODULE, 'Message rate limit exceeded', { type, messageId });
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Message rate limit exceeded', { type, messageId });
 
 
 
@@ -1828,7 +1844,7 @@
 
 
 
-                   callsState.processedMessageIds.has(messageId);
+                   window.__CallsCoreShared.callsState.processedMessageIds.has(messageId);
 
 
 
@@ -1892,7 +1908,7 @@
 
 
 
-    MessageRegistry.initialize();
+    window.__CallsCoreShared.MessageRegistry.initialize();
 
 
 
@@ -1904,7 +1920,7 @@
 
 
 
-    const IframeTransport = {
+    window.__CallsCoreShared.IframeTransport = {
 
 
 
@@ -1928,7 +1944,7 @@
 
 
 
-        _targetOrigin: OriginSecurity.getTargetOrigin(),
+        _targetOrigin: window.__CallsCoreShared.OriginSecurity.getTargetOrigin(),
 
 
 
@@ -1988,7 +2004,7 @@
 
 
 
-            logReady(MODULE, 'IframeTransport initialized');
+            window.__CallsCoreShared.logReady(window.__CallsCoreShared.MODULE, 'IframeTransport initialized');
 
 
 
@@ -2024,7 +2040,7 @@
 
 
 
-            }, CONFIG.MESSAGE_WINDOW_MS);
+            }, window.__CallsCoreShared.CONFIG.MESSAGE_WINDOW_MS);
 
 
 
@@ -2080,7 +2096,7 @@
 
 
 
-            logInfo(MODULE, 'Message handler installed');
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Message handler installed');
 
 
 
@@ -2103,21 +2119,21 @@
 
                 this._notifyListeners('online', {});
 
-                logInfo(MODULE, 'Network online — attempting call recovery if active');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Network online — attempting call recovery if active');
 
                 // If a call is active, trigger ICE restart to recover the connection
                 try {
                     // FIX: window.callsState was never actually exposed (always undefined),
                     // so this recovery path never ran. Use the real in-scope callsState.
-                    var activeCallId = callsState && (callsState.activeCallId || callsState.serverCallId);
+                    var activeCallId = window.__CallsCoreShared.callsState && (window.__CallsCoreShared.callsState.activeCallId || window.__CallsCoreShared.callsState.serverCallId);
                     if (activeCallId) {
-                        logInfo(MODULE, 'Triggering ICE restart after network recovery');
+                        window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Triggering ICE restart after network recovery');
                         setTimeout(function() {
                             // FIX: window.__PeerConnectionManager is a separate, unpopulated
                             // shadow WebRTC engine (no real sessions registered in it) —
                             // calling it here was a silent no-op. WebRTCManager owns the
                             // actual live peer connection for this call; restart it directly.
-                            try { WebRTCManager.handleIceFailure && WebRTCManager.handleIceFailure(); } catch(_e) {}
+                            try { window.__CallsCoreShared.WebRTCManager.handleIceFailure && window.__CallsCoreShared.WebRTCManager.handleIceFailure(); } catch(_e) {}
                         }, 800); // Short delay to let network stabilise
                     }
                 } catch(_e) {}
@@ -2143,7 +2159,7 @@
 
 
 
-                logWarn(MODULE, 'Network offline');
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Network offline');
 
 
 
@@ -2195,11 +2211,11 @@
 
 
 
-            if (this._rateLimitCounter >= CONFIG.MAX_MESSAGES_PER_SECOND) {
+            if (this._rateLimitCounter >= window.__CallsCoreShared.CONFIG.MAX_MESSAGES_PER_SECOND) {
 
 
 
-                logWarn(MODULE, 'Send rate limit exceeded', { type });
+                window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Send rate limit exceeded', { type });
 
 
 
@@ -2235,7 +2251,7 @@
 
 
 
-                LifecycleState.ACTIVE
+                window.__CallsCoreShared.LifecycleState.ACTIVE
 
 
 
@@ -2247,7 +2263,7 @@
 
 
 
-            return allowedStates.includes(currentState) && 
+            return allowedStates.includes(window.__CallsCoreShared.currentState) && 
 
 
 
@@ -2275,7 +2291,7 @@
 
 
 
-            return safeSend(type, payload, options.requireAck || false);
+            return window.__CallsCoreShared.safeSend(type, payload, options.requireAck || false);
 
 
 
@@ -2291,7 +2307,7 @@
 
 
 
-            if (!assertActive(action)) {
+            if (!window.__CallsCoreShared.assertActive(action)) {
 
 
 
@@ -2339,7 +2355,7 @@
 
 
 
-            return sendChildReady();
+            return window.__CallsCoreShared.sendChildReady();
 
 
 
@@ -2355,11 +2371,11 @@
 
 
 
-            if (currentState === LifecycleState.ACTIVE) {
+            if (window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.ACTIVE) {
 
 
 
-                SessionClient.requestSession();
+                window.__CallsCoreShared.SessionClient.requestSession();
 
 
 
@@ -2367,7 +2383,7 @@
 
 
 
-                console.warn(`[${MODULE_NAME}] Cannot request session - not ACTIVE (current: ${currentState})`);
+                console.warn(`[${window.__CallsCoreShared.MODULE_NAME}] Cannot request session - not ACTIVE (current: ${window.__CallsCoreShared.currentState})`);
 
 
 
@@ -2391,11 +2407,11 @@
 
 
 
-                if (!OriginSecurity.validateEvent(event)) {
+                if (!window.__CallsCoreShared.OriginSecurity.validateEvent(event)) {
 
 
 
-                    logWarn(MODULE, 'Invalid origin', { origin: event.origin });
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Invalid origin', { origin: event.origin });
 
 
 
@@ -2423,11 +2439,11 @@
 
 
 
-                if (!validateMessage(message)) {
+                if (!window.__CallsCoreShared.validateMessage(message)) {
 
 
 
-                    logWarn(MODULE, 'Invalid message format', message);
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Invalid message format', message);
 
 
 
@@ -2447,11 +2463,11 @@
 
 
 
-                if (message.messageId && MessageGuard.isDuplicate(message.messageId)) {
+                if (message.messageId && window.__CallsCoreShared.MessageGuard.isDuplicate(message.messageId)) {
 
 
 
-                    logInfo(MODULE, 'Duplicate message ignored', { messageId: message.messageId });
+                    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Duplicate message ignored', { messageId: message.messageId });
 
 
 
@@ -2483,7 +2499,7 @@
 
 
 
-                OriginSecurity.lockParentOrigin(event.origin);
+                window.__CallsCoreShared.OriginSecurity.lockParentOrigin(event.origin);
 
 
 
@@ -2495,7 +2511,7 @@
 
 
 
-                    callsState.processedMessageIds.add(message.messageId);
+                    window.__CallsCoreShared.callsState.processedMessageIds.add(message.messageId);
 
 
 
@@ -2511,7 +2527,7 @@
 
 
 
-                if (StorageProxy.handleStorageResponse(event)) {
+                if (window.__CallsCoreShared.StorageProxy.handleStorageResponse(event)) {
 
 
 
@@ -2531,7 +2547,7 @@
 
 
 
-                if (SessionClient.handleSessionMessage(event)) {
+                if (window.__CallsCoreShared.SessionClient.handleSessionMessage(event)) {
 
 
 
@@ -2551,11 +2567,11 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.PARENT_READY) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.PARENT_READY) {
 
 
 
-                    handleParentReady(message);
+                    window.__CallsCoreShared.handleParentReady(message);
 
 
 
@@ -2571,7 +2587,7 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.ACK) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.ACK) {
 
 
 
@@ -2583,7 +2599,7 @@
 
 
 
-                        MessageRegistry.acknowledge(ackId, message.payload);
+                        window.__CallsCoreShared.MessageRegistry.acknowledge(ackId, message.payload);
 
 
 
@@ -2607,7 +2623,7 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.API_RESPONSE) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.API_RESPONSE) {
 
 
 
@@ -2615,11 +2631,11 @@
 
 
 
-                    if (requestId && MessageRegistry._pendingMessages.has(requestId)) {
+                    if (requestId && window.__CallsCoreShared.MessageRegistry._pendingMessages.has(requestId)) {
 
 
 
-                        const pending = MessageRegistry._pendingMessages.get(requestId);
+                        const pending = window.__CallsCoreShared.MessageRegistry._pendingMessages.get(requestId);
 
 
 
@@ -2659,7 +2675,7 @@
 
 
 
-                            MessageRegistry._pendingMessages.delete(requestId);
+                            window.__CallsCoreShared.MessageRegistry._pendingMessages.delete(requestId);
 
 
 
@@ -2683,7 +2699,7 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.HEARTBEAT) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.HEARTBEAT) {
 
 
 
@@ -2723,7 +2739,7 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.SESSION_SYNC) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_SYNC) {
 
 
 
@@ -2743,11 +2759,11 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.MODULE_INIT_DATA) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.MODULE_INIT_DATA) {
 
 
 
-                    handleInitData(message);
+                    window.__CallsCoreShared.handleInitData(message);
 
 
 
@@ -2763,15 +2779,15 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.SESSION_RESPONSE || 
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_RESPONSE || 
 
 
 
-                    message.type === MESSAGE_TYPES.SESSION_DATA || 
+                    message.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_DATA || 
 
 
 
-                    message.type === MESSAGE_TYPES.SESSION_ACTIVE) {
+                    message.type === window.__CallsCoreShared.MESSAGE_TYPES.SESSION_ACTIVE) {
 
 
 
@@ -2799,23 +2815,23 @@
 
 
 
-                    callsState.session = null;
+                    window.__CallsCoreShared.callsState.session = null;
 
 
 
-                    callsState.token = null;
+                    window.__CallsCoreShared.callsState.token = null;
 
 
 
-                    callsState.sessionReceived = false;
+                    window.__CallsCoreShared.callsState.sessionReceived = false;
 
 
 
-                    callsState.sessionStatus = 'invalid';
+                    window.__CallsCoreShared.callsState.sessionStatus = 'invalid';
 
 
 
-                    validSessionConfirmed = false;
+                    window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -2823,7 +2839,7 @@
 
 
 
-                    logSession(MODULE, 'SESSION_NULL received');
+                    window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'SESSION_NULL received');
 
 
 
@@ -2859,11 +2875,11 @@
 
 
 
-    callsState.verified = isValid;
+    window.__CallsCoreShared.callsState.verified = isValid;
 
 
 
-    callsState.verificationLock = false;
+    window.__CallsCoreShared.callsState.verificationLock = false;
 
 
 
@@ -2875,11 +2891,11 @@
 
 
 
-    if (requestId && MessageRegistry._pendingMessages.has(requestId)) {
+    if (requestId && window.__CallsCoreShared.MessageRegistry._pendingMessages.has(requestId)) {
 
 
 
-        const pending = MessageRegistry._pendingMessages.get(requestId);
+        const pending = window.__CallsCoreShared.MessageRegistry._pendingMessages.get(requestId);
 
 
 
@@ -2915,7 +2931,7 @@
 
 
 
-            MessageRegistry._pendingMessages.delete(requestId);
+            window.__CallsCoreShared.MessageRegistry._pendingMessages.delete(requestId);
 
 
 
@@ -2931,7 +2947,7 @@
 
 
 
-        MessageRegistry.acknowledge(requestId, { valid: isValid });
+        window.__CallsCoreShared.MessageRegistry.acknowledge(requestId, { valid: isValid });
 
 
 
@@ -2947,11 +2963,11 @@
 
 
 
-    if (isValid && callsState.session) {
+    if (isValid && window.__CallsCoreShared.callsState.session) {
 
 
 
-        validSessionConfirmed = true;
+        window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -2963,7 +2979,7 @@
 
 
 
-    logInfo(MODULE, `VERIFY_RESPONSE received: ${isValid ? 'valid' : 'invalid'}`);
+    window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, `VERIFY_RESPONSE received: ${isValid ? 'valid' : 'invalid'}`);
 
 
 
@@ -2987,7 +3003,7 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_INCOMING ||
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_INCOMING ||
 
 
 
@@ -3007,7 +3023,7 @@
 
 
 
-                    handleIncomingCall(message.payload || message.data || message);
+                    window.__CallsCoreShared.handleIncomingCall(message.payload || message.data || message);
 
 
 
@@ -3031,7 +3047,7 @@
 
 
 
-                    const callId = (message.payload || {}).callId || callsState.activeCallId;
+                    const callId = (message.payload || {}).callId || window.__CallsCoreShared.callsState.activeCallId;
 
 
 
@@ -3039,7 +3055,7 @@
 
 
 
-                        logCall(MODULE, 'AUTO_ACCEPT_CALL received from parent banner', { callId });
+                        window.__CallsCoreShared.logCall(window.__CallsCoreShared.MODULE, 'AUTO_ACCEPT_CALL received from parent banner', { callId });
 
 
 
@@ -3047,7 +3063,7 @@
 
 
 
-                            logError(MODULE, 'AUTO_ACCEPT answerCall failed', e);
+                            window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'AUTO_ACCEPT answerCall failed', e);
 
 
 
@@ -3071,31 +3087,11 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_INITIATED) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_INITIATED) {
 
 
 
-                    handleCallInitiated(message.payload || message.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (message.type === MESSAGE_TYPES.CALL_ACCEPT) {
-
-
-
-                    handleCallAccepted(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallInitiated(message.payload || message.data);
 
 
 
@@ -3111,31 +3107,11 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_STARTED) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_ACCEPT) {
 
 
 
-                    handleCallStarted(message.payload || message.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (message.type === MESSAGE_TYPES.CALL_CONNECTED) {
-
-
-
-                    handleCallConnected(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallAccepted(message.payload || message.data);
 
 
 
@@ -3151,11 +3127,11 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_REJECTED) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_STARTED) {
 
 
 
-                    handleCallRejected(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallStarted(message.payload || message.data);
 
 
 
@@ -3171,11 +3147,51 @@
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_ENDED) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_CONNECTED) {
 
 
 
-                    handleCallEnded(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallConnected(message.payload || message.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_REJECTED) {
+
+
+
+                    window.__CallsCoreShared.handleCallRejected(message.payload || message.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_ENDED) {
+
+
+
+                    window.__CallsCoreShared.handleCallEnded(message.payload || message.data);
 
 
 
@@ -3199,11 +3215,11 @@
 
 
 
-                    handleCallForceEnd(message.payload || message.data || {});
+                    window.__CallsCoreShared.handleCallForceEnd(message.payload || message.data || {});
 
 
 
-                    notifyListeners('call_cancelled', message.payload || message.data || {});
+                    window.__CallsCoreShared.notifyListeners('call_cancelled', message.payload || message.data || {});
 
 
 
@@ -3223,7 +3239,7 @@ if (message.type === 'CALL_FORCE_END' || message.type === 'call:force_end') {
 
 
 
-    handleCallForceEnd(message.payload || message.data);
+    window.__CallsCoreShared.handleCallForceEnd(message.payload || message.data);
 
 
 
@@ -3239,11 +3255,11 @@ if (message.type === 'CALL_FORCE_END' || message.type === 'call:force_end') {
 
 
 
-if (message.type === MESSAGE_TYPES.CALL_FAILED) {
+if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-    handleCallFailed(message.payload || message.data);
+    window.__CallsCoreShared.handleCallFailed(message.payload || message.data);
 
 
 
@@ -3259,11 +3275,11 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_FAILED) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                    handleCallFailed(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallFailed(message.payload || message.data);
 
 
 
@@ -3279,11 +3295,11 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_TIMEOUT) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_TIMEOUT) {
 
 
 
-                    handleCallTimeout(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallTimeout(message.payload || message.data);
 
 
 
@@ -3303,47 +3319,47 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === 'CALL_FORCE_ENDED' || message.type === MESSAGE_TYPES.CALL_FORCE_ENDED) {
+                if (message.type === 'CALL_FORCE_ENDED' || message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_FORCE_ENDED) {
 
 
 
-                    logWarn(MODULE, 'Received CALL_FORCE_ENDED — resetting call state', message.payload);
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE, 'Received CALL_FORCE_ENDED — resetting call state', message.payload);
 
 
 
-                    resetCallState();
+                    window.__CallsCoreShared.resetCallState();
 
 
 
-                    callsState.callActive = false;
+                    window.__CallsCoreShared.callsState.callActive = false;
 
 
 
-                    callsState.callState = 'idle';
+                    window.__CallsCoreShared.callsState.callState = 'idle';
 
 
 
-                    callsState.activeCallId = null;
+                    window.__CallsCoreShared.callsState.activeCallId = null;
 
 
 
-                    callsState.serverCallId = null;
+                    window.__CallsCoreShared.callsState.serverCallId = null;
 
 
 
-                    callsState.callData = null;
+                    window.__CallsCoreShared.callsState.callData = null;
 
 
 
-                    if (CallsStateGovernor) {
+                    if (window.__CallsCoreShared.CallsStateGovernor) {
 
 
 
-                        CallsStateGovernor._transitionLock = false;
+                        window.__CallsCoreShared.CallsStateGovernor._transitionLock = false;
 
 
 
-                        CallsStateGovernor._currentState = CALLS_STATE.ACTIVE;
+                        window.__CallsCoreShared.CallsStateGovernor._currentState = window.__CallsCoreShared.CALLS_STATE.ACTIVE;
 
 
 
@@ -3351,7 +3367,7 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                    notifyListeners('call_force_ended', message.payload || {});
+                    window.__CallsCoreShared.notifyListeners('call_force_ended', message.payload || {});
 
 
 
@@ -3367,11 +3383,11 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_BUSY) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_BUSY) {
 
 
 
-                    handleCallBusy(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallBusy(message.payload || message.data);
 
 
 
@@ -3387,9 +3403,9 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.CALL_INITIATED_ACK) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.CALL_INITIATED_ACK) {
 
-                    handleCallInitiatedAck(message.payload || message.data);
+                    window.__CallsCoreShared.handleCallInitiatedAck(message.payload || message.data);
 
                     return;
 
@@ -3399,31 +3415,11 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.SIGNAL_OFFER) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.SIGNAL_OFFER) {
 
 
 
-                    handleSignalOffer(message.payload || message.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (message.type === MESSAGE_TYPES.SIGNAL_ANSWER) {
-
-
-
-                    handleSignalAnswer(message.payload || message.data);
+                    window.__CallsCoreShared.handleSignalOffer(message.payload || message.data);
 
 
 
@@ -3439,31 +3435,11 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.ICE_CANDIDATE) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.SIGNAL_ANSWER) {
 
 
 
-                    handleIceCandidate(message.payload || message.data);
-
-
-
-                    return;
-
-
-
-                }
-
-
-
-                
-
-
-
-                if (message.type === MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
-
-
-
-                    handleRemoteStreamAdded(message.payload || message.data);
+                    window.__CallsCoreShared.handleSignalAnswer(message.payload || message.data);
 
 
 
@@ -3479,11 +3455,51 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                if (message.type === MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.ICE_CANDIDATE) {
 
 
 
-                    handleRemoteStreamRemoved(message.payload || message.data);
+                    window.__CallsCoreShared.handleIceCandidate(message.payload || message.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.REMOTE_STREAM_ADDED) {
+
+
+
+                    window.__CallsCoreShared.handleRemoteStreamAdded(message.payload || message.data);
+
+
+
+                    return;
+
+
+
+                }
+
+
+
+                
+
+
+
+                if (message.type === window.__CallsCoreShared.MESSAGE_TYPES.REMOTE_STREAM_REMOVED) {
+
+
+
+                    window.__CallsCoreShared.handleRemoteStreamRemoved(message.payload || message.data);
 
 
 
@@ -3503,7 +3519,7 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                    notifyListeners('contacts_update', message.payload || message.data);
+                    window.__CallsCoreShared.notifyListeners('contacts_update', message.payload || message.data);
 
 
 
@@ -3523,7 +3539,7 @@ if (message.type === MESSAGE_TYPES.CALL_FAILED) {
 
 
 
-                    notifyListeners('call_history_update', message.payload || message.data);
+                    window.__CallsCoreShared.notifyListeners('call_history_update', message.payload || message.data);
 
 
 
@@ -3571,11 +3587,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (data.premium !== undefined) callsState.isPremium = data.premium;
+        if (data.premium !== undefined) window.__CallsCoreShared.callsState.isPremium = data.premium;
 
 
 
-        if (data.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...data.premiumFeatures };
+        if (data.premiumFeatures) window.__CallsCoreShared.callsState.premiumFeatures = { ...window.__CallsCoreShared.callsState.premiumFeatures, ...data.premiumFeatures };
 
 
 
@@ -3583,7 +3599,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        notifyListeners('setting_changed', { section, key, value });
+        window.__CallsCoreShared.notifyListeners('setting_changed', { section, key, value });
 
 
 
@@ -3623,11 +3639,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (s.premium !== undefined) callsState.isPremium = s.premium;
+        if (s.premium !== undefined) window.__CallsCoreShared.callsState.isPremium = s.premium;
 
 
 
-        if (s.premiumFeatures) callsState.premiumFeatures = { ...callsState.premiumFeatures, ...s.premiumFeatures };
+        if (s.premiumFeatures) window.__CallsCoreShared.callsState.premiumFeatures = { ...window.__CallsCoreShared.callsState.premiumFeatures, ...s.premiumFeatures };
 
 
 
@@ -3635,7 +3651,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        notifyListeners('settings_update', s);
+        window.__CallsCoreShared.notifyListeners('settings_update', s);
 
 
 
@@ -3667,31 +3683,31 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    resetCallState();
+                    window.__CallsCoreShared.resetCallState();
 
 
 
-                    callsState.session = null;
+                    window.__CallsCoreShared.callsState.session = null;
 
 
 
-                    callsState.token = null;
+                    window.__CallsCoreShared.callsState.token = null;
 
 
 
-                    callsState.verified = false;
+                    window.__CallsCoreShared.callsState.verified = false;
 
 
 
-                    callsState.sessionReceived = false;
+                    window.__CallsCoreShared.callsState.sessionReceived = false;
 
 
 
-                    callsState.sessionStatus = 'invalid';
+                    window.__CallsCoreShared.callsState.sessionStatus = 'invalid';
 
 
 
-                    validSessionConfirmed = false;
+                    window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -3699,7 +3715,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('logout', {});
+                    window.__CallsCoreShared.notifyListeners('logout', {});
 
 
 
@@ -3731,19 +3747,19 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                        if (validSessionConfirmed && callsState.session && __isValidSession(callsState.session)) {
+                        if (window.__CallsCoreShared.validSessionConfirmed && window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
-                            callsState.token = data.token;
+                            window.__CallsCoreShared.callsState.token = data.token;
 
 
 
-                            if (callsState.session) {
+                            if (window.__CallsCoreShared.callsState.session) {
 
 
 
-                                callsState.session.token = data.token;
+                                window.__CallsCoreShared.callsState.session.token = data.token;
 
 
 
@@ -3775,27 +3791,27 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    resetCallState();
+                    window.__CallsCoreShared.resetCallState();
 
 
 
-                    callsState.session = null;
+                    window.__CallsCoreShared.callsState.session = null;
 
 
 
-                    callsState.token = null;
+                    window.__CallsCoreShared.callsState.token = null;
 
 
 
-                    callsState.sessionReceived = false;
+                    window.__CallsCoreShared.callsState.sessionReceived = false;
 
 
 
-                    callsState.sessionStatus = 'invalid';
+                    window.__CallsCoreShared.callsState.sessionStatus = 'invalid';
 
 
 
-                    validSessionConfirmed = false;
+                    window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -3819,7 +3835,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('new_message', message.payload || message.data);
+                    window.__CallsCoreShared.notifyListeners('new_message', message.payload || message.data);
 
 
 
@@ -3839,7 +3855,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('status_update', message.payload || message.data);
+                    window.__CallsCoreShared.notifyListeners('status_update', message.payload || message.data);
 
 
 
@@ -3859,7 +3875,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    notifyListeners('group_update', message.payload || message.data);
+                    window.__CallsCoreShared.notifyListeners('group_update', message.payload || message.data);
 
 
 
@@ -3883,7 +3899,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                logError(MODULE, 'Error handling incoming message', error);
+                window.__CallsCoreShared.logError(window.__CallsCoreShared.MODULE, 'Error handling incoming message', error);
 
 
 
@@ -3903,7 +3919,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            if (!assertActive('HEARTBEAT')) return;
+            if (!window.__CallsCoreShared.assertActive('HEARTBEAT')) return;
 
 
 
@@ -3911,7 +3927,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            logHeartbeat(MODULE, 'Heartbeat received from parent');
+            window.__CallsCoreShared.logHeartbeat(window.__CallsCoreShared.MODULE, 'Heartbeat received from parent');
 
 
 
@@ -3919,7 +3935,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            safeSend('HEARTBEAT_ACK', {
+            window.__CallsCoreShared.safeSend('HEARTBEAT_ACK', {
 
 
 
@@ -3927,7 +3943,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                module: MODULE_NAME,
+                module: window.__CallsCoreShared.MODULE_NAME,
 
 
 
@@ -3951,11 +3967,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            if (callsState.registered) {
+            if (window.__CallsCoreShared.callsState.registered) {
 
 
 
-                logInfo(MODULE, 'Already registered, ignoring duplicate');
+                window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Already registered, ignoring duplicate');
 
 
 
@@ -3971,11 +3987,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            logSuccess(MODULE, 'MODULE_REGISTERED received');
+            window.__CallsCoreShared.logSuccess(window.__CallsCoreShared.MODULE, 'MODULE_REGISTERED received');
 
 
 
-            callsState.registered = true;
+            window.__CallsCoreShared.callsState.registered = true;
 
 
 
@@ -3987,7 +4003,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                safeSend('ACK', {
+                window.__CallsCoreShared.safeSend('ACK', {
 
 
 
@@ -4007,7 +4023,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            if (currentState === LifecycleState.ACTIVE) {
+            if (window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.ACTIVE) {
 
 
 
@@ -4015,7 +4031,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    SessionClient.requestSession();
+                    window.__CallsCoreShared.SessionClient.requestSession();
 
 
 
@@ -4047,7 +4063,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            logSession(MODULE, 'SESSION_SYNC received', {
+            window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'SESSION_SYNC received', {
 
 
 
@@ -4107,11 +4123,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                if (!__isValidSession(candidateSession)) {
+                if (!window.__CallsCoreShared.__isValidSession(candidateSession)) {
 
 
 
-                    console.warn(`[${MODULE}] SESSION_SYNC rejected - invalid session data`);
+                    console.warn(`[${window.__CallsCoreShared.MODULE}] SESSION_SYNC rejected - invalid session data`);
 
 
 
@@ -4127,23 +4143,23 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                callsState.session = candidateSession;
+                window.__CallsCoreShared.callsState.session = candidateSession;
 
 
 
-                callsState.token = token;
+                window.__CallsCoreShared.callsState.token = token;
 
 
 
-                callsState.sessionStatus = 'valid';
+                window.__CallsCoreShared.callsState.sessionStatus = 'valid';
 
 
 
-                callsState.sessionReceived = true;
+                window.__CallsCoreShared.callsState.sessionReceived = true;
 
 
 
-                validSessionConfirmed = true;
+                window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -4155,7 +4171,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                safeSend('SESSION_ACK', {
+                window.__CallsCoreShared.safeSend('SESSION_ACK', {
 
 
 
@@ -4195,7 +4211,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    detail: { module: MODULE_NAME, timestamp: Date.now() }
+                    detail: { module: window.__CallsCoreShared.MODULE_NAME, timestamp: Date.now() }
 
 
 
@@ -4251,7 +4267,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        MessageRegistry.acknowledge(requestId, message.payload);
+        window.__CallsCoreShared.MessageRegistry.acknowledge(requestId, message.payload);
 
 
 
@@ -4315,7 +4331,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-    logSession(MODULE, 'Session message received from parent', { 
+    window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'Session message received from parent', { 
 
 
 
@@ -4403,7 +4419,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        console.log(`[${MODULE_NAME}][_handleSessionMessage] Extracted userId:`, userId);
+        console.log(`[${window.__CallsCoreShared.MODULE_NAME}][_handleSessionMessage] Extracted userId:`, userId);
 
 
 
@@ -4451,11 +4467,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (!__isValidSession(candidateSession)) {
+        if (!window.__CallsCoreShared.__isValidSession(candidateSession)) {
 
 
 
-            console.warn(`[${MODULE_NAME}][LIFECYCLE] Session message rejected - invalid session data`, {
+            console.warn(`[${window.__CallsCoreShared.MODULE_NAME}][LIFECYCLE] Session message rejected - invalid session data`, {
 
 
 
@@ -4499,15 +4515,15 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (callsState.session && __isValidSession(callsState.session)) {
+        if (window.__CallsCoreShared.callsState.session && window.__CallsCoreShared.__isValidSession(window.__CallsCoreShared.callsState.session)) {
 
 
 
-            if (!__isValidSession(candidateSession)) {
+            if (!window.__CallsCoreShared.__isValidSession(candidateSession)) {
 
 
 
-                console.warn(`[${MODULE_NAME}][LIFECYCLE] Prevented session downgrade`);
+                console.warn(`[${window.__CallsCoreShared.MODULE_NAME}][LIFECYCLE] Prevented session downgrade`);
 
 
 
@@ -4535,11 +4551,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (sessionId && callsState.lastSessionId === sessionId) {
+        if (sessionId && window.__CallsCoreShared.callsState.lastSessionId === sessionId) {
 
 
 
-            logInfo(MODULE, 'Duplicate session message ignored', { sessionId });
+            window.__CallsCoreShared.logInfo(window.__CallsCoreShared.MODULE, 'Duplicate session message ignored', { sessionId });
 
 
 
@@ -4559,7 +4575,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            callsState.lastSessionId = sessionId;
+            window.__CallsCoreShared.callsState.lastSessionId = sessionId;
 
 
 
@@ -4571,23 +4587,23 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        callsState.session = candidateSession;
+        window.__CallsCoreShared.callsState.session = candidateSession;
 
 
 
-        callsState.token = token;
+        window.__CallsCoreShared.callsState.token = token;
 
 
 
-        callsState.sessionStatus = 'valid';
+        window.__CallsCoreShared.callsState.sessionStatus = 'valid';
 
 
 
-        callsState.sessionReceived = true;
+        window.__CallsCoreShared.callsState.sessionReceived = true;
 
 
 
-        validSessionConfirmed = true;
+        window.__CallsCoreShared.validSessionConfirmed;
 
 
 
@@ -4595,7 +4611,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        logSession(MODULE, 'Session activated', { 
+        window.__CallsCoreShared.logSession(window.__CallsCoreShared.MODULE, 'Session activated', { 
 
 
 
@@ -4623,23 +4639,23 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        if (currentState === LifecycleState.WAIT_PARENT && parentReadyReceived) {
+        if (window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.WAIT_PARENT && window.__CallsCoreShared.parentReadyReceived) {
 
 
 
-            transitionTo(LifecycleState.ACTIVE, 'session_received_after_parent_ready');
+            window.__CallsCoreShared.transitionTo(window.__CallsCoreShared.LifecycleState.ACTIVE, 'session_received_after_parent_ready');
 
 
 
-            flushQueue();
+            window.__CallsCoreShared.flushQueue();
 
 
 
-            onModuleActive();
+            window.__CallsCoreShared.onModuleActive();
 
 
 
-            console.log(`[${MODULE_NAME}][LIFECYCLE] ✅ Module activated after valid session received`);
+            console.log(`[${window.__CallsCoreShared.MODULE_NAME}][LIFECYCLE] ✅ Module activated after valid session received`);
 
 
 
@@ -4671,7 +4687,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            detail: { module: MODULE_NAME, timestamp: Date.now() }
+            detail: { module: window.__CallsCoreShared.MODULE_NAME, timestamp: Date.now() }
 
 
 
@@ -4851,7 +4867,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                pendingAcks: MessageRegistry.getPendingCount(),
+                pendingAcks: window.__CallsCoreShared.MessageRegistry.getPendingCount(),
 
 
 
@@ -4871,11 +4887,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                parentReady: parentReady,
+                parentReady: window.__CallsCoreShared.parentReady,
 
 
 
-                messageQueueSize: messageQueue.length
+                messageQueueSize: window.__CallsCoreShared.messageQueue.length
 
 
 
@@ -4947,11 +4963,11 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-            messageQueue.length = 0;
+            window.__CallsCoreShared.messageQueue.length = 0;
 
 
 
-            MessageRegistry.reset();
+            window.__CallsCoreShared.MessageRegistry.reset();
 
 
 
@@ -4975,12 +4991,10 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-    IframeTransport.initialize();
+    window.__CallsCoreShared.IframeTransport.initialize();
 
 
 
     
 
-
-
-
+})();

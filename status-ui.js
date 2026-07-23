@@ -494,14 +494,26 @@ async function _fetchFriendStatusesDirect() {
                 const dl = JSON.parse(localStorage.getItem('kyn_deleted_statuses_v1') || '[]');
                 dl.forEach(function(id) { deletedIds.add(String(id)); });
             } catch(_) {}
-            const EXPIRY_MS = 24 * 60 * 60 * 1000;
+            // Fallback expiry (used only for legacy statuses with no expiresAt
+            // field of their own) now follows the viewer's own autoExpireStatus
+            // setting instead of a hardcoded 24h.
+            const FALLBACK_EXPIRY_MS = _mapExpirySettingToSeconds(_getStatusExpirySetting()) * 1000;
             const now = Date.now();
             fetched = fetched.filter(function(s) {
                 if (!s || !s.id) return false;
                 if (deletedIds.has(String(s.id))) return false;
                 if (s.isDeleted) return false;
+                // Prefer the status's own real expiry — it was set per-post from
+                // whatever duration its owner actually chose (1h/6h/24h/1wk/
+                // permanent), which a blanket "24h from createdAt" check ignores.
+                if (s.expiresAt) {
+                    const expiresAt = new Date(s.expiresAt).getTime();
+                    if (expiresAt > 0 && now >= expiresAt) return false;
+                    return true;
+                }
+                if (s.duration === '0' || s.duration === 0) return true; // explicitly permanent, no expiresAt needed
                 const created = new Date(s.createdAt || s.created_at || 0).getTime();
-                if (created > 0 && (now - created) >= EXPIRY_MS) return false;
+                if (FALLBACK_EXPIRY_MS > 0 && created > 0 && (now - created) >= FALLBACK_EXPIRY_MS) return false;
                 return true;
             });
         }
@@ -826,6 +838,64 @@ const durationOptions = {
     '604800': '1 week',
     '0':      'Permanent'
 };
+
+// ─────────────────────────────────────────────────────────────────────────
+// SETTINGS INTEGRATION — reads the live values that js/settings-broadcast-
+// listener.js applies onto window.__* whenever the Settings module saves a
+// change to the "status" section, and maps them onto this file's own
+// privacy-key / duration-seconds vocabulary. Used to (a) default the
+// composer's Privacy/Duration pickers, (b) fall back sensibly if nothing
+// was explicitly clicked, and (c) filter/react to settings changes live.
+// ─────────────────────────────────────────────────────────────────────────
+function _getStatusPrivacySetting() {
+    return window.__whoCanViewMyStatus || window.__showStatusTo || 'friendsOnly';
+}
+function _mapPrivacySettingToComposerKey(value) {
+    switch (String(value || '').toLowerCase().replace(/[\s_-]/g, '')) {
+        case 'everyone': return 'everyone';
+        case 'closefriends': return 'close-friends';
+        case 'nobody':
+        case 'noone': return 'except'; // closest supported concept until a true "no one" mode exists
+        case 'friendsonly':
+        case 'friends':
+        default: return 'friends';
+    }
+}
+function _getStatusReplySetting() {
+    return window.__allowStatusReplies !== undefined ? !!window.__allowStatusReplies : true;
+}
+function _getStatusExpirySetting() {
+    return window.__autoExpireStatus || '24h';
+}
+// Converts settings values like '1h' / '24h' / '7d' / 'never' / already-raw
+// second counts (legacy) into the second-count keys used by durationOptions.
+function _mapExpirySettingToSeconds(value) {
+    const s = String(value || '24h').trim().toLowerCase();
+    if (s === 'never' || s === 'permanent' || s === '0') return 0;
+    let m = s.match(/^(\d+)\s*h(our)?s?$/);
+    if (m) return parseInt(m[1], 10) * 3600;
+    m = s.match(/^(\d+)\s*d(ay)?s?$/);
+    if (m) return parseInt(m[1], 10) * 86400;
+    m = s.match(/^(\d+)\s*w(eek)?s?$/);
+    if (m) return parseInt(m[1], 10) * 7 * 86400;
+    if (/^\d+$/.test(s)) return parseInt(s, 10); // legacy raw-seconds value
+    return 86400; // sane fallback: 24h
+}
+// Nearest option in durationOptions to a given second-count (composer only
+// offers a fixed set of durations; a setting like '2h' should snap to the
+// closest supported choice rather than silently falling back to 24h).
+function _nearestDurationOptionSeconds(targetSeconds) {
+    const keys = Object.keys(durationOptions).map(Number);
+    if (keys.includes(targetSeconds)) return targetSeconds;
+    if (targetSeconds === 0) return 0;
+    let best = 86400, bestDiff = Infinity;
+    keys.forEach(k => {
+        if (k === 0) return; // don't snap a finite preference to "Permanent"
+        const diff = Math.abs(k - targetSeconds);
+        if (diff < bestDiff) { bestDiff = diff; best = k; }
+    });
+    return best;
+}
 
 const reportReasons = {
     'spam': 'Spam',
@@ -3653,8 +3723,11 @@ function _applyViewerMode(isOwner, status) {
         // Update seen count from status data
         const seenEl = document.getElementById('seenCountNum');
         if (seenEl) seenEl.textContent = status.viewCount || status.views || 0;
-        // FIX: Load viewer list for owner — was never called, so list was always empty
-        _loadViewersForOwner(status);
+        // Collapse any name list left open from a previously-viewed status —
+        // each status starts collapsed; the owner taps the pill to reveal it.
+        const prevList = document.getElementById('inlineViewersList');
+        if (prevList) { prevList.style.display = 'none'; prevList.dataset.loaded = '0'; }
+        _bindViewerSeenCountToggle();
     } else {
         footer.classList.add('friend-mode');
         footer.classList.remove('owner-mode');
@@ -3682,6 +3755,15 @@ function _applyViewerMode(isOwner, status) {
             const hasExisting = eti && b.dataset.emoji === eti.textContent && eti.textContent !== '😊';
             b.classList.toggle('selected', !!hasExisting);
         });
+        // Respect the status owner's "allow replies" choice for THIS status
+        // (status.allowReplies, set at creation time from their own settings —
+        // not the current viewer's own setting). Reactions stay available
+        // either way; only the text reply box is hidden.
+        const replyWrap = document.querySelector('.reply-input-wrap');
+        if (replyWrap) {
+            const repliesAllowed = status.allowReplies !== false; // default true if unset (legacy statuses)
+            replyWrap.style.display = repliesAllowed ? '' : 'none';
+        }
     }
 
     // Always hide pause button (hold-to-pause is used)
@@ -3715,12 +3797,32 @@ function _loadReactionsForFriend(status) {
     }
 }
 
+// Wires the "👁 N" pill (#viewerSeenCount) so tapping it opens the name
+// list on demand instead of it being shown automatically. Tapping again
+// closes it. Bound once per element (guarded with _seenCountBound).
+function _bindViewerSeenCountToggle() {
+    const pill = document.getElementById('viewerSeenCount');
+    if (!pill || pill._seenCountBound) return;
+    pill._seenCountBound = true;
+    pill.addEventListener('click', () => {
+        const list = document.getElementById('inlineViewersList');
+        const isOpen = list && list.style.display !== 'none' && list.dataset.loaded === '1';
+        if (isOpen) {
+            list.style.display = 'none';
+            return;
+        }
+        if (!currentViewerStatus) return;
+        _loadViewersForOwner(currentViewerStatus);
+    });
+}
+
 function _loadViewersForOwner(status) {
     // Update seen count number immediately
     const seenEl = document.getElementById('seenCountNum');
     if (seenEl) seenEl.textContent = status.viewCount || 0;
 
-    // Create/find inline viewer list below seen count
+    // Create/find inline viewer list below seen count — hidden until the
+    // owner taps the seen-count pill; see _bindViewerSeenCountToggle().
     const ownerControls = document.getElementById('ownerControls');
     if (!ownerControls) return;
 
@@ -3731,6 +3833,8 @@ function _loadViewersForOwner(status) {
         viewersList.style.cssText = 'margin-top:8px;max-height:180px;overflow-y:auto;';
         ownerControls.appendChild(viewersList);
     }
+    viewersList.style.display = '';
+    viewersList.dataset.loaded = '0';
     viewersList.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0;">Loading viewers...</div>';
 
     const api = window.StatusAPI;
@@ -3739,6 +3843,7 @@ function _loadViewersForOwner(status) {
         return;
     }
     api.getViewers(status.id).then(result => {
+        viewersList.dataset.loaded = '1';
         if (!result || !result.success) { viewersList.innerHTML = ''; return; }
         const viewers = result.viewers || result.data?.viewers || [];
         if (!viewers.length) {
@@ -4591,6 +4696,10 @@ function handleCreateStatusClick() {
         modal.classList.add('active');
         const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
         if (textTab) textTab.click();
+        const privacyContainer = UIElements.getElement('privacyOptions');
+        if (privacyContainer) privacyContainer.dataset.userChanged = '0';
+        const durationContainer = UIElements.getElement('durationOptions');
+        if (durationContainer) durationContainer.dataset.userChanged = '0';
         
         // Load friends into the modal
         populateFriendsInCreateModal();
@@ -5265,6 +5374,64 @@ function bindGroupedStatusHandlers(container) {
 // BASIC EVENT LISTENERS SETUP
 // =============================================
 function setupBasicEventListeners() {
+    // ── Live settings adaptation ────────────────────────────────────────
+    // js/settings-broadcast-listener.js dispatches this on document whenever
+    // the Settings module saves a change (privacy/status/etc.), and keeps
+    // window.__whoCanViewMyStatus / __autoExpireStatus / __allowStatusReplies
+    // up to date. React immediately instead of requiring a reload.
+    if (!document._statusSettingsListenerBound) {
+        document._statusSettingsListenerBound = true;
+        document.addEventListener('settingsUpdated', function(e) {
+            const changed = (e && e.detail && e.detail.status) || null;
+            if (!changed) return;
+            // Re-default the composer pickers only if the user hasn't already
+            // made an explicit choice this session (don't yank a manual pick).
+            const privacyContainer = document.getElementById('privacyOptions');
+            if (privacyContainer && privacyContainer.dataset.userChanged !== '1'
+                && document.getElementById('createStatusModal')?.classList.contains('active')) {
+                initializePrivacyOptions();
+            }
+            const durationContainer = document.getElementById('durationOptions');
+            if (durationContainer && durationContainer.dataset.userChanged !== '1'
+                && document.getElementById('createStatusModal')?.classList.contains('active')) {
+                initializeDurationOptions();
+            }
+            // Re-filter the already-loaded status list against the new
+            // autoExpireStatus fallback (affects only legacy statuses with
+            // no expiresAt of their own) and re-render.
+            if (typeof renderStatusListInstantlyUI === 'function') {
+                try { renderStatusListInstantlyUI(); } catch(_) {}
+            }
+        });
+    }
+
+    // ── Select All / Clear All friends (privacy picker) ────────────────
+    // These buttons existed in the markup with zero click handlers —
+    // wired here to toggle every .friend-select-item the same way a
+    // manual click on each one would.
+    const selectAllFriendsBtn = document.getElementById('selectAllFriendsBtn');
+    if (selectAllFriendsBtn && !selectAllFriendsBtn._bound) {
+        selectAllFriendsBtn._bound = true;
+        selectAllFriendsBtn.addEventListener('click', () => {
+            document.querySelectorAll('#friendsListContainer .friend-select-item').forEach(el => {
+                el.classList.add('selected');
+                const cb = el.querySelector('.friend-checkbox i');
+                if (cb) cb.className = 'fas fa-check-square';
+            });
+        });
+    }
+    const clearAllFriendsBtn = document.getElementById('clearAllFriendsBtn');
+    if (clearAllFriendsBtn && !clearAllFriendsBtn._bound) {
+        clearAllFriendsBtn._bound = true;
+        clearAllFriendsBtn.addEventListener('click', () => {
+            document.querySelectorAll('#friendsListContainer .friend-select-item').forEach(el => {
+                el.classList.remove('selected');
+                const cb = el.querySelector('.friend-checkbox i');
+                if (cb) cb.className = 'far fa-square';
+            });
+        });
+    }
+
     // ── Delegated click handler on allStatusList ──────────────────────────
     // This survives DOM re-renders: we listen on the stable container,
     // not on individual items which get replaced on each render.
@@ -5869,11 +6036,14 @@ function initializePrivacyOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.privacy-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
+            container.dataset.userChanged = '1';
         });
         container.appendChild(option);
     });
-    const friends = container.querySelector('[data-privacy="friends"]');
-    if (friends) friends.classList.add('selected');
+    const defaultPrivacyKey = _mapPrivacySettingToComposerKey(_getStatusPrivacySetting());
+    const preselect = container.querySelector(`[data-privacy="${defaultPrivacyKey}"]`)
+        || container.querySelector('[data-privacy="friends"]');
+    if (preselect) preselect.classList.add('selected');
 }
 
 function initializeDurationOptions() {
@@ -5890,11 +6060,14 @@ function initializeDurationOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.duration-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
+            container.dataset.userChanged = '1';
         });
         container.appendChild(option);
     });
-    const day = container.querySelector('[data-duration="86400"]');
-    if (day) day.classList.add('selected');
+    const defaultSeconds = _nearestDurationOptionSeconds(_mapExpirySettingToSeconds(_getStatusExpirySetting()));
+    const preselect = container.querySelector(`[data-duration="${defaultSeconds}"]`)
+        || container.querySelector('[data-duration="86400"]');
+    if (preselect) preselect.classList.add('selected');
 }
 
 function initializeTemplateOptions() {
@@ -6072,8 +6245,10 @@ function initializeHighlightPrivacyOptions() {
         });
         container.appendChild(option);
     });
-    const friends = container.querySelector('[data-privacy="friends"]');
-    if (friends) friends.classList.add('selected');
+    const defaultHighlightPrivacyKey = _mapPrivacySettingToComposerKey(_getStatusPrivacySetting());
+    const highlightPreselect = container.querySelector(`[data-privacy="${defaultHighlightPrivacyKey}"]`)
+        || container.querySelector('[data-privacy="friends"]');
+    if (highlightPreselect) highlightPreselect.classList.add('selected');
 }
 
 function initializeRepeatOptions() {
@@ -6136,9 +6311,13 @@ async function handlePostStatus() {
     if (intent) statusData.intent = intent;
     if (mood) statusData.mood = mood;
     if (category) statusData.category = category;
-    // Default privacy to 'friends' so statuses are friends-only unless explicitly changed
-    statusData.privacy = privacy || 'friends';
-    statusData.allowReplies = true;
+    // Fall back to the user's saved "who can view my status" preference
+    // (js/settings-broadcast-listener.js keeps window.__whoCanViewMyStatus
+    // live) rather than a hardcoded 'friends' — the picker above is already
+    // pre-selected from this same setting, so this only matters if nothing
+    // could be read from the DOM.
+    statusData.privacy = privacy || _mapPrivacySettingToComposerKey(_getStatusPrivacySetting());
+    statusData.allowReplies = _getStatusReplySetting();
     if (selectedFriendIds.length > 0) {
         if (statusData.privacy === 'except') {
             statusData.excludedUserIds = selectedFriendIds;
@@ -6155,9 +6334,13 @@ async function handlePostStatus() {
             statusData.expiresAt = new Date(Date.now() + secs * 1000).toISOString();
         }
     } else {
-        // Default: 24 hours
-        statusData.duration  = '86400';
-        statusData.expiresAt = new Date(Date.now() + 86400 * 1000).toISOString();
+        // Fall back to the user's saved autoExpireStatus setting instead of
+        // a hardcoded 24h.
+        const fallbackSecs = _nearestDurationOptionSeconds(_mapExpirySettingToSeconds(_getStatusExpirySetting()));
+        statusData.duration = String(fallbackSecs);
+        if (fallbackSecs > 0) {
+            statusData.expiresAt = new Date(Date.now() + fallbackSecs * 1000).toISOString();
+        }
     }
     if (actions.length > 0) statusData.actionButtons = actions;
     const sensitive = UIElements.getElement('sensitiveContentToggle');
@@ -6406,7 +6589,15 @@ async function handlePostStatus() {
     }
 }
 
-function handleSaveDraft() {
+// silent=true (default): used by the 3s background autosave — no toast
+// spam for "nothing to type yet" and no toast for a routine background
+// save either. Pass silent=false only from an explicit, user-initiated
+// "Save Draft" action if one is ever added back to the UI.
+// IMPORTANT: this function never closes the composer. The create-status
+// modal is only ever closed by the user tapping the X / Cancel button —
+// background autosave must not be able to dismiss the screen out from
+// under someone who is mid-way through writing a status.
+function handleSaveDraft(silent = true) {
     if (!ensureUIActive('saveDraft')) return;
     const activeTab = UIElements.querySelector('.create-status-tab.active');
     if (!activeTab) return;
@@ -6419,7 +6610,7 @@ function handleSaveDraft() {
         const textInput = UIElements.getElement('textStatusInput');
         const text = textInput ? textInput.value.trim() : '';
         if (!text) {
-            showNotification('Nothing to save', 'warning');
+            if (!silent) showNotification('Nothing to save', 'warning');
             return;
         }
         draftData.text = text;
@@ -6429,7 +6620,7 @@ function handleSaveDraft() {
         const captionInput = UIElements.getElement('mediaCaptionInput');
         const caption = captionInput ? captionInput.value.trim() : '';
         if (!caption) {
-            showNotification('Nothing to save', 'warning');
+            if (!silent) showNotification('Nothing to save', 'warning');
             return;
         }
         draftData.caption = caption;
@@ -6437,7 +6628,7 @@ function handleSaveDraft() {
         const questionInput = UIElements.getElement('pollQuestionInput');
         const question = questionInput ? questionInput.value.trim() : '';
         if (!question) {
-            showNotification('Nothing to save', 'warning');
+            if (!silent) showNotification('Nothing to save', 'warning');
             return;
         }
         draftData.question = question;
@@ -6445,7 +6636,7 @@ function handleSaveDraft() {
             .map(input => input.value.trim())
             .filter(text => text);
         if (options.length < 2) {
-            showNotification('Please enter at least 2 options to save as draft', 'error');
+            if (!silent) showNotification('Please enter at least 2 options to save as draft', 'error');
             return;
         }
         draftData.options = options.map(text => ({ text, votes: 0 }));
@@ -6473,9 +6664,8 @@ function handleSaveDraft() {
             drafts.unshift(draftData);
             try { localStorage.setItem('status_drafts', JSON.stringify(drafts)); } catch(e) {}
         }
-        showNotification('Draft saved', 'success');
-        const modal = UIElements.createStatusModal || document.getElementById('createStatusModal');
-        if (modal) modal.classList.remove('active');
+        if (!silent) showNotification('Draft saved', 'success');
+        // Composer is intentionally NOT closed here — see function header.
     })();
 }
 
@@ -8675,6 +8865,52 @@ window._toggleStatusMusic = function() {
 // ═══════════════════════════════════════════════════════════════════
 // P3 FIX: Creator Analytics Bottom Sheet
 // ═══════════════════════════════════════════════════════════════════
+// Posting Streak — counts consecutive calendar days (ending today, or
+// yesterday if nothing's posted yet today so an active streak doesn't
+// read as broken mid-day) that have at least one of the user's own
+// statuses. Replaces the previous hardcoded "coming soon" alert.
+window._showPostingStreak = function() {
+    const list = (typeof getMyStatuses === 'function' ? getMyStatuses() : myStatuses) || [];
+    if (!list.length) {
+        showNotification('No statuses posted yet — post one to start a streak!', 'info');
+        return;
+    }
+    const days = new Set();
+    list.forEach(s => {
+        const d = new Date(s.createdAt || s.created_at || 0);
+        if (!isNaN(d.getTime())) days.add(d.toDateString());
+    });
+    let streak = 0;
+    const cursor = new Date();
+    if (!days.has(cursor.toDateString())) cursor.setDate(cursor.getDate() - 1);
+    while (days.has(cursor.toDateString())) {
+        streak++;
+        cursor.setDate(cursor.getDate() - 1);
+    }
+    showNotification(streak > 0 ? `🔥 ${streak}-day posting streak!` : 'No active posting streak yet', streak > 0 ? 'success' : 'info');
+};
+
+// Mood Trends — most frequent mood tag across the user's own statuses
+// (statusData.mood is already collected at creation time from the
+// composer's mood picker; this was simply never surfaced anywhere).
+window._showMoodTrends = function() {
+    const list = (typeof getMyStatuses === 'function' ? getMyStatuses() : myStatuses) || [];
+    const withMood = list.filter(s => s && s.mood);
+    if (!withMood.length) {
+        showNotification('No mood data yet — add a mood when posting a status', 'info');
+        return;
+    }
+    const counts = {};
+    withMood.forEach(s => { counts[s.mood] = (counts[s.mood] || 0) + 1; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    const moodEmoji = {
+        happy: '😊', calm: '😌', energetic: '⚡', focused: '🎯',
+        relaxed: '😎', stressed: '😣', tired: '😴', excited: '🤩', neutral: '😐'
+    };
+    const emoji = moodEmoji[top[0]] || '🙂';
+    showNotification(`${emoji} Most common mood: ${top[0]} (${top[1]} status${top[1] === 1 ? '' : 'es'})`, 'success');
+};
+
 window._showStatusAnalytics = async function() {
     const sheet   = document.getElementById('statusAnalyticsSheet');
     const backdrop = document.getElementById('statusAnalyticsBackdrop');

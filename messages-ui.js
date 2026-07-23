@@ -4986,11 +4986,12 @@
                             <span class="chat-time">${time}</span>
 
                             <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
-                                onmousedown="event.stopPropagation();"
-                                ontouchstart="event.stopPropagation();"
-                                onmouseup="event.stopPropagation();"
-                                ontouchend="event.stopPropagation();"
-                                onclick="event.stopPropagation();event.preventDefault();window.messagesUI?._showChatContextMenu('${chat.id}', event);"
+                                onmousedown="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
+                                ontouchstart="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
+                                onmouseup="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
+                                ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
+                                ontouchcancel="document.body.classList.remove('chat-item-pressing');"
+                                onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');window.messagesUI?._showChatContextMenu('${chat.id}', event);"
                                 style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;">
                                 <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                             </button>
@@ -6962,7 +6963,7 @@
 
                 ${isOwnMessage ? item('edit', 'fas fa-edit', 'Edit') : ''}
 
-                ${item('forward', 'fas fa-share',       'Forward')}
+                ${window.__messageForwardingEnabled === false ? '' : item('forward', 'fas fa-share', 'Forward')}
 
                 ${item('copy',    'fas fa-copy',        'Copy')}
 
@@ -7162,6 +7163,10 @@
 
             case 'forward':
 
+                if (window.__messageForwardingEnabled === false) {
+                    UIRenderer?.showNotification?.('Message forwarding is turned off in Settings', 'info');
+                    break;
+                }
                 showForwardModal(message);
 
                 break;

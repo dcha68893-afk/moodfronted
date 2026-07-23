@@ -1,15 +1,50 @@
-﻿/**
- * PART 1/4 — BOOTSTRAP & LIFECYCLE
- * Module guard, lifecycle state machine, auth handlers,
- * session management, core state, logging, security, constants
- */
-const MODULE_NAME = 'friends';
-const MODULE_VERSION = '14.0';
-const EXPECTED_PARENT_ORIGIN = window.location.origin;
+// =============================================
+// FRIEND CORE — BOOTSTRAP & LIFECYCLE
+// Split from the original friend-core.js (v14.0) into 3 real ES modules:
+//   friend-core.bootstrap.js   (this file) — iframe/session bootstrap, KYN protocol,
+//                               core controllers, lifecycle state machine
+//   friend-core.operations.js  — friend state, API/data-loading operations
+//   friend-core.ui-bridge.js   — UI bridge, rendering, and the public API surface
+//                               (this is the file friend.html / friend-ui.js load)
+// =============================================
 
-// =============================================
-// [POLLING CONFIGURATION]
-// =============================================
+import {
+    generateMessageId as importedGenerateMessageId
+} from './js/api.messages.js';
+import {
+    acceptFriendRequestOnline,
+    applySettingToFriendModule,
+    declineFriendRequest,
+    loadFriendRequestsFromBackend,
+    loadFriendsFromBackend,
+    loadSentRequestsFromBackend,
+    showNotification
+} from './friend-core.ui-bridge.js';
+import {
+    DiagnosticsAgent,
+    FriendSearchEngine,
+    currentUser,
+    friends,
+    setAllUsers,
+    setCurrentUser,
+    setFriendRequests,
+    setFriends,
+    setMutedFriends,
+    setPinnedFriends,
+    setSentRequests,
+    setUserData,
+    userData
+} from './friend-core.operations.js';
+
+const DEBUG = false;
+
+const PRODUCTION = window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1');
+
+const MODULE_NAME = 'friends';
+
+const MODULE_VERSION = '14.0';
+
+const EXPECTED_PARENT_ORIGIN = window.location.origin;
 
 const POLLING_CONFIG = {
     INCOMING_REQUESTS_INTERVAL: 60000,  // 60s — socket handles realtime; polling is offline fallback
@@ -26,10 +61,6 @@ let pollingIntervals = {
 let pollingRetryCounts = {
     incomingRequests: 0
 };
-
-// =============================================
-// [REQUEST DEDUPLICATION]
-// =============================================
 
 const RequestDeduplicator = {
     _processedHashes: new Map(),
@@ -108,10 +139,6 @@ const RequestDeduplicator = {
     }
 };
 
-// =============================================
-// [SHALLOW COMPARISON UTILITIES]
-// =============================================
-
 const ShallowCompare = {
     areRequestsEqual(oldRequests, newRequests) {
         if (!oldRequests && !newRequests) return true;
@@ -163,10 +190,6 @@ const ShallowCompare = {
         return false;
     }
 };
-
-// =============================================
-// [POLLING MANAGER] - FIXED: deduplication with _fetchInFlight
-// =============================================
 
 const PollingManager = {
     _isPolling: false,
@@ -459,10 +482,6 @@ const PollingManager = {
     }
 };
 
-// =============================================
-// [FRIEND CATEGORIES]
-// =============================================
-
 const friendCategories = {
     'acquaintance': { name: 'Acquaintance', color: 'var(--category-acquaintance)', icon: 'fas fa-handshake', description: 'Someone you know casually' },
     'friend': { name: 'Friend', color: 'var(--category-friend)', icon: 'fas fa-user-friends', description: 'A regular friend' },
@@ -472,10 +491,6 @@ const friendCategories = {
     'pinned': { name: 'Pinned', color: 'var(--warning-color)', icon: 'fas fa-thumbtack', description: 'Pinned friend' },
     'muted': { name: 'Muted', color: 'var(--text-secondary)', icon: 'fas fa-volume-mute', description: 'Muted friend' }
 };
-
-// =============================================
-// [STORAGE KEYS]
-// =============================================
 
 const LOCAL_STORAGE_KEYS = {
     USER: 'knecta_current_user',
@@ -502,19 +517,12 @@ const LOCAL_STORAGE_KEYS = {
     KYN_ORIGIN_TRUST: 'kyn_origin_trust'
 };
 
-// =============================================
-// [SESSION STORAGE] - MEMORY ONLY
-// =============================================
 const __session = {
     token: null,
     user: null,
     expiresAt: null,
     ready: false
 };
-
-// =============================================
-// [LIFECYCLE STATE MACHINE]
-// =============================================
 
 const LIFECYCLE_STATES = {
     BOOT: 'BOOT',
@@ -528,18 +536,25 @@ const LIFECYCLE_STATES = {
 };
 
 let currentState = LIFECYCLE_STATES.BOOT;
+
 let childReadySent = false;
+
 let parentReadyReceived = false;
+
+function setParentReadyReceived(value) { parentReadyReceived = value; }
+
 let authReadyReceived = false;
+
 let _stateHistory = [];
+
 const _listeners = new Set();
+
 let initializationLock = false;
 
-// =============================================
-// [REQUEST QUEUE]
-// =============================================
+function setInitializationLock(value) { initializationLock = value; }
 
 const requestQueue = [];
+
 let isFlushingQueue = false;
 
 function queueRequest(requestFn) {
@@ -579,10 +594,6 @@ async function flushRequestQueue() {
     isFlushingQueue = false;
     console.log(`[${MODULE_NAME}] Queue flush complete`);
 }
-
-// =============================================
-// [STRICT STATE TRANSITION]
-// =============================================
 
 const VALID_TRANSITIONS = {
     [LIFECYCLE_STATES.BOOT]: [LIFECYCLE_STATES.INITIALIZING],
@@ -666,10 +677,6 @@ const LifecycleStateMachine = {
     }
 };
 
-// =============================================
-// [LIFECYCLE GUARD]
-// =============================================
-
 function assertActive(actionName) {
     if (currentState !== LIFECYCLE_STATES.ACTIVE) {
         console.warn(`[Lifecycle] Blocked action "${actionName}" — not ACTIVE (current: ${currentState}, parentReady: ${parentReadyReceived}, authReady: ${authReadyReceived}, sessionReady: ${__session.ready})`);
@@ -699,9 +706,6 @@ function assertReadyForSession(actionName) {
     return true;
 }
 
-// =============================================
-// [EXACTLY-ONCE CHILD_READY SENDER]
-// =============================================
 function sendChildReady() {
     if (childReadySent) {
         console.warn('[Lifecycle] CHILD_READY already sent');
@@ -735,9 +739,6 @@ function sendChildReady() {
     return false;
 }
 
-// =============================================
-// [PARENT_READY HANDLER]
-// =============================================
 function handleParentReady(message, event) {
     if (parentReadyReceived) {
         console.warn('[Lifecycle] PARENT_READY already received — ignoring');
@@ -785,11 +786,6 @@ function handleParentReady(message, event) {
     onModuleActive();
 }
 
-// =============================================
-// [AUTH_READY HANDLER] - FIXED: suppress duplicate warning
-// =============================================
-
-// FIXED: Added deduplication flag for AUTH_READY
 let _authReadyHandled = false;
 
 function handleAuthReady(message) {
@@ -902,8 +898,8 @@ function applySession(session) {
     __session.ready = !!user;
 
     if (__session.user) {
-        currentUser = __session.user;
-        userData = __session.user;
+        setCurrentUser(__session.user);
+        setUserData(__session.user);
         window.currentUser = __session.user;
         window.userData = __session.user;
         
@@ -926,12 +922,10 @@ function onModuleActive() {
     window.dispatchEvent(new CustomEvent('parentReady'));
 }
 
-// =============================================
-// [MESSAGE QUEUE]
-// =============================================
-
 const _messageQueue = [];
+
 const _processedMessageIds = new Set();
+
 const _maxProcessedSize = 500;
 
 function queueMessage(message) {
@@ -964,10 +958,6 @@ function flushQueue() {
     }
     return flushed;
 }
-
-// =============================================
-// [MESSAGE WRAPPER]
-// =============================================
 
 const generateMessageId = importedGenerateMessageId || function() {
     return `${MODULE_NAME}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${Math.random().toString(36).substr(2, 4)}`;
@@ -1045,10 +1035,6 @@ function safeSend(message) {
     }
     return sendMessageInternal(message);
 }
-
-// =============================================
-// [AUTHENTICATED REQUEST THROUGH PARENT]
-// =============================================
 
 function isAuthenticated() {
     return authReadyReceived && __session.ready && !!__session.token;
@@ -1259,9 +1245,6 @@ async function authorizedRequest(endpoint, options = {}) {
     });
 }
 
-// =============================================
-// [API GATEWAY]
-// =============================================
 const APIGateway = {
     _pendingRequests: new Map(),
     _requestCounter: 0,
@@ -1299,10 +1282,6 @@ const APIGateway = {
         this._pendingRequests.clear();
     }
 };
-
-// =============================================
-// [LOGGING SYSTEM]
-// =============================================
 
 const Logger = {
     levels: { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3, NONE: 4 },
@@ -1351,10 +1330,6 @@ const Logger = {
     clearCache() { this.onceTracker.clear(); }
 };
 
-// =============================================
-// [STATUS MANAGER]
-// =============================================
-
 const StatusManager = {
     currentStatus: null,
     lastStatusTime: 0,
@@ -1388,11 +1363,8 @@ const StatusManager = {
     }
 };
 
-// =============================================
-// [ERROR HANDLING]
-// =============================================
-
 let NetworkError;
+
 try {
     const apiCore = await import('./js/api.core.js');
     NetworkError = apiCore.NetworkError;
@@ -1508,10 +1480,6 @@ const ErrorHandler = {
     }
 };
 
-// =============================================
-// [SAFE STORAGE LAYER]
-// =============================================
-
 const SafeStorage = {
     _memoryStore: new Map(),
     _storageAvailable: null,
@@ -1621,10 +1589,6 @@ const SafeStorage = {
         this._subscribers.clear();
     }
 };
-
-// =============================================
-// [SECURITY VALIDATOR]
-// =============================================
 
 const SecurityValidator = {
     _trustedOrigins: new Set(),
@@ -1769,10 +1733,6 @@ const SecurityValidator = {
         return allowedTypes.includes(type);
     }
 };
-
-// =============================================
-// [PARENT COMMUNICATION MANAGER]
-// =============================================
 
 const ParentCommunicationManager = {
     _parentOrigin: window.location.origin,
@@ -2048,7 +2008,51 @@ const ParentCommunicationManager = {
                     window.dispatchEvent(new CustomEvent('friendRequestReceived', {
                         detail: { request: newRequest, realtime: true }
                     }));
-                    showNotification?.(`New friend request from ${newRequest.senderName}`, 'info');
+
+                    // SETTINGS WIRING: friends.friendRequestPrivacy — 'nobody' means this user
+                    // doesn't want to receive requests at all; 'contacts' restricts to people
+                    // already in the contacts list. Both are enforced client-side here (in
+                    // addition to whatever the backend already does) so the setting has a
+                    // visible effect even for requests that already made it through.
+                    const _privacy = window.__friendRequestPrivacy || 'everyone';
+                    const _isExistingContact = Array.isArray(window.contacts) &&
+                        window.contacts.some(c => c && String(c.id) === String(senderId));
+                    const _shouldAutoDecline =
+                        (_privacy === 'nobody') ||
+                        (_privacy === 'contacts' && senderId && !_isExistingContact);
+
+                    if (_shouldAutoDecline) {
+                        declineFriendRequest({ id: requestId }).catch(() => {});
+                        if (window.__friendRequestNotifications !== false) {
+                            showNotification?.(`A friend request from ${newRequest.senderName} was automatically declined (your friend request privacy is set to "${_privacy === 'nobody' ? 'no one' : 'contacts only'}")`, 'info');
+                        }
+                        return;
+                    }
+
+                    // SETTINGS WIRING: friends.autoAcceptFriends — when enabled, skip the
+                    // pending-request step entirely and accept immediately.
+                    if (window.__autoAcceptFriends === true && requestId) {
+                        acceptFriendRequestOnline(requestId, senderId).then(result => {
+                            if (window.__friendRequestNotifications !== false) {
+                                showNotification?.(
+                                    result?.success
+                                        ? `${newRequest.senderName} was automatically added as a friend`
+                                        : `New friend request from ${newRequest.senderName}`,
+                                    result?.success ? 'success' : 'info'
+                                );
+                            }
+                        }).catch(() => {
+                            if (window.__friendRequestNotifications !== false) {
+                                showNotification?.(`New friend request from ${newRequest.senderName}`, 'info');
+                            }
+                        });
+                        return;
+                    }
+
+                    // SETTINGS WIRING: friends.friendRequestNotifications — default true.
+                    if (window.__friendRequestNotifications !== false) {
+                        showNotification?.(`New friend request from ${newRequest.senderName}`, 'info');
+                    }
                 }
                 return;
             }
@@ -2400,10 +2404,6 @@ function requestSessionFromParent() {
     return ParentCommunicationManager._requestSession();
 }
 
-// =============================================
-// [MODULE REGISTRATION MANAGER]
-// =============================================
-
 const ModuleRegistrationManager = {
     _registrationAttempted: false,
     _registrationCompleted: false,
@@ -2466,10 +2466,6 @@ const ModuleRegistrationManager = {
         this._registrationCompleted = false;
     }
 };
-
-// =============================================
-// [SESSION MANAGER]
-// =============================================
 
 const SessionManager = {
     _session: null,
@@ -2580,10 +2576,6 @@ const SessionManager = {
     }
 };
 
-// =============================================
-// [TOKEN PROMISE]
-// =============================================
-
 const TokenPromise = {
     _token: null,
     _tokenReceived: false,
@@ -2627,10 +2619,6 @@ const TokenPromise = {
         this._listeners.clear();
     }
 };
-
-// =============================================
-// [SANDBOX DETECTOR]
-// =============================================
 
 const SandboxDetector = {
     detected: false,
@@ -2691,10 +2679,6 @@ const SandboxDetector = {
         }
     }
 };
-
-// =============================================
-// [IFRAME ENVIRONMENT DETECTOR]
-// =============================================
 
 const IframeEnvironment = {
     type: 'UNKNOWN',
@@ -2830,10 +2814,6 @@ const IframeEnvironment = {
     }
 };
 
-// =============================================
-// [MESSAGE DISPATCHER]
-// =============================================
-
 const MessageDispatcher = {
     _handlers: new Map(),
     _initialized: false,
@@ -2941,8 +2921,781 @@ const MessageDispatcher = {
     }
 };
 
-// =============================================
-// [FRIEND CACHE MANAGER]
-// =============================================
+const FriendCacheManager = {
+    _cache: {
+        friends: new Map(),
+        requests: new Map(),
+        sentRequests: new Map(),
+        pinnedFriends: new Map(),
+        mutedFriends: new Map(),
+        users: new Map(),
+        searchIndex: new Map(),
+    },
+    _ttl: {
+        friends: 5 * 60 * 1000,
+        requests: 2 * 60 * 1000,
+        users: 10 * 60 * 1000,
+        search: 60 * 1000,
+    },
+    _timestamps: new Map(),
+    _listeners: new Map(),
+    _searchCache: null,
+    
+    init() {
+        this._loadFromStorage();
+        this._setupAutoCleanup();
+        StatusManager.show('READY', 'FriendCacheManager initialized');
+    },
+    
+    _loadFromStorage() {
+        try {
+            // FIX: On startup, purge any stale v8 cache entries that have int+string duplicate IDs.
+            // This happens when old code wrote both id=5 (integer) and id="5" (string) to the same array.
+            // We rewrite the key with deduplicated data so broadcasts from chat.html are clean.
+            try {
+                const v8Key = 'kynecta_friends_cache_v8';
+                const v8Raw = localStorage.getItem(v8Key);
+                if (v8Raw) {
+                    const v8Parsed = JSON.parse(v8Raw);
+                    const arr = v8Parsed?.friends || (Array.isArray(v8Parsed) ? v8Parsed : null);
+                    if (arr && arr.length > 0) {
+                        const seen = new Set();
+                        const deduped = arr.filter(f => {
+                            if (!f || !f.id) return false;
+                            const k = String(f.id);
+                            if (seen.has(k)) return false;
+                            seen.add(k);
+                            return true;
+                        });
+                        if (deduped.length !== arr.length) {
+                            // Rewrite with deduplicated data
+                            localStorage.setItem(v8Key, JSON.stringify({ friends: deduped, timestamp: Date.now() }));
+                        }
+                    }
+                }
+            } catch (_) {}
 
+            // FIX: Read from ALL known cache key variants written by different modules.
+            // services.friend.js writes 'kynecta_friends_cache_v8'; messages module writes
+            // the same key.  Previously only 'knecta_friends_cache' was read, causing 0 friends on reload.
+            let friendsData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.FRIENDS); // 'knecta_friends_cache'
+            if (!friendsData || !Array.isArray(friendsData) || friendsData.length === 0) {
+                const raw = localStorage.getItem('kynecta_friends_cache_v8')
+                         || localStorage.getItem('knecta_friends_cache_v8')
+                         || localStorage.getItem('kynecta_friends_cache')
+                         || localStorage.getItem('friends');
+                if (raw) {
+                    try {
+                        const parsed = JSON.parse(raw);
+                        friendsData = parsed?.friends || (Array.isArray(parsed) ? parsed : []);
+                    } catch (_) {}
+                }
+            }
+            if (friendsData && Array.isArray(friendsData)) {
+                friendsData.forEach(f => {
+                    // FIX: Only load truly accepted friends. Records with status
+                    // 'pending', 'pending_sent', 'pending_received', 'blocked',
+                    // or 'removed' must NOT appear in the friends list.
+                    // IMPORTANT: 'online', 'offline', 'away', 'busy' are PRESENCE statuses,
+                    // NOT friendship statuses. The messages module saves all conversation
+                    // participants to kynecta_friends_cache_v8 with their presence status —
+                    // those must NOT be loaded as accepted friends or every user appears as
+                    // a friend before they accept a request.
+                    if (f && f.id) {
+                        // A record is an accepted friend ONLY if it has an explicit
+                        // friendship status of 'accepted', OR it has NO status at all
+                        // (true legacy records from before status was added) AND it also
+                        // has an 'addedAt' or 'friendId' field proving it came from the
+                        // friends module — not the messages module's participant list.
+                        const friendshipStatus = f.friendshipStatus || f.friendStatus || null;
+                        const rawStatus = f.status;
+                        const isPresenceOnly = rawStatus === 'online' || rawStatus === 'offline' ||
+                                               rawStatus === 'away' || rawStatus === 'busy';
 
+                        let isAcceptedFriend = false;
+                        if (friendshipStatus === 'accepted') {
+                            isAcceptedFriend = true;
+                        } else if (rawStatus === 'accepted') {
+                            isAcceptedFriend = true;
+                        } else if (!rawStatus && !isPresenceOnly) {
+                            // Legacy record with no status — only treat as friend if it
+                            // has fields that uniquely identify a friends-module record
+                            isAcceptedFriend = !!(f.addedAt || f.friendId || f.localId || f.serverId);
+                        }
+                        // Explicitly reject pending/blocked/removed records
+                        if (rawStatus === 'pending_sent' || rawStatus === 'pending_received' ||
+                            rawStatus === 'pending' || rawStatus === 'blocked' || rawStatus === 'removed' ||
+                            rawStatus === 'none') {
+                            isAcceptedFriend = false;
+                        }
+
+                        if (isAcceptedFriend) {
+                            // FIX: Always use String key to prevent integer/string duplication
+                            const key = String(f.id);
+                            this._cache.friends.set(key, { ...f, id: key });
+                        }
+                    }
+                });
+            }
+            
+            const requestsData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.REQUESTS);
+            if (requestsData && Array.isArray(requestsData)) {
+                requestsData.forEach(r => {
+                    if (r && r.id) this._cache.requests.set(r.id, r);
+                });
+            }
+            
+            const sentData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.SENT_REQUESTS);
+            if (sentData && Array.isArray(sentData)) {
+                sentData.forEach(r => {
+                    if (r && r.id) this._cache.sentRequests.set(r.id, r);
+                });
+            }
+            
+            const pinnedData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.PINNED_FRIENDS);
+            if (pinnedData && Array.isArray(pinnedData)) {
+                pinnedData.forEach(f => {
+                    if (f && f.id) this._cache.pinnedFriends.set(f.id, f);
+                });
+            }
+            
+            const mutedData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.MUTED_FRIENDS);
+            if (mutedData && Array.isArray(mutedData)) {
+                mutedData.forEach(f => {
+                    if (f && f.id) this._cache.mutedFriends.set(f.id, f);
+                });
+            }
+            
+            const allUsersData = SafeStorage.getObject(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE);
+            if (allUsersData && Array.isArray(allUsersData)) {
+                allUsersData.forEach(u => {
+                    if (u && u.id) this._cache.users.set(u.id, u);
+                });
+            }
+        } catch (error) {
+            Logger.error('FriendCacheManager', 'Failed to load from storage', error);
+        }
+    },
+    
+    _setupAutoCleanup() {
+        setInterval(() => this.cleanup(), 5 * 60 * 1000);
+    },
+    
+    cleanup() {
+        const now = Date.now();
+        
+        for (const [id, friend] of this._cache.friends) {
+            const key = `friend_${id}`;
+            const timestamp = this._timestamps.get(key);
+            if (timestamp && now - timestamp > this._ttl.friends) {
+                this._cache.friends.delete(id);
+                this._timestamps.delete(key);
+            }
+        }
+        
+        for (const [id, request] of this._cache.requests) {
+            const key = `request_${id}`;
+            const timestamp = this._timestamps.get(key);
+            if (timestamp && now - timestamp > this._ttl.requests) {
+                this._cache.requests.delete(id);
+                this._timestamps.delete(key);
+            }
+        }
+        
+        for (const [id, user] of this._cache.users) {
+            const key = `user_${id}`;
+            const timestamp = this._timestamps.get(key);
+            if (timestamp && now - timestamp > this._ttl.users) {
+                this._cache.users.delete(id);
+                this._timestamps.delete(key);
+            }
+        }
+    },
+    
+    on(event, callback) {
+        if (!this._listeners.has(event)) {
+            this._listeners.set(event, new Set());
+        }
+        this._listeners.get(event).add(callback);
+        return () => this.off(event, callback);
+    },
+    
+    off(event, callback) {
+        const listeners = this._listeners.get(event);
+        if (listeners) {
+            listeners.delete(callback);
+            if (listeners.size === 0) this._listeners.delete(event);
+        }
+    },
+    
+    _emit(event, data) {
+        const listeners = this._listeners.get(event);
+        if (listeners) {
+            listeners.forEach(cb => {
+                try { cb(data); } catch (e) {}
+            });
+        }
+    },
+    
+    getFriend(id) {
+        return this._cache.friends.get(id) || null;
+    },
+    
+    getAllFriends() {
+        return Array.from(this._cache.friends.values());
+    },
+    
+    setFriend(friend) {
+        if (!friend || !friend.id) return false;
+        const key = String(friend.id);
+        // Never add current user as their own friend
+        const _selfId = __session?.user?.id || currentUser?.id;
+        if (_selfId && key === String(_selfId)) return false;
+        this._cache.friends.set(key, { ...friend, id: key });
+        this._timestamps.set(`friend_${key}`, Date.now());
+        this._emit('friend:updated', friend);
+        return true;
+    },
+    
+    setFriends(friendsArray) {
+        if (!Array.isArray(friendsArray)) return false;
+        const _selfId = __session?.user?.id || currentUser?.id;
+        friendsArray.forEach(f => {
+            if (!f || !f.id) return;
+            const key = String(f.id);
+            // Never add current user as their own friend
+            if (_selfId && key === String(_selfId)) return;
+            const st = f.status;
+            if (st === 'pending_sent' || st === 'pending_received' ||
+                st === 'pending' || st === 'blocked' || st === 'removed' ||
+                st === 'none') return;
+            if ((st === 'online' || st === 'offline' || st === 'away' || st === 'busy') &&
+                !(f.addedAt || f.friendId || f.localId || f.serverId)) return;
+            this._cache.friends.set(key, { ...f, id: key });
+            this._timestamps.set(`friend_${key}`, Date.now());
+        });
+        this._emit('friends:updated', this.getAllFriends());
+        return true;
+    },
+    
+    removeFriend(id) {
+        const key = String(id);
+        // Try both String and original forms (legacy data may have used integer key)
+        const existed = this._cache.friends.delete(key) || this._cache.friends.delete(id);
+        if (existed) {
+            this._timestamps.delete(`friend_${key}`);
+            this._timestamps.delete(`friend_${id}`);
+            this._emit('friend:removed', id);
+        }
+        return existed;
+    },
+    
+    getRequest(id) {
+        return this._cache.requests.get(id) || null;
+    },
+    
+    getAllRequests() {
+        return Array.from(this._cache.requests.values());
+    },
+    
+    setRequest(request) {
+        if (!request || !request.id) return false;
+        this._cache.requests.set(request.id, request);
+        this._timestamps.set(`request_${request.id}`, Date.now());
+        this._emit('request:updated', request);
+        return true;
+    },
+    
+    setRequests(requestsArray) {
+        if (!Array.isArray(requestsArray)) return false;
+        requestsArray.forEach(r => {
+            if (r && r.id) {
+                this._cache.requests.set(r.id, r);
+                this._timestamps.set(`request_${r.id}`, Date.now());
+            }
+        });
+        this._emit('requests:updated', this.getAllRequests());
+        return true;
+    },
+    
+    removeRequest(id) {
+        const existed = this._cache.requests.delete(id);
+        if (existed) {
+            this._timestamps.delete(`request_${id}`);
+            this._emit('request:removed', id);
+        }
+        return existed;
+    },
+    
+    getAllSentRequests() {
+        return Array.from(this._cache.sentRequests.values());
+    },
+
+    // FIX: getSentRequest was missing. cancelFriendRequest() calls this via optional
+    // chaining — without it existingSent is always undefined and rollback on cancel
+    // failure never restores the card in the UI.
+    getSentRequest(id) {
+        return this._cache.sentRequests.get(String(id)) || null;
+    },
+
+    setSentRequest(request) {
+        if (!request || !request.id) return false;
+        this._cache.sentRequests.set(request.id, request);
+        this._timestamps.set(`sent_${request.id}`, Date.now());
+        this._emit('sent:updated', request);
+        return true;
+    },
+    
+    setSentRequests(requestsArray) {
+        if (!Array.isArray(requestsArray)) return false;
+        requestsArray.forEach(r => {
+            if (r && r.id) {
+                this._cache.sentRequests.set(r.id, r);
+                this._timestamps.set(`sent_${r.id}`, Date.now());
+            }
+        });
+        this._emit('sent:all_updated', this.getAllSentRequests());
+        return true;
+    },
+    
+    removeSentRequest(id) {
+        const existed = this._cache.sentRequests.delete(id);
+        if (existed) {
+            this._timestamps.delete(`sent_${id}`);
+            this._emit('sent:removed', id);
+        }
+        return existed;
+    },
+    
+    getUser(id) {
+        return this._cache.users.get(id) || null;
+    },
+    
+    getAllUsers() {
+        return Array.from(this._cache.users.values());
+    },
+    
+    setUser(user) {
+        if (!user || !user.id) return false;
+        this._cache.users.set(user.id, user);
+        this._timestamps.set(`user_${user.id}`, Date.now());
+        this._emit('user:updated', user);
+        return true;
+    },
+    
+    setUsers(usersArray) {
+        if (!Array.isArray(usersArray)) return false;
+        usersArray.forEach(u => {
+            if (u && u.id) {
+                this._cache.users.set(u.id, u);
+                this._timestamps.set(`user_${u.id}`, Date.now());
+            }
+        });
+        this._emit('users:updated', this.getAllUsers());
+        return true;
+    },
+    
+    // FIXED: Client-side search (NO API CALLS)
+    searchFriends(query, options = {}) {
+        if (!query || typeof query !== 'string') return [];
+        
+        const normalizedQuery = query.toLowerCase().trim();
+        if (normalizedQuery.length === 0) return [];
+        
+        const results = [];
+        const searchTargets = options.includeUsers ? 
+            [...this._cache.friends.values(), ...this._cache.users.values()] : 
+            [...this._cache.friends.values()];
+        
+        for (const item of searchTargets) {
+            if (this._matchesQuery(item, normalizedQuery)) {
+                results.push(item);
+            }
+        }
+        
+        // Sort results by relevance (name match first)
+        results.sort((a, b) => {
+            const aName = (a.displayName || a.name || '').toLowerCase();
+            const bName = (b.displayName || b.name || '').toLowerCase();
+            
+            if (aName === normalizedQuery && bName !== normalizedQuery) return -1;
+            if (bName === normalizedQuery && aName !== normalizedQuery) return 1;
+            if (aName.startsWith(normalizedQuery) && !bName.startsWith(normalizedQuery)) return -1;
+            if (bName.startsWith(normalizedQuery) && !aName.startsWith(normalizedQuery)) return 1;
+            
+            return aName.localeCompare(bName);
+        });
+        
+        return results;
+    },
+    
+    _matchesQuery(item, query) {
+        if (!item) return false;
+        
+        const name = (item.displayName || item.name || '').toLowerCase();
+        const username = (item.username || '').toLowerCase();
+        const email = (item.email || '').toLowerCase();
+        
+        return name.includes(query) || username.includes(query) || email.includes(query);
+    },
+    
+    syncToGlobals() {
+        const _fRaw = this.getAllFriends();
+        const _r = this.getAllRequests();
+        const _s = this.getAllSentRequests();
+        const _p = Array.from(this._cache.pinnedFriends.values());
+        const _m = Array.from(this._cache.mutedFriends.values());
+        const _u = this.getAllUsers();
+
+        // FIX: Always deduplicate by String(id) before exposing to window globals.
+        // Multiple iframe instances can each write to window.friends via syncToGlobals,
+        // and our optimistic-accept code also pushes directly to window.friends.
+        // Using String(id) as key prevents int/string duplicate entries.
+        const _dedupMap = new Map();
+        _fRaw.forEach(f => { if (f && f.id) _dedupMap.set(String(f.id), f); });
+        const _f = Array.from(_dedupMap.values());
+
+        setFriends(_f);
+        setFriendRequests(_r);
+        setSentRequests(_s);
+        setPinnedFriends(_p);
+        setMutedFriends(_m);
+        setAllUsers(_u);
+
+        window.friends = _f;
+        window.friendRequests = _r;
+        window.sentRequests = _s;
+        window.pinnedFriends = _p;
+        window.mutedFriends = _m;
+        window.allUsers = _u;
+        // FIX: Do NOT dispatch friendsUpdated here. syncToGlobals is called dozens of
+        // times per second (after every API response). Dispatching friendsUpdated from here
+        // creates an infinite loop:
+        //   syncToGlobals → friendsUpdated → renderFriends → loadFriendsFromBackend → syncToGlobals
+        // Callers that actually have new data (loadFriendsFromBackend, FRIEND_REMOVED, etc.)
+        // dispatch friendsUpdated explicitly after syncToGlobals returns.
+        window.dispatchEvent(new CustomEvent('updateFriendCounts'));
+        // Broadcast to parent (chat/call/status/groups) with 80ms debounce
+        if (!FriendCacheManager._syncBroadcastTimer) {
+            FriendCacheManager._syncBroadcastTimer = setTimeout(() => {
+                FriendCacheManager._syncBroadcastTimer = null;
+                const _p = {
+                    type: 'FRIENDS_SYNC',
+                    friends: Array.from(FriendCacheManager._cache.friends.values()),
+                    requests: Array.from(FriendCacheManager._cache.requests.values()),
+                    sentRequests: Array.from(FriendCacheManager._cache.sentRequests.values()),
+                    source: 'friend-core',
+                    timestamp: Date.now()
+                };
+                try { window.parent.postMessage(_p, '*'); } catch (_) {}
+                window.dispatchEvent(new CustomEvent('FRIENDS_SYNC', { detail: _p }));
+            }, 80);
+        }
+    },
+    
+    persist() {
+        SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, this.getAllFriends());
+        SafeStorage.setObject(LOCAL_STORAGE_KEYS.REQUESTS, this.getAllRequests());
+        SafeStorage.setObject(LOCAL_STORAGE_KEYS.SENT_REQUESTS, this.getAllSentRequests());
+        SafeStorage.setObject(LOCAL_STORAGE_KEYS.PINNED_FRIENDS, Array.from(this._cache.pinnedFriends.values()));
+        SafeStorage.setObject(LOCAL_STORAGE_KEYS.MUTED_FRIENDS, Array.from(this._cache.mutedFriends.values()));
+        SafeStorage.setObject(LOCAL_STORAGE_KEYS.ALL_USERS_CACHE, this.getAllUsers());
+    },
+    
+    clear() {
+        this._cache.friends.clear();
+        this._cache.requests.clear();
+        this._cache.sentRequests.clear();
+        this._cache.pinnedFriends.clear();
+        this._cache.mutedFriends.clear();
+        this._cache.users.clear();
+        this._cache.searchIndex.clear();
+        this._timestamps.clear();
+        if (this._searchCache) this._searchCache.clear();
+        this.persist();
+    }
+};
+
+FriendCacheManager.init();
+
+const OfflineFirstFriends = {
+    _initialized: false,
+
+    async init() {
+        if (this._initialized) return;
+        this._initialized = true;
+
+        // Wait for localStore to be ready
+        const ls = window.KynectaFriendsLocalStore;
+        if (ls) {
+            try {
+                await ls.ready();
+                // Set current user on the store
+                const userId = __session.user?.id
+                    || window.__PARENT_SESSION__?.userId
+                    || window.KynectaStore?.get('user.id')
+                    || localStorage.getItem('currentUserId')
+                    || (() => {
+                        try {
+                            const stored = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null');
+                            return stored?.id || stored?.userId || null;
+                        } catch (_error) {
+                            return null;
+                        }
+                    })();
+                if (userId) ls.setCurrentUser(String(userId));
+
+                // Hydrate FriendCacheManager from localStore immediately (zero-wait UI)
+                await this._hydrateFromLocalStore();
+            } catch (e) {
+                Logger.warn('OfflineFirstFriends', 'LocalStore hydration failed', e.message);
+            }
+        }
+
+        // Listen for sync events from the sync engine
+        window.addEventListener('kyn:friendsSynced', (e) => {
+            Logger.debug('OfflineFirstFriends', 'Friends synced', e.detail);
+            this._hydrateFromLocalStore();
+        });
+
+        // Listen for queue rollback events — restore UI to pre-optimistic state
+        window.addEventListener('kyn:friendRollback', (e) => {
+            const { item } = e.detail || {};
+            if (item) {
+                Logger.warn('OfflineFirstFriends', 'Rolling back optimistic state', item);
+                this._hydrateFromLocalStore();
+                showNotification?.('Action failed and was reverted. Please try again.', 'error');
+            }
+        });
+
+        Logger.info('OfflineFirstFriends', '✅ Offline-first bridge initialized');
+    },
+
+    /**
+     * Read from IndexedDB localStore and push into FriendCacheManager + KynectaStore.
+     * This is what makes the UI "load instantly from local cache".
+     */
+    async _hydrateFromLocalStore() {
+        const ls = window.KynectaFriendsLocalStore;
+        if (!ls) return;
+        try {
+            await ls.ready();
+            const [friends, incoming, sent] = await Promise.all([
+                ls.getFriends(),
+                ls.getPendingReceived(),
+                ls.getPendingSent(),
+            ]);
+
+            // FIX Bug#2: Start from the CURRENT cache so we don't wipe localStorage-
+            // loaded data when this runs concurrently with FriendCacheManager.init().
+            const friendMap = new Map(FriendCacheManager._cache.friends);
+            friends.forEach(r => {
+                const display = {
+                    id:          r.friendId,
+                    localId:     r.id,
+                    serverId:    r.serverId,
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username || '',
+                    avatar:      r.avatar || '',
+                    photoURL:    r.avatar || '',
+                    coverPhoto:  r.coverPhoto || '',
+                    status:      r.status,
+                    addedAt:     r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                };
+                friendMap.set(r.friendId, display);
+            });
+            FriendCacheManager._cache.friends = friendMap;
+
+            // Push incoming requests
+            const reqMap = new Map(FriendCacheManager._cache.requests);
+            incoming.forEach(r => {
+                reqMap.set(r.serverId || r.id, {
+                    id:          r.serverId || r.id,
+                    localId:     r.id,
+                    senderId:    r.friendId,
+                    receiverId:  r.userId,
+                    status:      'pending',
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username || '',
+                    avatar:      r.avatar || '',
+                    coverPhoto:  r.coverPhoto || '',
+                    createdAt:   r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                });
+            });
+            FriendCacheManager._cache.requests = reqMap;
+
+            // Push sent requests
+            const sentMap = new Map(FriendCacheManager._cache.sentRequests);
+            sent.forEach(r => {
+                sentMap.set(r.serverId || r.id, {
+                    id:          r.serverId || r.id,
+                    localId:     r.id,
+                    receiverId:  r.friendId,
+                    senderId:    r.userId,
+                    status:      'pending',
+                    displayName: r.displayName || r.username || r.friendId,
+                    username:    r.username || '',
+                    avatar:      r.avatar || '',
+                    coverPhoto:  r.coverPhoto || '',
+                    createdAt:   r.createdAt,
+                    isLocalOnly: r.isLocalOnly,
+                    optimistic:  r.isLocalOnly,
+                });
+            });
+            FriendCacheManager._cache.sentRequests = sentMap;
+
+            FriendCacheManager.syncToGlobals();
+            try {
+                const localFriends = Array.from(friendMap.values());
+                SafeStorage.setObject(LOCAL_STORAGE_KEYS.FRIENDS, localFriends); // FIX: unified key
+                window.dispatchEvent(new CustomEvent('friendsUpdated', {
+                    detail: {
+                        friends: localFriends,
+                        count: localFriends.length,
+                        cached: true,
+                        offline: !navigator.onLine
+                    }
+                }));
+            } catch (_error) {}
+        } catch (e) {
+            Logger.warn('OfflineFirstFriends', 'Hydration error', e.message);
+        }
+    },
+
+    /**
+     * Enqueue a friend action offline-first.
+     * Creates a local record optimistically, then queues the server call.
+     *
+     * @param {'add'|'accept'|'reject'|'remove'|'cancel'|'block'|'unblock'} action
+     * @param {string} friendId
+     * @param {object} [opts]   Extra payload (requestId, notes, etc.)
+     * @returns {Promise<{success:boolean, localId:string}>}
+     */
+    async enqueueAction(action, friendId, opts = {}) {
+        const ls    = window.KynectaFriendsLocalStore;
+        const queue = window.KynectaFriendQueue;
+
+        const userId = __session.user?.id
+            || window.__PARENT_SESSION__?.userId
+            || window.KynectaStore?.get('user.id');
+
+        // Determine optimistic local status
+        const statusMap = {
+            add:     'pending_sent',
+            accept:  'accepted',
+            reject:  'removed',
+            remove:  'removed',
+            cancel:  'removed',
+            block:   'blocked',
+            unblock: 'none',
+        };
+        const optimisticStatus = statusMap[action] || 'none';
+
+        let localId = opts.localRecordId || null;
+
+        if (ls) {
+            try {
+                await ls.ready();
+                if (action === 'add') {
+                    // Create new local-only record
+                    const existing = await ls.getByFriendId(friendId);
+                    if (existing && !['none','removed'].includes(existing.status)) {
+                        return { success: false, error: 'Friendship already exists', existing };
+                    }
+                    const record = await ls.upsert({
+                        userId:      String(userId),
+                        friendId:    String(friendId),
+                        status:      'pending_sent',
+                        isLocalOnly: true,
+                        displayName: opts.displayName,
+                        username:    opts.username,
+                        avatar:      opts.avatar,
+                    });
+                    localId = record.id;
+                } else if (localId) {
+                    await ls.updateStatus(localId, optimisticStatus).catch(() => {});
+                } else {
+                    // Try to find by friendId
+                    const existing = await ls.getByFriendId(friendId);
+                    if (existing) {
+                        localId = existing.id;
+                        await ls.updateStatus(localId, optimisticStatus).catch(() => {});
+                    }
+                }
+            } catch (e) {
+                Logger.warn('OfflineFirstFriends', 'LocalStore pre-enqueue failed', e.message);
+            }
+        }
+
+        // Enqueue the server call
+        if (queue) {
+            queue.enqueue(action, friendId, opts, localId);
+        }
+
+        return { success: true, localId };
+    },
+};
+
+const _offlineInitTrigger = () => OfflineFirstFriends.init();
+
+window.addEventListener('kyn:authReady', _offlineInitTrigger);
+
+window.addEventListener('AUTH_READY', _offlineInitTrigger);
+
+if (authReadyReceived && __session.ready) {
+    setTimeout(() => OfflineFirstFriends.init(), 0);
+}
+
+setTimeout(() => OfflineFirstFriends.init(), 0);
+
+// Additional exports required for cross-module wiring between the 3 split files
+export {
+    APIGateway,
+    ErrorHandler,
+    FriendCacheManager,
+    IframeEnvironment,
+    LIFECYCLE_STATES,
+    LOCAL_STORAGE_KEYS,
+    LifecycleStateMachine,
+    Logger,
+    MODULE_NAME,
+    MODULE_VERSION,
+    MessageDispatcher,
+    ModuleRegistrationManager,
+    OfflineFirstFriends,
+    ParentCommunicationManager,
+    PollingManager,
+    SafeStorage,
+    SandboxDetector,
+    SecurityValidator,
+    SessionManager,
+    StatusManager,
+    TokenPromise,
+    __session,
+    _messageQueue,
+    assertActive,
+    authReadyReceived,
+    authorizedRequest,
+    childReadySent,
+    currentState,
+    flushRequestQueue,
+    friendCategories,
+    generateMessageId,
+    generateRequestId,
+    handleAuthReady,
+    handleParentReady,
+    initializationLock,
+    isAuthenticated,
+    onModuleActive,
+    parentReadyReceived,
+    queueRequest,
+    requestQueue,
+    safeSend,
+    sendChildReady,
+    sendMessageInternal,
+    setInitializationLock,
+    setParentReadyReceived,
+    transitionTo
+};

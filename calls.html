@@ -3621,7 +3621,17 @@ window.__CALLS_IFRAME__ = {
     <script src="/js/core/calls/GroupCallEngine.js"></script>
     <script src="/js/core/calls/CallManager.js"></script>
     <!-- Application modules (ES6 modules) - loaded in correct order -->
-    <script type="module" src="calls-core.js"></script>
+    <!-- calls-core is loaded as 8 independent, self-contained files (NOT ES modules --
+         they share state via window.__CallsCoreShared). Order matters: part1 must run
+         first (it owns the duplicate-boot guard), part8 last (it finishes init). -->
+    <script src="calls-core.part1.js"></script>
+    <script src="calls-core.part2.js"></script>
+    <script src="calls-core.part3.js"></script>
+    <script src="calls-core.part4.js"></script>
+    <script src="calls-core.part5.js"></script>
+    <script src="calls-core.part6.js"></script>
+    <script src="calls-core.part7.js"></script>
+    <script src="calls-core.part8.js"></script>
     <script type="module" src="calls-ui.js"></script>
     <script src="js/call-recording-notice.js" defer></script>
     <script src="js/adaptive-bitrate.js" defer></script>

@@ -4000,10 +4000,10 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
         });
         // Wire menu items to existing handlers
         var map = {
-            viewStreakBtn:       function() { alert('Posting streak feature coming soon'); },
-            viewMoodTrendsBtn:   function() { alert('Mood trends feature coming soon'); },
-            viewAchievementsBtn: function() { alert('Achievements feature coming soon'); },
-            viewFeedbackBtn:     function() { alert('Feedback feature coming soon'); }
+            viewStreakBtn:       function() { if (window._showPostingStreak) window._showPostingStreak(); },
+            viewMoodTrendsBtn:   function() { if (window._showMoodTrends) window._showMoodTrends(); },
+            viewAchievementsBtn: function() { showNotification && showNotification('Achievements feature coming soon', 'info'); },
+            viewFeedbackBtn:     function() { showNotification && showNotification('Feedback feature coming soon', 'info'); }
         };
         Object.keys(map).forEach(function(id) {
             var el = document.getElementById(id);
