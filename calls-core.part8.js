@@ -2756,7 +2756,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-        applySettingToCallsModule(section, key, value);
+        window.__CallsCoreShared.applySettingToCallsModule(section, key, value);
 
 
 
@@ -2804,7 +2804,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                Object.entries(secVal).forEach(([k, v]) => applySettingToCallsModule(sec, k, v));
+                Object.entries(secVal).forEach(([k, v]) => window.__CallsCoreShared.applySettingToCallsModule(sec, k, v));
 
 
 

@@ -986,6 +986,20 @@ function isGroupOperationReady() {
     return LifecycleState.isActive() && parentReady && sessionReady;
 }
 
+// FIX (group-core split): group-core-bootstrap.js, group-core-operations.js and
+// group-core-bridge.js import from one another in a genuine 3-way ES module
+// cycle (bootstrap -> operations -> bridge -> bootstrap/operations). Reading a
+// cross-module binding (e.g. sendGroupMessage from operations.js) synchronously
+// at a module's top level, during the module graph's initial evaluation, can
+// hit that binding before the module that defines it has reached its own
+// initializer — a TDZ ReferenceError ("Cannot access '...' before
+// initialization"). That aborts this module's evaluation partway through,
+// which is also why later, unrelated code (like the DOMContentLoaded handler
+// below referencing MODULE_NAME) can fail too.
+// Deferring this block to a microtask lets the whole synchronous module graph
+// (all three files) finish evaluating first, by which point every cross-module
+// binding is initialized, before we touch any of them.
+queueMicrotask(() => {
 if (typeof window !== 'undefined') {
     const secureExpose = (name, fn) => {
         Object.defineProperty(window, name, {
@@ -1040,6 +1054,7 @@ if (typeof window !== 'undefined') {
         parentReady
     }));
 }
+}); // end queueMicrotask — see FIX note above
 
 async function inviteToGroup(groupId, inviteeId, role, msg) {
     return GroupCore.inviteToGroup(groupId, inviteeId, role, msg);
@@ -1149,20 +1164,28 @@ function applySettingToGroupModule(section, key, value) {
     }
 }
 
-window.GroupCore = GroupCore;
+// FIX (group-core split): same cross-module TDZ risk as the secureExpose
+// block above — GroupCore is imported from group-core-bootstrap.js, and this
+// is the exact assignment group-core-patch.js polls window.GroupCore for
+// (its "[patch] GroupCore never appeared" after 40 retries). Deferred to a
+// microtask for the same reason: run after the whole circular module graph
+// has finished its initial synchronous evaluation.
+queueMicrotask(() => {
+    window.GroupCore = GroupCore;
 
-try {
-    if (window.KynectaVoiceRecorder) {
-        window.KynectaVoiceRecorder.install(GroupCore);
-    } else {
-        // VoiceRecorder loads after this module — install when ready
-        window.addEventListener('load', () => {
-            if (window.KynectaVoiceRecorder && !GroupCore.startRecording) {
-                window.KynectaVoiceRecorder.install(GroupCore);
-            }
-        });
-    }
-} catch (_) {}
+    try {
+        if (window.KynectaVoiceRecorder) {
+            window.KynectaVoiceRecorder.install(GroupCore);
+        } else {
+            // VoiceRecorder loads after this module — install when ready
+            window.addEventListener('load', () => {
+                if (window.KynectaVoiceRecorder && !GroupCore.startRecording) {
+                    window.KynectaVoiceRecorder.install(GroupCore);
+                }
+            });
+        }
+    } catch (_) {}
+});
 
 (function bootstrapSettingsFromCache() {
     try {

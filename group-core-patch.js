@@ -34,9 +34,9 @@
 //  FIX 13:  handleSessionUpdate const-reassignment bug patched.
 // ============================================================
 
-import LocalGroupStore                          from './localStore_groups.js';
-import GroupQueueManager, { QUEUE_ACTIONS }     from './groupQueue_manager.js';
-import GroupSyncEngine                          from './groupSync_engine.js';
+import LocalGroupStore                          from './localStore-groups.js';
+import GroupQueueManager, { QUEUE_ACTIONS }     from './groupQueue-manager.js';
+import GroupSyncEngine                          from './groupSync-engine.js';
 
 let _patchApplied = false;
 let _patchRetries = 0;

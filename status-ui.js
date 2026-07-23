@@ -206,7 +206,7 @@ function isSessionReady() {
     return false;
 }
 
-function isAuthenticated() {
+function isUserAuthenticated_StatusUI() {
     const core = getCore();
     if (core && core !== window && core.isAuthenticated) return core.isAuthenticated();
     if (core && core !== window && core.SessionManager && core.SessionManager.isAuthenticated) return core.SessionManager.isAuthenticated();
@@ -253,7 +253,13 @@ function getMyStatuses() {
 }
 
 // Global variables that will be populated from core
-let currentUser = null;
+// FIX (status-ui.js / status-core-state.js name collision): removed duplicate
+// 'let currentUser = null;' — status-core-state.js already declares this at its
+// own top level, and since both files load as plain classic <script> tags in the
+// same global scope (status.html's own comment: these files 'share window/global
+// scope... exactly like status-ui.js... already do'), redeclaring it here threw
+// 'Identifier has already been declared' and aborted this entire script's parse.
+// status-ui.js now reads/writes the single shared binding from status-core-state.js.
 let userData = null;
 let statuses = [];
 let myStatuses = [];
@@ -1092,7 +1098,7 @@ function generateSampleMoodData() {
 // =============================================
 // UI FAILSAFE - Critical Protection Layer
 // =============================================
-const UIFailsafe = {
+const UIFailsafe_StatusUI = {
     failedSections: new Set(),
     recoveryAttempts: new Map(),
     maxRecoveryAttempts: 3,
@@ -1262,7 +1268,7 @@ const UIFailsafe = {
             }
         });
         // Re-run basic event listeners for delegated containers
-        try { setupBasicEventListeners(); } catch(e) {}
+        try { setupBasicEventListeners_StatusUI(); } catch(e) {}
     },
     
     _setupMutationObserver() {
@@ -1477,7 +1483,7 @@ const UIFailsafe = {
     }
 };
 
-UIFailsafe.initialize();
+UIFailsafe_StatusUI.initialize();
 
 // =============================================
 // UI ERROR BOUNDARY
@@ -1506,7 +1512,7 @@ class UIErrorBoundary {
 
     wrap(sectionId, renderFn, fallbackType = null) {
         return async (...args) => {
-            if (this.failedSections.has(sectionId) || !UIFailsafe.canRecover(sectionId)) {
+            if (this.failedSections.has(sectionId) || !UIFailsafe_StatusUI.canRecover(sectionId)) {
                 const fallback = this.fallbacks.get(fallbackType || sectionId);
                 return fallback ? fallback(...args) : this.createGenericFallback();
             }
@@ -1517,7 +1523,7 @@ class UIErrorBoundary {
                 return result;
             } catch (error) {
                 this.failedSections.add(sectionId);
-                UIFailsafe.handleError(sectionId, error);
+                UIFailsafe_StatusUI.handleError(sectionId, error);
                 const fallback = this.fallbacks.get(fallbackType || sectionId);
                 return fallback ? fallback(...args) : this.createGenericFallback();
             }
@@ -1672,7 +1678,7 @@ class UIErrorBoundary {
 
     reset(sectionId) {
         this.failedSections.delete(sectionId);
-        UIFailsafe.reset(sectionId);
+        UIFailsafe_StatusUI.reset(sectionId);
     }
 }
 
@@ -1900,7 +1906,7 @@ const UIRenderPipeline = {
             container.innerHTML = html;
             container.classList.add('content-rendered');
             setTimeout(() => {
-                UIFailsafe._rebindAllHandlers();
+                UIFailsafe_StatusUI._rebindAllHandlers();
             }, 50);
         });
     },
@@ -1981,7 +1987,7 @@ const UIRenderPipeline = {
 // =============================================
 // CORE INTEGRATION BRIDGE
 // =============================================
-const UIBridge = {
+const UIBridge_StatusUI = {
     subscriptions: new Map(),
     validators: new Map(),
     messageQueue: [],
@@ -2362,7 +2368,7 @@ class UIEventSystem {
 
     handleOnline = () => {
         this.emit('online', { timestamp: Date.now() });
-        UIFailsafe.processActionQueue();
+        UIFailsafe_StatusUI.processActionQueue();
     };
 
     handleOffline = () => {
@@ -3002,7 +3008,7 @@ renderMoodChart() {
 },
 
     createEmptyState() {
-        const isAuth = isAuthenticated();
+        const isAuth = isUserAuthenticated_StatusUI();
         // If not authenticated yet, show shimmer so user doesn't see empty state
         if (!isAuth) {
             return `
@@ -3285,10 +3291,10 @@ const LiveUpdateEngine = {
     },
 
     setupCoreSubscriptions() {
-        UIBridge.subscribe('statusUpdate', (data) => {
+        UIBridge_StatusUI.subscribe('statusUpdate', (data) => {
             this.queueUpdate('status', data);
         });
-        UIBridge.subscribe('statusState', (data) => {
+        UIBridge_StatusUI.subscribe('statusState', (data) => {
             if (data.statuses) {
                 this.queueUpdate('statuses', data);
             }
@@ -4367,7 +4373,7 @@ function createPollStatusSlide(statusData) {
             ${hasVoted ? '<div class="poll-voted-message">✓ You have voted</div>' : ''}
         </div>
     `;
-    if (!hasVoted && isAuthenticated() && !isOfflineMode && ensureUIActive('votePoll')) {
+    if (!hasVoted && isUserAuthenticated_StatusUI() && !isOfflineMode && ensureUIActive('votePoll')) {
         const pollOptions = slide.querySelectorAll('.poll-option');
         pollOptions.forEach(option => {
             option.addEventListener('click', async (e) => {
@@ -4770,7 +4776,7 @@ function viewMyStatus() {
 
 function editMyStatus() {
     if (!ensureUIActive('editStatus')) return;
-    if (!isAuthenticated()) {
+    if (!isUserAuthenticated_StatusUI()) {
         showNotification('Please sign in to edit status', 'error');
         return;
     }
@@ -5025,7 +5031,7 @@ function enableProtectedUI() {
             el.style.opacity = '1';
             el.style.pointerEvents = 'auto';
             el.removeAttribute('aria-disabled');
-            UIFailsafe.disabledButtons.delete(id);
+            UIFailsafe_StatusUI.disabledButtons.delete(id);
         }
     });
 }
@@ -5072,7 +5078,7 @@ function showLogoutState() {
     disableProtectedUI();
 }
 
-function showReconnectionState() {
+function showReconnectionState_StatusUI() {
     const allStatusList = UIElements.allStatusList;
     if (allStatusList) {
         allStatusList.innerHTML = `
@@ -5373,7 +5379,7 @@ function bindGroupedStatusHandlers(container) {
 // =============================================
 // BASIC EVENT LISTENERS SETUP
 // =============================================
-function setupBasicEventListeners() {
+function setupBasicEventListeners_StatusUI() {
     // ── Live settings adaptation ────────────────────────────────────────
     // js/settings-broadcast-listener.js dispatches this on document whenever
     // the Settings module saves a change (privacy/status/etc.), and keeps
@@ -5698,7 +5704,7 @@ function setupBasicEventListeners() {
                 // Open ALL own statuses as a group (WhatsApp-style)
                 showStatusGroupViewer([...myStatuses]);
             } else {
-                if (!isAuthenticated()) {
+                if (!isUserAuthenticated_StatusUI()) {
                     showNotification('Please sign in to create a status', 'error');
                     return;
                 }
@@ -5719,7 +5725,7 @@ function setupBasicEventListeners() {
 // COMPLETE EVENT LISTENERS
 // =============================================
 function setupEventListeners() {
-    setupBasicEventListeners();
+    setupBasicEventListeners_StatusUI();
     // FIX: The bottom filter buttons (Feedback/Achievement/Advice/Happy/Motivated) live inside
     // .status-categories containers, NOT .filter-buttons. Delegate on every .status-categories.
     document.querySelectorAll('.status-categories').forEach(function(filterContainer) {
@@ -6286,7 +6292,7 @@ async function handlePostStatus() {
         showNotification('Please wait, connecting...', 'info');
         return;
     }
-    if (!isAuthenticated()) {
+    if (!isUserAuthenticated_StatusUI()) {
         showNotification('Please sign in to post a status', 'error');
         return;
     }
@@ -7939,12 +7945,12 @@ function updateMoodChartUI() {
 function cleanupUI() {
     stopAutoAdvance();
     uiEvents.removeAllListeners();
-    UIBridge.clearSubscriptions();
+    UIBridge_StatusUI.clearSubscriptions();
     UIStateManager.clear();
-    UIFailsafe.resetAll();
-    UIFailsafe.cleanup();
-    if (typeof UIFailsafe.mutationObserver !== 'undefined') {
-        UIFailsafe.mutationObserver.disconnect();
+    UIFailsafe_StatusUI.resetAll();
+    UIFailsafe_StatusUI.cleanup();
+    if (typeof UIFailsafe_StatusUI.mutationObserver !== 'undefined') {
+        UIFailsafe_StatusUI.mutationObserver.disconnect();
     }
     UILogger.info('Cleanup', 'UI cleanup complete');
 }
@@ -8006,8 +8012,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         UIRenderPipeline.setStage('initialRender');
         initializeUIComponents();
-        setupBasicEventListeners();
-        UIBridge.initialize();
+        setupBasicEventListeners_StatusUI();
+        UIBridge_StatusUI.initialize();
         uiEvents.initialize();
         ResponsiveEngine.initialize();
         
@@ -8181,7 +8187,7 @@ document.addEventListener('statusLifecycleChange', (e) => {
         
         // Rebind handlers after a short delay
         setTimeout(() => {
-            UIFailsafe._rebindAllHandlers();
+            UIFailsafe_StatusUI._rebindAllHandlers();
         }, 500);
         
         // Monitor lifecycle state changes
@@ -8235,7 +8241,7 @@ function updateUserUIInstantly() {}
 // Add this near the end of status-ui.js, before the exports
 function retryBindHandlers() {
     UILogger.info('UI', 'Manually retrying handler binding');
-    UIFailsafe._rebindAllHandlers();
+    UIFailsafe_StatusUI._rebindAllHandlers();
     setupEventListeners();
     enableProtectedUI();
     
@@ -8285,7 +8291,7 @@ if (typeof window !== 'undefined') {
             enableProtectedUI,
             disableProtectedUI,
             showLogoutState,
-            showReconnectionState,
+            showReconnectionState_StatusUI,
             renderStatusesList: renderStatusesListUI,
             cleanupUI,
             retryHandshake,

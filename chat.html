@@ -3276,8 +3276,10 @@
             // Iframe load handlers
             document.querySelectorAll('.content-iframe').forEach((iframe) => {
                 iframe.addEventListener('load', () => {
+                    // applyParentShellToIframe already resolves the active theme
+                    // and calls injectThemeIntoIframe(iframe, theme) internally —
+                    // no separate call needed here.
                     applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
-                    injectDarkThemeIntoIframe(iframe);
                 });
                 applyParentShellToIframe(iframe, iframe.dataset.module || 'messages');
             });
