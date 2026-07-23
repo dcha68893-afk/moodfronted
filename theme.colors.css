@@ -1,0 +1,897 @@
+/* ============================================================
+   KYNECTA — GLOBAL DARK THEME SYSTEM
+   theme.colors.css · v1.1 (safe visibility fix)
+   ============================================================
+   Single source of truth for ALL modules.
+   Imported by chat.html and injected into every iframe.
+   DO NOT override these in module-level CSS without
+   using a more-specific selector.
+   ============================================================ */
+
+/* ── 1a. Light Palette (DEFAULT — :root and explicit data-theme="light") ──
+   FIX: previously the dark palette below was applied unconditionally to
+   bare `:root` (no [data-theme] qualifier), so every page showed the dark
+   palette regardless of the user's actual theme setting — light, dark, and
+   auto all looked identical. :root now gets real light-mode values; the
+   dark block further down only applies when data-theme="dark" is actually
+   set on <html>/<body>. */
+:root,
+html[data-theme="light"],
+body[data-theme="light"] {
+
+  /* Global backgrounds */
+  --kyn-bg-root:          #ffffff;
+  --kyn-bg-chat:          #efeae2;
+  --kyn-bg-panel:         #ffffff;
+  --kyn-bg-card:          #ffffff;
+  --kyn-bg-input:         #f0f2f5;
+  --kyn-bg-sidebar:       #ffffff;
+  --kyn-bg-header:        #f0f2f5;
+  --kyn-bg-modal:         #ffffff;
+  --kyn-bg-overlay:       rgba(0, 0, 0, 0.45);
+  --kyn-bg-hover:         rgba(0, 0, 0, 0.04);
+  --kyn-bg-active:        rgba(0, 0, 0, 0.08);
+
+  /* Text */
+  --kyn-text-primary:     #111b21;
+  --kyn-text-secondary:   #667781;
+  --kyn-text-muted:       #8696a0;
+  --kyn-text-inverse:     #ffffff;
+  --kyn-text-placeholder: #8696a0;
+
+  /* Borders */
+  --kyn-border:           #e9edef;
+  --kyn-border-light:     rgba(0,0,0,0.06);
+  --kyn-border-strong:    #d1d7db;
+
+  /* Accents */
+  --kyn-accent-primary:   #22c55e;
+  --kyn-accent-secondary: #2563eb;
+  --kyn-accent-danger:    #ef4444;
+  --kyn-accent-warning:   #f59e0b;
+  --kyn-accent-info:      #38bdf8;
+  --kyn-accent-purple:    #8b5cf6;
+
+  /* Chat bubbles */
+  --kyn-bubble-sent:      #d9fdd3;
+  --kyn-bubble-sent-text: #111b21;
+  --kyn-bubble-recv:      #ffffff;
+  --kyn-bubble-recv-text: #111b21;
+
+  /* Scrollbar */
+  --kyn-scrollbar-track:  #f0f2f5;
+  --kyn-scrollbar-thumb:  #d1d7db;
+
+  /* Elevation */
+  --kyn-shadow-sm:        0 2px 8px rgba(0,0,0,0.08);
+  --kyn-shadow-md:        0 8px 24px rgba(0,0,0,0.12);
+  --kyn-shadow-lg:        0 16px 48px rgba(0,0,0,0.16);
+
+  /* Gradients */
+  --kyn-gradient-primary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
+  --kyn-gradient-sidebar: linear-gradient(180deg, #ffffff 0%, #f0f2f5 100%);
+  --kyn-gradient-header:  linear-gradient(135deg, rgba(255,255,255,0.97), rgba(240,242,245,0.97));
+}
+
+/* ── 1b. Dark Palette — ONLY when data-theme="dark" is actually set ──── */
+html[data-theme="dark"],
+body[data-theme="dark"] {
+
+  /* Global backgrounds */
+  --kyn-bg-root:          #0f172a;
+  --kyn-bg-chat:          #020617;
+  --kyn-bg-panel:         #1e293b;
+  --kyn-bg-card:          #1e293b;
+  --kyn-bg-input:         #1e293b;
+  --kyn-bg-sidebar:       #0f172a;
+  --kyn-bg-header:        #0f172a;
+  --kyn-bg-modal:         #1e293b;
+  --kyn-bg-overlay:       rgba(0, 0, 0, 0.65);
+  --kyn-bg-hover:         rgba(255, 255, 255, 0.06);
+  --kyn-bg-active:        rgba(255, 255, 255, 0.10);
+
+  /* Text */
+  --kyn-text-primary:     #e5e7eb;
+  --kyn-text-secondary:   #9ca3af;
+  --kyn-text-muted:       #6b7280;
+  --kyn-text-inverse:     #0f172a;
+  --kyn-text-placeholder: #9ca3af;
+
+  /* Borders */
+  --kyn-border:           #374151;
+  --kyn-border-light:     rgba(255,255,255,0.08);
+  --kyn-border-strong:    #4b5563;
+
+  /* Accents */
+  --kyn-accent-primary:   #22c55e;
+  --kyn-accent-secondary: #2563eb;
+  --kyn-accent-danger:    #ef4444;
+  --kyn-accent-warning:   #f59e0b;
+  --kyn-accent-info:      #38bdf8;
+  --kyn-accent-purple:    #8b5cf6;
+
+  /* Chat bubbles */
+  --kyn-bubble-sent:      #005c4b;
+  --kyn-bubble-sent-text: #e5e7eb;
+  --kyn-bubble-recv:      #1e293b;
+  --kyn-bubble-recv-text: #e5e7eb;
+
+  /* Scrollbar */
+  --kyn-scrollbar-track:  #1e293b;
+  --kyn-scrollbar-thumb:  #374151;
+
+  /* Elevation */
+  --kyn-shadow-sm:        0 2px 8px rgba(0,0,0,0.4);
+  --kyn-shadow-md:        0 8px 24px rgba(0,0,0,0.5);
+  --kyn-shadow-lg:        0 16px 48px rgba(0,0,0,0.6);
+
+  /* Gradients */
+  --kyn-gradient-primary: linear-gradient(135deg, #2563eb 0%, #1d4ed8 62%, #06b6d4 100%);
+  --kyn-gradient-sidebar: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  --kyn-gradient-header:  linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97));
+}
+
+/* ── 2. Base Reset (Dark) ─────────────────────────────────── */
+html, body {
+  background: var(--kyn-bg-root) !important;
+  color:      var(--kyn-text-primary) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── 3. Typography ────────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--kyn-text-primary) !important;
+}
+
+p, span, div, li, td, th, label, small {
+  color: inherit;
+}
+
+a {
+  color: var(--kyn-accent-secondary);
+}
+
+a:hover {
+  color: var(--kyn-accent-primary);
+}
+
+/* ── 4. Panels, Cards & Containers ───────────────────────── */
+.panel,
+.card,
+.sidebar,
+.app-sidebar,
+.desktop-sidebar,
+.left-panel,
+.right-panel,
+.chat-sidebar,
+.contacts-panel,
+.settings-panel,
+[class*="panel"],
+[class*="sidebar"],
+[class*="card"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 5. Headers & Toolbars ────────────────────────────────── */
+header,
+.header,
+.top-bar,
+.toolbar,
+.app-header,
+.chat-header,
+.module-header,
+[class*="header"],
+[class*="topbar"],
+[class*="top-bar"] {
+  background: var(--kyn-bg-header) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 6. Inputs & Forms ────────────────────────────────────── */
+input,
+textarea,
+select {
+  background: var(--kyn-bg-input) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
+  outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--kyn-accent-secondary) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--kyn-text-placeholder) !important;
+  opacity: 1 !important;
+}
+
+input[type="search"]::placeholder {
+  color: var(--kyn-text-muted) !important;
+}
+
+/* Search inputs */
+.search-input,
+[class*="search"] input,
+[type="search"] {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+/* ── 7. Buttons ───────────────────────────────────────────── */
+button {
+  color: var(--kyn-text-primary);
+}
+
+/* Primary action buttons */
+.btn-primary,
+.primary-btn,
+[class*="btn-primary"],
+[class*="primary-btn"] {
+  background: var(--kyn-accent-primary) !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+
+.btn-primary:hover,
+.primary-btn:hover {
+  background: #16a34a !important;
+  color: #ffffff !important;
+}
+
+/* Secondary action buttons */
+.btn-secondary,
+.secondary-btn {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
+}
+
+/* Danger buttons */
+.btn-danger,
+.danger-btn,
+[class*="btn-danger"] {
+  background: var(--kyn-accent-danger) !important;
+  color: #ffffff !important;
+}
+
+/* Icon buttons */
+.icon-btn,
+.action-btn,
+[class*="icon-btn"],
+[class*="action-btn"] {
+  color: var(--kyn-text-secondary) !important;
+  background: transparent;
+}
+
+.icon-btn:hover,
+.action-btn:hover,
+[class*="icon-btn"]:hover,
+[class*="action-btn"]:hover {
+  color: var(--kyn-text-primary) !important;
+  background: var(--kyn-bg-hover) !important;
+}
+
+/* ── 8. Icons ─────────────────────────────────────────────── */
+/*
+  FIX: Removed `svg { fill: currentColor }` from the global rule.
+  Applying fill globally to svg broke FontAwesome SVG icons whose
+  internal <path> elements rely on their own fill attributes.
+  Instead, color inheritance is handled via `color: inherit` only,
+  which is safe for icon-font (i.fa*) icons.
+*/
+i,
+.fa,
+.fas,
+.far,
+.fab,
+.fal,
+.fad {
+  color: inherit;
+  opacity: 0.9;
+}
+
+/* Icon buttons — ensure visibility */
+button i,
+a i,
+.nav-icon i,
+.action-icon i,
+[class*="icon"] i {
+  color: inherit !important;
+}
+
+/* ── 9. Lists & Contacts ──────────────────────────────────── */
+.list-item,
+.contact-item,
+.chat-item,
+.friend-item,
+.call-item,
+[class*="list-item"],
+[class*="contact-item"],
+[class*="chat-item"] {
+  background: transparent !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.list-item:hover,
+.contact-item:hover,
+.chat-item:hover,
+.friend-item:hover,
+.call-item:hover {
+  background: var(--kyn-bg-hover) !important;
+}
+
+.list-item.active,
+.contact-item.active,
+.chat-item.active,
+[class*="list-item"].active,
+[class*="chat-item"].active {
+  background: var(--kyn-bg-active) !important;
+}
+
+/* Secondary text within items */
+.list-item .subtitle,
+.list-item .meta,
+.list-item small,
+.contact-item .subtitle,
+.chat-item .last-message,
+.chat-item .timestamp,
+[class*="subtitle"],
+[class*="last-message"],
+[class*="timestamp"] {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/* ── 10. Modals & Overlays ────────────────────────────────── */
+.modal,
+.dialog,
+.popup,
+.sheet,
+.bottom-sheet,
+[class*="modal"],
+[class*="dialog"],
+[class*="popup"] {
+  background: var(--kyn-bg-modal) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.modal-overlay,
+.modal-backdrop,
+.overlay,
+[class*="overlay"],
+[class*="backdrop"] {
+  background: var(--kyn-bg-overlay) !important;
+}
+
+.modal-header,
+.dialog-header,
+.sheet-header,
+[class*="modal-header"],
+[class*="sheet-header"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 11. Scrollbars ───────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--kyn-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--kyn-scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--kyn-border-strong);
+}
+
+/* ── 12. Dividers & Separators ────────────────────────────── */
+hr,
+.divider,
+.separator,
+[class*="divider"],
+[class*="separator"] {
+  border-color: var(--kyn-border) !important;
+  background-color: var(--kyn-border) !important;
+}
+
+/* ── 13. Badges & Tags ────────────────────────────────────── */
+.badge,
+.tag,
+.chip,
+.pill,
+[class*="badge"],
+[class*="tag"],
+[class*="chip"] {
+  background: var(--kyn-bg-active) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.badge-success  { background: var(--kyn-accent-primary)   !important; color: #fff !important; }
+.badge-danger   { background: var(--kyn-accent-danger)    !important; color: #fff !important; }
+.badge-info     { background: var(--kyn-accent-secondary) !important; color: #fff !important; }
+.badge-warning  { background: var(--kyn-accent-warning)   !important; color: #fff !important; }
+
+/* ── 14. Dropdowns & Menus ────────────────────────────────── */
+.dropdown,
+.dropdown-menu,
+.context-menu,
+.popup-menu,
+[class*="dropdown"],
+[class*="context-menu"],
+[class*="popup-menu"] {
+  background: var(--kyn-bg-panel) !important;
+  border: 1px solid var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+  box-shadow: var(--kyn-shadow-md) !important;
+}
+
+.dropdown-item,
+.menu-item,
+[class*="dropdown-item"],
+[class*="menu-item"] {
+  color: var(--kyn-text-primary) !important;
+  background: transparent !important;
+}
+
+.dropdown-item:hover,
+.menu-item:hover {
+  background: var(--kyn-bg-hover) !important;
+}
+
+/* ── 15. Tables ───────────────────────────────────────────── */
+table {
+  border-color: var(--kyn-border) !important;
+}
+
+th {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-secondary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+td {
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+tr:hover td {
+  background: var(--kyn-bg-hover) !important;
+}
+
+/* ── 16. Calls Module ─────────────────────────────────────── */
+.call-screen,
+.video-screen,
+.call-container,
+.video-container,
+[class*="call-screen"],
+[class*="video-screen"] {
+  background: var(--kyn-bg-chat) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.call-controls,
+[class*="call-controls"] {
+  background: rgba(15, 23, 42, 0.85) !important;
+  backdrop-filter: blur(12px);
+}
+
+/* ── 17. Settings Module ──────────────────────────────────── */
+.settings-section,
+.settings-group,
+.settings-row,
+[class*="settings-section"],
+[class*="settings-group"],
+[class*="settings-row"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* Settings label */
+.settings-label,
+.setting-label,
+[class*="settings-label"] {
+  color: var(--kyn-text-primary) !important;
+}
+
+.settings-description,
+.setting-description,
+[class*="settings-desc"] {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/* Toggles */
+.toggle-off,
+.switch[aria-checked="false"],
+input[type="checkbox"]:not(:checked) + .toggle {
+  background: var(--kyn-border) !important;
+}
+
+.toggle-on,
+.switch[aria-checked="true"],
+input[type="checkbox"]:checked + .toggle {
+  background: var(--kyn-accent-primary) !important;
+}
+
+/* ── 18. Status / Stories Module ──────────────────────────── */
+.status-item,
+.story-item,
+[class*="status-item"],
+[class*="story-item"] {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 19. Friends Module ───────────────────────────────────── */
+.friend-card,
+.user-card,
+.profile-card-small,
+[class*="friend-card"],
+[class*="user-card"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 20. Groups Module ────────────────────────────────────── */
+.group-card,
+.group-item,
+[class*="group-card"],
+[class*="group-item"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 21. Tools / Marketplace Module ──────────────────────── */
+.tool-card,
+.listing-card,
+.marketplace-item,
+[class*="tool-card"],
+[class*="listing-card"] {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 22. Empty States & Placeholders ─────────────────────── */
+.empty-state,
+.no-results,
+.placeholder-text,
+[class*="empty-state"],
+[class*="no-results"] {
+  color: var(--kyn-text-muted) !important;
+}
+
+/* ── 23. Loading Indicators ───────────────────────────────── */
+.skeleton,
+.loading-placeholder,
+[class*="skeleton"] {
+  background: linear-gradient(
+    90deg,
+    var(--kyn-bg-panel) 25%,
+    var(--kyn-border) 50%,
+    var(--kyn-bg-panel) 75%
+  ) !important;
+  background-size: 200% 100% !important;
+  animation: kynSkeletonShimmer 1.4s ease infinite !important;
+}
+
+@keyframes kynSkeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── 24. Notifications ────────────────────────────────────── */
+.notification,
+.toast,
+.alert,
+.snackbar,
+[class*="notification"],
+[class*="toast"],
+[class*="alert"] {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border-left: 3px solid var(--kyn-accent-primary) !important;
+  box-shadow: var(--kyn-shadow-md) !important;
+}
+
+/* ── 25. Avatars / Profile Images ─────────────────────────── */
+.avatar,
+.profile-pic,
+.user-avatar,
+[class*="avatar"],
+[class*="profile-pic"] {
+  background: var(--kyn-bg-active) !important;
+}
+
+/* ── 26. Override any white/light backgrounds left behind ─── */
+/* Use a weaker specificity so module-specific themed elements
+   (e.g. chat bubble colours) still win */
+[style*="background: white"],
+[style*="background:#fff"],
+[style*="background: #fff"],
+[style*="background-color: white"],
+[style*="background-color:#fff"],
+[style*="background-color: #fff"],
+[style*="background-color: #ffffff"],
+[style*="background-color:#ffffff"] {
+  background: var(--kyn-bg-panel) !important;
+}
+
+[style*="color: black"],
+[style*="color:#000"],
+[style*="color: #000"],
+[style*="color: #111"],
+[style*="color:#111"],
+[style*="color: #1a1a1a"] {
+  color: var(--kyn-text-primary) !important;
+}
+
+/* ── 27. Module variable bridge (backwards-compat) ──────── */
+/* Map Kynecta vars used in module CSS to global dark values */
+:root {
+  --primary-color:      var(--kyn-accent-primary);
+  --secondary-color:    var(--kyn-bg-panel);
+  --danger-color:       var(--kyn-accent-danger);
+  --success-color:      var(--kyn-accent-primary);
+  --warning-color:      var(--kyn-accent-warning);
+  --info-color:         var(--kyn-accent-info);
+  --text-primary:       var(--kyn-text-primary);
+  --text-secondary:     var(--kyn-text-secondary);
+  --bg-color:           var(--kyn-bg-root);
+  --border-color:       var(--kyn-border);
+  --shadow:             var(--kyn-shadow-sm);
+  --shadow-lg:          var(--kyn-shadow-lg);
+
+  /* calls.css overrides */
+  --kynecta-primary:    var(--kyn-accent-purple);
+  --kynecta-secondary:  var(--kyn-accent-primary);
+  --kynecta-dark:       var(--kyn-text-primary);
+  --kynecta-light:      var(--kyn-bg-root);
+  --kynecta-border:     var(--kyn-border);
+  --kynecta-info:       var(--kyn-accent-secondary);
+  --kynecta-danger:     var(--kyn-accent-danger);
+}
+
+/* ════════════════════════════════════════════════════════════
+   ── 28. VISIBILITY FIXES — v1.1 (NON-DESTRUCTIVE PATCHES) ──
+   Only targets elements confirmed to have text-on-background
+   collisions. No layout, no icon structure, no flex/grid
+   properties are touched.
+   ════════════════════════════════════════════════════════════ */
+
+/*
+  FIX A — Loading screen inline text colours
+  Problem: <h2 style="color:#374151"> and <p style="color:#6b7280">
+  are dark text on a now-dark (#0f172a) loading screen background.
+  The inline style overrides external class rules, so we must be
+  explicit about the #loadingScreen scope.
+*/
+#loadingScreen {
+  background: var(--kyn-bg-root) !important;
+}
+#loadingScreen h2 {
+  color: var(--kyn-text-primary) !important;
+}
+#loadingScreen p {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/*
+  FIX B — Profile card white background
+  Problem: .profile-card has `background: white` in base CSS.
+  The [class*="card"] rule above catches it, but adding an
+  explicit rule prevents any specificity race.
+*/
+.profile-card {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-username {
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-bio {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/*
+  FIX C — Profile edit sheet and header white backgrounds
+  Problem: .profile-edit-sheet { background: #fff } and
+  .profile-edit-header { background: #fff } in base CSS.
+  .profile-edit-header h3 { color: #0f172a } — dark on white.
+*/
+.profile-edit-sheet {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-edit-header {
+  background: var(--kyn-bg-panel) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.profile-edit-header h3 {
+  color: var(--kyn-text-primary) !important;
+}
+
+.profile-edit-close {
+  background: var(--kyn-border) !important;
+  color: var(--kyn-text-secondary) !important;
+}
+
+.profile-edit-avatar-hint {
+  color: var(--kyn-text-secondary) !important;
+}
+
+.profile-edit-field label {
+  color: var(--kyn-text-secondary) !important;
+}
+
+.profile-edit-field input,
+.profile-edit-field textarea {
+  background: var(--kyn-bg-root) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+.profile-edit-field input:focus,
+.profile-edit-field textarea:focus {
+  border-color: var(--kyn-accent-secondary) !important;
+  background: var(--kyn-bg-root) !important;
+}
+
+/*
+  FIX D — Avatar fallback background
+  Problem: .avatar-large { background: #f3f4f6 } — light grey
+  fallback is visible in dark cards when image fails to load.
+*/
+.avatar-large {
+  background: var(--kyn-bg-active) !important;
+}
+
+/*
+  FIX E — iframe container flash
+  Problem: .iframe-container { background: white } causes a
+  white flash before iframe content paints on dark layout.
+*/
+.iframe-container {
+  background: var(--kyn-bg-root) !important;
+}
+
+/*
+  FIX F — Call banner generic buttons
+  Problem: .call-banner-actions button { background: white }
+  with button text inheriting var(--kyn-text-primary) = #e5e7eb
+  → near-invisible light grey text on white.
+  Only override the plain (non-accept/non-decline) buttons.
+  The .accept-call and .decline-call variants already have
+  explicit background/color and must NOT be changed.
+*/
+.call-banner-actions button:not(.accept-call):not(.decline-call) {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
+}
+
+/*
+  FIX G — Profile name in header
+  Problem: .profile-name-sm { color: #1f2937 } (dark) against
+  the now-dark header background → invisible.
+*/
+.profile-name-sm {
+  color: var(--kyn-text-primary) !important;
+}
+
+/*
+  FIX H — Header module title / subtitle
+  Problem: .header-module-title { color: #0f172a } and
+  .header-module-subtitle { color: #64748b } both set in base
+  CSS against a light header that is now dark.
+*/
+.header-module-title {
+  color: var(--kyn-text-primary) !important;
+}
+
+.header-module-subtitle {
+  color: var(--kyn-text-secondary) !important;
+}
+
+/*
+  FIX I — Header action buttons
+  Problem: .header-action-btn { background: rgba(255,255,255,0.70);
+  color: #0f172a } → dark text on a semi-transparent white button
+  sitting in a dark header. Contrast is acceptable on light bg but
+  broken on dark bg.
+*/
+.header-action-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.header-action-btn:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+/*
+  FIX J — Settings link button in profile modal
+  Problem: .settings-link-btn { background: #1f2937; color: white }
+  This is actually fine on dark theme but the [class*="card"] rule
+  previously reset it to panel colour. Restore explicit contrast.
+*/
+.settings-link-btn {
+  background: var(--kyn-border) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/*
+  FIX K — Message bubble, emoji picker, poll, recording bar, edit box
+  Problem: several real chat surfaces were hardcoded to white/near-white
+  in messages.css/group.css, invisible or jarring against a dark theme:
+  received message bubbles, the message-edit input, the emoji picker
+  panel/grid, poll option rows, and the voice-recording bar.
+*/
+.msg-recv .bubble,
+.edit-message-input,
+.emoji-picker-container,
+.emoji-grid,
+.poll-option,
+.recording-bar {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border-color: var(--kyn-border) !important;
+}
+
+/*
+  FIX L — Status/Story creation screen
+  Problem: .status-creation-content in chat.css was hardcoded white,
+  showing a bright white screen in the middle of an otherwise dark app
+  when creating a status update.
+*/
+.status-creation-content {
+  background: var(--kyn-bg-root) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+/*
+  FIX M — Marketplace/Tools cards and buttons (.jm-* classes)
+  Problem: Tool.css's marketplace card/category/follow-button surfaces
+  don't match any of the generic [class*="card"]/[class*="btn"] catch-alls
+  above (jm-cat-group, jm-cat-item, jm-follow-btn, jm-wa-btn), so they stayed
+  hardcoded white against a dark app shell.
+*/
+.jm-cat-group,
+.jm-cat-item.active {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+}
+
+.jm-follow-btn.following,
+.jm-wa-btn {
+  background: var(--kyn-bg-panel) !important;
+  color: var(--kyn-text-primary) !important;
+  border: 1px solid var(--kyn-border) !important;
+}

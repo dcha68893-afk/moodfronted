@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoodChat — Call Monitoring Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+  :root {
+    --bg: #0f0f1a; --surface: #1a1a2e; --surface2: #252540;
+    --accent: #6366f1; --accent2: #818cf8; --success: #22c55e;
+    --warning: #f59e0b; --danger: #ef4444; --text: #e2e8f0;
+    --muted: #94a3b8; --border: #2d2d4e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px;
+    display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+  .header .status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .layout { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; padding: 20px 24px; }
+  .layout-full { grid-column: 1/-1; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+  .stat-value { font-size: 36px; font-weight: 800; color: var(--text); }
+  .stat-sub   { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  .calls-table { width: 100%; border-collapse: collapse; }
+  .calls-table th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase;
+    padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .calls-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .calls-table tr:last-child td { border-bottom: none; }
+  .calls-table tr:hover td { background: var(--surface2); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge-green  { background: rgba(34,197,94,0.15);  color: #22c55e; }
+  .badge-amber  { background: rgba(245,158,11,0.15); color: #f59e0b; }
+  .badge-red    { background: rgba(239,68,68,0.15);  color: #ef4444; }
+  .badge-blue   { background: rgba(99,102,241,0.15); color: #818cf8; }
+  .badge-gray   { background: rgba(148,163,184,0.15);color: #94a3b8; }
+
+  .quality-bar { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+  .quality-bar span { width: 4px; border-radius: 2px; }
+
+  .btn { padding: 7px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px;
+    font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-ghost   { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn:hover   { opacity: 0.85; }
+
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .filter-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 6px 12px; font-size: 13px; outline: none; }
+  .filter-input:focus { border-color: var(--accent); }
+
+  #refreshMsg { font-size: 12px; color: var(--muted); }
+  .loading { opacity: 0.5; pointer-events: none; }
+  .empty { text-align: center; color: var(--muted); padding: 40px; }
+  .err-msg { color: var(--danger); font-size: 13px; text-align: center; padding: 20px; }
+
+  .chart-bar-wrap { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .chart-row { display: flex; align-items: center; gap: 10px; }
+  .chart-label { width: 80px; font-size: 12px; color: var(--muted); text-align: right; flex-shrink: 0; }
+  .chart-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .chart-fill  { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+  .chart-count { width: 30px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><i class="fas fa-chart-line" style="color:var(--accent)"></i> Call Monitoring Dashboard</h1>
+  <div class="status">
+    <div class="dot" id="connDot"></div>
+    <span id="refreshMsg">Loading…</span>
+    <button class="btn btn-ghost" onclick="loadAll()" aria-label="Refresh dashboard">
+      <i class="fas fa-sync-alt" id="refreshIcon"></i> Refresh
+    </button>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- Stat cards -->
+  <div class="card">
+    <h3>Total Calls (today)</h3>
+    <div class="stat-value" id="statTotal">—</div>
+    <div class="stat-sub">All call attempts</div>
+  </div>
+  <div class="card">
+    <h3>Active Right Now</h3>
+    <div class="stat-value" id="statActive" style="color:var(--success)">—</div>
+    <div class="stat-sub" id="statActiveSub">Fetching…</div>
+  </div>
+  <div class="card">
+    <h3>Completion Rate</h3>
+    <div class="stat-value" id="statComplete">—</div>
+    <div class="stat-sub">Calls successfully answered</div>
+  </div>
+  <div class="card">
+    <h3>Avg Duration</h3>
+    <div class="stat-value" id="statDuration">—</div>
+    <div class="stat-sub">Seconds per completed call</div>
+  </div>
+  <div class="card">
+    <h3>Avg Quality Score</h3>
+    <div class="stat-value" id="statQuality">—</div>
+    <div class="stat-sub">1–5 scale (MOS-like)</div>
+  </div>
+  <div class="card">
+    <h3>Missed / Failed</h3>
+    <div class="stat-value" id="statMissed" style="color:var(--warning)">—</div>
+    <div class="stat-sub">Unanswered + errors</div>
+  </div>
+
+  <!-- Breakdown chart -->
+  <div class="card">
+    <h3>Call Status Breakdown</h3>
+    <div class="chart-bar-wrap" id="statusChart">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Date filter -->
+  <div class="card" style="display:flex;flex-direction:column;gap:12px;justify-content:center;">
+    <h3>Filter Period</h3>
+    <div class="filters">
+      <input type="date" id="fromDate" class="filter-input" aria-label="From date">
+      <span style="color:var(--muted)">to</span>
+      <input type="date" id="toDate" class="filter-input" aria-label="To date">
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-filter"></i> Apply</button>
+      <button class="btn btn-ghost" onclick="clearDates()">Clear</button>
+      <button class="btn btn-ghost" onclick="setToday()">Today</button>
+      <button class="btn btn-ghost" onclick="setLast7()">Last 7d</button>
+    </div>
+  </div>
+
+  <div class="card" id="errorCard" style="display:none;">
+    <h3>Last Error</h3>
+    <div id="errorMsg" class="err-msg"></div>
+  </div>
+
+  <!-- Active calls table -->
+  <div class="card layout-full">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <h3 style="margin:0">Active Calls</h3>
+      <span id="activeCount" class="badge badge-green">—</span>
+    </div>
+    <div id="activeCallsWrap">
+      <div class="empty"><i class="fas fa-phone-slash" style="font-size:24px;margin-bottom:8px;display:block"></i>No active calls</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  var API_BASE = window.API_BASE_URL ||
+                 (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
+                 localStorage.getItem('kyn_api_base') ||
+                 prompt('Enter API base URL (e.g. https://moodchat-fy56.onrender.com)', 'https://moodchat-fy56.onrender.com') || '';
+
+  if (API_BASE) localStorage.setItem('kyn_api_base', API_BASE);
+
+  var AUTH_TOKEN = localStorage.getItem('authToken') || localStorage.getItem('token') ||
+                   prompt('Enter your admin auth token', '') || '';
+
+  function _headers() {
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN };
+  }
+
+  async function _get(path) {
+    var from = document.getElementById('fromDate').value;
+    var to   = document.getElementById('toDate').value;
+    var qs   = '';
+    if (from || to) qs = '?' + (from ? 'from=' + from : '') + (from && to ? '&' : '') + (to ? 'to=' + to : '');
+    var res = await fetch(API_BASE + path + qs, { headers: _headers() });
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    return res.json();
+  }
+
+  function _fmt(sec) {
+    if (!sec && sec !== 0) return '—';
+    if (sec < 60) return sec + 's';
+    return Math.floor(sec/60) + 'm ' + (sec % 60) + 's';
+  }
+
+  function _badge(status) {
+    var map = { 'in-progress': 'badge-green', ringing: 'badge-amber', completed: 'badge-blue',
+                missed: 'badge-amber', failed: 'badge-red', initiated: 'badge-gray', cancelled: 'badge-gray' };
+    return '<span class="badge ' + (map[status] || 'badge-gray') + '">' + (status || 'unknown') + '</span>';
+  }
+
+  function _qualityBar(score) {
+    if (!score) return '<span style="color:var(--muted)">—</span>';
+    var colors = ['#ef4444','#f59e0b','#f59e0b','#22c55e','#22c55e'];
+    var bars = 4;
+    var filled = Math.round((score / 5) * bars);
+    var html = '<div class="quality-bar" title="Quality: ' + score.toFixed(1) + '/5">';
+    for (var i = 0; i < bars; i++) {
+      var h = 8 + i * 3;
+      html += '<span style="height:' + h + 'px;background:' + (i < filled ? colors[Math.min(Math.floor(score)-1,4)] : 'var(--surface2)') + '"></span>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  async function loadStats() {
+    var data = await _get('/api/calls/admin/stats');
+    var d = data.data;
+    document.getElementById('statTotal').textContent    = d.totals.total.toLocaleString();
+    document.getElementById('statComplete').textContent = d.completionRate + '%';
+    document.getElementById('statDuration').textContent = _fmt(d.avgDurationSeconds);
+    document.getElementById('statQuality').textContent  = d.avgQualityScore ? d.avgQualityScore.toFixed(1) : '—';
+    document.getElementById('statMissed').textContent   = (d.totals.missed + d.totals.failed).toLocaleString();
+
+    // Status breakdown chart
+    var total = d.totals.total || 1;
+    var statuses = [
+      { label: 'Completed', count: d.totals.completed, color: '#6366f1' },
+      { label: 'Missed',    count: d.totals.missed,    color: '#f59e0b' },
+      { label: 'Failed',    count: d.totals.failed,    color: '#ef4444' },
+      { label: 'Other',     count: d.totals.other,     color: '#94a3b8' },
+    ];
+    var chartHtml = statuses.map(function(s) {
+      var pct = Math.round((s.count / total) * 100);
+      return '<div class="chart-row">' +
+        '<div class="chart-label">' + s.label + '</div>' +
+        '<div class="chart-track"><div class="chart-fill" style="width:' + pct + '%;background:' + s.color + '"></div></div>' +
+        '<div class="chart-count">' + s.count + '</div>' +
+        '</div>';
+    }).join('');
+    document.getElementById('statusChart').innerHTML = chartHtml;
+  }
+
+  async function loadActiveCalls() {
+    var data = await _get('/api/calls/admin/active');
+    var calls = (data.data && data.data.activeCalls) || [];
+    document.getElementById('statActive').textContent  = calls.length;
+    document.getElementById('statActiveSub').textContent = calls.length === 1 ? '1 call in progress' : calls.length + ' calls in progress';
+    document.getElementById('activeCount').textContent = calls.length;
+    document.getElementById('activeCount').className   = 'badge ' + (calls.length > 0 ? 'badge-green' : 'badge-gray');
+
+    if (!calls.length) {
+      document.getElementById('activeCallsWrap').innerHTML =
+        '<div class="empty"><i class="fas fa-phone-slash" style="font-size:24px;margin-bottom:8px;display:block"></i>No active calls</div>';
+      return;
+    }
+
+    var rows = calls.map(function(c) {
+      var duration = c.startedAt ? Math.round((Date.now() - new Date(c.startedAt).getTime()) / 1000) : null;
+      var type = (c.isGroupCall ? 'Group' : (c.type || 'audio'));
+      return '<tr>' +
+        '<td><code style="font-size:11px;color:var(--muted)">' + c.id.toString().slice(-8) + '</code></td>' +
+        '<td>' + _badge(c.status) + '</td>' +
+        '<td><span class="badge badge-blue">' + type + '</span></td>' +
+        '<td>' + (c.isGroupCall ? (c.participants && c.participants.length || '?') + ' people' : '2 people') + '</td>' +
+        '<td>' + (duration !== null ? _fmt(duration) : '—') + '</td>' +
+        '<td>' + _qualityBar(c.qualityScore) + '</td>' +
+        '</tr>';
+    }).join('');
+
+    document.getElementById('activeCallsWrap').innerHTML =
+      '<div style="overflow-x:auto"><table class="calls-table">' +
+      '<thead><tr><th>Call ID</th><th>Status</th><th>Type</th><th>Participants</th><th>Duration</th><th>Quality</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
+  }
+
+  window.loadAll = async function() {
+    var icon = document.getElementById('refreshIcon');
+    var msg  = document.getElementById('refreshMsg');
+    icon.classList.add('fa-spin');
+    msg.textContent = 'Refreshing…';
+    document.getElementById('errorCard').style.display = 'none';
+
+    try {
+      await Promise.all([loadStats(), loadActiveCalls()]);
+      document.getElementById('connDot').style.background = 'var(--success)';
+      msg.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    } catch(err) {
+      document.getElementById('connDot').style.background = 'var(--danger)';
+      msg.textContent = 'Error loading data';
+      document.getElementById('errorCard').style.display = 'block';
+      document.getElementById('errorMsg').textContent = err.message;
+    }
+    icon.classList.remove('fa-spin');
+  };
+
+  window.clearDates = function() {
+    document.getElementById('fromDate').value = '';
+    document.getElementById('toDate').value   = '';
+    loadAll();
+  };
+  window.setToday = function() {
+    var t = new Date().toISOString().slice(0,10);
+    document.getElementById('fromDate').value = t;
+    document.getElementById('toDate').value   = t;
+    loadAll();
+  };
+  window.setLast7 = function() {
+    var to   = new Date();
+    var from = new Date(to.getTime() - 7*24*60*60*1000);
+    document.getElementById('fromDate').value = from.toISOString().slice(0,10);
+    document.getElementById('toDate').value   = to.toISOString().slice(0,10);
+    loadAll();
+  };
+
+  // Initial load + auto-refresh every 30s
+  loadAll();
+  setInterval(loadAll, 30000);
+})();
+</script>
+</body>
+</html>

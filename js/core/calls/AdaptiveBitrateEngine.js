@@ -1,0 +1,451 @@
+/**
+ * AdaptiveBitrateEngine.js
+ * Phase 3 — Adaptive Media Engine + Call Recovery Engine (Frontend)
+ *
+ * Keeps calls alive on poor networks:
+ *  - Monitors RTC stats (RTT, packet loss, jitter, bandwidth)
+ *  - Adapts quality: HD → SD → audio-only WITHOUT dropping call
+ *  - Peer health monitoring with automatic ICE restart
+ *  - Background/hidden-tab call recovery
+ *  - Transport failover during active calls
+ *
+ * @version 3.0.0
+ * @phase 3 — Adaptive Media + Recovery
+ */
+
+(function () {
+  'use strict';
+
+  if (window.__AdaptiveBitrateEngine) return;
+
+  // ─── Quality Profiles ─────────────────────────────────────────────────────
+
+  const QUALITY_PROFILES = {
+    HD:         { width: 1280, height: 720,  frameRate: 30, maxBitrate: 2000000, audioBitrate: 128000 },
+    SD:         { width: 640,  height: 480,  frameRate: 24, maxBitrate: 800000,  audioBitrate: 64000  },
+    LOW:        { width: 320,  height: 240,  frameRate: 15, maxBitrate: 300000,  audioBitrate: 32000  },
+    AUDIO_ONLY: { width: 0,    height: 0,    frameRate: 0,  maxBitrate: 0,       audioBitrate: 32000  },
+  };
+
+  const QUALITY_ORDER = ['HD', 'SD', 'LOW', 'AUDIO_ONLY'];
+
+  // ─── NetworkQualityScorer ─────────────────────────────────────────────────
+
+  class NetworkQualityScorer {
+    score(stats) {
+      if (!stats) return 'LOW';
+      const { roundTripTime, packetsLost, bytesReceived } = stats;
+      const rttMs = (roundTripTime || 0) * 1000;
+
+      if (rttMs < 100 && packetsLost < 5)   return 'HD';
+      if (rttMs < 300 && packetsLost < 20)  return 'SD';
+      if (rttMs < 600 && packetsLost < 50)  return 'LOW';
+      return 'AUDIO_ONLY';
+    }
+  }
+
+  // ─── BitrateController ────────────────────────────────────────────────────
+
+  class BitrateController {
+    async setMaxBitrate(sender, maxBitrateBps) {
+      if (!sender) return;
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || !params.encodings.length) {
+          params.encodings = [{}];
+        }
+        params.encodings[0].maxBitrate = maxBitrateBps;
+        await sender.setParameters(params);
+      } catch (err) {
+        // setParameters not supported in all browsers — silently degrade
+        console.debug('[AdaptiveBR] setParameters not supported:', err.message);
+      }
+    }
+
+    async applyProfile(peerConnection, profile) {
+      if (!peerConnection) return;
+      try {
+        const senders = peerConnection.getSenders();
+        for (const sender of senders) {
+          if (!sender.track) continue;
+          if (sender.track.kind === 'video' && profile.maxBitrate > 0) {
+            await this.setMaxBitrate(sender, profile.maxBitrate);
+          }
+          if (sender.track.kind === 'audio') {
+            await this.setMaxBitrate(sender, profile.audioBitrate);
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  // ─── PeerHealthMonitor ────────────────────────────────────────────────────
+
+  class PeerHealthMonitor {
+    constructor(onHealthChange) {
+      this._onHealthChange = onHealthChange;
+      this._timers         = new Map(); // peerKey → intervalId
+      this._lastQuality    = new Map(); // peerKey → quality string
+    }
+
+    startMonitoring(peerId, callId, getPeerSessionFn) {
+      const key = `${peerId}:${callId}`;
+      if (this._timers.has(key)) return;
+
+      const timer = setInterval(async () => {
+        const session = getPeerSessionFn(peerId, callId);
+        if (!session) { this.stopMonitoring(peerId, callId); return; }
+
+        const stats = await session.getStats().catch(() => null);
+        if (!stats) return;
+
+        const quality  = new NetworkQualityScorer().score(stats);
+        const lastQual = this._lastQuality.get(key);
+
+        if (quality !== lastQual) {
+          this._lastQuality.set(key, quality);
+          this._onHealthChange(peerId, callId, quality, stats);
+        }
+      }, 3000);
+
+      this._timers.set(key, timer);
+    }
+
+    stopMonitoring(peerId, callId) {
+      const key   = `${peerId}:${callId}`;
+      const timer = this._timers.get(key);
+      if (timer) { clearInterval(timer); this._timers.delete(key); }
+      this._lastQuality.delete(key);
+    }
+
+    stopAll() {
+      for (const timer of this._timers.values()) clearInterval(timer);
+      this._timers.clear();
+      this._lastQuality.clear();
+    }
+  }
+
+  // ─── CallRecoveryEngine ───────────────────────────────────────────────────
+
+  class CallRecoveryEngine {
+    constructor() {
+      this._recovering  = false;
+      this._hiddenAt    = null;
+      this._listeners   = [];
+    }
+
+    attach() {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          this._hiddenAt = Date.now();
+        } else {
+          this._onTabVisible();
+        }
+      });
+
+      // Network restoration recovery
+      window.addEventListener('online', () => this._onNetworkRestored());
+
+      // C-10 FIX: WiFi → mobile-data (or vice-versa) transitions do NOT fire
+      // 'offline'/'online' events — navigator.onLine stays true throughout.
+      // The RTCPeerConnection fails silently: ICE candidates cached for the
+      // old interface are no longer valid, so the connection degrades and
+      // eventually enters 'disconnected'/'failed' (handled by
+      // PeerConnectionManager.oniceconnectionstatechange). But on some
+      // devices the connection state never transitions to 'failed' before
+      // the ICE timeout, leaving the call alive with no audio. Listening to
+      // navigator.connection 'change' gives us an early signal to trigger an
+      // ICE restart before the timeout fires, reducing the dead-audio window
+      // from ~30s (ICE timeout) to ~1.5s (debounce below).
+      if (navigator.connection) {
+        navigator.connection.addEventListener('change', () => {
+          const active = window.__CallStateMachine?.getActive();
+          if (!active) return;
+          const type = navigator.connection.effectiveType || navigator.connection.type || 'unknown';
+          console.log(`[CallRecovery] Network type changed to ${type} — scheduling ICE restart`);
+          // Debounce: the change event fires before the new network path is
+          // fully established; wait 1.5 s before restarting ICE.
+          clearTimeout(this._netChangeTimer);
+          this._netChangeTimer = setTimeout(() => {
+            this._triggerICERestart(active);
+            this._notify('recovery:network_type_changed', { callId: active.callId, type });
+          }, 1500);
+        });
+      }
+
+      const bus = window.KynectaEventBus;
+      if (bus) {
+        bus.on('SOCKET_CONNECTED', () => this._onSocketReconnected());
+      }
+
+      // FIX-DEVICE-CHANGE: Bluetooth headset connect/disconnect, wired
+      // headset plug/unplug, or any other audio/video input device change
+      // had no handling anywhere in the app. If the device currently in use
+      // (e.g. a Bluetooth mic) disappears mid-call, its MediaStreamTrack
+      // ends silently and nothing reacted until the tab was backgrounded and
+      // re-foregrounded (which triggers _onTabVisible above) — on desktop
+      // that could mean staying silent/dark for the rest of the call.
+      // navigator.mediaDevices.ondevicechange fires immediately on any such
+      // change, so route it through the same recovery pipeline.
+      if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) {
+        navigator.mediaDevices.addEventListener('devicechange', () => this._onDeviceChange());
+      }
+
+      console.log('[CallRecovery] Attached');
+    }
+
+    // FIX-DEVICE-CHANGE: debounced the same way network-type-change is above —
+    // devicechange can fire multiple times in quick succession for a single
+    // physical event (e.g. a Bluetooth headset registering as both an audio
+    // input and output device change).
+    _onDeviceChange() {
+      const active = window.__CallStateMachine?.getActive();
+      if (!active) return;
+
+      clearTimeout(this._deviceChangeTimer);
+      this._deviceChangeTimer = setTimeout(() => {
+        console.log('[CallRecovery] Audio/video device change detected — checking for ended tracks');
+        const _recover = typeof window.callsCoreRecoverMedia === 'function'
+          ? window.callsCoreRecoverMedia()
+          : Promise.resolve();
+        _recover.then(() => {
+          this._notify('recovery:device_changed', { callId: active.callId });
+        });
+      }, 500);
+    }
+
+    onRecovery(fn) {
+      this._listeners.push(fn);
+      return () => { this._listeners = this._listeners.filter(l => l !== fn); };
+    }
+
+    // ── Private recovery flows ────────────────────────────────────────────
+
+    _onTabVisible() {
+      const hiddenSec = this._hiddenAt ? (Date.now() - this._hiddenAt) / 1000 : 0;
+      this._hiddenAt  = null;
+
+      const active = window.__CallStateMachine?.getActive();
+      if (!active) return;
+
+      console.log(`[CallRecovery] Tab visible after ${Math.round(hiddenSec)}s — checking call health`);
+
+      // Recover media tracks that may have ended while backgrounded.
+      // FIX: DeviceMediaManager.recoverTracks() only ever operated on its own
+      // internal stream, which nothing in this app ever populates — always a
+      // no-op. window.callsCoreRecoverMedia (calls-core.js) does the same job
+      // against the real stream and real peer connection senders.
+      const _recover = typeof window.callsCoreRecoverMedia === 'function'
+        ? window.callsCoreRecoverMedia()
+        : Promise.resolve();
+      _recover.then(() => {
+        if (hiddenSec > 10) {
+          // Long absence — try ICE restart
+          this._triggerICERestart(active);
+        }
+        this._notify('recovery:tab_visible', { hiddenSec, callId: active.callId });
+      });
+    }
+
+    _onNetworkRestored() {
+      const active = window.__CallStateMachine?.getActive();
+      if (!active) return;
+
+      console.log('[CallRecovery] Network restored during call — triggering ICE restart');
+      setTimeout(() => this._triggerICERestart(active), 1500);
+      this._notify('recovery:network_restored', { callId: active.callId });
+    }
+
+    _onSocketReconnected() {
+      const active = window.__CallStateMachine?.getActive();
+      if (!active) return;
+
+      if (active.state === window.CALL_STATE?.RECONNECTING) {
+        console.log('[CallRecovery] Socket reconnected — restoring signaling for call');
+        window.__CallStateMachine?.transition(active.callId, window.CALL_STATE.CONNECTING);
+        this._triggerICERestart(active);
+        this._notify('recovery:socket_reconnected', { callId: active.callId });
+      }
+    }
+
+    _triggerICERestart(session) {
+      if (!session || !session.callId) return;
+      // FIX: calls-core.js is the sole owner of the real, live RTCPeerConnection
+      // for this app. window.callsCoreRestartICE is a small hook it exposes
+      // (see calls-core.js WebRTCManager) specifically so this recovery engine
+      // can trigger a restart on the REAL connection instead of routing through
+      // WebRTCSessionOrchestrator's own separate, unused peer connection.
+      if (typeof window.callsCoreRestartICE === 'function') {
+        try {
+          const r = window.callsCoreRestartICE(session.callId, session.peerId);
+          if (r && typeof r.catch === 'function') {
+            r.catch(err => console.warn('[CallRecovery] ICE restart error:', err && err.message));
+          }
+        } catch (err) {
+          console.warn('[CallRecovery] ICE restart error:', err && err.message);
+        }
+      }
+    }
+
+    _notify(event, data) {
+      this._listeners.forEach(fn => { try { fn({ event, ...data }); } catch (_) {} });
+    }
+  }
+
+  // ─── AdaptiveBitrateEngine (main) ─────────────────────────────────────────
+
+  class AdaptiveBitrateEngine {
+    constructor() {
+      this._scorer     = new NetworkQualityScorer();
+      this._bitrate    = new BitrateController();
+      this._health     = new PeerHealthMonitor((peerId, callId, quality, stats) => {
+        this._onQualityChange(peerId, callId, quality, stats);
+      });
+      this._recovery   = new CallRecoveryEngine();
+      this._currentQuality = new Map(); // peerKey → quality level index
+      this._listeners  = [];
+    }
+
+    start() {
+      this._recovery.attach();
+
+      // Watch for new peer connections
+      const bus = window.KynectaEventBus;
+      if (bus) {
+        bus.on('SOCKET_EVENT', payload => {
+          if (payload?.type === 'call:peer_connected') {
+            const { peerId, callId } = payload;
+            if (peerId && callId) {
+              this._health.startMonitoring(peerId, callId,
+                (pid, cid) => window.__PeerConnectionManager?.getSession(pid, cid)
+              );
+            }
+          }
+        });
+      }
+
+      // Watch via CallStateMachine
+      window.__CallStateMachine?.watchAll(({ callId, state, session }) => {
+        if (state === window.CALL_STATE?.CONNECTED && session?.peerId) {
+          this._health.startMonitoring(session.peerId, callId,
+            (pid, cid) => window.__PeerConnectionManager?.getSession(pid, cid)
+          );
+        }
+        if (state === window.CALL_STATE?.ENDED || state === window.CALL_STATE?.FAILED) {
+          this._health.stopAll();
+        }
+      });
+
+      console.log('[AdaptiveBR] ✅ Started');
+    }
+
+    getRecovery() { return this._recovery; }
+
+    onChange(fn) {
+      this._listeners.push(fn);
+      return () => { this._listeners = this._listeners.filter(l => l !== fn); };
+    }
+
+    getDiagnostics() {
+      return {
+        currentQuality: Object.fromEntries(this._currentQuality),
+        monitoredPeers: this._health._timers.size,
+      };
+    }
+
+    // ── Private ─────────────────────────────────────────────────────────────
+
+    async _onQualityChange(peerId, callId, newQuality, stats) {
+      const key         = `${peerId}:${callId}`;
+      const prevIndex   = this._currentQuality.get(key) ?? 0;
+      const newIndex    = QUALITY_ORDER.indexOf(newQuality);
+      if (newIndex === prevIndex) return;
+
+      const profile = QUALITY_PROFILES[newQuality];
+      this._currentQuality.set(key, newIndex);
+
+      console.log(`[AdaptiveBR] Quality change for ${peerId}: ${QUALITY_ORDER[prevIndex]} → ${newQuality}`);
+
+      // NOTE: video-disable / resolution adaptation here are currently safe no-ops
+      // (DeviceMediaManager._localStream is never populated in this app). Leave it
+      // that way — js/adaptive-bitrate.js already owns bitrate + resolution scaling
+      // for the real connection via sender.setParameters(). If DeviceMediaManager's
+      // stream reference is ever wired up for real, these two calls would start
+      // fighting that engine over the same video track and need to be reconciled
+      // (e.g. disable one of the two) before being allowed to run for real.
+      // Adapt video track constraints
+      const media = window.__DeviceMediaManager;
+      if (newQuality === 'AUDIO_ONLY') {
+        media?.disableVideo(true);
+      } else if (prevIndex >= QUALITY_ORDER.indexOf('AUDIO_ONLY')) {
+        media?.disableVideo(false); // Restore video if we were audio-only
+      }
+
+      // Apply bitrate caps to all senders for this peer.
+      // NOTE: peerSession._pc is intentionally not provided by PeerConnectionManager's
+      // getSession() fallback (see its comment) — this stays a no-op by design so it
+      // doesn't fight js/adaptive-bitrate.js, which already does this job for real.
+      const peerSession = window.__PeerConnectionManager?.getSession(peerId, callId);
+      if (peerSession?._pc) {
+        await this._bitrate.applyProfile(peerSession._pc, profile);
+      }
+
+      // Adapt video resolution — same no-op caveat as disableVideo() above.
+      if (newQuality !== 'AUDIO_ONLY') {
+        await media?.adaptQuality(newQuality === 'HD' ? 'high' : newQuality === 'SD' ? 'medium' : 'low');
+      }
+
+      this._listeners.forEach(fn => {
+        try { fn({ event: 'quality:changed', peerId, callId, quality: newQuality, stats }); } catch (_) {}
+      });
+
+      // Notify calls.html via CustomEvent
+      window.dispatchEvent(new CustomEvent('kyn:call:quality_changed', {
+        detail: { peerId, callId, quality: newQuality, stats }
+      }));
+
+      // Report stats to backend for quality analytics (non-blocking, best-effort)
+      if (callId && stats) {
+        try {
+          const _apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE_URL) ||
+                           (window.config && window.config.apiUrl) || '';
+          const _token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+          if (_apiBase && _token) {
+            fetch(`${_apiBase}/api/calls/${callId}/stats`, {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+              body: JSON.stringify({
+                rtt:          stats.rtt || 0,
+                packetLoss:   stats.packetsLost || 0,
+                jitter:       stats.jitter || 0,
+                bitrate:      stats.bitrate || 0,
+                qualityLevel: newQuality,
+                timestamp:    Date.now(),
+              }),
+            }).catch(() => {}); // fully non-blocking
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // ─── Singleton ───────────────────────────────────────────────────────────
+
+  const engine = new AdaptiveBitrateEngine();
+
+  // Start after dependencies ready
+  const tryStart = () => {
+    if (window.__CallStateMachine && window.__PeerConnectionManager) {
+      engine.start();
+    } else {
+      setTimeout(tryStart, 500);
+    }
+  };
+  tryStart();
+
+  window.__AdaptiveBitrateEngine = engine;
+  window.AdaptiveBR              = engine;
+  window.__CallRecoveryEngine    = engine.getRecovery();
+
+  console.log('[AdaptiveBR] ✅ Ready');
+})();

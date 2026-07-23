@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Predictive Analytics | MoodChat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        :root {
+            --primary: #6366f1; --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+            --light: #f8fafc; --text: #1e293b; --text-light: #64748b;
+        }
+        body { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); min-height: 100vh; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { 
+            background: white; border-radius: 15px; padding: 25px; margin-bottom: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07); display: flex; justify-content: space-between; align-items: center;
+        }
+        .header h1 { font-size: 28px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .back-btn { padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; }
+        .filters { background: white; border-radius: 15px; padding: 20px; margin-bottom: 25px; display: flex; gap: 15px; flex-wrap: wrap; }
+        .filter-group { flex: 1; min-width: 200px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text); }
+        select, input { width: 100%; padding: 10px 15px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 14px; }
+        .dashboard { display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+        .card { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.07); }
+        .card.full-width { grid-column: span 12; }
+        .card.half { grid-column: span 6; }
+        .card.third { grid-column: span 4; }
+        .card.quarter { grid-column: span 3; }
+        .card-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: var(--text); display: flex; justify-content: space-between; align-items: center; }
+        .stat-number { font-size: 32px; font-weight: 700; margin-bottom: 5px; }
+        .stat-label { font-size: 14px; color: var(--text-light); }
+        .trend-up { color: var(--success); }
+        .trend-down { color: var(--danger); }
+        .prediction-alert { padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+        .alert-success { background: rgba(16, 185, 129, 0.1); border-left: 4px solid var(--success); }
+        .alert-warning { background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); }
+        .alert-danger { background: rgba(239, 68, 68, 0.1); border-left: 4px solid var(--danger); }
+        .chart-container { height: 300px; margin-top: 20px; }
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .data-table th, .data-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        .data-table th { background: #f8fafc; font-weight: 600; color: var(--text); }
+        .progress-bar { height: 8px; background: #e2e8f0; border-radius: 4px; margin: 10px 0; overflow: hidden; }
+        .progress { height: 100%; background: var(--primary); }
+        .insight { padding: 15px; background: #f8fafc; border-radius: 10px; margin: 10px 0; }
+        .ai-suggestion { background: linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%); padding: 20px; border-radius: 10px; margin-top: 20px; }
+        .loading { display: flex; align-items: center; justify-content: center; padding: 40px; }
+        .loading i { animation: spin 1s linear infinite; font-size: 24px; color: var(--primary); }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @media (max-width: 1200px) { 
+            .card.third { grid-column: span 6; }
+            .card.quarter { grid-column: span 6; }
+        }
+        @media (max-width: 768px) { 
+            .card { grid-column: span 12 !important; }
+            .filters { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-chart-line"></i> Predictive Analytics</h1>
+            <button class="back-btn" onclick="window.history.back()">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </button>
+        </div>
+        
+        <div class="filters">
+            <div class="filter-group">
+                <label>Time Period</label>
+                <select id="timePeriod">
+                    <option value="7days">Last 7 Days</option>
+                    <option value="30days" selected>Last 30 Days</option>
+                    <option value="90days">Last 90 Days</option>
+                    <option value="year">Last Year</option>
+                    <option value="custom">Custom Range</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Business Metric</label>
+                <select id="metric">
+                    <option value="revenue">Revenue</option>
+                    <option value="users">Active Users</option>
+                    <option value="conversion">Conversion Rate</option>
+                    <option value="retention">Customer Retention</option>
+                    <option value="churn">Churn Rate</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Prediction Horizon</label>
+                <select id="horizon">
+                    <option value="7">Next 7 Days</option>
+                    <option value="30" selected>Next 30 Days</option>
+                    <option value="90">Next 90 Days</option>
+                    <option value="180">Next 6 Months</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Confidence Level</label>
+                <select id="confidence">
+                    <option value="80">80% (Aggressive)</option>
+                    <option value="90" selected>90% (Balanced)</option>
+                    <option value="95">95% (Conservative)</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="dashboard">
+            <!-- Key Metrics -->
+            <div class="card quarter">
+                <div class="card-title">Current Value</div>
+                <div class="stat-number" id="currentValue">$12,450</div>
+                <div class="stat-label">Daily Revenue</div>
+                <div class="trend-up">+8.2% from yesterday</div>
+            </div>
+            
+            <div class="card quarter">
+                <div class="card-title">Predicted Value</div>
+                <div class="stat-number" id="predictedValue">$13,890</div>
+                <div class="stat-label">In 30 Days</div>
+                <div class="trend-up">+11.6% predicted growth</div>
+            </div>
+            
+            <div class="card quarter">
+                <div class="card-title">Accuracy Score</div>
+                <div class="stat-number" id="accuracyScore">94.2%</div>
+                <div class="stat-label">Model Confidence</div>
+                <div class="progress-bar"><div class="progress" style="width: 94.2%;"></div></div>
+            </div>
+            
+            <div class="card quarter">
+                <div class="card-title">Risk Level</div>
+                <div class="stat-number" id="riskLevel">Low</div>
+                <div class="stat-label">Prediction Stability</div>
+                <div style="color: var(--success);"><i class="fas fa-shield-alt"></i> Minimal Variance</div>
+            </div>
+            
+            <!-- Main Chart -->
+            <div class="card full-width">
+                <div class="card-title">
+                    <span>Revenue Forecast</span>
+                    <button onclick="downloadChart()" style="padding: 8px 15px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer;">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                </div>
+                <div class="chart-container">
+                    <canvas id="forecastChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Predictions & Insights -->
+            <div class="card half">
+                <div class="card-title">AI Predictions</div>
+                
+                <div class="prediction-alert alert-success">
+                    <strong><i class="fas fa-arrow-up"></i> Growth Opportunity</strong>
+                    <p>Weekend sales predicted to increase by 23% based on seasonal patterns.</p>
+                </div>
+                
+                <div class="prediction-alert alert-warning">
+                    <strong><i class="fas fa-exclamation-triangle"></i> Risk Alert</strong>
+                    <p>Market saturation detected in current segment. Consider expanding to new demographics.</p>
+                </div>
+                
+                <div class="prediction-alert alert-success">
+                    <strong><i class="fas fa-bolt"></i> Optimal Timing</strong>
+                    <p>Best time for marketing campaigns: Thursday 2-5 PM (34% higher engagement predicted).</p>
+                </div>
+                
+                <div class="prediction-alert alert-danger">
+                    <strong><i class="fas fa-chart-line"></i> Churn Risk</strong>
+                    <p>18% of inactive users predicted to churn within 14 days. Re-engagement recommended.</p>
+                </div>
+            </div>
+            
+            <!-- Data Table -->
+            <div class="card half">
+                <div class="card-title">Detailed Forecast</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Predicted</th>
+                            <th>Lower Bound</th>
+                            <th>Upper Bound</th>
+                            <th>Confidence</th>
+                        </tr>
+                    </thead>
+                    <tbody id="forecastTable">
+                        <!-- Data will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- AI Suggestions -->
+            <div class="card full-width">
+                <div class="card-title">AI Recommendations</div>
+                <div class="ai-suggestion">
+                    <h3><i class="fas fa-robot"></i> Optimize Revenue Strategy</h3>
+                    <p>Based on predictive analysis, here are actionable recommendations:</p>
+                    
+                    <div class="insight">
+                        <strong>1. Price Optimization</strong>
+                        <p>Increase premium plan price by 8% - predicted to maintain 92% retention while boosting revenue by $2,400/month.</p>
+                        <div class="progress-bar"><div class="progress" style="width: 85%; background: var(--success);"></div></div>
+                        <small>85% confidence level</small>
+                    </div>
+                    
+                    <div class="insight">
+                        <strong>2. Marketing Allocation</strong>
+                        <p>Shift 30% of social media budget to influencer partnerships - predicted 41% higher ROI.</p>
+                        <div class="progress-bar"><div class="progress" style="width: 78%; background: var(--warning);"></div></div>
+                        <small>78% confidence level</small>
+                    </div>
+                    
+                    <div class="insight">
+                        <strong>3. Feature Development</strong>
+                        <p>Prioritize mobile app enhancements - predicted to increase user retention by 17%.</p>
+                        <div class="progress-bar"><div class="progress" style="width: 91%; background: var(--success);"></div></div>
+                        <small>91% confidence level</small>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Model Details -->
+            <div class="card half">
+                <div class="card-title">Model Performance</div>
+                <div style="margin-bottom: 15px;">
+                    <strong>Algorithm:</strong> Gradient Boosting Regressor<br>
+                    <strong>Training Data:</strong> 90 Days Historical<br>
+                    <strong>Features:</strong> 24 Variables<br>
+                    <strong>Last Updated:</strong> Just now
+                </div>
+                <button onclick="retrainModel()" style="padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; width: 100%;">
+                    <i class="fas fa-sync-alt"></i> Retrain Model with Latest Data
+                </button>
+            </div>
+            
+            <!-- Export Options -->
+            <div class="card half">
+                <div class="card-title">Export & Integrate</div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button onclick="exportData('csv')" style="flex: 1; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-file-csv"></i> CSV
+                    </button>
+                    <button onclick="exportData('excel')" style="flex: 1; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-file-excel"></i> Excel
+                    </button>
+                    <button onclick="exportData('pdf')" style="flex: 1; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-file-pdf"></i> PDF
+                    </button>
+                </div>
+                <div style="margin-top: 15px;">
+                    <strong>API Integration</strong>
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 6px; margin-top: 5px; font-family: monospace; font-size: 12px;">
+                        GET /api/predictions?metric=revenue&horizon=30
+                    </div>
+                    <button onclick="copyAPILink()" style="margin-top: 10px; padding: 8px 15px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; width: 100%;">
+                        <i class="fas fa-copy"></i> Copy API Endpoint
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart instances
+        let forecastChart;
+        
+        // Sample data
+        const historicalData = {
+            dates: [],
+            values: [],
+            predictions: [],
+            lowerBounds: [],
+            upperBounds: []
+        };
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            generateSampleData();
+            initializeChart();
+            updateForecastTable();
+            setupEventListeners();
+        });
+        
+        // Generate sample data
+        function generateSampleData() {
+            const today = new Date();
+            historicalData.dates = [];
+            historicalData.values = [];
+            historicalData.predictions = [];
+            historicalData.lowerBounds = [];
+            historicalData.upperBounds = [];
+            
+            // Historical data (last 30 days)
+            for (let i = 30; i >= 1; i--) {
+                const date = new Date(today);
+                date.setDate(today.getDate() - i);
+                historicalData.dates.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Simulate revenue with some randomness
+                const baseValue = 8000 + Math.random() * 4000;
+                const trend = 1 + (i * 0.01); // Upward trend
+                const noise = (Math.random() - 0.5) * 1000;
+                historicalData.values.push(Math.round(baseValue * trend + noise));
+            }
+            
+            // Predictions (next 30 days)
+            for (let i = 1; i <= 30; i++) {
+                const date = new Date(today);
+                date.setDate(today.getDate() + i);
+                historicalData.dates.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Predict future values with confidence intervals
+                const lastValue = historicalData.values[historicalData.values.length - 1];
+                const growthRate = 1 + (0.02 + Math.random() * 0.01); // 2-3% daily growth
+                const predicted = lastValue * Math.pow(growthRate, i);
+                const confidence = 0.9; // 90% confidence
+                
+                historicalData.predictions.push(Math.round(predicted));
+                historicalData.lowerBounds.push(Math.round(predicted * (1 - (1 - confidence) / 2)));
+                historicalData.upperBounds.push(Math.round(predicted * (1 + (1 - confidence) / 2)));
+            }
+            
+            // Update current and predicted values
+            document.getElementById('currentValue').textContent = `$${historicalData.values[historicalData.values.length - 1].toLocaleString()}`;
+            document.getElementById('predictedValue').textContent = `$${historicalData.predictions[29].toLocaleString()}`;
+            
+            // Calculate growth percentage
+            const growth = ((historicalData.predictions[29] - historicalData.values[historicalData.values.length - 1]) / historicalData.values[historicalData.values.length - 1]) * 100;
+            document.querySelector('.card.quarter:nth-child(2) .trend-up').textContent = `+${growth.toFixed(1)}% predicted growth`;
+        }
+        
+        // Initialize chart
+        function initializeChart() {
+            const ctx = document.getElementById('forecastChart').getContext('2d');
+            
+            // Clear existing chart
+            if (forecastChart) {
+                forecastChart.destroy();
+            }
+            
+            // Prepare data
+            const allDates = historicalData.dates;
+            const allValues = [...historicalData.values, ...historicalData.predictions];
+            
+            // Find the split point between historical and predicted
+            const splitIndex = historicalData.values.length;
+            
+            forecastChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: allDates,
+                    datasets: [
+                        {
+                            label: 'Historical Data',
+                            data: allValues.slice(0, splitIndex),
+                            borderColor: '#6366f1',
+                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                            borderWidth: 3,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Predicted',
+                            data: [...Array(splitIndex).fill(null), ...historicalData.predictions],
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 3,
+                            borderDash: [5, 5],
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Confidence Interval',
+                            data: [...Array(splitIndex).fill(null), ...historicalData.upperBounds],
+                            borderColor: 'rgba(245, 158, 11, 0.3)',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            borderWidth: 1,
+                            borderDash: [2, 2],
+                            fill: '-1', // Fill to the dataset below (lower bounds)
+                            pointRadius: 0
+                        },
+                        {
+                            label: '',
+                            data: [...Array(splitIndex).fill(null), ...historicalData.lowerBounds],
+                            borderColor: 'rgba(245, 158, 11, 0.3)',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            borderWidth: 1,
+                            borderDash: [2, 2],
+                            pointRadius: 0,
+                            fill: '-1' // Fill to previous dataset
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += new Intl.NumberFormat('en-US', {
+                                            style: 'currency',
+                                            currency: 'USD',
+                                            minimumFractionDigits: 0
+                                        }).format(context.parsed.y);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Update forecast table
+        function updateForecastTable() {
+            const table = document.getElementById('forecastTable');
+            table.innerHTML = '';
+            
+            // Show next 10 days of predictions
+            const splitIndex = historicalData.values.length;
+            for (let i = 0; i < 10; i++) {
+                const dateIndex = splitIndex + i;
+                const row = document.createElement('tr');
+                
+                row.innerHTML = `
+                    <td>${historicalData.dates[dateIndex]}</td>
+                    <td>$${historicalData.predictions[i].toLocaleString()}</td>
+                    <td>$${historicalData.lowerBounds[i].toLocaleString()}</td>
+                    <td>$${historicalData.upperBounds[i].toLocaleString()}</td>
+                    <td>
+                        <div class="progress-bar" style="height: 6px;">
+                            <div class="progress" style="width: ${document.getElementById('confidence').value}%; background: var(--primary);"></div>
+                        </div>
+                        ${document.getElementById('confidence').value}%
+                    </td>
+                `;
+                
+                table.appendChild(row);
+            }
+        }
+        
+        // Setup event listeners
+        function setupEventListeners() {
+            // Filter changes
+            document.getElementById('timePeriod').addEventListener('change', updateAnalysis);
+            document.getElementById('metric').addEventListener('change', updateAnalysis);
+            document.getElementById('horizon').addEventListener('change', updateAnalysis);
+            document.getElementById('confidence').addEventListener('change', updateAnalysis);
+        }
+        
+        // Update analysis based on filters
+        function updateAnalysis() {
+            // Show loading
+            document.body.style.opacity = '0.7';
+            
+            setTimeout(() => {
+                generateSampleData();
+                initializeChart();
+                updateForecastTable();
+                
+                // Update accuracy score based on confidence level
+                const confidence = parseInt(document.getElementById('confidence').value);
+                const accuracy = confidence - 5 + Math.random() * 10; // Simulate accuracy near confidence
+                document.getElementById('accuracyScore').textContent = accuracy.toFixed(1) + '%';
+                document.querySelector('.progress').style.width = accuracy.toFixed(1) + '%';
+                
+                // Update risk level
+                const riskLevels = ['Low', 'Medium', 'High'];
+                const riskIndex = Math.min(2, Math.floor((100 - confidence) / 30));
+                document.getElementById('riskLevel').textContent = riskLevels[riskIndex];
+                document.querySelector('.card.quarter:nth-child(4) div:last-child').style.color = 
+                    riskIndex === 0 ? 'var(--success)' : riskIndex === 1 ? 'var(--warning)' : 'var(--danger)';
+                
+                document.body.style.opacity = '1';
+            }, 500);
+        }
+        
+        // Export functions
+        function exportData(format) {
+            alert(`Exporting data as ${format.toUpperCase()}...\n\n(In production, this would download a file)`);
+            
+            // Simulate export
+            const data = {
+                dates: historicalData.dates,
+                historical: historicalData.values,
+                predictions: historicalData.predictions,
+                lowerBounds: historicalData.lowerBounds,
+                upperBounds: historicalData.upperBounds,
+                generatedAt: new Date().toISOString()
+            };
+            
+            console.log('Export data:', data);
+            
+            // In production, you would:
+            // 1. Convert to desired format
+            // 2. Create download link
+            // 3. Trigger download
+        }
+        
+        function downloadChart() {
+            const link = document.createElement('a');
+            link.download = 'revenue-forecast.png';
+            link.href = document.getElementById('forecastChart').toDataURL('image/png');
+            link.click();
+        }
+        
+        function copyAPILink() {
+            const endpoint = 'https://api.moodchat.com/v1/predictions?metric=revenue&horizon=30';
+            navigator.clipboard.writeText(endpoint);
+            alert('API endpoint copied to clipboard!');
+        }
+        
+        function retrainModel() {
+            const button = document.querySelector('button[onclick="retrainModel()"]');
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Training...';
+            button.disabled = true;
+            
+            setTimeout(() => {
+                button.innerHTML = originalText;
+                button.disabled = false;
+                
+                // Update accuracy score
+                const newAccuracy = 95 + Math.random() * 3;
+                document.getElementById('accuracyScore').textContent = newAccuracy.toFixed(1) + '%';
+                document.querySelector('.progress').style.width = newAccuracy.toFixed(1) + '%';
+                
+                alert('Model retrained successfully! Accuracy improved to ' + newAccuracy.toFixed(1) + '%');
+            }, 2000);
+        }
+        
+        // REAL ML API INTEGRATION EXAMPLE
+        /*
+        async function getRealPredictions(metric, horizon, confidence) {
+            const response = await fetch('https://api.moodchat.com/v1/predict', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer YOUR_API_KEY'
+                },
+                body: JSON.stringify({
+                    metric: metric,
+                    horizon: horizon,
+                    confidence_level: confidence / 100,
+                    historical_data: historicalData.values
+                })
+            });
+            
+            const data = await response.json();
+            return data.predictions;
+        }
+        */
+    </script>
+</body>
+</html>

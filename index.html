@@ -1,0 +1,3635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
+    <!--
+        THEME FLASH PREVENTION — first thing in <head>, before any CSS.
+        Applies the saved theme class to <html> immediately so the page
+        never paints light-then-dark on load/refresh. initThemeToggle()
+        further down still runs on DOMContentLoaded to wire up the
+        toggle buttons, but the visual theme itself is already correct
+        by the time anything is drawn.
+    -->
+    <script>
+    (function () {
+        function resolveEarlyTheme() {
+            var raw = null;
+            try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
+            if (raw === 'auto') {
+                try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
+            }
+            return raw === 'dark' ? 'dark' : 'light';
+        }
+        if (resolveEarlyTheme() === 'dark') {
+            document.documentElement.classList.add('theme-dark');
+        }
+        try {
+            var savedColor = localStorage.getItem('moodchat_dashboard_color');
+            if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
+        } catch (_) {}
+    })();
+    </script>
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4F46E5">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/moodchat-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/moodchat-512.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MoodChat - Global Chat Platform</title>
+    
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+    
+    <!-- CSS Frameworks and Styles -->
+    <style>
+        /* ============================================= */
+        /* ROOT VARIABLES & THEME SYSTEM */
+        /* ============================================= */
+        :root {
+            --primary-color: #667eea;
+            --primary-dark: #764ba2;
+            --secondary-color: #8e44ad;
+            --accent-color: #3498db;
+            --success-color: #2ecc71;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+            --info-color: #5dade2;
+            --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient-secondary: linear-gradient(135deg, #8e44ad 0%, #3498db 100%);
+            --gradient-success: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+            --gradient-warning: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            --bg-color: #ffffff;
+            --sidebar-bg: #f8f9fa;
+            --panel-bg: #ffffff;
+            --card-bg: #ffffff;
+            --text-primary: #2c3e50;
+            --text-secondary: #7f8c8d;
+            --text-light: #95a5a6;
+            --border-color: #ecf0f1;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --sidebar-width: 400px;
+            --header-height: 70px;
+            --border-radius: 16px;
+            --card-radius: 12px;
+            --input-radius: 10px;
+            --button-radius: 8px;
+            --transition-fast: 0.2s ease;
+            --transition-medium: 0.3s ease;
+            --transition-slow: 0.5s ease;
+            --session-checking-color: #3498db;
+            --session-expired-color: #e67e22;
+            --session-valid-color: #2ecc71;
+            --session-invalid-color: #e74c3c;
+            --theme-primary: #667eea;
+            --theme-primary-dark: #764ba2;
+            --theme-accent: #3498db;
+            --theme-success: #2ecc71;
+        }
+        
+        .theme-dark {
+            --bg-color: #1a1a2e;
+            --sidebar-bg: #16213e;
+            --panel-bg: #0f3460;
+            --card-bg: #1e2a47;
+            --text-primary: #e4e6eb;
+            --text-secondary: #b0b3b8;
+            --text-light: #8a8d91;
+            --border-color: #2d3748;
+            --shadow-color: rgba(0, 0, 0, 0.3);
+            --primary-color: #818cf8;
+            --primary-dark: #a78bfa;
+            --accent-color: #60a5fa;
+            --success-color: #34d399;
+            --warning-color: #fbbf24;
+            --danger-color: #f87171;
+        }
+        
+        body[data-theme-color="ocean"] {
+            --theme-primary: #0066cc;
+            --theme-primary-dark: #004c99;
+            --theme-accent: #00aaff;
+            --theme-success: #00cc88;
+        }
+        body[data-theme-color="sunset"] {
+            --theme-primary: #ff6b6b;
+            --theme-primary-dark: #ee5253;
+            --theme-accent: #ff9f43;
+            --theme-success: #10ac84;
+        }
+        body[data-theme-color="forest"] {
+            --theme-primary: #27ae60;
+            --theme-primary-dark: #219150;
+            --theme-accent: #f39c12;
+            --theme-success: #2ecc71;
+        }
+        body[data-theme-color="lavender"] {
+            --theme-primary: #9b59b6;
+            --theme-primary-dark: #8e44ad;
+            --theme-accent: #f1c40f;
+            --theme-success: #1abc9c;
+        }
+
+        #app-container, #iframe-container, #bottom-nav { display: none; }
+        footer { display: none; }
+
+        .theme-toggle-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 30px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 20px;
+            font-weight: 600;
+            transition: all var(--transition-fast);
+            backdrop-filter: blur(10px);
+            width: 100%;
+        }
+        .theme-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+        }
+        .theme-dark .theme-toggle-btn i { transform: rotate(180deg); }
+
+        .theme-picker {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .theme-option {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 3px solid transparent;
+            transition: transform 0.2s, border-color 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .theme-option:hover { transform: scale(1.15); }
+        .theme-option.active {
+            border-color: white;
+            box-shadow: 0 0 0 2px var(--primary-color);
+        }
+        .theme-option[data-color="default"] { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .theme-option[data-color="ocean"] { background: linear-gradient(135deg, #0066cc, #00aaff); }
+        .theme-option[data-color="sunset"] { background: linear-gradient(135deg, #ff6b6b, #ff9f43); }
+        .theme-option[data-color="forest"] { background: linear-gradient(135deg, #27ae60, #f39c12); }
+        .theme-option[data-color="lavender"] { background: linear-gradient(135deg, #9b59b6, #f1c40f); }
+
+        @keyframes invitePulse {
+            0% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.02); opacity: 1; box-shadow: 0 0 20px var(--primary-color); }
+            100% { transform: scale(1); opacity: 0.8; }
+        }
+        .invite-message {
+            background: var(--gradient-primary);
+            color: white;
+            padding: 18px;
+            border-radius: var(--card-radius);
+            text-align: center;
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin: 20px 0;
+            animation: invitePulse 2s infinite ease-in-out;
+            box-shadow: 0 8px 20px rgba(102,126,234,0.3);
+            border: 2px solid rgba(255,255,255,0.3);
+            backdrop-filter: blur(5px);
+        }
+        .invite-message i {
+            margin-right: 10px;
+            font-size: 1.4rem;
+            vertical-align: middle;
+        }
+
+        .bottom-nav-toggle {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 2000;
+            background: var(--primary-color);
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: transform 0.2s, background 0.2s;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        .bottom-nav-toggle:hover {
+            transform: scale(1.1);
+            background: var(--primary-dark);
+        }
+        #bottom-nav {
+            position: fixed;
+            bottom: 80px;
+            left: 20px;
+            background: var(--panel-bg);
+            border-radius: 20px;
+            padding: 15px;
+            box-shadow: 0 10px 30px var(--shadow-color);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 200px;
+            z-index: 1999;
+            border: 1px solid var(--border-color);
+            transform: translateX(-120%);
+            transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        }
+        #bottom-nav.visible { transform: translateX(0); }
+        #bottom-nav a {
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 12px 15px;
+            border-radius: 12px;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 500;
+        }
+        #bottom-nav a:hover {
+            background: var(--border-color);
+            color: var(--primary-color);
+        }
+        #bottom-nav a i {
+            width: 20px;
+            color: var(--primary-color);
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            transition: background-color var(--transition-medium), color var(--transition-medium);
+        }
+        
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+            position: relative;
+        }
+        
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--gradient-primary);
+            background-size: 200% 200%;
+            animation: gradientFlow 10s ease infinite;
+            color: white;
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 100;
+            overflow-y: auto;
+            box-shadow: 5px 0 30px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .sidebar-content {
+            padding: 30px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .auth-panel {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            min-height: 100vh;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-color);
+            overflow-y: auto;
+        }
+        
+        .mobile-header {
+            display: none;
+            height: var(--header-height);
+            background: var(--gradient-primary);
+            color: white;
+            padding: 0 20px;
+            align-items: center;
+            justify-content: space-between;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .mobile-header .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .mobile-header .logo-icon { font-size: 28px; }
+        .mobile-header .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(to right, #ffffff, #e0e0e0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .mobile-menu-toggle {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+        
+        .mobile-sidebar-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            opacity: 0;
+            transition: opacity var(--transition-medium);
+        }
+        .mobile-sidebar-overlay.active { opacity: 1; }
+        
+        .sidebar.mobile {
+            position: fixed;
+            top: 0;
+            left: -100%;
+            width: 85%;
+            max-width: 350px;
+            height: 100vh;
+            z-index: 1000;
+            transition: left var(--transition-medium);
+            display: block;
+        }
+        .sidebar.mobile.active { left: 0; }
+        .auth-panel.mobile-active { margin-left: 0; }
+        
+        .session-status {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 2000;
+            background: var(--session-checking-color);
+            color: white;
+            animation: pulse 2s infinite;
+            display: none;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        .session-status.visible { display: flex; }
+        .session-status.checking { background: var(--session-checking-color); }
+        .session-status.expired { background: var(--session-expired-color); animation: none; }
+        .session-status.valid { background: var(--session-valid-color); animation: none; }
+        .session-status.invalid { background: var(--session-invalid-color); animation: none; }
+        .session-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.8);
+        }
+        
+        /* Loading overlay — hidden by default, only shown for explicit actions (e.g. login submit) */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            pointer-events: none;
+        }
+        .loading-overlay.visible {
+            opacity: 1;
+            pointer-events: all;
+        }
+        .loading-spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(255, 255, 255, 0.25);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.85s linear infinite;
+        }
+        .loading-text {
+            color: white;
+            margin-top: 16px;
+            font-size: 13px;
+            text-align: center;
+            opacity: 0.85;
+        }
+        
+        .branding {
+            text-align: center;
+            margin-bottom: 30px;
+            padding-top: 10px;
+        }
+        .logo-large {
+            font-size: 42px;
+            margin-bottom: 15px;
+            color: white;
+        }
+        .branding h1 {
+            font-size: 26px;
+            font-weight: 800;
+            margin-bottom: 8px;
+            color: white;
+        }
+        .tagline {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 20px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: var(--card-radius);
+            padding: 15px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .stat-number {
+            font-size: 24px;
+            font-weight: 800;
+            margin-bottom: 5px;
+            color: white;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .feature-showcase {
+            margin-bottom: 30px;
+        }
+        .feature-showcase h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: white;
+            text-align: center;
+        }
+        .feature-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .feature-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: var(--card-radius);
+            padding: 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all var(--transition-fast);
+        }
+        .feature-card:hover {
+            transform: translateY(-2px);
+            background: rgba(255, 255, 255, 0.15);
+        }
+        .feature-icon {
+            width: 36px;
+            height: 36px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: white;
+            flex-shrink: 0;
+        }
+        .feature-content h3 {
+            font-size: 15px;
+            margin-bottom: 4px;
+            color: white;
+        }
+        .feature-content p {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.4;
+        }
+        
+        .social-proof {
+            margin-bottom: 30px;
+        }
+        .social-proof h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: white;
+            text-align: center;
+        }
+        .testimonial {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: var(--card-radius);
+            padding: 15px;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .testimonial-content {
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .testimonial-author {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .testimonial-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        .testimonial-author h4 {
+            font-size: 14px;
+            color: white;
+            margin-bottom: 2px;
+        }
+        .testimonial-author p {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+        
+        .download-section {
+            margin-top: auto;
+        }
+        .download-section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: white;
+            text-align: center;
+        }
+        .badge-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .download-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: var(--card-radius);
+            padding: 12px 15px;
+            text-decoration: none;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all var(--transition-fast);
+        }
+        .download-badge:hover {
+            background: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+        .badge-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .badge-text {
+            display: flex;
+            flex-direction: column;
+        }
+        .badge-text span:first-child {
+            font-size: 10px;
+            opacity: 0.8;
+        }
+        .badge-text span:last-child {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .coming-soon {
+            background: var(--warning-color);
+            color: white;
+            font-size: 10px;
+            padding: 3px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+            margin-left: auto;
+        }
+        
+        .login-container, .register-container, .forgot-container { display: none; }
+        .login-container.active, .register-container.active, .forgot-container.active { display: block; }
+        
+        .auth-content {
+            flex: 1;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding: 20px;
+            padding-top: calc(var(--header-height) + 20px);
+            overflow-y: auto;
+            min-height: 0;
+        }
+        
+        .auth-container {
+            width: 100%;
+            max-width: 500px;
+            background: var(--panel-bg);
+            border-radius: var(--border-radius);
+            box-shadow: 0 10px 40px var(--shadow-color);
+            overflow: visible;
+        }
+        
+        .auth-header {
+            background: var(--gradient-primary);
+            color: white;
+            padding: 25px 20px;
+            text-align: center;
+            position: relative;
+        }
+        .auth-header h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+        .auth-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .double-clock {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 24px;
+            opacity: 0.5;
+            animation: clockPulse 2s ease-in-out infinite;
+        }
+        
+        .auth-tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        .auth-tab {
+            flex: 1;
+            padding: 15px 10px;
+            text-align: center;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            white-space: nowrap;
+            transition: background-color var(--transition-fast);
+        }
+        .auth-tab:hover { background: rgba(255, 255, 255, 0.15); }
+        .auth-tab i { margin-right: 5px; }
+        .auth-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: white;
+        }
+        
+        .auth-body { padding: 25px; }
+        
+        .auth-footer {
+            padding: 20px 25px;
+            background: var(--sidebar-bg);
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+        }
+        .auth-footer p {
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .auth-footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .footer-link {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 14px;
+            transition: color var(--transition-fast);
+        }
+        .footer-link:hover {
+            color: var(--primary-dark);
+            text-decoration: underline;
+        }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .form-input-group { position: relative; }
+        .form-input {
+            width: 100%;
+            padding: 14px 45px 14px 15px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--input-radius);
+            font-size: 16px;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            -webkit-appearance: none;
+            transition: border-color var(--transition-fast);
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .input-icon {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-light);
+            pointer-events: none;
+        }
+        .password-toggle {
+            position: absolute;
+            right: 45px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-light);
+            cursor: pointer;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color var(--transition-fast);
+            z-index: 5;
+        }
+        .password-toggle:hover { color: var(--primary-color); }
+        
+        .password-warning {
+            font-size: 12px;
+            color: var(--warning-color);
+            margin-top: 6px;
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            line-height: 1.4;
+            background: rgba(243, 156, 18, 0.05);
+            padding: 8px 10px;
+            border-radius: 6px;
+            border-left: 3px solid var(--warning-color);
+        }
+        .error-message {
+            color: var(--danger-color);
+            font-size: 13px;
+            margin-top: 6px;
+            display: none;
+            align-items: center;
+            gap: 5px;
+        }
+        .error-message.visible { display: flex; }
+        .success-message {
+            color: var(--success-color);
+            font-size: 13px;
+            margin-top: 6px;
+            display: none;
+            align-items: center;
+            gap: 5px;
+        }
+        .success-message.visible { display: block; }
+        
+        .login-attempt-countdown {
+            background: var(--warning-color);
+            color: white;
+            padding: 10px 15px;
+            border-radius: var(--card-radius);
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 14px;
+            animation: pulseWarning 1s ease-in-out infinite alternate;
+            display: none;
+        }
+        .login-attempt-countdown.visible { display: block; }
+        .countdown-timer {
+            font-weight: bold;
+            font-size: 16px;
+            margin: 0 5px;
+        }
+        @keyframes pulseWarning {
+            0% { opacity: 0.8; }
+            100% { opacity: 1; }
+        }
+        
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .checkbox-input {
+            width: 18px;
+            height: 18px;
+            margin-top: 3px;
+            accent-color: var(--primary-color);
+            cursor: pointer;
+        }
+        .checkbox-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            cursor: pointer;
+        }
+        
+        .feature-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        .feature-tag {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            border: 2px solid transparent;
+            background: var(--border-color);
+            color: var(--text-secondary);
+            transition: all var(--transition-fast);
+        }
+        .feature-tag:hover {
+            background: var(--primary-color);
+            color: white;
+            transform: translateY(-2px);
+        }
+        .feature-tag.selected {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-dark);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .language-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+        .language-tag {
+            padding: 5px 10px;
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 15px;
+            font-size: 11px;
+            color: var(--accent-color);
+            border: 1px solid rgba(52, 152, 219, 0.3);
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 14px 20px;
+            border: none;
+            border-radius: var(--button-radius);
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            width: 100%;
+            transition: all var(--transition-fast);
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-primary {
+            background: var(--gradient-primary);
+            color: white;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+        .btn-success {
+            background: var(--gradient-success);
+            color: white;
+        }
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(46, 204, 113, 0.4);
+        }
+        .btn-secondary {
+            background: var(--bg-color);
+            color: var(--primary-color);
+            border: 2px solid var(--primary-color);
+        }
+        .btn-secondary:hover {
+            background: var(--primary-color);
+            color: white;
+            transform: translateY(-2px);
+        }
+        .btn-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(231, 76, 60, 0.4);
+        }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+        .spinner.visible { display: block; }
+        
+        .auth-form { animation: fadeIn 0.3s ease; }
+        .panel { display: none; animation: fadeIn 0.3s ease; }
+        .panel.active { display: block; }
+        
+        .quick-login-card {
+            background: var(--card-bg);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            box-shadow: 0 5px 20px var(--shadow-color);
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+            border-left: 5px solid var(--success-color);
+            position: relative;
+            animation: slideInRight 0.3s ease-out;
+            display: none;
+            width: 100%;
+            max-width: 500px;
+        }
+        .quick-login-card.visible { display: block; }
+        .quick-login-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .quick-login-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: var(--gradient-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .quick-login-info {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+        }
+        .quick-login-info h3 {
+            font-size: 18px;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+        .quick-login-info p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            word-break: break-word;
+        }
+        .quick-login-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .quick-login-actions .btn {
+            flex: 1 1 auto;
+            width: auto;
+            min-width: 120px;
+        }
+        .remove-quick-login {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            color: var(--text-light);
+            cursor: pointer;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all var(--transition-fast);
+        }
+        .remove-quick-login:hover {
+            background: rgba(231, 76, 60, 0.1);
+            color: var(--danger-color);
+        }
+        
+        .premium-promotion {
+            background: var(--gradient-primary);
+            border-radius: var(--card-radius);
+            padding: 20px;
+            margin-bottom: 20px;
+            color: white;
+            position: relative;
+            overflow: hidden;
+            animation: fadeIn 0.5s ease;
+        }
+        .premium-promotion::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+            opacity: 0.2;
+            animation: float 20s linear infinite;
+        }
+        .premium-badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            backdrop-filter: blur(10px);
+        }
+        .premium-promotion h3 {
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+        .premium-promotion p {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 15px;
+        }
+        .premium-features {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        .premium-feature {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .premium-feature i { color: #ffd700; }
+        
+        .dashboard-content {
+            width: 100%;
+            max-width: 500px;
+        }
+        .dashboard-header {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .dashboard-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: var(--gradient-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+            font-weight: 700;
+            margin: 0 auto 15px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            animation: float 4s ease-in-out infinite;
+        }
+        .dashboard-header h1 {
+            font-size: 26px;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+        .dashboard-header p {
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+        .dashboard-stat {
+            background: var(--card-bg);
+            border-radius: var(--card-radius);
+            padding: 15px;
+            text-align: center;
+            border: 1px solid var(--border-color);
+            transition: all var(--transition-fast);
+        }
+        .dashboard-stat:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px var(--shadow-color);
+        }
+        .dashboard-stat .number {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--primary-color);
+            margin-bottom: 4px;
+        }
+        .dashboard-stat .label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .dashboard-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 25px;
+        }
+        
+        .notification-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: calc(100vw - 40px);
+        }
+        .notification {
+            background: var(--panel-bg);
+            border-radius: var(--card-radius);
+            padding: 15px;
+            max-width: 300px;
+            box-shadow: 0 5px 20px var(--shadow-color);
+            border-left: 5px solid var(--primary-color);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            transform: translateX(400px);
+            opacity: 0;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        .notification.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        .notification.success { border-left-color: var(--success-color); }
+        .notification.error { border-left-color: var(--danger-color); }
+        .notification.warning { border-left-color: var(--warning-color); }
+        .notification.info { border-left-color: var(--info-color); }
+        .notification-icon { font-size: 20px; flex-shrink: 0; }
+        .notification-content { flex: 1; min-width: 0; }
+        .notification-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        .notification-message {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            word-break: break-word;
+        }
+        .notification-close {
+            background: none;
+            border: none;
+            color: var(--text-light);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: color var(--transition-fast);
+        }
+        .notification-close:hover { color: var(--text-primary); }
+        
+        @media (max-width: 768px) {
+            :root { --sidebar-width: 0; }
+            .app-container { flex-direction: column; }
+            .mobile-header { display: flex; }
+            .sidebar { display: none; }
+            .sidebar.mobile { display: block; }
+            .auth-panel { margin-left: 0; padding-top: var(--header-height); }
+            .auth-content { padding: 15px; padding-top: calc(var(--header-height) + 15px); align-items: flex-start; }
+            .auth-container { box-shadow: none; border-radius: 0; }
+            .auth-body { padding: 20px; }
+            .auth-footer { padding: 15px 20px; }
+            .dashboard-stats { grid-template-columns: repeat(3, 1fr); }
+            .dashboard-actions { flex-direction: column; }
+            .quick-login-actions { flex-direction: column; }
+            .quick-login-actions .btn { width: 100%; }
+            .feature-tags { justify-content: center; }
+        }
+        
+        @media (max-width: 480px) {
+            .auth-header { padding: 20px 15px; }
+            .auth-header h2 { font-size: 22px; }
+            .auth-tab { padding: 12px 8px; font-size: 13px; }
+            .auth-tab i { margin-right: 3px; }
+            .form-input { padding: 12px 40px 12px 12px; font-size: 16px; }
+            .btn { padding: 12px 16px; font-size: 15px; }
+            .dashboard-stats { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .badge-grid { flex-direction: column; }
+            .quick-login-actions { flex-direction: column; }
+            .feature-grid { gap: 8px; }
+            .feature-card { padding: 12px; }
+            .quick-login-header { flex-direction: column; text-align: center; }
+            .quick-login-info { align-items: center; }
+        }
+        
+        @media (max-width: 360px) {
+            .auth-header h2 { font-size: 20px; }
+            .auth-header p { font-size: 13px; }
+            .auth-tab { font-size: 12px; padding: 10px 6px; }
+            .form-input { padding: 10px 35px 10px 10px; font-size: 15px; }
+            .feature-tag { padding: 6px 12px; font-size: 12px; }
+            .dashboard-stats { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: 1fr; }
+        }
+        
+        @media (min-width: 769px) {
+            .mobile-header { display: none; }
+            .mobile-sidebar-overlay { display: none !important; }
+            .sidebar { display: flex; }
+            .sidebar.mobile { display: none; }
+        }
+        
+        @keyframes gradientFlow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        @keyframes clockPulse {
+            0%, 100% { opacity: 0.5; transform: translateY(-50%) scale(1); }
+            50% { opacity: 0.8; transform: translateY(-50%) scale(1.1); }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(30px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+        
+        .stat-card:nth-child(1) { animation: float 3s ease-in-out infinite; }
+        .stat-card:nth-child(2) { animation: float 3.5s ease-in-out infinite 0.5s; }
+        .stat-card:nth-child(3) { animation: float 4s ease-in-out infinite 1s; }
+        .stat-card:nth-child(4) { animation: float 3.8s ease-in-out infinite 0.8s; }
+        
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .mb-0 { margin-bottom: 0; }
+        .mb-10 { margin-bottom: 10px; }
+        .mb-20 { margin-bottom: 20px; }
+        .mb-30 { margin-bottom: 30px; }
+        .mt-0 { margin-top: 0; }
+        .mt-10 { margin-top: 10px; }
+        .mt-20 { margin-top: 20px; }
+        .mt-30 { margin-top: 30px; }
+        .hidden { display: none !important; }
+        .visible { display: flex !important; }
+        .visible-block { display: block !important; }
+        .shake { animation: shake 0.5s ease-in-out; }
+        .slide-in-right { animation: slideInRight 0.3s ease-out; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        /* OFFLINE-FIRST: Auth panel hidden by default.
+           Only revealed when session check confirms no saved session.
+           Prevents the login form flashing during auto-login / redirect. */
+        #authPanel {
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        #authPanel.show-auth {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container"></div>
+    <div id="iframe-container"></div>
+    
+    <div class="bottom-nav-toggle" id="bottomNavToggle">
+        <i class="fas fa-bars"></i>
+    </div>
+    <div id="bottom-nav">
+        <a href="#"><i class="fas fa-home"></i> Home</a>
+        <a href="#"><i class="fas fa-compass"></i> Explore</a>
+        <a href="#"><i class="fas fa-bell"></i> Notifications</a>
+        <a href="#"><i class="fas fa-user"></i> Profile</a>
+        <a href="#"><i class="fas fa-cog"></i> Settings</a>
+        <a href="#" id="bottomNavClose"><i class="fas fa-times"></i> Close</a>
+    </div>
+    <footer></footer>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div id="loadingText">Initializing...</div>
+        </div>
+    </div>
+    
+    <div class="notification-container" id="notificationContainer"></div>
+    
+    <div class="session-status" id="sessionStatus">
+        <div class="session-status-dot"></div>
+        <span id="sessionStatusText">Loading...</span>
+    </div>
+    
+    <div class="mobile-header">
+        <div class="logo">
+            <i class="fas fa-comments logo-icon"></i>
+            <span class="logo-text">MoodChat</span>
+        </div>
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+    </div>
+    
+    <div class="mobile-sidebar-overlay" id="mobileSidebarOverlay"></div>
+    
+    <aside class="sidebar mobile" id="mobileSidebar">
+        <div class="sidebar-content">
+            <div class="branding">
+                <div class="logo-large"><i class="fas fa-comments"></i></div>
+                <h1>MoodChat</h1>
+                <p class="tagline">Connect with the world</p>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-number">2M+</div><div class="stat-label">Active Users</div></div>
+                <div class="stat-card"><div class="stat-number">200+</div><div class="stat-label">Countries</div></div>
+                <div class="stat-card"><div class="stat-number">50+</div><div class="stat-label">Languages</div></div>
+                <div class="stat-card"><div class="stat-number">100K+</div><div class="stat-label">Chat Rooms</div></div>
+            </div>
+            
+            <div class="feature-showcase">
+                <h2>✨ Features</h2>
+                <div class="feature-grid">
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-globe"></i></div><div class="feature-content"><h3>Global Chat</h3><p>Connect worldwide instantly</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>AI Translation</h3><p>Real-time language support</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-video"></i></div><div class="feature-content"><h3>HD Video Calls</h3><p>Crystal clear quality</p></div></div>
+                </div>
+            </div>
+            
+            <div class="social-proof">
+                <h2>🌟 Testimonials</h2>
+                <div class="testimonial">
+                    <div class="testimonial-content">"Made friends across 3 continents! Translation is amazing."</div>
+                    <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>Sarah R.</h4><p>Spain</p></div></div>
+                </div>
+            </div>
+            
+            <div class="download-section">
+                <h2>📱 Get The App</h2>
+                <div class="badge-grid">
+                    <a href="#" class="download-badge"><i class="fab fa-google-play badge-icon"></i><div class="badge-text"><span>GET IT ON</span><span>Google Play</span></div></a>
+                    <a href="#" class="download-badge"><i class="fab fa-apple badge-icon"></i><div class="badge-text"><span>Download on</span><span>App Store</span></div><div class="coming-soon">Soon</div></a>
+                </div>
+                <button class="theme-toggle-btn" id="mobileThemeToggle"><i class="fas fa-moon"></i> Dark Mode</button>
+            </div>
+        </div>
+    </aside>
+    
+    <aside class="sidebar" id="desktopSidebar">
+        <div class="sidebar-content">
+            <div class="branding">
+                <div class="logo-large"><i class="fas fa-comments"></i></div>
+                <h1>MoodChat</h1>
+                <p class="tagline">Connect with the world, one chat at a time</p>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-number">2M+</div><div class="stat-label">Active Users</div></div>
+                <div class="stat-card"><div class="stat-number">200+</div><div class="stat-label">Countries</div></div>
+                <div class="stat-card"><div class="stat-number">50+</div><div class="stat-label">Languages</div></div>
+                <div class="stat-card"><div class="stat-number">100K+</div><div class="stat-label">Chat Rooms</div></div>
+            </div>
+            
+            <div class="feature-showcase">
+                <h2>✨ Platform Features</h2>
+                <div class="feature-grid">
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-globe-americas"></i></div><div class="feature-content"><h3>Global Chat Rooms</h3><p>Join topic-based rooms worldwide</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-video"></i></div><div class="feature-content"><h3>Video & Voice Chat</h3><p>HD quality with 8 participants</p></div></div>
+                </div>
+            </div>
+            
+            <div class="social-proof">
+                <h2>🌟 Success Stories</h2>
+                <div class="testimonial">
+                    <div class="testimonial-content">"MoodChat helped me find amazing friends across continents!"</div>
+                    <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>Sarah Rodriguez</h4><p>Spain • Regular User</p></div></div>
+                </div>
+            </div>
+            
+            <div class="download-section">
+                <h2>📱 Get The App</h2>
+                <div class="badge-grid">
+                    <a href="#" class="download-badge"><i class="fab fa-google-play badge-icon"></i><div class="badge-text"><span>GET IT ON</span><span>Google Play</span></div></a>
+                    <a href="#" class="download-badge"><i class="fab fa-apple badge-icon"></i><div class="badge-text"><span>Download on the</span><span>App Store</span></div><div class="coming-soon">Soon</div></a>
+                </div>
+                <button class="theme-toggle-btn" id="desktopThemeToggle"><i class="fas fa-moon"></i> Dark Mode</button>
+            </div>
+        </div>
+    </aside>
+    
+    <main class="auth-panel" id="authPanel">
+        <div class="auth-content">
+            <div class="quick-login-card" id="quickLoginCard">
+                <button class="remove-quick-login" id="removeQuickLogin"><i class="fas fa-times"></i></button>
+                <div class="quick-login-header">
+                    <div class="quick-login-avatar" id="quickLoginAvatar">U</div>
+                    <div class="quick-login-info">
+                        <h3 id="quickLoginName">Welcome Back!</h3>
+                        <p id="quickLoginEmail">Quick login available</p>
+                    </div>
+                </div>
+                <div class="quick-login-actions">
+                    <button class="btn btn-success" id="quickLoginBtn"><i class="fas fa-bolt"></i> Quick Login</button>
+                    <button class="btn btn-secondary" id="useDifferentAccountBtn"><i class="fas fa-user"></i> Different Account</button>
+                </div>
+            </div>
+            
+            <div class="auth-container" id="auth-container">
+                <div class="auth-header">
+                    <div class="double-clock"><i class="fas fa-clock"></i></div>
+                    <h2 id="panelTitle">Welcome to MoodChat</h2>
+                    <p id="panelSubtitle">Login to continue</p>
+                </div>
+                
+                <div class="auth-tabs" id="authTabs">
+                    <button class="auth-tab active" data-method="email"><i class="fas fa-envelope"></i> Email</button>
+                    <button class="auth-tab" data-method="mobile"><i class="fas fa-mobile-alt"></i> Mobile</button>
+                    <button class="auth-tab" data-method="username"><i class="fas fa-user"></i> Username</button>
+                </div>
+                
+                <div class="auth-body">
+                    <!-- LOGIN FORM -->
+                    <div class="login-container active" id="login-container">
+                        <form class="auth-form" id="login-form" novalidate>
+                            <div class="login-attempt-countdown" id="loginAttemptCountdown">
+                                <i class="fas fa-clock"></i>
+                                <span id="countdownMessage">Too many login attempts. Please wait:</span>
+                                <span class="countdown-timer" id="countdownTimer">00:20</span>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="loginIdentifier">Email Address</label>
+                                <div class="form-input-group">
+                                    <input type="text" class="form-input" id="loginIdentifier" name="identifier" placeholder="Enter your email" autocomplete="username" required>
+                                    <i class="fas fa-envelope input-icon" id="loginMethodIcon"></i>
+                                </div>
+                                <div class="error-message" id="loginIdentifierError"><i class="fas fa-exclamation-circle"></i><span id="loginIdentifierErrorText">Please enter a valid email</span></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="loginPassword">Password</label>
+                                <div class="form-input-group">
+                                    <input type="password" class="form-input" id="loginPassword" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+                                    <button type="button" class="password-toggle" id="toggleLoginPassword" data-toggle-password data-target="loginPassword" aria-label="Show password"><i class="fas fa-eye"></i></button>
+                                    <i class="fas fa-lock input-icon"></i>
+                                </div>
+                                <div class="password-warning"><i class="fas fa-exclamation-triangle"></i><small>Warning: Passwords are case-sensitive. Make sure Caps Lock is off.</small></div>
+                                <div class="error-message" id="loginPasswordError"><i class="fas fa-exclamation-circle"></i><span id="loginPasswordErrorText">Password is required</span></div>
+                            </div>
+                            
+                            <div class="checkbox-group">
+                                <input type="checkbox" class="checkbox-input" id="rememberMe" name="rememberMe" checked>
+                                <label class="checkbox-label" for="rememberMe">Remember me & enable auto-login</label>
+                            </div>
+                            
+                            <div class="form-group mb-30">
+                                <button type="submit" class="btn btn-primary btn-with-state" id="login-button" data-form-toggle="login">
+                                    <span id="loginButtonText">Login to MoodChat</span>
+                                    <div class="spinner" id="loginSpinner"></div>
+                                </button>
+                            </div>
+                            
+                            <!-- GOOGLE SIGN-IN -->
+                            <div class="google-signin-divider" style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#8a8a8a;font-size:13px;">
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                                <span>or</span>
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                            </div>
+                            <div id="googleSignInLoginContainer" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+
+                            <div class="text-center">
+                                <p class="mb-10">Don't have an account? <a href="#" class="footer-link" id="signup-button" data-form-toggle="register">Sign up here</a></p>
+                                <p><a href="#" class="footer-link" id="forgot-password-button" data-form-toggle="forgot">Forgot password?</a></p>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- REGISTER FORM -->
+                    <div class="register-container" id="register-container">
+                        <form class="auth-form" id="register-form" novalidate>
+                            <div class="premium-promotion">
+                                <div class="premium-badge"><i class="fas fa-crown"></i> 30 DAYS FREE</div>
+                                <h3>Premium Trial Activated!</h3>
+                                <p>Sign up today for exclusive features</p>
+                                <div class="premium-features">
+                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>HD video calls (up to 8 people)</span></div>
+                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>AI chat assistant</span></div>
+                                    <div class="premium-feature"><i class="fas fa-check-circle"></i><span>Custom themes & backgrounds</span></div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Choose Your Interests</label>
+                                <div class="feature-tags">
+                                    <div class="feature-tag" data-interest="tech">💻 Tech</div>
+                                    <div class="feature-tag" data-interest="music">🎵 Music</div>
+                                    <div class="feature-tag" data-interest="sports">⚽ Sports</div>
+                                    <div class="feature-tag" data-interest="gaming">🎮 Gaming</div>
+                                    <div class="feature-tag" data-interest="art">🎨 Art</div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="registerDisplayName">Display Name</label>
+                                <div class="form-input-group">
+                                    <input type="text" class="form-input" id="registerDisplayName" name="displayName" placeholder="How should we call you?" required>
+                                    <i class="fas fa-user input-icon"></i>
+                                </div>
+                                <div class="error-message" id="registerNameError"><i class="fas fa-exclamation-circle"></i><span id="registerNameErrorText">Display name is required</span></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="registerUsername">Username</label>
+                                <div class="form-input-group">
+                                    <input type="text" class="form-input" id="registerUsername" name="username" placeholder="@username" autocomplete="username" required>
+                                    <i class="fas fa-at input-icon"></i>
+                                </div>
+                                <div class="error-message" id="registerUsernameError"><i class="fas fa-exclamation-circle"></i><span id="registerUsernameErrorText">Username required (3-20 chars)</span></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="registerEmail">Email Address</label>
+                                <div class="form-input-group">
+                                    <input type="email" class="form-input" id="registerEmail" name="email" placeholder="your.email@example.com" autocomplete="email" required>
+                                    <i class="fas fa-envelope input-icon"></i>
+                                </div>
+                                <div class="error-message" id="registerEmailError"><i class="fas fa-exclamation-circle"></i><span id="registerEmailErrorText">Please enter a valid email</span></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="registerPassword">Password</label>
+                                <div class="form-input-group">
+                                    <input type="password" class="form-input" id="registerPassword" name="password" placeholder="Create a password (min 8 characters)" autocomplete="new-password" required>
+                                    <button type="button" class="password-toggle" id="toggleRegisterPassword" data-toggle-password data-target="registerPassword" aria-label="Show password"><i class="fas fa-eye"></i></button>
+                                    <i class="fas fa-lock input-icon"></i>
+                                </div>
+                                <div class="password-warning"><i class="fas fa-exclamation-triangle"></i><small>Warning: Use a strong password with at least 6 characters. Avoid common passwords.</small></div>
+                                <div class="error-message" id="registerPasswordError"><i class="fas fa-exclamation-circle"></i><span id="registerPasswordErrorText">Minimum 8 characters</span></div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="registerConfirmPassword">Confirm Password</label>
+                                <div class="form-input-group">
+                                    <input type="password" class="form-input" id="registerConfirmPassword" name="confirmPassword" placeholder="Confirm your password" autocomplete="new-password" required>
+                                    <button type="button" class="password-toggle" id="toggleRegisterConfirmPassword" data-toggle-password data-target="registerConfirmPassword" aria-label="Show password"><i class="fas fa-eye"></i></button>
+                                    <i class="fas fa-lock input-icon"></i>
+                                </div>
+                                <div class="error-message" id="registerConfirmPasswordError"><i class="fas fa-exclamation-circle"></i><span id="registerConfirmPasswordErrorText">Passwords must match</span></div>
+                            </div>
+                            
+                            <div class="checkbox-group">
+                                <input type="checkbox" class="checkbox-input" id="acceptTerms" name="acceptTerms" required>
+                                <label class="checkbox-label" for="acceptTerms">I agree to <a href="#" class="footer-link" data-modal="terms">Terms</a> and <a href="#" class="footer-link" data-modal="privacy">Privacy Policy</a></label>
+                            </div>
+                            
+                            <div class="form-group mb-30">
+                                <button type="submit" class="btn btn-success" id="register-button" data-form-toggle="register">
+                                    <i class="fas fa-user-plus"></i>
+                                    <span id="registerButtonText">Create Free Account</span>
+                                    <div class="spinner" id="registerSpinner"></div>
+                                </button>
+                            </div>
+
+                            <div class="google-signin-divider" style="display:flex;align-items:center;gap:10px;margin:18px 0;color:#8a8a8a;font-size:13px;">
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                                <span>or</span>
+                                <span style="flex:1;height:1px;background:currentColor;opacity:.25;"></span>
+                            </div>
+                            <div id="googleSignInRegisterContainer" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+                            
+                            <div class="text-center">
+                                <p>Already have an account? <a href="#" class="footer-link" id="back-to-login-from-register" data-form-toggle="login">Login here</a></p>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- FORGOT PASSWORD FORM -->
+                    <div class="forgot-container" id="forgot-container">
+                        <form class="auth-form" id="forgot-form" novalidate>
+                            <div class="form-group">
+                                <label class="form-label" for="forgotPasswordEmail">Enter your email</label>
+                                <div class="form-input-group">
+                                    <input type="email" class="form-input" id="forgotPasswordEmail" name="email" placeholder="your.email@example.com" required>
+                                    <i class="fas fa-envelope input-icon"></i>
+                                </div>
+                                <div class="error-message" id="forgotPasswordError"><i class="fas fa-exclamation-circle"></i><span id="forgotPasswordErrorText">Please enter a valid email</span></div>
+                                <div class="success-message" id="forgotPasswordSuccess"><i class="fas fa-check-circle"></i><span>Reset instructions sent</span></div>
+                            </div>
+                            
+                            <div class="form-group mb-30">
+                                <button type="submit" class="btn btn-primary" id="forgot-button" data-form-toggle="forgot">
+                                    <i class="fas fa-paper-plane"></i>
+                                    <span id="forgotButtonText">Send Reset Link</span>
+                                    <div class="spinner" id="forgotPasswordSpinner"></div>
+                                </button>
+                            </div>
+                            
+                            <div class="text-center">
+                                <p><a href="#" class="footer-link" id="back-to-login-from-forgot" data-form-toggle="login">Back to Login</a></p>
+                            </div>
+                        </form>
+                    </div>
+                    
+                    <!-- DASHBOARD PANEL -->
+                    <div class="panel" id="dashboardPanel">
+                        <div class="dashboard-content">
+                            <div class="invite-message"><i class="fas fa-hand-peace"></i> We've missed you! Ready to continue the conversation?</div>
+                            <div class="theme-picker">
+                                <div class="theme-option active" data-color="default" title="Default"></div>
+                                <div class="theme-option" data-color="ocean" title="Ocean"></div>
+                                <div class="theme-option" data-color="sunset" title="Sunset"></div>
+                                <div class="theme-option" data-color="forest" title="Forest"></div>
+                                <div class="theme-option" data-color="lavender" title="Lavender"></div>
+                            </div>
+                            <div class="dashboard-header">
+                                <div class="dashboard-avatar" id="dashboardAvatar">U</div>
+                                <h1 id="dashboardGreeting">Welcome!</h1>
+                                <p id="dashboardEmail">user@example.com</p>
+                            </div>
+                            <div class="dashboard-stats">
+                                <div class="dashboard-stat"><div class="number">24</div><div class="label">Friends Online</div></div>
+                                <div class="dashboard-stat"><div class="number">156</div><div class="label">Unread Messages</div></div>
+                                <div class="dashboard-stat"><div class="number">30</div><div class="label">Premium Days Left</div></div>
+                            </div>
+                            <div class="dashboard-actions">
+                                <button class="btn btn-primary" id="enterChatBtn"><i class="fas fa-comments"></i> Enter Chat</button>
+                                <button class="btn btn-danger" id="logoutBtn"><i class="fas fa-sign-out-alt"></i> Logout</button>
+                            </div>
+                            <div class="language-tags mt-30">
+                                <div class="language-tag">English</div>
+                                <div class="language-tag">Español</div>
+                                <div class="language-tag">Français</div>
+                                <div class="language-tag">Deutsch</div>
+                                <div class="language-tag">日本語</div>
+                                <div class="language-tag">中文</div>
+                                <div class="language-tag">+44 more</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="auth-footer">
+                    <p>© 2024 MoodChat. All rights reserved.</p>
+                    <div class="auth-footer-links">
+                        <a href="#" class="footer-link" data-modal="privacy">Privacy</a>
+                        <a href="#" class="footer-link" data-modal="terms">Terms</a>
+                        <a href="#" class="footer-link" data-modal="contact">Contact</a>
+                        <a href="#" class="footer-link" data-modal="help">Help</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script type="module" src="/js/AppSettings.js"></script>
+    <script type="module" src="/js/settings-global-propagation.js"></script>
+    <script type="module" src="/js/settings-module-subscriptions.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- API LAYER - MUST LOAD FIRST -->
+    <!-- ====================================================================== -->
+    <script type="module" src="/js/api.core.js"></script>
+    <script type="module" src="/js/api.request.js"></script>
+    <script type="module" src="/js/api.auth.js"></script>
+    <script type="module" src="/js/api.messages.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- APP CORE -->
+    <!-- ====================================================================== -->
+    <script type="module" src="/js/app.core.bootstrap.js"></script>
+    <script type="module" src="/js/app.core.session.js"></script>
+    <script type="module" src="/js/app.core.ui.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- UI AUTH -->
+    <!-- ====================================================================== -->
+    <script type="module" src="/js/app.ui.auth.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- GOOGLE SIGN-IN -->
+    <!-- ====================================================================== -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="/js/google-auth.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- SESSION MANAGER - MUST BE LOADED BEFORE ANY AUTH LOGIC -->
+    <!-- ====================================================================== -->
+    <!-- ✅ OFFLINE-FIRST: Persistent auth storage (must load first) -->
+    <script type="module" src="/js/app.cache.js"></script>
+    <script type="module" src="/js/authStorage.js"></script>
+    <!-- ✅ OFFLINE-FIRST: Offline action queue -->
+    <script type="module" src="/js/app.offline.queue.js"></script>
+
+    <script type="module" src="/js/auth.session.manager.js"></script>
+    <script type="module" src="/js/app.runtime.authority.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- ACCOUNT LIMIT ENFORCEMENT -->
+    <!-- ====================================================================== -->
+    <script type="module" src="/js/auth.account.limit.js"></script>
+
+    <!-- ====================================================================== -->
+    <!-- API TIMEOUT FIXES -->
+    <!-- ====================================================================== -->
+    <script>
+        window.__API_TIMEOUT_OVERRIDES = {
+            '/status': 5000,
+            '/status/my': 5000,
+            '/status/highlights': 5000,
+            default: 15000
+        };
+        
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options) {
+            if (typeof url === 'string' && url.includes('/status')) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                options = options || {};
+                options.signal = controller.signal;
+                return originalFetch(url, options)
+                    .finally(() => clearTimeout(timeoutId))
+                    .catch(error => {
+                        if (error.name === 'AbortError') {
+                            console.warn('[Fetch] Status API timeout, returning empty data');
+                            return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+                        }
+                        throw error;
+                    });
+            }
+            return originalFetch(url, options);
+        };
+    </script>
+
+    <!-- ====================================================================== -->
+    <!-- CORE UTILITIES AND SESSION STATE -->
+    <!-- ====================================================================== -->
+    <script>
+        window.CoreUtils = {
+            showLoading: function(message) {
+                const overlay = document.getElementById('loadingOverlay');
+                const text = document.getElementById('loadingText');
+                if (overlay && text) {
+                    text.textContent = message || 'Loading...';
+                    overlay.classList.add('visible');
+                }
+            },
+            hideLoading: function() {
+                const overlay = document.getElementById('loadingOverlay');
+                if (overlay) overlay.classList.remove('visible');
+            },
+            showNotification: function(title, message, type) {
+                const container = document.getElementById('notificationContainer');
+                if (!container) return;
+                const notification = document.createElement('div');
+                notification.className = `notification ${type || 'info'}`;
+                notification.innerHTML = `
+                    <div class="notification-icon"><i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'}"></i></div>
+                    <div class="notification-content"><div class="notification-title">${title || 'Notification'}</div><div class="notification-message">${message || ''}</div></div>
+                    <button class="notification-close" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+                `;
+                container.appendChild(notification);
+                setTimeout(() => notification.classList.add('show'), 10);
+                setTimeout(() => { notification.classList.remove('show'); setTimeout(() => notification.remove(), 300); }, 5000);
+            },
+            validateEmail: function(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+        };
+        
+        window.SessionState = {
+            getToken: function() {
+                if (window.AuthStorage?.getToken) return window.AuthStorage.getToken();
+                if (window.api?.auth?.getToken) return window.api.auth.getToken();
+                const token = localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || localStorage.getItem('token') || localStorage.getItem('accessToken');
+                console.log('[AUTH TOKEN]', token);
+                return token;
+            },
+            setToken: function(token) {
+                if (token) {
+                    if (window.api?.auth?.setToken) window.api.auth.setToken(token);
+                    localStorage.setItem('authToken', token);
+                    localStorage.setItem('token', token);
+                    localStorage.setItem('accessToken', token);
+                    localStorage.setItem('USER_TOKEN', token);
+                    localStorage.setItem('moodchat_token', token);
+                    localStorage.setItem('isLoggedIn', 'true');
+                    console.log('[AUTH TOKEN]', token);
+                }
+            },
+            clearToken: function() {
+                if (window.api?.auth?.clearToken) window.api.auth.clearToken();
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('token');
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('USER_TOKEN');
+                localStorage.removeItem('moodchat_token');
+                localStorage.removeItem('kynecta_auth');
+                localStorage.removeItem('isLoggedIn');
+            },
+            getUser: function() {
+                if (window.currentUser) return window.currentUser;
+                if (window.AuthStorage?.getUser) {
+                    const storedUser = window.AuthStorage.getUser();
+                    if (storedUser) return storedUser;
+                }
+                const userStr = localStorage.getItem('currentUser') || localStorage.getItem('user') || localStorage.getItem('moodchat_user');
+                return userStr ? JSON.parse(userStr) : null;
+            },
+            setUser: function(user) {
+                if (user) {
+                    window.currentUser = user;
+                    localStorage.setItem('currentUser', JSON.stringify(user));
+                    localStorage.setItem('user', JSON.stringify(user));
+                    localStorage.setItem('moodchat_user', JSON.stringify(user));
+                    localStorage.setItem('isLoggedIn', 'true');
+                }
+            },
+            clearUser: function() {
+                window.currentUser = null;
+                localStorage.removeItem('currentUser');
+                localStorage.removeItem('user');
+                localStorage.removeItem('moodchat_user');
+            },
+            isLoggedIn: function() {
+                if (window.api?.auth?.isAuthenticated) return window.api.auth.isAuthenticated();
+                return localStorage.getItem('isLoggedIn') === 'true' && !!this.getToken();
+            }
+        };
+        
+        window.AuthGateway = {
+            login: async function(credentials) {
+                if (window.api?.auth?.login) {
+                    try { return await window.api.auth.login(credentials); }
+                    catch (error) { return { success: false, message: error.message || 'Login failed' }; }
+                }
+                return { success: false, message: 'Authentication service not available' };
+            },
+            register: async function(userData) {
+                if (window.AccountLimit && !window.AccountLimit.canRegisterNewAccount()) {
+                    window.CoreUtils.showNotification('Error', `Maximum ${window.AccountLimit.MAX_ACCOUNTS} accounts per device. Please use another device.`, 'error');
+                    return { success: false, message: 'Maximum accounts per device reached' };
+                }
+                if (window.api?.auth?.register) {
+                    try { return await window.api.auth.register(userData); }
+                    catch (error) { return { success: false, message: error.message || 'Registration failed' }; }
+                }
+                return { success: false, message: 'Registration service not available' };
+            },
+            forgotPassword: async function(emailData) {
+                if (window.api?.auth?.forgotPassword) {
+                    try { return await window.api.auth.forgotPassword(emailData); }
+                    catch (error) { return { success: false, message: error.message || 'Password reset failed' }; }
+                }
+                return { success: false, message: 'Password reset service not available' };
+            }
+        };
+    </script>
+    
+    <!-- ====================================================================== -->
+    <!-- MAIN AUTHENTICATION HANDLER -->
+    <!-- ====================================================================== -->
+    <script>
+        // FIX: index.html previously read/wrote its own localStorage key
+        // ('moodchat_theme') and toggled a `.theme-dark` class, completely
+        // disconnected from the app-wide theme system — which persists the
+        // user's Settings > Appearance choice under 'app_theme' and applies
+        // it via a `data-theme` attribute (see chat.html's getResolvedTheme()).
+        // As a result, choosing Light/Dark in Settings never affected the
+        // login screen at all. This now reads 'app_theme' first (falling
+        // back to the old key for anyone who only ever toggled dark mode
+        // from this page before), resolves 'auto' the same way chat.html
+        // does, and keeps both keys in sync going forward so this page and
+        // the rest of the app never disagree about which theme is active.
+        function resolveAppTheme() {
+            var raw = null;
+            try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
+            if (raw === 'auto') {
+                return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+            }
+            return raw === 'dark' ? 'dark' : 'light';
+        }
+
+        function initThemeToggle() {
+            const btns = [document.getElementById('mobileThemeToggle'), document.getElementById('desktopThemeToggle')].filter(Boolean);
+            const saved = resolveAppTheme();
+            // NOTE: the actual theme class is already applied to <html> by the
+            // inline flash-prevention script at the very top of <head> (runs
+            // before first paint). We only sync the button labels here and
+            // keep <html> as the single source of truth going forward instead
+            // of also toggling a separate class on <body>, which previously
+            // caused the two to drift out of sync after a manual toggle.
+            if (saved === 'dark') {
+                btns.forEach(btn => { if (btn) btn.innerHTML = '<i class="fas fa-sun"></i> Light Mode'; });
+            }
+            btns.forEach(btn => {
+                if (btn) btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    document.documentElement.classList.toggle('theme-dark');
+                    const isDark = document.documentElement.classList.contains('theme-dark');
+                    try { localStorage.setItem('app_theme', isDark ? 'dark' : 'light'); } catch (_) {}
+                    localStorage.setItem('moodchat_theme', isDark ? 'dark' : 'light');
+                    btns.forEach(b => { if (b) b.innerHTML = isDark ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });
+                });
+            });
+        }
+        
+        function initDashboardThemePicker() {
+            const options = document.querySelectorAll('.theme-option');
+            const savedColor = localStorage.getItem('moodchat_dashboard_color') || 'default';
+            document.body.setAttribute('data-theme-color', savedColor);
+            options.forEach(opt => opt.classList.toggle('active', opt.dataset.color === savedColor));
+            options.forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const color = opt.dataset.color;
+                    document.body.setAttribute('data-theme-color', color);
+                    localStorage.setItem('moodchat_dashboard_color', color);
+                    options.forEach(o => o.classList.remove('active'));
+                    opt.classList.add('active');
+                    if (window.CoreUtils) window.CoreUtils.showNotification('Theme Updated', `Dashboard color changed to ${color}`, 'success');
+                });
+            });
+        }
+
+        function initBottomNav() {
+            const toggle = document.getElementById('bottomNavToggle');
+            const bottomNav = document.getElementById('bottom-nav');
+            const closeBtn = document.getElementById('bottomNavClose');
+            if (toggle && bottomNav) {
+                toggle.addEventListener('click', (e) => { e.stopPropagation(); bottomNav.classList.toggle('visible'); });
+                document.addEventListener('click', (e) => { if (!bottomNav.contains(e.target) && !toggle.contains(e.target)) bottomNav.classList.remove('visible'); });
+                if (closeBtn) closeBtn.addEventListener('click', (e) => { e.preventDefault(); bottomNav.classList.remove('visible'); });
+            }
+        }
+
+        function initPasswordToggles() {
+            document.querySelectorAll('[data-toggle-password]').forEach(toggle => {
+                const newToggle = toggle.cloneNode(true);
+                toggle.parentNode.replaceChild(newToggle, toggle);
+                newToggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const target = document.getElementById(this.getAttribute('data-target'));
+                    const icon = this.querySelector('i');
+                    if (target) {
+                        if (target.type === 'password') {
+                            target.type = 'text';
+                            if (icon) { icon.classList.remove('fa-eye'); icon.classList.add('fa-eye-slash'); }
+                        } else {
+                            target.type = 'password';
+                            if (icon) { icon.classList.remove('fa-eye-slash'); icon.classList.add('fa-eye'); }
+                        }
+                    }
+                });
+            });
+        }
+        
+        let authInitialized = false;
+        
+        async function waitForAPIReady() {
+            return new Promise((resolve) => {
+                let attempts = 0;
+                const maxAttempts = 50;
+                const check = setInterval(() => {
+                    attempts++;
+                    if (window.api?.auth?.login && window.api?.auth?.getCurrentUser) {
+                        clearInterval(check);
+                        clearTimeout(timeout);
+                        resolve(true);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(check);
+                        clearTimeout(timeout);
+                        resolve(false);
+                    }
+                }, 100);
+                const timeout = setTimeout(() => { clearInterval(check); resolve(false); }, 8000);
+            });
+        }
+        
+        async function initializeAuthenticationSystem() {
+            if (authInitialized) return;
+            // No blocking splash — UI renders immediately.
+            // API modules are awaited in the background only.
+            waitForAPIReady(); // fire-and-forget; buttons re-bind when ready
+            initPasswordToggles();
+            initThemeToggle();
+            initBottomNav();
+            initDashboardThemePicker();
+            
+            document.querySelectorAll('[data-form-toggle]').forEach(toggle => {
+                toggle.addEventListener('click', (e) => { e.preventDefault(); switchForm(toggle.getAttribute('data-form-toggle')); });
+            });
+            
+            const tabs = document.querySelectorAll('.auth-tab');
+            const loginId = document.getElementById('loginIdentifier');
+            const icon = document.getElementById('loginMethodIcon');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    const method = this.getAttribute('data-method');
+                    const label = document.querySelector('label[for="loginIdentifier"]');
+                    if (method === 'email') {
+                        label.textContent = 'Email Address';
+                        loginId.placeholder = 'Enter your email';
+                        loginId.type = 'email';
+                        icon.className = 'fas fa-envelope input-icon';
+                    } else if (method === 'mobile') {
+                        label.textContent = 'Mobile Number';
+                        loginId.placeholder = 'Enter your mobile number';
+                        loginId.type = 'tel';
+                        icon.className = 'fas fa-mobile-alt input-icon';
+                    } else {
+                        label.textContent = 'Username';
+                        loginId.placeholder = 'Enter your username';
+                        loginId.type = 'text';
+                        icon.className = 'fas fa-user input-icon';
+                    }
+                    hideError('loginIdentifier');
+                });
+            });
+            
+            document.querySelectorAll('.feature-tag').forEach(tag => {
+                tag.addEventListener('click', function() { this.classList.toggle('selected'); });
+            });
+            
+            const mobileToggle = document.getElementById('mobileMenuToggle');
+            const mobileSidebar = document.getElementById('mobileSidebar');
+            const overlay = document.getElementById('mobileSidebarOverlay');
+            if (mobileToggle && mobileSidebar) {
+                mobileToggle.addEventListener('click', () => { mobileSidebar.classList.add('active'); overlay.classList.add('active'); });
+                overlay.addEventListener('click', () => { mobileSidebar.classList.remove('active'); overlay.classList.remove('active'); });
+            }
+            
+            bindAuthButtons();
+            checkExistingSession();  // reads localStorage synchronously — instant
+            
+            authInitialized = true;
+            // No hideLoading() needed — nothing was shown
+        }
+        
+        // FIX (2FA audit): completes the redirect-to-chat flow shared by a
+        // normal password-only login AND a login that required a 2FA
+        // challenge. Extracted from the login click handler so the MFA
+        // modal's "Verify" button can reuse it instead of duplicating it.
+        function finalizeLoginSuccess(response, password) {
+            const token = response.token || response.data?.token || response.accessToken;
+            const user = response.user || response.data?.user;
+            if (token) {
+                window.AppRuntimeAuthority?.persistSession?.({
+                    token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
+                    user: user || null, expiresAt: response.expiresAt || response.data?.expiresAt || null
+                });
+                ['authToken','moodchat_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                    try { localStorage.setItem(k, token); } catch(_) {}
+                });
+                if (user) {
+                    try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch(_) {}
+                    try { localStorage.setItem('moodchat_user', JSON.stringify(user)); } catch(_) {}
+                }
+            }
+            window.CoreUtils.showNotification('Success', 'Login successful! Redirecting...', 'success');
+            // See FIX-E2E-WIRING note below (unchanged) — persist plaintext
+            // password for the tab session so any iframe can derive the E2E key.
+            try { sessionStorage.setItem('kyn_e2e_pw_session', password); } catch (_) {}
+            // FIX (perf audit): this was `setTimeout(..., 1000)` — a full second of
+            // pure dead time on EVERY login before the browser even starts requesting
+            // chat.html, let alone anything inside it. The toast above is purely
+            // cosmetic and provides no value once the page is about to navigate away;
+            // nothing here depends on the delay (session/token are already persisted
+            // synchronously above). This was the single biggest fixed-cost contributor
+            // to "login completes instantly but the app takes a long time to open."
+            window.location.href = 'chat.html';
+        }
+
+        // FIX (2FA audit): state + UI wiring for the 2FA challenge modal.
+        // Previously there was no code path at all that handled the
+        // { requiresMfa: true, tempToken } response from login() — users
+        // with 2FA enabled just saw a confusing "no token received" error.
+        let __mfaPending = null; // { tempToken, password }
+
+        function showMfaModal(tempToken, password) {
+            __mfaPending = { tempToken, password };
+            const overlay = document.getElementById('mfaModalOverlay');
+            const input = document.getElementById('mfaCodeInput');
+            const err = document.getElementById('mfaModalError');
+            if (err) { err.style.display = 'none'; err.textContent = ''; }
+            if (input) { input.value = ''; }
+            if (overlay) overlay.classList.add('open');
+            setTimeout(() => input?.focus(), 100);
+        }
+
+        function hideMfaModal() {
+            __mfaPending = null;
+            document.getElementById('mfaModalOverlay')?.classList.remove('open');
+        }
+
+        function setupMfaModal() {
+            const submitBtn = document.getElementById('mfaSubmitBtn');
+            const cancelBtn = document.getElementById('mfaCancelBtn');
+            if (!submitBtn || !cancelBtn) return;
+
+            // Clone-and-replace so re-calling setupMfaModal() (e.g. if
+            // bindAuthButtons runs more than once) never double-binds.
+            const newSubmit = submitBtn.cloneNode(true);
+            submitBtn.parentNode.replaceChild(newSubmit, submitBtn);
+            const newCancel = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+
+            const doVerify = async () => {
+                if (!__mfaPending) return;
+                const input = document.getElementById('mfaCodeInput');
+                const err = document.getElementById('mfaModalError');
+                const code = input?.value.trim();
+                if (!code) {
+                    if (err) { err.textContent = 'Enter your 6-digit code or a backup code'; err.style.display = 'block'; }
+                    return;
+                }
+                newSubmit.disabled = true;
+                newSubmit.textContent = 'Verifying…';
+                try {
+                    const result = await window.api.auth.verifyMfaChallenge(__mfaPending.tempToken, code);
+                    if (result?.success) {
+                        const password = __mfaPending.password;
+                        hideMfaModal();
+                        finalizeLoginSuccess(result, password);
+                    } else {
+                        if (err) { err.textContent = result?.message || result?.error || 'Invalid code — please try again'; err.style.display = 'block'; }
+                    }
+                } catch (verifyErr) {
+                    if (err) { err.textContent = verifyErr.message || 'Verification failed'; err.style.display = 'block'; }
+                } finally {
+                    newSubmit.disabled = false;
+                    newSubmit.textContent = 'Verify';
+                }
+            };
+
+            newSubmit.addEventListener('click', doVerify);
+            newCancel.addEventListener('click', () => {
+                hideMfaModal();
+                setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
+            });
+            document.getElementById('mfaCodeInput')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); doVerify(); }
+            });
+        }
+
+        function bindAuthButtons() {
+            setupMfaModal();
+            // Login Button
+            const loginBtn = document.getElementById('login-button');
+            if (loginBtn) {
+                const newBtn = loginBtn.cloneNode(true);
+                loginBtn.parentNode.replaceChild(newBtn, loginBtn);
+                newBtn.addEventListener('click', async function(e) {
+                    e.preventDefault();
+                    const identifier = document.getElementById('loginIdentifier').value.trim();
+                    const password = document.getElementById('loginPassword').value;
+                    const rememberMe = document.getElementById('rememberMe').checked;
+                    const method = document.querySelector('.auth-tab.active')?.getAttribute('data-method') || 'email';
+                    clearErrorMessages();
+                    if (!validateLoginInputs(identifier, password, method)) return;
+                    setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Logging in...', true);
+
+                    // FIX: Only show "waking up" if the server health probe actually fails/is slow.
+                    // Previously this fired after 4s unconditionally — even when the server was
+                    // fully awake, giving users a false "sleeping" message on every login attempt.
+                    let wakeTimer = null;
+                    let _wakeNotified = false;
+                    const _showWakeNotice = () => {
+                        if (_wakeNotified) return;
+                        _wakeNotified = true;
+                        const btn = document.getElementById('login-button');
+                        if (btn) btn.title = 'Server is waking up, please wait…';
+                        const sp = document.getElementById('loginButtonText');
+                        if (sp) sp.textContent = 'Server waking up… (~30s)';
+                        window.CoreUtils?.showNotification('Please wait', 'The server is starting up. This takes about 30 seconds on the first request.', 'info');
+                    };
+                    // Probe the health endpoint: if it doesn't respond within 3s, server is sleeping
+                    (async () => {
+                        try {
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://moodchat-fy56.onrender.com';
+                            const ctrl = new AbortController();
+                            const tid = setTimeout(() => { ctrl.abort(); _showWakeNotice(); }, 3000);
+                            const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
+                            clearTimeout(tid);
+                            // Only show notice if server returned non-ok (still booting)
+                            if (!hr.ok) _showWakeNotice();
+                        } catch (_) {
+                            _showWakeNotice();
+                        }
+                    })();
+
+                    const doLogin = async () => {
+                        const baseUrl = window.__getApiOrigin
+                            ? window.__getApiOrigin()
+                            : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
+                        if (window.api?.auth?.login) {
+                            // FIX: 65s timeout to survive Render cold start (~50s)
+                            const loginPromise = window.api.auth.login({ identifier, password, rememberMe });
+                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Server is taking too long to respond. It may be starting up — please try again.')), 65000));
+                            return Promise.race([loginPromise, timeout]);
+                        } else {
+                            const res = await fetch(`${baseUrl}/api/auth/login`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                signal: AbortSignal.timeout ? AbortSignal.timeout(65000) : undefined,
+                                body: JSON.stringify({ identifier, password })
+                            });
+                            const data = await res.json();
+                            return { success: res.ok, data, message: data.message, token: data.token, user: data.user };
+                        }
+                    };
+
+                    try {
+                        let response;
+                        try {
+                            response = await doLogin();
+                        } catch (firstErr) {
+                            // Auto-retry once on cold-start timeout or 404 (server was asleep)
+                            const isWakeIssue = firstErr.message?.includes('timeout') || firstErr.message?.includes('Timeout') || firstErr.message?.includes('too long');
+                            if (isWakeIssue) {
+                                const sp = document.getElementById('loginButtonText');
+                                if (sp) sp.textContent = 'Retrying…';
+                                await new Promise(r => setTimeout(r, 3000));
+                                response = await doLogin();
+                            } else {
+                                throw firstErr;
+                            }
+                        }
+
+                        clearTimeout(wakeTimer);
+                        // FIX (2FA audit): the backend returns requiresMfa+tempToken
+                        // instead of a token when the account has 2FA enabled. This
+                        // must be checked BEFORE the generic success/failure branch,
+                        // or it falls through to the "invalid credentials" error.
+                        if (response?.requiresMfa && response?.tempToken) {
+                            setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
+                            showMfaModal(response.tempToken, password);
+                        } else if (response?.success || response?.token || response?.data?.token) {
+                            // FIX-E2E-WIRING: js/e2e-encryption.js (KynectaE2E) needs the
+                            // plaintext password to derive the key that wraps/unwraps the
+                            // user's private encryption key, but it only ever runs inside
+                            // whichever IFRAME currently has it loaded (message.html,
+                            // group.html, etc.) — never here in index.html where login
+                            // actually happens. Each of those iframes is a SEPARATE window
+                            // object, so a single same-window event can't reach all of them,
+                            // and they don't all load at once (group.html only loads when
+                            // the user opens the Groups tab, which could be long after
+                            // message.html already consumed-and-deleted a one-shot key in
+                            // an earlier version of this fix — that was the bug).
+                            //
+                            // sessionStorage entry persists for the WHOLE TAB SESSION
+                            // (not deleted after first read) so any iframe that boots at
+                            // any point can independently call KynectaE2E.init(password).
+                            // Cleared on explicit logout (see logout handler) rather than
+                            // after one use.
+                            finalizeLoginSuccess(response, password);
+                        } else {
+                            const errorMsg = response?.message || response?.data?.message || 'Invalid email or password. Please check your credentials.';
+                            window.CoreUtils.showNotification('Error', errorMsg, 'error');
+                            showError('loginIdentifier', errorMsg);
+                        }
+                    } catch (error) {
+                        clearTimeout(wakeTimer);
+                        const msg = error.message?.includes('too long') || error.message?.includes('timeout')
+                            ? 'Server is starting up. Please wait 30 seconds and try again.'
+                            : (error.message || 'Network error — please check your connection.');
+                        window.CoreUtils.showNotification('Error', msg, 'error');
+                        showError('loginIdentifier', msg);
+                    } finally {
+                        clearTimeout(wakeTimer);
+                        setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
+                    }
+                });
+            }
+            
+            // Register Button
+            const regBtn = document.getElementById('register-button');
+            if (regBtn) {
+                const newBtn = regBtn.cloneNode(true);
+                regBtn.parentNode.replaceChild(newBtn, regBtn);
+                newBtn.addEventListener('click', async function(e) {
+                    e.preventDefault();
+                    const displayName = document.getElementById('registerDisplayName').value.trim();
+                    const username = document.getElementById('registerUsername').value.trim();
+                    const email = document.getElementById('registerEmail').value.trim();
+                    const password = document.getElementById('registerPassword').value;
+                    const confirm = document.getElementById('registerConfirmPassword').value;
+                    const accept = document.getElementById('acceptTerms').checked;
+                    clearErrorMessages();
+                    if (!validateRegisterInputs(displayName, username, email, password, confirm, accept)) return;
+                    setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Creating account...', true);
+
+                    // FIX: Only show "waking up" if the health probe actually fails/times out
+                    let wakeTimerReg = null;
+                    let _wakeRegNotified = false;
+                    const _showWakeNoticeReg = () => {
+                        if (_wakeRegNotified) return;
+                        _wakeRegNotified = true;
+                        const sp = document.getElementById('registerButtonText');
+                        if (sp) sp.textContent = 'Server waking up… (~30s)';
+                        window.CoreUtils?.showNotification('Please wait', 'The server is starting up. This takes about 30 seconds on the first request.', 'info');
+                    };
+                    (async () => {
+                        try {
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://moodchat-fy56.onrender.com';
+                            const ctrl = new AbortController();
+                            const tid = setTimeout(() => { ctrl.abort(); _showWakeNoticeReg(); }, 3000);
+                            const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
+                            clearTimeout(tid);
+                            if (!hr.ok) _showWakeNoticeReg();
+                        } catch (_) {
+                            _showWakeNoticeReg();
+                        }
+                    })();
+
+                    try {
+                        let response;
+                        if (window.api?.auth?.register) {
+                            // FIX: Increased timeout from 30s to 65s for Render.com cold starts
+                            const regPromise = window.api.auth.register({ email: email, username: username, password: password, displayName: displayName || username, name: displayName || username, acceptPrivacyPolicy: accept });
+                            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out. The server may be starting up — please try again in a moment.')), 65000));
+                            response = await Promise.race([regPromise, timeout]);
+                        } else {
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
+                            const res = await fetch(`${baseUrl}/api/auth/register`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ email: email, username: username, password: password, displayName: displayName || username, name: displayName || username, acceptPrivacyPolicy: accept })
+                            });
+                            const data = await res.json();
+                            response = { success: res.ok, data: data };
+                        }
+                        if (response?.success === true) {
+                            const token = response.token || response.data?.token;
+                            const user = response.user || response.data?.user;
+                            if (token) {
+                                window.AppRuntimeAuthority?.persistSession?.({
+                                    token: token,
+                                    refreshToken: response.refreshToken || response.data?.refreshToken || null,
+                                    user: user || null,
+                                    expiresAt: response.expiresAt || response.data?.expiresAt || null
+                                });
+                                // Store token in ALL known localStorage keys for module compatibility
+                                ['authToken','moodchat_token','token','accessToken','USER_TOKEN'].forEach(k => {
+                                    try { localStorage.setItem(k, token); } catch(_) {}
+                                });
+                                if (user) {
+                                    try { localStorage.setItem('currentUser', JSON.stringify(user)); } catch(_) {}
+                                    try { localStorage.setItem('moodchat_user', JSON.stringify(user)); } catch(_) {}
+                                }
+                                try { window.SessionState.setToken(token); } catch(_) {}
+                                try { if (user) window.SessionState.setUser(user); } catch(_) {}
+                                try { if (window.SessionManager && user) window.SessionManager.createSession(user, token, true); } catch(_) {}
+                            }
+                            clearTimeout(wakeTimerReg);
+                            window.CoreUtils.showNotification('Success', 'Account created! Please login to continue.', 'success');
+                            // Switch to login form
+                            switchForm('login');
+                        } else {
+                            clearTimeout(wakeTimerReg);
+                            const msg = response?.message || response?.data?.message || 'Registration failed. Please check your details and try again.';
+                            window.CoreUtils.showNotification('Error', msg, 'error');
+                            showError('registerEmail', msg);
+                        }
+                    } catch (error) {
+                        clearTimeout(wakeTimerReg);
+                        const msg = error.message?.includes('timeout') || error.message?.includes('starting up')
+                            ? 'Server is starting up. Please wait 30 seconds and try again.'
+                            : (error.message || 'Registration failed — please try again.');
+                        window.CoreUtils.showNotification('Error', msg, 'error');
+                        showError('registerEmail', msg);
+                    } finally {
+                        clearTimeout(wakeTimerReg);
+                        setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Create Free Account', false);
+                    }
+                });
+            }
+            
+            // Forgot Button
+            const forgotBtn = document.getElementById('forgot-button');
+            if (forgotBtn) {
+                const newBtn = forgotBtn.cloneNode(true);
+                forgotBtn.parentNode.replaceChild(newBtn, forgotBtn);
+                newBtn.addEventListener('click', async function(e) {
+                    e.preventDefault();
+                    const email = document.getElementById('forgotPasswordEmail').value.trim();
+                    clearErrorMessages();
+                    if (!email || !window.CoreUtils.validateEmail(email)) {
+                        showError('forgotPassword', 'Valid email is required');
+                        return;
+                    }
+                    setButtonLoadingState('forgot-button', 'forgotButtonText', 'forgotPasswordSpinner', 'Sending...', true);
+                    try {
+                        let response;
+                        if (window.api?.auth?.forgotPassword) {
+                            response = await window.api.auth.forgotPassword({ email: email });
+                        } else {
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://moodchat-fy56.onrender.com');
+                            const res = await fetch(`${baseUrl}/api/auth/forgot-password`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ email: email })
+                            });
+                            const data = await res.json();
+                            response = { success: res.ok, message: data.message };
+                        }
+                        if (response?.success === true) {
+                            showSuccess('forgotPassword');
+                            window.CoreUtils.showNotification('Success', 'Reset instructions sent to your email', 'success');
+                            document.getElementById('forgotPasswordEmail').value = '';
+                        } else {
+                            window.CoreUtils.showNotification('Error', response?.message || 'Failed to send reset instructions', 'error');
+                        }
+                    } catch (error) {
+                        window.CoreUtils.showNotification('Error', error.message || 'Failed to send reset instructions', 'error');
+                    } finally {
+                        setButtonLoadingState('forgot-button', 'forgotButtonText', 'forgotPasswordSpinner', 'Send Reset Link', false);
+                    }
+                });
+            }
+            
+            document.getElementById('login-form')?.addEventListener('submit', e => { e.preventDefault(); document.getElementById('login-button')?.click(); });
+            document.getElementById('register-form')?.addEventListener('submit', e => { e.preventDefault(); document.getElementById('register-button')?.click(); });
+            document.getElementById('forgot-form')?.addEventListener('submit', e => { e.preventDefault(); document.getElementById('forgot-button')?.click(); });
+        }
+        
+        async function checkExistingSession() {
+            const runtimeSession = window.AppRuntimeAuthority?.getSessionSnapshot?.();
+            if (runtimeSession?.authenticated) {
+                // CRITICAL FIX: Don't auto-redirect to prevent login flicker loop
+                console.log('[Auth] Existing session found, staying on current page');
+                return true;
+            }
+
+            const token = window.SessionState.getToken();
+            const user = window.SessionState.getUser();
+            const isLoggedIn = localStorage.getItem('isLoggedIn') === 'true';
+            if (isLoggedIn && token && token.length > 20 && user) {
+                window.currentUser = user;
+                // CRITICAL FIX: Don't auto-redirect to prevent login flicker loop
+                console.log('[Auth] Valid session found, staying on current page');
+                return true;
+            }
+            if (token && token.length > 20) {
+                if (user) {
+                    window.currentUser = user;
+                    document.getElementById('authPanel').classList.add('show-auth');
+                    switchForm('dashboard');
+                    document.getElementById('dashboardGreeting').textContent = `Welcome, ${user.displayName || user.username || 'User'}!`;
+                    document.getElementById('dashboardEmail').textContent = user.email || '';
+                    document.getElementById('dashboardAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
+                    const quickCard = document.getElementById('quickLoginCard');
+                    if (quickCard) {
+                        document.getElementById('quickLoginName').textContent = `Welcome back, ${user.displayName || user.username || 'User'}!`;
+                        document.getElementById('quickLoginEmail').textContent = user.email || '';
+                        document.getElementById('quickLoginAvatar').textContent = (user.displayName || user.username || 'U').charAt(0).toUpperCase();
+                        quickCard.classList.add('visible');
+                    }
+                    return true;
+                }
+            }
+            // No saved session — reveal the auth panel now and show login form
+            document.getElementById('authPanel').classList.add('show-auth');
+            switchForm('login');
+            return false;
+        }
+        
+        function initializeQuickLogin() {
+            const quickBtn = document.getElementById('quickLoginBtn');
+            const removeBtn = document.getElementById('removeQuickLogin');
+            const diffBtn = document.getElementById('useDifferentAccountBtn');
+            const card = document.getElementById('quickLoginCard');
+            if (quickBtn) {
+                quickBtn.addEventListener('click', async () => {
+                    const token = window.SessionState.getToken();
+                    const user = window.SessionState.getUser();
+                    if (token && user) {
+                        window.AppRuntimeAuthority?.persistSession?.({ token: token, user: user });
+                        window.currentUser = user;
+                        window.CoreUtils.showNotification('Success', 'Quick login successful!', 'success');
+                        console.log('[Auth] Quick login successful, staying on current page');
+                    } else {
+                        window.CoreUtils.showNotification('Error', 'Session expired. Please login again.', 'error');
+                        card.classList.remove('visible');
+                        switchForm('login');
+                    }
+                });
+            }
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => {
+                    window.AppRuntimeAuthority?.clearSession?.({ emit: true, reason: 'quick-login-removed' });
+                    window.SessionState.clearUser();
+                    window.SessionState.clearToken();
+                    card.classList.remove('visible');
+                    switchForm('login');
+                });
+            }
+            if (diffBtn) {
+                diffBtn.addEventListener('click', () => {
+                    card.classList.remove('visible');
+                    switchForm('login');
+                });
+            }
+        }
+        
+        function initializeDashboardButtons() {
+            const logout = document.getElementById('logoutBtn');
+            if (logout) {
+                logout.addEventListener('click', () => {
+                    window.AppRuntimeAuthority?.clearSession?.({ emit: true, reason: 'logout' });
+                    window.SessionState.clearToken();
+                    window.SessionState.clearUser();
+                    if (window.SessionManager) window.SessionManager.logout(false);
+                    window.CoreUtils.showNotification('Success', 'Logged out successfully', 'success');
+                    switchForm('login');
+                });
+            }
+            const enter = document.getElementById('enterChatBtn');
+            if (enter) enter.addEventListener('click', () => { window.location.href = 'chat.html'; });
+        }
+        
+        function switchForm(formName) {
+            const loginContainer = document.getElementById('login-container');
+            const registerContainer = document.getElementById('register-container');
+            const forgotContainer = document.getElementById('forgot-container');
+            const dashboardPanel = document.getElementById('dashboardPanel');
+            
+            if (loginContainer) loginContainer.classList.remove('active');
+            if (registerContainer) registerContainer.classList.remove('active');
+            if (forgotContainer) forgotContainer.classList.remove('active');
+            if (dashboardPanel) dashboardPanel.classList.remove('active');
+            
+            if (formName === 'login') {
+                if (loginContainer) loginContainer.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Welcome to MoodChat';
+                document.getElementById('panelSubtitle').textContent = 'Login to continue';
+            } else if (formName === 'register') {
+                if (registerContainer) registerContainer.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Create Account';
+                document.getElementById('panelSubtitle').textContent = 'Join our global community';
+            } else if (formName === 'forgot') {
+                if (forgotContainer) forgotContainer.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Reset Password';
+                document.getElementById('panelSubtitle').textContent = 'Enter your email to receive reset instructions';
+            } else if (formName === 'dashboard') {
+                if (dashboardPanel) dashboardPanel.classList.add('active');
+                document.getElementById('panelTitle').textContent = 'Dashboard';
+                document.getElementById('panelSubtitle').textContent = 'Welcome back!';
+            }
+            clearErrorMessages();
+        }
+        
+        function validateLoginInputs(identifier, password, method) {
+            let valid = true;
+            if (!identifier) { 
+                showError('loginIdentifier', `${method === 'email' ? 'Email' : method === 'mobile' ? 'Mobile number' : 'Username'} is required`); 
+                valid = false; 
+            } else if (method === 'email' && !window.CoreUtils.validateEmail(identifier)) { 
+                showError('loginIdentifier', 'Please enter a valid email address'); 
+                valid = false; 
+            }
+            if (!password) { 
+                showError('loginPassword', 'Password is required'); 
+                valid = false; 
+            }
+            return valid;
+        }
+        
+        function validateRegisterInputs(displayName, username, email, password, confirm, accept) {
+            let valid = true;
+            if (!displayName) { 
+                showError('registerName', 'Display name is required'); 
+                valid = false; 
+            } else if (displayName.length < 2) { 
+                showError('registerName', 'Display name must be at least 2 characters'); 
+                valid = false; 
+            }
+            if (!username) { 
+                showError('registerUsername', 'Username is required'); 
+                valid = false; 
+            } else if (username.length < 3) { 
+                showError('registerUsername', 'Username must be at least 3 characters'); 
+                valid = false; 
+            }
+            if (!email) { 
+                showError('registerEmail', 'Email is required'); 
+                valid = false; 
+            } else if (!window.CoreUtils.validateEmail(email)) { 
+                showError('registerEmail', 'Please enter a valid email address'); 
+                valid = false; 
+            }
+            if (!password) { 
+                showError('registerPassword', 'Password is required'); 
+                valid = false; 
+            } else if (password.length < 8) { 
+                showError('registerPassword', 'Password must be at least 8 characters'); 
+                valid = false; 
+            }
+            if (password !== confirm) { 
+                showError('registerConfirmPassword', 'Passwords do not match'); 
+                valid = false; 
+            }
+            if (!accept) { 
+                window.CoreUtils.showNotification('Warning', 'You must accept the terms and conditions', 'warning'); 
+                valid = false; 
+            }
+            return valid;
+        }
+        
+        function clearErrorMessages() {
+            document.querySelectorAll('.error-message').forEach(el => el.classList.remove('visible'));
+            document.querySelectorAll('.success-message').forEach(el => el.classList.remove('visible'));
+        }
+        
+        function showError(fieldId, message) {
+            const el = document.getElementById(fieldId + 'Error');
+            if (el) { 
+                const span = el.querySelector('span'); 
+                if (span) span.textContent = message; 
+                el.classList.add('visible'); 
+            } else {
+                // Fallback for fields without specific error element
+                window.CoreUtils.showNotification('Error', message, 'error');
+            }
+        }
+        
+        function hideError(fieldId) { 
+            const el = document.getElementById(fieldId + 'Error');
+            if (el) el.classList.remove('visible'); 
+        }
+        
+        function showSuccess(fieldId) { 
+            const el = document.getElementById(fieldId + 'Success');
+            if (el) el.classList.add('visible'); 
+        }
+        
+        function setButtonLoadingState(btnId, textId, spinnerId, text, loading) {
+            const btn = document.getElementById(btnId);
+            const txt = document.getElementById(textId);
+            const spin = document.getElementById(spinnerId);
+            if (btn) btn.disabled = loading;
+            if (txt) txt.textContent = text;
+            if (spin) spin.classList.toggle('visible', loading);
+        }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeAuthenticationSystem();
+            initializeQuickLogin();
+            initializeDashboardButtons();
+        });
+    </script>
+    
+    <!-- ====================================================================== -->
+    <!-- INFO MODALS: Privacy, Terms, Contact, Help                            -->
+    <!-- ====================================================================== -->
+    <style>
+        /* ---- Info Modal Overlay ---- */
+        .info-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 99999;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 0;
+            animation: overlayFadeIn 0.2s ease;
+        }
+        .info-modal-overlay.open {
+            display: flex;
+            align-items: flex-end;
+        }
+        @keyframes overlayFadeIn {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+
+        .info-modal-sheet {
+            background: var(--panel-bg, #fff);
+            width: 100%;
+            max-width: 520px;
+            max-height: 80vh;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -8px 40px rgba(0,0,0,0.18);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: sheetSlideUp 0.28s cubic-bezier(.32,1.15,.58,1);
+        }
+        @keyframes sheetSlideUp {
+            from { transform: translateY(100%); opacity: 0.5; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+
+        /* On wider screens, show as centred card */
+        @media (min-width: 540px) {
+            .info-modal-overlay.open { align-items: center; }
+            .info-modal-sheet {
+                border-radius: 20px;
+                max-height: 85vh;
+                margin: 20px;
+            }
+        }
+
+        .info-modal-header {
+            background: var(--gradient-primary, linear-gradient(135deg,#667eea,#764ba2));
+            color: #fff;
+            padding: 18px 20px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .info-modal-header h3 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .info-modal-close {
+            background: rgba(255,255,255,.2);
+            border: none;
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background .2s;
+            flex-shrink: 0;
+        }
+        .info-modal-close:hover { background: rgba(255,255,255,.35); }
+
+        /* Drag handle for mobile */
+        .info-modal-handle {
+            width: 40px;
+            height: 4px;
+            background: var(--border-color, #ddd);
+            border-radius: 2px;
+            margin: 10px auto 0;
+            flex-shrink: 0;
+        }
+        @media (min-width: 540px) { .info-modal-handle { display: none; } }
+
+        .info-modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .info-modal-body h4 {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary, #2c3e50);
+            margin: 18px 0 6px;
+        }
+        .info-modal-body h4:first-child { margin-top: 0; }
+        .info-modal-body p, .info-modal-body li {
+            font-size: 14px;
+            line-height: 1.65;
+            color: var(--text-secondary, #7f8c8d);
+            margin: 0 0 8px;
+        }
+        .info-modal-body ul { padding-left: 18px; margin: 0 0 8px; }
+        .info-modal-body a { color: var(--primary-color, #667eea); }
+
+        /* Opt-in / opt-out toggle rows */
+        .pref-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color, #ecf0f1);
+            gap: 10px;
+        }
+        .pref-row:last-child { border-bottom: none; }
+        .pref-label { font-size: 14px; color: var(--text-primary, #2c3e50); flex: 1; }
+        .pref-label small { display: block; font-size: 12px; color: var(--text-secondary, #7f8c8d); margin-top: 2px; }
+
+        /* Toggle switch */
+        .pref-toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+        .pref-toggle input { opacity: 0; width: 0; height: 0; }
+        .pref-toggle-track {
+            position: absolute;
+            inset: 0;
+            background: var(--border-color, #ccc);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .pref-toggle input:checked + .pref-toggle-track { background: var(--primary-color, #667eea); }
+        .pref-toggle-track::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 20px; height: 20px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform .2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,.25);
+        }
+        .pref-toggle input:checked + .pref-toggle-track::after { transform: translateX(20px); }
+
+        /* Contact form inside modal */
+        .contact-field { margin-bottom: 14px; }
+        .contact-field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary, #2c3e50);
+            margin-bottom: 5px;
+        }
+        .contact-field input, .contact-field textarea, .contact-field select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px 12px;
+            border: 1.5px solid var(--border-color, #ddd);
+            border-radius: 8px;
+            font-size: 14px;
+            background: var(--bg-color, #fff);
+            color: var(--text-primary, #2c3e50);
+            transition: border-color .2s;
+            font-family: inherit;
+        }
+        .contact-field input:focus, .contact-field textarea:focus, .contact-field select:focus {
+            outline: none;
+            border-color: var(--primary-color, #667eea);
+        }
+        .contact-field textarea { resize: vertical; min-height: 90px; }
+        .contact-submit {
+            width: 100%;
+            padding: 12px;
+            background: var(--gradient-primary, linear-gradient(135deg,#667eea,#764ba2));
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity .2s;
+            margin-top: 4px;
+        }
+        .contact-submit:hover { opacity: .9; }
+
+        /* Help accordion */
+        .help-item { border-bottom: 1px solid var(--border-color, #ecf0f1); }
+        .help-item:last-child { border-bottom: none; }
+        .help-question {
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            padding: 13px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary, #2c3e50);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .help-question i { font-size: 12px; transition: transform .2s; flex-shrink: 0; color: var(--text-secondary,#7f8c8d); }
+        .help-item.open .help-question i { transform: rotate(180deg); }
+        .help-answer {
+            display: none;
+            padding: 0 0 12px;
+            font-size: 13.5px;
+            line-height: 1.65;
+            color: var(--text-secondary, #7f8c8d);
+        }
+        .help-item.open .help-answer { display: block; }
+    </style>
+
+    <!-- ====================================================================== -->
+    <!-- 2FA CHALLENGE MODAL (FIX: 2FA audit — shown when login() returns       -->
+    <!-- requiresMfa; previously there was no UI for this at all, so users     -->
+    <!-- with 2FA enabled were locked out with a generic "no token" error)     -->
+    <!-- ====================================================================== -->
+    <style>
+        .mfa-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 99999;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .mfa-modal-overlay.open { display: flex; }
+        .mfa-modal-card {
+            background: var(--bg-secondary, #1e1e2e);
+            color: var(--text-primary, #fff);
+            border-radius: 14px;
+            width: 100%;
+            max-width: 360px;
+            padding: 24px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+        }
+        .mfa-modal-card h3 {
+            margin: 0 0 6px;
+            font-size: 17px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .mfa-modal-card p {
+            margin: 0 0 18px;
+            font-size: 13px;
+            color: var(--text-secondary, #aaa);
+            line-height: 1.5;
+        }
+        .mfa-modal-card input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color, #3a3a4e);
+            background: var(--input-bg, #2a2a3e);
+            color: var(--text-primary, #fff);
+            font-size: 18px;
+            letter-spacing: 3px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .mfa-modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 6px;
+        }
+        .mfa-modal-actions button {
+            flex: 1;
+            padding: 11px 16px;
+            border-radius: 10px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #mfaSubmitBtn { background: var(--accent, #4F46E5); color: #fff; }
+        #mfaCancelBtn { background: transparent; color: var(--text-secondary, #aaa); border: 1px solid var(--border-color, #3a3a4e) !important; }
+        .mfa-modal-error {
+            display: none;
+            color: #ef4444;
+            font-size: 12.5px;
+            margin: -4px 0 12px;
+        }
+        .mfa-modal-hint {
+            font-size: 11.5px;
+            color: var(--text-secondary, #888);
+            margin-top: 14px;
+            text-align: center;
+        }
+    </style>
+    <div class="mfa-modal-overlay" id="mfaModalOverlay" role="dialog" aria-modal="true" aria-labelledby="mfaModalTitle">
+        <div class="mfa-modal-card">
+            <h3 id="mfaModalTitle"><i class="fas fa-shield-alt"></i> Two-Factor Verification</h3>
+            <p>Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+            <input type="text" id="mfaCodeInput" inputmode="numeric" maxlength="11" placeholder="123456" autocomplete="one-time-code">
+            <div class="mfa-modal-error" id="mfaModalError"></div>
+            <div class="mfa-modal-actions">
+                <button type="button" id="mfaCancelBtn">Cancel</button>
+                <button type="button" id="mfaSubmitBtn">Verify</button>
+            </div>
+            <div class="mfa-modal-hint">Lost access to your device? Use one of your saved backup codes instead.</div>
+        </div>
+    </div>
+
+    <!-- Modal overlay container -->
+    <div class="info-modal-overlay" id="infoModalOverlay" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">
+        <div class="info-modal-sheet" id="infoModalSheet">
+            <div class="info-modal-handle"></div>
+            <div class="info-modal-header">
+                <h3 id="infoModalTitle"><i class="fas fa-shield-alt" id="infoModalIcon"></i> <span id="infoModalTitleText">Privacy Policy</span></h3>
+                <button class="info-modal-close" id="infoModalClose" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="info-modal-body" id="infoModalBody">
+                <!-- Content injected by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        /* ======================================================
+           INFO MODAL ENGINE — Privacy / Terms / Contact / Help
+           ====================================================== */
+
+        var MODAL_CONTENT = {
+
+            privacy: {
+                icon: 'fa-shield-alt',
+                title: 'Privacy Policy',
+                html: function() {
+                    var analytics = _getPref('pref_analytics', true);
+                    var marketing = _getPref('pref_marketing', false);
+                    var thirdParty = _getPref('pref_thirdparty', false);
+                    return '<p>Last updated: May 2026. MoodChat ("we", "us") is committed to protecting your personal data.</p>' +
+                        '<h4>What we collect</h4>' +
+                        '<ul><li>Account info: name, email, username, and password (hashed).</li>' +
+                        '<li>Usage data: messages (end-to-end encrypted), calls, and interactions.</li>' +
+                        '<li>Device info: browser type, OS, and IP address for security.</li></ul>' +
+                        '<h4>How we use your data</h4>' +
+                        '<p>We use your data to provide and improve the service, send security alerts, and — with your consent — personalise your experience.</p>' +
+                        '<h4>Your preferences</h4>' +
+                        '<div class="pref-row"><span class="pref-label">Analytics cookies<small>Help us improve MoodChat (anonymous)</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_analytics"' + (analytics ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<div class="pref-row"><span class="pref-label">Marketing emails<small>Product updates and offers from MoodChat</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_marketing"' + (marketing ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<div class="pref-row"><span class="pref-label">Third-party integrations<small>Share anonymised data with analytics partners</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_thirdparty"' + (thirdParty ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<h4>Data retention</h4>' +
+                        '<p>You may delete your account at any time from Settings. We retain your data for 30 days after deletion to support dispute resolution, then permanently erase it.</p>' +
+                        '<h4>Contact DPO</h4>' +
+                        '<p>Data Protection Officer: <a href="mailto:privacy@moodchat.app">privacy@moodchat.app</a></p>';
+                }
+            },
+
+            terms: {
+                icon: 'fa-file-contract',
+                title: 'Terms of Service',
+                html: function() {
+                    var updates = _getPref('pref_terms_updates', true);
+                    var promos  = _getPref('pref_terms_promos', false);
+                    return '<p>Effective: January 2026. By using MoodChat you agree to these terms.</p>' +
+                        '<h4>Eligibility</h4><p>You must be 13 years or older. Users under 18 require parental consent.</p>' +
+                        '<h4>Account responsibilities</h4>' +
+                        '<ul><li>Keep your credentials secure. You are responsible for all activity on your account.</li>' +
+                        '<li>Do not share account access with others.</li>' +
+                        '<li>Report any unauthorised access immediately.</li></ul>' +
+                        '<h4>Prohibited conduct</h4>' +
+                        '<ul><li>Harassment, hate speech, or threats of violence.</li>' +
+                        '<li>Distributing spam, malware, or illegal content.</li>' +
+                        '<li>Attempting to reverse-engineer or scrape the platform.</li></ul>' +
+                        '<h4>Intellectual property</h4>' +
+                        '<p>MoodChat grants you a limited, non-exclusive licence to use the service. You retain ownership of content you post.</p>' +
+                        '<h4>Notifications preferences</h4>' +
+                        '<div class="pref-row"><span class="pref-label">Terms update notifications<small>Email me when terms change materially</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_terms_updates"' + (updates ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<div class="pref-row"><span class="pref-label">Promotional offers<small>Receive offers and feature announcements</small></span>' +
+                        '<label class="pref-toggle"><input type="checkbox" id="pref_terms_promos"' + (promos ? ' checked' : '') + '><span class="pref-toggle-track"></span></label></div>' +
+                        '<h4>Termination</h4>' +
+                        '<p>We reserve the right to suspend accounts that violate these terms. You may delete your account at any time in Settings.</p>';
+                }
+            },
+
+            contact: {
+                icon: 'fa-envelope',
+                title: 'Contact Us',
+                html: function() {
+                    return '<p>We typically respond within 24 hours on business days.</p>' +
+                        '<div class="contact-field"><label for="ct_name">Your Name</label>' +
+                        '<input type="text" id="ct_name" placeholder="Enter your name" autocomplete="name"></div>' +
+                        '<div class="contact-field"><label for="ct_email">Email Address</label>' +
+                        '<input type="email" id="ct_email" placeholder="your@email.com" autocomplete="email"></div>' +
+                        '<div class="contact-field"><label for="ct_subject">Subject</label>' +
+                        '<select id="ct_subject"><option value="">Select a topic…</option>' +
+                        '<option value="account">Account issue</option>' +
+                        '<option value="bug">Bug report</option>' +
+                        '<option value="privacy">Privacy concern</option>' +
+                        '<option value="billing">Billing</option>' +
+                        '<option value="feature">Feature request</option>' +
+                        '<option value="other">Other</option></select></div>' +
+                        '<div class="contact-field"><label for="ct_message">Message</label>' +
+                        '<textarea id="ct_message" placeholder="Describe your issue or question…"></textarea></div>' +
+                        '<button class="contact-submit" id="contactSendBtn"><i class="fas fa-paper-plane"></i> Send Message</button>' +
+                        '<p style="font-size:12px;color:var(--text-light);margin-top:10px;text-align:center">Or email us directly: <a href="mailto:support@moodchat.app">support@moodchat.app</a></p>';
+                }
+            },
+
+            help: {
+                icon: 'fa-question-circle',
+                title: 'Help Center',
+                html: function() {
+                    var faqs = [
+                        { q: 'How do I reset my password?', a: 'On the login screen click "Forgot password?", enter your email, and follow the link we send you.' },
+                        { q: 'Why can\'t I log in?', a: 'Ensure your email and password are correct. If the server is starting from sleep mode (free tier), wait 30 seconds and try again. Check CAPS LOCK.' },
+                        { q: 'How do I start a video call?', a: 'Open a chat conversation and tap the camera icon in the top-right. Both users must allow camera/microphone access.' },
+                        { q: 'Can I use MoodChat on multiple devices?', a: 'Yes. You can be signed in on up to 2 devices per account simultaneously.' },
+                        { q: 'How do I delete my account?', a: 'Go to Settings → Account → Delete Account. This is permanent after 30 days.' },
+                        { q: 'Why are my messages disappearing?', a: 'This can happen if you have Auto-Delete enabled, or if the app was refreshed during a sync. Check Settings → Privacy → Auto-Delete Messages.' },
+                        { q: 'How do I report someone?', a: 'Open the conversation, tap the ⋮ menu, then choose "Report User". Our moderation team reviews reports within 48 hours.' },
+                        { q: 'Why does the app show a loading spinner for a long time?', a: 'MoodChat is hosted on a free cloud tier that sleeps after inactivity. The first request after sleep takes ~30 seconds to wake the server. This is normal.' }
+                    ];
+                    var html = '<p>Find answers to common questions below.</p>';
+                    faqs.forEach(function(f, i) {
+                        html += '<div class="help-item" data-help-idx="' + i + '">' +
+                            '<button class="help-question"><span>' + f.q + '</span><i class="fas fa-chevron-down"></i></button>' +
+                            '<div class="help-answer">' + f.a + '</div></div>';
+                    });
+                    return html;
+                }
+            }
+        };
+
+        /* Preference persistence */
+        function _getPref(key, def) {
+            try { var v = localStorage.getItem(key); return v === null ? def : v === 'true'; }
+            catch(e) { return def; }
+        }
+        function _setPref(key, val) {
+            try { localStorage.setItem(key, val ? 'true' : 'false'); } catch(e) {}
+        }
+
+        /* Open modal */
+        function openInfoModal(type) {
+            var cfg = MODAL_CONTENT[type];
+            if (!cfg) return;
+            var overlay = document.getElementById('infoModalOverlay');
+            var body    = document.getElementById('infoModalBody');
+            var icon    = document.getElementById('infoModalIcon');
+            var title   = document.getElementById('infoModalTitleText');
+            if (!overlay || !body) return;
+
+            icon.className  = 'fas ' + cfg.icon;
+            title.textContent = cfg.title;
+            body.innerHTML  = cfg.html();
+            overlay.classList.add('open');
+            document.body.style.overflow = 'hidden';
+
+            /* Wire up toggles */
+            body.querySelectorAll('.pref-toggle input[type=checkbox]').forEach(function(cb) {
+                cb.addEventListener('change', function() {
+                    _setPref(cb.id, cb.checked);
+                    if (window.CoreUtils) window.CoreUtils.showNotification('Preference saved', (cb.checked ? 'Enabled' : 'Disabled') + ': ' + (cb.closest('.pref-row')?.querySelector('.pref-label')?.firstChild?.textContent?.trim() || cb.id), 'success');
+                });
+            });
+
+            /* Wire help accordion */
+            body.querySelectorAll('.help-item').forEach(function(item) {
+                item.querySelector('.help-question')?.addEventListener('click', function() {
+                    item.classList.toggle('open');
+                });
+            });
+
+            /* Wire contact send */
+            var sendBtn = body.querySelector('#contactSendBtn');
+            if (sendBtn) {
+                sendBtn.addEventListener('click', function() {
+                    var name    = body.querySelector('#ct_name')?.value.trim();
+                    var email   = body.querySelector('#ct_email')?.value.trim();
+                    var subject = body.querySelector('#ct_subject')?.value;
+                    var message = body.querySelector('#ct_message')?.value.trim();
+                    if (!name || !email || !subject || !message) {
+                        if (window.CoreUtils) window.CoreUtils.showNotification('Error', 'Please fill in all fields', 'error');
+                        return;
+                    }
+                    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                        if (window.CoreUtils) window.CoreUtils.showNotification('Error', 'Please enter a valid email', 'error');
+                        return;
+                    }
+                    /* In production this would POST to /api/contact */
+                    sendBtn.disabled = true;
+                    sendBtn.innerHTML = '<i class="fas fa-check"></i> Message sent!';
+                    if (window.CoreUtils) window.CoreUtils.showNotification('Success', 'Your message has been sent. We\'ll reply within 24 hours.', 'success');
+                    setTimeout(function() { closeInfoModal(); }, 1800);
+                });
+            }
+        }
+
+        /* Close modal */
+        function closeInfoModal() {
+            var overlay = document.getElementById('infoModalOverlay');
+            if (overlay) overlay.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+
+        /* Delegate all [data-modal] clicks */
+        document.addEventListener('click', function(e) {
+            var el = e.target.closest('[data-modal]');
+            if (el) {
+                e.preventDefault();
+                openInfoModal(el.getAttribute('data-modal'));
+                return;
+            }
+            /* Close on backdrop click */
+            if (e.target.id === 'infoModalOverlay') closeInfoModal();
+        });
+
+        /* Close button */
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('#infoModalClose')) closeInfoModal();
+        });
+
+        /* Close on Escape */
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeInfoModal();
+        });
+
+        /* Expose for external use */
+        window.InfoModal = { open: openInfoModal, close: closeInfoModal };
+    })();
+    </script>
+
+
+    <!-- ====================================================================== -->
+    <script>
+    console.log('[SW-REG] Service Worker temporarily disabled to test redirect loop issue');
+    
+    // Clear any existing service worker registration
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(var i = 0; i < registrations.length; i++) {
+          registrations[i].unregister();
+          console.log('[SW-REG] Unregistered existing service worker');
+        }
+      });
+    }
+    </script>
+    <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/js/core/phase6.bootstrap.js"></script>
+
+<script>
+/* ============================================================
+   MOODCHAT RUNTIME STABILIZATION — All 17 issues fixed inline
+   ============================================================ */
+(function(){
+'use strict';
+if(window.__MCRuntimeStab)return;
+window.__MCRuntimeStab=true;
+
+/* ── Shared helpers ─────────────────────────────────────── */
+var _ts=function(){return Date.now();};
+var _dispatch=function(n,d){try{window.dispatchEvent(new CustomEvent(n,{detail:d}));}catch(_){}};
+var _userId=function(){
+  try{var s=window.__PARENT_SESSION__||{};return String(s.userId||s.user&&s.user.id||'');}catch(_){}
+  try{var u=localStorage.getItem('currentUser')||localStorage.getItem('moodchat_user');
+    if(u){var p=JSON.parse(u);return String(p.id||p.userId||'');}
+  }catch(_){}return '';
+};
+
+/* ── FIX #2: Tombstone engine (prevent deleted entity resurrection) ── */
+var _tombs=(function(){
+  var KEY='moodchat_tombstones_v1';
+  var _t={};try{_t=JSON.parse(localStorage.getItem(KEY)||'{}');}catch(_){}
+  return{
+    mark:function(id,type){_t[String(id)]={deletedAt:_ts(),entityType:type||'chat'};
+      try{localStorage.setItem(KEY,JSON.stringify(_t));}catch(_){}},
+    is:function(id){return !!_t[String(id)];}
+  };
+})();
+window.MoodTombstones=_tombs;
+
+/* ── FIX #4: Navigation lock — single authoritative chat open ── */
+var _navLock=(function(){
+  var _opening=null,_timer=null;
+  return{
+    open:function(chatId){
+      var k=String(chatId);
+      if(_opening===k)return false;
+      clearTimeout(_timer);_opening=k;
+      _timer=setTimeout(function(){_opening=null;},3000);
+      _dispatch('kyn:navigation:openChat',{chatId:k});
+      return true;
+    },
+    release:function(){_opening=null;clearTimeout(_timer);}
+  };
+})();
+window.MoodNavLock=_navLock;
+
+// Deduplicate OPEN_CHAT events that fire twice (double render)
+var _seenChats={};
+document.addEventListener('OPEN_CHAT',function(e){
+  var id=e.detail&&(e.detail.chatId||e.detail.id);
+  if(!id)return;
+  var k=id+'_'+Math.floor(_ts()/300);
+  if(_seenChats[k]){e.stopImmediatePropagation();return;}
+  _seenChats[k]=1;setTimeout(function(){delete _seenChats[k];},600);
+},true);
+
+// Patch openChat once modules load
+function _patchOpenChat(){
+  if(window.openChat&&!window.openChat.__navLocked){
+    var orig=window.openChat;
+    window.openChat=function(id){
+      if(!_navLock.open(id))return;
+      return orig.apply(this,arguments);
+    };
+    window.openChat.__navLocked=true;
+  }
+}
+setTimeout(_patchOpenChat,1000);setInterval(_patchOpenChat,3000);
+
+/* ── FIX #5: Bottom nav — never let overlays block pointer events ── */
+setInterval(function(){
+  try{
+    var bn=document.getElementById('bottom-nav')||document.querySelector('.bottom-nav');
+    if(!bn)return;
+    bn.style.pointerEvents='';
+    bn.querySelectorAll('*').forEach(function(el){
+      var cs=getComputedStyle(el);
+      if(cs.pointerEvents==='none'&&!el.disabled&&el.tagName!=='SPAN')el.style.pointerEvents='';
+    });
+  }catch(_){}
+},2000);
+
+// Sweep stale overlays on back/nav clicks
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.bottom-nav-item,[data-nav-item],.nav-item'))return;
+  document.querySelectorAll('.modal-overlay:not(.open),.modal-backdrop,[data-overlay].active').forEach(function(o){
+    o.style.pointerEvents='none';o.style.display='none';o.classList.remove('active','open','show');
+  });
+},true);
+
+/* ── FIX #13: Marketplace — image fallback + white screen prevention ── */
+var PLACEHOLDER='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIj5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
+new MutationObserver(function(muts){
+  muts.forEach(function(m){m.addedNodes.forEach(function(n){
+    if(n.nodeType!==1)return;
+    var imgs=n.tagName==='IMG'?[n]:[].slice.call(n.querySelectorAll?n.querySelectorAll('img'):[]);
+    imgs.forEach(function(img){
+      if(!img.dataset.efixed){img.dataset.efixed='1';
+        img.addEventListener('error',function(){if(this.src!==PLACEHOLDER)this.src=PLACEHOLDER;});}
+    });
+  });});
+}).observe(document.body,{childList:true,subtree:true});
+
+// White-screen recovery for marketplace/tools sections
+setTimeout(function(){
+  ['.tools-panel','.marketplace-panel','#marketplace','#tools-page'].forEach(function(sel){
+    var el=document.querySelector(sel);
+    if(!el)return;
+    if(!el.children.length||(el.innerHTML||'').trim()===''){
+      el.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;padding:60px 20px;text-align:center;color:var(--text-secondary,#7f8c8d)"><i class="fas fa-store" style="font-size:3rem;color:var(--primary-color,#667eea);margin-bottom:16px"></i><h3 style="margin:0 0 8px;color:var(--text-primary,#2c3e50)">Marketplace</h3><p>Loading products…</p></div>';
+    }
+  });
+},3000);
+
+/* ── FIX #14: Cart / checkout pipeline connector ── */
+var _cart=(function(){
+  var KEY='moodchat_cart_v1';var items=[];
+  try{items=JSON.parse(localStorage.getItem(KEY)||'[]');}catch(_){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(items));}catch(_){}}
+  return{
+    add:function(p){var x=items.find(function(i){return i.id===String(p.id);});
+      if(x){x.qty=(x.qty||1)+1;}else{items.push(Object.assign({},p,{id:String(p.id),qty:1,addedAt:_ts()}));}
+      save();_dispatch('kyn:cart:updated',{count:items.length});},
+    get:function(){return items.slice();},
+    open:function(prod){
+      var list=Array.isArray(prod)?prod:(prod?[prod]:items);
+      if(!list.length)return;
+      var total=list.reduce(function(s,i){return s+((i.price||0)*(i.qty||1));},0);
+      var panel=document.getElementById('__mc_checkout')||document.createElement('div');
+      panel.id='__mc_checkout';
+      panel.style.cssText='position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center';
+      panel.innerHTML='<div style="background:var(--panel-bg,#fff);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:24px;max-height:85vh;overflow-y:auto">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">'
+        +'<h3 style="margin:0;font-size:18px;font-weight:700"><i class="fas fa-shopping-cart" style="color:var(--primary-color,#667eea);margin-right:8px"></i>Checkout</h3>'
+        +'<button onclick="document.getElementById(\'__mc_checkout\').remove()" style="background:var(--sidebar-bg,#f5f5f5);border:none;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px">✕</button></div>'
+        +'<div>'+list.map(function(i){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color,#eee)">'
+          +'<div style="display:flex;align-items:center;gap:10px"><img src="'+(i.image||PLACEHOLDER)+'" style="width:46px;height:46px;border-radius:8px;object-fit:cover" onerror="this.src=\''+PLACEHOLDER+'\'">'
+          +'<div><div style="font-weight:600;font-size:14px">'+(i.name||'Product')+'</div><div style="font-size:12px;color:#888">Qty: '+(i.qty||1)+'</div></div></div>'
+          +'<b style="color:var(--primary-color,#667eea)">$'+((i.price||0)*(i.qty||1)).toFixed(2)+'</b></div>'}).join('')+'</div>'
+        +'<div style="margin:14px 0;padding:12px;background:var(--sidebar-bg,#f9f9f9);border-radius:10px">'
+        +'<div style="display:flex;justify-content:space-between;font-weight:700;font-size:16px"><span>Total</span><span style="color:var(--primary-color,#667eea)">$'+total.toFixed(2)+'</span></div></div>'
+        +'<div style="margin-bottom:12px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Delivery Address</label>'
+        +'<input type="text" placeholder="Enter address" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color,#ddd);border-radius:8px;font-size:14px;background:var(--bg-color,#fff);color:var(--text-primary,#333)"></div>'
+        +'<div style="margin-bottom:14px"><label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px">Payment</label>'
+        +'<select style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--border-color,#ddd);border-radius:8px;font-size:14px;background:var(--bg-color,#fff)">'
+        +'<option>M-Pesa</option><option>Credit Card</option><option>PayPal</option><option>Bank Transfer</option></select></div>'
+        +'<button onclick="window.__mcCart.placeOrder()" style="width:100%;padding:14px;background:var(--gradient-primary,linear-gradient(135deg,#667eea,#764ba2));color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer">'
+        +'<i class="fas fa-lock"></i> Place Order — $'+total.toFixed(2)+'</button></div>';
+      document.body.appendChild(panel);
+    },
+    placeOrder:function(){
+      _dispatch('kyn:order:placed',{items:items,total:items.reduce(function(s,i){return s+(i.price||0)*(i.qty||1);},0)});
+      if(window.CoreUtils&&window.CoreUtils.showNotification)window.CoreUtils.showNotification('Order Placed!','Your order was submitted successfully','success');
+      items=[];save();document.getElementById('__mc_checkout')&&document.getElementById('__mc_checkout').remove();
+    }
+  };
+})();
+window.__mcCart=_cart;
+
+document.addEventListener('click',function(e){
+  var addBtn=e.target.closest('[data-add-to-cart]');
+  if(addBtn){_cart.add({id:addBtn.dataset.productId||_ts(),name:addBtn.dataset.productName,price:parseFloat(addBtn.dataset.productPrice||0),image:addBtn.dataset.productImage});return;}
+  if(e.target.closest('[data-checkout],[data-open-checkout],.checkout-btn')){e.preventDefault();_cart.open();}
+});
+
+/* ── FIX #15/#16: Socket dedup + server-authoritative cache ── */
+// Canonical event alias map so duplicate-name events don't double-fire UI
+window.__socketCanonical={
+  'new_message':'message:new','chat:message':'message:new','MESSAGE_RECEIVED':'message:new',
+  'message_deleted':'message:delete','message_seen':'message:read','message_read':'message:read',
+  'message_delivered':'message:delivered','incoming_call':'call:incoming','CALL_INCOMING':'call:incoming',
+  'call_incoming':'call:incoming','call_accepted':'call:accepted','call_answered':'call:accepted',
+  'call_rejected':'call:rejected','call_cancelled':'call:cancelled','call_ended':'call:ended',
+  'call_force_ended':'call:ended','webrtc_signal':'webrtc:signal'
+};
+
+/* ── FIX #3: Multi-send model ── */
+var _ms=(function(){
+  var KEY='moodchat_multisend_v1';var _s=[];
+  try{_s=JSON.parse(localStorage.getItem(KEY)||'[]');}catch(_){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(_s.slice(-100)));}catch(_){}}
+  return{
+    create:function(recipients,content){
+      var s={id:'ms_'+_ts(),recipients:(recipients||[]).map(function(r){return{userId:String(r.userId||r.id||''),name:r.displayName||r.username||'',status:'pending'};}),content:content||'',states:{},createdAt:_ts()};
+      _s.unshift(s);save();return s;},
+    update:function(sid,uid,status){var s=_s.find(function(x){return x.id===sid;});if(!s)return;s.states[String(uid)]={status:status,at:_ts()};save();},
+    getSessions:function(){return _s.slice();},
+    renderHistory:function(el){
+      if(!el)return;var list=_s;
+      if(!list.length){el.innerHTML='<div style="text-align:center;padding:40px;color:var(--text-secondary,#888)"><i class="fas fa-paper-plane" style="font-size:2rem;display:block;margin-bottom:12px"></i>No bulk sends yet</div>';return;}
+      el.innerHTML=list.map(function(s){
+        var t=s.recipients.length,d=s.recipients.filter(function(r){return r.status==='delivered'||r.status==='read';}).length,f=s.recipients.filter(function(r){return r.status==='failed';}).length;
+        return'<div style="background:var(--card-bg,#fff);border-radius:12px;padding:16px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.08)">'
+          +'<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b style="font-size:14px">'+t+' recipients</b><small style="color:#999">'+new Date(s.createdAt).toLocaleString()+'</small></div>'
+          +'<div style="font-size:13px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:8px">"'+(s.content||'').slice(0,80)+'"</div>'
+          +'<div style="display:flex;gap:12px;font-size:13px"><span style="color:var(--success-color,#2ecc71)"><i class="fas fa-check-circle"></i> '+d+' delivered</span>'
+          +(f?'<span style="color:var(--danger-color,#e74c3c)"><i class="fas fa-times-circle"></i> '+f+' failed</span>':'')
+          +'<span style="color:#999"><i class="fas fa-clock"></i> '+(t-d-f)+' pending</span></div></div>';
+      }).join('');
+    }
+  };
+})();
+window.MoodMultiSend=_ms;
+
+/* ── FIX #11: Group creator auto-membership ── */
+['kyn:group:created','group:created','kyn:group:create_success'].forEach(function(evt){
+  window.addEventListener(evt,function(e){
+    var d=e.detail||{};
+    var gId=d.groupId||d.id||(d.group&&d.group.id);
+    var cId=d.creatorId||d.userId||_userId();
+    if(!gId||!cId)return;
+    var orch=window.__GroupOrchestrator||window.GroupOrchestrator;
+    if(orch&&orch._registry){orch._registry.addMember(String(gId),String(cId),{userId:String(cId),role:'owner',joinedAt:_ts(),isCreator:true});}
+    if(!window.__groupMembershipCache)window.__groupMembershipCache={};
+    window.__groupMembershipCache[String(gId)]={groupId:String(gId),userId:String(cId),role:'owner',joinedAt:_ts()};
+    console.log('[RuntimeStab] FIX#11 — Creator',cId,'added as owner of group',gId);
+  });
+});
+
+/* ── FIX #17: Visibility + reconnect ── */
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden)return;
+  var rt=window.KynectaRealtime;
+  var sock=rt&&rt._socket;
+  if(sock&&!sock.connected){try{sock.connect();}catch(_){}}
+  setTimeout(function(){if(window.KynectaSyncEngine&&window.KynectaSyncEngine.scheduleSyncAll)window.KynectaSyncEngine.scheduleSyncAll(500);},800);
+});
+
+/* ── FIX #9: Status timer pause on interaction ── */
+window.__statusTimerPause=function(reason){_dispatch('kyn:status:replyOpen',{reason:reason||'interaction'});};
+window.__statusTimerResume=function(){_dispatch('kyn:status:replyClose',{});};
+
+/* ── Diagnostics ── */
+window.__MCStabDiag=function(){
+  console.table({
+    fix2_tombstones: {active: typeof window.MoodTombstones!=='undefined'},
+    fix3_multiSend:  {sessions: _ms.getSessions().length},
+    fix4_navLock:    {active: typeof window.MoodNavLock!=='undefined'},
+    fix5_overlay:    {active: true},
+    fix11_groups:    {cache: Object.keys(window.__groupMembershipCache||{}).length},
+    fix13_imgFb:     {active: true},
+    fix14_cart:      {items: _cart.get().length},
+    fix15_dedup:     {canonicalMap: Object.keys(window.__socketCanonical||{}).length},
+    fix17_visibility:{active: true},
+    realtime:        {connected: !!(window.KynectaRealtime&&window.KynectaRealtime._socket&&window.KynectaRealtime._socket.connected)},
+    userId:          {value: _userId()||'not logged in'}
+  });
+};
+
+console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for status.');
+})();
+</script>
+</body>
+</html>

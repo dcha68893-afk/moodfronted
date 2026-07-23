@@ -1,0 +1,3553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
+<script>
+// Suppress iframe sandbox warnings (usually from extensions)
+(function() {
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    
+    console.error = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalError.apply(console, arguments);
+    };
+    
+    console.warn = function(msg) {
+        if (msg && msg.includes && (
+            msg.includes('iframe which has both') ||
+            msg.includes('sandbox')
+        )) {
+            return;
+        }
+        originalWarn.apply(console, arguments);
+    };
+})();
+</script>
+    <!-- CRITICAL: Safety layer must load before module scripts -->
+    <script src="/js/kynecta.safety.layer.js"></script>
+    <link rel="manifest" href="../manifest.json">
+    <meta name="theme-color" content="#4F46E5">
+    <link rel="icon" href="../icons/moodchat-192.png">
+    <link rel="icon" href="../icons/moodchat-512.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <!-- Dynamic title based on connection state -->
+    <title>Settings | Knecta Chat</title>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="/css/vendor/font-awesome.min.css">
+<link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+<link rel="stylesheet" href="/css/vendor/viewer.min.css">
+<link rel="stylesheet" href="/css/vendor/spectrum.min.css">
+<link rel="stylesheet" href="/css/vendor/video-js.min.css">
+    
+    <!-- Color Picker Library -->
+    <script src="/js/vendor/pickr.min.js"></script>
+    <link rel="stylesheet" href="/css/vendor/pickr-nano.min.css">
+
+    <!-- Animation Styles - Enhanced -->
+    <style>
+        /* Core Animations */
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.05); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        
+        @keyframes glow {
+            0% { box-shadow: 0 0 0 0 var(--primary-color); }
+            50% { box-shadow: 0 0 10px 2px var(--primary-color); }
+            100% { box-shadow: 0 0 0 0 var(--primary-color); }
+        }
+        
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-5px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        .fa-spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        .glow {
+            animation: glow 2s infinite;
+        }
+        
+        .float {
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        .shake {
+            animation: shake 0.5s ease-in-out;
+        }
+        
+        /* Connection quality indicators */
+        .connection-good {
+            color: var(--success-color);
+        }
+        
+        .connection-poor {
+            color: var(--warning-color);
+            animation: pulse 2s infinite;
+        }
+        
+        .connection-degraded {
+            color: var(--danger-color);
+            animation: pulse 1.5s infinite;
+        }
+        
+        .connection-offline {
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
+    </style>
+    
+    <link rel="stylesheet" href="settings.css">
+
+    <style>
+        /* =============================================
+           LAYOUT STYLES - PRESERVED COMPLETE + ENHANCED
+           ============================================= */
+        
+        /* Base Layout */
+        .app-container {
+            display: flex;
+            height: 100vh;
+            background: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* Settings Sidebar */
+        .settings-sidebar {
+            width: 280px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 100;
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+
+        .settings-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .back-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--hover-color);
+            color: var(--text-color);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            background: var(--primary-color);
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .back-btn:active {
+            transform: scale(0.95);
+        }
+
+        .settings-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        /* user-profile + avatar + status CSS removed */
+
+        /* Connection Status */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: var(--hover-color);
+            margin-top: 5px;
+            transition: all 0.3s ease;
+        }
+
+        .connection-status.good {
+            color: var(--success-color);
+            background: rgba(52, 199, 89, 0.1);
+        }
+
+        .connection-status.poor {
+            color: var(--warning-color);
+            background: rgba(255, 149, 0, 0.1);
+            animation: pulse 2s infinite;
+        }
+
+        .connection-status.degraded {
+            color: var(--danger-color);
+            background: rgba(255, 59, 48, 0.1);
+            animation: pulse 1.5s infinite;
+        }
+
+        .connection-status.offline {
+            color: var(--text-secondary);
+            background: var(--hover-color);
+            opacity: 0.7;
+        }
+
+        /* Search */
+        .settings-search {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .search-container {
+            position: relative;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 15px 10px 40px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-color-light);
+        }
+
+        .search-input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+        }
+
+        .search-clear {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 5px;
+            display: none;
+        }
+
+        .search-clear:hover {
+            color: var(--primary-color);
+        }
+
+        .search-input:not(:placeholder-shown) + .search-icon + .search-clear {
+            display: block;
+        }
+
+        /* Settings Menu - INSTANTLY VISIBLE */
+        .settings-menu {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+            min-height: 200px;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: var(--text-color);
+            text-decoration: none;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .menu-item:hover {
+            background: var(--hover-color);
+            transform: translateX(5px);
+        }
+
+        .menu-item.active {
+            background: var(--primary-color-light);
+            color: var(--primary-color);
+            border-left: 3px solid var(--primary-color);
+        }
+
+        .menu-item.active .menu-icon {
+            color: var(--primary-color);
+        }
+
+        .menu-item.danger {
+            color: var(--danger-color);
+        }
+
+        .menu-item.danger:hover {
+            background: rgba(255, 59, 48, 0.1);
+        }
+
+        .menu-item.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .menu-icon {
+            width: 20px;
+            margin-right: 12px;
+            text-align: center;
+            transition: color 0.2s;
+        }
+
+        .menu-text {
+            flex: 1;
+            font-size: 14px;
+        }
+
+        .menu-badge {
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            animation: pulse 2s infinite;
+        }
+
+        .menu-badge.danger {
+            background: var(--danger-color);
+        }
+
+        .menu-badge.warning {
+            background: var(--warning-color);
+        }
+
+        /* Settings Content Area */
+        .settings-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .content-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-color);
+            z-index: 10;
+        }
+
+        .content-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .content-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .content-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .action-btn.primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .action-btn.primary:hover:not(:disabled) {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 132, 255, 0.3);
+        }
+
+        .action-btn.secondary {
+            background: var(--hover-color);
+            color: var(--text-color);
+        }
+
+        .action-btn.secondary:hover:not(:disabled) {
+            background: var(--border-color);
+            transform: translateY(-2px);
+        }
+
+        .action-btn.danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .action-btn.danger:hover:not(:disabled) {
+            background: var(--danger-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 59, 48, 0.3);
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .action-btn i {
+            font-size: 14px;
+        }
+
+        /* Content Body */
+        .content-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 30px;
+            scroll-behavior: smooth;
+        }
+
+        /* Settings Sections */
+        .settings-section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s;
+        }
+
+        .settings-section:hover {
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+
+        .settings-section.danger-zone {
+            border-color: var(--danger-color);
+            border-width: 2px;
+        }
+
+        .section-header {
+            margin-bottom: 25px;
+        }
+
+        .section-header h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-icon {
+            color: var(--primary-color);
+        }
+
+        .section-description {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Setting Items */
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.2s;
+        }
+
+        .setting-item:last-child {
+            border-bottom: none;
+        }
+
+        .setting-item:hover {
+            background-color: var(--hover-color);
+            padding-left: 10px;
+            padding-right: 10px;
+            margin-left: -10px;
+            margin-right: -10px;
+            border-radius: 8px;
+        }
+
+        .setting-info {
+            flex: 1;
+        }
+
+        .setting-label {
+            font-weight: 500;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .setting-label-icon {
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: help;
+            position: relative;
+        }
+
+        .setting-label-icon:hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--text-color);
+            color: var(--bg-color);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        .setting-description {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .setting-control {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        /* Input Styles */
+        .setting-input, .setting-textarea {
+            padding: 10px 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 14px;
+            min-width: 250px;
+            transition: all 0.2s;
+        }
+
+        .setting-input:focus, .setting-textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-color-light);
+        }
+
+        .setting-input:disabled, .setting-textarea:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .setting-input.error, .setting-textarea.error {
+            border-color: var(--danger-color);
+            animation: shake 0.5s;
+        }
+
+        .setting-textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .setting-button {
+            padding: 8px 16px;
+            background: var(--hover-color);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-color);
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .setting-button:hover:not(:disabled) {
+            background: var(--border-color);
+            transform: translateY(-2px);
+        }
+
+        .setting-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .setting-button i {
+            font-size: 12px;
+        }
+
+        /* Dropdown */
+        .setting-dropdown {
+            padding: 10px 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 14px;
+            min-width: 200px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .setting-dropdown:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .setting-dropdown:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border-color);
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: var(--primary-color);
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        input:disabled + .toggle-slider {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .toggle-switch:hover .toggle-slider:before {
+            box-shadow: 0 0 5px var(--primary-color);
+        }
+
+        /* Radio Group */
+        .radio-group {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .radio-input {
+            margin: 0;
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .radio-label {
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .radio-option:hover .radio-label {
+            color: var(--primary-color);
+        }
+
+        /* Color Picker */
+        .color-picker {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 2px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .color-picker:hover {
+            transform: scale(1.1);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+            border-color: var(--primary-color);
+        }
+
+        /* Slider */
+        .setting-slider {
+            width: 200px;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--border-color);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .setting-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .setting-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 10px var(--primary-color);
+        }
+
+        .setting-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .setting-slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 10px var(--primary-color);
+        }
+
+        .setting-slider:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Input Hints */
+        .input-hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        #bioCounter {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        /* =============================================
+           MODAL STYLES - PRESERVED + ENHANCED
+           ============================================= */
+        
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.2s ease;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-container {
+            background: var(--card-bg);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            animation: slideIn 0.3s ease;
+        }
+
+        .modal-header {
+            padding: 20px 25px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 18px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+            background: var(--hover-color);
+            transform: rotate(90deg);
+        }
+
+        .modal-body {
+            flex: 1;
+            padding: 25px;
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            padding: 20px 25px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* Photo Upload */
+        .photo-upload-container {
+            text-align: center;
+        }
+
+        .photo-preview {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: var(--hover-color);
+            margin: 0 auto 20px;
+            position: relative;
+            overflow: hidden;
+            background-size: cover;
+            background-position: center;
+            border: 3px solid var(--primary-color);
+            transition: all 0.3s;
+        }
+
+        .photo-preview:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+
+        .photo-change-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.2s;
+            cursor: pointer;
+        }
+
+        .photo-preview:hover .photo-change-overlay {
+            opacity: 1;
+        }
+
+        /* Sessions List */
+        .sessions-list, .blocked-users-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .session-item, .blocked-user-item {
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: all 0.2s;
+        }
+
+        .session-item:hover, .blocked-user-item:hover {
+            background: var(--hover-color);
+            transform: translateX(5px);
+        }
+
+        .session-icon, .blocked-user-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background: var(--hover-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: var(--primary-color);
+        }
+
+        .session-info, .blocked-user-info {
+            flex: 1;
+        }
+
+        .session-name, .blocked-user-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .session-details, .blocked-user-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .session-actions, .blocked-user-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .terminate-btn, .unblock-btn {
+            padding: 6px 12px;
+            background: var(--danger-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .terminate-btn:hover, .unblock-btn:hover {
+            background: var(--danger-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(255, 59, 48, 0.3);
+        }
+
+        /* =============================================
+           NOTIFICATION STYLES - ENHANCED
+           ============================================= */
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--success-color);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 1001;
+            transform: translateX(100%);
+            opacity: 0;
+            transition: all 0.3s;
+            max-width: 350px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+
+        .notification.active {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .notification.error {
+            background: var(--danger-color);
+        }
+
+        .notification.warning {
+            background: var(--warning-color);
+        }
+
+        .notification.info {
+            background: var(--primary-color);
+        }
+
+        .notification i {
+            font-size: 18px;
+        }
+
+        /* =============================================
+           MOOD COLORS GRID
+           ============================================= */
+        
+        .mood-colors-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .mood-color-item {
+            text-align: center;
+            cursor: pointer;
+            padding: 10px;
+            border-radius: 8px;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .mood-color-item:hover {
+            background: var(--hover-color);
+            transform: translateY(-2px);
+        }
+
+        .mood-color-item.active {
+            border-color: var(--primary-color);
+            background: var(--primary-color-light);
+        }
+
+        .mood-color-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin: 0 auto 8px;
+            border: 2px solid var(--border-color);
+            transition: all 0.2s;
+        }
+
+        .mood-color-item:hover .mood-color-preview {
+            transform: scale(1.1);
+        }
+
+        .mood-color-label {
+            font-size: 12px;
+            color: var(--text-color);
+            font-weight: 500;
+        }
+
+        /* =============================================
+           LAYOUT PREVIEWS
+           ============================================= */
+        
+        .layout-previews {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .layout-preview {
+            flex: 1;
+            text-align: center;
+            padding: 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .layout-preview:hover {
+            border-color: var(--primary-color);
+            transform: translateY(-2px);
+        }
+
+        .layout-preview.selected {
+            border-color: var(--primary-color);
+            background: var(--primary-color-light);
+        }
+
+        .preview-thumbnail {
+            width: 100%;
+            height: 80px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .preview-title {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* =============================================
+           WALLPAPER SELECTOR
+           ============================================= */
+        
+        .wallpaper-selector {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .wallpaper-option {
+            text-align: center;
+            cursor: pointer;
+            padding: 10px;
+            border: 2px solid transparent;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .wallpaper-option:hover {
+            background: var(--hover-color);
+        }
+
+        .wallpaper-option.selected {
+            border-color: var(--primary-color);
+            background: var(--primary-color-light);
+        }
+
+        .wallpaper-preview {
+            width: 100%;
+            height: 100px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .wallpaper-name {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        /* =============================================
+           SHORTCUT PREVIEW
+           ============================================= */
+        
+        .shortcut-preview {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: var(--hover-color);
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .shortcut-icon {
+            width: 24px;
+            height: 24px;
+            background: var(--primary-color);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .shortcut-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        /* =============================================
+           STORAGE INFO
+           ============================================= */
+        
+        .storage-info {
+            background: var(--hover-color);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .storage-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .storage-label {
+            font-weight: 500;
+        }
+
+        .storage-value {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .storage-bar {
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .storage-fill {
+            height: 100%;
+            background: var(--primary-color);
+            transition: width 0.3s;
+        }
+
+        /* =============================================
+           ERROR MESSAGES - HIDDEN BY DEFAULT
+           ============================================= */
+        
+        .error-message {
+            display: none;
+        }
+
+        /* =============================================
+           LOADING SPINNER - HIDDEN BY DEFAULT
+           ============================================= */
+        
+        .loading-spinner {
+            display: none;
+        }
+
+        /* Loading container - hidden by default */
+        .loading-container {
+            display: none;
+        }
+
+        /* =============================================
+           KEYBOARD SHORTCUT HINT
+           ============================================= */
+        
+        .shortcut-hint {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            z-index: 100;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .shortcut-hint:hover {
+            opacity: 1;
+        }
+
+        .shortcut-hint kbd {
+            background: var(--hover-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: monospace;
+            font-size: 11px;
+        }
+
+        /* =============================================
+           SANDBOX WARNING BANNER - HIDDEN
+           ============================================= */
+        
+        .sandbox-warning {
+            display: none;
+        }
+
+        /* =============================================
+           COMPATIBILITY MODE BADGE - HIDDEN
+           ============================================= */
+        
+        .compatibility-badge {
+            display: none;
+        }
+
+        /* =============================================
+           CONNECTION QUALITY INDICATORS
+           ============================================= */
+        
+        .connection-quality {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 12px;
+            background: var(--hover-color);
+        }
+
+        .connection-quality.good {
+            color: var(--success-color);
+        }
+
+        .connection-quality.poor {
+            color: var(--warning-color);
+        }
+
+        .connection-quality.degraded {
+            color: var(--danger-color);
+        }
+
+        .connection-quality.offline {
+            color: var(--text-secondary);
+        }
+
+        /* =============================================
+           OFFLINE MODE INDICATOR
+           ============================================= */
+        
+        /* Offline: dim action-only elements but NEVER icons/menu/navigation */
+        body.offline .online-only {
+            opacity: 0.6;
+            pointer-events: none;
+            /* No filter — grayscale breaks Font Awesome icon rendering */
+        }
+
+        /* ── Bulletproof icon protection: no filter ANYWHERE on any icon ────── */
+        /* This is global — applies online AND offline so icons are always crisp */
+        i.fas, i.far, i.fab, i.fa,
+        [class^="fa-"], [class*=" fa-"],
+        .fas, .far, .fab, .fa {
+            filter: none !important;
+            -webkit-filter: none !important;
+        }
+
+        /* Offline: protect ALL icons + navigation unconditionally */
+        body.offline i,
+        body.offline i.fas,
+        body.offline i.far,
+        body.offline i.fab,
+        body.offline i.fa,
+        body.offline .menu-item,
+        body.offline .menu-icon,
+        body.offline .back-btn,
+        body.offline .back-to-menu-btn,
+        body.offline .settings-header,
+        body.offline .settings-sidebar,
+        body.offline .settings-menu,
+        body.offline .settings-search,
+        body.offline .action-btn,
+        body.offline .notification,
+        body.offline .modal-overlay,
+        body.offline .setting-button,
+        body.offline .toggle-switch,
+        body.offline .setting-dropdown,
+        body.offline .setting-input,
+        body.offline .settings-section,
+        body.offline .content-header,
+        body.offline .content-body {
+            opacity: 1 !important;
+            filter: none !important;
+            -webkit-filter: none !important;
+            pointer-events: auto !important;
+        }
+
+        /* Only truly disable server-dependent action buttons when offline */
+        body.offline .online-only {
+            opacity: 0.55;
+            pointer-events: none;
+            /* NO filter — ever */
+        }
+
+        body.offline .offline-badge {
+            display: block;
+        }
+
+        .offline-badge {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--danger-color);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 1002;
+            animation: pulse 2s infinite;
+        }
+
+        /* =============================================
+           RESPONSIVE DESIGN
+           ============================================= */
+        
+        @media (max-width: 768px) {
+            .app-container {
+                flex-direction: column;
+            }
+            
+            .settings-sidebar {
+                width: 100%;
+                height: auto;
+                max-height: 100vh;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+            
+            .settings-content {
+                width: 100%;
+                height: 100vh;
+            }
+            
+            .content-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .content-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
+            
+            .setting-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .setting-control {
+                width: 100%;
+                justify-content: flex-end;
+            }
+            
+            .setting-input, .setting-textarea, .setting-dropdown {
+                min-width: 100%;
+            }
+            
+            .mood-colors-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .layout-previews {
+                flex-direction: column;
+            }
+            
+            .wallpaper-selector {
+                grid-template-columns: 1fr;
+            }
+            
+            .shortcut-hint {
+                display: none;
+            }
+            
+            .modal-container {
+                width: 95%;
+                margin: 10px;
+            }
+            
+            /* Mobile navigation */
+            .settings-sidebar.mobile-hidden {
+                display: none;
+            }
+            
+            .settings-content.mobile-visible {
+                display: flex;
+            }
+        }
+
+        /* Small phones */
+        @media (max-width: 480px) {
+            .settings-header {
+                padding: 15px;
+            }
+            
+            /* settings-user-profile removed */
+            
+            .content-body {
+                padding: 15px;
+            }
+            
+            .settings-section {
+                padding: 15px;
+            }
+            
+            .action-btn {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+            
+            .modal-header, .modal-body, .modal-footer {
+                padding: 15px;
+            }
+        }
+
+        /* =============================================
+           PRINT STYLES
+           ============================================= */
+        
+        @media print {
+            .settings-sidebar,
+            .content-actions,
+            .modal-overlay,
+            .notification,
+            .shortcut-hint,
+            .sandbox-warning,
+            .compatibility-badge,
+            .offline-badge {
+                display: none !important;
+            }
+            
+            .settings-content {
+                width: 100%;
+            }
+            
+            .setting-item {
+                break-inside: avoid;
+            }
+            
+            .settings-section {
+                box-shadow: none;
+                border: 1px solid #ccc;
+            }
+        }
+
+        /* =============================================
+           THEME VARIABLES - PRESERVED + ENHANCED
+           ============================================= */
+        
+        :root {
+            --bg-color: #ffffff;
+            --sidebar-bg: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --text-secondary: #666666;
+            --primary-color: #0084ff;
+            --primary-dark: #0069cc;
+            --primary-color-light: rgba(0, 132, 255, 0.1);
+            --danger-color: #ff3b30;
+            --danger-dark: #d70015;
+            --success-color: #34c759;
+            --warning-color: #ff9500;
+            --border-color: #e0e0e0;
+            --hover-color: #f0f0f0;
+            
+            /* Additional theme variables */
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --overlay-color: rgba(0, 0, 0, 0.5);
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            --base-font-size: 16px;
+            --border-radius: 8px;
+            --transition-speed: 0.2s;
+        }
+
+        .dark-theme {
+            --bg-color: #1a1a1a;
+            --sidebar-bg: #252525;
+            --card-bg: #2d2d2d;
+            --text-color: #ffffff;
+            --text-secondary: #aaaaaa;
+            --border-color: #404040;
+            --hover-color: #363636;
+            --shadow-color: rgba(0, 0, 0, 0.3);
+        }
+
+        /* Dark theme specific adjustments */
+        .dark-theme .setting-input,
+        .dark-theme .setting-textarea,
+        .dark-theme .setting-dropdown {
+            background: #363636;
+            border-color: #505050;
+            color: #ffffff;
+        }
+
+        .dark-theme .modal-container {
+            background: #2d2d2d;
+        }
+
+        .dark-theme .storage-info {
+            background: #363636;
+        }
+
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+            :root {
+                --border-color: #000000;
+                --text-secondary: #000000;
+            }
+            
+            .dark-theme {
+                --border-color: #ffffff;
+                --text-secondary: #ffffff;
+            }
+        }
+
+        /* Reduced motion support */
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        /* Failsafe disabled elements styling — no filter on icon wrappers */
+        .failsafe-disabled {
+            opacity: 0.5;
+            cursor: not-allowed !important;
+            pointer-events: none;
+            /* filter: grayscale removed — breaks Font Awesome icons */
+        }
+
+        /* Ensure failsafe never degrades icons themselves */
+        .failsafe-disabled i.fas,
+        .failsafe-disabled i.far,
+        .failsafe-disabled i.fab {
+            opacity: 1;
+            filter: none;
+        }
+
+        /* Slow connection indicator */
+        body.slow-connection .setting-item,
+        body.slow-connection .menu-item {
+            transition: all 0.5s ease;
+        }
+
+        /* Compatibility mode styling */
+        .compatibility-mode .advanced-feature {
+            display: none !important;
+        }
+
+        /* Pre-built menu items - INSTANTLY VISIBLE */
+        .prebuilt-menu {
+            display: block;
+        }
+        
+        .menu-loading {
+            display: none;
+        }
+
+        /* Settings saved indicator animation */
+        @keyframes savedPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); background: var(--success-color); }
+            100% { transform: scale(1); }
+        }
+
+        .saved-animation {
+            animation: savedPulse 0.5s ease;
+        }
+
+        /* Setting update pending indicator */
+        .setting-pending {
+            opacity: 0.7;
+            position: relative;
+        }
+
+        .setting-pending::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 132, 255, 0.1);
+            border-radius: 8px;
+            pointer-events: none;
+        }
+    
+        /* =============================================
+           BACK-TO-MENU BUTTON — mobile navigation
+           ============================================= */
+
+        .back-to-menu-btn {
+            display: none; /* hidden on desktop */
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            min-width: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--hover-color);
+            color: var(--text-color);
+            cursor: pointer;
+            margin-right: 12px;
+            font-size: 16px;
+            transition: background 0.2s, transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .back-to-menu-btn:hover {
+            background: var(--primary-color);
+            color: #fff;
+            transform: scale(1.08);
+        }
+
+        .back-to-menu-btn:active {
+            transform: scale(0.93);
+        }
+
+        /* On mobile show the button and allow content-header row to flex */
+        @media (max-width: 768px) {
+            .back-to-menu-btn {
+                display: flex;
+            }
+
+            /* When sidebar is visible (user viewing menu), hide the content panel */
+            .settings-sidebar.mobile-show {
+                display: flex !important;
+                flex-direction: column;
+                width: 100%;
+                height: 100vh;
+                border-right: none;
+                border-bottom: none;
+            }
+
+            .settings-content.mobile-hide {
+                display: none !important;
+            }
+
+            /* When a section is open, hide sidebar and show content */
+            .settings-sidebar.mobile-hide {
+                display: none !important;
+            }
+
+            .settings-content.mobile-show {
+                display: flex !important;
+            }
+        }
+
+        /* =============================================
+           SECTION BREADCRUMB — shows current path
+           ============================================= */
+
+        .section-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .section-breadcrumb .crumb-sep {
+            opacity: 0.5;
+        }
+
+        .section-breadcrumb .crumb-link {
+            cursor: pointer;
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .section-breadcrumb .crumb-link:hover {
+            text-decoration: underline;
+        }
+
+        /* Slide animation for mobile panel transitions */
+        @keyframes slideInFromRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to   { transform: translateX(0);    opacity: 1; }
+        }
+
+        @keyframes slideOutToRight {
+            from { transform: translateX(0);    opacity: 1; }
+            to   { transform: translateX(100%); opacity: 0; }
+        }
+
+        .settings-content.slide-in {
+            animation: slideInFromRight 0.22s ease forwards;
+        }
+
+        /* Highlight active menu item more visibly on mobile */
+        @media (max-width: 768px) {
+            .menu-item.active {
+                background: var(--primary-color-light);
+                border-left: 3px solid var(--primary-color);
+                color: var(--primary-color);
+            }
+        }
+</style>
+
+    <!-- Exposed flags for parent inspection -->
+    <script>
+        // Parent inspection flags - set initial values
+        window.__PARENT_READY__ = false;
+        window.__MODULE_READY__ = false;
+        window.__MODULE_SESSION_ACTIVE__ = false;
+        window.__MODULE_STATE__ = 'PREINIT';
+        
+        // Allow parent to set ready flag
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'PARENT_READY') {
+                window.__PARENT_READY__ = true;
+            }
+        });
+    </script>
+
+    <link rel="stylesheet" href="/css/suppress-webgl.css">
+</head>
+<body>
+    <!--
+        ─────────────────────────────────────────────────────────────────
+        THEME FLASH PREVENTION — inline, runs before any CSS loads
+        Reads app_settings_global (AppSettings key) or knecta_settings_cache
+        and applies data-theme + CSS variables immediately.
+        ─────────────────────────────────────────────────────────────────
+    -->
+    <script>
+    (function() {
+        function _readTheme() {
+            try {
+                var raw = localStorage.getItem('app_settings_global');
+                if (raw) {
+                    var p = JSON.parse(raw);
+                    if (p && p.data && p.data.appearance && p.data.appearance.theme) return p.data.appearance.theme;
+                }
+            } catch (_) {}
+            try {
+                var raw2 = localStorage.getItem('knecta_settings_cache');
+                if (raw2) {
+                    var p2 = JSON.parse(raw2);
+                    var d = p2.data || p2;
+                    if (d && d.appearance && d.appearance.theme) return d.appearance.theme;
+                    if (d && d.theme) return d.theme;
+                }
+            } catch (_) {}
+            try {
+                var raw3 = localStorage.getItem('moodchat_settings_default');
+                if (raw3) {
+                    var p3 = JSON.parse(raw3);
+                    if (p3 && p3.appearance && p3.appearance.theme) return p3.appearance.theme;
+                }
+            } catch (_) {}
+            return null;
+        }
+        var theme = _readTheme();
+        // FIX (theme flash audit): 'auto' used to be written straight to
+        // data-theme with no resolved light/dark variables, so the page
+        // painted once as unstyled "auto", then again once settings-core.js's
+        // _applyTheme() resolved prefers-color-scheme and dispatched
+        // themeApplied — that double-paint was the visible flash between
+        // auto/dark/light. Resolve 'auto' here too, the same way
+        // _applyTheme() does, so the very first paint already matches.
+        var resolvedTheme = theme;
+        if (!resolvedTheme || resolvedTheme === 'auto') {
+            try {
+                resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            } catch (_) {
+                resolvedTheme = 'light';
+            }
+        }
+        var root = document.documentElement;
+        root.setAttribute('data-theme', resolvedTheme);
+        root.classList.add('theme-' + resolvedTheme);
+        if (resolvedTheme === 'dark') {
+            root.style.setProperty('--bg-color', '#1a1a1a');
+            root.style.setProperty('--text-color', '#ffffff');
+            root.style.setProperty('--text-primary', '#ffffff');
+            root.style.setProperty('--sidebar-bg', '#252525');
+            root.style.setProperty('--card-bg', '#2d2d2d');
+            root.style.setProperty('--border-color', '#404040');
+            root.style.setProperty('--hover-color', '#363636');
+        }
+        // Also read accent color
+        try {
+            var accentRaw = localStorage.getItem('app_settings_global');
+            if (accentRaw) {
+                var accentP = JSON.parse(accentRaw);
+                var accent = accentP && accentP.data && accentP.data.appearance && accentP.data.appearance.accentColor;
+                if (accent) document.documentElement.style.setProperty('--primary-color', accent);
+            }
+        } catch (_) {}
+        // Font size
+        try {
+            var fsRaw = localStorage.getItem('app_settings_global');
+            if (fsRaw) {
+                var fsP = JSON.parse(fsRaw);
+                var fs = fsP && fsP.data && fsP.data.appearance && fsP.data.appearance.fontSize;
+                if (fs) {
+                    document.documentElement.style.setProperty('--base-font-size', fs + 'px');
+                    document.documentElement.style.fontSize = fs + 'px';
+                }
+            }
+        } catch (_) {}
+    })();
+    </script>
+
+    <!-- Offline Mode Badge - Only shown when offline -->
+    <div class="offline-badge" id="offlineBadge">
+        <i class="fas fa-wifi-slash"></i> Offline
+    </div>
+
+    <!-- Keyboard shortcut hint - Hidden by default, appears on hover -->
+    <div class="shortcut-hint">
+        <kbd>Ctrl</kbd> + <kbd>S</kbd> save • <kbd>Esc</kbd> close • <kbd>Ctrl</kbd> + <kbd>F</kbd> search
+    </div>
+
+    <!-- =============================================
+         MODALS - PRESERVED WITH ENHANCEMENTS
+         ============================================= -->
+    
+    <!-- Change Photo Modal -->
+    <div class="modal-overlay" id="changePhotoModal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Change Profile Photo</h3>
+                <button class="modal-close" id="closePhotoModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="photo-upload-container">
+                    <div class="photo-preview" id="photoPreview">
+                        <div class="photo-change-overlay">
+                            <i class="fas fa-camera"></i>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <p style="margin-bottom: 10px; color: var(--text-secondary); font-size: 14px;">
+                            Choose a new profile photo
+                        </p>
+                        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                            <button class="action-btn secondary" id="takePhotoBtn">
+                                <i class="fas fa-camera"></i> Take Photo
+                            </button>
+                            <button class="action-btn secondary" id="choosePhotoBtn">
+                                <i class="fas fa-images"></i> Choose from Gallery
+                            </button>
+                        </div>
+                    </div>
+                    <div style="border-top: 1px solid var(--border-color); padding-top: 20px;">
+                        <button class="action-btn danger" id="removePhotoBtn" style="width: 100%;">
+                            <i class="fas fa-trash"></i> Remove Current Photo
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn secondary" id="cancelPhotoBtn">Cancel</button>
+                <button class="action-btn primary" id="savePhotoBtn">Save Photo</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Cover Photo Modal -->
+    <div class="modal-overlay" id="changeCoverPhotoModal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Change Cover Photo</h3>
+                <button class="modal-close" id="closeCoverPhotoModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="photo-upload-container">
+                    <div class="photo-preview" id="coverPhotoPreview" style="width: 100%; height: 140px; border-radius: 10px;">
+                        <div class="photo-change-overlay">
+                            <i class="fas fa-camera"></i>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <p style="margin-bottom: 10px; color: var(--text-secondary); font-size: 14px;">
+                            Choose a new cover photo
+                        </p>
+                        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                            <button class="action-btn secondary" id="chooseCoverPhotoBtn">
+                                <i class="fas fa-images"></i> Choose from Gallery
+                            </button>
+                        </div>
+                    </div>
+                    <div style="border-top: 1px solid var(--border-color); padding-top: 20px;">
+                        <button class="action-btn danger" id="removeCoverPhotoBtn" style="width: 100%;">
+                            <i class="fas fa-trash"></i> Remove Current Cover Photo
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn secondary" id="cancelCoverPhotoBtn">Cancel</button>
+                <button class="action-btn primary" id="saveCoverPhotoBtn">Save Cover Photo</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Change Password Modal -->
+    <div class="modal-overlay" id="changePasswordModal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Change Password</h3>
+                <button class="modal-close" id="closePasswordModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
+                            Current Password
+                        </label>
+                        <input type="password" class="setting-input" id="currentPassword" style="width: 100%;" 
+                               placeholder="Enter current password">
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
+                            New Password
+                        </label>
+                        <input type="password" class="setting-input" id="newPassword" style="width: 100%;" 
+                               placeholder="Enter new password">
+                        <div class="error-message" id="passwordError"></div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 14px; font-weight: 500;">
+                            Confirm New Password
+                        </label>
+                        <input type="password" class="setting-input" id="confirmPassword" style="width: 100%;" 
+                               placeholder="Confirm new password">
+                    </div>
+                    <div style="background-color: rgba(0, 132, 255, 0.1); padding: 12px; border-radius: 6px; margin-top: 20px;">
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 5px;">
+                            <i class="fas fa-info-circle"></i> Password Requirements:
+                        </p>
+                        <ul style="font-size: 12px; color: var(--text-secondary); padding-left: 20px; margin: 0;">
+                            <li>At least 8 characters long</li>
+                            <li>Include uppercase and lowercase letters</li>
+                            <li>Include at least one number</li>
+                            <li>Include at least one special character</li>
+                        </ul>
+                    </div>
+                    
+                    <!-- Password strength meter -->
+                    <div id="passwordStrength" style="margin-top: 15px; display: none;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <span style="font-size: 12px;">Password strength:</span>
+                            <span id="strengthText" style="font-size: 12px; font-weight: 500;">Weak</span>
+                        </div>
+                        <div style="height: 4px; background: var(--border-color); border-radius: 2px; overflow: hidden;">
+                            <div id="strengthBar" style="width: 0%; height: 100%; background: var(--danger-color); transition: all 0.3s;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn secondary" id="cancelPasswordBtn">Cancel</button>
+                <button class="action-btn primary" id="savePasswordBtn">Change Password</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Active Sessions Modal -->
+    <div class="modal-overlay" id="sessionsModal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Active Sessions</h3>
+                <button class="modal-close" id="closeSessionsModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="sessions-list" id="sessionsList">
+                    <!-- Sessions will be loaded here -->
+                    <div style="text-align: center; padding: 20px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
+                        <p style="margin-top: 10px; color: var(--text-secondary);">Loading sessions...</p>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 20px;">
+                    <button class="action-btn danger" id="terminateAllSessionsBtn" style="width: 100%;">
+                        <i class="fas fa-sign-out-alt"></i> Terminate All Other Sessions
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn secondary" id="closeSessionsBtn">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Blocked Users Modal -->
+    <div class="modal-overlay" id="blockedUsersModal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Blocked Users</h3>
+                <button class="modal-close" id="closeBlockedModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="blocked-users-list" id="blockedUsersList">
+                    <!-- Blocked users will be loaded here -->
+                    <div style="text-align: center; padding: 20px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--primary-color);"></i>
+                        <p style="margin-top: 10px; color: var(--text-secondary);">Loading blocked users...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn secondary" id="closeBlockedBtn">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Confirmation Modal -->
+    <div class="modal-overlay" id="confirmationModal">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 id="confirmationTitle">Confirm Action</h3>
+                <button class="modal-close" id="closeConfirmationModal">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmationMessage">Are you sure you want to perform this action?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn secondary" id="cancelConfirmationBtn">Cancel</button>
+                <button class="action-btn danger" id="confirmActionBtn">Confirm</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Notification -->
+    <div class="notification" id="notification">
+        <i class="fas fa-check-circle"></i>
+        <span id="notificationText">Operation completed successfully</span>
+    </div>
+    
+    <!-- =============================================
+         MAIN APP CONTAINER
+         ============================================= -->
+    
+    <div class="app-container">
+        <!-- Settings Sidebar - ALWAYS VISIBLE INSTANTLY -->
+        <div class="settings-sidebar" id="settingsSidebar">
+            <div class="settings-header">
+                <button class="back-btn" id="backToAppBtn">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <div class="settings-title">Settings</div>
+            </div>
+            
+            <!-- user profile section removed -->
+            
+            <div class="settings-search">
+                <div class="search-container">
+                    <input type="text" class="search-input" id="settingsSearch" placeholder="Search settings...">
+                    <i class="fas fa-search search-icon"></i>
+                    <i class="fas fa-times search-clear" id="searchClear"></i>
+                </div>
+            </div>
+            
+            <!-- Settings Menu - PRE-BUILT HTML FOR INSTANT DISPLAY -->
+            <div class="settings-menu" id="settingsMenu">
+                <!-- Profile -->
+                <a href="#" class="menu-item active" data-section="profile" id="menu-profile">
+                    <div class="menu-icon"><i class="fas fa-user"></i></div>
+                    <div class="menu-text">Profile</div>
+                </a>
+                
+                <!-- Security -->
+                <a href="#" class="menu-item" data-section="security" id="menu-security">
+                    <div class="menu-icon"><i class="fas fa-shield-alt"></i></div>
+                    <div class="menu-text">Security</div>
+                </a>
+                
+                <!-- Privacy -->
+                <a href="#" class="menu-item" data-section="privacy" id="menu-privacy">
+                    <div class="menu-icon"><i class="fas fa-lock"></i></div>
+                    <div class="menu-text">Privacy</div>
+                </a>
+                
+                <!-- Chat -->
+                <a href="#" class="menu-item" data-section="chat" id="menu-chat">
+                    <div class="menu-icon"><i class="fas fa-comments"></i></div>
+                    <div class="menu-text">Chat</div>
+                </a>
+                
+                <!-- Friends -->
+                <a href="#" class="menu-item" data-section="friends" id="menu-friends">
+                    <div class="menu-icon"><i class="fas fa-user-friends"></i></div>
+                    <div class="menu-text">Friends</div>
+                </a>
+                
+                <!-- Groups -->
+                <a href="#" class="menu-item" data-section="groups" id="menu-groups">
+                    <div class="menu-icon"><i class="fas fa-users"></i></div>
+                    <div class="menu-text">Groups</div>
+                </a>
+                
+                <!-- Calls -->
+                <a href="#" class="menu-item" data-section="calls" id="menu-calls">
+                    <div class="menu-icon"><i class="fas fa-phone"></i></div>
+                    <div class="menu-text">Calls</div>
+                </a>
+                
+                <!-- Status -->
+                <a href="#" class="menu-item" data-section="status" id="menu-status">
+                    <div class="menu-icon"><i class="fas fa-circle"></i></div>
+                    <div class="menu-text">Status</div>
+                </a>
+                
+                <!-- Notifications -->
+                <a href="#" class="menu-item" data-section="notifications" id="menu-notifications">
+                    <div class="menu-icon"><i class="fas fa-bell"></i></div>
+                    <div class="menu-text">Notifications</div>
+                </a>
+                
+                <!-- Appearance -->
+                <a href="#" class="menu-item" data-section="appearance" id="menu-appearance">
+                    <div class="menu-icon"><i class="fas fa-palette"></i></div>
+                    <div class="menu-text">Appearance</div>
+                </a>
+                
+                <!-- Storage -->
+                <a href="#" class="menu-item" data-section="storage" id="menu-storage">
+                    <div class="menu-icon"><i class="fas fa-database"></i></div>
+                    <div class="menu-text">Storage</div>
+                </a>
+                
+                <!-- Mood Settings -->
+                <a href="#" class="menu-item" data-section="mood" id="menu-mood">
+                    <div class="menu-icon"><i class="fas fa-smile"></i></div>
+                    <div class="menu-text">Mood Settings</div>
+                    <div class="menu-badge">NEW</div>
+                </a>
+                
+                <!-- Advanced -->
+                <a href="#" class="menu-item" data-section="advanced" id="menu-advanced">
+                    <div class="menu-icon"><i class="fas fa-cogs"></i></div>
+                    <div class="menu-text">Advanced</div>
+                </a>
+                
+                <!-- Backup -->
+                <a href="#" class="menu-item" data-section="backup" id="menu-backup">
+                    <div class="menu-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+                    <div class="menu-text">Backup & Restore</div>
+                </a>
+                
+                <!-- Danger Zone -->
+                <a href="#" class="menu-item danger" data-section="danger" id="menu-danger">
+                    <div class="menu-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                    <div class="menu-text">Danger Zone</div>
+                    <div class="menu-badge danger">!</div>
+                </a>
+                
+                <!-- Status indicator removed — online/offline shown in user profile above -->
+            </div>
+            
+            <!-- Version info and connection mode - Minimal, no console noise -->
+            <div style="padding: 15px 20px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-secondary); text-align: center;">
+                <span>Knecta Chat</span>
+                <span style="margin: 0 5px;">•</span>
+                <span id="connectionMode">Ready</span>
+                <div id="environmentBadge" style="margin-top: 5px; font-size: 10px; opacity: 0.7;"></div>
+            </div>
+        </div>
+        
+        <!-- Settings Content Area -->
+        <div class="settings-content" id="settingsContent">
+            <div class="content-header">
+                <!-- Mobile back-to-sidebar button — hidden on desktop, shown on mobile -->
+                <button class="back-to-menu-btn" id="backToMenuBtn" title="Back to Settings Menu">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <div style="flex:1; min-width:0;">
+                    <div class="content-title" id="contentTitle">Settings</div>
+                    <div class="content-subtitle" id="contentSubtitle">Manage your preferences</div>
+                </div>
+                <div class="content-actions">
+                    <button class="action-btn secondary" id="resetSectionBtn">
+                        <i class="fas fa-undo"></i> Reset
+                    </button>
+                    <button class="action-btn primary" id="saveSectionBtn">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                </div>
+            </div>
+            
+            <div class="content-body" id="settingsContentBody">
+                <!-- Profile section will be loaded by default - instant placeholder -->
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-user section-icon"></i> Profile Information</h3>
+                    </div>
+                    <div class="section-body">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Profile Photo</div>
+                            </div>
+                            <div class="setting-control">
+                                <button class="setting-button" id="changePhotoBtn">
+                                    <i class="fas fa-camera"></i> Change
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Display Name</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input" id="displayNameInput" 
+                                       value="User" placeholder="Your name">
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Username</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="text" class="setting-input" id="usernameInput" 
+                                       value="@user" placeholder="@username">
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Bio</div>
+                            </div>
+                            <div class="setting-control">
+                                <textarea class="setting-textarea" id="bioInput" 
+                                          placeholder="About you..."></textarea>
+                                <div class="input-hint"><span id="bioCounter">0</span>/150</div>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Email</div>
+                            </div>
+                            <div class="setting-control">
+                                <input type="email" class="setting-input" id="emailInput" 
+                                       value="user@example.com" placeholder="email@example.com">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-eye section-icon"></i> Profile Visibility</h3>
+                    </div>
+                    <div class="section-body">
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Profile Visibility</div>
+                            </div>
+                            <div class="setting-control">
+                                <select class="setting-dropdown" id="profileVisibilitySelect">
+                                    <option value="everyone" selected>Everyone</option>
+                                    <option value="friendsOnly">Friends Only</option>
+                                    <option value="nobody">Nobody</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <div class="setting-label">Last Seen</div>
+                            </div>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="lastSeenToggle" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Color Picker (hidden) -->
+    <div id="colorPickerContainer" style="display: none;"></div>
+    
+    <!-- Fallback color picker (hidden) -->
+    <div id="fallbackColorPickerContainer" style="display: none;"></div>
+
+    <!--
+        ═══════════════════════════════════════════════════════════════════
+        SCRIPT LOAD ORDER — DO NOT CHANGE
+        ═══════════════════════════════════════════════════════════════════
+        1. AppSettings       — single source of truth, boots from localStorage
+        2. Propagation       — subscribes to AppSettings, applies DOM effects
+        3. Module subs       — per-module apply functions + auto-subscriptions
+        4. Local store layer — localstore.settings + schema validator + sync
+        5. Core patch        — ties localstore into the pipeline
+        6. settings-core     — SettingsState, lifecycle, backend sync
+        7. settings-ui       — UI rendering, section loading
+        8. UI patch          — offline indicator, sync badge
+        ═══════════════════════════════════════════════════════════════════
+    -->
+
+    <!-- ① Single source of truth — must come first -->
+    <script src="/js/AppSettings.js"></script>
+
+    <!-- ② Global propagation — all modules react to changes -->
+    <script src="/js/settings-global-propagation.js"></script>
+
+    <!-- ③ Per-module apply functions + auto-subscription bootstrapper -->
+    <script src="/js/settings-module-subscriptions.js"></script>
+
+    <!-- ④ Local-first storage layer -->
+    <script src="/js/localstore.settings.js"></script>
+    <script src="/js/settingsschema.validator.js"></script>
+    <script src="/js/settingsSync.engine.js"></script>
+
+    <!-- ⑤ Patch: ties LocalStoreSettings into SettingsState + AppSettings -->
+    <!-- Intentionally NOT deferred: this file is designed to run before
+         settings-core.js exists — it listens for the 'settingsLoaded' event
+         and polls window.__SETTINGS_STATE_OBJ__ rather than assuming
+         SettingsState is available synchronously. See file header. -->
+    <script src="/js/settings-core.local-first.patch.js"></script>
+
+    <!-- ⑥ Core module (SettingsState, lifecycle, backend sync, UI sections) -->
+    <script type="module" src="settings-core.js"></script>
+
+    <!-- ⑦ UI rendering layer -->
+    <script type="module" src="settings-ui.js"></script>
+
+    <!-- ⑧ UI additions — offline indicator, sync badge, sync toggle row -->
+    <!-- defer required: settings-ui.js above is type="module" (auto-deferred),
+         so this patch must also defer or it captures window.__updateSetting
+         before settings-ui.js has defined it, and then gets overwritten -->
+    <script src="/js/settings-ui.local-first.patch.js" defer></script>
+
+    <!-- =============================================
+         INLINE ERROR BOUNDARY AND INITIALIZATION - SILENT
+         ============================================= -->
+    
+    <script>
+        // =============================================
+        // GLOBAL ERROR HANDLING - SILENT IN PRODUCTION
+        // =============================================
+        
+        (function() {
+            // Store original console methods
+            const originalConsole = {
+                error: console.error,
+                warn: console.warn,
+                log: console.log
+            };
+            
+            // Error queue for diagnostics - silent unless debug mode
+            window.__ERROR_QUEUE__ = [];
+            const isDebug = window.location.search.includes('debug=true');
+            
+            // Override console to capture errors silently
+            console.error = function() {
+                window.__ERROR_QUEUE__.push({
+                    type: 'error',
+                    message: Array.from(arguments).join(' '),
+                    timestamp: Date.now()
+                });
+                if (isDebug) {
+                    originalConsole.error.apply(console, arguments);
+                }
+            };
+            
+            console.warn = function() {
+                window.__ERROR_QUEUE__.push({
+                    type: 'warn',
+                    message: Array.from(arguments).join(' '),
+                    timestamp: Date.now()
+                });
+                if (isDebug) {
+                    originalConsole.warn.apply(console, arguments);
+                }
+            };
+            
+            // Global error handler - silent recovery
+            window.addEventListener('error', function(event) {
+                if (isDebug) {
+                    console.error('Global error caught:', event.error);
+                }
+                
+                const errorData = {
+                    message: event.message,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    error: event.error ? event.error.stack : null,
+                    timestamp: Date.now()
+                };
+                
+                window.__ERROR_QUEUE__.push({
+                    type: 'global',
+                    ...errorData
+                });
+                
+                return false;
+            });
+            
+            window.addEventListener('unhandledrejection', function(event) {
+                if (isDebug) {
+                    console.error('Unhandled promise rejection:', event.reason);
+                }
+                
+                window.__ERROR_QUEUE__.push({
+                    type: 'unhandledrejection',
+                    reason: event.reason ? event.reason.toString() : 'Unknown',
+                    stack: event.reason ? event.reason.stack : null,
+                    timestamp: Date.now()
+                });
+            });
+            
+            // =============================================
+            // DOM CONTENT LOADED HANDLER - SILENT
+            // =============================================
+            
+            document.addEventListener('DOMContentLoaded', function() {
+                // =============================================
+                // UI ELEMENT SETUP - SILENT
+                // =============================================
+                
+                // Search clear button
+                const searchInput = document.getElementById('settingsSearch');
+                const searchClear = document.getElementById('searchClear');
+                
+                if (searchInput && searchClear) {
+                    searchClear.addEventListener('click', function() {
+                        searchInput.value = '';
+                        searchInput.dispatchEvent(new Event('input'));
+                        searchInput.focus();
+                    });
+                }
+                
+                // Bio counter
+                const bioInput = document.getElementById('bioInput');
+                const bioCounter = document.getElementById('bioCounter');
+                if (bioInput && bioCounter) {
+                    const updateBioCounter = () => {
+                        const length = bioInput.value.length;
+                        bioCounter.textContent = length;
+                        if (length > 150) {
+                            bioCounter.style.color = 'var(--danger-color)';
+                        } else {
+                            bioCounter.style.color = 'var(--primary-color)';
+                        }
+                    };
+                    bioInput.addEventListener('input', updateBioCounter);
+                    updateBioCounter();
+                }
+                
+                // Update connection mode based on URL - silent
+                const connectionMode = document.getElementById('connectionMode');
+                if (connectionMode) {
+                    if (window.self !== window.top) {
+                        connectionMode.textContent = 'Embedded';
+                    } else {
+                        connectionMode.textContent = 'Standalone';
+                    }
+                }
+                
+                // Detect environment - silent
+                const environmentBadge = document.getElementById('environmentBadge');
+                if (environmentBadge) {
+                    const hostname = window.location.hostname;
+                    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                        environmentBadge.textContent = 'Dev';
+                    } else if (hostname.includes('onrender.com')) {
+                        environmentBadge.textContent = 'Render';
+                    } else if (window.location.protocol === 'https:') {
+                        environmentBadge.textContent = 'Secure';
+                    }
+                }
+                
+                // =============================================
+                // PASSWORD STRENGTH METER - SILENT
+                // =============================================
+                
+                const newPassword = document.getElementById('newPassword');
+                const strengthDiv = document.getElementById('passwordStrength');
+                const strengthBar = document.getElementById('strengthBar');
+                const strengthText = document.getElementById('strengthText');
+                
+                if (newPassword && strengthDiv && strengthBar && strengthText) {
+                    newPassword.addEventListener('input', function() {
+                        const password = this.value;
+                        if (password.length === 0) {
+                            strengthDiv.style.display = 'none';
+                            return;
+                        }
+                        
+                        strengthDiv.style.display = 'block';
+                        
+                        let strength = 0;
+                        
+                        // Length check
+                        if (password.length >= 8) strength += 25;
+                        
+                        // Uppercase check
+                        if (/[A-Z]/.test(password)) strength += 25;
+                        
+                        // Lowercase check
+                        if (/[a-z]/.test(password)) strength += 25;
+                        
+                        // Number check
+                        if (/[0-9]/.test(password)) strength += 15;
+                        
+                        // Special character check
+                        if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) strength += 10;
+                        
+                        strengthBar.style.width = strength + '%';
+                        
+                        if (strength < 30) {
+                            strengthBar.style.background = 'var(--danger-color)';
+                            strengthText.textContent = 'Weak';
+                            strengthText.style.color = 'var(--danger-color)';
+                        } else if (strength < 60) {
+                            strengthBar.style.background = 'var(--warning-color)';
+                            strengthText.textContent = 'Medium';
+                            strengthText.style.color = 'var(--warning-color)';
+                        } else if (strength < 85) {
+                            strengthBar.style.background = 'var(--success-color)';
+                            strengthText.textContent = 'Good';
+                            strengthText.style.color = 'var(--success-color)';
+                        } else {
+                            strengthBar.style.background = 'var(--success-color)';
+                            strengthText.textContent = 'Strong';
+                            strengthText.style.color = 'var(--success-color)';
+                        }
+                    });
+                }
+                
+                // =============================================
+                // ONLINE/OFFLINE HANDLING - SILENT
+                // =============================================
+                
+                const offlineBadge = document.getElementById('offlineBadge');
+                
+                window.addEventListener('online', function() {
+                    document.body.classList.remove('offline');
+                    if (offlineBadge) offlineBadge.style.display = 'none';
+                });
+                
+                window.addEventListener('offline', function() {
+                    document.body.classList.add('offline');
+                    if (offlineBadge) offlineBadge.style.display = 'block';
+                });
+                
+                // Initial online check
+                if (!navigator.onLine) {
+                    document.body.classList.add('offline');
+                    if (offlineBadge) offlineBadge.style.display = 'block';
+                }
+                
+                // =============================================
+                // EXPOSE DEBUG INTERFACE - SILENT
+                // =============================================
+                
+                window.__HTML_DEBUG__ = {
+                    getErrors: () => window.__ERROR_QUEUE__,
+                    clearErrors: () => { window.__ERROR_QUEUE__ = []; },
+                    getEnvironment: () => ({
+                        hostname: window.location.hostname,
+                        protocol: window.location.protocol,
+                        inIframe: window.self !== window.top,
+                        online: navigator.onLine
+                    })
+                };
+            });
+            
+            // ═══════════════════════════════════════════════════════════════
+            // APPSETTINGS LIVE BINDINGS
+            // Connect the static HTML inputs (profile section placeholder) to
+            // AppSettings so they update the store without waiting for JS modules.
+            // ═══════════════════════════════════════════════════════════════════
+
+            function _bindInputToAppSettings(id, settingPath, eventType) {
+                eventType = eventType || 'change';
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.addEventListener(eventType, function() {
+                    var val = el.type === 'checkbox' ? el.checked : el.value;
+                    if (window.AppSettings) window.AppSettings.set(settingPath, val);
+                    // Also fire __updateSetting for backwards compat with settings-core
+                    if (window.__updateSetting) {
+                        var parts = settingPath.split('.');
+                        var section = parts[0];
+                        var key = parts.slice(1).join('.');
+                        window.__updateSetting(section, key, val);
+                    }
+                });
+            }
+
+            // Profile section inputs
+            _bindInputToAppSettings('displayNameInput',        'account.displayName',        'input');
+            _bindInputToAppSettings('usernameInput',           'account.username',           'input');
+            _bindInputToAppSettings('bioInput',                'account.bio',                'input');
+            _bindInputToAppSettings('emailInput',              'account.email',              'input');
+            _bindInputToAppSettings('profileVisibilitySelect', 'privacy.profileVisibility',  'change');
+            _bindInputToAppSettings('lastSeenToggle',          'privacy.lastSeen',           'change');
+
+            // Sync badge — listen to AppSettings state changes
+            window.addEventListener('appSettingsChanged', function(e) {
+                var d = e.detail;
+                if (!d || !d.path) return;
+                // Visual "saved" pulse on the save button
+                var saveBtn = document.getElementById('saveSectionBtn');
+                if (saveBtn) {
+                    saveBtn.classList.add('saved-animation');
+                    setTimeout(function() { saveBtn.classList.remove('saved-animation'); }, 600);
+                }
+            });
+
+            // Pre-populate the static profile inputs from AppSettings once it's ready
+            function _populateFromAppSettings() {
+                if (!window.AppSettings) return;
+                var s = window.AppSettings.getAll();
+                var el;
+
+                el = document.getElementById('displayNameInput');
+                if (el && s.account && s.account.displayName) el.value = s.account.displayName;
+
+                el = document.getElementById('usernameInput');
+                if (el && s.account && s.account.username) el.value = s.account.username;
+
+                el = document.getElementById('bioInput');
+                if (el && s.account && s.account.bio) {
+                    el.value = s.account.bio;
+                    // Update counter
+                    var counter = document.getElementById('bioCounter');
+                    if (counter) counter.textContent = s.account.bio.length;
+                }
+
+                el = document.getElementById('emailInput');
+                if (el && s.account && s.account.email) el.value = s.account.email;
+
+                el = document.getElementById('profileVisibilitySelect');
+                if (el && s.privacy && s.privacy.profileVisibility) el.value = s.privacy.profileVisibility;
+
+                el = document.getElementById('lastSeenToggle');
+                if (el && s.privacy) el.checked = s.privacy.lastSeen !== false;
+
+            }
+
+            if (window.AppSettings) {
+                _populateFromAppSettings();
+                window.AppSettings.subscribe(function() { _populateFromAppSettings(); });
+            } else {
+                window.addEventListener('appSettingsReady', _populateFromAppSettings);
+            }
+
+            // ═══════════════════════════════════════════════════════════════
+            // END APPSETTINGS LIVE BINDINGS
+            // ═══════════════════════════════════════════════════════════════
+
+            // =============================================
+            // PERFORMANCE MARKERS - SILENT
+            // =============================================
+            
+            performance.mark('html-loaded');
+            
+            window.addEventListener('load', function() {
+                performance.mark('window-loaded');
+                if (window.location.search.includes('debug=true')) {
+                    performance.measure('load-time', 'html-loaded', 'window-loaded');
+                    console.log('[HTML] Load time:', performance.getEntriesByName('load-time')[0].duration.toFixed(2) + 'ms');
+                }
+            });
+            
+        })();
+    </script>
+
+    <!-- =============================================
+         SETTINGS NAVIGATION  v2 — back button + mobile panel switching
+         ─────────────────────────────────────────────────────────────────
+         BEHAVIOUR SUMMARY
+         Desktop  : sidebar + content always side-by-side.
+                    Clicking a menu item loads that section (no panel switch).
+                    Back arrow (sidebar) → exits settings.
+         Mobile   : starts with ONLY the sidebar visible.
+                    Tapping a menu item → sidebar slides away, content slides in.
+                    ← in content header  → back to sidebar menu (or prev section).
+                    Back arrow (sidebar, top-left) → exits settings to app.
+                    Android/browser back button → same as ← in content header.
+         ============================================= -->
+    <script>
+    (function () {
+        'use strict';
+
+        /* ── State ─────────────────────────────────────────────────────── */
+        var _currentSection  = null;   // active section name
+        var _previousSection = null;   // one-level back stack
+        var _isMobile        = window.innerWidth <= 768;
+        var _domReady        = false;
+
+        /* ── DOM refs (set on DOMContentLoaded) ────────────────────────── */
+        var $sidebar, $content, $btnBackMenu, $btnBackApp,
+            $title, $subtitle, $menu;
+
+        function _el(id) { return document.getElementById(id); }
+
+        /* ── Resize: recompute mobile flag + restore desktop layout ─────── */
+        window.addEventListener('resize', function () {
+            var wasMobile = _isMobile;
+            _isMobile = window.innerWidth <= 768;
+            if (wasMobile && !_isMobile) {
+                /* switched to desktop → always show both panels */
+                _showBothPanels();
+            }
+            if (!wasMobile && _isMobile) {
+                /* switched to mobile → show sidebar if no section active */
+                if (!_currentSection) _showSidebarOnly();
+            }
+        });
+
+        /* ── Panel visibility ───────────────────────────────────────────── */
+        function _showSidebarOnly() {
+            if (!$sidebar || !$content) return;
+            $sidebar.style.display = '';
+            $sidebar.classList.remove('mobile-hide');
+            $content.style.display = 'none';
+            $content.classList.remove('slide-in');
+            if ($btnBackMenu) $btnBackMenu.style.display = 'none';
+        }
+
+        function _showContentOnly(animate) {
+            if (!$sidebar || !$content) return;
+            $sidebar.style.display = 'none';
+            $content.style.display = '';
+            if (animate) {
+                $content.classList.remove('slide-in');
+                void $content.offsetWidth;   /* force reflow */
+                $content.classList.add('slide-in');
+            }
+            if ($btnBackMenu) $btnBackMenu.style.display = 'flex';
+        }
+
+        function _showBothPanels() {
+            if (!$sidebar || !$content) return;
+            $sidebar.style.display = '';
+            $content.style.display = '';
+            $sidebar.classList.remove('mobile-hide');
+            $content.classList.remove('slide-in');
+            if ($btnBackMenu) $btnBackMenu.style.display = 'none';
+        }
+
+        /* ── Header title/subtitle map ──────────────────────────────────── */
+        var META = {
+            profile:       ['Profile',          'Manage your profile information'],
+            security:      ['Security',         'Password and account security'],
+            privacy:       ['Privacy',          'Control who can see your info'],
+            chat:          ['Chat',             'Chat appearance and behaviour'],
+            friends:       ['Friends',          'Friends & discovery settings'],
+            groups:        ['Groups',           'Group chat preferences'],
+            calls:         ['Calls',            'Call settings and permissions'],
+            status:        ['Status',           'Status visibility and updates'],
+            notifications: ['Notifications',    'Alerts and notification behaviour'],
+            appearance:    ['Appearance',       'Theme, colours and display'],
+            storage:       ['Storage',          'Manage your local data'],
+            mood:          ['Mood Settings',    'Mood sharing and colours'],
+            advanced:      ['Advanced',         'Developer and connection options'],
+            backup:        ['Backup & Restore', 'Export and import your settings'],
+            danger:        ['Danger Zone',      'Irreversible account actions'],
+        };
+
+        function _updateHeader(section) {
+            var m = META[section] || ['Settings', 'Manage your preferences'];
+            if ($title)    $title.textContent    = m[0];
+            if ($subtitle) $subtitle.textContent = m[1];
+        }
+
+        /* ── Highlight active menu item ─────────────────────────────────── */
+        function _highlightMenu(section) {
+            if (!$menu) return;
+            $menu.querySelectorAll('.menu-item').forEach(function (item) {
+                if (item.getAttribute('data-section') === section) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+
+        /* ── Navigate to a section ──────────────────────────────────────── */
+        function navigateTo(section, opts) {
+            opts = opts || {};
+            /* push previous to back-stack unless suppressed */
+            if (!opts.replace && _currentSection && _currentSection !== section) {
+                _previousSection = _currentSection;
+            }
+
+            _currentSection = section;
+            _highlightMenu(section);
+            _updateHeader(section);
+
+            if (_isMobile) {
+                _showContentOnly(opts.animate !== false);
+            }
+
+            /* Tell settings-core / settings-ui to render the section */
+            try {
+                window.dispatchEvent(new CustomEvent('settingsNavigate', {
+                    detail: { section: section }
+                }));
+            } catch (_) {}
+        }
+
+        /* ── Back navigation ────────────────────────────────────────────── */
+        function goBack() {
+            if (_isMobile) {
+                if (_previousSection) {
+                    /* go to previous section */
+                    var prev = _previousSection;
+                    _previousSection = null;
+                    navigateTo(prev, { replace: true, animate: true });
+                } else if (_currentSection) {
+                    /* inside a section with no deeper back-stack → return to the menu */
+                    _currentSection  = null;
+                    _previousSection = null;
+                    _showSidebarOnly();
+                    /* reset header */
+                    if ($title)    $title.textContent    = 'Settings';
+                    if ($subtitle) $subtitle.textContent = 'Manage your preferences';
+                    /* clear active highlight */
+                    if ($menu) $menu.querySelectorAll('.menu-item').forEach(function(i){ i.classList.remove('active'); });
+                } else {
+                    /* FIX: already at the top-level settings menu (no section
+                       open) — previously this branch just re-ran
+                       _showSidebarOnly(), a no-op, so pressing back while at
+                       the Settings menu on mobile did nothing and the user
+                       appeared stuck inside Settings with no way out. Now it
+                       actually exits, same as the desktop path below. */
+                    _exitSettings();
+                }
+            } else {
+                /* Desktop back = exit settings */
+                _exitSettings();
+            }
+        }
+
+        /* ── Exit settings entirely ─────────────────────────────────────── */
+        function _exitSettings() {
+            /* Preserve the unsaved-changes guard that used to live in
+               settings-ui.js's setupAndroidBackButton(). */
+            try {
+                var dbg = window.__UI_DEBUG__ && typeof window.__UI_DEBUG__.getState === 'function'
+                    ? window.__UI_DEBUG__.getState() : null;
+                if (dbg && dbg.unsavedChanges && !window.confirm('You have unsaved changes. Leave anyway?')) {
+                    return;
+                }
+            } catch (_) {}
+
+            if (window.parent && window.parent !== window) {
+                /* FIX: the parent shell (chat.html) only listens for
+                   'CHILD_CLOSING' (see its postMessage handler) — this used
+                   to send 'CLOSE_SETTINGS', a type the parent never checks
+                   for, so the postMessage was silently ignored and Settings
+                   never actually closed via this path. */
+                window.parent.postMessage({ type: 'CHILD_CLOSING', module: 'settings', childId: 'settings', source: 'settings', timestamp: Date.now() }, '*');
+            } else if (document.referrer) {
+                window.history.back();
+            } else {
+                window.location.href = '/';
+            }
+        }
+
+        /* ── Android / browser hardware back ────────────────────────────── */
+        window.addEventListener('popstate', function (e) {
+            /* only handle if we pushed states ourselves */
+            if (e.state && e.state.__settingsNav) {
+                goBack();
+            }
+        });
+
+        function _pushState(section) {
+            try {
+                window.history.pushState(
+                    { __settingsNav: true, section: section },
+                    '',
+                    window.location.pathname + (section ? '#' + section : '')
+                );
+            } catch (_) {}
+        }
+
+        /* ── DOMContentLoaded ───────────────────────────────────────────── */
+        document.addEventListener('DOMContentLoaded', function () {
+            $sidebar     = _el('settingsSidebar');
+            $content     = _el('settingsContent');
+            $btnBackMenu = _el('backToMenuBtn');
+            $btnBackApp  = _el('backToAppBtn');
+            $title       = _el('contentTitle');
+            $subtitle    = _el('contentSubtitle');
+            $menu        = _el('settingsMenu');
+
+            _domReady = true;
+            _isMobile = window.innerWidth <= 768;
+
+            /* ── ← button inside content header (back to menu / prev section) */
+            if ($btnBackMenu) {
+                $btnBackMenu.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    goBack();
+                    _pushState(_currentSection);
+                });
+                $btnBackMenu.style.display = 'none';
+            }
+
+            /* ── Back arrow at top of sidebar (exit settings) */
+            if ($btnBackApp) {
+                /* clone to remove any listeners attached by settings-core.js */
+                var fresh = $btnBackApp.cloneNode(true);
+                $btnBackApp.parentNode.replaceChild(fresh, $btnBackApp);
+                $btnBackApp = fresh;
+
+                $btnBackApp.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    /* On mobile, if a section is open, first go back to menu */
+                    if (_isMobile && _currentSection) {
+                        goBack();
+                        return;
+                    }
+                    _exitSettings();
+                });
+            }
+
+            /* ── Menu item clicks */
+            if ($menu) {
+                $menu.addEventListener('click', function (e) {
+                    var item = e.target.closest('.menu-item[data-section]');
+                    if (!item) return;
+                    e.preventDefault();
+                    var section = item.getAttribute('data-section');
+                    if (!section) return;
+                    navigateTo(section, { animate: true });
+                    _pushState(section);
+                });
+            }
+
+            /* ── Initial layout */
+            if (_isMobile) {
+                _showSidebarOnly();
+                /* push base state for Android back */
+                _pushState(null);
+            } else {
+                _showBothPanels();
+                /* on desktop load default or hash section */
+                var hash = (window.location.hash || '').replace('#', '');
+                var defaultSection = (hash && META[hash]) ? hash : 'profile';
+                navigateTo(defaultSection, { replace: true, animate: false });
+                _pushState(defaultSection);
+            }
+        });
+
+        /* ── React to section loads triggered by settings-core / settings-ui */
+        window.addEventListener('settingsSectionLoaded', function (e) {
+            var s = e.detail && e.detail.section;
+            if (!s) return;
+            /* sync state without double-pushing history */
+            if (s !== _currentSection) {
+                _previousSection = _currentSection;
+                _currentSection  = s;
+            }
+            _highlightMenu(s);
+            _updateHeader(s);
+            if (_isMobile) {
+                _showContentOnly(false);
+            }
+        });
+
+        /* ── Intercept window.__loadSection if settings-core defines it */
+        var _wrapTimer = setInterval(function () {
+            if (typeof window.__loadSection === 'function' && !window.__loadSection._navWrapped) {
+                var _orig = window.__loadSection;
+                window.__loadSection = function (section) {
+                    navigateTo(section, { animate: _isMobile });
+                    return _orig.apply(this, arguments);
+                };
+                window.__loadSection._navWrapped = true;
+                clearInterval(_wrapTimer);
+            }
+        }, 150);
+
+        /* ── Public API */
+        window.__settingsNav = {
+            navigateTo : navigateTo,
+            goBack     : goBack,
+            get currentSection()  { return _currentSection;  },
+            get previousSection() { return _previousSection; }
+        };
+
+    })();
+    </script>
+
+
+<!-- ═══ P1 Settings Audit Fixes: Blocked Users / Account Deletion / 2FA / syncEnabled ═══ -->
+<script>
+(function () {
+  'use strict';
+
+  /* ── helpers ──────────────────────────────────────────────────────────────── */
+  function tok() {
+    // FIX (live-testing audit): 'authToken'/'token' are written once at the
+    // very first login (index.html's login handler) and never touched again.
+    // The session coordinator (app.core.session.js _saveToStorage) keeps
+    // 'accessToken' current on every token refresh, but never touches
+    // 'authToken'/'token'. Checking those two first meant this file kept
+    // sending an increasingly stale token on every 2FA/blocked-users call
+    // after the first refresh — silently 401ing with no clear error, which
+    // is why 2FA setup/verify looked broken. Check 'accessToken' first now.
+    return localStorage.getItem('accessToken') || sessionStorage.getItem('accessToken') ||
+           localStorage.getItem('authToken') || localStorage.getItem('token') ||
+           sessionStorage.getItem('authToken') || sessionStorage.getItem('token') || '';
+  }
+  async function api(method, url, body) {
+    const o = { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok() } };
+    if (body) o.body = JSON.stringify(body);
+    // ✅ FIX: prefix relative /api/* URLs with the real backend origin — this
+    // iframe's own origin is the static frontend, which has no /api routes,
+    // so an un-prefixed fetch was silently hitting the frontend and getting
+    // back 404/HTML instead of the intended backend JSON response.
+    const fullUrl = (url.startsWith('/api') && window.API_BASE_URL) ? (window.API_BASE_URL + url) : url;
+    try { const r = await fetch(fullUrl, o); return r.json(); }
+    catch (e) { return { status: 'error', message: 'Network error' }; }
+  }
+  function toast(msg, type) {
+    if (window.showToast)          return window.showToast(msg, type);
+    if (window.KynectaToast?.show) return window.KynectaToast.show(msg, type);
+    console.log('[Toast]', type, msg);
+  }
+  function el(id) { return document.getElementById(id); }
+
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 1. BLOCKED USERS — real API, Unblock buttons
+   * ══════════════════════════════════════════════════════════════════════════*/
+  async function loadBlockedUsers() {
+    const list = el('blockedUsersList');
+    if (!list) return;
+    list.innerHTML = '<p style="padding:16px;color:var(--text-secondary,#888)">Loading…</p>';
+    try {
+      const d = await api('GET', '/api/friends/blocked');
+      const users = d.data?.blockedUsers || d.blockedUsers || [];
+      if (!users.length) {
+        list.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-secondary,#888)">No blocked users</p>';
+        return;
+      }
+      list.innerHTML = users.map(u => `
+        <div class="blocked-user-item" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border,#2a2a3e)">
+          <img src="${u.avatar||'https://ui-avatars.com/api/?name='+encodeURIComponent(u.username||'U')+'&background=random&color=fff'}"
+               style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${u.username||'Unknown'}</div>
+            <div style="font-size:12px;color:var(--text-secondary,#888)">${(u.firstName||'')+' '+(u.lastName||'')}</div>
+          </div>
+          <button data-uid="${u.id}" style="padding:6px 14px;border-radius:8px;border:1px solid var(--accent,#4F46E5);background:transparent;color:var(--accent,#4F46E5);cursor:pointer;font-size:13px;white-space:nowrap">Unblock</button>
+        </div>`).join('');
+
+      list.querySelectorAll('[data-uid]').forEach(btn => {
+        btn.addEventListener('click', async function () {
+          const uid = this.dataset.uid;
+          this.disabled = true; this.textContent = '…';
+          const r = await api('POST', '/api/friends/' + uid + '/unblock');
+          if (r.status === 'success' || r.success) {
+            this.closest('.blocked-user-item') || this.parentElement.parentElement;
+            this.closest('[style]')?.remove();
+            toast('User unblocked', 'success');
+            if (!list.querySelector('[data-uid]'))
+              list.innerHTML = '<p style="padding:16px;text-align:center;color:var(--text-secondary,#888)">No blocked users</p>';
+          } else {
+            toast(r.message || 'Failed', 'error');
+            this.disabled = false; this.textContent = 'Unblock';
+          }
+        });
+      });
+    } catch (e) {
+      list.innerHTML = '<p style="padding:16px;color:var(--text-secondary,#888)">Failed to load</p>';
+    }
+  }
+
+  function watchBlockedModal() {
+    const modal = el('blockedUsersModal');
+    if (!modal) return;
+    new MutationObserver(() => {
+      if (modal.classList.contains('active') || modal.style.display === 'flex' || modal.style.display === 'block')
+        loadBlockedUsers();
+    }).observe(modal, { attributes: true, attributeFilter: ['class', 'style'] });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 2. ACCOUNT DELETION — mandatory password + typed confirmation
+   * ══════════════════════════════════════════════════════════════════════════*/
+  function patchDeleteButtons() {
+    document.querySelectorAll('button, a').forEach(btn => {
+      if (btn._p1del) return;
+      const t = (btn.textContent || '').toLowerCase();
+      const id = (btn.id || '').toLowerCase();
+      if (!((t.includes('delete') && t.includes('account')) || id.includes('deleteaccount') || id.includes('delete-account'))) return;
+      btn._p1del = true;
+      btn.addEventListener('click', e => { e.preventDefault(); e.stopImmediatePropagation(); showDeleteDialog(); }, true);
+    });
+  }
+
+  function showDeleteDialog() {
+    el('__p1del')?.remove();
+    const d = document.createElement('div');
+    d.id = '__p1del';
+    d.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+    d.innerHTML = `
+      <div style="background:var(--surface,#1e1e2e);border-radius:16px;padding:28px;width:100%;max-width:400px;color:var(--text-primary,#fff);box-shadow:0 20px 60px rgba(0,0,0,.5)">
+        <h3 style="margin:0 0 6px;color:#ef4444;font-size:18px">⚠️ Delete Account</h3>
+        <p style="font-size:13px;color:var(--text-secondary,#aaa);margin:0 0 20px">This is permanent. All data will be erased immediately.</p>
+        <label style="font-size:13px;display:block;margin-bottom:6px">Type <strong>delete my account</strong>:</label>
+        <input id="__p1delc" type="text" placeholder="delete my account"
+               style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:12px">
+        <label style="font-size:13px;display:block;margin-bottom:6px">Your password:</label>
+        <input id="__p1delp" type="password" placeholder="Password"
+               style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:20px">
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button id="__p1delcancel" style="padding:10px 18px;border-radius:8px;border:1px solid #444;background:transparent;color:var(--text-primary,#fff);cursor:pointer">Cancel</button>
+          <button id="__p1delgo" style="padding:10px 18px;border-radius:8px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-weight:600">Delete My Account</button>
+        </div>
+        <p id="__p1delerr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none"></p>
+      </div>`;
+    document.body.appendChild(d);
+    el('__p1delcancel').onclick = () => d.remove();
+    d.addEventListener('click', e => { if (e.target === d) d.remove(); });
+    el('__p1delgo').onclick = async function () {
+      const conf = el('__p1delc').value.trim().toLowerCase();
+      const pass = el('__p1delp').value;
+      const err  = el('__p1delerr');
+      err.style.display = 'none';
+      if (conf !== 'delete my account') { err.textContent = 'Type "delete my account" exactly.'; err.style.display='block'; return; }
+      if (!pass)                         { err.textContent = 'Password is required.';              err.style.display='block'; return; }
+      this.disabled = true; this.textContent = 'Deleting…';
+      const r = await api('DELETE', '/api/settings/account', { confirmation: conf, password: pass });
+      if (r.status === 'success') {
+        d.remove(); toast('Account deleted. Logging out…', 'success');
+        setTimeout(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/auth.html'; }, 2000);
+      } else {
+        err.textContent = r.message || 'Failed — check your password.'; err.style.display = 'block';
+        this.disabled = false; this.textContent = 'Delete My Account';
+      }
+    };
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 3. 2FA TOTP — full setup / verify / disable panel
+   * ══════════════════════════════════════════════════════════════════════════*/
+  function inject2FAPanel() {
+    // FIX (2FA audit, round 2): previously this bailed out completely once
+    // the panel existed, so the real enabled/disabled sync (load2FAStatus)
+    // only ever ran once per page load. Now it always re-syncs against the
+    // real /api/settings/2fa/status on repeat calls — cheap and idempotent.
+    if (el('__p12fa')) { load2FAStatus(); return; }
+    // BUG FIX (2FA audit, round 2): the old anchor chain fell all the way
+    // back to `.settings-main,.settings-content,.content-area` whenever the
+    // Security section wasn't the one currently rendered (e.g. on first
+    // page load, which defaults to Profile). `.settings-content` sits
+    // *outside* `#settingsContentBody` — the container loadSection()
+    // replaces via innerHTML on every navigation — so a panel anchored
+    // there survived every section switch and was never cleaned up: the
+    // exact "floating panel" bug. This function must now anchor ONLY inside
+    // the real Security section body (or the Two-Step Verification host
+    // that lives inside it), and do nothing otherwise — matching the fix
+    // already applied to linked-sessions-and-pin.js's _injectTwoStepPin().
+    const securityBody = document.getElementById('securitySectionBody');
+    if (!securityBody) return; // not viewing Security — render nowhere
+    // Prefer nesting inline inside the merged "Two-Step Verification" box
+    // (linked-sessions-and-pin.js) so it appears in that same box when the
+    // user taps "Set Up 2FA", instead of as a second separate box.
+    const anchor = document.getElementById('__kynTwoStepPinTwoFAHost') || securityBody;
+
+    const div = document.createElement('div');
+    div.id = '__p12fa';
+    div.innerHTML = `
+      <div style="background:var(--surface,#1e1e2e);border-radius:14px;padding:20px;border:1px solid var(--border,#2a2a3e);margin:24px 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div>
+            <div style="font-weight:600;font-size:15px">Two-Factor Authentication (2FA)</div>
+            <div style="font-size:12px;color:var(--text-secondary,#aaa);margin-top:3px">TOTP — Google Authenticator, Authy, etc.</div>
+          </div>
+          <span id="__p12faStatus" style="font-size:11px;padding:3px 10px;border-radius:20px;background:#3a3a4e;color:#aaa">Loading…</span>
+        </div>
+        <button id="__p12faBtn" style="padding:10px 20px;border-radius:10px;border:none;background:var(--accent,#4F46E5);color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Set Up 2FA</button>
+
+        <div id="__p12faSetup" style="display:none;margin-top:18px">
+          <p style="font-size:13px;color:var(--text-secondary,#aaa);margin:0 0 12px">Scan with your authenticator app:</p>
+          <div style="text-align:center;margin-bottom:14px">
+            <img id="__p12faQR" src="" alt="QR" style="max-width:180px;border-radius:8px;background:#fff;padding:6px">
+          </div>
+          <p style="font-size:11px;color:var(--text-secondary,#aaa);margin:0 0 10px;word-break:break-all">Manual secret: <code id="__p12faSecret"></code></p>
+          <div id="__p12faCodes" style="display:none;padding:12px;background:var(--input-bg,#2a2a3e);border-radius:8px;margin-bottom:14px">
+            <p style="font-size:12px;font-weight:600;color:#f59e0b;margin:0 0 8px">⚠️ Save these backup codes — shown once only:</p>
+            <div id="__p12faCodesGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-family:monospace;font-size:12px"></div>
+          </div>
+          <input id="__p12faTok" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit code"
+                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px">
+          <button id="__p12faVerify" style="padding:10px 20px;border-radius:10px;border:none;background:#22c55e;color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Activate 2FA</button>
+        </div>
+
+        <div id="__p12faDisable" style="display:none;margin-top:18px">
+          <input id="__p12faDisPass" type="password" placeholder="Your password"
+                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:14px;margin-bottom:10px">
+          <input id="__p12faDisTok" type="text" inputmode="numeric" maxlength="6" placeholder="TOTP code"
+                 style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #444;background:var(--input-bg,#2a2a3e);color:var(--text-primary,#fff);font-size:20px;letter-spacing:8px;text-align:center;margin-bottom:12px">
+          <button id="__p12faDisBtn" style="padding:10px 20px;border-radius:10px;border:none;background:#ef4444;color:#fff;cursor:pointer;font-size:14px;font-weight:600;width:100%">Disable 2FA</button>
+        </div>
+        <p id="__p12faErr" style="color:#ef4444;font-size:12px;margin:10px 0 0;display:none"></p>
+      </div>`;
+
+    // anchor is always either the Two-Step Verification host div or the
+    // Security section body itself — both are inside #settingsContentBody,
+    // so this panel gets torn down for free whenever loadSection() rebuilds
+    // the content for whatever section the user navigates to next.
+    anchor.appendChild(div);
+
+    load2FAStatus();
+    wire2FA();
+  }
+
+  // Exposed so settings-ui.js's (real) 2FA toggle can open/reveal this panel
+  // on demand instead of duplicating this logic.
+  window.__open2FAPanel = inject2FAPanel;
+
+  async function load2FAStatus() {
+    // FIX (2FA audit, round 2): this used to bail out entirely if the full
+    // setup/verify/disable panel (`__p12faStatus`) wasn't on the page. Since
+    // inject2FAPanel() no longer auto-renders that panel outside of Security,
+    // this function must still be able to run on its own — just to sync the
+    // real enabled/disabled state into settings-ui.js's toggle — whenever
+    // the Security section is visible, panel open or not.
+    try {
+      const r = await api('GET', '/api/settings/2fa/status');
+      const on = r.data?.mfaEnabled === true;
+
+      const status = el('__p12faStatus'), btn = el('__p12faBtn');
+      if (status) {
+        status.textContent = on ? '✓ Enabled' : 'Disabled';
+        status.style.background = on ? '#14532d' : '#3a3a4e';
+        status.style.color = on ? '#86efac' : '#aaa';
+      }
+      if (btn) btn.textContent = on ? 'Manage 2FA' : 'Set Up 2FA';
+      if (el('__p12faDisable')) el('__p12faDisable').style.display = on ? 'block' : 'none';
+      if (el('__p12faSetup') && on) el('__p12faSetup').style.display = 'none';
+      // Keep the toggle rendered by settings-ui.js's loadSecuritySection in sync
+      const uiToggle = el('twoFactorAuthToggle');
+      if (uiToggle) uiToggle.checked = on;
+      const uiDesc = el('twoFactorAuthDesc');
+      if (uiDesc) uiDesc.textContent = on
+        ? 'Enabled — your account requires a verification code at login'
+        : 'Add an extra layer of security to your account';
+    } catch {
+      const status = el('__p12faStatus');
+      if (status) status.textContent = 'Unknown';
+    }
+  }
+
+  function wire2FA() {
+    el('__p12faBtn')?.addEventListener('click', async function () {
+      const on = el('__p12faStatus')?.textContent?.includes('Enabled');
+      if (on) { el('__p12faDisable').style.display = 'block'; el('__p12faSetup').style.display = 'none'; return; }
+      this.disabled = true; this.textContent = 'Generating…';
+      try {
+        const r = await api('POST', '/api/settings/2fa/setup');
+        if (r.status !== 'success') { show2FAErr(r.message); return; }
+        el('__p12faQR').src = r.data.qrCode;
+        el('__p12faSecret').textContent = r.data.secret;
+        el('__p12faSetup').style.display = 'block';
+        if (r.data.backupCodes) {
+          el('__p12faCodesGrid').innerHTML = r.data.backupCodes.map(c =>
+            `<span style="padding:3px 6px;background:rgba(255,255,255,.06);border-radius:4px">${c}</span>`).join('');
+          el('__p12faCodes').style.display = 'block';
+        }
+      } catch (e) { show2FAErr('Setup failed'); }
+      finally { this.disabled = false; this.textContent = 'Set Up 2FA'; }
+    });
+
+    el('__p12faVerify')?.addEventListener('click', async function () {
+      const token = el('__p12faTok').value.trim();
+      if (!token) { show2FAErr('Enter the 6-digit code'); return; }
+      this.disabled = true; this.textContent = 'Verifying…';
+      const r = await api('POST', '/api/settings/2fa/verify', { token });
+      if (r.status === 'success') {
+        toast('2FA enabled! ✓', 'success');
+        el('__p12faSetup').style.display = 'none';
+        load2FAStatus();
+      } else show2FAErr(r.message || 'Invalid code');
+      this.disabled = false; this.textContent = 'Activate 2FA';
+    });
+
+    el('__p12faDisBtn')?.addEventListener('click', async function () {
+      const pass = el('__p12faDisPass').value, token = el('__p12faDisTok').value.trim();
+      if (!pass || !token) { show2FAErr('Password and code required'); return; }
+      this.disabled = true; this.textContent = 'Disabling…';
+      const r = await api('POST', '/api/settings/2fa/disable', { password: pass, token });
+      if (r.status === 'success') {
+        toast('2FA disabled', 'success');
+        el('__p12faDisable').style.display = 'none';
+        load2FAStatus();
+      } else show2FAErr(r.message || 'Failed');
+      this.disabled = false; this.textContent = 'Disable 2FA';
+    });
+  }
+
+  function show2FAErr(msg) {
+    const e = el('__p12faErr');
+    if (e) { e.textContent = msg; e.style.display = 'block'; setTimeout(() => e.style.display = 'none', 5000); }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════════
+   * 4. syncEnabled cache migration — fix stale false in localStorage
+   * ══════════════════════════════════════════════════════════════════════════*/
+  function patchSyncCache() {
+    ['userSettings','settings','kynecta_settings','mood_settings','moodchat_settings'].forEach(k => {
+      try {
+        const raw = localStorage.getItem(k);
+        if (!raw) return;
+        const obj = JSON.parse(raw);
+        let changed = false;
+        if (obj.syncEnabled === false)                   { obj.syncEnabled = true; changed = true; }
+        if (obj.advanced?.syncEnabled === false)         { obj.advanced.syncEnabled = true; changed = true; }
+        if (obj.advancedSettings?.syncEnabled === false) { obj.advancedSettings.syncEnabled = true; changed = true; }
+        if (changed) localStorage.setItem(k, JSON.stringify(obj));
+      } catch (_) {}
+    });
+  }
+
+  // FIX (2FA audit, round 2): this used to call inject2FAPanel()
+  // unconditionally on load and on every DOM mutation. On first load the
+  // default section is Profile, not Security, so `securitySectionBody`
+  // didn't exist yet and inject2FAPanel() fell back to anchoring on
+  // `.settings-content` — outside the container loadSection() replaces —
+  // creating the exact permanently-floating 2FA panel this audit was
+  // tracking down. The panel should only ever be built on demand (the
+  // Security toggle / the merged "Set Up 2FA" button both call
+  // window.__open2FAPanel already). All this bootstrap needs to do is keep
+  // the toggle's enabled/disabled state in sync while Security is visible,
+  // and remove any panel left orphaned outside the current section body.
+  function syncOrCleanup2FA() {
+    const securityBody = document.getElementById('securitySectionBody');
+    const panel = el('__p12fa');
+    if (securityBody) {
+      // Only sync status if the panel is already open, or just the toggle
+      // if it isn't — never creates the panel itself.
+      load2FAStatus();
+    } else if (panel) {
+      // Not on Security anymore: if the panel somehow isn't nested inside
+      // a container that already got torn down (e.g. it was appended
+      // before this fix shipped), remove it explicitly rather than leave
+      // it floating.
+      panel.remove();
+    }
+  }
+
+  /* ── Bootstrap ─────────────────────────────────────────────────────────── */
+  function init() {
+    patchSyncCache();
+    watchBlockedModal();
+    patchDeleteButtons();
+    syncOrCleanup2FA();
+    // Re-run when settings-core re-renders sections dynamically
+    new MutationObserver(() => {
+      patchDeleteButtons();
+      syncOrCleanup2FA();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  document.readyState === 'loading'
+    ? document.addEventListener('DOMContentLoaded', init)
+    : init();
+})();
+</script>
+
+<script src="back-nav.js"></script>
+<script src="js/last-seen-privacy.js" defer></script>
+<script src="js/linked-sessions-and-pin.js" defer></script>
+<!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
+  Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
+  DO NOT move above existing scripts.
+════════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/js/core/phase6.bootstrap.js"></script>
+<script src="/pwa-manager.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
+     <link rel="manifest" href="/manifest.json">
+     <meta name="theme-color" content="#000000">
+    <title>Secure Cloudinary Upload Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1rem;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 10px;
+            padding: 40px 20px;
+            text-align: center;
+            margin: 20px 0;
+            background: #f8f9ff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 15px;
+        }
+        
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .upload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .file-info {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e8f4fd;
+            border-radius: 8px;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            margin: 15px 0;
+            overflow: hidden;
+            display: none;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .result {
+            margin-top: 25px;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .success {
+            background: #e8f5e8;
+            border: 2px solid #4CAF50;
+            color: #2e7d32;
+        }
+        
+        .error {
+            background: #ffebee;
+            border: 2px solid #f44336;
+            color: #c62828;
+        }
+        
+        .preview {
+            max-width: 100%;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .url-box {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        
+        .copy-btn {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .security-notice {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        .user-tags {
+            background: #f0f7ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #667eea;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .tag {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        
+        .tag-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+            display: block;
+        }
+        
+        .no-tags {
+            color: #666;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌤️ Secure Cloudinary Upload</h1>
+        <p class="subtitle">Secure server-signed uploads with mood/interests tagging</p>
+        
+        <!-- User Tags Display -->
+        <div class="user-tags" id="userTags" style="display: none;">
+            <span class="tag-label">Your upload will be tagged with:</span>
+            <div class="tag-list" id="tagList"></div>
+            <p class="no-tags" id="noTags" style="display: none;">No mood/interest tags selected</p>
+        </div>
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <h3>Drag & Drop your file here</h3>
+            <p>or click to browse files</p>
+            <input type="file" id="fileInput" class="file-input" accept="image/*,video/*,audio/*,.pdf,.doc,.docx">
+            <br>
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                Choose File
+            </button>
+        </div>
+        
+        <div id="fileInfo" class="file-info" style="display: none;"></div>
+        
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        
+        <button class="upload-btn" id="uploadBtn" onclick="uploadFile()" disabled style="width: 100%;">
+            <span id="uploadText">📤 Upload to Cloudinary</span>
+        </button>
+        
+        <div id="result" class="result"></div>
+        
+        <div class="security-notice">
+            <strong>🔒 Secure Upload:</strong> All files are securely signed by our server before being uploaded to Cloudinary. 
+            Your API keys are never exposed to the client. Files are automatically tagged with your mood/interests.
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInfo = document.getElementById('fileInfo');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadText = document.getElementById('uploadText');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const resultDiv = document.getElementById('result');
+        const userTagsDiv = document.getElementById('userTags');
+        const tagListDiv = document.getElementById('tagList');
+        const noTagsDiv = document.getElementById('noTags');
+        
+        // User selections from localStorage or app instance
+        let userSelections = null;
+        let combinedTags = [];
+
+        // Load user selections on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUserSelections();
+        });
+
+        // Load user selections from localStorage or app instance
+        function loadUserSelections() {
+            try {
+                // Try to get from localStorage first
+                const selections = JSON.parse(localStorage.getItem('kynecta-selections'));
+                
+                // Or from the app instance if available
+                if (!selections && window.kynectaApp) {
+                    userSelections = window.kynectaApp.getUserSelections();
+                } else {
+                    userSelections = selections;
+                }
+                
+                // Process and display tags
+                if (userSelections) {
+                    processUserTags();
+                    displayUserTags();
+                } else {
+                    console.log('No user selections found');
+                }
+            } catch (error) {
+                console.error('Error loading user selections:', error);
+            }
+        }
+
+        // Process user tags from selections
+        function processUserTags() {
+            combinedTags = [];
+            
+            if (userSelections.moods && userSelections.moods.length > 0) {
+                combinedTags = combinedTags.concat(userSelections.moods);
+            }
+            
+            if (userSelections.interests && userSelections.interests.length > 0) {
+                combinedTags = combinedTags.concat(userSelections.interests);
+            }
+            
+            // Clean up tags - remove duplicates and format
+            combinedTags = [...new Set(combinedTags)]
+                .map(tag => tag.trim().toLowerCase().replace(/\s+/g, '_'))
+                .filter(tag => tag.length > 0);
+            
+            console.log('Processed user tags:', combinedTags);
+        }
+
+        // Display user tags in the UI
+        function displayUserTags() {
+            if (combinedTags.length > 0) {
+                tagListDiv.innerHTML = '';
+                combinedTags.forEach(tag => {
+                    const tagElement = document.createElement('span');
+                    tagElement.className = 'tag';
+                    tagElement.textContent = tag.replace(/_/g, ' ');
+                    tagListDiv.appendChild(tagElement);
+                });
+                userTagsDiv.style.display = 'block';
+                noTagsDiv.style.display = 'none';
+            } else {
+                userTagsDiv.style.display = 'block';
+                noTagsDiv.style.display = 'block';
+            }
+        }
+
+        // Event Listeners
+        fileInput.addEventListener('change', handleFileSelect);
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        // Drag and drop functionality
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                handleFileSelect();
+            }
+        });
+
+        function handleFileSelect() {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // Validate file size (10MB limit)
+            const maxSize = 10 * 1024 * 1024; // 10MB in bytes
+            if (file.size > maxSize) {
+                showError(`File size too large. Maximum allowed: 10MB. Your file: ${(file.size / (1024 * 1024)).toFixed(2)}MB`);
+                resetForm();
+                return;
+            }
+
+            // Validate file type
+            const allowedTypes = ['image/', 'video/', 'audio/', 'application/pdf', 
+                                 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+            const isValidType = allowedTypes.some(type => file.type.startsWith(type));
+            
+            if (!isValidType) {
+                showError('Invalid file type. Please upload images, videos, audio, PDF, or Word documents.');
+                resetForm();
+                return;
+            }
+
+            // Display file info
+            fileInfo.innerHTML = `
+                <strong>Selected File:</strong> ${file.name}<br>
+                <strong>Type:</strong> ${file.type || 'Unknown'}<br>
+                <strong>Size:</strong> ${formatFileSize(file.size)}
+            `;
+            fileInfo.style.display = 'block';
+
+            // Enable upload button
+            uploadBtn.disabled = false;
+        }
+
+        // A) UPLOAD FUNCTION LOGIC - SECURE VERSION WITH TAGGING
+        async function uploadFile() {
+            const file = fileInput.files[0];
+            if (!file) {
+                showError('Please select a file first!');
+                return;
+            }
+
+            // Disable UI during upload
+            uploadBtn.disabled = true;
+            uploadText.innerHTML = '<div class="loading"></div>Uploading...';
+            progressBar.style.display = 'block';
+            resultDiv.style.display = 'none';
+
+            try {
+                // B) CRITICAL SECURITY FIX: Two-step secure upload process with tagging
+                
+                // Step 1: Get signed upload parameters from our server with user tags
+                console.log('🔐 Requesting signed upload parameters from server...');
+                const signResponse = await fetch(window.API_BASE_URL + '/api/cloudinary/sign-upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename: file.name,
+                        fileType: file.type,
+                        fileSize: file.size,
+                        // Include user tags in the request
+                        userTags: combinedTags,
+                        moods: userSelections?.moods || [],
+                        interests: userSelections?.interests || []
+                    })
+                });
+
+                if (!signResponse.ok) {
+                    throw new Error(`Server error: ${signResponse.status}`);
+                }
+
+                const signData = await signResponse.json();
+                
+                if (!signData.success) {
+                    throw new Error(`Signing failed: ${signData.error}`);
+                }
+
+                console.log('✅ Received signed parameters:', signData);
+                console.log('🏷️ Tags to be applied:', combinedTags);
+
+                // Step 2: Upload file to Cloudinary using signed parameters with tags
+                console.log('📤 Uploading file to Cloudinary with user tags...');
+                
+                const cloudinaryFormData = new FormData();
+                
+                // Add all signed parameters from our server
+                Object.keys(signData.params).forEach(key => {
+                    cloudinaryFormData.append(key, signData.params[key]);
+                });
+                
+                // Add the actual file
+                cloudinaryFormData.append('file', file);
+                
+                // Add tags to the upload if available
+                if (combinedTags.length > 0) {
+                    // Cloudinary accepts tags as comma-separated string
+                    const tagsString = combinedTags.join(',');
+                    cloudinaryFormData.append('tags', tagsString);
+                    console.log('🏷️ Adding tags to upload:', tagsString);
+                }
+
+                // Upload to Cloudinary with progress tracking
+                const xhr = new XMLHttpRequest();
+                
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressFill.style.width = percentComplete + '%';
+                    }
+                });
+
+                const uploadPromise = new Promise((resolve, reject) => {
+                    xhr.addEventListener('load', () => {
+                        if (xhr.status === 200) {
+                            try {
+                                const response = JSON.parse(xhr.responseText);
+                                resolve(response);
+                            } catch (e) {
+                                reject(new Error('Invalid response from Cloudinary'));
+                            }
+                        } else {
+                            reject(new Error(`Cloudinary upload failed: ${xhr.status}`));
+                        }
+                    });
+                    
+                    xhr.addEventListener('error', () => {
+                        reject(new Error('Network error during upload'));
+                    });
+                    
+                    xhr.addEventListener('abort', () => {
+                        reject(new Error('Upload cancelled'));
+                    });
+                });
+
+                xhr.open('POST', signData.uploadUrl);
+                xhr.send(cloudinaryFormData);
+
+                const cloudinaryResult = await uploadPromise;
+                console.log('✅ Cloudinary upload successful:', cloudinaryResult);
+
+                // Step 3: Verify upload with our server (optional but recommended)
+                console.log('🔍 Verifying upload with our server...');
+                const verifyResponse = await fetch(window.API_BASE_URL + '/api/cloudinary/verify-upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        publicId: cloudinaryResult.public_id,
+                        signature: cloudinaryResult.signature,
+                        version: cloudinaryResult.version,
+                        tags: combinedTags,
+                        moods: userSelections?.moods || [],
+                        interests: userSelections?.interests || []
+                    })
+                });
+
+                const verifyData = await verifyResponse.json();
+
+                // Display success result with tags
+                showSuccess(cloudinaryResult, file);
+
+            } catch (error) {
+                console.error('❌ Upload error:', error);
+                showError(error.message);
+            } finally {
+                // Reset UI
+                uploadText.innerHTML = '📤 Upload to Cloudinary';
+                progressBar.style.display = 'none';
+                progressFill.style.width = '0%';
+            }
+        }
+
+        function showSuccess(cloudinaryResult, originalFile) {
+            const isImage = cloudinaryResult.resource_type === 'image';
+            const isVideo = cloudinaryResult.resource_type === 'video';
+            const isAudio = cloudinaryResult.resource_type === 'audio';
+            
+            // Check if tags were applied
+            const hasTags = cloudinaryResult.tags && cloudinaryResult.tags.length > 0;
+            
+            let previewHtml = '';
+            if (isImage) {
+                previewHtml = `<img src="${cloudinaryResult.secure_url}" alt="Uploaded image" class="preview">`;
+            } else if (isVideo) {
+                previewHtml = `
+                    <video controls class="preview">
+                        <source src="${cloudinaryResult.secure_url}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                `;
+            } else if (isAudio) {
+                previewHtml = `
+                    <audio controls style="width: 100%; margin: 15px 0;">
+                        <source src="${cloudinaryResult.secure_url}" type="audio/mpeg">
+                        Your browser does not support the audio tag.
+                    </audio>
+                `;
+            }
+            
+            // Display tags if available
+            let tagsHtml = '';
+            if (hasTags) {
+                tagsHtml = `
+                    <div style="margin: 15px 0;">
+                        <strong>🏷️ Tags Applied:</strong>
+                        <div class="tag-list" style="margin-top: 8px;">
+                            ${cloudinaryResult.tags.map(tag => `
+                                <span class="tag" style="background: #4CAF50; font-size: 0.8rem;">${tag}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else if (combinedTags.length > 0) {
+                tagsHtml = `
+                    <div style="margin: 15px 0;">
+                        <strong>🏷️ User Tags (metadata):</strong>
+                        <div class="tag-list" style="margin-top: 8px;">
+                            ${combinedTags.map(tag => `
+                                <span class="tag" style="background: #2196F3; font-size: 0.8rem;">${tag.replace(/_/g, ' ')}</span>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            resultDiv.innerHTML = `
+                <div class="success">
+                    <h3>✅ Upload Successful!</h3>
+                    <p><strong>File:</strong> ${originalFile.name}</p>
+                    <p><strong>Type:</strong> ${cloudinaryResult.resource_type} / ${cloudinaryResult.format}</p>
+                    <p><strong>Size:</strong> ${formatFileSize(cloudinaryResult.bytes)}</p>
+                    <p><strong>Public ID:</strong> ${cloudinaryResult.public_id}</p>
+                    
+                    ${tagsHtml}
+                    
+                    ${previewHtml}
+                    
+                    <p><strong>Secure URL:</strong></p>
+                    <div style="display: flex; align-items: center;">
+                        <div class="url-box">${cloudinaryResult.secure_url}</div>
+                        <button class="copy-btn" onclick="copyToClipboard('${cloudinaryResult.secure_url}')">Copy</button>
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <button class="copy-btn" onclick="copyToClipboard('${cloudinaryResult.secure_url}')" 
+                                style="background: #4CAF50;">Copy URL</button>
+                        <a href="${cloudinaryResult.secure_url}" target="_blank" class="copy-btn" 
+                           style="background: #2196F3; text-decoration: none;">Open</a>
+                    </div>
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+            
+            // Reset form for new upload
+            resetForm();
+        }
+
+        function showError(message) {
+            resultDiv.innerHTML = `
+                <div class="error">
+                    <h3>❌ Upload Failed</h3>
+                    <p>${message}</p>
+                    <button class="upload-btn" onclick="resetForm()" 
+                            style="background: #f44336; margin-top: 10px;">Try Again</button>
+                </div>
+            `;
+            resultDiv.style.display = 'block';
+        }
+
+        function resetForm() {
+            fileInput.value = '';
+            fileInfo.style.display = 'none';
+            uploadBtn.disabled = true;
+            uploadText.innerHTML = '📤 Upload to Cloudinary';
+            progressBar.style.display = 'none';
+            progressFill.style.width = '0%';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('URL copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+            });
+        }
+
+        // Service Worker Registration for PWA functionality
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js')
+                .then(registration => {
+                    console.log('ServiceWorker registered: ', registration);
+                })
+                .catch(error => {
+                    console.log('ServiceWorker registration failed: ', error);
+                });
+        }
+    </script>
+</body>
+</html>
