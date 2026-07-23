@@ -2906,15 +2906,12 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             <!-- REDESIGN: bottom mode switcher — drives the (now hidden)
                  legacy tab buttons above via real .click() calls, so the
                  exact same tab/content-active logic in status-ui.js runs
-                 unchanged. Video and Photo both map to the existing media
-
-                 tab; the file input's accept attribute is narrowed per mode. -->
+                 unchanged. "File" opens a Camera/Gallery chooser instead of
+                 two separate Video/Photo icons; either choice lands on the
+                 same underlying media tab. -->
             <div class="composer-bottombar" id="composerBottombar">
-                <button class="composer-mode-btn" data-mode="media" data-accept="video/*" title="Video">
-                    <i class="fas fa-video"></i><span>Video</span>
-                </button>
-                <button class="composer-mode-btn" data-mode="media" data-accept="image/*" title="Photo">
-                    <i class="fas fa-image"></i><span>Photo</span>
+                <button class="composer-mode-btn" id="composerFileBtn" data-mode="media" title="Photo or Video">
+                    <i class="fas fa-paperclip"></i><span>File</span>
                 </button>
                 <button class="composer-mode-btn active" data-mode="text" title="Text">
                     <i class="fas fa-font"></i><span>Text</span>
@@ -2923,6 +2920,22 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                     <i class="fas fa-poll"></i><span>Poll</span>
                 </button>
             </div>
+
+            <!-- Camera vs Gallery chooser — appears above composerFileBtn -->
+            <div class="composer-file-chooser" id="composerFileChooser" style="display:none;">
+                <button type="button" id="fileChooserCameraBtn">
+                    <i class="fas fa-camera"></i> Take Photo/Video
+                </button>
+                <button type="button" id="fileChooserGalleryBtn">
+                    <i class="fas fa-images"></i> Choose from Gallery
+                </button>
+            </div>
+            <!-- Real device camera capture — separate input so "Take Photo"
+                 opens the actual camera app instead of the file browser.
+                 No accept/capture narrowing to a single type: browsers that
+                 support capture will offer a live camera view for either
+                 photo or video depending on the OS camera app's own toggle. -->
+            <input type="file" id="cameraCaptureInput" accept="image/*,video/*" capture="environment" style="display:none;">
 
             <!-- postStatusBtn keeps its original id/click-handler; only its
                  position and appearance change, from a footer button to an
@@ -3804,6 +3817,13 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                         <i class="fas fa-play"></i>
                     </button>
                 </div>
+            </div>
+
+            <!-- Tagged-friends chip — shows who was mentioned in this status.
+                 Was being collected at post time but never displayed anywhere. -->
+            <div class="status-mentions-overlay" id="statusMentionsOverlay" style="display:none;">
+                <i class="fas fa-user-tag"></i>
+                <span id="statusMentionsText"></span>
             </div>
 
             <!-- P2 FIX: Poll overlay for poll-type statuses -->

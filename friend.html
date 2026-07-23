@@ -2624,6 +2624,14 @@
                         <div class="friends-list" id="friendsList">
                             <!-- Approved friends will be loaded in background -->
                         </div>
+                        <!-- People you may know — populated by renderFriendSuggestions(), hidden
+                             entirely when the friends.friendSuggestions setting is off -->
+                        <div id="friendSuggestionsContainer" style="display:none; margin-top: 16px;">
+                            <div style="display:flex; align-items:center; gap:8px; margin: 8px 4px; font-size: 13px; font-weight: 600; color: var(--text-secondary,#888); text-transform: uppercase; letter-spacing: 0.5px;">
+                                <i class="fas fa-user-plus"></i> People you may know
+                            </div>
+                            <div class="friends-list" id="friendSuggestionsList"></div>
+                        </div>
                     </div>
                     
                     <!-- Requests Section -->

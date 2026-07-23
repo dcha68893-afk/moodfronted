@@ -13808,14 +13808,21 @@ Type: ${message.type || 'text'}`;
                     if (_setHas(STORAGE_KEY_BLOCKED, chatId)) {
                         _setRemove(STORAGE_KEY_BLOCKED, chatId);
                         _showToast('User unblocked');
+                        try { window.MessagesCore?.blockUser?.(String(chatId).replace('pending_', ''), false); } catch(_) {}
                     } else {
                         _setAdd(STORAGE_KEY_BLOCKED, chatId);
                         _showToast('User blocked — messages will not be delivered');
-                        // Notify backend
+                        const friendId = String(chatId).replace('pending_', '');
+                        // FIX-BLOCK-NOT-ENFORCED: this used to be a fire-and-forget fetch only,
+                        // completely separate from ConversationManager._blockedFriends — the set
+                        // actually checked elsewhere to gate incoming messages. If that fetch
+                        // failed silently, the toast said "blocked" but nothing was actually
+                        // blocked. MessagesCore.blockUser() writes the real key AND sends over
+                        // the app's reliable socket path.
+                        try { window.MessagesCore?.blockUser?.(friendId, true); } catch(_) {}
+                        // Keep as a secondary/legacy notification path — harmless if redundant.
                         try {
                             const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
-                            const friendId = chatId.replace('pending_','');
-                            // Best-effort — fire and forget
                             fetch('/api/friends/' + friendId + '/block', {
                                 method:'POST',
                                 headers:{ Authorization:'Bearer ' + tok, 'Content-Type':'application/json' }
@@ -13829,9 +13836,16 @@ Type: ${message.type || 'text'}`;
                     if (_setHas(STORAGE_KEY_ARCHIVED, chatId)) {
                         _setRemove(STORAGE_KEY_ARCHIVED, chatId);
                         _showToast('Chat unarchived');
+                        try { window.MessagesCore?.archiveConversation?.(chatId, false); } catch(_) {}
                     } else {
                         _setAdd(STORAGE_KEY_ARCHIVED, chatId);
                         _showToast('Chat archived');
+                        // FIX-ARCHIVE-NOT-SYNCED: this used to only touch a UI-local storage
+                        // key, so archiving never reached the server — reopening on another
+                        // device, or after clearing local storage, the chat would show as
+                        // un-archived again. MessagesCore.archiveConversation() sends it to
+                        // the server over the socket and updates the conversation object too.
+                        try { window.MessagesCore?.archiveConversation?.(chatId, true); } catch(_) {}
                     }
                     window.messagesUI?.refreshChatsList?.();
                     break;

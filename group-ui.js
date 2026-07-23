@@ -1926,6 +1926,7 @@ export function registerMessageHandlers() {
 
             // ── TYPING INDICATOR ─────────────────────────────────────────────
             if (message.type === 'GROUP_TYPING' || message.type === 'group:typing') {
+                if (window.__SHOW_TYPING_INDICATORS === false) return; // setting disabled: don't show others' typing status either
                 const p = message.payload || {};
                 if (typeof showTypingIndicator === 'function') showTypingIndicator(p.groupId, p.userId, p.userName);
                 return;

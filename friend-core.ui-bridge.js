@@ -497,6 +497,42 @@ async function loadFriendRequestsFromBackend() {
     return { success: false };
 }
 
+// SETTINGS WIRING: friends.friendSuggestions — the backend already has a fully-built
+// GET /api/friends/suggestions endpoint (mutual-friend + shared-group scoring, falls back to
+// newest users). Nothing on the client ever called it. This wires it up; rendering is gated
+// on the setting in friend-ui.js's renderFriendSuggestions().
+async function loadFriendSuggestions(limit = 10) {
+    if (!assertActive('loadFriendSuggestions')) {
+        return { success: false, error: 'Module not active' };
+    }
+    if (window.__friendSuggestions === false) {
+        return { success: true, suggestions: [] };
+    }
+    if (!authReadyReceived || !__session.ready || !__session.token) {
+        return new Promise((resolve) => {
+            queueRequest(async () => {
+                const result = await loadFriendSuggestions(limit);
+                resolve(result);
+            });
+        });
+    }
+
+    try {
+        const response = await authorizedRequest(`/api/friends/suggestions?limit=${limit}`);
+        if (response.success && response.data) {
+            const suggestions = response.data.suggestions || response.data.data?.suggestions || [];
+            window.friendSuggestions = suggestions;
+            window.dispatchEvent(new CustomEvent('friendSuggestionsUpdated', {
+                detail: { suggestions }
+            }));
+            return { success: true, suggestions };
+        }
+    } catch (error) {
+        Logger.error('loadFriendSuggestions', 'Failed to load suggestions', error);
+    }
+    return { success: false, suggestions: [] };
+}
+
 async function loadSentRequestsFromBackend() {
     if (!assertActive('loadSentRequestsFromBackend')) {
         return { success: false, error: 'Module not active' };
@@ -3541,6 +3577,7 @@ export {
     // Data Loading
     loadFriendsFromBackend,
     loadFriendRequestsFromBackend,
+    loadFriendSuggestions,
     loadSentRequestsFromBackend,
     loadPinnedFriendsFromBackend,
     loadMutedFriendsFromBackend,

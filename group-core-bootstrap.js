@@ -1775,6 +1775,9 @@ const MessageRouter = {
                   }
                 } catch (_soundErr) {}
               }
+              if (window.__vibrationEnabled !== false && navigator.vibrate) {
+                try { navigator.vibrate(200); } catch (_vibrateErr) {}
+              }
               window.dispatchEvent(new CustomEvent('kyn:incomingMessage', {
                 detail: {
                   message: messageData,

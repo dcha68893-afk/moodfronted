@@ -3998,6 +3998,11 @@ function loadViewerContent(statusData) {
     // P3 FIX: Render music overlay
     if (window._renderMusicOverlay) window._renderMusicOverlay(sanitized);
 
+    // Render tagged-friends chip — mentions were being collected and sent
+    // to the server at post time, but never actually shown to anyone
+    // viewing the status (poster, tagged person, or other viewers).
+    if (window._renderMentionsOverlay) window._renderMentionsOverlay(sanitized);
+
     // P3 FIX: Start/stop countdown ticker
     const prevStatus = window.currentViewerStatus;
     if (prevStatus && prevStatus.id !== sanitized.id) {
@@ -4098,6 +4103,48 @@ function renderQuestionOverlay(statusData) {
     }
 }
 window._renderQuestionOverlay = renderQuestionOverlay;
+
+// Tagged-friends chip — mentions were being collected in the composer and
+// sent to the server (metadata.mentions / notifying the mentioned user
+// server-side) but nothing ever displayed them anywhere. This shows a
+// "Tagged: Alice, Bob" chip to any viewer, and a distinct "tagged you"
+// callout when the person currently viewing is one of the mentioned users.
+function renderMentionsOverlay(statusData) {
+    const overlay = document.getElementById('statusMentionsOverlay');
+    const textEl  = document.getElementById('statusMentionsText');
+    if (!overlay || !textEl) return;
+
+    const meta = statusData && statusData.metadata;
+    const mentions = (meta && Array.isArray(meta.mentions) && meta.mentions.length)
+        ? meta.mentions
+        : (Array.isArray(statusData && statusData.mentions) ? statusData.mentions : null);
+
+    if (!mentions || !mentions.length) {
+        overlay.style.display = 'none';
+        return;
+    }
+
+    const myId = currentUser && (currentUser.id || currentUser.userId);
+    const iAmTagged = myId && mentions.some(m => String((m && (m.userId || m.id)) || m) === String(myId));
+
+    const names = mentions
+        .map(m => (m && (m.displayName || m.username)) || null)
+        .filter(Boolean);
+
+    if (iAmTagged) {
+        const others = names.filter(n => true); // display list as-is; poster already knows who they tagged
+        textEl.textContent = others.length ? `You were tagged, with ${others.join(', ')}` : 'You were tagged';
+        overlay.classList.add('mentions-you');
+    } else if (names.length) {
+        textEl.textContent = `Tagged: ${names.join(', ')}`;
+        overlay.classList.remove('mentions-you');
+    } else {
+        overlay.style.display = 'none';
+        return;
+    }
+    overlay.style.display = 'flex';
+}
+window._renderMentionsOverlay = renderMentionsOverlay;
 
 // P3 FIX: Load and render story templates in create modal
 async function loadStatusTemplates() {
@@ -5673,9 +5720,16 @@ function setupBasicEventListeners_StatusUI() {
 
     const mediaUploadArea = UIElements.getElement('mediaUploadArea');
     const mediaFileInput = UIElements.getElement('mediaFileInput');
+    const fileChooser = document.getElementById('composerFileChooser');
     if (mediaUploadArea && !mediaUploadArea._hasListener) {
         mediaUploadArea._hasListener = true;
-        mediaUploadArea.addEventListener('click', () => mediaFileInput.click());
+        // Was: mediaFileInput.click() directly (skips straight to the generic
+        // file browser, no real camera option). Now: show a small chooser so
+        // "Take Photo/Video" can open the actual device camera.
+        mediaUploadArea.addEventListener('click', () => {
+            if (fileChooser) fileChooser.style.display = 'flex';
+            else mediaFileInput.click(); // fallback if chooser markup missing
+        });
         mediaUploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             mediaUploadArea.style.backgroundColor = 'rgba(0, 132, 255, 0.1)';
@@ -5691,9 +5745,56 @@ function setupBasicEventListeners_StatusUI() {
             }
         });
     }
+    // ── Camera / Gallery chooser ────────────────────────────────────────
+    const fileChooserCameraBtn  = document.getElementById('fileChooserCameraBtn');
+    const fileChooserGalleryBtn = document.getElementById('fileChooserGalleryBtn');
+    const cameraCaptureInput    = document.getElementById('cameraCaptureInput');
+    if (fileChooserCameraBtn && !fileChooserCameraBtn._bound) {
+        fileChooserCameraBtn._bound = true;
+        fileChooserCameraBtn.addEventListener('click', () => {
+            if (fileChooser) fileChooser.style.display = 'none';
+            if (cameraCaptureInput) cameraCaptureInput.click(); // opens the real device camera
+        });
+    }
+    if (fileChooserGalleryBtn && !fileChooserGalleryBtn._bound) {
+        fileChooserGalleryBtn._bound = true;
+        fileChooserGalleryBtn.addEventListener('click', () => {
+            if (fileChooser) fileChooser.style.display = 'none';
+            if (mediaFileInput) mediaFileInput.click(); // regular gallery/file picker, no capture attr
+        });
+    }
+    // Tapping anywhere outside the two chooser buttons closes it
+    if (fileChooser && !fileChooser._outsideBound) {
+        fileChooser._outsideBound = true;
+        document.addEventListener('click', (e) => {
+            if (fileChooser.style.display === 'none') return;
+            if (e.target === document.getElementById('composerFileBtn')) return;
+            if (fileChooser.contains(e.target)) return;
+            fileChooser.style.display = 'none';
+        });
+    }
     if (mediaFileInput && !mediaFileInput._hasListener) {
         mediaFileInput._hasListener = true;
         mediaFileInput.addEventListener('change', handleMediaUpload);
+    }
+    if (cameraCaptureInput && !cameraCaptureInput._hasListener) {
+        cameraCaptureInput._hasListener = true;
+        cameraCaptureInput.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            // Mirror the captured photo/video into mediaFileInput itself via
+            // DataTransfer, so handlePostStatus()'s existing
+            // `mediaFileInput.files[0]` read works unchanged no matter which
+            // of the two inputs actually produced the file.
+            if (mediaFileInput) {
+                try {
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    mediaFileInput.files = dt.files;
+                } catch (_) { /* DataTransfer unsupported — preview still works below */ }
+            }
+            handleMediaUpload({ target: { files: [file] } });
+        });
     }
     const myStatusPreview = UIElements.getElement('myStatusPreview');
     if (myStatusPreview && !myStatusPreview._hasListener) {
@@ -7015,7 +7116,13 @@ function handleMediaUpload(event) {
                 `;
             }
             const removeBtn = item.querySelector('.remove-media-btn');
-            removeBtn.addEventListener('click', () => item.remove());
+            removeBtn.addEventListener('click', () => {
+                item.remove();
+                const mfi = UIElements.getElement('mediaFileInput');
+                const cci = document.getElementById('cameraCaptureInput');
+                if (mfi) mfi.value = '';
+                if (cci) cci.value = '';
+            });
             preview.appendChild(item);
         };
         reader.readAsDataURL(file);

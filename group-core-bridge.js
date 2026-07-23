@@ -684,10 +684,6 @@ function setupResponsiveBehavior() {
 // MISSING FUNCTION EXPORTS (PRESERVED)
 // =============================================
 
-function showGroupOptions(groupData) {
-    try {} catch (error) {}
-}
-
 function downloadQRCode() {
     try {
         const canvas = document.querySelector('#groupQRModal canvas');
@@ -705,6 +701,12 @@ async function showGroupQRCode() {
     try {
         const group = currentChatGroup;
         if (!group) return;
+        if (window.__allowInviteLinks === false) {
+            if (typeof showNotification === 'function') {
+                showNotification('Invite links are turned off in your settings.', 'error');
+            }
+            return;
+        }
 
         // Fetch the invite link QR data from backend
         const res = await secureApiCall(`/groups/${group.id}/invite-link/qr`).catch(() => null);
@@ -763,80 +765,127 @@ async function showGroupQRCode() {
     }
 }
 
-function addPollOption() {
-    try {} catch (error) {}
-}
-
-function removePollOption() {
-    try {} catch (error) {}
-}
-
-function saveNewPoll() {
-    try {} catch (error) {}
-}
-
-function voteOnPoll() {
-    try {} catch (error) {}
-}
-
-function saveNewEvent() {
-    try {} catch (error) {}
-}
-
-function viewGroupNotes() {
-    try {} catch (error) {}
-}
-
-function viewGroupEvents() {
-    try {} catch (error) {}
-}
-
-function viewGroupAnalytics() {
-    try {} catch (error) {}
-}
-
-function loadGroupAnalytics() {
+// ============================================================================
+// These used to be empty placeholder stubs kept only so the export list
+// below wouldn't throw "undefined export" errors. None of them were ever
+// called from any button or menu in the app. The real, working
+// implementations of everything they were meant to do already exist
+// elsewhere (the group chat menu in group.html, the GroupOS Tools panel,
+// and openAdminManagement()) — these now delegate to those instead of
+// silently doing nothing.
+// ============================================================================
+function _openGroupToolsTab(tabName) {
     try {
-        return { success: true, data: {} };
-    } catch (error) {
-        return { success: false };
-    }
+        if (!document.getElementById('groupOSOverlay') && typeof window._openGroupOSPanel === 'function') {
+            window._openGroupOSPanel();
+        }
+        // GroupOS.mount() is async; give it a moment to attach before switching tabs.
+        setTimeout(() => {
+            if (window.GroupOS && typeof window.GroupOS.openTab === 'function') {
+                window.GroupOS.openTab(tabName);
+            }
+        }, 400);
+    } catch (error) {}
 }
 
-function renderAnalyticsChart() {
-    try {} catch (error) {}
-}
-
-function changePurposeMood() {
-    try {} catch (error) {}
-}
-
-function viewChangeHistory() {
-    try {} catch (error) {}
+function showGroupOptions(groupData) {
+    try {
+        const btn = document.getElementById('chatMoreBtn');
+        if (btn) btn.click();
+    } catch (error) {}
 }
 
 function showOptionsModal() {
-    try {} catch (error) {}
+    showGroupOptions(currentChatGroup);
+}
+
+function addPollOption() {
+    _openGroupToolsTab('polls'); // GroupOS's own poll-creation modal manages its option inputs internally
+}
+
+function removePollOption() {
+    _openGroupToolsTab('polls');
+}
+
+function saveNewPoll() {
+    _openGroupToolsTab('polls');
+}
+
+function createPoll() {
+    try {
+        _openGroupToolsTab('polls');
+        setTimeout(() => { if (window.GroupOS && typeof window.GroupOS.createPoll === 'function') window.GroupOS.createPoll(); }, 500);
+    } catch (error) {}
+}
+
+function voteOnPoll(pollId, optionId) {
+    try {
+        if (window.GroupOS && typeof window.GroupOS.vote === 'function') window.GroupOS.vote(pollId, optionId);
+    } catch (error) {}
+}
+
+function saveNewEvent() {
+    _openGroupToolsTab('events');
+}
+
+function createEvent() {
+    try {
+        _openGroupToolsTab('events');
+        setTimeout(() => { if (window.GroupOS && typeof window.GroupOS.createEvent === 'function') window.GroupOS.createEvent(); }, 500);
+    } catch (error) {}
+}
+
+function viewGroupNotes() {
+    _openGroupToolsTab('notes');
+}
+
+function viewGroupEvents() {
+    _openGroupToolsTab('events');
+}
+
+function viewGroupAnalytics() {
+    _openGroupToolsTab('analytics');
+}
+
+function renderAnalyticsChart() {
+    _openGroupToolsTab('analytics'); // GroupOS renders its own chart once mounted
+}
+
+function loadGroupAnalytics() {
+    _openGroupToolsTab('analytics');
+    return { success: true };
+}
+
+function changePurposeMood() {
+    try {
+        if (typeof window.openSub === 'function') { window.__gcCurGroup = currentChatGroup; window.openSub('purpose'); }
+    } catch (error) {}
+}
+
+function viewChangeHistory() {
+    try {
+        if (typeof window.openSub === 'function') { window.__gcCurGroup = currentChatGroup; window.openSub('info'); }
+    } catch (error) {}
 }
 
 function shareGroup() {
-    try {} catch (error) {}
+    try { if (typeof window.doShareGroup === 'function') window.doShareGroup(currentChatGroup); } catch (error) {}
 }
 
 function muteGroup() {
-    try {} catch (error) {}
+    try { if (typeof window.toggleMute === 'function') window.toggleMute(currentChatGroup); } catch (error) {}
 }
 
 function favoriteGroup() {
-    try {} catch (error) {}
+    try { if (typeof window.doToggleFavorite === 'function') window.doToggleFavorite(currentChatGroup); } catch (error) {}
 }
 
 function reportGroup() {
-    try {} catch (error) {}
+    try { if (typeof window.doReportGroup === 'function') window.doReportGroup(currentChatGroup); } catch (error) {}
 }
 
 function blockGroup() {
-    try {} catch (error) {}
+    try { if (typeof window.doToggleBlock === 'function') window.doToggleBlock(currentChatGroup); } catch (error) {}
 }
 
 function copyInviteLink() {
@@ -855,23 +904,19 @@ function inviteMembers() {
 }
 
 function editGroupInfo() {
-    try {} catch (error) {}
+    try {
+        if (typeof openAdminManagement === 'function') openAdminManagement(currentChatGroup);
+    } catch (error) {}
 }
 
 function manageRoles() {
-    try {} catch (error) {}
-}
-
-function createEvent() {
-    try {} catch (error) {}
-}
-
-function createPoll() {
-    try {} catch (error) {}
+    try {
+        if (typeof window.openSub === 'function') { window.__gcCurGroup = currentChatGroup; window.openSub('members'); }
+    } catch (error) {}
 }
 
 function showGroupInviteDetails() {
-    try {} catch (error) {}
+    try { showGroupQRCode(); } catch (error) {}
 }
 
 export async function initGroupPage() {
@@ -986,20 +1031,6 @@ function isGroupOperationReady() {
     return LifecycleState.isActive() && parentReady && sessionReady;
 }
 
-// FIX (group-core split): group-core-bootstrap.js, group-core-operations.js and
-// group-core-bridge.js import from one another in a genuine 3-way ES module
-// cycle (bootstrap -> operations -> bridge -> bootstrap/operations). Reading a
-// cross-module binding (e.g. sendGroupMessage from operations.js) synchronously
-// at a module's top level, during the module graph's initial evaluation, can
-// hit that binding before the module that defines it has reached its own
-// initializer — a TDZ ReferenceError ("Cannot access '...' before
-// initialization"). That aborts this module's evaluation partway through,
-// which is also why later, unrelated code (like the DOMContentLoaded handler
-// below referencing MODULE_NAME) can fail too.
-// Deferring this block to a microtask lets the whole synchronous module graph
-// (all three files) finish evaluating first, by which point every cross-module
-// binding is initialized, before we touch any of them.
-queueMicrotask(() => {
 if (typeof window !== 'undefined') {
     const secureExpose = (name, fn) => {
         Object.defineProperty(window, name, {
@@ -1054,7 +1085,6 @@ if (typeof window !== 'undefined') {
         parentReady
     }));
 }
-}); // end queueMicrotask — see FIX note above
 
 async function inviteToGroup(groupId, inviteeId, role, msg) {
     return GroupCore.inviteToGroup(groupId, inviteeId, role, msg);
@@ -1164,28 +1194,20 @@ function applySettingToGroupModule(section, key, value) {
     }
 }
 
-// FIX (group-core split): same cross-module TDZ risk as the secureExpose
-// block above — GroupCore is imported from group-core-bootstrap.js, and this
-// is the exact assignment group-core-patch.js polls window.GroupCore for
-// (its "[patch] GroupCore never appeared" after 40 retries). Deferred to a
-// microtask for the same reason: run after the whole circular module graph
-// has finished its initial synchronous evaluation.
-queueMicrotask(() => {
-    window.GroupCore = GroupCore;
+window.GroupCore = GroupCore;
 
-    try {
-        if (window.KynectaVoiceRecorder) {
-            window.KynectaVoiceRecorder.install(GroupCore);
-        } else {
-            // VoiceRecorder loads after this module — install when ready
-            window.addEventListener('load', () => {
-                if (window.KynectaVoiceRecorder && !GroupCore.startRecording) {
-                    window.KynectaVoiceRecorder.install(GroupCore);
-                }
-            });
-        }
-    } catch (_) {}
-});
+try {
+    if (window.KynectaVoiceRecorder) {
+        window.KynectaVoiceRecorder.install(GroupCore);
+    } else {
+        // VoiceRecorder loads after this module — install when ready
+        window.addEventListener('load', () => {
+            if (window.KynectaVoiceRecorder && !GroupCore.startRecording) {
+                window.KynectaVoiceRecorder.install(GroupCore);
+            }
+        });
+    }
+} catch (_) {}
 
 (function bootstrapSettingsFromCache() {
     try {

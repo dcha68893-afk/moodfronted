@@ -1141,7 +1141,10 @@
                             <button class="gcm-item" data-subaction="export"><i class="fas fa-file-export"></i> Export Chat</button>
                             <button class="gcm-item" data-subaction="shortcut"><i class="fas fa-thumbtack"></i> Add Shortcut</button>
                             <button class="gcm-item" data-subaction="addtolist"><i class="fas fa-list"></i> Add to List</button>
+                            <button class="gcm-item" data-subaction="share"><i class="fas fa-share"></i> Share Group</button>
+                            <button class="gcm-item" data-subaction="favorite"><i class="fas fa-star"></i> <span data-favorite-label>Add to Favorites</span></button>
                             <div style="height:1px;background:var(--border-color);margin:4px 0"></div>
+                            <button class="gcm-item gcm-danger" data-subaction="block"><i class="fas fa-ban"></i> <span data-block-label>Block Group</span></button>
                             <button class="gcm-item gcm-danger" data-subaction="report"><i class="fas fa-flag"></i> Report</button>
                         </div>
                     </div>
@@ -2969,6 +2972,9 @@ function setupMenu(){
                 else if(sa==='export')doExportChat(g);
                 else if(sa==='shortcut')doAddShortcut(g);
                 else if(sa==='addtolist')doAddToList(g);
+                else if(sa==='share')doShareGroup(g);
+                else if(sa==='favorite')doToggleFavorite(g);
+                else if(sa==='block')doToggleBlock(g);
                 else if(sa==='report')doReportGroup(g);
             });
         });});
@@ -3223,12 +3229,43 @@ function doAddToList(g){
 }
 function doReportGroup(g){
     if(!confirm('Report the group "'+g.name+'" to moderators?'))return;
-    var ownerId=g.createdBy||g.ownerId||(g.owner&&g.owner.id);
-    if(!ownerId){ntf('Unable to report this group','error');return;}
-    api('/privacy/report',{method:'POST',body:{reportedUserId:ownerId,reason:'other',details:'Reported group "'+(g.name||'')+'" (ID: '+g.id+')'}}).then(function(d){
-        if(d&&d.status==='error'){ntf(d.message||'Failed to report','error');return;}
-        ntf('Report submitted');
-    }).catch(function(){ntf('Failed to report group','error');});
+    api('/groups/'+g.id+'/report',{method:'POST',body:{reason:'other',details:'Reported from group menu'}}).then(function(d){
+        if(d&&d.success===false){ntf(d.message||'Failed to report','error');return;}
+        ntf('Report submitted to moderators');
+    }).catch(function(err){
+        var msg=(err&&err.message)||'Failed to report group';
+        ntf(msg==='Conflict'||/already/i.test(msg)?'You already reported this group':msg,'error');
+    });
+}
+function doShareGroup(g){
+    api('/groups/'+g.id+'/invite-link/qr').then(function(d){
+        var url=(d&&d.inviteUrl)||(window.location.origin+'/join?token='+(g.inviteLink||g.id));
+        if(navigator.share){
+            navigator.share({title:g.name||'Join my group',text:'Join "'+(g.name||'this group')+'" on Kynecta',url:url}).catch(function(){});
+        }else{
+            navigator.clipboard.writeText(url).then(function(){ntf('Invite link copied to clipboard');}).catch(function(){ntf(url,'info');});
+        }
+    }).catch(function(){ntf('Failed to get invite link','error');});
+}
+function doToggleFavorite(g){
+    var newState=!g.isFavorite;
+    api('/groups/'+g.id+'/preferences',{method:'PUT',body:{isFavorite:newState}}).then(function(){
+        g.isFavorite=newState;
+        var lbl=document.querySelector('[data-favorite-label]');
+        if(lbl)lbl.textContent=newState?'Remove from Favorites':'Add to Favorites';
+        ntf(newState?'Added to favorites':'Removed from favorites');
+    }).catch(function(){ntf('Failed to update favorites','error');});
+}
+function doToggleBlock(g){
+    var newState=!g.isBlocked;
+    if(newState&&!confirm('Block "'+(g.name||'this group')+'"? You\'ll stop seeing it and its notifications until you unblock it.'))return;
+    api('/groups/'+g.id+'/'+(newState?'block':'unblock'),{method:'POST'}).then(function(){
+        g.isBlocked=newState;
+        var lbl=document.querySelector('[data-block-label]');
+        if(lbl)lbl.textContent=newState?'Unblock Group':'Block Group';
+        ntf(newState?'Group blocked':'Group unblocked');
+        if(newState){closePanel();var gc2=gc();if(gc2&&typeof gc2.requestGroupList==='function')gc2.requestGroupList().catch(function(){});}
+    }).catch(function(){ntf('Failed to update block state','error');});
 }
 
 /* ─── Leave / Delete ──────────────────────────────────────────── */

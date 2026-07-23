@@ -1078,7 +1078,37 @@ const QRCodeManager = {
         }
         
         Logger.info('QRCodeManager', 'Sending friend request from QR', { userId });
-        
+
+        // FIX: this used to always call the generic request-send endpoint, completely
+        // bypassing the dedicated /api/friends/qr/connect endpoint that already existed on
+        // the backend (auto-accepts if the other person already sent you a pending request,
+        // and rejects blocked users) — that endpoint was fully built but never called by
+        // anything. Use it when we have the raw scanned QR string to build a token from;
+        // fall back to the generic endpoint only if that's unavailable or fails.
+        if (options.rawQrString) {
+            try {
+                const token = btoa(unescape(encodeURIComponent(options.rawQrString)));
+                const qrResponse = await authorizedRequest('/api/friends/qr/connect', {
+                    method: 'POST',
+                    body: JSON.stringify({ token })
+                });
+                if (qrResponse && qrResponse.success) {
+                    if (qrResponse.data?.request) {
+                        FriendCacheManager.setSentRequest(qrResponse.data.request);
+                        FriendCacheManager.syncToGlobals();
+                        FriendCacheManager.persist();
+                    }
+                    if (qrResponse.data?.friendship || qrResponse.data?.alreadyFriends) {
+                        loadFriendsFromBackend().catch(() => {});
+                    }
+                    return { success: true, request: qrResponse.data?.request, friendship: qrResponse.data?.friendship, alreadyFriends: qrResponse.data?.alreadyFriends };
+                }
+                Logger.warn('QRCodeManager', 'qr/connect failed, falling back to generic request', qrResponse?.error || qrResponse?.message);
+            } catch (e) {
+                Logger.warn('QRCodeManager', 'qr/connect threw, falling back to generic request', e.message);
+            }
+        }
+
         const response = await authorizedRequest('/api/friends/requests/send', {
             method: 'POST',
             body: JSON.stringify({ 
@@ -1578,7 +1608,8 @@ const UIBridge = {
                     
                     if (result.success && result.user) {
                         QRCodeManager.sendFriendRequestFromQR(result.user.id, {
-                            note: 'Added via QR code scan'
+                            note: 'Added via QR code scan',
+                            rawQrString: qrData
                         }).then(requestResult => {
                             window.dispatchEvent(new CustomEvent('ui:qrFriendRequestResult', {
                                 detail: { userId: result.user.id, result: requestResult }

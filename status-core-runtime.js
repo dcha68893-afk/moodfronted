@@ -12,7 +12,7 @@
 // =============================================
 // UI BRIDGE
 // =============================================
-const UIBridge = {
+const CoreUIBridge = {
     _listeners: new Map(),
     _domEvents: new Map(),
     _initialized: false,
@@ -20,16 +20,16 @@ const UIBridge = {
     
     init() {
         if (this._initialized) return this;
-        initLog('UIBridge initializing');
+        initLog('CoreUIBridge initializing');
         this._setupDefaultListeners();
         this._initialized = true;
-        successLog('UIBridge initialized');
+        successLog('CoreUIBridge initialized');
         return this;
     },
     
     _setupDefaultListeners() {
         this.register('updateSetting', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
                 errorLog('Cannot update setting: auth not ready');
                 return { success: false, error: 'Auth not ready' };
             }
@@ -44,7 +44,7 @@ const UIBridge = {
         });
         
         this.register('saveSettings', async () => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
                 return { success: false, error: 'Auth not ready' };
             }
             
@@ -57,7 +57,7 @@ const UIBridge = {
         });
         
         this.register('resetSettings', async () => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
                 return { success: false, error: 'Auth not ready' };
             }
             
@@ -74,7 +74,7 @@ const UIBridge = {
                 return { success: false, error: 'Module not active' };
             }
             
-            if (!isAuthenticated) {
+            if (!coreAuthState) {
                 return { success: false, error: 'Auth not ready' };
             }
             
@@ -87,152 +87,152 @@ const UIBridge = {
         });
         
         this.register('sendMessage', (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             MessageTransport.send('SEND_MESSAGE', data);
         });
         
         this.register('updateProfile', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('profile', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updatePrivacy', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('privacy', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateNotifications', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('notifications', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateAppearance', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('appearance', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateSecurity', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('security', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateChat', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('chat', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateFriends', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('friends', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateGroups', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('groups', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateCalls', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('calls', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateStatus', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('status', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateStorage', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('storage', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateMood', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('mood', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateAdvanced', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('advanced', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateBackup', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('backup', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('updateDanger', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await updateSetting('danger', data.key, data.value);
             } catch (error) {}
         });
         
         this.register('logout', async () => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await handleLogout();
             } catch (error) {}
         });
         
         this.register('terminateSession', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await terminateSession(data.sessionId);
             } catch (error) {}
         });
         
         this.register('terminateAllSessions', async () => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await terminateAllSessions();
             } catch (error) {}
         });
         
         this.register('unblockUser', async (data) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await unblockUser(data.userId);
             } catch (error) {}
         });
         
         this.register('clearChatCache', async () => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await clearChatCache();
             } catch (error) {}
         });
         
         this.register('clearMediaCache', async () => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             try {
                 await clearMediaCache();
             } catch (error) {}
@@ -273,7 +273,7 @@ const UIBridge = {
         if (!element) return this;
         
         const handler = (domEvent) => {
-            if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+            if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
             const data = transform ? transform(domEvent) : { value: domEvent.target.value };
             this.trigger(bridgeEvent, data);
         };
@@ -324,7 +324,7 @@ const UIBridge = {
     }
 };
 
-UIBridge.init();
+CoreUIBridge.init();
 
 // =============================================
 // MODULE CORE CONTROLLER
@@ -359,10 +359,10 @@ const ModuleCoreController = {
         this._components.set('handshake', HandshakeManager);
         this._components.set('lifecycle', ModuleLifecycleController);
         this._components.set('recovery', RecoveryManager);
-        this._components.set('ui', UIBridge);
+        this._components.set('ui', CoreUIBridge);
         this._components.set('api', ApiCore);
         this._components.set('navigation', NavigationGuard);
-        this._components.set('failsafe', UIFailsafe);
+        this._components.set('failsafe', CoreUIFailsafe);
         this._components.set('coordinator', MultiModuleCoordinator);
         this._components.set('reliabilityEngine', ReliabilityEngine);
         this._components.set('settingsState', SettingsState);
@@ -586,7 +586,7 @@ async function loadFromLocalStorage() {
                 user: cachedUser
             };
             if (__isValidSession(sessionData)) {
-                currentUser = cachedUser;
+                coreCurrentUser = cachedUser;
                 coreData.user = cachedUser;
                 window.session.user = cachedUser;
                 if (DEBUG) console.log('[settings-core] ✅ Loaded cached user:', cachedUser.displayName);
@@ -761,7 +761,7 @@ function getMoodColor(mood) {
 // LOAD USER DATA - USES authorizedRequest
 // =============================================
 async function loadUserData() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
     
     try {
         const response = await authorizedRequest('/api/profile', { method: 'GET' });
@@ -774,10 +774,10 @@ async function loadUserData() {
                     user: user
                 };
                 if (__isValidSession(sessionData)) {
-                    currentUser = user;
+                    coreCurrentUser = user;
                     coreData.user = user;
                     window.session.user = user;
-                    SafeStorage.setJSON('current_user', currentUser);
+                    SafeStorage.setJSON('current_user', coreCurrentUser);
                     updateUserUI();
                 } else {
                     console.warn('[settings-core] ⚠️ Loaded user data invalid');
@@ -793,7 +793,7 @@ async function loadUserData() {
 // LOAD ACTIVE SESSIONS - USES authorizedRequest
 // =============================================
 async function loadActiveSessions() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
     
     try {
         const response = await authorizedRequest('/api/auth/sessions', { method: 'GET' });
@@ -814,7 +814,7 @@ async function loadActiveSessions() {
 // LOAD BLOCKED USERS - USES authorizedRequest
 // =============================================
 async function loadBlockedUsers() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
     
     try {
         const response = await authorizedRequest('/api/users/blocked', { method: 'GET' });
@@ -835,7 +835,7 @@ async function loadBlockedUsers() {
 // LOAD USER CONTACTS - USES authorizedRequest
 // =============================================
 async function loadUserContacts() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
     
     try {
         const response = await authorizedRequest('/api/friends/contacts', { method: 'GET' });
@@ -856,7 +856,7 @@ async function loadUserContacts() {
 // LOAD USER GROUPS - USES authorizedRequest
 // =============================================
 async function loadUserGroups() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) return;
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) return;
     
     try {
         const response = await authorizedRequest('/api/groups', { method: 'GET' });
@@ -957,7 +957,7 @@ async function saveSettings() {
 // HANDLE LOGOUT - USES authorizedRequest
 // =============================================
 async function handleLogout() {
-    if (!isAuthenticated) {
+    if (!coreAuthState) {
         return false;
     }
     
@@ -966,7 +966,7 @@ async function handleLogout() {
         
         await MessageTransport.send('SESSION_INVALIDATED', {});
         
-        isAuthenticated = false;
+        coreAuthState = false;
         clearSession();
         parentSessionReceived = false;
         sessionValidated = false;
@@ -992,7 +992,7 @@ async function handleLogout() {
 // TERMINATE SESSION - USES authorizedRequest
 // =============================================
 async function terminateSession(sessionId) {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
         throw new Error('Not ready');
     }
     
@@ -1036,7 +1036,7 @@ async function terminateSession(sessionId) {
 // TERMINATE ALL SESSIONS - USES authorizedRequest
 // =============================================
 async function terminateAllSessions() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
         throw new Error('Not ready');
     }
     
@@ -1077,7 +1077,7 @@ async function terminateAllSessions() {
 // UNBLOCK USER - USES authorizedRequest
 // =============================================
 async function unblockUser(userId) {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
         throw new Error('Not ready');
     }
     
@@ -1112,7 +1112,7 @@ async function unblockUser(userId) {
 // CLEAR CHAT CACHE - USES authorizedRequest
 // =============================================
 async function clearChatCache() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
         throw new Error('Not ready');
     }
     
@@ -1151,7 +1151,7 @@ async function clearChatCache() {
 // CLEAR MEDIA CACHE - USES authorizedRequest
 // =============================================
 async function clearMediaCache() {
-    if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
+    if (currentState !== LifecycleState.ACTIVE || !coreAuthState) {
         throw new Error('Not ready');
     }
     
@@ -1193,7 +1193,7 @@ function updateUserUI() {
     try {
         const event = new CustomEvent('userUIUpdate', {
             detail: {
-                user: currentUser,
+                user: coreCurrentUser,
                 timestamp: Date.now()
             }
         });
@@ -1214,8 +1214,8 @@ function initializeUI() {
         const event = new CustomEvent('coreUIInitialized', {
             detail: {
                 timestamp: Date.now(),
-                mode: isAuthenticated ? 'authenticated' : 'no_session',
-                user: currentUser,
+                mode: coreAuthState ? 'authenticated' : 'no_session',
+                user: coreCurrentUser,
                 environment: IframeEnvironment.getEnvironment()
             }
         });
@@ -1239,7 +1239,7 @@ async function secureFetchWrapper(endpoint, method = 'GET', data = null, options
         };
     }
     
-    if (!isAuthenticated) {
+    if (!coreAuthState) {
         return {
             success: false,
             status: 'error',
@@ -1270,7 +1270,7 @@ async function secureFetchWrapper(endpoint, method = 'GET', data = null, options
 // SAFE LOAD USER DATA
 // =============================================
 async function safeLoadUserData() {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) {
         return null;
     }
     
@@ -1282,10 +1282,10 @@ async function safeLoadUserData() {
                 user: window.session.user
             };
             if (__isValidSession(sessionData)) {
-                currentUser = window.session.user;
+                coreCurrentUser = window.session.user;
                 coreData.user = window.session.user;
-                SafeStorage.setJSON('current_user', currentUser);
-                return currentUser;
+                SafeStorage.setJSON('current_user', coreCurrentUser);
+                return coreCurrentUser;
             }
         }
         return null;
@@ -1298,7 +1298,7 @@ async function safeLoadUserData() {
 // SAFE LOAD SETTINGS
 // =============================================
 async function safeLoadSettings() {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) {
         return null;
     }
     
@@ -1319,7 +1319,7 @@ async function safeLoadSettings() {
 // SAFE LOAD BLOCKED USERS
 // =============================================
 async function safeLoadBlockedUsers() {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
         const response = await secureFetchWrapper('/api/users/blocked', 'GET');
@@ -1338,7 +1338,7 @@ async function safeLoadBlockedUsers() {
 // SAFE LOAD ACTIVE SESSIONS
 // =============================================
 async function safeLoadActiveSessions() {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
         const response = await secureFetchWrapper('/api/auth/sessions', 'GET');
@@ -1357,7 +1357,7 @@ async function safeLoadActiveSessions() {
 // SAFE LOAD USER CONTACTS
 // =============================================
 async function safeLoadUserContacts() {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
         const response = await secureFetchWrapper('/api/friends/contacts', 'GET');
@@ -1376,7 +1376,7 @@ async function safeLoadUserContacts() {
 // SAFE LOAD USER GROUPS
 // =============================================
 async function safeLoadUserGroups() {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) return null;
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) return null;
     
     try {
         const response = await secureFetchWrapper('/api/groups', 'GET');
@@ -1396,7 +1396,7 @@ async function safeLoadUserGroups() {
 // MAKE SAFE REQUEST
 // =============================================
 async function makeSafeRequest(endpoint, method = 'GET', data = null, options = {}) {
-    if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+    if (!coreAuthState && currentState !== LifecycleState.ACTIVE) {
         throw new Error('Authentication not available');
     }
     return await secureFetchWrapper(endpoint, method, data, options);
@@ -1443,7 +1443,7 @@ function getSecureToken() {
 async function waitForToken(timeout = 10000) {
     const startTime = Date.now();
     while (Date.now() - startTime < timeout) {
-        if (isAuthenticated && window.session.token) return true;
+        if (coreAuthState && window.session.token) return true;
         await new Promise(resolve => setTimeout(resolve, 100));
     }
     return false;
@@ -1460,7 +1460,7 @@ function startPassiveAuthMonitoring() {}
 function startBackgroundTasks() {
     try {
         if (backgroundTasksStarted) return;
-        if (!isAuthenticated && currentState !== LifecycleState.ACTIVE) {
+        if (!coreAuthState && currentState !== LifecycleState.ACTIVE) {
             console.log(`[${MODULE_NAME}] ⏳ Cannot start background tasks: auth not ready`);
             return;
         }
@@ -1489,7 +1489,7 @@ function startBackgroundTasks() {
 // CHECK AUTHENTICATION STATE
 // =============================================
 function checkAuthenticationState() {
-    return isAuthenticated && isSessionValid();
+    return coreAuthState && isSessionValid();
 }
 
 // =============================================
@@ -1525,7 +1525,7 @@ function sendMessageToParent(message) {
 // =============================================
 function resetUIForLogout() {
     try {
-        isAuthenticated = false;
+        coreAuthState = false;
         clearSession();
         parentSessionReceived = false;
         sessionValidated = false;
@@ -1553,7 +1553,7 @@ function resetUIForLogout() {
 // =============================================
 // SHOW RECONNECTION STATE
 // =============================================
-function showReconnectionState() {
+function coreShowReconnectionState() {
     try {
         const event = new CustomEvent('coreReconnecting', {
             detail: {
@@ -1591,14 +1591,14 @@ async function bootstrapIframe() {
 // =============================================
 async function waitForSession(timeout = 10000) {
     return new Promise((resolve) => {
-        if (isAuthenticated && isSessionValid()) {
+        if (coreAuthState && isSessionValid()) {
             resolve(true);
             return;
         }
         const startTime = Date.now();
         const checkInterval = safeSetInterval(() => {
             try {
-                if (isAuthenticated && isSessionValid()) {
+                if (coreAuthState && isSessionValid()) {
                     clearInterval(checkInterval);
                     activeIntervals.delete(checkInterval);
                     clearTimeout(timeoutId);
@@ -1639,7 +1639,7 @@ function initializeBasicUI() {
                 timestamp: Date.now(),
                 state: currentState,
                 environment: IframeEnvironment.getEnvironment(),
-                authenticated: isAuthenticated
+                authenticated: coreAuthState
             }
         });
         window.dispatchEvent(event);
@@ -1652,7 +1652,7 @@ function initializeBasicUI() {
 // =============================================
 // SETUP BASIC EVENT LISTENERS
 // =============================================
-function setupBasicEventListeners() {
+function coreSetupBasicEventListeners() {
     try {
         const backToAppBtn = document.getElementById('backToAppBtn');
         if (backToAppBtn) {
@@ -1718,7 +1718,7 @@ function getHealthMetrics() {
     return {
         uptime: Date.now() - (stateHistory[0]?.timestamp || Date.now()),
         state: currentState,
-        authenticated: isAuthenticated,
+        authenticated: coreAuthState,
         sessionValid: isSessionValid(),
         heartbeatHealthy: HeartbeatClient.isHealthy(),
         parentVerified: OriginAdapter.isParentVerified(),
@@ -1749,7 +1749,7 @@ function forceRecovery() {
 const readyCallbacks = [];
 
 function onReady(callback) {
-    if (isReady && isAuthenticated) {
+    if (isReady && coreAuthState) {
         callback();
     } else {
         readyCallbacks.push(callback);
@@ -1806,7 +1806,7 @@ function shutdownCore() {
         tokenReady = false;
         tokenAvailable = false;
         backgroundTasksStarted = false;
-        isAuthenticated = false;
+        coreAuthState = false;
         clearSession();
         
         window.__SETTINGS_STATE__ = currentState;
@@ -1840,7 +1840,7 @@ async function initializeCore(options = {}) {
     }
     
     if (currentState !== LifecycleState.BOOT && currentState !== LifecycleState.INITIALIZING) {
-        return { success: true, state: currentState, authenticated: isAuthenticated };
+        return { success: true, state: currentState, authenticated: coreAuthState };
     }
     
     initializationPromise = (async () => {
@@ -1873,7 +1873,7 @@ async function initializeCore(options = {}) {
             return { 
                 success: true, 
                 state: currentState, 
-                authenticated: isAuthenticated 
+                authenticated: coreAuthState 
             };
             
         } catch (error) {
@@ -1913,13 +1913,13 @@ function setupMessageHandlers() {
     MessageTransport.on('SETTINGS_DATA', handleSettingsDataResponse);
     MessageTransport.on('SETTINGS_GLOBAL_UPDATE', handleSettingsGlobalUpdateMessage);
     MessageTransport.on('AUTH_READY', (message) => {
-        isAuthenticated = true;
+        coreAuthState = true;
         authCheckComplete = true;
         processRequestQueue();
         console.log('[settings-core] ✅ AUTH_READY received');
     });
     MessageTransport.on('AUTH_ERROR', (message) => {
-        isAuthenticated = false;
+        coreAuthState = false;
         console.error('[settings-core] ❌ AUTH_ERROR received');
     });
     
@@ -1990,7 +1990,7 @@ const DiagnosticsAgent = {
             timeStr: new Date().toISOString().slice(11, 23),
             state: currentState,
             environment: IframeEnvironment.getEnvironment(),
-            authenticated: isAuthenticated
+            authenticated: coreAuthState
         };
         
         this._logBuffer.push(entry);
@@ -2012,7 +2012,7 @@ const DiagnosticsAgent = {
             details,
             timestamp: Date.now(),
             state: currentState,
-            authenticated: isAuthenticated,
+            authenticated: coreAuthState,
             sessionValid: isSessionValid(),
             environment: IframeEnvironment.getEnvironment(),
             settingsLoaded: SettingsState.loaded
@@ -2029,7 +2029,7 @@ const DiagnosticsAgent = {
             uptime: Date.now() - this._startTime,
             environment: IframeEnvironment.getEnvironment(),
             compatibility: CompatibilityBridge.isEnabled(),
-            authenticated: isAuthenticated,
+            authenticated: coreAuthState,
             settingsLoaded: SettingsState.loaded
         };
     },
@@ -2042,7 +2042,7 @@ const DiagnosticsAgent = {
                 history: stateHistory.slice(-5)
             },
             auth: {
-                authenticated: isAuthenticated,
+                authenticated: coreAuthState,
                 sessionValid: isSessionValid()
             },
             environment: {
@@ -2331,7 +2331,7 @@ window.__getEnvironment = () => IframeEnvironment.getInfo();
 window.__getTransportStatus = () => IframeTransport.getDiagnostics();
 window.__getSessionStatus = () => ({
     valid: isSessionValid(),
-    authenticated: isAuthenticated,
+    authenticated: coreAuthState,
     hasToken: !!window.session.token,
     user: window.session.user,
     expiresAt: window.session.expiresAt,
@@ -2347,7 +2347,7 @@ window.__getSettingsState = () => ({
     pendingUpdates: SettingsState.pendingUpdates.size
 });
 window.__getAuthState = () => ({
-    authenticated: isAuthenticated,
+    authenticated: coreAuthState,
     queueLength: requestQueue.length
 });
 

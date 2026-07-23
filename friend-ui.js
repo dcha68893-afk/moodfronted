@@ -104,6 +104,7 @@ import {
     // Data Loading
     loadFriendsFromBackend,
     loadFriendRequestsFromBackend,
+    loadFriendSuggestions,
     loadSentRequestsFromBackend,
     loadPinnedFriendsFromBackend,
     loadMutedFriendsFromBackend,
@@ -1365,6 +1366,7 @@ export const RenderPipeline = {
                 }).catch(() => {});
                 loadFriendRequestsFromBackend().then(() => renderFriendRequests()).catch(() => {});
                 loadSentRequestsFromBackend().then(() => renderSentRequests()).catch(() => {});
+                renderFriendSuggestions().catch(() => {});
             }, 500);
         });
         
@@ -3324,6 +3326,38 @@ function renderFilteredUsersList(users, searchTerm) {
     });
     allUsersListElement.appendChild(fragment);
 }
+// SETTINGS WIRING: friends.friendSuggestions — default true. Fetches and renders "People you
+// may know" using the existing (previously unused) GET /api/friends/suggestions endpoint.
+// Reuses createUserSearchItemElement so suggestion cards get the same Add Friend / pending /
+// already-friends button states as search results, for free.
+async function renderFriendSuggestions() {
+    const container = document.getElementById('friendSuggestionsContainer');
+    const list = document.getElementById('friendSuggestionsList');
+    if (!container || !list) return;
+
+    if (window.__friendSuggestions === false) {
+        container.style.display = 'none';
+        return;
+    }
+
+    const result = await loadFriendSuggestions(10);
+    const suggestions = (result && result.suggestions) || [];
+
+    if (suggestions.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    list.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    suggestions.forEach(user => {
+        const item = createUserSearchItemElement(user);
+        if (item && item.nodeType === Node.ELEMENT_NODE) fragment.appendChild(item);
+    });
+    list.appendChild(fragment);
+    container.style.display = '';
+}
+
 // [9] UI ELEMENT CREATORS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
 
@@ -6499,6 +6533,9 @@ function initializeUI() {
         }
         if (key === 'allowRequestMessage') {
             applyFriendNoteFieldVisibility();
+        }
+        if (key === 'friendSuggestions') {
+            renderFriendSuggestions();
         }
     });
     window.addEventListener('settingsUpdated', function(e) {

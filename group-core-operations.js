@@ -1428,8 +1428,8 @@ function buildGroupMessageMarkup(message) {
                         ${replyMarkup}
                         ${buildGroupMessageBody(message)}
                         <div class="message-meta" style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; opacity: 0.8;">
-                            <span class="message-time">${formatMessageTime(message.createdAt || message.timestamp || new Date())}</span>
-                            ${isSent ? `<span class="message-status">${escapeGroupChatHTML(statusLabel)}</span>` : ''}
+                            ${window.__showTimestamps !== false ? `<span class="message-time">${formatMessageTime(message.createdAt || message.timestamp || new Date())}</span>` : ''}
+                            ${isSent && window.__SHOW_READ_RECEIPTS !== false ? `<span class="message-status">${escapeGroupChatHTML(statusLabel)}</span>` : ''}
                         </div>
                     </div>
                 </div>
@@ -2613,6 +2613,7 @@ function setupTypingListener(groupId) {
             try {
                 adjustTextareaHeight();
                 updateGroupPrimaryActionState();
+                if (window.__SHOW_TYPING_INDICATORS === false) return; // setting disabled: don't broadcast typing status
                 if (!isTyping) {
                     isTyping = true;
                     GroupCore.handleTyping(groupId, session.user?.uid || session.user?.id, true);
@@ -2640,6 +2641,7 @@ function setupTypingListener(groupId) {
         
         newChatInput.addEventListener('keydown', (event) => {
             try {
+                if (window.__enterToSend === false) return; // setting disabled: Enter inserts a newline instead
                 if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     if (newChatInput.value.trim()) {
@@ -3193,6 +3195,14 @@ function renderFriendSelection() {
                             checkbox.querySelector('i').style.display = 'none';
                             selectedFriends = selectedFriends.filter(id => id !== friend.id);
                         } else {
+                            const cap = window.__maxGroupSize;
+                            // +1 accounts for the creator, who is a member but not in selectedFriends
+                            if (typeof cap === 'number' && cap > 0 && selectedFriends.length + 1 >= cap) {
+                                if (typeof showNotification === 'function') {
+                                    showNotification(`This group is limited to ${cap} members in your settings.`, 'error');
+                                }
+                                return;
+                            }
                             checkbox.classList.add('selected');
                             checkbox.querySelector('i').style.display = 'block';
                             selectedFriends.push(friend.id);
@@ -3274,6 +3284,11 @@ function removeSelectedFriend(friendId) {
 }
 
 const createGroupOnline = async function(groupData) {
+    if (window.__allowGroupCreation === false) {
+        const msg = 'Group creation is turned off in your settings.';
+        if (typeof showNotification === 'function') showNotification(msg, 'error');
+        throw new Error(msg);
+    }
     // FIX: Instead of silently returning when not ready, wait up to 8s for
     // the parent handshake and session to arrive, then show a clear error.
     if (!isGroupOperationReady()) {

@@ -2924,6 +2924,45 @@ export function loadFriendsSection(container) {
                         </label>
                     </div>
                 </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Friend Suggestions</div>
+                        <div class="setting-description">Show "People you may know" based on mutual friends and shared groups</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="friendSuggestions" ${settings.friendSuggestions !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Discoverable by Phone Number</div>
+                        <div class="setting-description">Let people who search your phone number find your profile</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="discoverByPhone" ${settings.discoverByPhone !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Discoverable by Email</div>
+                        <div class="setting-description">Let people who search your email address find your profile</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="discoverByEmail" ${settings.discoverByEmail !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -2942,6 +2981,15 @@ export function loadFriendsSection(container) {
     
     const sortFriendsBy = document.getElementById('sortFriendsBy');
     if (sortFriendsBy) sortFriendsBy.addEventListener('change', () => window.__updateSetting('friends', 'sortFriendsBy', sortFriendsBy.value));
+
+    const friendSuggestions = document.getElementById('friendSuggestions');
+    if (friendSuggestions) friendSuggestions.addEventListener('change', () => window.__updateSetting('friends', 'friendSuggestions', friendSuggestions.checked));
+
+    const discoverByPhone = document.getElementById('discoverByPhone');
+    if (discoverByPhone) discoverByPhone.addEventListener('change', () => window.__updateSetting('friends', 'discoverByPhone', discoverByPhone.checked));
+
+    const discoverByEmail = document.getElementById('discoverByEmail');
+    if (discoverByEmail) discoverByEmail.addEventListener('change', () => window.__updateSetting('friends', 'discoverByEmail', discoverByEmail.checked));
     
     const friendLimitWarning = document.getElementById('friendLimitWarning');
     if (friendLimitWarning) friendLimitWarning.addEventListener('change', () => window.__updateSetting('friends', 'friendLimitWarning', friendLimitWarning.checked));
@@ -3152,57 +3200,6 @@ export function loadStatusSection(container) {
     container.innerHTML = `
         <div class="settings-section">
             <div class="section-header">
-                <h3><i class="fas fa-eye section-icon"></i> Status Updates Privacy</h3>
-            </div>
-            <div class="section-body">
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Who can see my status</div>
-                        <div class="setting-description">Controls who sees your Status updates by default</div>
-                    </div>
-                    <div class="setting-control">
-                        <select class="setting-dropdown" id="whoCanViewMyStatus">
-                            <option value="everyone" ${settings.whoCanViewMyStatus === 'everyone' ? 'selected' : ''}>Everyone</option>
-                            <option value="friendsOnly" ${(settings.whoCanViewMyStatus === 'friendsOnly' || !settings.whoCanViewMyStatus) ? 'selected' : ''}>Friends Only</option>
-                            <option value="closeFriends" ${settings.whoCanViewMyStatus === 'closeFriends' ? 'selected' : ''}>Close Friends</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Auto-expire status after</div>
-                        <div class="setting-description">Default duration for new status updates</div>
-                    </div>
-                    <div class="setting-control">
-                        <select class="setting-dropdown" id="autoExpireStatus">
-                            <option value="1h" ${settings.autoExpireStatus === '1h' ? 'selected' : ''}>1 hour</option>
-                            <option value="6h" ${settings.autoExpireStatus === '6h' ? 'selected' : ''}>6 hours</option>
-                            <option value="12h" ${settings.autoExpireStatus === '12h' ? 'selected' : ''}>12 hours</option>
-                            <option value="24h" ${(settings.autoExpireStatus === '24h' || !settings.autoExpireStatus) ? 'selected' : ''}>24 hours</option>
-                            <option value="7d" ${settings.autoExpireStatus === '7d' ? 'selected' : ''}>1 week</option>
-                            <option value="never" ${settings.autoExpireStatus === 'never' ? 'selected' : ''}>Never (permanent)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="setting-item">
-                    <div class="setting-info">
-                        <div class="setting-label">Allow replies to my status</div>
-                        <div class="setting-description">Let viewers reply to your status updates</div>
-                    </div>
-                    <div class="setting-control">
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="allowStatusReplies" ${settings.allowStatusReplies !== false ? 'checked' : ''}>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="section-header">
                 <h3><i class="fas fa-smile section-icon"></i> Status Settings</h3>
             </div>
             <div class="section-body">
@@ -3284,22 +3281,6 @@ export function loadStatusSection(container) {
         </div>
     `;
     
-    const whoCanViewMyStatus = document.getElementById('whoCanViewMyStatus');
-    if (whoCanViewMyStatus) whoCanViewMyStatus.addEventListener('change', () => {
-        window.__updateSetting('status', 'whoCanViewMyStatus', whoCanViewMyStatus.value);
-        // showStatusTo duplicates whoCanViewMyStatus in the data model (both
-        // default 'friendsOnly', no UI ever distinguished them) — keep synced.
-        window.__updateSetting('status', 'showStatusTo', whoCanViewMyStatus.value);
-    });
-
-    const autoExpireStatus = document.getElementById('autoExpireStatus');
-    if (autoExpireStatus) autoExpireStatus.addEventListener('change', () =>
-        window.__updateSetting('status', 'autoExpireStatus', autoExpireStatus.value));
-
-    const allowStatusReplies = document.getElementById('allowStatusReplies');
-    if (allowStatusReplies) allowStatusReplies.addEventListener('change', () =>
-        window.__updateSetting('status', 'allowStatusReplies', allowStatusReplies.checked));
-
     const currentStatus = document.getElementById('currentStatus');
     if (currentStatus) currentStatus.addEventListener('change', () => window.__updateSetting('status', 'currentStatus', currentStatus.value));
     
