@@ -253,13 +253,12 @@ function getMyStatuses() {
 }
 
 // Global variables that will be populated from core
-// FIX (status-ui.js / status-core-state.js name collision): removed duplicate
-// 'let currentUser = null;' — status-core-state.js already declares this at its
-// own top level, and since both files load as plain classic <script> tags in the
-// same global scope (status.html's own comment: these files 'share window/global
-// scope... exactly like status-ui.js... already do'), redeclaring it here threw
-// 'Identifier has already been declared' and aborted this entire script's parse.
-// status-ui.js now reads/writes the single shared binding from status-core-state.js.
+// UPDATE: status-core-state.js has since renamed its own top-level user
+// variable to `coreCurrentUser`, so this is no longer a name collision —
+// status-ui.js's syncDataFromCore() populates this local `currentUser` itself
+// (from core.SessionManager.getUser() or localStorage), independently of
+// status-core-state.js's own session state.
+let currentUser = null;
 let userData = null;
 let statuses = [];
 let myStatuses = [];

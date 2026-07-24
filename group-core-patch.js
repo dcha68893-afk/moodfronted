@@ -34,7 +34,14 @@
 //  FIX 13:  handleSessionUpdate const-reassignment bug patched.
 // ============================================================
 
-import LocalGroupStore                          from './localStore-groups.js';
+// FIX: localStore-groups.js is a plain classic IIFE (no ES `export`
+// statements — see its own "NO ES module export (script tag compatibility)"
+// comment); it only sets window.LocalGroupStore. Importing a default export
+// from it threw "does not provide an export named 'default'" and aborted
+// this whole module. group.html loads localStore-groups.js as the module
+// script immediately before this one, so by the time this file's top-level
+// code runs, window.LocalGroupStore is already set — read it from there.
+const LocalGroupStore = window.LocalGroupStore;
 import GroupQueueManager, { QUEUE_ACTIONS }     from './groupQueue-manager.js';
 import GroupSyncEngine                          from './groupSync-engine.js';
 
