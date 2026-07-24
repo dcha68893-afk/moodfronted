@@ -1333,6 +1333,31 @@ body {
     box-shadow: var(--shadow);
 }
 
+.font-options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    width: 100%;
+}
+.font-option {
+    height: 56px;
+    border-radius: 10px;
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    transition: all 0.2s;
+}
+.font-option:hover { background: rgba(255,255,255,0.12); }
+.font-option.selected {
+    border-color: var(--primary-color, #00a884);
+    background: rgba(0,168,132,0.18);
+}
+
 .background-option[data-bg="1"] { background-color: var(--status-bg-1); }
 .background-option[data-bg="2"] { background-color: var(--status-bg-2); }
 .background-option[data-bg="3"] { background-color: var(--status-bg-3); }
@@ -4189,7 +4214,11 @@ html, body, .app-container {
     justify-content: space-between;
     padding: max(14px, env(safe-area-inset-top)) 14px 14px;
     z-index: 30;
-    background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+    background: transparent;
+    pointer-events: none; /* only the buttons inside should capture taps */
+}
+#createStatusModal .composer-topbar > * {
+    pointer-events: auto;
 }
 #createStatusModal .composer-topbar-right {
     display: flex;

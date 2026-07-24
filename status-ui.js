@@ -3497,7 +3497,8 @@ function _startSlideTimer(isOwner, group) {
     _clearSlideTimer();
     _setSegmentState(currentViewerSlot);
     const DURATION = 5000;
-    const fill = document.querySelector(`.progress-segment:nth-child(${currentViewerSlot + 1}) .fill`);
+    const fill = document.querySelector(`.progress-segment:nth-child(${currentViewerSlot + 1}) .fill`)
+        || document.getElementById('progressFill'); // fallback single-bar path — was built but never animated
     if (fill) {
         fill.style.transition = `width ${DURATION}ms linear`;
         fill.style.width = '100%';
@@ -3513,6 +3514,8 @@ function _clearSlideTimer() {
     document.querySelectorAll('.progress-segment .fill').forEach(f => {
         f.style.transition = 'none';
     });
+    const fallbackFill = document.getElementById('progressFill');
+    if (fallbackFill) fallbackFill.style.transition = 'none';
 }
 
 function _advanceSlide(isOwner, group) {
@@ -4311,6 +4314,11 @@ function createTextStatusSlide(statusData) {
         <div class="text-status-content">${UISanitizer.sanitizeHTML(statusData.content || statusData.text || '')}</div>
         <div class="text-status-author">— ${UISanitizer.sanitizeHTML(statusData.user?.displayName || 'Unknown User')}</div>
     `;
+    const chosenFont = (statusData.metadata && statusData.metadata.fontFamily) || statusData.fontFamily;
+    if (chosenFont) {
+        const contentEl = slide.querySelector('.text-status-content');
+        if (contentEl) contentEl.style.fontFamily = chosenFont;
+    }
     return slide;
 }
 
@@ -6033,6 +6041,50 @@ function initializeBackgroundOptions() {
     if (first) first.classList.add('selected');
 }
 
+// Font picker for the "Aa" composer icon — this button previously opened
+// the Templates panel by mistake because no font-selection feature had
+// ever actually been built. Applies the chosen font live to the text
+// canvas (same "live apply" pattern as the background-color picker) and
+// is read by handlePostStatus() so it's saved with the status too.
+const fontOptionsList = [
+    { id: 'default',    label: 'Aa', family: "inherit" },
+    { id: 'serif',      label: 'Aa', family: "Georgia, 'Times New Roman', serif" },
+    { id: 'mono',       label: 'Aa', family: "'Courier New', monospace" },
+    { id: 'rounded',    label: 'Aa', family: "'Segoe UI Rounded', 'Comic Sans MS', sans-serif" },
+    { id: 'condensed',  label: 'Aa', family: "'Arial Narrow', sans-serif" },
+    { id: 'handwritten',label: 'Aa', family: "'Brush Script MT', cursive" }
+];
+function initializeFontOptions() {
+    const container = document.getElementById('fontOptions');
+    if (!container) return;
+    container.innerHTML = '';
+    fontOptionsList.forEach(f => {
+        const option = document.createElement('div');
+        option.className = 'font-option';
+        option.dataset.font = f.id;
+        option.style.fontFamily = f.family;
+        option.setAttribute('role', 'button');
+        option.setAttribute('tabindex', '0');
+        option.textContent = f.label;
+        option.addEventListener('click', () => {
+            container.querySelectorAll('.font-option').forEach(opt => opt.classList.remove('selected'));
+            option.classList.add('selected');
+            const textInput = UIElements.getElement('textStatusInput') || document.getElementById('textStatusInput');
+            if (textInput) textInput.style.fontFamily = f.family;
+            container.dataset.selectedFamily = f.family;
+        });
+        container.appendChild(option);
+    });
+    const textInput = UIElements.getElement('textStatusInput') || document.getElementById('textStatusInput');
+    const currentFamily = (textInput && textInput.style.fontFamily) || '';
+    const match = fontOptionsList.find(f => f.family === currentFamily) || fontOptionsList[0];
+    const toSelect = container.querySelector('[data-font="' + match.id + '"]');
+    if (toSelect) toSelect.classList.add('selected');
+    container.dataset.selectedFamily = match.family;
+}
+window._initFontOptions = initializeFontOptions;
+
+
 function initializeIntentOptions() {
     const container = UIElements.getElement('intentOptions');
     if (!container) return;
@@ -6473,6 +6525,10 @@ async function handlePostStatus() {
         statusData.content = text; // ensure core's postStatus payload uses correct field
         const bg = UIElements.querySelector('.background-option.selected');
         if (bg) statusData.background = bg.dataset.bg;
+        const fontContainer = document.getElementById('fontOptions');
+        if (fontContainer && fontContainer.dataset.selectedFamily && fontContainer.dataset.selectedFamily !== 'inherit') {
+            statusData.fontFamily = fontContainer.dataset.selectedFamily;
+        }
     } else if (tabName === 'media') {
         const mediaPreview = UIElements.getElement('mediaPreview');
         if (!mediaPreview || mediaPreview.children.length === 0) {
@@ -8108,8 +8164,17 @@ document.addEventListener('DOMContentLoaded', async function() {
         syncDataFromCore();
         subscribeToStatusChanges();
         
-        // Initial render with cached data
-        renderStatusListInstantlyUI();
+        // Initial render with cached data — own try/catch so a bug in list
+        // rendering doesn't also take down the rest of init below it, and so
+        // the real exception is visible instead of being caught by the huge
+        // outer catch and reported as an undifferentiated init failure.
+        try {
+            renderStatusListInstantlyUI();
+        } catch (renderErr) {
+            UILogger.error('Init', 'renderStatusListInstantlyUI threw', renderErr);
+            const container = UIElements.allStatusList || document.getElementById('allStatusList');
+            if (container) container.innerHTML = uiErrorBoundary.createStatusListFallback();
+        }
 
         // Fetch friend statuses early — StatusAPI uses parent bridge, no lifecycle needed
         setTimeout(() => {
@@ -8405,6 +8470,15 @@ if (typeof window !== 'undefined') {
             showDiagnosticOverlay,
             retryLoad: () => {
                 if (ensureUIActive('retryLoad') && isSessionReady()) {
+                    // FIX: core.loadStatuses() is unreliable/own-statuses-only
+                    // (see comment above _fetchFriendStatusesDirect) — that's
+                    // why Retry wasn't actually recovering. Use the real path.
+                    _friendFetchLast = 0;
+                    if (typeof _fetchFriendStatusesDirect === 'function') {
+                        _fetchFriendStatusesDirect().then(() => {
+                            try { renderStatusListInstantlyUI(); } catch (_) {}
+                        }).catch(() => {});
+                    }
                     const core = getCore();
                     if (core && core.loadStatuses) {
                         core.loadStatuses().catch(() => {});

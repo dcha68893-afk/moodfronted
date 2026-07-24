@@ -2966,6 +2966,14 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             <div class="composer-sheet-body" id="composerBgSheetBody"></div>
         </div>
 
+        <div class="composer-sheet" id="composerFontSheet">
+            <div class="composer-sheet-handle"></div>
+            <div class="composer-sheet-title">Font</div>
+            <div class="composer-sheet-body">
+                <div class="font-options" id="fontOptions"></div>
+            </div>
+        </div>
+
         <div class="composer-sheet" id="composerEmojiSheet">
             <div class="composer-sheet-handle"></div>
             <div class="composer-sheet-title">Emoji</div>
@@ -3125,8 +3133,8 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
             var fontBtn = document.getElementById('composerFontBtn');
             if (fontBtn) fontBtn.addEventListener('click', function () {
                 moveOnce();
-                openPanel('composerTemplatesPanel');
-                if (window._loadStatusTemplates) window._loadStatusTemplates();
+                if (window._initFontOptions) window._initFontOptions();
+                openSheet('composerFontSheet');
             });
             var moreBtn = document.getElementById('composerMoreBtn');
             if (moreBtn) moreBtn.addEventListener('click', function () { moveOnce(); openSheet('composerMoreSheet'); });
@@ -3189,6 +3197,14 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
                     }
                     var legacyTab = document.querySelector('.create-status-tab[data-tab="' + mode + '"]');
                     if (legacyTab) legacyTab.click();
+
+                    // File icon: open the Camera/Gallery chooser right away
+                    // instead of just revealing the media tab and leaving the
+                    // user to find and tap the upload area a second time.
+                    if (btn.id === 'composerFileBtn') {
+                        var chooser = document.getElementById('composerFileChooser');
+                        if (chooser) chooser.style.display = 'flex';
+                    }
                 });
             }
 
