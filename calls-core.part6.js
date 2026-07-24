@@ -14,16 +14,6 @@
     var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
     if (__CC.__aborted) { return; }
 
-/**
- * PART 6/8 — STATE GOVERNORS
- * Call state governor, legacy V5 state governor (compatibility), the current state governor, and the iframe session client that governors talk to.
- *
- * This file is a SOURCE FRAGMENT of calls-core.js, not a standalone script.
- * It shares the single closure of the original module and must be concatenated
- * in numeric order (part 0..7) — see build.js — before it is served to the browser.
- * Do NOT <script src> this file directly on its own; it will throw ReferenceErrors
- * for symbols defined in the other parts of the same closure.
- */
     // ==================== CALL STATE GOVERNOR (REAL) ====================
 
 
@@ -2229,7 +2219,7 @@ initiateCall: async function(callType, participants = [], options = {}) {
 
     const permCheck = await window.__CallsCoreShared.PermissionManager.checkPermissions({
 
-        audio: window.__CallsCoreShared.CONFIG.AUDIO_CONSTRAINTS,
+        audio: window.__CallsCoreShared.getAudioConstraints(),
 
         video: callType === 'video'
 
@@ -2311,11 +2301,11 @@ initiateCall: async function(callType, participants = [], options = {}) {
 
 
 
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            audio: window.__CallsCoreShared.getAudioConstraints(),
 
 
 
-            video: callType === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+            video: window.__CallsCoreShared.getVideoConstraints(callType)
 
 
 
@@ -3030,11 +3020,11 @@ initiateCall: async function(callType, participants = [], options = {}) {
                 const constraints = {
 
 
-                    // FIX: use full audio constraints (echo cancel, noise suppress) on callee side
-                    audio: window.__CallsCoreShared.CONFIG.AUDIO_CONSTRAINTS,
+                    // FIX: live settings-aware constraints (echo cancel, noise suppress, video quality)
+                    audio: window.__CallsCoreShared.getAudioConstraints(),
 
 
-                    video: callType === 'video'
+                    video: window.__CallsCoreShared.getVideoConstraints(callType)
 
 
 

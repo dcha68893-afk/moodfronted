@@ -299,7 +299,7 @@
     overlay.id = 'kynForwardPicker';
 
     // Load conversations for the picker
-    const core = global.MessagesCore || global.messagesCore || global.__messagesCore;
+    const core = global.messagesCore || global.__messagesCore;
     const conversations = core?.ChatManager?.getConversations?.() ||
                           core?.getConversations?.() || [];
 

@@ -154,24 +154,6 @@ function authorizedRequest(endpoint, options = {}) {
                     return;
                 }
                 
-                // FIX (live-testing audit): this used to resolve() unconditionally for
-                // every response type other than a 401 — including a 400 "Current
-                // password is incorrect", a 500, or any other backend error. chat.html's
-                // directApiRequest() already correctly sets payload.success = false and
-                // payload.statusCode to the real HTTP status for those cases (see
-                // `if (!response.ok) return { success: false, ... }` there), but nothing
-                // here ever looked at it. The result: password changes, settings restores,
-                // and any other write action that failed on the backend still showed
-                // "success" in the UI because the promise resolved instead of rejecting.
-                const isFailure = response.success === false ||
-                    (typeof response.statusCode === 'number' && response.statusCode >= 400) ||
-                    response.status === 'error';
-                if (isFailure) {
-                    console.error(`[${MODULE_NAME}] ❌ Request failed: ${method} ${endpoint}`, response);
-                    reject(new Error(response.message || response.error || `Request failed (${response.statusCode || 'unknown'})`));
-                    return;
-                }
-                
                 if (DEBUG) {
                     console.log(`[${MODULE_NAME}] ✅ Response: ${method} ${endpoint}`);
                 }
@@ -473,45 +455,13 @@ const SettingsState = {
         // STEP 1: Update AppSettings FIRST (single source of truth)
         // This triggers all module subscriptions instantly
         if (window.AppSettings) {
-            // Mark as user-triggered so propagation layer logs and broadcasts to iframes
-            window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });
+            window.AppSettings.set(section + '.' + key, value);
         }
 
         // STEP 2: Update local state for backwards compatibility
         if (!this.data[section]) this.data[section] = {};
         this.data[section][key] = value;
         this._saveToCache();
-
-        // FIX: this is the actual function that runs on every single settings
-        // change (every toggle, dropdown, theme pick, etc.) — but until now it
-        // never notified the parent window (chat.html) directly. The only
-        // function that did (saveSettings(), below) is wired only to Ctrl+S
-        // and an internal command-palette action, not the normal UI flow, so
-        // chat.html's dispatchEventToModules relay — the only mechanism that
-        // reaches EVERY module iframe, including group.html and status.html,
-        // which don't even load AppSettings.js and so can never receive its
-        // BroadcastChannel-only updates — was essentially never triggered by
-        // ordinary use. This is why changing a setting only ever visibly
-        // applied inside the Settings page itself.
-        //
-        // IMPORTANT: send the FULL current settings snapshot (this.data), not
-        // just {[section]:{[key]:value}} — chat.html's SETTINGS_UPDATED
-        // handler calls persistCachedSettings(), which REPLACES its entire
-        // settings cache with whatever object arrives here rather than
-        // merging it. A partial payload would silently wipe every other
-        // cached section (privacy, notifications, chat, etc.) on every
-        // single settings change.
-        try {
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({
-                    type: 'SETTINGS_UPDATED',
-                    module: MODULE_NAME,
-                    section, key, value,
-                    settings: this.data,
-                    timestamp: Date.now()
-                }, '*');
-            }
-        } catch (e) { /* no parent — that's fine */ }
 
         // STEP 3: Emit unified event for any remaining legacy listeners
         window.dispatchEvent(new CustomEvent('appSettingsChanged', {
@@ -632,7 +582,7 @@ const SettingsState = {
     _applySettingGlobally(section, key, value) {
         // 1. Push into AppSettings (single source of truth)
         if (window.AppSettings) {
-            window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });
+            window.AppSettings.set(section + '.' + key, value);
         }
 
         // 2. Notify parent frame
@@ -822,15 +772,6 @@ const SettingsState = {
                 version: MODULE_VERSION
             };
             localStorage.setItem('knecta_settings_cache', JSON.stringify(cacheData));
-            // FIX-009 (corrected): was referencing an undefined `data` variable
-            // (should be `this.data`), so this write ReferenceError'd on every
-            // single save and was silently swallowed by the inner try/catch —
-            // 'kyn_app_settings' was never actually kept in sync from here.
-            // (AppSettings.js's own .set()/.merge() already keeps this key
-            // correct as the primary path, so this was a harmless-but-dead
-            // redundant write — fixed anyway since it's still read by
-            // chat.html, AppSettings.js, and settings-broadcast-listener.js.)
-            try { localStorage.setItem('kyn_app_settings', JSON.stringify(this.data)); } catch(_) {}
         } catch (error) {}
     },
     
@@ -1940,13 +1881,89 @@ function handlePongMessage(message) {
 }
 
 // =============================================
-// PLACEHOLDER HANDLERS TO PREVENT UNDEFINED ERRORS
+// SESSION SYNC HANDLERS (FIX: Forensic Audit P2 — were empty stubs)
 // =============================================
-function handleSessionData(message) {}
-function handleModuleRegisteredMessage(message) {}
-function handleSessionSyncMessage(message) {}
-function handleSessionUpdateMessage(message) {}
-function handleSessionInvalidatedMessage(message) {}
+
+function handleSessionData(message) {
+    // Initial session delivery from parent frame on load
+    const sessionData = message?.session || message?.data?.session || message?.data || message;
+    if (!sessionData) return;
+    const token  = sessionData.token || sessionData.accessToken;
+    const user   = sessionData.user  || (sessionData.id ? sessionData : null);
+    const expiry = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3_600_000);
+    if (token || user) {
+        window.session = window.session || {};
+        if (token)  { window.session.token     = token; }
+        if (user)   { window.session.user      = typeof user === 'object' ? { ...user } : user;
+                      window.currentUser       = window.session.user; }
+        if (expiry) { window.session.expiresAt = expiry; }
+        window.parentSessionReceived  = true;
+        window.sessionValidated       = true;
+        window.__SETTINGS_SESSION_ACTIVE__ = true;
+    }
+}
+
+function handleModuleRegisteredMessage(message) {
+    // Parent confirms this module has been registered — safe to request data
+    window.__statusModuleRegistered = true;
+    // Re-request any pending status data now that the channel is confirmed open
+    if (window.__statusPendingLoad) {
+        window.__statusPendingLoad = false;
+        window.dispatchEvent(new CustomEvent('status:requestInitialLoad', { detail: {} }));
+    }
+}
+
+function handleSessionSyncMessage(message) {
+    // Parent is syncing session state (e.g. after a token refresh or tab focus)
+    const sessionData = message?.session || message?.data?.session || message?.data || message;
+    if (!sessionData) return;
+    const token = sessionData.token || sessionData.accessToken;
+    const user  = sessionData.user  || (sessionData.id ? sessionData : null);
+    if (!token && !user) return;
+    window.session = window.session || {};
+    if (token) { window.session.token = token; }
+    if (user)  {
+        window.session.user  = typeof user === 'object' ? { ...user } : user;
+        window.currentUser   = window.session.user;
+        currentUser          = window.session.user;
+    }
+    window.session.expiresAt = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3_600_000);
+    window.__SETTINGS_SESSION_ACTIVE__ = true;
+    // Re-render in case the user object changed (e.g. avatar or displayName updated)
+    window.dispatchEvent(new CustomEvent('status:sessionRefreshed', {
+        detail: { userId: window.session.user?.id, token: !!token }
+    }));
+}
+
+function handleSessionUpdateMessage(message) {
+    // A field-level session update (e.g. user changed their avatar or name)
+    const update = message?.update || message?.data?.update || message?.data || {};
+    if (!window.session?.user) return;
+    window.session.user = Object.assign({}, window.session.user, update);
+    window.currentUser  = window.session.user;
+    currentUser         = window.session.user;
+    // Propagate into any visible status UI
+    window.dispatchEvent(new CustomEvent('status:userUpdated', {
+        detail: { user: window.session.user }
+    }));
+}
+
+function handleSessionInvalidatedMessage(message) {
+    // Parent signals that the current session is no longer valid (logout / expiry)
+    window.session = { token: null, user: null, expiresAt: 0, version: 0 };
+    window.currentUser  = null;
+    currentUser         = null;
+    window.parentSessionReceived          = false;
+    window.sessionValidated               = false;
+    window.__SETTINGS_SESSION_ACTIVE__    = false;
+    window.__statusModuleRegistered       = false;
+    // Clear any cached status data that may contain PII
+    try {
+        const keysToRemove = Object.keys(sessionStorage).filter(k => k.startsWith('status_'));
+        keysToRemove.forEach(k => sessionStorage.removeItem(k));
+    } catch(_) {}
+    window.dispatchEvent(new CustomEvent('status:sessionInvalidated', { detail: {} }));
+}
 function handleSettingsLoadResponseMessage(message) {
     // Settings data returned from parent's cache/backend — merge into SettingsState
     const settings = message?.settings || message?.data?.settings || message?.data || null;
@@ -6389,91 +6406,75 @@ async function clearChatCache() {
     if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
-
-    // FIX: this previously POSTed to /api/storage/clear-chat-cache, a route
-    // that does not exist anywhere in the backend (verified against every
-    // file in src/routes/) — the request always 404'd, silently, because the
-    // caller in settings-ui.js didn't await this function either. "Chat
-    // cache" is genuinely client-side data (cached messages in IndexedDB),
-    // so clear it directly via the existing local cache layer instead of a
-    // network round-trip that could never succeed.
-    if (!window.AppCache || typeof window.AppCache.clear !== 'function') {
-        throw new Error('Local cache is not available yet');
+    
+    try {
+        const response = await authorizedRequest('/api/storage/clear-chat-cache', {
+            method: 'POST'
+        });
+        
+        if (response.success && userSettings.storage) {
+            userSettings.storage.storageBreakdown.chats = 0;
+            userSettings.storage.totalStorageUsed = 
+                (userSettings.storage.storageBreakdown.media || 0) + 
+                (userSettings.storage.storageBreakdown.other || 0);
+            calculateStorageUsage();
+            unsavedChanges = true;
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
+                cacheType: 'chat'
+            });
+            
+            const event = new CustomEvent('chatCacheCleared', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        throw error;
     }
-
-    const cleared = await window.AppCache.clear('messages');
-    if (!cleared) {
-        throw new Error('Failed to clear local message cache');
-    }
-
-    if (userSettings.storage) {
-        userSettings.storage.storageBreakdown.chats = 0;
-        userSettings.storage.totalStorageUsed =
-            (userSettings.storage.storageBreakdown.media || 0) +
-            (userSettings.storage.storageBreakdown.other || 0);
-        calculateStorageUsage();
-        unsavedChanges = true;
-    }
-
-    await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
-        cacheType: 'chat'
-    });
-
-    window.dispatchEvent(new CustomEvent('chatCacheCleared', {
-        detail: { timestamp: Date.now() }
-    }));
-
-    return true;
 }
 
 // =============================================
-// CLEAR MEDIA CACHE — uses the service worker's CACHE_CLEARED mechanism
+// CLEAR MEDIA CACHE - USES authorizedRequest
 // =============================================
 async function clearMediaCache() {
     if (currentState !== LifecycleState.ACTIVE || !isAuthenticated) {
         throw new Error('Not ready');
     }
-
-    // FIX: this previously POSTed to /api/storage/clear-media-cache, which
-    // also does not exist in the backend. Media cache is the service
-    // worker's Cache Storage (service-worker.js, CACHE_NAME), which already
-    // has a working CLEAR_CACHE message handler — use that instead of a
-    // network call.
-    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
-        throw new Error('Service worker not available to clear media cache');
+    
+    try {
+        const response = await authorizedRequest('/api/storage/clear-media-cache', {
+            method: 'POST'
+        });
+        
+        if (response.success && userSettings.storage) {
+            userSettings.storage.storageBreakdown.media = 0;
+            userSettings.storage.totalStorageUsed = 
+                (userSettings.storage.storageBreakdown.chats || 0) + 
+                (userSettings.storage.storageBreakdown.other || 0);
+            calculateStorageUsage();
+            unsavedChanges = true;
+            
+            await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
+                cacheType: 'media'
+            });
+            
+            const event = new CustomEvent('mediaCacheCleared', {
+                detail: { timestamp: Date.now() }
+            });
+            window.dispatchEvent(event);
+            
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        throw error;
     }
-
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Timed out clearing media cache')), 8000);
-        const onMessage = (event) => {
-            if (event.data && event.data.type === 'CACHE_CLEARED') {
-                clearTimeout(timeout);
-                navigator.serviceWorker.removeEventListener('message', onMessage);
-                resolve();
-            }
-        };
-        navigator.serviceWorker.addEventListener('message', onMessage);
-        navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
-    });
-
-    if (userSettings.storage) {
-        userSettings.storage.storageBreakdown.media = 0;
-        userSettings.storage.totalStorageUsed =
-            (userSettings.storage.storageBreakdown.chats || 0) +
-            (userSettings.storage.storageBreakdown.other || 0);
-        calculateStorageUsage();
-        unsavedChanges = true;
-    }
-
-    await MessageTransport.send(PARENT_MESSAGE_TYPES.CACHE_CLEARED, {
-        cacheType: 'media'
-    });
-
-    window.dispatchEvent(new CustomEvent('mediaCacheCleared', {
-        detail: { timestamp: Date.now() }
-    }));
-
-    return true;
 }
 
 // =============================================
@@ -7415,9 +7416,6 @@ const DEFAULT_SETTINGS = {
         changePassword: false
     },
     notifications: {
-        enableNotifications: true,
-        notificationSound: true,
-        notificationVibration: true,
         messageNotifications: true,
         groupNotifications: true,
         callNotifications: true,
@@ -7441,18 +7439,10 @@ const DEFAULT_SETTINGS = {
         allowReactions: true
     },
     calls: {
-        allowIncomingCalls: true,
         whoCanCallMe: 'friendsOnly',
-        autoAnswer: false,
-        autoReject: false,
-        callRingtone: 'default',
-        vibrateOnCall: true,
-        cameraOnStart: false,
+        callVibration: true,
         videoQuality: 'auto',
         voiceQuality: 'high',
-        noiseCancellation: true,
-        echoCancellation: true,
-        speakerDefault: true,
         allowScreenShare: true
     },
     friends: {
@@ -7709,20 +7699,6 @@ document.addEventListener('DOMContentLoaded', function() {
     domContentLoadedFired = true;
     
     // === CACHE-FIRST: Load settings from localStorage immediately so UI renders fast ===
-    // FIX-009: Also check canonical 'kyn_app_settings' key written by AppSettings.js
-    try {
-        const canonicalRaw = localStorage.getItem('kyn_app_settings');
-        if (canonicalRaw) {
-            const canonicalData = JSON.parse(canonicalRaw);
-            if (canonicalData && typeof canonicalData === 'object' && Object.keys(canonicalData).length > 0) {
-                // Merge canonical settings into SettingsState so all modules see them
-                if (!SettingsState.data || Object.keys(SettingsState.data).length === 0) {
-                    SettingsState.data = canonicalData;
-                    SettingsState.loaded = true;
-                }
-            }
-        }
-    } catch(_) {}
     try {
         const cached = localStorage.getItem('knecta_settings_cache');
         if (cached) {
@@ -7817,3 +7793,129 @@ window.__getAuthState = () => ({
 // =============================================
 // END OF FILE
 // =============================================
+
+// FIX: Bridge kyn: CustomEvents from app.realtime.socket.js _routeMessage
+// so status-core.js receives realtime status:new and status:viewed events
+// without needing a direct socket connection inside the iframe.
+(function _installStatusRealtimeBridge() {
+    'use strict';
+
+    function _handleNewStatus(detail) {
+        try {
+            const status = detail.status || detail;
+            if (!status || !status.id) return;
+            // Fire the same CustomEvent that the status UI listens on
+            window.dispatchEvent(new CustomEvent('statusReceived', { detail: status }));
+            window.dispatchEvent(new CustomEvent('statusFeedUpdated', { detail: { type: 'new', status } }));
+        } catch(_) {}
+    }
+
+    function _handleStatusViewed(detail) {
+        try {
+            window.dispatchEvent(new CustomEvent('statusViewedUpdate', { detail }));
+        } catch(_) {}
+    }
+
+    function _handleStatusDeleted(detail) {
+        if (!detail) return;
+        // Collect all affected status IDs
+        const ids = [];
+        if (Array.isArray(detail.statusIds)) detail.statusIds.forEach(function(id) { ids.push(String(id)); });
+        if (detail.statusId)  ids.push(String(detail.statusId));
+        if (detail.id)        ids.push(String(detail.id));
+        // Deduplicate
+        const uniqueIds = [...new Set(ids)];
+
+        // 1. Remove from DOM immediately
+        uniqueIds.forEach(function(sid) {
+            document.querySelectorAll(
+                '[data-status-id="' + sid + '"], [data-id="' + sid + '"]'
+            ).forEach(function(el) {
+                el.style.transition = 'opacity 0.25s';
+                el.style.opacity = '0';
+                setTimeout(function() { try { el.remove(); } catch(_) {} }, 250);
+            });
+        });
+
+        // 2. Clear from localStorage status cache
+        if (uniqueIds.length > 0) {
+            try {
+                ['kyn_status_cache_v1', 'kyn_status_list_v1'].forEach(function(SKEY) {
+                    const cached = JSON.parse(localStorage.getItem(SKEY) || 'null');
+                    if (cached && Array.isArray(cached.statuses)) {
+                        cached.statuses = cached.statuses.filter(function(s) {
+                            return !uniqueIds.includes(String(s.id));
+                        });
+                        localStorage.setItem(SKEY, JSON.stringify(cached));
+                    }
+                });
+            } catch(_) {}
+            // 3. Track in permanent deleted set so expired statuses never restore
+            try {
+                const DKEY = 'kyn_deleted_statuses_v1';
+                const existing = JSON.parse(localStorage.getItem(DKEY) || '[]');
+                uniqueIds.forEach(function(sid) {
+                    if (!existing.includes(sid)) existing.push(sid);
+                });
+                if (existing.length > 5000) existing.splice(0, existing.length - 5000);
+                localStorage.setItem(DKEY, JSON.stringify(existing));
+            } catch(_) {}
+
+            // PHASE10: Record in DeletionRegistry — prevents stale cache resurrection
+            try {
+                uniqueIds.forEach(function(sid) {
+                    window.__PHASE10_DeletionRegistry?.mark('status', sid, 'deleted');
+                });
+            } catch(_) {}
+        }
+
+        // 4. Dispatch event for other listeners
+        try { window.dispatchEvent(new CustomEvent('statusDeleted', { detail: { ...detail, ids: uniqueIds } })); } catch(_) {}
+    }
+
+    window.addEventListener('kyn:status:new',     function(e) { _handleNewStatus(e.detail || {}); });
+    window.addEventListener('kyn:status:created', function(e) { _handleNewStatus(e.detail || {}); });
+    window.addEventListener('kyn:status:viewed',  function(e) { _handleStatusViewed(e.detail || {}); });
+    window.addEventListener('kyn:status:deleted', function(e) { _handleStatusDeleted(e.detail || {}); });
+
+    // Handle ALL status postMessage types (from ws-status-bridge and REALTIME_EVENT)
+    window.addEventListener('message', function(evt) {
+        if (!evt.data || typeof evt.data !== 'object') return;
+        const { type, payload } = evt.data;
+        if (!type) return;
+
+        // Handle canonical types from ws-status-bridge
+        if (type === 'status:created' || type === 'status:new') {
+            _handleNewStatus(payload || {});
+        } else if (type === 'status:deleted') {
+            _handleStatusDeleted(payload || {});
+        } else if (type === 'status:viewed' || type === 'status:viewer_update') {
+            _handleStatusViewed(payload || {});
+        } else if (type === 'status:reaction') {
+            window.dispatchEvent(new CustomEvent('statusReaction', { detail: payload || {} }));
+        } else if (type === 'status:reply') {
+            window.dispatchEvent(new CustomEvent('statusReply', { detail: payload || {} }));
+        } else if (type === 'status:expired') {
+            _handleStatusDeleted(payload || {}); // treat expired same as deleted
+        } else if (type === 'STATUS_UPDATE') {
+            // Generic wrapper — check sub-type
+            const subType = (payload && payload.type) || '';
+            if (subType === 'new' || subType === 'created') _handleNewStatus(payload);
+            else if (subType === 'deleted' || subType === 'expired') _handleStatusDeleted(payload);
+            else if (subType === 'viewed') _handleStatusViewed(payload);
+        }
+        // Legacy REALTIME_EVENT: prefixed types
+        else if (type === 'REALTIME_EVENT:status:new' || type === 'REALTIME_EVENT:status:created') {
+            _handleNewStatus(payload || {});
+        } else if (type === 'REALTIME_EVENT:status:viewed') {
+            _handleStatusViewed(payload || {});
+        } else if (type === 'REALTIME_EVENT:status:deleted') {
+            _handleStatusDeleted(payload || {});
+        } else if (type === 'KYN_REALTIME_READY') {
+            // Socket reconnected — reload statuses from server
+            try { window.dispatchEvent(new CustomEvent('statusReconnect', { detail: {} })); } catch(_) {}
+        }
+    });
+
+    console.log('[status-core] realtime kyn: bridge installed ✅');
+})();

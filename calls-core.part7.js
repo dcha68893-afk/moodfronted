@@ -14,16 +14,6 @@
     var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
     if (__CC.__aborted) { return; }
 
-/**
- * PART 7/8 — RELIABILITY & ORCHESTRATION
- * Reliability engine, recovery manager, compatibility bridge, diagnostics agent, multi-module coordinator, navigation guard, lifecycle controller, session pipeline, and another set of real call-signaling handlers used during orchestration.
- *
- * This file is a SOURCE FRAGMENT of calls-core.js, not a standalone script.
- * It shares the single closure of the original module and must be concatenated
- * in numeric order (part 0..7) — see build.js — before it is served to the browser.
- * Do NOT <script src> this file directly on its own; it will throw ReferenceErrors
- * for symbols defined in the other parts of the same closure.
- */
     // ==================== RELIABILITY ENGINE ====================
 
 
@@ -6136,7 +6126,61 @@ _escapeHtml: function(text) {
 
 
 
+    // FIX: 'friendsOnly' calling tier — asks the parent page (which holds the
+    // real friends list; this iframe has no access to it) whether the caller
+    // is a friend, then force-rejects if confirmed not. Self-contained (does
+    // not use the VERIFY_SESSION/MessageRegistry machinery, which is gated on
+    // an active call — this needs to run for a call that hasn't been accepted
+    // yet). Fails open on timeout, error, or missing parent — an unconfirmed
+    // caller is let through rather than risk blocking a real friend.
+    window.__CallsCoreShared._enforceFriendsOnlyTier = function (callData) {
+        try {
+            const requestId = 'friend_check_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            let responded = false;
+
+            const onMessage = function (event) {
+                const msg = event.data;
+                if (!msg || msg.type !== 'CHECK_FRIEND_RESPONSE' || msg.requestId !== requestId) return;
+                if (responded) return;
+                responded = true;
+                window.removeEventListener('message', onMessage);
+                clearTimeout(timeoutId);
+
+                const isFriend = !!(msg.payload && msg.payload.isFriend);
+                if (!isFriend) {
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE,
+                        'Incoming call rejected — caller is not a friend (Friends Only setting)',
+                        { callerId: callData.callerId });
+                    window.__CallsCoreShared.safeSend('CALL_REJECT', {
+                        callId: callData.callId,
+                        reason: 'calls_restricted',
+                        timestamp: Date.now()
+                    }, false);
+                    if (window.hideIncomingCallUI) { try { window.hideIncomingCallUI(); } catch (e) {} }
+                    document.dispatchEvent(new CustomEvent('call:forceRejectedNotFriend', { detail: { callId: callData.callId } }));
+                }
+            };
+
+            const timeoutId = setTimeout(function () {
+                if (responded) return;
+                responded = true;
+                window.removeEventListener('message', onMessage);
+                // Fail open — no response in time, let the call proceed
+            }, 1500);
+
+            window.addEventListener('message', onMessage);
+            window.parent.postMessage({
+                type: 'CHECK_FRIEND',
+                requestId: requestId,
+                payload: { requestId: requestId, callerId: callData.callerId }
+            }, '*');
+        } catch (e) {
+            // Fail open — never let this check throw and block a legitimate call
+        }
+    };
+
     window.__CallsCoreShared.handleIncomingCall = function handleIncomingCall(callData) {
+
 
         // ── FIX: Capture the receiver's origin page (tagged by chat.html as
         // _receiverReturnTo) so that after this call ends, POST_CALL_RESTORE
@@ -6343,10 +6387,9 @@ _escapeHtml: function(text) {
         // cosmetic. We enforce the two cases we can check with certainty here:
         //   - autoReject === true            → reject every incoming call
         //   - whoCanCallMe === 'nobody'       → reject every incoming call
-        // The 'friends'-only tier is deliberately NOT enforced here: it would
-        // require a reliable cross-iframe friends-list lookup this file doesn't
-        // have, and incorrectly rejecting a real friend is worse than today's
-        // no-op. Both settings still fail open (no data → call proceeds normally).
+        // The 'friendsOnly' tier is checked separately, below, via an async
+        // cross-iframe query — see _enforceFriendsOnlyTier(). Both settings
+        // still fail open (no data → call proceeds normally).
         try {
             const _callsCfg = (window.AppSettings && window.AppSettings.get('calls')) || {};
             const _whoCanCall = _callsCfg.whoCanCallMe
@@ -6363,9 +6406,21 @@ _escapeHtml: function(text) {
                 }, false);
                 return;
             }
+
+            // FIX: 'friendsOnly' tier — query the parent (which holds window.friends)
+            // for whether this caller is a friend. Runs in parallel with the call
+            // already ringing (no added latency for the common friend-calling case);
+            // if the parent confirms the caller is NOT a friend, the call is force-
+            // rejected a moment later. Fails open on timeout/error/no data — an
+            // unconfirmed friend is allowed through rather than risk blocking a
+            // real friend due to a slow or missing parent response.
+            if (_whoCanCall === 'friendsOnly' && callData.callerId != null && window.parent && window.parent !== window) {
+                window.__CallsCoreShared._enforceFriendsOnlyTier(callData);
+            }
         } catch (_privacyErr) {
             // Fail open — never let a settings-read error block a legitimate call
         }
+
 
         // If stale state from a previous call, reset it first
 
@@ -7650,6 +7705,54 @@ _escapeHtml: function(text) {
                 }
             }
 
+            // FIX: resilience check against premature/spurious call-end signals.
+            // Several backend and client paths can emit an end/force-end event
+            // for reasons that are administrative guesses rather than an
+            // explicit hangup (e.g. 'stale_cleanup', 'timeout', 'no_answer') —
+            // if one of those arrives within a few seconds of the connection
+            // actually going live (ICE connected/completed) and media is
+            // STILL live right now, this is almost certainly a false positive
+            // racing the real connection rather than a genuine end. Re-check
+            // once, shortly, instead of tearing down immediately; only proceed
+            // with teardown if the connection has actually gone away by then.
+            // Explicit user actions (declined/rejected/ended/hangup/busy) are
+            // never delayed — those are always trusted immediately.
+            var _deferredSuspiciousEnd = (function () {
+                var _reason = (callData && callData.reason) || '';
+                var _explicitReasons = ['declined', 'rejected', 'ended', 'user_ended', 'hangup', 'busy', 'cancelled', 'accepted_elsewhere', 'auto_reject_enabled', 'calls_restricted'];
+                var _isAmbiguous = _reason && _explicitReasons.indexOf(_reason) === -1;
+                var _connectedAt = window.__CallsCoreShared.callsState._iceConnectedAt;
+                var _sinceConnected = _connectedAt ? (Date.now() - _connectedAt) : Infinity;
+                var _pc = window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._peerConnection;
+                var _iceState = _pc && _pc.iceConnectionState;
+                var _stillLiveNow = _iceState === 'connected' || _iceState === 'completed';
+
+                if (_isAmbiguous && _connectedAt && _sinceConnected < 8000 && _stillLiveNow) {
+                    window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE,
+                        'handleCallEnded: suspicious end signal (' + _reason + ') arrived ' + _sinceConnected +
+                        'ms after connect while media is still live — verifying before teardown', callData);
+                    setTimeout(function () {
+                        var _pc2 = window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._peerConnection;
+                        var _iceState2 = _pc2 && _pc2.iceConnectionState;
+                        var _stillLive2 = _iceState2 === 'connected' || _iceState2 === 'completed';
+                        if (_stillLive2) {
+                            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE,
+                                'handleCallEnded: suspicious end signal ignored — connection is still live', callData);
+                        } else {
+                            window.__CallsCoreShared.logWarn(window.__CallsCoreShared.MODULE,
+                                'handleCallEnded: connection genuinely gone on re-check — proceeding with teardown', callData);
+                            // Re-run this same handler; _iceConnectedAt guard above is skipped
+                            // this time because _stillLiveNow will now be false, so it falls
+                            // straight through to the real teardown below.
+                            window.__CallsCoreShared.handleCallEnded(callData);
+                        }
+                    }, 1500);
+                    return true;
+                }
+                return false;
+            })();
+            if (_deferredSuspiciousEnd) { return; }
+
             // FIX-020: Guaranteed ringtone stop — must run BEFORE anything else
             // to prevent ringtone looping when UI reset path fails
             try {
@@ -8844,7 +8947,7 @@ window.CallHandlers = {
 
 
 
-            const constraints = { audio: window.__CallsCoreShared.CONFIG.AUDIO_CONSTRAINTS, video: window.__CallsCoreShared.callsState.callType === 'video' };
+            const constraints = { audio: window.__CallsCoreShared.getAudioConstraints(), video: window.__CallsCoreShared.getVideoConstraints(window.__CallsCoreShared.callsState.callType) };
 
 
 

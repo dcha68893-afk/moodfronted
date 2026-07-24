@@ -1,16 +1,69 @@
-// =============================================
-// MESSAGES CORE :: UI BRIDGE & PUBLIC API
-// One of 3 companion files (messages-core.bootstrap.js,
-// messages-core.operations.js, messages-core.ui-bridge.js) that
-// together replace the old single messages-core.js module.
-// Loaded as plain classic scripts (defer, no type=module) IN ORDER
-// so they share one global lexical scope, exactly like the original
-// single IIFE did internally. Do not load out of order, and do not
-// load this file without the other two.
-// =============================================
-'use strict';
+﻿/**
+ * PART 3/3 — UI BRIDGE & PUBLIC API
+ * UI bridge, public API, initialization
+ */
+conversationId: conversationId,
+                archived: archived
+            }, { requireAck: false });
+            
+            const conversation = ChatManager.getConversation(conversationId);
+            if (conversation) {
+                conversation.archived = archived;
+                
+                try {
+                    const archivedChats = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, []);
+                    if (archived && !archivedChats.includes(conversationId)) {
+                        archivedChats.push(conversationId);
+                    } else if (!archived) {
+                        const index = archivedChats.indexOf(conversationId);
+                        if (index !== -1) archivedChats.splice(index, 1);
+                    }
+                    SafeStorage.setJSON(LOCAL_STORAGE_KEYS.ARCHIVED_CHATS, archivedChats);
+                } catch (e) {}
+                
+                EventBus.emit('conversation:updated', conversation);
+            }
+        },
+        
+        blockUser: function(userId, block = true) {
+            const guardResult = window.__guardAction('blockUser', MODULE_NAME, currentState, false);
+            if (guardResult !== null) {
+                return guardResult;
+            }
+            
+            if (!canSendUserMessages()) return false;
+            if (!SessionManager.isAuthenticated()) return false;
+            
+            const result = safeSend(OUTGOING_ACTIONS.BLOCK_USER, {
+                userId,
+                block
+            }, { requireAck: false });
+            
+            if (result.blocked) {
+                return false;
+            }
+            
+            try {
+                const blockedUsers = SafeStorage.getJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, []);
+                if (block && !blockedUsers.includes(userId)) {
+                    blockedUsers.push(userId);
+                } else if (!block) {
+                    const index = blockedUsers.indexOf(userId);
+                    if (index !== -1) blockedUsers.splice(index, 1);
+                }
+                SafeStorage.setJSON(LOCAL_STORAGE_KEYS.BLOCKED_USERS, blockedUsers);
+            } catch (e) {}
+            
+            EventBus.emit('user:blocked', { userId, block });
+            
+            return true;
+        }
+    };
 
-const UIStateManager = {
+    // =============================================
+    // UI STATE MANAGER
+    // =============================================
+    const UIStateManager = {
         _drafts: {},
         _chatThemes: {},
         _starredMessages: {},
@@ -2327,7 +2380,9 @@ const UIStateManager = {
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = MessagesCore;
     }
+})();
 
+// ── TOP-LEVEL: accessible from all closures ──────────────────────────────────
 function applySettingToMessagesModule(section, key, value) {
     if (section === 'appearance') {
         if (key === 'theme') {

@@ -61,7 +61,7 @@ let CONSOLE_NOISE_SUPPRESSED = true;
 // =============================================
 // AUTH STATE - CRITICAL FIX
 // =============================================
-let coreAuthState = false;
+let isAuthenticated = false;
 let authCheckComplete = false;
 
 // =============================================
@@ -116,7 +116,7 @@ const pendingRequests = new Map();
 function authorizedRequest(endpoint, options = {}) {
     return new Promise((resolve, reject) => {
         // Block requests if not authenticated
-        if (!coreAuthState) {
+        if (!isAuthenticated) {
             if (DEBUG) console.warn(`[${MODULE_NAME}] ⏳ Auth not ready, queuing request: ${endpoint}`);
             requestQueue.push(() => authorizedRequest(endpoint, options).then(resolve).catch(reject));
             return;
@@ -210,7 +210,7 @@ function authorizedRequest(endpoint, options = {}) {
 // Process queued requests after auth is ready
 async function processRequestQueue() {
     if (queueProcessing) return;
-    if (!coreAuthState) return;
+    if (!isAuthenticated) return;
     
     queueProcessing = true;
     
@@ -482,7 +482,7 @@ const SettingsState = {
         }));
 
         // STEP 4: Persist to backend when possible (non-blocking)
-        if (!coreAuthState || currentState !== LifecycleState.ACTIVE) {
+        if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
             if (!OfflineQueue.isOnline()) {
                 OfflineQueue.enqueue(section, key, value);
                 this._notify('update-queued', { section, key, value, reason: 'offline-pre-auth' });
@@ -694,13 +694,13 @@ const SettingsState = {
             if (window.AppSettings) window.AppSettings.merge(this.data);
             
             // If not authenticated, don't try to fetch from backend
-            if (!coreAuthState) {
+            if (!isAuthenticated) {
                 return this.data;
             }
         }
         
         // Only try backend fetch if authenticated
-        if (!coreAuthState) {
+        if (!isAuthenticated) {
             if (DEBUG) console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings from backend: auth not ready`);
             return this.data;
         }
@@ -810,7 +810,7 @@ const SettingsState = {
     },
     
     async reset() {
-        if (!coreAuthState) {
+        if (!isAuthenticated) {
             throw new Error('Authentication not ready');
         }
         
@@ -921,7 +921,7 @@ function sendChildReady() {
         messageId: generateMessageId(),
         timestamp: Date.now(),
         environment: window.__iframeEnvironment || 'unknown',
-        waitingForAuth: !coreAuthState
+        waitingForAuth: !isAuthenticated
     };
     
     try {
@@ -967,7 +967,7 @@ function handleParentReady(message) {
                 _lastSessionId = newSessionId;
                 _currentValidSession = newSessionData;
                 applySession(newSessionData);
-                coreAuthState = true;
+                isAuthenticated = true;
                 authCheckComplete = true;
                 processRequestQueue();
                 loadSettingsAfterActivation();
@@ -1018,7 +1018,7 @@ function handleParentReady(message) {
     flushQueue();
     
     // Mark authenticated and load settings
-    coreAuthState = true;
+    isAuthenticated = true;
     authCheckComplete = true;
     processRequestQueue();
     loadSettingsAfterActivation();
@@ -1036,7 +1036,7 @@ function handleParentReady(message) {
 }
 
 async function loadSettingsAfterActivation() {
-    if (!coreAuthState) {
+    if (!isAuthenticated) {
         console.warn(`[${MODULE_NAME}] ⏳ Cannot load settings: auth not ready`);
         return;
     }
@@ -1247,7 +1247,7 @@ function showRetryUI() {
         }
         
         window.__retryLoadSettings = async () => {
-            if (!coreAuthState) {
+            if (!isAuthenticated) {
                 console.warn('[settings-core] Cannot retry: auth not ready');
                 return;
             }
@@ -1342,7 +1342,7 @@ function onModuleActive() {
     }
     
     // Only start background tasks if auth is ready
-    if (coreAuthState) {
+    if (isAuthenticated) {
         if (typeof startBackgroundTasks === 'function') {
             startBackgroundTasks();
         }
@@ -1545,7 +1545,7 @@ function setupMessageListener() {
         // =============================================
         if (data.type === 'AUTH_READY') {
             console.log(`[${MODULE_NAME}] ✅ AUTH_READY received`);
-            coreAuthState = true;
+            isAuthenticated = true;
             authCheckComplete = true;
             
             // Process queued requests
@@ -1571,7 +1571,7 @@ function setupMessageListener() {
         // =============================================
         if (data.type === 'AUTH_ERROR') {
             console.error(`[${MODULE_NAME}] ❌ AUTH_ERROR received`);
-            coreAuthState = false;
+            isAuthenticated = false;
             authCheckComplete = true;
             setState(LifecycleState.ERROR, 'auth_error');
             return;
@@ -1593,7 +1593,7 @@ function setupMessageListener() {
             }
             
             const sessionId = sessionData.sessionId || `${sessionData.token}_${sessionData.userId}`;
-            if (_lastSessionId === sessionId && _currentValidSession && coreAuthState) {
+            if (_lastSessionId === sessionId && _currentValidSession && isAuthenticated) {
                 if (DEBUG) console.log(`[${MODULE_NAME}] 📥 Duplicate SESSION_DATA ignored`);
                 return;
             }
@@ -1603,8 +1603,8 @@ function setupMessageListener() {
             applySession(sessionData);
             
             // Mark authenticated so API calls can proceed
-            if (!coreAuthState) {
-                coreAuthState = true;
+            if (!isAuthenticated) {
+                isAuthenticated = true;
                 authCheckComplete = true;
                 processRequestQueue();
                 if (currentState === LifecycleState.ACTIVE) {
@@ -1709,7 +1709,7 @@ function handleApiRequest(message) {
         return;
     }
     
-    if (!coreAuthState) {
+    if (!isAuthenticated) {
         console.warn(`[${MODULE_NAME}] API request ignored - not authenticated`);
         return;
     }
@@ -1933,7 +1933,7 @@ function handleSessionSyncMessage(message) {
     if (user)  {
         window.session.user  = typeof user === 'object' ? { ...user } : user;
         window.currentUser   = window.session.user;
-        coreCurrentUser          = window.session.user;
+        currentUser          = window.session.user;
     }
     window.session.expiresAt = sessionData.expiry || sessionData.expiresAt || (Date.now() + 3_600_000);
     window.__SETTINGS_SESSION_ACTIVE__ = true;
@@ -1949,7 +1949,7 @@ function handleSessionUpdateMessage(message) {
     if (!window.session?.user) return;
     window.session.user = Object.assign({}, window.session.user, update);
     window.currentUser  = window.session.user;
-    coreCurrentUser         = window.session.user;
+    currentUser         = window.session.user;
     // Propagate into any visible status UI
     window.dispatchEvent(new CustomEvent('status:userUpdated', {
         detail: { user: window.session.user }
@@ -1960,7 +1960,7 @@ function handleSessionInvalidatedMessage(message) {
     // Parent signals that the current session is no longer valid (logout / expiry)
     window.session = { token: null, user: null, expiresAt: 0, version: 0 };
     window.currentUser  = null;
-    coreCurrentUser         = null;
+    currentUser         = null;
     window.parentSessionReceived          = false;
     window.sessionValidated               = false;
     window.__SETTINGS_SESSION_ACTIVE__    = false;
@@ -2042,7 +2042,7 @@ window.session = {
 // =============================================
 // EXPORTED STATE VARIABLES
 // =============================================
-let coreCurrentUser = null;
+let currentUser = null;
 let userSettings = null;
 let currentSection = 'profile';
 let unsavedChanges = false;
@@ -2295,7 +2295,7 @@ const MessageTransport = {
             receiveLog(message.type);
             
             if (message.type === 'AUTH_READY') {
-                coreAuthState = true;
+                isAuthenticated = true;
                 authCheckComplete = true;
                 processRequestQueue();
                 
@@ -2313,7 +2313,7 @@ const MessageTransport = {
             
             if (message.type === 'AUTH_ERROR') {
                 console.error(`[${MODULE_NAME}] ❌ AUTH_ERROR received`);
-                coreAuthState = false;
+                isAuthenticated = false;
                 authCheckComplete = true;
                 setState(LifecycleState.ERROR, 'auth_error');
                 return;
@@ -2553,7 +2553,7 @@ const ApiCore = {
     },
     
     isReady() {
-        return this._ready && currentState === LifecycleState.ACTIVE && coreAuthState;
+        return this._ready && currentState === LifecycleState.ACTIVE && isAuthenticated;
     },
     
     whenReady() {
@@ -2570,7 +2570,7 @@ const ApiCore = {
             };
         }
         
-        if (!coreAuthState) {
+        if (!isAuthenticated) {
             return {
                 success: false,
                 status: 'error',
@@ -2595,7 +2595,7 @@ const ApiCore = {
     getDiagnostics() {
         return {
             ready: this._ready,
-            authenticated: coreAuthState
+            authenticated: isAuthenticated
         };
     }
 }.init();
@@ -2613,7 +2613,7 @@ async function secureApiCall(endpoint, options = {}) {
         };
     }
     
-    if (!coreAuthState) {
+    if (!isAuthenticated) {
         return {
             success: false,
             status: 'error',

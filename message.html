@@ -1376,7 +1376,7 @@
         
         <!-- Chat Panel -->
         <div class="chat-panel hidden" id="chatPanel">
-            <div class="chat-header" id="chatHeader">
+            <div class="chat-header">
                 <!-- Back button: visible only on mobile via CSS (.back-to-sidebar-btn) -->
                 <button class="chat-action-btn back-to-sidebar-btn" id="backToChatsBtn" title="Back to chats" aria-label="Back to chats"><i class="fas fa-arrow-left"></i></button>
                 <!-- Floating scroll-date badge: fades in/out during scroll -->
@@ -1670,15 +1670,7 @@
     <script src="/js/messageQueue.manager.js"></script>
     <script src="/js/messageSync.engine.js"></script>
     <script src="/js/services.message.js"></script>
-    <!-- messages-core.js replaced by 3 companion files. These are plain
-         classic scripts (defer, NOT type=module) loaded in this exact order
-         so they share one global lexical scope, the same way the old
-         single-file IIFE did internally. Do not reorder, and do not add
-         type="module" back — that would give each file its own isolated
-         scope and break every cross-file reference. -->
-    <script src="messages-core.bootstrap.js" defer></script>
-    <script src="messages-core.operations.js" defer></script>
-    <script src="messages-core.ui-bridge.js" defer></script>
+    <script type="module" src="messages-core.js"></script>
     <script type="module" src="messages-ui.js?v=3"></script>
     <script src="js/e2e-encryption.js" defer></script>
     <script defer>

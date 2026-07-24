@@ -15,7 +15,7 @@
 // AUTHORIZED FETCH - NO LONGER USED DIRECTLY
 // =============================================
 function authorizedFetch(url, options = {}) {
-    if (!coreAuthState) {
+    if (!isAuthenticated) {
         throw new Error("Authentication not ready");
     }
     
@@ -822,7 +822,7 @@ function updateSession(user, token, expiry, version) {
     
     if (user) {
         window.session.user = typeof user === 'object' ? { ...user } : user;
-        coreCurrentUser = window.session.user;
+        currentUser = window.session.user;
         coreData.user = window.session.user;
     }
     
@@ -834,7 +834,7 @@ function updateSession(user, token, expiry, version) {
         window.session.version = version;
     }
     
-    window.__SETTINGS_SESSION_ACTIVE__ = !!window.session.user && coreAuthState;
+    window.__SETTINGS_SESSION_ACTIVE__ = !!window.session.user && isAuthenticated;
     return true;
 }
 
@@ -845,7 +845,7 @@ function clearSession() {
         expiresAt: 0,
         version: 0
     };
-    coreCurrentUser = null;
+    currentUser = null;
     coreData.user = null;
     window.__SETTINGS_SESSION_ACTIVE__ = false;
 }
@@ -855,7 +855,7 @@ function isSessionValid() {
         userId: window.session.user?.id || window.session.user?.userId,
         token: window.session.token
     };
-    return coreAuthState && __isValidSession(sessionData) && window.session.expiresAt > Date.now();
+    return isAuthenticated && __isValidSession(sessionData) && window.session.expiresAt > Date.now();
 }
 
 // =============================================
@@ -1023,7 +1023,7 @@ const SessionClient = {
             return false;
         }
         
-        if (!coreAuthState) {
+        if (!isAuthenticated) {
             return false;
         }
         
@@ -1081,7 +1081,7 @@ const SessionClient = {
         
         if (user) {
             window.session.user = typeof user === 'object' ? { ...user } : user;
-            coreCurrentUser = window.session.user;
+            currentUser = window.session.user;
             coreData.user = window.session.user;
             this._session = window.session.user;
         }
@@ -1187,7 +1187,7 @@ const SessionClient = {
             expiresAt: 0,
             version: 0
         };
-        coreCurrentUser = null;
+        currentUser = null;
         coreData.user = null;
         this._session = null;
         this._sessionToken = null;
@@ -1423,14 +1423,14 @@ const MessageDispatcher = {
         });
         
         this.register('AUTH_READY', (message) => {
-            coreAuthState = true;
+            isAuthenticated = true;
             authCheckComplete = true;
             processRequestQueue();
             console.log('[settings-core] ✅ AUTH_READY received');
         });
         
         this.register('AUTH_ERROR', (message) => {
-            coreAuthState = false;
+            isAuthenticated = false;
             console.error('[settings-core] ❌ AUTH_ERROR received');
         });
     },
@@ -2011,7 +2011,7 @@ const RecoveryManager = {
         });
         
         this.registerStrategy('session_expired', async () => {
-            if (!coreAuthState) return false;
+            if (!isAuthenticated) return false;
             if (!window.session.token) return false;
             const response = await MessageTransport.send('SESSION_REFRESH', {});
             if (response && response.payload && response.payload.session) {
@@ -2038,7 +2038,7 @@ const RecoveryManager = {
         });
         
         this.registerStrategy('settings_load_failed', async () => {
-            if (!coreAuthState) return false;
+            if (!isAuthenticated) return false;
             try {
                 await SettingsState.load();
                 return SettingsState.loaded;
@@ -2293,7 +2293,7 @@ NavigationGuard.init();
 // =============================================
 // UI FAILSAFE
 // =============================================
-const CoreUIFailsafe = {
+const UIFailsafe = {
     _enabled: true,
     _errorCount: 0,
     _maxErrors: 5,
@@ -2304,10 +2304,10 @@ const CoreUIFailsafe = {
     _silent: true,
     
     init() {
-        initLog('CoreUIFailsafe initializing');
+        initLog('UIFailsafe initializing');
         this._setupErrorHandling();
         this._setupElementProtection();
-        successLog('CoreUIFailsafe initialized');
+        successLog('UIFailsafe initialized');
     },
     
     _setupErrorHandling() {
@@ -2402,7 +2402,7 @@ const CoreUIFailsafe = {
             `;
             fallbackMsg.innerHTML = `
                 <i class="fas fa-exclamation-triangle"></i> Limited mode
-                <button onclick="CoreUIFailsafe.exitFallbackMode()" style="margin-left: 10px; padding: 4px 12px; background: white; color: var(--warning-color); border: none; border-radius: 4px; cursor: pointer;">
+                <button onclick="UIFailsafe.exitFallbackMode()" style="margin-left: 10px; padding: 4px 12px; background: white; color: var(--warning-color); border: none; border-radius: 4px; cursor: pointer;">
                     Retry
                 </button>
             `;
@@ -2483,7 +2483,7 @@ const CoreUIFailsafe = {
     }
 };
 
-CoreUIFailsafe.init();
+UIFailsafe.init();
 
 // =============================================
 // MULTI-MODULE COORDINATOR
@@ -2532,7 +2532,7 @@ const MultiModuleCoordinator = {
     
     _handleBroadcastMessage(data) {
         if (data.type === 'SETTINGS_UPDATED' && data.source !== this._moduleId) {
-            if (currentState === LifecycleState.ACTIVE && coreAuthState) {
+            if (currentState === LifecycleState.ACTIVE && isAuthenticated) {
                 MessageTransport.send('SETTINGS_LOAD_REQUEST', {});
             }
         }
@@ -2566,7 +2566,7 @@ const MultiModuleCoordinator = {
             ready: currentState === LifecycleState.ACTIVE,
             handshakeComplete: registrationCompleted,
             sessionValid: isSessionValid(),
-            authenticated: coreAuthState
+            authenticated: isAuthenticated
         });
         
         this._broadcast({
@@ -2605,7 +2605,7 @@ const MultiModuleCoordinator = {
                     ready: currentState === LifecycleState.ACTIVE,
                     handshakeComplete: registrationCompleted,
                     sessionValid: isSessionValid(),
-                    authenticated: coreAuthState,
+                    authenticated: isAuthenticated,
                     timestamp: Date.now(),
                     target: sourceId
                 });

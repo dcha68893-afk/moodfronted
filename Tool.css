@@ -4674,8 +4674,8 @@ html, body,
 
 .jm-subcat-img,
 .jm-subcat-img-placeholder {
-    width: 88px !important;
-    height: 88px !important;
+    width: 70px !important;
+    height: 70px !important;
     object-fit: contain !important;
     border-radius: 8px !important;
     background: #f8f8f8 !important;

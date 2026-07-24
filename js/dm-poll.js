@@ -335,7 +335,7 @@
         // Re-render the poll bubble with updated data
         const bubble = document.querySelector(`[data-poll-msg-id="${messageId}"]`);
         if (bubble) {
-          const currentUserId = (global.MessagesCore || global.messagesCore)?.getCurrentUserId?.() ||
+          const currentUserId = global.messagesCore?.getCurrentUserId?.() ||
                                 parseInt(localStorage.getItem('userId') || '0');
           const fakeMsg = { id: messageId, metadata: { poll: data.poll } };
           const newHtml = renderPollBubble(fakeMsg, currentUserId);
@@ -375,7 +375,7 @@
     socket.on('poll:vote', ({ messageId, poll }) => {
       const bubble = document.querySelector(`[data-poll-msg-id="${messageId}"]`);
       if (!bubble) return;
-      const currentUserId = (global.MessagesCore || global.messagesCore)?.getCurrentUserId?.() ||
+      const currentUserId = global.messagesCore?.getCurrentUserId?.() ||
                             parseInt(localStorage.getItem('userId') || '0');
       const fakeMsg = { id: messageId, metadata: { poll } };
       bubble.outerHTML = renderPollBubble(fakeMsg, currentUserId);

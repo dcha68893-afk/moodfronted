@@ -206,7 +206,7 @@ function isSessionReady() {
     return false;
 }
 
-function isUserAuthenticated_StatusUI() {
+function isAuthenticated() {
     const core = getCore();
     if (core && core !== window && core.isAuthenticated) return core.isAuthenticated();
     if (core && core !== window && core.SessionManager && core.SessionManager.isAuthenticated) return core.SessionManager.isAuthenticated();
@@ -253,13 +253,7 @@ function getMyStatuses() {
 }
 
 // Global variables that will be populated from core
-// FIX (status-ui.js / status-core-state.js name collision): removed duplicate
-// 'let currentUser = null;' — status-core-state.js already declares this at its
-// own top level, and since both files load as plain classic <script> tags in the
-// same global scope (status.html's own comment: these files 'share window/global
-// scope... exactly like status-ui.js... already do'), redeclaring it here threw
-// 'Identifier has already been declared' and aborted this entire script's parse.
-// status-ui.js now reads/writes the single shared binding from status-core-state.js.
+let currentUser = null;
 let userData = null;
 let statuses = [];
 let myStatuses = [];
@@ -500,26 +494,14 @@ async function _fetchFriendStatusesDirect() {
                 const dl = JSON.parse(localStorage.getItem('kyn_deleted_statuses_v1') || '[]');
                 dl.forEach(function(id) { deletedIds.add(String(id)); });
             } catch(_) {}
-            // Fallback expiry (used only for legacy statuses with no expiresAt
-            // field of their own) now follows the viewer's own autoExpireStatus
-            // setting instead of a hardcoded 24h.
-            const FALLBACK_EXPIRY_MS = _mapExpirySettingToSeconds(_getStatusExpirySetting()) * 1000;
+            const EXPIRY_MS = 24 * 60 * 60 * 1000;
             const now = Date.now();
             fetched = fetched.filter(function(s) {
                 if (!s || !s.id) return false;
                 if (deletedIds.has(String(s.id))) return false;
                 if (s.isDeleted) return false;
-                // Prefer the status's own real expiry — it was set per-post from
-                // whatever duration its owner actually chose (1h/6h/24h/1wk/
-                // permanent), which a blanket "24h from createdAt" check ignores.
-                if (s.expiresAt) {
-                    const expiresAt = new Date(s.expiresAt).getTime();
-                    if (expiresAt > 0 && now >= expiresAt) return false;
-                    return true;
-                }
-                if (s.duration === '0' || s.duration === 0) return true; // explicitly permanent, no expiresAt needed
                 const created = new Date(s.createdAt || s.created_at || 0).getTime();
-                if (FALLBACK_EXPIRY_MS > 0 && created > 0 && (now - created) >= FALLBACK_EXPIRY_MS) return false;
+                if (created > 0 && (now - created) >= EXPIRY_MS) return false;
                 return true;
             });
         }
@@ -845,64 +827,6 @@ const durationOptions = {
     '0':      'Permanent'
 };
 
-// ─────────────────────────────────────────────────────────────────────────
-// SETTINGS INTEGRATION — reads the live values that js/settings-broadcast-
-// listener.js applies onto window.__* whenever the Settings module saves a
-// change to the "status" section, and maps them onto this file's own
-// privacy-key / duration-seconds vocabulary. Used to (a) default the
-// composer's Privacy/Duration pickers, (b) fall back sensibly if nothing
-// was explicitly clicked, and (c) filter/react to settings changes live.
-// ─────────────────────────────────────────────────────────────────────────
-function _getStatusPrivacySetting() {
-    return window.__whoCanViewMyStatus || window.__showStatusTo || 'friendsOnly';
-}
-function _mapPrivacySettingToComposerKey(value) {
-    switch (String(value || '').toLowerCase().replace(/[\s_-]/g, '')) {
-        case 'everyone': return 'everyone';
-        case 'closefriends': return 'close-friends';
-        case 'nobody':
-        case 'noone': return 'except'; // closest supported concept until a true "no one" mode exists
-        case 'friendsonly':
-        case 'friends':
-        default: return 'friends';
-    }
-}
-function _getStatusReplySetting() {
-    return window.__allowStatusReplies !== undefined ? !!window.__allowStatusReplies : true;
-}
-function _getStatusExpirySetting() {
-    return window.__autoExpireStatus || '24h';
-}
-// Converts settings values like '1h' / '24h' / '7d' / 'never' / already-raw
-// second counts (legacy) into the second-count keys used by durationOptions.
-function _mapExpirySettingToSeconds(value) {
-    const s = String(value || '24h').trim().toLowerCase();
-    if (s === 'never' || s === 'permanent' || s === '0') return 0;
-    let m = s.match(/^(\d+)\s*h(our)?s?$/);
-    if (m) return parseInt(m[1], 10) * 3600;
-    m = s.match(/^(\d+)\s*d(ay)?s?$/);
-    if (m) return parseInt(m[1], 10) * 86400;
-    m = s.match(/^(\d+)\s*w(eek)?s?$/);
-    if (m) return parseInt(m[1], 10) * 7 * 86400;
-    if (/^\d+$/.test(s)) return parseInt(s, 10); // legacy raw-seconds value
-    return 86400; // sane fallback: 24h
-}
-// Nearest option in durationOptions to a given second-count (composer only
-// offers a fixed set of durations; a setting like '2h' should snap to the
-// closest supported choice rather than silently falling back to 24h).
-function _nearestDurationOptionSeconds(targetSeconds) {
-    const keys = Object.keys(durationOptions).map(Number);
-    if (keys.includes(targetSeconds)) return targetSeconds;
-    if (targetSeconds === 0) return 0;
-    let best = 86400, bestDiff = Infinity;
-    keys.forEach(k => {
-        if (k === 0) return; // don't snap a finite preference to "Permanent"
-        const diff = Math.abs(k - targetSeconds);
-        if (diff < bestDiff) { bestDiff = diff; best = k; }
-    });
-    return best;
-}
-
 const reportReasons = {
     'spam': 'Spam',
     'inappropriate': 'Inappropriate Content',
@@ -1098,7 +1022,7 @@ function generateSampleMoodData() {
 // =============================================
 // UI FAILSAFE - Critical Protection Layer
 // =============================================
-const UIFailsafe_StatusUI = {
+const UIFailsafe = {
     failedSections: new Set(),
     recoveryAttempts: new Map(),
     maxRecoveryAttempts: 3,
@@ -1268,7 +1192,7 @@ const UIFailsafe_StatusUI = {
             }
         });
         // Re-run basic event listeners for delegated containers
-        try { setupBasicEventListeners_StatusUI(); } catch(e) {}
+        try { setupBasicEventListeners(); } catch(e) {}
     },
     
     _setupMutationObserver() {
@@ -1483,7 +1407,7 @@ const UIFailsafe_StatusUI = {
     }
 };
 
-UIFailsafe_StatusUI.initialize();
+UIFailsafe.initialize();
 
 // =============================================
 // UI ERROR BOUNDARY
@@ -1512,7 +1436,7 @@ class UIErrorBoundary {
 
     wrap(sectionId, renderFn, fallbackType = null) {
         return async (...args) => {
-            if (this.failedSections.has(sectionId) || !UIFailsafe_StatusUI.canRecover(sectionId)) {
+            if (this.failedSections.has(sectionId) || !UIFailsafe.canRecover(sectionId)) {
                 const fallback = this.fallbacks.get(fallbackType || sectionId);
                 return fallback ? fallback(...args) : this.createGenericFallback();
             }
@@ -1523,7 +1447,7 @@ class UIErrorBoundary {
                 return result;
             } catch (error) {
                 this.failedSections.add(sectionId);
-                UIFailsafe_StatusUI.handleError(sectionId, error);
+                UIFailsafe.handleError(sectionId, error);
                 const fallback = this.fallbacks.get(fallbackType || sectionId);
                 return fallback ? fallback(...args) : this.createGenericFallback();
             }
@@ -1678,7 +1602,7 @@ class UIErrorBoundary {
 
     reset(sectionId) {
         this.failedSections.delete(sectionId);
-        UIFailsafe_StatusUI.reset(sectionId);
+        UIFailsafe.reset(sectionId);
     }
 }
 
@@ -1906,7 +1830,7 @@ const UIRenderPipeline = {
             container.innerHTML = html;
             container.classList.add('content-rendered');
             setTimeout(() => {
-                UIFailsafe_StatusUI._rebindAllHandlers();
+                UIFailsafe._rebindAllHandlers();
             }, 50);
         });
     },
@@ -1987,7 +1911,7 @@ const UIRenderPipeline = {
 // =============================================
 // CORE INTEGRATION BRIDGE
 // =============================================
-const UIBridge_StatusUI = {
+const UIBridge = {
     subscriptions: new Map(),
     validators: new Map(),
     messageQueue: [],
@@ -2368,7 +2292,7 @@ class UIEventSystem {
 
     handleOnline = () => {
         this.emit('online', { timestamp: Date.now() });
-        UIFailsafe_StatusUI.processActionQueue();
+        UIFailsafe.processActionQueue();
     };
 
     handleOffline = () => {
@@ -3008,7 +2932,7 @@ renderMoodChart() {
 },
 
     createEmptyState() {
-        const isAuth = isUserAuthenticated_StatusUI();
+        const isAuth = isAuthenticated();
         // If not authenticated yet, show shimmer so user doesn't see empty state
         if (!isAuth) {
             return `
@@ -3291,10 +3215,10 @@ const LiveUpdateEngine = {
     },
 
     setupCoreSubscriptions() {
-        UIBridge_StatusUI.subscribe('statusUpdate', (data) => {
+        UIBridge.subscribe('statusUpdate', (data) => {
             this.queueUpdate('status', data);
         });
-        UIBridge_StatusUI.subscribe('statusState', (data) => {
+        UIBridge.subscribe('statusState', (data) => {
             if (data.statuses) {
                 this.queueUpdate('statuses', data);
             }
@@ -3497,8 +3421,7 @@ function _startSlideTimer(isOwner, group) {
     _clearSlideTimer();
     _setSegmentState(currentViewerSlot);
     const DURATION = 5000;
-    const fill = document.querySelector(`.progress-segment:nth-child(${currentViewerSlot + 1}) .fill`)
-        || document.getElementById('progressFill'); // fallback single-bar path — was built but never animated
+    const fill = document.querySelector(`.progress-segment:nth-child(${currentViewerSlot + 1}) .fill`);
     if (fill) {
         fill.style.transition = `width ${DURATION}ms linear`;
         fill.style.width = '100%';
@@ -3514,8 +3437,6 @@ function _clearSlideTimer() {
     document.querySelectorAll('.progress-segment .fill').forEach(f => {
         f.style.transition = 'none';
     });
-    const fallbackFill = document.getElementById('progressFill');
-    if (fallbackFill) fallbackFill.style.transition = 'none';
 }
 
 function _advanceSlide(isOwner, group) {
@@ -3732,11 +3653,8 @@ function _applyViewerMode(isOwner, status) {
         // Update seen count from status data
         const seenEl = document.getElementById('seenCountNum');
         if (seenEl) seenEl.textContent = status.viewCount || status.views || 0;
-        // Collapse any name list left open from a previously-viewed status —
-        // each status starts collapsed; the owner taps the pill to reveal it.
-        const prevList = document.getElementById('inlineViewersList');
-        if (prevList) { prevList.style.display = 'none'; prevList.dataset.loaded = '0'; }
-        _bindViewerSeenCountToggle();
+        // FIX: Load viewer list for owner — was never called, so list was always empty
+        _loadViewersForOwner(status);
     } else {
         footer.classList.add('friend-mode');
         footer.classList.remove('owner-mode');
@@ -3764,15 +3682,6 @@ function _applyViewerMode(isOwner, status) {
             const hasExisting = eti && b.dataset.emoji === eti.textContent && eti.textContent !== '😊';
             b.classList.toggle('selected', !!hasExisting);
         });
-        // Respect the status owner's "allow replies" choice for THIS status
-        // (status.allowReplies, set at creation time from their own settings —
-        // not the current viewer's own setting). Reactions stay available
-        // either way; only the text reply box is hidden.
-        const replyWrap = document.querySelector('.reply-input-wrap');
-        if (replyWrap) {
-            const repliesAllowed = status.allowReplies !== false; // default true if unset (legacy statuses)
-            replyWrap.style.display = repliesAllowed ? '' : 'none';
-        }
     }
 
     // Always hide pause button (hold-to-pause is used)
@@ -3806,32 +3715,12 @@ function _loadReactionsForFriend(status) {
     }
 }
 
-// Wires the "👁 N" pill (#viewerSeenCount) so tapping it opens the name
-// list on demand instead of it being shown automatically. Tapping again
-// closes it. Bound once per element (guarded with _seenCountBound).
-function _bindViewerSeenCountToggle() {
-    const pill = document.getElementById('viewerSeenCount');
-    if (!pill || pill._seenCountBound) return;
-    pill._seenCountBound = true;
-    pill.addEventListener('click', () => {
-        const list = document.getElementById('inlineViewersList');
-        const isOpen = list && list.style.display !== 'none' && list.dataset.loaded === '1';
-        if (isOpen) {
-            list.style.display = 'none';
-            return;
-        }
-        if (!currentViewerStatus) return;
-        _loadViewersForOwner(currentViewerStatus);
-    });
-}
-
 function _loadViewersForOwner(status) {
     // Update seen count number immediately
     const seenEl = document.getElementById('seenCountNum');
     if (seenEl) seenEl.textContent = status.viewCount || 0;
 
-    // Create/find inline viewer list below seen count — hidden until the
-    // owner taps the seen-count pill; see _bindViewerSeenCountToggle().
+    // Create/find inline viewer list below seen count
     const ownerControls = document.getElementById('ownerControls');
     if (!ownerControls) return;
 
@@ -3842,8 +3731,6 @@ function _loadViewersForOwner(status) {
         viewersList.style.cssText = 'margin-top:8px;max-height:180px;overflow-y:auto;';
         ownerControls.appendChild(viewersList);
     }
-    viewersList.style.display = '';
-    viewersList.dataset.loaded = '0';
     viewersList.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);padding:4px 0;">Loading viewers...</div>';
 
     const api = window.StatusAPI;
@@ -3852,7 +3739,6 @@ function _loadViewersForOwner(status) {
         return;
     }
     api.getViewers(status.id).then(result => {
-        viewersList.dataset.loaded = '1';
         if (!result || !result.success) { viewersList.innerHTML = ''; return; }
         const viewers = result.viewers || result.data?.viewers || [];
         if (!viewers.length) {
@@ -4001,11 +3887,6 @@ function loadViewerContent(statusData) {
     // P3 FIX: Render music overlay
     if (window._renderMusicOverlay) window._renderMusicOverlay(sanitized);
 
-    // Render tagged-friends chip — mentions were being collected and sent
-    // to the server at post time, but never actually shown to anyone
-    // viewing the status (poster, tagged person, or other viewers).
-    if (window._renderMentionsOverlay) window._renderMentionsOverlay(sanitized);
-
     // P3 FIX: Start/stop countdown ticker
     const prevStatus = window.currentViewerStatus;
     if (prevStatus && prevStatus.id !== sanitized.id) {
@@ -4106,48 +3987,6 @@ function renderQuestionOverlay(statusData) {
     }
 }
 window._renderQuestionOverlay = renderQuestionOverlay;
-
-// Tagged-friends chip — mentions were being collected in the composer and
-// sent to the server (metadata.mentions / notifying the mentioned user
-// server-side) but nothing ever displayed them anywhere. This shows a
-// "Tagged: Alice, Bob" chip to any viewer, and a distinct "tagged you"
-// callout when the person currently viewing is one of the mentioned users.
-function renderMentionsOverlay(statusData) {
-    const overlay = document.getElementById('statusMentionsOverlay');
-    const textEl  = document.getElementById('statusMentionsText');
-    if (!overlay || !textEl) return;
-
-    const meta = statusData && statusData.metadata;
-    const mentions = (meta && Array.isArray(meta.mentions) && meta.mentions.length)
-        ? meta.mentions
-        : (Array.isArray(statusData && statusData.mentions) ? statusData.mentions : null);
-
-    if (!mentions || !mentions.length) {
-        overlay.style.display = 'none';
-        return;
-    }
-
-    const myId = currentUser && (currentUser.id || currentUser.userId);
-    const iAmTagged = myId && mentions.some(m => String((m && (m.userId || m.id)) || m) === String(myId));
-
-    const names = mentions
-        .map(m => (m && (m.displayName || m.username)) || null)
-        .filter(Boolean);
-
-    if (iAmTagged) {
-        const others = names.filter(n => true); // display list as-is; poster already knows who they tagged
-        textEl.textContent = others.length ? `You were tagged, with ${others.join(', ')}` : 'You were tagged';
-        overlay.classList.add('mentions-you');
-    } else if (names.length) {
-        textEl.textContent = `Tagged: ${names.join(', ')}`;
-        overlay.classList.remove('mentions-you');
-    } else {
-        overlay.style.display = 'none';
-        return;
-    }
-    overlay.style.display = 'flex';
-}
-window._renderMentionsOverlay = renderMentionsOverlay;
 
 // P3 FIX: Load and render story templates in create modal
 async function loadStatusTemplates() {
@@ -4314,11 +4153,6 @@ function createTextStatusSlide(statusData) {
         <div class="text-status-content">${UISanitizer.sanitizeHTML(statusData.content || statusData.text || '')}</div>
         <div class="text-status-author">— ${UISanitizer.sanitizeHTML(statusData.user?.displayName || 'Unknown User')}</div>
     `;
-    const chosenFont = (statusData.metadata && statusData.metadata.fontFamily) || statusData.fontFamily;
-    if (chosenFont) {
-        const contentEl = slide.querySelector('.text-status-content');
-        if (contentEl) contentEl.style.fontFamily = chosenFont;
-    }
     return slide;
 }
 
@@ -4428,7 +4262,7 @@ function createPollStatusSlide(statusData) {
             ${hasVoted ? '<div class="poll-voted-message">✓ You have voted</div>' : ''}
         </div>
     `;
-    if (!hasVoted && isUserAuthenticated_StatusUI() && !isOfflineMode && ensureUIActive('votePoll')) {
+    if (!hasVoted && isAuthenticated() && !isOfflineMode && ensureUIActive('votePoll')) {
         const pollOptions = slide.querySelectorAll('.poll-option');
         pollOptions.forEach(option => {
             option.addEventListener('click', async (e) => {
@@ -4757,10 +4591,6 @@ function handleCreateStatusClick() {
         modal.classList.add('active');
         const textTab = UIElements.querySelector('.create-status-tab[data-tab="text"]');
         if (textTab) textTab.click();
-        const privacyContainer = UIElements.getElement('privacyOptions');
-        if (privacyContainer) privacyContainer.dataset.userChanged = '0';
-        const durationContainer = UIElements.getElement('durationOptions');
-        if (durationContainer) durationContainer.dataset.userChanged = '0';
         
         // Load friends into the modal
         populateFriendsInCreateModal();
@@ -4831,7 +4661,7 @@ function viewMyStatus() {
 
 function editMyStatus() {
     if (!ensureUIActive('editStatus')) return;
-    if (!isUserAuthenticated_StatusUI()) {
+    if (!isAuthenticated()) {
         showNotification('Please sign in to edit status', 'error');
         return;
     }
@@ -5086,7 +4916,7 @@ function enableProtectedUI() {
             el.style.opacity = '1';
             el.style.pointerEvents = 'auto';
             el.removeAttribute('aria-disabled');
-            UIFailsafe_StatusUI.disabledButtons.delete(id);
+            UIFailsafe.disabledButtons.delete(id);
         }
     });
 }
@@ -5133,7 +4963,7 @@ function showLogoutState() {
     disableProtectedUI();
 }
 
-function showReconnectionState_StatusUI() {
+function showReconnectionState() {
     const allStatusList = UIElements.allStatusList;
     if (allStatusList) {
         allStatusList.innerHTML = `
@@ -5434,65 +5264,7 @@ function bindGroupedStatusHandlers(container) {
 // =============================================
 // BASIC EVENT LISTENERS SETUP
 // =============================================
-function setupBasicEventListeners_StatusUI() {
-    // ── Live settings adaptation ────────────────────────────────────────
-    // js/settings-broadcast-listener.js dispatches this on document whenever
-    // the Settings module saves a change (privacy/status/etc.), and keeps
-    // window.__whoCanViewMyStatus / __autoExpireStatus / __allowStatusReplies
-    // up to date. React immediately instead of requiring a reload.
-    if (!document._statusSettingsListenerBound) {
-        document._statusSettingsListenerBound = true;
-        document.addEventListener('settingsUpdated', function(e) {
-            const changed = (e && e.detail && e.detail.status) || null;
-            if (!changed) return;
-            // Re-default the composer pickers only if the user hasn't already
-            // made an explicit choice this session (don't yank a manual pick).
-            const privacyContainer = document.getElementById('privacyOptions');
-            if (privacyContainer && privacyContainer.dataset.userChanged !== '1'
-                && document.getElementById('createStatusModal')?.classList.contains('active')) {
-                initializePrivacyOptions();
-            }
-            const durationContainer = document.getElementById('durationOptions');
-            if (durationContainer && durationContainer.dataset.userChanged !== '1'
-                && document.getElementById('createStatusModal')?.classList.contains('active')) {
-                initializeDurationOptions();
-            }
-            // Re-filter the already-loaded status list against the new
-            // autoExpireStatus fallback (affects only legacy statuses with
-            // no expiresAt of their own) and re-render.
-            if (typeof renderStatusListInstantlyUI === 'function') {
-                try { renderStatusListInstantlyUI(); } catch(_) {}
-            }
-        });
-    }
-
-    // ── Select All / Clear All friends (privacy picker) ────────────────
-    // These buttons existed in the markup with zero click handlers —
-    // wired here to toggle every .friend-select-item the same way a
-    // manual click on each one would.
-    const selectAllFriendsBtn = document.getElementById('selectAllFriendsBtn');
-    if (selectAllFriendsBtn && !selectAllFriendsBtn._bound) {
-        selectAllFriendsBtn._bound = true;
-        selectAllFriendsBtn.addEventListener('click', () => {
-            document.querySelectorAll('#friendsListContainer .friend-select-item').forEach(el => {
-                el.classList.add('selected');
-                const cb = el.querySelector('.friend-checkbox i');
-                if (cb) cb.className = 'fas fa-check-square';
-            });
-        });
-    }
-    const clearAllFriendsBtn = document.getElementById('clearAllFriendsBtn');
-    if (clearAllFriendsBtn && !clearAllFriendsBtn._bound) {
-        clearAllFriendsBtn._bound = true;
-        clearAllFriendsBtn.addEventListener('click', () => {
-            document.querySelectorAll('#friendsListContainer .friend-select-item').forEach(el => {
-                el.classList.remove('selected');
-                const cb = el.querySelector('.friend-checkbox i');
-                if (cb) cb.className = 'far fa-square';
-            });
-        });
-    }
-
+function setupBasicEventListeners() {
     // ── Delegated click handler on allStatusList ──────────────────────────
     // This survives DOM re-renders: we listen on the stable container,
     // not on individual items which get replaced on each render.
@@ -5728,16 +5500,9 @@ function setupBasicEventListeners_StatusUI() {
 
     const mediaUploadArea = UIElements.getElement('mediaUploadArea');
     const mediaFileInput = UIElements.getElement('mediaFileInput');
-    const fileChooser = document.getElementById('composerFileChooser');
     if (mediaUploadArea && !mediaUploadArea._hasListener) {
         mediaUploadArea._hasListener = true;
-        // Was: mediaFileInput.click() directly (skips straight to the generic
-        // file browser, no real camera option). Now: show a small chooser so
-        // "Take Photo/Video" can open the actual device camera.
-        mediaUploadArea.addEventListener('click', () => {
-            if (fileChooser) fileChooser.style.display = 'flex';
-            else mediaFileInput.click(); // fallback if chooser markup missing
-        });
+        mediaUploadArea.addEventListener('click', () => mediaFileInput.click());
         mediaUploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             mediaUploadArea.style.backgroundColor = 'rgba(0, 132, 255, 0.1)';
@@ -5753,56 +5518,9 @@ function setupBasicEventListeners_StatusUI() {
             }
         });
     }
-    // ── Camera / Gallery chooser ────────────────────────────────────────
-    const fileChooserCameraBtn  = document.getElementById('fileChooserCameraBtn');
-    const fileChooserGalleryBtn = document.getElementById('fileChooserGalleryBtn');
-    const cameraCaptureInput    = document.getElementById('cameraCaptureInput');
-    if (fileChooserCameraBtn && !fileChooserCameraBtn._bound) {
-        fileChooserCameraBtn._bound = true;
-        fileChooserCameraBtn.addEventListener('click', () => {
-            if (fileChooser) fileChooser.style.display = 'none';
-            if (cameraCaptureInput) cameraCaptureInput.click(); // opens the real device camera
-        });
-    }
-    if (fileChooserGalleryBtn && !fileChooserGalleryBtn._bound) {
-        fileChooserGalleryBtn._bound = true;
-        fileChooserGalleryBtn.addEventListener('click', () => {
-            if (fileChooser) fileChooser.style.display = 'none';
-            if (mediaFileInput) mediaFileInput.click(); // regular gallery/file picker, no capture attr
-        });
-    }
-    // Tapping anywhere outside the two chooser buttons closes it
-    if (fileChooser && !fileChooser._outsideBound) {
-        fileChooser._outsideBound = true;
-        document.addEventListener('click', (e) => {
-            if (fileChooser.style.display === 'none') return;
-            if (e.target === document.getElementById('composerFileBtn')) return;
-            if (fileChooser.contains(e.target)) return;
-            fileChooser.style.display = 'none';
-        });
-    }
     if (mediaFileInput && !mediaFileInput._hasListener) {
         mediaFileInput._hasListener = true;
         mediaFileInput.addEventListener('change', handleMediaUpload);
-    }
-    if (cameraCaptureInput && !cameraCaptureInput._hasListener) {
-        cameraCaptureInput._hasListener = true;
-        cameraCaptureInput.addEventListener('change', (e) => {
-            const file = e.target.files && e.target.files[0];
-            if (!file) return;
-            // Mirror the captured photo/video into mediaFileInput itself via
-            // DataTransfer, so handlePostStatus()'s existing
-            // `mediaFileInput.files[0]` read works unchanged no matter which
-            // of the two inputs actually produced the file.
-            if (mediaFileInput) {
-                try {
-                    const dt = new DataTransfer();
-                    dt.items.add(file);
-                    mediaFileInput.files = dt.files;
-                } catch (_) { /* DataTransfer unsupported — preview still works below */ }
-            }
-            handleMediaUpload({ target: { files: [file] } });
-        });
     }
     const myStatusPreview = UIElements.getElement('myStatusPreview');
     if (myStatusPreview && !myStatusPreview._hasListener) {
@@ -5813,7 +5531,7 @@ function setupBasicEventListeners_StatusUI() {
                 // Open ALL own statuses as a group (WhatsApp-style)
                 showStatusGroupViewer([...myStatuses]);
             } else {
-                if (!isUserAuthenticated_StatusUI()) {
+                if (!isAuthenticated()) {
                     showNotification('Please sign in to create a status', 'error');
                     return;
                 }
@@ -5834,7 +5552,7 @@ function setupBasicEventListeners_StatusUI() {
 // COMPLETE EVENT LISTENERS
 // =============================================
 function setupEventListeners() {
-    setupBasicEventListeners_StatusUI();
+    setupBasicEventListeners();
     // FIX: The bottom filter buttons (Feedback/Achievement/Advice/Happy/Motivated) live inside
     // .status-categories containers, NOT .filter-buttons. Delegate on every .status-categories.
     document.querySelectorAll('.status-categories').forEach(function(filterContainer) {
@@ -6041,50 +5759,6 @@ function initializeBackgroundOptions() {
     if (first) first.classList.add('selected');
 }
 
-// Font picker for the "Aa" composer icon — this button previously opened
-// the Templates panel by mistake because no font-selection feature had
-// ever actually been built. Applies the chosen font live to the text
-// canvas (same "live apply" pattern as the background-color picker) and
-// is read by handlePostStatus() so it's saved with the status too.
-const fontOptionsList = [
-    { id: 'default',    label: 'Aa', family: "inherit" },
-    { id: 'serif',      label: 'Aa', family: "Georgia, 'Times New Roman', serif" },
-    { id: 'mono',       label: 'Aa', family: "'Courier New', monospace" },
-    { id: 'rounded',    label: 'Aa', family: "'Segoe UI Rounded', 'Comic Sans MS', sans-serif" },
-    { id: 'condensed',  label: 'Aa', family: "'Arial Narrow', sans-serif" },
-    { id: 'handwritten',label: 'Aa', family: "'Brush Script MT', cursive" }
-];
-function initializeFontOptions() {
-    const container = document.getElementById('fontOptions');
-    if (!container) return;
-    container.innerHTML = '';
-    fontOptionsList.forEach(f => {
-        const option = document.createElement('div');
-        option.className = 'font-option';
-        option.dataset.font = f.id;
-        option.style.fontFamily = f.family;
-        option.setAttribute('role', 'button');
-        option.setAttribute('tabindex', '0');
-        option.textContent = f.label;
-        option.addEventListener('click', () => {
-            container.querySelectorAll('.font-option').forEach(opt => opt.classList.remove('selected'));
-            option.classList.add('selected');
-            const textInput = UIElements.getElement('textStatusInput') || document.getElementById('textStatusInput');
-            if (textInput) textInput.style.fontFamily = f.family;
-            container.dataset.selectedFamily = f.family;
-        });
-        container.appendChild(option);
-    });
-    const textInput = UIElements.getElement('textStatusInput') || document.getElementById('textStatusInput');
-    const currentFamily = (textInput && textInput.style.fontFamily) || '';
-    const match = fontOptionsList.find(f => f.family === currentFamily) || fontOptionsList[0];
-    const toSelect = container.querySelector('[data-font="' + match.id + '"]');
-    if (toSelect) toSelect.classList.add('selected');
-    container.dataset.selectedFamily = match.family;
-}
-window._initFontOptions = initializeFontOptions;
-
-
 function initializeIntentOptions() {
     const container = UIElements.getElement('intentOptions');
     if (!container) return;
@@ -6195,14 +5869,11 @@ function initializePrivacyOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.privacy-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            container.dataset.userChanged = '1';
         });
         container.appendChild(option);
     });
-    const defaultPrivacyKey = _mapPrivacySettingToComposerKey(_getStatusPrivacySetting());
-    const preselect = container.querySelector(`[data-privacy="${defaultPrivacyKey}"]`)
-        || container.querySelector('[data-privacy="friends"]');
-    if (preselect) preselect.classList.add('selected');
+    const friends = container.querySelector('[data-privacy="friends"]');
+    if (friends) friends.classList.add('selected');
 }
 
 function initializeDurationOptions() {
@@ -6219,14 +5890,11 @@ function initializeDurationOptions() {
         option.addEventListener('click', () => {
             container.querySelectorAll('.duration-option').forEach(opt => opt.classList.remove('selected'));
             option.classList.add('selected');
-            container.dataset.userChanged = '1';
         });
         container.appendChild(option);
     });
-    const defaultSeconds = _nearestDurationOptionSeconds(_mapExpirySettingToSeconds(_getStatusExpirySetting()));
-    const preselect = container.querySelector(`[data-duration="${defaultSeconds}"]`)
-        || container.querySelector('[data-duration="86400"]');
-    if (preselect) preselect.classList.add('selected');
+    const day = container.querySelector('[data-duration="86400"]');
+    if (day) day.classList.add('selected');
 }
 
 function initializeTemplateOptions() {
@@ -6404,10 +6072,8 @@ function initializeHighlightPrivacyOptions() {
         });
         container.appendChild(option);
     });
-    const defaultHighlightPrivacyKey = _mapPrivacySettingToComposerKey(_getStatusPrivacySetting());
-    const highlightPreselect = container.querySelector(`[data-privacy="${defaultHighlightPrivacyKey}"]`)
-        || container.querySelector('[data-privacy="friends"]');
-    if (highlightPreselect) highlightPreselect.classList.add('selected');
+    const friends = container.querySelector('[data-privacy="friends"]');
+    if (friends) friends.classList.add('selected');
 }
 
 function initializeRepeatOptions() {
@@ -6445,7 +6111,7 @@ async function handlePostStatus() {
         showNotification('Please wait, connecting...', 'info');
         return;
     }
-    if (!isUserAuthenticated_StatusUI()) {
+    if (!isAuthenticated()) {
         showNotification('Please sign in to post a status', 'error');
         return;
     }
@@ -6470,13 +6136,9 @@ async function handlePostStatus() {
     if (intent) statusData.intent = intent;
     if (mood) statusData.mood = mood;
     if (category) statusData.category = category;
-    // Fall back to the user's saved "who can view my status" preference
-    // (js/settings-broadcast-listener.js keeps window.__whoCanViewMyStatus
-    // live) rather than a hardcoded 'friends' — the picker above is already
-    // pre-selected from this same setting, so this only matters if nothing
-    // could be read from the DOM.
-    statusData.privacy = privacy || _mapPrivacySettingToComposerKey(_getStatusPrivacySetting());
-    statusData.allowReplies = _getStatusReplySetting();
+    // Default privacy to 'friends' so statuses are friends-only unless explicitly changed
+    statusData.privacy = privacy || 'friends';
+    statusData.allowReplies = true;
     if (selectedFriendIds.length > 0) {
         if (statusData.privacy === 'except') {
             statusData.excludedUserIds = selectedFriendIds;
@@ -6493,13 +6155,9 @@ async function handlePostStatus() {
             statusData.expiresAt = new Date(Date.now() + secs * 1000).toISOString();
         }
     } else {
-        // Fall back to the user's saved autoExpireStatus setting instead of
-        // a hardcoded 24h.
-        const fallbackSecs = _nearestDurationOptionSeconds(_mapExpirySettingToSeconds(_getStatusExpirySetting()));
-        statusData.duration = String(fallbackSecs);
-        if (fallbackSecs > 0) {
-            statusData.expiresAt = new Date(Date.now() + fallbackSecs * 1000).toISOString();
-        }
+        // Default: 24 hours
+        statusData.duration  = '86400';
+        statusData.expiresAt = new Date(Date.now() + 86400 * 1000).toISOString();
     }
     if (actions.length > 0) statusData.actionButtons = actions;
     const sensitive = UIElements.getElement('sensitiveContentToggle');
@@ -6525,10 +6183,6 @@ async function handlePostStatus() {
         statusData.content = text; // ensure core's postStatus payload uses correct field
         const bg = UIElements.querySelector('.background-option.selected');
         if (bg) statusData.background = bg.dataset.bg;
-        const fontContainer = document.getElementById('fontOptions');
-        if (fontContainer && fontContainer.dataset.selectedFamily && fontContainer.dataset.selectedFamily !== 'inherit') {
-            statusData.fontFamily = fontContainer.dataset.selectedFamily;
-        }
     } else if (tabName === 'media') {
         const mediaPreview = UIElements.getElement('mediaPreview');
         if (!mediaPreview || mediaPreview.children.length === 0) {
@@ -6752,15 +6406,7 @@ async function handlePostStatus() {
     }
 }
 
-// silent=true (default): used by the 3s background autosave — no toast
-// spam for "nothing to type yet" and no toast for a routine background
-// save either. Pass silent=false only from an explicit, user-initiated
-// "Save Draft" action if one is ever added back to the UI.
-// IMPORTANT: this function never closes the composer. The create-status
-// modal is only ever closed by the user tapping the X / Cancel button —
-// background autosave must not be able to dismiss the screen out from
-// under someone who is mid-way through writing a status.
-function handleSaveDraft(silent = true) {
+function handleSaveDraft() {
     if (!ensureUIActive('saveDraft')) return;
     const activeTab = UIElements.querySelector('.create-status-tab.active');
     if (!activeTab) return;
@@ -6773,7 +6419,7 @@ function handleSaveDraft(silent = true) {
         const textInput = UIElements.getElement('textStatusInput');
         const text = textInput ? textInput.value.trim() : '';
         if (!text) {
-            if (!silent) showNotification('Nothing to save', 'warning');
+            showNotification('Nothing to save', 'warning');
             return;
         }
         draftData.text = text;
@@ -6783,7 +6429,7 @@ function handleSaveDraft(silent = true) {
         const captionInput = UIElements.getElement('mediaCaptionInput');
         const caption = captionInput ? captionInput.value.trim() : '';
         if (!caption) {
-            if (!silent) showNotification('Nothing to save', 'warning');
+            showNotification('Nothing to save', 'warning');
             return;
         }
         draftData.caption = caption;
@@ -6791,7 +6437,7 @@ function handleSaveDraft(silent = true) {
         const questionInput = UIElements.getElement('pollQuestionInput');
         const question = questionInput ? questionInput.value.trim() : '';
         if (!question) {
-            if (!silent) showNotification('Nothing to save', 'warning');
+            showNotification('Nothing to save', 'warning');
             return;
         }
         draftData.question = question;
@@ -6799,7 +6445,7 @@ function handleSaveDraft(silent = true) {
             .map(input => input.value.trim())
             .filter(text => text);
         if (options.length < 2) {
-            if (!silent) showNotification('Please enter at least 2 options to save as draft', 'error');
+            showNotification('Please enter at least 2 options to save as draft', 'error');
             return;
         }
         draftData.options = options.map(text => ({ text, votes: 0 }));
@@ -6827,8 +6473,9 @@ function handleSaveDraft(silent = true) {
             drafts.unshift(draftData);
             try { localStorage.setItem('status_drafts', JSON.stringify(drafts)); } catch(e) {}
         }
-        if (!silent) showNotification('Draft saved', 'success');
-        // Composer is intentionally NOT closed here — see function header.
+        showNotification('Draft saved', 'success');
+        const modal = UIElements.createStatusModal || document.getElementById('createStatusModal');
+        if (modal) modal.classList.remove('active');
     })();
 }
 
@@ -7172,13 +6819,7 @@ function handleMediaUpload(event) {
                 `;
             }
             const removeBtn = item.querySelector('.remove-media-btn');
-            removeBtn.addEventListener('click', () => {
-                item.remove();
-                const mfi = UIElements.getElement('mediaFileInput');
-                const cci = document.getElementById('cameraCaptureInput');
-                if (mfi) mfi.value = '';
-                if (cci) cci.value = '';
-            });
+            removeBtn.addEventListener('click', () => item.remove());
             preview.appendChild(item);
         };
         reader.readAsDataURL(file);
@@ -8108,12 +7749,12 @@ function updateMoodChartUI() {
 function cleanupUI() {
     stopAutoAdvance();
     uiEvents.removeAllListeners();
-    UIBridge_StatusUI.clearSubscriptions();
+    UIBridge.clearSubscriptions();
     UIStateManager.clear();
-    UIFailsafe_StatusUI.resetAll();
-    UIFailsafe_StatusUI.cleanup();
-    if (typeof UIFailsafe_StatusUI.mutationObserver !== 'undefined') {
-        UIFailsafe_StatusUI.mutationObserver.disconnect();
+    UIFailsafe.resetAll();
+    UIFailsafe.cleanup();
+    if (typeof UIFailsafe.mutationObserver !== 'undefined') {
+        UIFailsafe.mutationObserver.disconnect();
     }
     UILogger.info('Cleanup', 'UI cleanup complete');
 }
@@ -8164,17 +7805,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         syncDataFromCore();
         subscribeToStatusChanges();
         
-        // Initial render with cached data — own try/catch so a bug in list
-        // rendering doesn't also take down the rest of init below it, and so
-        // the real exception is visible instead of being caught by the huge
-        // outer catch and reported as an undifferentiated init failure.
-        try {
-            renderStatusListInstantlyUI();
-        } catch (renderErr) {
-            UILogger.error('Init', 'renderStatusListInstantlyUI threw', renderErr);
-            const container = UIElements.allStatusList || document.getElementById('allStatusList');
-            if (container) container.innerHTML = uiErrorBoundary.createStatusListFallback();
-        }
+        // Initial render with cached data
+        renderStatusListInstantlyUI();
 
         // Fetch friend statuses early — StatusAPI uses parent bridge, no lifecycle needed
         setTimeout(() => {
@@ -8184,8 +7816,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         UIRenderPipeline.setStage('initialRender');
         initializeUIComponents();
-        setupBasicEventListeners_StatusUI();
-        UIBridge_StatusUI.initialize();
+        setupBasicEventListeners();
+        UIBridge.initialize();
         uiEvents.initialize();
         ResponsiveEngine.initialize();
         
@@ -8359,7 +7991,7 @@ document.addEventListener('statusLifecycleChange', (e) => {
         
         // Rebind handlers after a short delay
         setTimeout(() => {
-            UIFailsafe_StatusUI._rebindAllHandlers();
+            UIFailsafe._rebindAllHandlers();
         }, 500);
         
         // Monitor lifecycle state changes
@@ -8413,7 +8045,7 @@ function updateUserUIInstantly() {}
 // Add this near the end of status-ui.js, before the exports
 function retryBindHandlers() {
     UILogger.info('UI', 'Manually retrying handler binding');
-    UIFailsafe_StatusUI._rebindAllHandlers();
+    UIFailsafe._rebindAllHandlers();
     setupEventListeners();
     enableProtectedUI();
     
@@ -8463,22 +8095,13 @@ if (typeof window !== 'undefined') {
             enableProtectedUI,
             disableProtectedUI,
             showLogoutState,
-            showReconnectionState_StatusUI,
+            showReconnectionState,
             renderStatusesList: renderStatusesListUI,
             cleanupUI,
             retryHandshake,
             showDiagnosticOverlay,
             retryLoad: () => {
                 if (ensureUIActive('retryLoad') && isSessionReady()) {
-                    // FIX: core.loadStatuses() is unreliable/own-statuses-only
-                    // (see comment above _fetchFriendStatusesDirect) — that's
-                    // why Retry wasn't actually recovering. Use the real path.
-                    _friendFetchLast = 0;
-                    if (typeof _fetchFriendStatusesDirect === 'function') {
-                        _fetchFriendStatusesDirect().then(() => {
-                            try { renderStatusListInstantlyUI(); } catch (_) {}
-                        }).catch(() => {});
-                    }
                     const core = getCore();
                     if (core && core.loadStatuses) {
                         core.loadStatuses().catch(() => {});
@@ -9052,52 +8675,6 @@ window._toggleStatusMusic = function() {
 // ═══════════════════════════════════════════════════════════════════
 // P3 FIX: Creator Analytics Bottom Sheet
 // ═══════════════════════════════════════════════════════════════════
-// Posting Streak — counts consecutive calendar days (ending today, or
-// yesterday if nothing's posted yet today so an active streak doesn't
-// read as broken mid-day) that have at least one of the user's own
-// statuses. Replaces the previous hardcoded "coming soon" alert.
-window._showPostingStreak = function() {
-    const list = (typeof getMyStatuses === 'function' ? getMyStatuses() : myStatuses) || [];
-    if (!list.length) {
-        showNotification('No statuses posted yet — post one to start a streak!', 'info');
-        return;
-    }
-    const days = new Set();
-    list.forEach(s => {
-        const d = new Date(s.createdAt || s.created_at || 0);
-        if (!isNaN(d.getTime())) days.add(d.toDateString());
-    });
-    let streak = 0;
-    const cursor = new Date();
-    if (!days.has(cursor.toDateString())) cursor.setDate(cursor.getDate() - 1);
-    while (days.has(cursor.toDateString())) {
-        streak++;
-        cursor.setDate(cursor.getDate() - 1);
-    }
-    showNotification(streak > 0 ? `🔥 ${streak}-day posting streak!` : 'No active posting streak yet', streak > 0 ? 'success' : 'info');
-};
-
-// Mood Trends — most frequent mood tag across the user's own statuses
-// (statusData.mood is already collected at creation time from the
-// composer's mood picker; this was simply never surfaced anywhere).
-window._showMoodTrends = function() {
-    const list = (typeof getMyStatuses === 'function' ? getMyStatuses() : myStatuses) || [];
-    const withMood = list.filter(s => s && s.mood);
-    if (!withMood.length) {
-        showNotification('No mood data yet — add a mood when posting a status', 'info');
-        return;
-    }
-    const counts = {};
-    withMood.forEach(s => { counts[s.mood] = (counts[s.mood] || 0) + 1; });
-    const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-    const moodEmoji = {
-        happy: '😊', calm: '😌', energetic: '⚡', focused: '🎯',
-        relaxed: '😎', stressed: '😣', tired: '😴', excited: '🤩', neutral: '😐'
-    };
-    const emoji = moodEmoji[top[0]] || '🙂';
-    showNotification(`${emoji} Most common mood: ${top[0]} (${top[1]} status${top[1] === 1 ? '' : 'es'})`, 'success');
-};
-
 window._showStatusAnalytics = async function() {
     const sheet   = document.getElementById('statusAnalyticsSheet');
     const backdrop = document.getElementById('statusAnalyticsBackdrop');

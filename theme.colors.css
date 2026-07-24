@@ -889,31 +889,6 @@ input[type="checkbox"]:checked + .toggle {
   color: var(--kyn-text-primary) !important;
 }
 
-/* FIX M continued — the header text/see-all button inside .jm-cat-group and the
-   category type bar were still hardcoded to dark text via Tool.css/Tools.html,
-   which went invisible once .jm-cat-group's background switched to the dark
-   panel color above. Route them through the same theme variables. */
-.jm-cat-group-header,
-.jm-cat-group-header span,
-.jm-subcat-name,
-.jm-cat-type-bar,
-.jm-cat-type-btn {
-  color: var(--kyn-text-primary) !important;
-  background: transparent !important;
-}
-.jm-cat-type-btn {
-  background: var(--kyn-bg-panel) !important;
-  border-color: var(--kyn-border) !important;
-}
-.jm-cat-type-btn.active {
-  background: #f57224 !important;
-  border-color: #f57224 !important;
-  color: #ffffff !important;
-}
-.jm-cat-see-all {
-  color: #f57224 !important;
-}
-
 .jm-follow-btn.following,
 .jm-wa-btn {
   background: var(--kyn-bg-panel) !important;

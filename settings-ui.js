@@ -3109,7 +3109,54 @@ export function loadCallsSection(container) {
                         </label>
                     </div>
                 </div>
-                
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Who Can Call Me</div>
+                        <div class="setting-description">Choose who is allowed to call you</div>
+                    </div>
+                    <div class="setting-control">
+                        <select class="setting-dropdown" id="whoCanCallMe">
+                            <option value="everyone" ${settings.whoCanCallMe === 'everyone' ? 'selected' : ''}>Everyone</option>
+                            <option value="friendsOnly" ${(settings.whoCanCallMe === 'friendsOnly' || !settings.whoCanCallMe) ? 'selected' : ''}>Friends Only</option>
+                            <option value="nobody" ${settings.whoCanCallMe === 'nobody' ? 'selected' : ''}>Nobody</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Do Not Disturb</div>
+                        <div class="setting-description">Automatically decline every incoming call</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoReject" ${settings.autoReject === true ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Auto-Answer Calls</div>
+                        <div class="setting-description">Automatically accept incoming calls</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoAnswer" ${settings.autoAnswer === true ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="section-header">
+                <h3><i class="fas fa-volume-up section-icon"></i> Ringing &amp; Audio</h3>
+            </div>
+            <div class="section-body">
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Call Ringtone</div>
@@ -3132,6 +3179,45 @@ export function loadCallsSection(container) {
                     <div class="setting-control">
                         <label class="toggle-switch">
                             <input type="checkbox" id="vibrateOnCall" ${settings.vibrateOnCall !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Default to Speakerphone</div>
+                        <div class="setting-description">Start calls on speaker instead of earpiece</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="speakerDefault" ${settings.speakerDefault !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Noise Cancellation</div>
+                        <div class="setting-description">Reduce background noise on your microphone</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="noiseCancellation" ${settings.noiseCancellation !== false ? 'checked' : ''}>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting-item">
+                    <div class="setting-info">
+                        <div class="setting-label">Echo Cancellation</div>
+                        <div class="setting-description">Prevent audio feedback/echo during calls</div>
+                    </div>
+                    <div class="setting-control">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="echoCancellation" ${settings.echoCancellation !== false ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -3176,7 +3262,25 @@ export function loadCallsSection(container) {
     
     const allowIncomingCalls = document.getElementById('allowIncomingCalls');
     if (allowIncomingCalls) allowIncomingCalls.addEventListener('change', () => window.__updateSetting('calls', 'allowIncomingCalls', allowIncomingCalls.checked));
-    
+
+    const whoCanCallMe = document.getElementById('whoCanCallMe');
+    if (whoCanCallMe) whoCanCallMe.addEventListener('change', () => window.__updateSetting('calls', 'whoCanCallMe', whoCanCallMe.value));
+
+    const autoReject = document.getElementById('autoReject');
+    if (autoReject) autoReject.addEventListener('change', () => window.__updateSetting('calls', 'autoReject', autoReject.checked));
+
+    const autoAnswer = document.getElementById('autoAnswer');
+    if (autoAnswer) autoAnswer.addEventListener('change', () => window.__updateSetting('calls', 'autoAnswer', autoAnswer.checked));
+
+    const speakerDefault = document.getElementById('speakerDefault');
+    if (speakerDefault) speakerDefault.addEventListener('change', () => window.__updateSetting('calls', 'speakerDefault', speakerDefault.checked));
+
+    const noiseCancellation = document.getElementById('noiseCancellation');
+    if (noiseCancellation) noiseCancellation.addEventListener('change', () => window.__updateSetting('calls', 'noiseCancellation', noiseCancellation.checked));
+
+    const echoCancellation = document.getElementById('echoCancellation');
+    if (echoCancellation) echoCancellation.addEventListener('change', () => window.__updateSetting('calls', 'echoCancellation', echoCancellation.checked));
+
     const callRingtone = document.getElementById('callRingtone');
     if (callRingtone) callRingtone.addEventListener('change', () => window.__updateSetting('calls', 'callRingtone', callRingtone.value));
     

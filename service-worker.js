@@ -45,7 +45,14 @@ const CORE_STATIC_ASSETS = [
   '/calls.html',
 
   // Calls module assets (critical for offline UI)
-  '/calls-core.js',
+  '/calls-core.part1.js',
+  '/calls-core.part2.js',
+  '/calls-core.part3.js',
+  '/calls-core.part4.js',
+  '/calls-core.part5.js',
+  '/calls-core.part6.js',
+  '/calls-core.part7.js',
+  '/calls-core.part8.js',
   '/calls-ui.js',
   '/calls.css',
   '/callSession.manager.js',
@@ -119,7 +126,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/api\.core\.js/i,
 
   // ✅ NEW: Calls module — stale version caused connection timeout + call UI blank
-  /\/calls-core\.js/i,
+  /\/calls-core\.part[1-8]\.js/i,
   /\/calls-ui\.js/i,
   /\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,

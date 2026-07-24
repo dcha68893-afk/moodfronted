@@ -4981,21 +4981,18 @@
 
                         </div>
 
-                        <div class="chat-item-right"
-                            onmousedown="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
-                            ontouchstart="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
-                            onmouseup="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
-                            ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
-                            ontouchcancel="document.body.classList.remove('chat-item-pressing');"
-                            onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');window.messagesUI?._showChatContextMenu('${chat.id}', event);"
-                            style="display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:4px;cursor:pointer;min-width:44px;min-height:44px;padding:4px 6px;box-sizing:border-box;">
+                        <div class="chat-item-right">
 
-                            <span class="chat-time" style="pointer-events:none;">${time}</span>
+                            <span class="chat-time">${time}</span>
 
                             <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
-                                tabindex="-1"
-                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:2px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;pointer-events:none;">
-                                <i class="fas fa-ellipsis-v"></i>
+                                onmousedown="event.stopPropagation();"
+                                ontouchstart="event.stopPropagation();"
+                                onmouseup="event.stopPropagation();"
+                                ontouchend="event.stopPropagation();"
+                                onclick="event.stopPropagation();event.preventDefault();window.messagesUI?._showChatContextMenu('${chat.id}', event);"
+                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;">
+                                <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                             </button>
 
                         </div>
@@ -6965,7 +6962,7 @@
 
                 ${isOwnMessage ? item('edit', 'fas fa-edit', 'Edit') : ''}
 
-                ${window.__messageForwardingEnabled === false ? '' : item('forward', 'fas fa-share', 'Forward')}
+                ${item('forward', 'fas fa-share',       'Forward')}
 
                 ${item('copy',    'fas fa-copy',        'Copy')}
 
@@ -7165,10 +7162,6 @@
 
             case 'forward':
 
-                if (window.__messageForwardingEnabled === false) {
-                    UIRenderer?.showNotification?.('Message forwarding is turned off in Settings', 'info');
-                    break;
-                }
                 showForwardModal(message);
 
                 break;
@@ -13810,21 +13803,14 @@ Type: ${message.type || 'text'}`;
                     if (_setHas(STORAGE_KEY_BLOCKED, chatId)) {
                         _setRemove(STORAGE_KEY_BLOCKED, chatId);
                         _showToast('User unblocked');
-                        try { window.MessagesCore?.blockUser?.(String(chatId).replace('pending_', ''), false); } catch(_) {}
                     } else {
                         _setAdd(STORAGE_KEY_BLOCKED, chatId);
                         _showToast('User blocked — messages will not be delivered');
-                        const friendId = String(chatId).replace('pending_', '');
-                        // FIX-BLOCK-NOT-ENFORCED: this used to be a fire-and-forget fetch only,
-                        // completely separate from ConversationManager._blockedFriends — the set
-                        // actually checked elsewhere to gate incoming messages. If that fetch
-                        // failed silently, the toast said "blocked" but nothing was actually
-                        // blocked. MessagesCore.blockUser() writes the real key AND sends over
-                        // the app's reliable socket path.
-                        try { window.MessagesCore?.blockUser?.(friendId, true); } catch(_) {}
-                        // Keep as a secondary/legacy notification path — harmless if redundant.
+                        // Notify backend
                         try {
                             const tok = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+                            const friendId = chatId.replace('pending_','');
+                            // Best-effort — fire and forget
                             fetch('/api/friends/' + friendId + '/block', {
                                 method:'POST',
                                 headers:{ Authorization:'Bearer ' + tok, 'Content-Type':'application/json' }
@@ -13838,16 +13824,9 @@ Type: ${message.type || 'text'}`;
                     if (_setHas(STORAGE_KEY_ARCHIVED, chatId)) {
                         _setRemove(STORAGE_KEY_ARCHIVED, chatId);
                         _showToast('Chat unarchived');
-                        try { window.MessagesCore?.archiveConversation?.(chatId, false); } catch(_) {}
                     } else {
                         _setAdd(STORAGE_KEY_ARCHIVED, chatId);
                         _showToast('Chat archived');
-                        // FIX-ARCHIVE-NOT-SYNCED: this used to only touch a UI-local storage
-                        // key, so archiving never reached the server — reopening on another
-                        // device, or after clearing local storage, the chat would show as
-                        // un-archived again. MessagesCore.archiveConversation() sends it to
-                        // the server over the socket and updates the conversation object too.
-                        try { window.MessagesCore?.archiveConversation?.(chatId, true); } catch(_) {}
                     }
                     window.messagesUI?.refreshChatsList?.();
                     break;
@@ -14061,84 +14040,17 @@ Type: ${message.type || 'text'}`;
             modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
         }
 
-        // ── Biometric (fingerprint/Face ID) unlock via WebAuthn platform authenticator ──
-        // This is a LOCAL device gate, not a server-verified login: success just means
-        // "this device's own fingerprint/Face ID sensor verified the person holding it",
-        // which is what a chat-lock feature needs. It does not replace the PIN (which
-        // remains the fallback on any device/browser without a platform authenticator,
-        // and the only option if biometric enrollment is skipped or fails).
-        const STORAGE_KEY_BIOMETRIC_CRED = 'kyn_hidden_biometric_cred_v1';
-
-        async function _biometricAvailable() {
-            try {
-                return !!(window.PublicKeyCredential &&
-                    await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
-            } catch (_) { return false; }
-        }
-
-        async function _enrollBiometric() {
-            try {
-                const challenge = crypto.getRandomValues(new Uint8Array(32));
-                const userId = crypto.getRandomValues(new Uint8Array(16));
-                const cred = await navigator.credentials.create({
-                    publicKey: {
-                        challenge,
-                        rp: { name: 'MoodChat' },
-                        user: { id: userId, name: 'chat-lock', displayName: 'Chat Lock' },
-                        pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
-                        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
-                        timeout: 60000,
-                    }
-                });
-                if (!cred || !cred.rawId) return false;
-                const credIdB64 = btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
-                localStorage.setItem(STORAGE_KEY_BIOMETRIC_CRED, credIdB64);
-                return true;
-            } catch (e) {
-                _showToast('Could not set up fingerprint/Face ID unlock', true);
-                return false;
-            }
-        }
-
-        async function _verifyBiometric() {
-            const credIdB64 = localStorage.getItem(STORAGE_KEY_BIOMETRIC_CRED);
-            if (!credIdB64) return false;
-            try {
-                const challenge = crypto.getRandomValues(new Uint8Array(32));
-                const rawId = Uint8Array.from(atob(credIdB64), c => c.charCodeAt(0));
-                const assertion = await navigator.credentials.get({
-                    publicKey: {
-                        challenge,
-                        allowCredentials: [{ id: rawId, type: 'public-key' }],
-                        userVerification: 'required',
-                        timeout: 60000,
-                    }
-                });
-                return !!assertion; // resolved without throwing = the platform authenticator verified the user
-            } catch (e) {
-                return false; // includes user cancelling, wrong finger/face, no match, etc.
-            }
-        }
-
+        // ── PIN prompt helpers ────────────────────────────────────────────
         window.messagesUI._showSetHiddenPin = function(cb) {
-            _showPinDialog('Set a 4-digit PIN to lock this chat', async function(pin) {
+            _showPinDialog('Set a 4-digit PIN to lock this chat', function(pin) {
                 if (!pin || pin.length < 4) { cb(null); return; }
-                if (await _biometricAvailable()) {
-                    _showConfirm('Also enable fingerprint / Face ID unlock for this chat?', async function(yes) {
-                        if (yes) await _enrollBiometric();
-                        cb(pin);
-                    });
-                } else {
-                    cb(pin);
-                }
+                cb(pin);
             }, true);
         };
         window.messagesUI._showHiddenPinPrompt = function(cb) {
             const saved = localStorage.getItem(STORAGE_KEY_HIDDEN_PIN);
-            const hasBiometric = !!localStorage.getItem(STORAGE_KEY_BIOMETRIC_CRED);
             _showPinDialog('Enter your PIN to unlock', async function(pin) {
                 if (!pin) { cb(false); return; }
-                if (pin === '__biometric_ok__') { cb(true); return; }
                 try {
                     // Hash the entered PIN and compare against stored hash
                     const encoder = new TextEncoder();
@@ -14148,10 +14060,10 @@ Type: ${message.type || 'text'}`;
                     // Support legacy plaintext PINs (migration path)
                     cb(hashHex === saved || pin === saved);
                 } catch(e) { cb(pin === saved); }
-            }, false, hasBiometric ? _verifyBiometric : null);
+            }, false);
         };
 
-        function _showPinDialog(title, cb, isSet, biometricVerifier) {
+        function _showPinDialog(title, cb, isSet) {
             const modal = document.createElement('div');
             modal.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;';
             modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:24px 20px;width:280px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
@@ -14159,7 +14071,6 @@ Type: ${message.type || 'text'}`;
                 '<div style="color:#e5e7eb;font-size:15px;font-weight:600;margin-bottom:16px;">' + title + '</div>' +
                 '<input id="pinInput" type="password" maxlength="4" inputmode="numeric" pattern="[0-9]*" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;box-sizing:border-box;" placeholder="••••">' +
                 (isSet ? '<input id="pinConfirm" type="password" maxlength="4" inputmode="numeric" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;box-sizing:border-box;margin-top:8px;" placeholder="Confirm">' : '') +
-                (biometricVerifier ? '<button id="pinBiometric" style="width:100%;margin-top:12px;padding:11px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#e5e7eb;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fas fa-fingerprint"></i> Use fingerprint / Face ID</button>' : '') +
                 '<div style="display:flex;gap:8px;margin-top:16px;">' +
                 '<button id="pinCancel" style="flex:1;padding:11px;border-radius:12px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>' +
                 '<button id="pinOk" style="flex:1;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,#2563eb,#06b6d4);color:#fff;font-weight:700;cursor:pointer;">OK</button>' +
@@ -14169,17 +14080,6 @@ Type: ${message.type || 'text'}`;
             const pinConfirm = modal.querySelector('#pinConfirm');
             setTimeout(function(){ pinInput && pinInput.focus(); }, 50);
             modal.querySelector('#pinCancel').onclick = function() { modal.remove(); cb(null); };
-            if (biometricVerifier) {
-                modal.querySelector('#pinBiometric').onclick = async function() {
-                    const btn = modal.querySelector('#pinBiometric');
-                    btn.disabled = true; btn.textContent = 'Verifying…';
-                    const ok = await biometricVerifier();
-                    if (ok) { modal.remove(); cb('__biometric_ok__'); }
-                    else { btn.disabled = false; btn.innerHTML = '<i class="fas fa-fingerprint"></i> Use fingerprint / Face ID'; _showToast('Fingerprint/Face ID not recognized', true); }
-                };
-                // Offer biometric immediately on open — most users expect this, not a second tap.
-                setTimeout(function(){ modal.querySelector('#pinBiometric')?.click(); }, 250);
-            }
             modal.querySelector('#pinOk').onclick = function() {
                 const pin = pinInput ? pinInput.value : '';
                 if (isSet) {

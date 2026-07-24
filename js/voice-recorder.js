@@ -482,14 +482,13 @@
     cancelRecording: _cancel,
   };
 
-  // Auto-install if window.messagesCore / window.MessagesCore / window.core is already set
-  if (global.MessagesCore) install(global.MessagesCore);
-  if (global.messagesCore && global.messagesCore !== global.MessagesCore) install(global.messagesCore);
-  if (global.core && global.core !== global.MessagesCore && global.core !== global.messagesCore) install(global.core);
+  // Auto-install if window.messagesCore / window.core is already set
+  if (global.messagesCore) install(global.messagesCore);
+  if (global.core && global.core !== global.messagesCore) install(global.core);
 
   // Deferred install for when core is set later
   const _origDefineProperty = Object.defineProperty.bind(Object);
-  ['MessagesCore', 'messagesCore', 'core'].forEach(function (prop) {
+  ['messagesCore', 'core'].forEach(function (prop) {
     if (!global[prop]) {
       let _val;
       try {
