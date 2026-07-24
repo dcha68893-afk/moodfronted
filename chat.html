@@ -3648,6 +3648,7 @@
 
     </script>
         <!-- ✅ SAFETY LAYER — Must be first (patch v1) -->
+    <script src="js/core/identity/IdentityProfileStore.js"></script>
     <script src="js/kynecta.safety.layer.js"></script>
     <!-- PWA install banner + SW update manager — MUST be in main shell (chat.html) -->
     <script src="/pwa-manager.js"></script>
@@ -5675,6 +5676,20 @@
                     // across the module iframes picks it up.
                     dispatchEventToModules({ type: 'SETTINGS_UPDATED', payload: { settings: settingsPayload, timestamp: Date.now() }, settings: settingsPayload, originalSource: 'socket' });
                     emitGlobalAppEvent('SETTINGS_UPDATED', { settings: settingsPayload, source: 'socket', timestamp: Date.now() }, { async: true });
+                }
+
+                // ── FIX (IDENTITY-CENTRALIZATION): profile/avatar/cover/username/bio
+                // update relay — same shape as the settings_updated relay above.
+                // This is what makes "edit avatar -> every module updates instantly"
+                // actually true: the parent shell is the one place that can reach
+                // every module iframe (messages, friends, groups, calls, status,
+                // marketplace, search, notifications), so it re-broadcasts whatever
+                // the realtime socket relayed up to it.
+                if (data.type === 'SOCKET_EVENT' && ['profile:update', 'avatar:update', 'cover:update', 'username:update', 'bio:update', 'displayName:update', 'privacy:update'].includes(data.event)) {
+                    const identityPayload = data.payload || {};
+                    try { if (window.Identity && typeof window.Identity.applyUpdate === 'function') window.Identity.applyUpdate(identityPayload); } catch (_) {}
+                    dispatchEventToModules({ type: 'IDENTITY_UPDATED', payload: identityPayload, event: data.event, originalSource: 'socket' });
+                    emitGlobalAppEvent('IDENTITY_UPDATED', { identity: identityPayload, event: data.event, source: 'socket', timestamp: Date.now() }, { async: true });
                 }
 
                 // ✅ ROOT-FIX: ADD_REACTION — previously silently dropped.

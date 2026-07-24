@@ -62,6 +62,7 @@
          so those calls would always have silently no-op'd and rendered raw
          ciphertext. js/e2e-encryption.js must load first since
          groupEncryption.client.js calls window.KynectaE2E directly. -->
+    <script src="js/core/identity/IdentityProfileStore.js"></script>
     <script src="js/e2e-encryption.js"></script>
     <script src="js/groupEncryption.client.js"></script>
     <!-- Phase 3+4: Security & Sealed Groups -->

@@ -477,6 +477,32 @@ const SettingsState = {
             window.AppSettings.set(section + '.' + key, value, { source: 'user-action', userTriggered: true });
         }
 
+        // FIX (IDENTITY-CENTRALIZATION): Settings is the master controller for
+        // identity fields (avatar/cover/username/displayName/bio). Previously
+        // the owner only saw their own edit reflected after the backend
+        // round-trip resolved (or not at all outside the Settings page,
+        // since AppSettings.set() only reaches modules that load
+        // AppSettings.js — group.html/status.html don't). Push the change
+        // into the shared window.Identity store immediately so the editor's
+        // OWN open modules repaint with zero perceived latency; the
+        // server's profile:update broadcast (see identityBroadcastService.js)
+        // then confirms it and fans it out to friends/groups.
+        if (window.Identity && typeof window.Identity.setCurrentUser === 'function') {
+            const IDENTITY_KEY_MAP = {
+                photoUrl: 'avatar', avatar: 'avatar',
+                coverPhotoUrl: 'coverPhoto', coverPhoto: 'coverPhoto',
+                username: 'username', bio: 'bio',
+                displayName: 'displayName', firstName: 'displayName', lastName: 'displayName',
+            };
+            if (section === 'account' && IDENTITY_KEY_MAP[key]) {
+                let currentUserId = null;
+                try { currentUserId = (window.currentUser && window.currentUser.id) || JSON.parse(localStorage.getItem('currentUser') || '{}').id; } catch (_) {}
+                if (currentUserId != null) {
+                    window.Identity.setCurrentUser({ id: currentUserId, [IDENTITY_KEY_MAP[key]]: value });
+                }
+            }
+        }
+
         // STEP 2: Update local state for backwards compatibility
         if (!this.data[section]) this.data[section] = {};
         this.data[section][key] = value;

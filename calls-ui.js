@@ -137,7 +137,7 @@ function normalizeParticipantEntry(participant) {
         id,
         userId: id,
         name,
-        avatar: participant.avatar || participant.photo || participant.userAvatar || null,
+        avatar: (window.Identity && window.Identity.resolveAvatar(participant)) || participant.avatar || participant.photo || participant.userAvatar || null, // IDENTITY-CENTRALIZATION
         isOnline: participant.isOnline !== false,
         isMuted: !!participant.isMuted,
         isSpeaking: !!participant.isSpeaking
@@ -402,7 +402,7 @@ const GlobalCallHistory = {
     let userAvatar = null;
     const contacts = window.__cachedCallContacts || [];
     const contact = contacts.find(c => String(c.id) === String(userId) || String(c.userId) === String(userId));
-    const photoUrl = contact && (contact.avatar || contact.photo || contact.profilePhoto);
+    const photoUrl = contact && ((window.Identity && window.Identity.resolveAvatar(contact)) || contact.avatar || contact.photo || contact.profilePhoto); // IDENTITY-CENTRALIZATION
     
     if (photoUrl) {
         userAvatar = `<img src="${photoUrl}" alt="${userName}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
@@ -940,7 +940,7 @@ function transitionToInCall(callInfo) {
     const incallAvatar = document.getElementById('incallAvatar') || document.getElementById('callAvatar');
     if (incallAvatar) {
         const participant = (UIState.callParticipants && UIState.callParticipants[0]) || {};
-        const photo = callInfo.userAvatar || participant.avatar || participant.photo;
+        const photo = (window.Identity && window.Identity.resolveAvatar(participant)) || callInfo.userAvatar || participant.avatar || participant.photo; // IDENTITY-CENTRALIZATION
         const _safePhoto = photo && window.SecuritySanitizer ? SecuritySanitizer.sanitizeURL(photo) : photo;
         if (_safePhoto && _safePhoto !== '#') {
             incallAvatar.textContent = '';
@@ -1494,7 +1494,7 @@ function displayCallHistory(calls) {
             || ('User #' + (otherId || '?'));
 
         const initials = name.split(' ').map(function(n){ return n[0]; }).join('').toUpperCase().substring(0, 2);
-        const avatarUrl = otherParticipant?.avatar || otherParticipant?.photoURL || contactMatch?.avatar || contactMatch?.photoURL || '';
+        const avatarUrl = (window.Identity && window.Identity.resolveAvatar(otherParticipant)) || otherParticipant?.avatar || otherParticipant?.photoURL || contactMatch?.avatar || contactMatch?.photoURL || ''; // IDENTITY-CENTRALIZATION
         // Real-time status: prefer live UIState contacts data over stale call record
         const _liveContact = (UIState.contacts || window.__cachedCallContacts || []).find(c =>
             c.id == otherId || c.userId == otherId

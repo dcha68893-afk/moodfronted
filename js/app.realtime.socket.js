@@ -1730,6 +1730,62 @@
                 });
                 // ── end settings_updated fix ──────────────────────────────────────────
 
+                // ── FIX (IDENTITY-CENTRALIZATION): profile/avatar/cover/username/bio/
+                // privacy update relay ──────────────────────────────────────────────
+                // Root cause: the server now emits profile:update / avatar:update /
+                // cover:update / username:update / bio:update / privacy:update
+                // (see identityBroadcastService.js) whenever ANY user's identity
+                // changes — the owner's own devices, but also every friend and group
+                // co-member. Without a listener here, none of that reached the
+                // module iframes (messages, friends, groups, calls, status,
+                // marketplace, search, notifications all live in iframes off
+                // chat.html), so the only thing that ever updated was the editor's
+                // own settings screen. Relay it exactly like settings_updated above:
+                // postMessage to the parent frame (which chat.html fans out to every
+                // module iframe) + a local CustomEvent for same-frame listeners +
+                // direct application to IdentityProfileStore.js's window.Identity
+                // cache if that store is loaded in this frame.
+                const identityEventNames = [
+                    'profile:update', 'avatar:update', 'cover:update',
+                    'username:update', 'bio:update', 'displayName:update', 'privacy:update',
+                ];
+
+                identityEventNames.forEach(eventType => {
+                    if (this._registeredSocketListeners.has(eventType)) return;
+                    this._registeredSocketListeners.add(eventType);
+
+                    this._socket.on(eventType, (payload) => {
+                        // 1. Post to parent frame -> chat.html fans out to all module iframes
+                        const outbound = {
+                            type: 'SOCKET_EVENT',
+                            event: eventType,
+                            payload,
+                            source: 'realtime-socket',
+                            timestamp: Date.now()
+                        };
+                        try { window.parent.postMessage(outbound, '*'); } catch (_) {}
+
+                        // 2. Fan out directly to every iframe on THIS page too (covers the
+                        //    case where this socket lives inside the parent shell itself).
+                        try {
+                            document.querySelectorAll('iframe').forEach((f) => {
+                                try { f.contentWindow.postMessage(outbound, '*'); } catch (_) {}
+                            });
+                        } catch (_) {}
+
+                        // 3. Same-frame consumers (kyn: CustomEvent + direct store update)
+                        try { window.dispatchEvent(new CustomEvent('kyn:' + eventType, { detail: payload })); } catch (_) {}
+                        try { if (window.Identity && typeof window.Identity.applyUpdate === 'function') window.Identity.applyUpdate(payload); } catch (_) {}
+
+                        // 4. Standard bridge + EventBus, same as every other event above
+                        this._routeMessage({ type: eventType, payload });
+                        if (window.KynectaEventBus) {
+                            window.KynectaEventBus.emit('REALTIME_' + eventType, payload, { async: true });
+                        }
+                    });
+                });
+                // ── end identity relay fix ─────────────────────────────────────────
+
                 console.log('[Realtime] ✅ Message bridge listeners registered');
             }
         }

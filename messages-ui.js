@@ -2884,7 +2884,7 @@
 
             
 
-            let avatarUrl = chat.friendAvatar || chat.avatar;
+            let avatarUrl = (window.Identity && window.Identity.resolveAvatar(chat)) || chat.friendAvatar || chat.avatar; // IDENTITY-CENTRALIZATION
 
             
 
@@ -5221,7 +5221,7 @@
 
             const displayName = contact.displayName || contact.username || contact.name || 'User';
 
-            const avatarUrl = contact.avatar || contact.photoURL || contact.avatarUrl || '';
+            const avatarUrl = (window.Identity && window.Identity.resolveAvatar(contact)) || contact.avatar || contact.photoURL || contact.avatarUrl || ''; // IDENTITY-CENTRALIZATION
 
             const initials = displayName.charAt(0).toUpperCase();
 
@@ -5990,7 +5990,7 @@
                     return v;
                 })();
 
-                const avatarUrl = chat.friendAvatar || chat.avatar || '';
+                const avatarUrl = (window.Identity && window.Identity.resolveAvatar(chat)) || chat.friendAvatar || chat.avatar || ''; // IDENTITY-CENTRALIZATION
 
                 const initials = name.charAt(0).toUpperCase();
 
@@ -11116,7 +11116,7 @@ Type: ${message.type || 'text'}`;
 
                 resolvedName = _stripUserSuffix(friend.displayName || friend.username || friend.name) || resolvedName;
 
-                resolvedAvatar = resolvedAvatar || friend.avatar || friend.photoURL || friend.avatarUrl || null;
+                resolvedAvatar = resolvedAvatar || (window.Identity && window.Identity.resolveAvatar(friend)) || friend.avatar || friend.photoURL || friend.avatarUrl || null; // IDENTITY-CENTRALIZATION
 
             }
 

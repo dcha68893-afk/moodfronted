@@ -340,7 +340,7 @@ async function loadGroupMembers(groupId, searchTerm) {
         }
         groupMembersList.innerHTML = members.map(m => {
             const isSelf = m.id === (currentUser && currentUser.id);
-            const avatarUrl = m.photoURL || m.avatar;
+            const avatarUrl = (window.Identity && window.Identity.resolveAvatar(m)) || m.photoURL || m.avatar; // IDENTITY-CENTRALIZATION
             const avatarInner = avatarUrl
                 ? `<img src="${escapeHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
                 : escapeHtml(((m.displayName || m.username || '?')[0]).toUpperCase());
@@ -3394,7 +3394,7 @@ function createFriendItemElement(friendData, type, instantMode = false) {
         const escapedUsername = username ? escapeHtml(username) : null;
         
         // Enhanced avatar URL fallbacks
-        const photoURL = friendData.photoURL || friendData.avatar || friendData.profileImage || friendData.image;
+        const photoURL = (window.Identity && window.Identity.resolveAvatar(friendData)) || friendData.photoURL || friendData.avatar || friendData.profileImage || friendData.image; // IDENTITY-CENTRALIZATION
         const avatarUrl = photoURL ? escapeHtml(photoURL) : null;
 
         // Enhanced initials generation with better fallbacks
@@ -3893,7 +3893,7 @@ function createUserSearchItemElement(user) {
         const escapedDisplayName = escapeHtml(displayName);
         const username = user.username ? escapeHtml(user.username.toString()) : null;
         
-        const avatarUrl = user.photoURL || user.avatar;
+        const avatarUrl = (window.Identity && window.Identity.resolveAvatar(user)) || user.photoURL || user.avatar; // IDENTITY-CENTRALIZATION
         const avatarSrc = avatarUrl ? escapeHtml(avatarUrl) : null;
         
         const bioRaw = user.bio || '';
@@ -6303,7 +6303,7 @@ if (refreshRequestsBtn) {
             return;
         }
         nearbyListEl.innerHTML = users.map(u => {
-            const avatarUrl = u.photoURL || u.avatar;
+            const avatarUrl = (window.Identity && window.Identity.resolveAvatar(u)) || u.photoURL || u.avatar; // IDENTITY-CENTRALIZATION
             const avatarHtml = avatarUrl 
                 ? `<img src="${escapeHtml(avatarUrl)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
                 : escapeHtml((u.displayName||u.username||'?')[0].toUpperCase());

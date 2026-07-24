@@ -3866,7 +3866,7 @@ function _loadViewersForOwner(status) {
             const time = v.viewedAt ? formatTimeAgo(v.viewedAt) : '';
             const reaction = v.reaction ? ' · ' + v.reaction : '';
             const replies = v.replyCount ? ' · ' + v.replyCount + ' repl' + (v.replyCount === 1 ? 'y' : 'ies') : '';
-            const avatarUrl = v.viewer?.avatar || v.viewer?.photoURL || '';
+            const avatarUrl = (window.Identity && window.Identity.resolveAvatar(v.viewer)) || v.viewer?.avatar || v.viewer?.photoURL || ''; // IDENTITY-CENTRALIZATION
             return '<div class="viewer-list-item" style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-color,#2a3942);">' +
                 '<div style="width:32px;height:32px;border-radius:50%;background:var(--primary-color,#00a884);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;' + (avatarUrl ? 'background-image:url(' + avatarUrl + ');background-size:cover;background-position:center;' : '') + '">' +
                 (avatarUrl ? '' : initial) + '</div>' +
@@ -3952,7 +3952,7 @@ function loadViewerContent(statusData) {
     const statusOwnerId = sanitized.userId || sanitized.user_id || (sanitized.user && sanitized.user.id);
     const isViewingOwnStatus = currentUid && statusOwnerId && String(currentUid) === String(statusOwnerId);
     const shownName = isViewingOwnStatus ? 'My Status' : (user.displayName || 'Unknown User');
-    const avatarUrl = user.photoURL || user.avatar || '';
+    const avatarUrl = (window.Identity && window.Identity.resolveAvatar(user)) || user.photoURL || user.avatar || ''; // IDENTITY-CENTRALIZATION
     viewerUserInfo.innerHTML = `
         <div class="viewer-user-avatar" ${avatarUrl ? `style="background-image: url('${UISanitizer.sanitizeUrl(avatarUrl)}');background-size:cover;background-position:center;"` : ''}>
             ${avatarUrl ? '' : `<span>${initials}</span>`}
@@ -5296,7 +5296,7 @@ function createGroupedStatusElement(statuses, allViewedOverride) {
     const lastName    = user.lastName  || '';
     const displayName = user.displayName || (firstName + ' ' + lastName).trim() || user.username || 'Unknown';
     const initials    = displayName.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2) || '?';
-    const avatarUrl   = user.photoURL || user.avatar || user.profilePicture || '';
+    const avatarUrl   = (window.Identity && window.Identity.resolveAvatar(user)) || user.photoURL || user.avatar || user.profilePicture || ''; // IDENTITY-CENTRALIZATION
 
     const item = document.createElement('div');
     item.className = 'status-group-item' + (fullyViewed ? ' status-viewed' : '');
