@@ -238,12 +238,12 @@ window.applyCallsSettings = window.applyCallsSettings || function applyCallsSett
         const c = settings.calls || {};
         const p = settings.privacy || {};
 
-        root.setAttribute('data-calls-who-can-call', c.whoCanCallMe || 'friends');
+        root.setAttribute('data-calls-who-can-call', c.whoCanCallMe || 'friendsOnly');
         root.setAttribute('data-calls-auto-reject',   String(!!c.autoReject));
         root.setAttribute('data-calls-auto-answer',   String(!!c.autoAnswer));
-        root.setAttribute('data-calls-ringtone',      c.ringtone || 'default');
-        root.setAttribute('data-calls-vibration',     String(c.callVibration !== false));
-        root.setAttribute('data-calls-speaker-default', String(c.speakerDefault === true));
+        root.setAttribute('data-calls-ringtone',      c.callRingtone || 'default');
+        root.setAttribute('data-calls-vibration',     String(c.vibrateOnCall !== false));
+        root.setAttribute('data-calls-speaker-default', String(c.speakerDefault !== false));
         root.setAttribute('data-calls-microphone-default', c.microphoneDefault || 'default');
         root.setAttribute('data-calls-video-quality', c.videoQuality || 'auto');
         root.setAttribute('data-calls-noise-cancel',  String(c.noiseCancellation !== false));

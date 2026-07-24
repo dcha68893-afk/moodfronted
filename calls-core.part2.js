@@ -14,16 +14,6 @@
     var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
     if (__CC.__aborted) { return; }
 
-/**
- * PART 2/8 — HANDSHAKE & MESSAGING PLUMBING
- * Message dedup, lifecycle state defs, strict state management, CHILD_READY/PARENT_READY handshake, module activation, safe UI init, async data loading, message queue, ID generation, endpoint normalization, standardized message sender, safe API request, queue flush, module registration, session request.
- *
- * This file is a SOURCE FRAGMENT of calls-core.js, not a standalone script.
- * It shares the single closure of the original module and must be concatenated
- * in numeric order (part 0..7) — see build.js — before it is served to the browser.
- * Do NOT <script src> this file directly on its own; it will throw ReferenceErrors
- * for symbols defined in the other parts of the same closure.
- */
     // ==================== MESSAGE DEDUPLICATION ====================
 
 

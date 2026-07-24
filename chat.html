@@ -5342,6 +5342,30 @@
                     return;
                 }
 
+                // CHECK FRIEND HANDLER — lets the calls iframe enforce the
+                // "Friends Only" calling setting, which previously had no way
+                // to check the friends list across the iframe boundary.
+                if (data.type === 'CHECK_FRIEND') {
+                    const requestId = data.payload?.requestId || data.requestId;
+                    const callerId = data.payload?.callerId;
+                    let isFriend = true; // fail open: unknown -> treat as friend, never wrongly block
+                    try {
+                        if (Array.isArray(window.friends) && callerId != null) {
+                            isFriend = window.friends.some(f =>
+                                String(f.id) === String(callerId) || String(f.userId) === String(callerId)
+                            );
+                        }
+                    } catch (e) { /* keep fail-open default */ }
+                    if (event.source && event.source.postMessage) {
+                        event.source.postMessage({
+                            type: 'CHECK_FRIEND_RESPONSE',
+                            requestId: requestId,
+                            payload: { isFriend: isFriend }
+                        }, '*');
+                    }
+                    return;
+                }
+
                 // CHILD READY HANDLER
                 if (data.type === 'CHILD_READY') {
                     const targetModule = data.module || data.source || data.payload?.module || null;
