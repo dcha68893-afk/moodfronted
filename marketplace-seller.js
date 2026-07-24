@@ -128,15 +128,15 @@ function _barChart(data) {
 
 // ─── Category materials ───────────────────────────────────────────────────────
 const CAT_MAT = {
-    furniture:['Wood','Mahogany','Oak','Bamboo','Metal','Plastic','Glass','Rattan'],
+    home:['Wood','Mahogany','Oak','Bamboo','Metal','Plastic','Glass','Rattan'],
     fashion:['Cotton','Leather','Polyester','Silk','Wool','Denim','Linen','Nylon'],
     electronics:['Aluminum','Plastic','Glass','Stainless Steel','Rubber','Silicone'],
-    food:['Organic','Fresh','Frozen','Halal','Vegetarian','Vegan','Gluten-Free'],
-    beauty:['Natural','Organic','Cruelty-free','Paraben-free','Hypoallergenic'],
+    phones:['Aluminum','Plastic','Glass','Stainless Steel','Silicone'],
+    supermarket:['Organic','Fresh','Frozen','Halal','Vegetarian','Vegan','Gluten-Free'],
+    health:['Natural','Organic','Cruelty-free','Paraben-free','Hypoallergenic','FDA Approved'],
     sports:['Rubber','Foam','Nylon','Carbon Fiber','Aluminum','Polyester'],
-    construction:['Steel','Aluminum','Cement','Ceramic','Marble','PVC'],
-    home:['Wood','Metal','Ceramic','Glass','Fabric','Plastic'],
-    health:['Natural','Organic','FDA Approved','Hypoallergenic'],
+    garden:['Steel','Aluminum','Cement','Ceramic','Marble','PVC','Wood'],
+    appliances:['Steel','Plastic','Glass','Ceramic'],
 };
 const _phys = {images:[],variants:[],specs:[],materials:[]};
 
