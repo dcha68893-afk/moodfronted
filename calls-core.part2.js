@@ -422,7 +422,7 @@ window.__CallsCoreShared.VERIFICATION_COOLDOWN = 5000;
 
 
 
-        window.__CallsCoreShared.currentState;
+        window.__CallsCoreShared.currentState = nextState;
 
 
 
@@ -606,7 +606,7 @@ window.__CallsCoreShared.VERIFICATION_COOLDOWN = 5000;
 
 
 
-        window.__CallsCoreShared.childReadySent;
+        window.__CallsCoreShared.childReadySent = true;
 
 
 
@@ -691,7 +691,7 @@ window.__CallsCoreShared.VERIFICATION_COOLDOWN = 5000;
                     if (typeof window.__CallsCoreShared.currentState !== 'undefined' && window.__CallsCoreShared.currentState === window.__CallsCoreShared.LifecycleState.WAIT_PARENT) {
                         console.warn('[' + window.__CallsCoreShared.MODULE_NAME + '] WAIT_PARENT timeout — forcing ACTIVE to unblock queue');
                         try { window.__CallsCoreShared.transitionTo(window.__CallsCoreShared.LifecycleState.ACTIVE, 'wait_parent_timeout_forced'); } catch(_) {
-                            window.__CallsCoreShared.currentStatered.LifecycleState.ACTIVE;
+                            window.__CallsCoreShared.currentState = window.__CallsCoreShared.LifecycleState.ACTIVE;
                         }
                         if (typeof window.__CallsCoreShared.flushQueue === 'function') window.__CallsCoreShared.flushQueue();
                     }
@@ -708,7 +708,7 @@ window.__CallsCoreShared.VERIFICATION_COOLDOWN = 5000;
 
 
 
-            window.__CallsCoreShared.childReadySent;
+            window.__CallsCoreShared.childReadySent = false;
 
 
 
@@ -796,7 +796,7 @@ window.__CallsCoreShared.VERIFICATION_COOLDOWN = 5000;
 
 
 
-    window.__CallsCoreShared.parentReadyReceived;
+    window.__CallsCoreShared.parentReadyReceived = true;
 
 
 
@@ -804,7 +804,7 @@ window.__CallsCoreShared.VERIFICATION_COOLDOWN = 5000;
 
 
 
-    window.__CallsCoreShared.parentReady;
+    window.__CallsCoreShared.parentReady = true;
 
 
 
@@ -1388,7 +1388,7 @@ function applySession(sessionData) {
 
 
 
-        window.__CallsCoreShared.validSessionConfirmed;
+        window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -2849,7 +2849,7 @@ function applySession(sessionData) {
 
 
 
-            window.__CallsCoreShared.sessionRequestAttempts;
+            window.__CallsCoreShared.sessionRequestAttempts++;
 
 
 
@@ -2873,7 +2873,7 @@ function applySession(sessionData) {
 
 
 
-        window.__CallsCoreShared.sessionRequestAttemptsed.sessionRequestAttempts;
+        window.__CallsCoreShared.sessionRequestAttempts++;
 
 
 
@@ -3001,7 +3001,7 @@ function applySession(sessionData) {
 
 
 
-            window.__CallsCoreShared.validSessionConfirmed;
+            window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 

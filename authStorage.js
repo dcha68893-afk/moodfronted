@@ -28,11 +28,85 @@
         }
     }
 
+    // ------------------------------------------------------------------
+    // ACCOUNT-SWITCH ISOLATION
+    // A device is allowed to hold accounts for different people over
+    // time (Google sign-in or manual login), but data from account A
+    // must never leak into account B's UI. The old "clear on logout"
+    // paths only cleared a handful of keys and never ran at all when
+    // someone signed straight into a *different* account without
+    // explicitly logging out first (exactly what Google's "choose an
+    // account" picker lets people do). We detect that switch here, at
+    // the single choke point every login path (password login, Google
+    // login) funnels through, and wipe everything belonging to the
+    // previous account before the new token/user is written.
+    // ------------------------------------------------------------------
+    const KNOWN_INDEXEDDB_NAMES = [
+        'KnectaToolsDB', 'kynectaMesh', 'AppDB', 'calls-db', 'KnectaStatusDB',
+        'kyn_offline_queue', 'moodchat_repair_v1', 'kyn_stories_v1', 'moodchat_dq_v1'
+    ];
+    // Device-level (not account) keys that are safe to keep across switches.
+    const WIPE_ALLOWLIST = ['moodchat_theme', 'moodchat_nav_state'];
+
+    function getStoredUserId() {
+        try {
+            const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+            const parsed = raw ? safeParse(raw) : null;
+            const user = parsed && parsed.user;
+            if (user) return user.id || user.uid || user._id || null;
+        } catch (_) { /* ignore */ }
+        return null;
+    }
+
+    function wipeIndexedDBData() {
+        try {
+            if (typeof indexedDB === 'undefined') return;
+            if (typeof indexedDB.databases === 'function') {
+                indexedDB.databases().then((dbs) => {
+                    (dbs || []).forEach((db) => {
+                        if (db && db.name) {
+                            try { indexedDB.deleteDatabase(db.name); } catch (_) { /* ignore */ }
+                        }
+                    });
+                }).catch(() => {
+                    KNOWN_INDEXEDDB_NAMES.forEach((name) => {
+                        try { indexedDB.deleteDatabase(name); } catch (_) { /* ignore */ }
+                    });
+                });
+            } else {
+                KNOWN_INDEXEDDB_NAMES.forEach((name) => {
+                    try { indexedDB.deleteDatabase(name); } catch (_) { /* ignore */ }
+                });
+            }
+        } catch (_) { /* ignore */ }
+    }
+
+    function wipePreviousAccountData() {
+        try {
+            withAuthMutation(() => {
+                Object.keys(localStorage).forEach((key) => {
+                    if (WIPE_ALLOWLIST.indexOf(key) === -1) {
+                        try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
+                    }
+                });
+            });
+        } catch (_) { /* ignore */ }
+        try { sessionStorage.clear(); } catch (_) { /* ignore */ }
+        wipeIndexedDBData();
+        console.warn('[AuthStorage] Detected sign-in from a different account on this device — cleared previous account local data.');
+    }
+
     function saveAuth(data) {
         try {
             if (!data || !data.token) {
                 console.warn('[AuthStorage] saveAuth() called with missing token');
                 return false;
+            }
+
+            const incomingUserId = data.user ? (data.user.id || data.user.uid || data.user._id || null) : null;
+            const previousUserId = getStoredUserId();
+            if (incomingUserId && previousUserId && String(previousUserId) !== String(incomingUserId)) {
+                wipePreviousAccountData();
             }
 
             const payload = {

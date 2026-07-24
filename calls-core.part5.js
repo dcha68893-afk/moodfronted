@@ -3756,7 +3756,7 @@
                 }
             }
             if (typeof _cmReset._stopCallTimer === 'function') _cmReset._stopCallTimer();
-            window.__CallsCoreShared._cmTimerDelegated;
+            window.__CallsCoreShared._cmTimerDelegated = true;
         }
     } catch(_crErr) {}
     // FIX-ROOT-CAUSE-45S-FORCE-END: reset the accepted flag here too, or it

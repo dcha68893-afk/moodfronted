@@ -1172,7 +1172,7 @@ _closeCallUI: function() {
 
 
 
-        window.__CallsCoreShared.initializationLock;
+        window.__CallsCoreShared.initializationLock = true;
 
 
 
@@ -1276,7 +1276,7 @@ _closeCallUI: function() {
 
 
 
-        window.__CallsCoreShared.initializationLock;
+        window.__CallsCoreShared.initializationLock = false;
 
 
 
@@ -1800,7 +1800,7 @@ _closeCallUI: function() {
 
 
 
-                        window.__CallsCoreShared.validSessionConfirmed;
+                        window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -1876,7 +1876,7 @@ _closeCallUI: function() {
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -2416,7 +2416,7 @@ if (msg.type === 'SETTING_CHANGED' || msg.type === 'SETTINGS_UPDATED') {
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 

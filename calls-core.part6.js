@@ -170,7 +170,7 @@
 
 
 
-            window.__CallsCoreShared.validSessionConfirmed;
+            window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -610,7 +610,7 @@
 
 
 
-            window.__CallsCoreShared.validSessionConfirmed;
+            window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -794,7 +794,7 @@
 
 
 
-            window.__CallsCoreShared.validSessionConfirmed;
+            window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -1006,7 +1006,7 @@ if (Date.now() - window.__CallsCoreShared.lastVerificationTime < window.__CallsC
 
 
 
-window.__CallsCoreShared.lastVerificationTime;
+window.__CallsCoreShared.lastVerificationTime = Date.now();
 
 
 
@@ -1298,7 +1298,7 @@ window.__CallsCoreShared.lastVerificationTime;
 
 
 
-                        window.__CallsCoreShared.validSessionConfirmed;
+                        window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -1434,7 +1434,7 @@ window.__CallsCoreShared.lastVerificationTime;
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -1522,7 +1522,7 @@ window.__CallsCoreShared.lastVerificationTime;
 
 
 
-                        window.__CallsCoreShared.validSessionConfirmed;
+                        window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -3834,7 +3834,7 @@ endCall: async function(callId, options = {}) {
 
 
 
-                    window.__CallsCoreShared.currentStatered.LifecycleState.ACTIVE;
+                    window.__CallsCoreShared.currentState = window.__CallsCoreShared.LifecycleState.ACTIVE;
 
 
 
@@ -4326,7 +4326,7 @@ endCall: async function(callId, options = {}) {
 
 
 
-            window.__CallsCoreShared.validSessionConfirmed;
+            window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -6738,7 +6738,7 @@ endCall: async function(callId, options = {}) {
 
 
 
-            window.__CallsCoreShared.validSessionConfirmed;
+            window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 

@@ -6309,7 +6309,7 @@ _escapeHtml: function(text) {
 
 
 
-                window.__CallsCoreShared.currentStatered.LifecycleState.ACTIVE;
+                window.__CallsCoreShared.currentState = window.__CallsCoreShared.LifecycleState.ACTIVE;
 
 
 
@@ -7526,7 +7526,7 @@ _escapeHtml: function(text) {
                     }
                     var _isVid2 = !!(window.__CallsCoreShared.callsState.callType === 'video');
                     _cm2.onConnected(_cid2, _isVid2);
-                    window.__CallsCoreShared._cmTimerDelegated;
+                    window.__CallsCoreShared._cmTimerDelegated = true;
                 }
             }
         } catch(_be2) {}
@@ -9491,7 +9491,7 @@ window.CallHandlers = {
 
 
 
-                window.__CallsCoreShared.validSessionConfirmed;
+                window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -9563,7 +9563,7 @@ window.CallHandlers = {
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 

@@ -1730,7 +1730,7 @@
                 _isCallLeader = true; // Fallback: no BroadcastChannel, act as leader
                 return;
             }
-            window.__CallsCoreShared._callBroadcast;
+            window.__CallsCoreShared._callBroadcast = new BroadcastChannel('kynecta_call_leader');
 
             window.__CallsCoreShared._callBroadcast.onmessage = function(e) {
                 var msg = e.data;

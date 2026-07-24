@@ -2868,7 +2868,7 @@
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -3004,7 +3004,7 @@
 
 
 
-        window.__CallsCoreShared.validSessionConfirmed;
+        window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -3744,7 +3744,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -3848,7 +3848,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                    window.__CallsCoreShared.validSessionConfirmed;
+                    window.__CallsCoreShared.validSessionConfirmed = false;
 
 
 
@@ -4196,7 +4196,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-                window.__CallsCoreShared.validSessionConfirmed;
+                window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
@@ -4640,7 +4640,7 @@ if (message.type === 'SETTING_CHANGED' || message.type === 'SETTINGS_UPDATED') {
 
 
 
-        window.__CallsCoreShared.validSessionConfirmed;
+        window.__CallsCoreShared.validSessionConfirmed = true;
 
 
 
