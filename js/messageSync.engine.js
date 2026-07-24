@@ -67,6 +67,19 @@
                 if (window.KynectaE2E) {
                     for (const m of serverMessages) {
                         if (m && m.type === 'text' && m.content && (m.senderId || (m.sender && m.sender.id))) {
+                            // FIX-DOUBLE-DECRYPT-RACE-3: this bulk/background REST sync path
+                            // ran fully unguarded against the shared claim registry that
+                            // messages-ui.js's two decrypt paths already coordinate through
+                            // (window.__kynClaimDecrypt). A message decrypted once via the
+                            // real-time socket path still gets re-fetched by this periodic
+                            // sync later — without claiming it first, this path would
+                            // decrypt the SAME envelope a second time, irreversibly
+                            // advancing the ratchet receive chain again and corrupting
+                            // every message after it in that chat.
+                            const _claimKey = m.id || m.localId;
+                            if (window.__kynClaimDecrypt && !window.__kynClaimDecrypt(_claimKey)) {
+                                continue; // another path already claimed/decrypted this message
+                            }
                             try {
                                 m.content = await window.KynectaE2E.decryptFromChat(
                                     m.content,
@@ -171,9 +184,12 @@
             let _content = rawMessage.content || rawMessage.text || '';
             const _senderIdForDecrypt = rawMessage.senderId || rawMessage.sender?.id;
             if ((rawMessage.type || 'text') === 'text' && _content && _senderIdForDecrypt && window.KynectaE2E) {
-                try {
-                    _content = await window.KynectaE2E.decryptFromChat(_content, _chatIdStr, _senderIdForDecrypt);
-                } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
+                const _claimKey = rawMessage.id || rawMessage.localId;
+                if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
+                    try {
+                        _content = await window.KynectaE2E.decryptFromChat(_content, _chatIdStr, _senderIdForDecrypt);
+                    } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
+                }
             }
 
             const saved = await localStore.saveMessage({

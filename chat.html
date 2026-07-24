@@ -5181,12 +5181,22 @@
 
                     try { sessionStorage.setItem('pending_call', JSON.stringify(payload)); } catch(e) {}
 
-                    setTimeout(() => {
-                        if (callsIframe.contentWindow) {
-                            callsIframe.contentWindow.postMessage({ type: 'CALL_ORIGIN', origin: returnTo, source: 'parent-frame' }, '*');
-                            callsIframe.contentWindow.postMessage({ type: 'OPEN_CALL_WITH_USER', payload, source: 'parent-frame' }, '*');
-                        }
-                    }, 400);
+                    // FIX-CALL-DISPATCH-RACE: this used to postMessage straight into the
+                    // iframe after a blind 400ms setTimeout, instead of going through the
+                    // same _postToModule/_iframeReady/_iframeQueue system every other
+                    // module (messages, tools, groups, friends) already uses. Under real
+                    // load — many scripts and API calls competing at page load — calls.html
+                    // routinely takes longer than 400ms to finish loading and mount its
+                    // message listener, so CALL_ORIGIN/OPEN_CALL_WITH_USER were posted into
+                    // a target that wasn't listening yet and silently dropped. calls-core.js
+                    // then sat waiting forever for the parent handshake, stuck in BOOT/
+                    // WAIT_PARENT — this is why calls intermittently failed to reach the
+                    // active stage, or never did ("Timeout waiting for core"). _postToModule
+                    // queues the message if 'calls' isn't ready yet and the existing
+                    // CHILD_READY handler automatically flushes it the instant calls.html
+                    // signals it's actually ready, removing the race entirely.
+                    _postToModule('calls', 'callsIframe', { type: 'CALL_ORIGIN', origin: returnTo, source: 'parent-frame' });
+                    _postToModule('calls', 'callsIframe', { type: 'OPEN_CALL_WITH_USER', payload, source: 'parent-frame' });
                 }
 
                 if (data.type === 'SWITCH_MODULE' && data.module === 'calls') {

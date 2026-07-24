@@ -1379,6 +1379,8 @@ const UIStateManager = {
                 if (window.KynectaE2E && window.KynectaE2E.enabled &&
                     typeof message.content === 'string' &&
                     message.content.charAt(0) === '{' && message.content.indexOf('"v"') !== -1) {
+                    const _claimKey = message.id || message.localId;
+                    if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
                     try {
                         const _plaintext = await window.KynectaE2E.decryptFromChat(
                             message.content, chatId, message.senderId
@@ -1392,6 +1394,7 @@ const UIStateManager = {
                         // messages-ui.js's render-time decrypt still gets a chance to
                         // retry later (e.g. once the ratchet session catches up).
                     } catch (_) {}
+                    }
                 }
 
                 // FIX: always numeric ms — ISO strings compare as NaN in sort
