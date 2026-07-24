@@ -100,7 +100,20 @@
 
   function loadScript(src) {
     return new Promise(resolve => {
-      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+      // FIX: the old check — document.querySelector(`script[src="${src}"]`) —
+      // compares against the raw HTML attribute text, but `src` here is always a
+      // fully-RESOLVED absolute URL (BASE is derived from script.src, which the
+      // DOM always resolves to absolute). A page that wrote its own tag as a
+      // relative or root-relative path (e.g. calls.html's
+      // <script src="/js/core/calls/CallStateMachine.js">) never matched this
+      // selector, so phase6 loaded that file a SECOND time — duplicate classes,
+      // duplicate CallManager/WebRTCSessionOrchestrator singletons, duplicate
+      // socket + event listeners all firing at once. Comparing against the
+      // *live* .src property of every existing <script> (which the DOM always
+      // reports as an absolute URL, regardless of how it was authored) fixes
+      // the comparison for every page, not just calls.html.
+      const already = Array.from(document.scripts).some(s => s.src === src);
+      if (already) { resolve(); return; }
       const s = document.createElement('script');
       s.src = src;
       s.async = false;
