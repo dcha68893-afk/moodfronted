@@ -4981,19 +4981,21 @@
 
                         </div>
 
-                        <div class="chat-item-right">
+                        <div class="chat-item-right"
+                            onmousedown="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
+                            ontouchstart="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
+                            onmouseup="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
+                            ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
+                            ontouchcancel="document.body.classList.remove('chat-item-pressing');"
+                            onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');window.messagesUI?._showChatContextMenu('${chat.id}', event);"
+                            style="display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:4px;cursor:pointer;min-width:44px;min-height:44px;padding:4px 6px;box-sizing:border-box;">
 
-                            <span class="chat-time">${time}</span>
+                            <span class="chat-time" style="pointer-events:none;">${time}</span>
 
                             <button class="chat-more-btn" data-more-chat-id="${chat.id}" title="More options"
-                                onmousedown="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
-                                ontouchstart="event.stopPropagation();document.body.classList.add('chat-item-pressing');"
-                                onmouseup="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
-                                ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
-                                ontouchcancel="document.body.classList.remove('chat-item-pressing');"
-                                onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');window.messagesUI?._showChatContextMenu('${chat.id}', event);"
-                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;">
-                                <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
+                                tabindex="-1"
+                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:2px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;pointer-events:none;">
+                                <i class="fas fa-ellipsis-v"></i>
                             </button>
 
                         </div>
@@ -14059,17 +14061,84 @@ Type: ${message.type || 'text'}`;
             modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
         }
 
-        // ── PIN prompt helpers ────────────────────────────────────────────
+        // ── Biometric (fingerprint/Face ID) unlock via WebAuthn platform authenticator ──
+        // This is a LOCAL device gate, not a server-verified login: success just means
+        // "this device's own fingerprint/Face ID sensor verified the person holding it",
+        // which is what a chat-lock feature needs. It does not replace the PIN (which
+        // remains the fallback on any device/browser without a platform authenticator,
+        // and the only option if biometric enrollment is skipped or fails).
+        const STORAGE_KEY_BIOMETRIC_CRED = 'kyn_hidden_biometric_cred_v1';
+
+        async function _biometricAvailable() {
+            try {
+                return !!(window.PublicKeyCredential &&
+                    await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+            } catch (_) { return false; }
+        }
+
+        async function _enrollBiometric() {
+            try {
+                const challenge = crypto.getRandomValues(new Uint8Array(32));
+                const userId = crypto.getRandomValues(new Uint8Array(16));
+                const cred = await navigator.credentials.create({
+                    publicKey: {
+                        challenge,
+                        rp: { name: 'MoodChat' },
+                        user: { id: userId, name: 'chat-lock', displayName: 'Chat Lock' },
+                        pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+                        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+                        timeout: 60000,
+                    }
+                });
+                if (!cred || !cred.rawId) return false;
+                const credIdB64 = btoa(String.fromCharCode(...new Uint8Array(cred.rawId)));
+                localStorage.setItem(STORAGE_KEY_BIOMETRIC_CRED, credIdB64);
+                return true;
+            } catch (e) {
+                _showToast('Could not set up fingerprint/Face ID unlock', true);
+                return false;
+            }
+        }
+
+        async function _verifyBiometric() {
+            const credIdB64 = localStorage.getItem(STORAGE_KEY_BIOMETRIC_CRED);
+            if (!credIdB64) return false;
+            try {
+                const challenge = crypto.getRandomValues(new Uint8Array(32));
+                const rawId = Uint8Array.from(atob(credIdB64), c => c.charCodeAt(0));
+                const assertion = await navigator.credentials.get({
+                    publicKey: {
+                        challenge,
+                        allowCredentials: [{ id: rawId, type: 'public-key' }],
+                        userVerification: 'required',
+                        timeout: 60000,
+                    }
+                });
+                return !!assertion; // resolved without throwing = the platform authenticator verified the user
+            } catch (e) {
+                return false; // includes user cancelling, wrong finger/face, no match, etc.
+            }
+        }
+
         window.messagesUI._showSetHiddenPin = function(cb) {
-            _showPinDialog('Set a 4-digit PIN to lock this chat', function(pin) {
+            _showPinDialog('Set a 4-digit PIN to lock this chat', async function(pin) {
                 if (!pin || pin.length < 4) { cb(null); return; }
-                cb(pin);
+                if (await _biometricAvailable()) {
+                    _showConfirm('Also enable fingerprint / Face ID unlock for this chat?', async function(yes) {
+                        if (yes) await _enrollBiometric();
+                        cb(pin);
+                    });
+                } else {
+                    cb(pin);
+                }
             }, true);
         };
         window.messagesUI._showHiddenPinPrompt = function(cb) {
             const saved = localStorage.getItem(STORAGE_KEY_HIDDEN_PIN);
+            const hasBiometric = !!localStorage.getItem(STORAGE_KEY_BIOMETRIC_CRED);
             _showPinDialog('Enter your PIN to unlock', async function(pin) {
                 if (!pin) { cb(false); return; }
+                if (pin === '__biometric_ok__') { cb(true); return; }
                 try {
                     // Hash the entered PIN and compare against stored hash
                     const encoder = new TextEncoder();
@@ -14079,10 +14148,10 @@ Type: ${message.type || 'text'}`;
                     // Support legacy plaintext PINs (migration path)
                     cb(hashHex === saved || pin === saved);
                 } catch(e) { cb(pin === saved); }
-            }, false);
+            }, false, hasBiometric ? _verifyBiometric : null);
         };
 
-        function _showPinDialog(title, cb, isSet) {
+        function _showPinDialog(title, cb, isSet, biometricVerifier) {
             const modal = document.createElement('div');
             modal.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;';
             modal.innerHTML = '<div style="background:#1e293b;border-radius:20px;padding:24px 20px;width:280px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5);">' +
@@ -14090,6 +14159,7 @@ Type: ${message.type || 'text'}`;
                 '<div style="color:#e5e7eb;font-size:15px;font-weight:600;margin-bottom:16px;">' + title + '</div>' +
                 '<input id="pinInput" type="password" maxlength="4" inputmode="numeric" pattern="[0-9]*" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;box-sizing:border-box;" placeholder="••••">' +
                 (isSet ? '<input id="pinConfirm" type="password" maxlength="4" inputmode="numeric" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;font-size:22px;letter-spacing:8px;text-align:center;outline:none;box-sizing:border-box;margin-top:8px;" placeholder="Confirm">' : '') +
+                (biometricVerifier ? '<button id="pinBiometric" style="width:100%;margin-top:12px;padding:11px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#e5e7eb;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><i class="fas fa-fingerprint"></i> Use fingerprint / Face ID</button>' : '') +
                 '<div style="display:flex;gap:8px;margin-top:16px;">' +
                 '<button id="pinCancel" style="flex:1;padding:11px;border-radius:12px;border:none;background:rgba(255,255,255,0.08);color:#9ca3af;font-weight:600;cursor:pointer;">Cancel</button>' +
                 '<button id="pinOk" style="flex:1;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,#2563eb,#06b6d4);color:#fff;font-weight:700;cursor:pointer;">OK</button>' +
@@ -14099,6 +14169,17 @@ Type: ${message.type || 'text'}`;
             const pinConfirm = modal.querySelector('#pinConfirm');
             setTimeout(function(){ pinInput && pinInput.focus(); }, 50);
             modal.querySelector('#pinCancel').onclick = function() { modal.remove(); cb(null); };
+            if (biometricVerifier) {
+                modal.querySelector('#pinBiometric').onclick = async function() {
+                    const btn = modal.querySelector('#pinBiometric');
+                    btn.disabled = true; btn.textContent = 'Verifying…';
+                    const ok = await biometricVerifier();
+                    if (ok) { modal.remove(); cb('__biometric_ok__'); }
+                    else { btn.disabled = false; btn.innerHTML = '<i class="fas fa-fingerprint"></i> Use fingerprint / Face ID'; _showToast('Fingerprint/Face ID not recognized', true); }
+                };
+                // Offer biometric immediately on open — most users expect this, not a second tap.
+                setTimeout(function(){ modal.querySelector('#pinBiometric')?.click(); }, 250);
+            }
             modal.querySelector('#pinOk').onclick = function() {
                 const pin = pinInput ? pinInput.value : '';
                 if (isSet) {
