@@ -3594,6 +3594,19 @@
                 return true;
             } catch (_) { return true; }
         }
+        // FIX: desktopEnabled existed in Settings (and group-core.js already
+        // wrote it to window.__desktopNotificationsEnabled) but nothing ever
+        // actually checked it before firing a native Notification — the
+        // toggle had no effect. Reads the same settings cache as above.
+        function _kynDesktopNotificationsAllowed() {
+            try {
+                const raw = localStorage.getItem('knecta_settings_cache');
+                if (!raw) return true;
+                const n = JSON.parse(raw)?.data?.notifications;
+                if (!n) return true;
+                return n.desktopEnabled !== false;
+            } catch (_) { return true; }
+        }
         window.addEventListener('message', function(evt) {
             if (!isTrustedOrigin(evt.origin)) return;
             const d = evt.data || {};
@@ -3613,7 +3626,7 @@
             });
 
             // Show a native notification when the tab is not focused
-            if (document.hidden && window.Notification && Notification.permission === 'granted') {
+            if (document.hidden && window.Notification && Notification.permission === 'granted' && _kynDesktopNotificationsAllowed()) {
                 try {
                     const senderName = (msg.sender && (msg.sender.displayName || msg.sender.username)) || 'New message';
                     new Notification(senderName, {

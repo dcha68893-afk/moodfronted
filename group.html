@@ -1343,6 +1343,21 @@
                         </select>
                     </div>
 
+                    <div class="input-group">
+                        <label class="input-label">Discoverable By (Optional)</label>
+                        <select class="text-input" id="groupDiscoveryScopeSelect">
+                            <option value="world" selected>World - Anyone browsing Discover</option>
+                            <option value="community">Community</option>
+                            <option value="region">Region</option>
+                            <option value="county">County</option>
+                        </select>
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 5px;">Only matters if this is a public group — controls which Discover filter surfaces it. Skip this if you're not sure.</div>
+                    </div>
+                    <div class="input-group" id="groupLocationInputGroup" style="display:none;">
+                        <label class="input-label">Community / Region / County Name (Optional)</label>
+                        <input type="text" class="text-input" id="groupLocationInput" placeholder="e.g. Downtown Denver, Yorkshire, Cook County" maxlength="100">
+                    </div>
+
                     <!-- REDESIGN: More options — Settings/Purpose/Theme/Members
                          used to be permanently-visible tabs (5 tabs, one huge
                          scrolling form). Each is now one tap away instead. -->
@@ -1665,6 +1680,16 @@
                 });
             }
             moveOnce();
+
+            // Discoverability scope: only ask for a community/region/county
+            // name when the creator actually picks one of those scopes.
+            var scopeSelect = document.getElementById('groupDiscoveryScopeSelect');
+            var locationGroup = document.getElementById('groupLocationInputGroup');
+            if (scopeSelect && locationGroup) {
+                scopeSelect.addEventListener('change', function () {
+                    locationGroup.style.display = (this.value === 'world') ? 'none' : '';
+                });
+            }
 
             function closeAllPanels() {
                 document.querySelectorAll('.groupc-fullscreen-panel.open').forEach(function (p) { p.classList.remove('open'); });
@@ -2112,6 +2137,13 @@
                     <button class="discover-filter" data-purpose="hobby" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🎨 Hobby</button>
                     <button class="discover-filter" data-purpose="fitness" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">💪 Fitness</button>
                     <button class="discover-filter" data-purpose="family" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">👨‍👩‍👧 Family</button>
+                </div>
+                <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;" id="discoverScopeBtns">
+                    <button class="discover-scope active" data-scope="world" style="padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:var(--primary-color,#6c63ff);color:#fff;">🌍 World</button>
+                    <button class="discover-scope" data-scope="friends" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🤝 Friends</button>
+                    <button class="discover-scope" data-scope="community" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🏘️ Community</button>
+                    <button class="discover-scope" data-scope="region" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">📍 Region</button>
+                    <button class="discover-scope" data-scope="county" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border-color);cursor:pointer;font-size:12px;background:none;color:var(--text-primary);">🗺️ County</button>
                 </div>
             </div>
             <div id="discoverResults" style="overflow-y:auto;flex:1;padding:0 20px 20px;"></div>

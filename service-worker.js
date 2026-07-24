@@ -16,7 +16,7 @@
 // already installed can keep serving old cached files until their own
 // periodic update check happens — bumping forces immediate eviction.
 const SW_VERSION = '19.0.0';
-const CACHE_NAME = 'moodchat-static-v19'; // Bumped — old v18 cache auto-deleted on activate
+const CACHE_NAME = 'moodchat-static-v20'; // Bumped — group-core.js cache entry was stale (still referenced pre-split file)
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -37,7 +37,9 @@ const CORE_STATIC_ASSETS = [
   '/Tool-core.part2.js',
   '/Tool-core.part3.js',
   '/group-ui.js',
-  '/group-core.js',
+  '/group-core-bootstrap.js',
+  '/group-core-operations.js',
+  '/group-core-bridge.js',
 
   // Pages
   '/friend.html',

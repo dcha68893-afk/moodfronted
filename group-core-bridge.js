@@ -931,6 +931,25 @@ export async function initGroupPage() {
         if (!authReady) {
             initializeTokenSystem();
         }
+
+        // mediaAutoDownload setting: when off, images render as a
+        // tap-to-load placeholder (see buildGroupMessageBody); this
+        // delegated listener is what actually loads them on tap.
+        if (!window.__groupMediaTapListenerInstalled) {
+            window.__groupMediaTapListenerInstalled = true;
+            document.addEventListener('click', (event) => {
+                const placeholder = event.target.closest?.('.group-media-tap-to-load');
+                if (!placeholder) return;
+                const url = placeholder.getAttribute('data-media-url');
+                const alt = placeholder.getAttribute('data-media-alt') || 'Attachment';
+                if (!url) return;
+                const img = document.createElement('img');
+                img.src = url;
+                img.alt = alt;
+                img.style.cssText = 'max-width: 240px; width: 100%; border-radius: 14px; display: block;';
+                placeholder.replaceWith(img);
+            });
+        }
         
         return { success: true };
     } catch (error) {

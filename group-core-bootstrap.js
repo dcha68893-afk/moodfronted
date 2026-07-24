@@ -569,7 +569,51 @@ function sendChildReady() {
             // STRICT: Transition to WAIT_PARENT immediately after sending
             LifecycleState.setState(LifecycleState.STATES.WAIT_PARENT);
             /* lifecycle log suppressed */
-            
+
+            // FIX (stuck-loading-spinner): there was previously no recovery
+            // path at all if the parent frame never sent PARENT_READY (or
+            // sent a session that failed __isValidSession) — the module
+            // stayed in WAIT_PARENT forever and every group list stayed on
+            // its static "Loading groups..." placeholder with no retry and
+            // no error shown. If we're still waiting after a few seconds,
+            // fall back to whatever session SafeStorage has cached locally
+            // instead of hanging indefinitely.
+            setTimeout(() => {
+                if (!LifecycleState.isWaitingForParent()) return; // already progressed normally
+                console.warn(`[${MODULE_NAME}] No PARENT_READY after timeout — attempting cached-session fallback`);
+                try {
+                    // Same-origin with chat.html, so read the same keys
+                    // app.core.session.js writes on login rather than
+                    // waiting on a postMessage that may never arrive.
+                    const token = localStorage.getItem('accessToken');
+                    const userStr = localStorage.getItem('moodchat_user');
+                    if (token && userStr) {
+                        const user = JSON.parse(userStr);
+                        const cachedSession = { token, user, userId: user?.id };
+                        if (__isValidSession(cachedSession)) {
+                            applySession(cachedSession);
+                            parentReady = true; // best-effort: proceed without the parent frame
+                            LifecycleState.setState(LifecycleState.STATES.ACTIVE);
+                            console.log(`[${MODULE_NAME}] State: WAIT_PARENT → ACTIVE (cached-session fallback)`);
+                            return;
+                        }
+                    }
+                } catch (_fallbackErr) {}
+                console.error(`[${MODULE_NAME}] No cached session available either — showing retry UI instead of hanging`);
+                try {
+                    document.querySelectorAll('.loading-placeholder, .empty-state').forEach(el => {
+                        const p = el.querySelector('p');
+                        if (p && /Loading groups/i.test(p.textContent || '')) {
+                            el.innerHTML = `
+                                <i class="fas fa-exclamation-circle" style="opacity:.6"></i>
+                                <p>Taking longer than expected to connect</p>
+                                <p class="subtext" style="cursor:pointer; text-decoration: underline;" onclick="window.location.reload()">Tap to retry</p>
+                            `;
+                        }
+                    });
+                } catch (_uiErr) {}
+            }, 6000);
+
             return true;
         } else {
             console.error(`[${MODULE_NAME}] Failed to send CHILD_READY: ${result.error}`);
@@ -1714,6 +1758,21 @@ const MessageRouter = {
         } catch (e) {}
       }
 
+      // Detect @mentions before branching on whether the chat is open, so
+      // the highlight in buildGroupMessageMarkup works either way — not
+      // just when triggering a notification.
+      try {
+        const _meUser = getCurrentUserLocal();
+        const text = (messageData && (messageData.content || messageData.text || '')).toString();
+        if (text && /@/.test(text)) {
+          const candidates = [_meUser?.username, _meUser?.displayName, _meUser?.name]
+            .filter(Boolean).map(s => s.toString().trim().toLowerCase()).filter(Boolean);
+          messageData.isMention = candidates.some(name => text.toLowerCase().includes('@' + name));
+        } else {
+          messageData.isMention = false;
+        }
+      } catch (_) { messageData.isMention = false; }
+
       // Update unread count (only if ACTIVE)
       if (LifecycleState.isActive()) {
         if (currentChatGroup && currentChatGroup.id === groupId) {
@@ -1746,7 +1805,17 @@ const MessageRouter = {
             // (both keys write to the same global), so this one check covers
             // both "notifications off entirely" and "group notifications off".
             const _groupNotifsOn = window.__groupNotificationsEnabled !== false;
-            if (!_isSelf && _groupNotifsOn) {
+
+            // FIX (Notifications audit): mentionNotifications existed as a
+            // setting but there was no @mention detection anywhere in the
+            // group message pipeline for it to gate — it had nothing to do.
+            // isMention was computed above (before the open/closed branch);
+            // treating a real mention as notify-worthy independently of the
+            // general group notifications toggle is the same behavior
+            // WhatsApp/Signal use, and the whole point of a separate setting.
+            const _isMention = messageData.isMention === true && window.__mentionNotificationsEnabled !== false;
+
+            if (!_isSelf && (_groupNotifsOn || _isMention)) {
               if (window.__notificationSoundEnabled !== false) {
                 // group-core.js runs as its own iframe module — it has no
                 // access to messages-core.js's UIFeatures object (a separate

@@ -1355,9 +1355,18 @@ function buildGroupMessageBody(message) {
     const safeFileName = escapeGroupChatHTML(message.fileName || 'Attachment');
     
     if (message.type === 'image' && message.mediaUrl) {
+        const autoDownload = window.__mediaAutoDownload !== false;
+        const safeUrl = escapeGroupChatAttribute(message.mediaUrl);
+        const mediaHtml = autoDownload
+            ? `<img src="${safeUrl}" alt="${safeFileName}" style="max-width: 240px; width: 100%; border-radius: 14px; display: block;" />`
+            : `<div class="group-media-tap-to-load" data-media-url="${safeUrl}" data-media-alt="${safeFileName}"
+                    style="width: 240px; max-width: 100%; height: 160px; border-radius: 14px; background: rgba(0,0,0,0.08); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: inherit;">
+                    <i class="fas fa-image" style="font-size: 22px; opacity: 0.7;"></i>
+                    <span style="font-size: 12px; opacity: 0.8;">Tap to load image</span>
+               </div>`;
         return `
             <div class="group-message-media image">
-                <img src="${escapeGroupChatAttribute(message.mediaUrl)}" alt="${safeFileName}" style="max-width: 240px; width: 100%; border-radius: 14px; display: block;" />
+                ${mediaHtml}
             </div>
             ${safeContent ? `<div class="message-content">${safeContent}</div>` : ''}
         `;
@@ -1424,8 +1433,8 @@ function buildGroupMessageMarkup(message) {
                 ${senderAvatarMarkup}
                 <div class="group-message-bubble" style="max-width: 75%; max-width: min(75%, 540px); flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;">
                     ${!isSent ? `<div class="message-sender" style="font-size: 12px; font-weight: 700; color: var(--text-secondary); padding: 0 4px;">${escapeGroupChatHTML(senderName)}</div>` : ''}
-                    <div class="group-message-card" style="padding: 6px 10px 4px 10px; border-radius: 7.5px; background: ${isSent ? '#005c4b' : '#202c33'}; color: #e9edef; box-shadow: 0 1px 1px rgba(0,0,0,0.3); font-size: 14.2px; line-height: 1.45;">
-                        ${replyMarkup}
+                    <div class="group-message-card" style="padding: 6px 10px 4px 10px; border-radius: 7.5px; background: ${isSent ? '#005c4b' : '#202c33'}; color: #e9edef; box-shadow: 0 1px 1px rgba(0,0,0,0.3); font-size: 14.2px; line-height: 1.45; ${message.isMention ? 'border-left: 3px solid #fbbf24;' : ''}">
+                        ${message.isMention ? '<div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:2px;"><i class="fas fa-at"></i> mentioned you</div>' : ''}                        ${replyMarkup}
                         ${buildGroupMessageBody(message)}
                         <div class="message-meta" style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; opacity: 0.8;">
                             ${window.__showTimestamps !== false ? `<span class="message-time">${formatMessageTime(message.createdAt || message.timestamp || new Date())}</span>` : ''}

@@ -566,6 +566,30 @@ export function sanitizeURL(url) {
 /**
  * UI Error Boundary - Prevents cascade failures and XSS
  */
+/**
+ * FIX (stuck-loading-spinner): shared fallback for the group-list
+ * *Secure render functions. Previously each one's error fallback just
+ * re-displayed "Loading groups..." — meaning if the real render logic
+ * ever threw (bad data shape, a helper being undefined, etc.), the user
+ * saw the exact same spinner they started with, forever, with no way to
+ * recover short of a full page reload. This shows what actually happened
+ * and offers a real retry.
+ */
+function _groupListErrorFallback(containerId, retryFn) {
+    const container = safeGetElement(containerId);
+    if (!container) return;
+    const btnId = `_retry_${containerId.replace('#', '')}_${Date.now()}`;
+    container.innerHTML = `
+        <div class="empty-state">
+            <i class="fas fa-exclamation-circle" style="opacity:.6"></i>
+            <p>Couldn't load this list</p>
+            <p class="subtext" id="${btnId}" style="cursor:pointer; text-decoration: underline;">Tap to retry</p>
+        </div>
+    `;
+    const btn = document.getElementById(btnId);
+    if (btn) btn.addEventListener('click', () => { try { retryFn(); } catch (_) {} });
+}
+
 export function createUIErrorBoundary(componentId, fallbackRenderer) {
     return (fn) => {
         return function(...args) {
@@ -576,6 +600,12 @@ export function createUIErrorBoundary(componentId, fallbackRenderer) {
                 const errorKey = `UI:${safeComponentId}:${error.message}`;
                 if (!_UI_ERRORS.has(errorKey)) {
                     _UI_ERRORS.add(errorKey);
+                    // FIX (stuck-loading-spinner): this used to swallow the
+                    // error completely with no console output, which is why
+                    // render failures here were undiagnosable — the UI just
+                    // sat on its loading placeholder forever with nothing in
+                    // devtools to explain why.
+                    console.error(`[UIErrorBoundary:${safeComponentId}]`, error);
                 }
                 
                 if (fallbackRenderer && typeof fallbackRenderer === 'function') {
@@ -2173,10 +2203,7 @@ export function createSecureGroupItemElement(groupData, type = 'group') {
  * Render all groups securely
  */
 export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecure', () => {
-    const container = safeGetElement('#allGroupsList');
-    if (container) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading groups...</p></div>';
-    }
+    _groupListErrorFallback('#allGroupsList', () => renderAllGroupsSecure());
 })(
     function() {
         const allGroupsList = safeGetElement('#allGroupsList');
@@ -2237,10 +2264,7 @@ export const renderAllGroupsSecure = createUIErrorBoundary('renderAllGroupsSecur
  * Render my groups securely
  */
 export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure', () => {
-    const container = safeGetElement('#myGroupsList');
-    if (container) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading your groups...</p></div>';
-    }
+    _groupListErrorFallback('#myGroupsList', () => renderMyGroupsSecure());
 })(
     function() {
         const myGroupsList = safeGetElement('#myGroupsList');
@@ -2271,10 +2295,7 @@ export const renderMyGroupsSecure = createUIErrorBoundary('renderMyGroupsSecure'
  * Render joined groups securely
  */
 export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroupsSecure', () => {
-    const container = safeGetElement('#joinedList');
-    if (container) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading joined groups...</p></div>';
-    }
+    _groupListErrorFallback('#joinedList', () => renderJoinedGroupsSecure());
 })(
     function() {
         const joinedList = safeGetElement('#joinedList');
@@ -2305,10 +2326,7 @@ export const renderJoinedGroupsSecure = createUIErrorBoundary('renderJoinedGroup
  * Render group invites securely
  */
 export const renderGroupInvitesSecure = createUIErrorBoundary('renderGroupInvitesSecure', () => {
-    const container = safeGetElement('#invitesList');
-    if (container) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading invitations...</p></div>';
-    }
+    _groupListErrorFallback('#invitesList', () => renderGroupInvitesSecure());
 })(
     function() {
         const invitesList = safeGetElement('#invitesList');
@@ -2322,10 +2340,7 @@ export const renderGroupInvitesSecure = createUIErrorBoundary('renderGroupInvite
  * Render admin groups securely
  */
 export const renderAdminGroupsSecure = createUIErrorBoundary('renderAdminGroupsSecure', () => {
-    const container = safeGetElement('#adminList');
-    if (container) {
-        container.innerHTML = '<div class="empty-state"><i class="fas fa-spinner fa-spin"></i><p>Loading admin groups...</p></div>';
-    }
+    _groupListErrorFallback('#adminList', () => renderAdminGroupsSecure());
 })(
     function() {
         const adminList = safeGetElement('#adminList');
@@ -2832,7 +2847,24 @@ export function setupToolbarButtons() {
             const panel = document.getElementById('discoverPanel');
             if (panel) {
                 panel.style.display = 'flex';
-                loadDiscoverGroups('', 'all');
+                loadDiscoverGroups('', 'all', 'world');
+            }
+        });
+    }
+
+    // FIX (discover-unreachable): #discoverGroupsBtn (the quick-action button
+    // that used to open this panel) was deliberately removed from the DOM in
+    // an earlier pass, with a comment claiming the "Discover" tab in the
+    // category row (#discoverTab) already covered the same functionality.
+    // It didn't — no listener was ever attached to it, so Discover became
+    // completely unreachable from the UI. This wires up the real trigger.
+    const discoverTabBtn = safeGetElement('#discoverTab');
+    if (discoverTabBtn) {
+        registerUIEventListener(discoverTabBtn, 'click', () => {
+            const panel = document.getElementById('discoverPanel');
+            if (panel) {
+                panel.style.display = 'flex';
+                loadDiscoverGroups('', 'all', 'world');
             }
         });
     }
@@ -2881,7 +2913,25 @@ export function setupToolbarButtons() {
             this.style.color = '#fff';
             this.classList.add('active');
             const q = document.getElementById('discoverSearchInput')?.value || '';
-            loadDiscoverGroups(q, this.dataset.purpose);
+            const scope = document.querySelector('.discover-scope.active')?.dataset.scope || 'world';
+            loadDiscoverGroups(q, this.dataset.purpose, scope);
+        });
+    });
+
+    // ── Discover scope tabs (community/region/county/world/friends) ──
+    document.querySelectorAll('.discover-scope').forEach(btn => {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('.discover-scope').forEach(b => {
+                b.style.background = 'none';
+                b.style.color = 'var(--text-primary)';
+                b.classList.remove('active');
+            });
+            this.style.background = 'var(--primary-color,#6c63ff)';
+            this.style.color = '#fff';
+            this.classList.add('active');
+            const q = document.getElementById('discoverSearchInput')?.value || '';
+            const purpose = document.querySelector('.discover-filter.active')?.dataset.purpose || 'all';
+            loadDiscoverGroups(q, purpose, this.dataset.scope);
         });
     });
 
@@ -2890,7 +2940,8 @@ export function setupToolbarButtons() {
         clearTimeout(discoverDebounce);
         discoverDebounce = setTimeout(() => {
             const purpose = document.querySelector('.discover-filter.active')?.dataset.purpose || 'all';
-            loadDiscoverGroups(this.value, purpose);
+            const scope = document.querySelector('.discover-scope.active')?.dataset.scope || 'world';
+            loadDiscoverGroups(this.value, purpose, scope);
         }, 350);
     });
 
@@ -3208,6 +3259,12 @@ export function resetCreateGroupForm() {
     if (groupDescriptionInput) groupDescriptionInput.value = '';
     if (groupTopicInput) groupTopicInput.value = '';
     if (groupTypeSelect) groupTypeSelect.value = 'private';
+    const groupDiscoveryScopeSelect = safeGetElement('#groupDiscoveryScopeSelect');
+    const groupLocationInput = safeGetElement('#groupLocationInput');
+    const groupLocationInputGroup = safeGetElement('#groupLocationInputGroup');
+    if (groupDiscoveryScopeSelect) groupDiscoveryScopeSelect.value = 'world';
+    if (groupLocationInput) groupLocationInput.value = '';
+    if (groupLocationInputGroup) groupLocationInputGroup.style.display = 'none';
     if (welcomeMessageInput) welcomeMessageInput.value = '';
     if (groupRulesInput) {
         groupRulesInput.value = '1. Be respectful to all members\n2. No spam or self-promotion\n3. Keep discussions relevant to the group topic\n4. No hate speech or harassment';
@@ -3322,6 +3379,8 @@ export function collectGroupFormData() {
     const groupNameInput = safeGetElement('#groupNameInput');
     const groupDescriptionInput = safeGetElement('#groupDescriptionInput');
     const groupTopicInput = safeGetElement('#groupTopicInput');
+    const groupDiscoveryScopeSelect = safeGetElement('#groupDiscoveryScopeSelect');
+    const groupLocationInput = safeGetElement('#groupLocationInput');
     const groupTypeSelect = safeGetElement('#groupTypeSelect');
     const welcomeMessageInput = safeGetElement('#welcomeMessageInput');
     const groupRulesInput = safeGetElement('#groupRulesInput');
@@ -3349,6 +3408,8 @@ export function collectGroupFormData() {
         description: groupDescriptionInput ? sanitizeInput(groupDescriptionInput.value.trim()) : '',
         topic: groupTopicInput ? sanitizeInput(groupTopicInput.value.trim()) : '',
         privacy: groupTypeSelect ? sanitizeInput(groupTypeSelect.value) : 'private',
+        discoveryScope: groupDiscoveryScopeSelect ? sanitizeInput(groupDiscoveryScopeSelect.value) : 'world',
+        location: groupLocationInput ? sanitizeInput(groupLocationInput.value.trim()) : '',
         theme: selectedTheme ? sanitizeInput(selectedTheme.dataset.theme) : 'blue',
         welcomeMessage: welcomeMessageInput ? sanitizeInput(welcomeMessageInput.value.trim()) : '',
         rules: groupRulesInput ? groupRulesInput.value.split('\n').filter(rule => rule.trim()).map(r => sanitizeInput(r)) : [],
@@ -4501,8 +4562,8 @@ function timeAgo(d) {
 }
 
 // ── DISCOVER ──────────────────────────────────────────────────
-export async function loadDiscoverGroups(query, purpose) {
-    query=query||''; purpose=purpose||'all';
+export async function loadDiscoverGroups(query, purpose, scope) {
+    query=query||''; purpose=purpose||'all'; scope=scope||'world';
     var container=document.getElementById('discoverResults');
     if(!container)return;
     container.innerHTML=panelLoader();
@@ -4553,7 +4614,7 @@ export async function loadDiscoverGroups(query, purpose) {
         }
         var b2=this;b2.disabled=true;b2.textContent='Joining\u2026';try{var res=await panelFetch('/api/groups/'+gid2+'/join',{method:'POST',body:'{}'});if(res.success!==false){b2.textContent='\u2713 Joined';b2.style.background='#48bb78';if(typeof showNotification==='function')showNotification('Joined "'+gname+'"!','success');var gc3=window.GroupCore;if(gc3&&typeof gc3.requestGroupList==='function')gc3.requestGroupList().catch(function(){});}else{b2.disabled=false;b2.textContent='Join';if(typeof showNotification==='function')showNotification(res.message||'Failed','error');}}catch(e){b2.disabled=false;b2.textContent='Join';}});});return card;}
     async function loadMyGroups(){var list=document.getElementById('dscMyList');if(!list)return;list.innerHTML=panelLoader();try{var GC=window.GroupCore;var myGrps=(GC&&GC.groups&&GC.groups.length)?GC.groups:[];if(!myGrps.length){var data=await panelFetch('/api/groups/user');myGrps=data&&(data.data&&(data.data.groups||data.data.myGroups)||data.groups)||[];}if(!myGrps.length){list.innerHTML=panelEmpty('fas fa-users','You have no groups yet.');return;}list.innerHTML='';myGrps.forEach(function(g){list.appendChild(makeCard(g,true));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Could not load groups.');}}
-    async function loadPublicGroups(){var list=document.getElementById('dscOtherList');if(!list)return;list.innerHTML=panelLoader();try{var url='/api/groups/public?limit=30';if(query)url+='&query='+encodeURIComponent(query);if(purpose&&purpose!=='all')url+='&purpose='+purpose;var data=await panelFetch(url);var grps=data&&(data.data&&data.data.groups||data.groups)||[];var GC=window.GroupCore;
+    async function loadPublicGroups(){var list=document.getElementById('dscOtherList');if(!list)return;list.innerHTML=panelLoader();try{var url='/api/groups/public?limit=30';if(query)url+='&query='+encodeURIComponent(query);if(purpose&&purpose!=='all')url+='&purpose='+purpose;if(scope&&scope!=='world')url+='&scope='+encodeURIComponent(scope);var data=await panelFetch(url);var grps=data&&(data.data&&data.data.groups||data.groups)||[];var GC=window.GroupCore;
         // FIX-DISCOVER: GC.myGroups may be undefined — fall back to GC.groups.
         // Without this fallback myIds is always empty so ALL groups (including own) appear.
         var myGroups=(GC&&(GC.myGroups&&GC.myGroups.length?GC.myGroups:GC.groups))||[];
@@ -4564,11 +4625,14 @@ export async function loadDiscoverGroups(query, purpose) {
             if(myIds.has(String(g.id)))return false;
             if(myUserId&&(String(g.createdBy||'')===myUserId||String(g.ownerId||'')===myUserId||String(g.userId||'')===myUserId))return false;
             return true;
-        });if(!others.length){list.innerHTML=panelEmpty('fas fa-search','No public groups from other users.');return;}list.innerHTML='';others.forEach(function(g){list.appendChild(makeCard(g,false));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Failed to load public groups.');}}
+        });if(!others.length){list.innerHTML=panelEmpty('fas fa-search',scope==='friends'?'None of your friends have created public groups yet.':'No public groups from other users.');return;}list.innerHTML='';others.forEach(function(g){list.appendChild(makeCard(g,false));});}catch(e){list.innerHTML=panelEmpty('fas fa-exclamation-circle','Failed to load public groups.');}}
     var mt2=document.getElementById('dscMyTab'),ot2=document.getElementById('dscOtherTab');
     if(mt2)mt2.addEventListener('click',function(){setTab('my');loadMyGroups();});
     if(ot2)ot2.addEventListener('click',function(){setTab('other');loadPublicGroups();});
-    loadMyGroups();
+    // Scope/purpose filters only meaningfully apply to "Explore Public" — jump there
+    // automatically so picking a scope (e.g. Region) isn't a no-op on the My Groups tab.
+    if((scope&&scope!=='world')||(purpose&&purpose!=='all')||query){setTab('other');loadPublicGroups();}
+    else{loadMyGroups();}
 }
 
 
