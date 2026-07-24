@@ -1253,8 +1253,14 @@
                 }
 
                 // ── Phase 4+6: Group events fan-out to sibling iframes ───────────────────
+                // FIX (PROFILE-LIVE-UPDATE): added 'profile:' so a profile:updated event
+                // (emitted by the backend whenever a user changes their avatar/cover —
+                // see profileController.js) reaches every module iframe (status, friend,
+                // group, message) the same way group:/status: events already do, instead
+                // of only ever updating the parent chat.html header.
                 if (evType.startsWith('group:') || evType.startsWith('status:') ||
-                    evType.startsWith('device:') || evType.startsWith('session:')) {
+                    evType.startsWith('device:') || evType.startsWith('session:') ||
+                    evType.startsWith('profile:')) {
                     // Fan-out to all iframes using REALTIME_EVENT pattern
                     var _iframesP4 = document.querySelectorAll('iframe');
                     _iframesP4.forEach(function(f) {

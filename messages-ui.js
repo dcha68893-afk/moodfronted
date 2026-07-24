@@ -23,6 +23,57 @@
     'use strict';
     const _uiLog = (...a) => { if (window.__MESSAGES_DEBUG__) console.log(...a); };
 
+    // BUG FIX (PROFILE-LIVE-UPDATE-NOT-WIRED-TO-MESSAGES-MODULE): chat.html's
+    // realtime bridge fans out backend profile:updated events (a contact
+    // changed their own avatar) as REALTIME_EVENT:profile:updated to every
+    // iframe — but nothing in this module ever listened for it, so a
+    // contact's new avatar only ever showed up in the chat list/header after
+    // a full reload. This patches any already-rendered row for that user in
+    // place. Checks several container selectors and both markup styles
+    // (<img src> and inline background-image) since this file renders chat
+    // avatars via multiple different functions that don't share one markup
+    // pattern. Mirrors the same fix already applied in status-ui.js,
+    // friend-ui.js, and group-core.js.
+    if (!window.__messagesProfileLiveListenerBound) {
+        window.__messagesProfileLiveListenerBound = true;
+        window.addEventListener('message', function (event) {
+            const data = event && event.data;
+            if (!data || data.type !== 'REALTIME_EVENT:profile:updated') return;
+            const payload = data.payload || {};
+            if (!payload.userId || !payload.avatar) return;
+            const uid = String(payload.userId);
+            try {
+                const containers = document.querySelectorAll(
+                    `.contact-item[data-contact-id="${uid}"], ` +
+                    `.conversation-item[data-user-id="${uid}"], ` +
+                    `.chat-item[data-user-id="${uid}"], ` +
+                    `.user-item[data-user-id="${uid}"]`
+                );
+                containers.forEach(function (container) {
+                    const img = container.querySelector('img');
+                    if (img) { img.src = payload.avatar; return; }
+                    const bgEl = container.querySelector('[style*="background"]') || container;
+                    bgEl.style.backgroundImage = `url('${payload.avatar}')`;
+                    bgEl.style.backgroundSize = 'cover';
+                    bgEl.style.backgroundPosition = 'center';
+                    bgEl.textContent = '';
+                });
+                // Also patch the 1:1 chat header avatar (#hdrChatAvatar, owned by
+                // chat.html) if this contact's chat happens to be open right now.
+                if (window.parent && window.parent !== window && window.parent.document) {
+                    const hdrAvatar = window.parent.document.getElementById('hdrChatAvatar');
+                    if (hdrAvatar && hdrAvatar.dataset && String(hdrAvatar.dataset.userId) === uid) {
+                        hdrAvatar.style.backgroundImage = `url('${payload.avatar}')`;
+                        hdrAvatar.style.backgroundSize = 'cover';
+                        hdrAvatar.style.backgroundPosition = 'center';
+                        hdrAvatar.innerHTML = '';
+                    }
+                }
+            } catch (_) { /* non-fatal — next natural re-render will pick it up */ }
+        });
+    }
+
+
     // FIX-AUDIT: Guaranteed local HTML escape — does NOT depend on `core` being
     // loaded. The caption rendering paths below previously did
     // `core?.escapeHtml ? core.escapeHtml(x) : x` — if core was unavailable for

@@ -6502,6 +6502,33 @@ async function loadGroupMembersForManagement(groupData) {
     } catch (error) {}
 }
 
+// BUG FIX (PROFILE-LIVE-UPDATE-NOT-WIRED-TO-GROUP-MODULE): chat.html's
+// realtime bridge fans out backend profile:updated events (a member changed
+// their own avatar) as REALTIME_EVENT:profile:updated to every iframe — but
+// nothing in this module ever listened for it, so a member's new avatar only
+// ever showed up in the group member list after a full reload. This patches
+// any already-rendered .member-management-item row for that user in place.
+// Mirrors the same fix already applied in status-ui.js and friend-ui.js.
+if (!window.__groupProfileLiveListenerBound) {
+    window.__groupProfileLiveListenerBound = true;
+    window.addEventListener('message', function (event) {
+        const data = event && event.data;
+        if (!data || data.type !== 'REALTIME_EVENT:profile:updated') return;
+        const payload = data.payload || {};
+        if (!payload.userId || !payload.avatar) return;
+        const uid = String(payload.userId);
+        try {
+            document.querySelectorAll(`.member-management-item[data-user-id="${uid}"] .friend-avatar`)
+                .forEach(function (el) {
+                    el.style.backgroundImage = `url('${payload.avatar}')`;
+                    el.style.backgroundSize = 'cover';
+                    el.style.backgroundPosition = 'center';
+                    el.innerHTML = '';
+                });
+        } catch (_) { /* non-fatal — next natural re-render will pick it up */ }
+    });
+}
+
 function renderMembersList(memberDetails) {
     try {
         const memberList = safeGetElement('#memberManagementList');
@@ -6512,6 +6539,7 @@ function renderMembersList(memberDetails) {
         memberDetails.forEach(member => {
             const memberItem = document.createElement('div');
             memberItem.className = 'member-management-item';
+            memberItem.dataset.userId = String(member.id || member.userId || '');
             
             const initials = member.displayName 
                 ? member.displayName.split(' ').map(word => word[0]).join('').toUpperCase().substring(0, 2)

@@ -8015,6 +8015,74 @@ function renderStatusListInstantlyUI() {
     }
 }
 
+// BUG FIX (OWN-AVATAR-NEVER-SHOWN-IN-STATUS): reads the same avatar source
+// chat.html's header icon uses (localStorage 'user_avatar', kept in sync with
+// the server by chat.html's syncUserProfileFromServer()) and applies it as
+// the "My status" row's photo. Falls back to a generated-initials circle
+// (matching the rest of the app) rather than a plain <i class="fas fa-user">
+// icon when no avatar has been set at all.
+function applyOwnAvatarToStatusPreview(avatarEl) {
+    if (!avatarEl) return;
+    try {
+        const avatarUrl = localStorage.getItem('user_avatar');
+        if (avatarUrl) {
+            avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
+            avatarEl.style.backgroundSize = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            avatarEl.innerHTML = '';
+            return;
+        }
+        const auth = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+        const name = (auth && (auth.user?.displayName || auth.user?.username || auth.displayName || auth.username)) || 'User';
+        const initials = String(name).trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p.charAt(0).toUpperCase()).join('') || 'U';
+        avatarEl.style.backgroundImage = 'none';
+        avatarEl.innerHTML = `<span style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-weight:700;border-radius:50%;">${initials}</span>`;
+    } catch (_) { /* leave whatever was already there */ }
+}
+
+// BUG FIX (PROFILE-LIVE-UPDATE-NOT-WIRED-TO-STATUS-MODULE): chat.html already
+// broadcasts UPDATE_PROFILE_DATA to every iframe (own avatar/cover/bio saved
+// or re-synced from the server) and the realtime bridge fans out backend
+// profile:updated events (a friend changed their own avatar/cover) as
+// REALTIME_EVENT:profile:updated — but nothing in this module ever listened
+// for either, so the status list only ever picked up a changed avatar after
+// a full reload. This refreshes "My status" immediately for the former, and
+// refreshes any already-rendered status rows belonging to that friend for
+// the latter (statusFeedContainer/recentUpdatesContainer/viewedUpdatesContainer
+// re-render via the existing renderStatusesListUI path on next natural
+// refresh; this specifically patches any already-painted avatar <img>/bg
+// nodes for that userId so the photo updates without waiting for that).
+if (!window.__statusProfileLiveListenerBound) {
+    window.__statusProfileLiveListenerBound = true;
+    window.addEventListener('message', function (event) {
+        const data = event && event.data;
+        if (!data || !data.type) return;
+
+        if (data.type === 'UPDATE_PROFILE_DATA') {
+            if (data.payload && data.payload.avatar) {
+                try { localStorage.setItem('user_avatar', data.payload.avatar); } catch (_) {}
+            }
+            if (typeof updateMyStatusPreviewUI === 'function') updateMyStatusPreviewUI();
+            return;
+        }
+
+        if (data.type === 'REALTIME_EVENT:profile:updated' && data.payload && data.payload.userId) {
+            const uid = String(data.payload.userId);
+            const newAvatar = data.payload.avatar;
+            if (!newAvatar) return;
+            try {
+                document.querySelectorAll(`.status-group-item[data-user-id="${uid}"] .status-group-avatar-inner`)
+                    .forEach(function (el) {
+                        el.style.backgroundImage = `url('${newAvatar}')`;
+                        el.style.backgroundSize = 'cover';
+                        el.style.backgroundPosition = 'center';
+                        el.innerHTML = '';
+                    });
+            } catch (_) { /* non-fatal — next natural re-render will pick it up */ }
+        }
+    });
+}
+
 function updateMyStatusPreviewUI() {
     const preview = document.getElementById('myStatusPreview') || UIElements.getElement('myStatusPreview');
     if (!preview) return;
@@ -8058,14 +8126,19 @@ function updateMyStatusPreviewUI() {
     }
 
     // ── Avatar photo ───────────────────────────────────────────────────
-    if (avatarEl && myStatuses && myStatuses[0]) {
-        const mediaUrl = myStatuses[0].mediaUrl || myStatuses[0].contentUrl || '';
-        if (mediaUrl) {
-            avatarEl.style.backgroundImage = `url('${mediaUrl}')`;
-            avatarEl.style.backgroundSize  = 'cover';
-            avatarEl.style.backgroundPosition = 'center';
-            avatarEl.innerHTML = '';
-        }
+    // BUG FIX (OWN-AVATAR-NEVER-SHOWN-IN-STATUS): this used to only ever set
+    // avatarEl's background to the latest status POST's media (and left the
+    // generic <i class="fas fa-user"> icon showing whenever there were no
+    // posts yet) — it never once read the user's actual profile photo, so a
+    // user who set an avatar but hasn't posted a status today saw a blank
+    // person icon here instead of their real photo, unlike WhatsApp where
+    // "My status" always shows your profile picture. Now the real avatar
+    // (synced from the server/localStorage by chat.html — see
+    // applyOwnAvatarToStatusPreview()) is always the base image; if there's
+    // no avatar set either, it falls back to the same generated-initials
+    // placeholder the rest of the app uses instead of the plain icon.
+    if (avatarEl) {
+        applyOwnAvatarToStatusPreview(avatarEl);
     }
 
     // ── Sub text ───────────────────────────────────────────────────────

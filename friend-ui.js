@@ -6683,6 +6683,33 @@ setTimeout(() => {
     }
 }, 2000);
 
+// BUG FIX (PROFILE-LIVE-UPDATE-NOT-WIRED-TO-FRIEND-MODULE): chat.html's
+// realtime bridge fans out backend profile:updated events (a friend changed
+// their own avatar/cover) as REALTIME_EVENT:profile:updated to every iframe —
+// but nothing in this module ever listened for it, so a friend's new avatar
+// only ever showed up here after a full reload/re-fetch of the friend list.
+// This patches any already-rendered .friend-item row for that user in place.
+// Mirrors the same fix already applied in status-ui.js.
+if (!window.__friendProfileLiveListenerBound) {
+    window.__friendProfileLiveListenerBound = true;
+    window.addEventListener('message', function (event) {
+        const data = event && event.data;
+        if (!data || data.type !== 'REALTIME_EVENT:profile:updated') return;
+        const payload = data.payload || {};
+        if (!payload.userId || !payload.avatar) return;
+        const uid = String(payload.userId);
+        try {
+            document.querySelectorAll(`.friend-item[data-user-id="${uid}"] .friend-avatar`)
+                .forEach(function (el) {
+                    el.style.backgroundImage = `url('${payload.avatar}')`;
+                    el.style.backgroundSize = 'cover';
+                    el.style.backgroundPosition = 'center';
+                    el.innerHTML = '';
+                });
+        } catch (_) { /* non-fatal — next natural re-render will pick it up */ }
+    });
+}
+
 window.addEventListener('friendCoreReady', () => {
     logUI('Friend core ready, ensuring events are bound');
     if (!_eventHandlersBound) {
