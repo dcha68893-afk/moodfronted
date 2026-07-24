@@ -897,12 +897,34 @@ const QRCodeManager = {
             return null;
         }
 
+        // SECURITY FIX: QR codes are now generated and signed server-side (POST
+        // /api/friends/qr/generate). The old approach signed the payload in the browser
+        // using an HMAC keyed to this user's own session token — that's a signature nobody
+        // else could ever verify (not the scanner, not even the backend, without persisting
+        // live session tokens), so it existed but nothing ever checked it. The backend has
+        // its own secret and can verify a scanned QR is genuine and unmodified.
+        try {
+            const response = await authorizedRequest('/api/friends/qr/generate', { method: 'POST' });
+            if (response && response.success && response.data?.qrData) {
+                const qrData = response.data.qrData;
+                const qrString = JSON.stringify(qrData);
+                this._qrCache.set(userId, qrData);
+                console.log('[QRCodeManager] Generated server-signed QR for user:', { userId, username, displayName });
+                return qrString;
+            }
+            console.warn('[QRCodeManager] /qr/generate did not return qrData, falling back to local generation (offline mode — this QR will not carry a verifiable signature until back online)');
+        } catch (error) {
+            console.warn('[QRCodeManager] /qr/generate request failed, falling back to local generation (offline mode)', error.message);
+        }
+
+        // Offline fallback only — used when the backend can't be reached. A QR generated
+        // this way carries a signature the backend cannot verify, so treat it as best-effort;
+        // it'll still work once /qr/generate is reachable again.
         const timestamp = Date.now();
         const nonce = (window.crypto && window.crypto.randomUUID)
             ? window.crypto.randomUUID()
             : `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 
-        // P1 FIX: use HMAC-SHA256 when Web Crypto is available
         const signature = await this.generateSecureHashAsync(userId, username, timestamp, nonce);
 
         const qrData = {
@@ -915,13 +937,14 @@ const QRCodeManager = {
             timestamp:   timestamp,
             nonce:       nonce,
             expiresAt:   timestamp + (24 * 60 * 60 * 1000),
-            signature:   signature
+            signature:   signature,
+            _unverifiedOfflineQr: true
         };
 
         const qrString = JSON.stringify(qrData);
         this._qrCache.set(userId, qrData);
         
-        console.log('[QRCodeManager] Generated unique QR for user:', { userId, username, displayName });
+        console.log('[QRCodeManager] Generated offline (unverified) QR for user:', { userId, username, displayName });
         
         return qrString;
     },

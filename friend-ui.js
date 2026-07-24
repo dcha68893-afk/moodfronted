@@ -1548,8 +1548,8 @@ export const RenderPipeline = {
             allToDisplay.forEach(item => {
                 if (!item?.id) return;
                 const friendElement = createFriendItemElement(item,
-                    pinnedArray.some(f => f && f.id === item.id) ? 'pinned' :
-                    friendArray.some(f => f && f.id === item.id) ? 'friend' : 'contact',
+                    pinnedArray.some(f => f && String(f.id) === String(item.id)) ? 'pinned' :
+                    friendArray.some(f => f && String(f.id) === String(item.id)) ? 'friend' : 'contact',
                     true
                 );
                 if (friendElement) fragment.appendChild(friendElement);
@@ -2127,9 +2127,9 @@ export const renderAllFriendsList = function() {
 
         const fragment = document.createDocumentFragment();
         uniqueItems.forEach(item => {
-            const type = pinnedArray.some(f => f && f.id === item.id) ? 'pinned' :
-                       friendArray.some(f => f && f.id === item.id) ? 'friend' :
-                       temporaryArray.some(f => f && f.id === item.id) ? 'temporary' : 'contact';
+            const type = pinnedArray.some(f => f && String(f.id) === String(item.id)) ? 'pinned' :
+                       friendArray.some(f => f && String(f.id) === String(item.id)) ? 'friend' :
+                       temporaryArray.some(f => f && String(f.id) === String(item.id)) ? 'temporary' : 'contact';
 
             const friendElement = createFriendItemElement(item, type);
             if (friendElement) fragment.appendChild(friendElement);
@@ -2365,8 +2365,8 @@ export const renderFriends = function() {
         }
         const sortedFriends = [...friendArray].sort((a, b) => {
             if (!a || !b) return 0;
-            const aPinned = pinnedArray.some(f => f && f.id === a.id);
-            const bPinned = pinnedArray.some(f => f && f.id === b.id);
+            const aPinned = pinnedArray.some(f => f && String(f.id) === String(a.id));
+            const bPinned = pinnedArray.some(f => f && String(f.id) === String(b.id));
             if (aPinned !== bPinned) return bPinned ? 1 : -1;
 
             if (sortMode === 'name') {
@@ -3439,8 +3439,12 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             : friendCategories.friend || { name: 'Friend', icon: 'fas fa-user' };
 
         // Safe pinned/muted checks with array validation
-        const isPinned = Array.isArray(pinnedFriends) && pinnedFriends.some(f => f && f.id === friendId);
-        const isMuted = Array.isArray(mutedFriends) && mutedFriends.some(f => f && f.id === friendId);
+        // BUG FIX: strict === comparison failed whenever one array stored IDs as strings and
+        // the other as numbers (common when items come from different fetch/cache sources) —
+        // this silently misclassified real friends as plain contacts elsewhere in the file
+        // (wrong action icons shown) and could do the same to these badges. Coerce both sides.
+        const isPinned = Array.isArray(pinnedFriends) && pinnedFriends.some(f => f && String(f.id) === String(friendId));
+        const isMuted = Array.isArray(mutedFriends) && mutedFriends.some(f => f && String(f.id) === String(friendId));
         const isTemporary = friendData.isTemporary === true;
         const isBusiness = friendData.isBusiness === true;
 
@@ -3493,17 +3497,35 @@ function createFriendItemElement(friendData, type, instantMode = false) {
 
         let actionsHtml = '';
         if (type === 'contact') {
-            actionsHtml = `
-                <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
-                    <i class="fas fa-comments"></i>
-                </button>
-                <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
-                    <i class="fas fa-phone"></i>
-                </button>
-                <button class="friend-action-btn success" data-action="add" title="Add as Friend">
-                    <i class="fas fa-user-plus"></i>
-                </button>
-            `;
+            // FIX: a "contact" (from phone/device contacts) who is already a friend was still
+            // showing the "Add as Friend" plus icon regardless of relationship status. Check
+            // against the actual friends list and, once someone is a friend, show exactly the
+            // same two icons as everywhere else a friend appears — message and call, nothing more.
+            const alreadyFriend = friendData.friendshipStatus === 'friends' ||
+                (Array.isArray(window.friends) && window.friends.some(f => f && String(f.id) === String(friendId)));
+
+            if (alreadyFriend) {
+                actionsHtml = `
+                    <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
+                        <i class="fas fa-comments"></i>
+                    </button>
+                    <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                `;
+            } else {
+                actionsHtml = `
+                    <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
+                        <i class="fas fa-comments"></i>
+                    </button>
+                    <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="friend-action-btn success" data-action="add" title="Add as Friend">
+                        <i class="fas fa-user-plus"></i>
+                    </button>
+                `;
+            }
         } else if (type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary') {
             // P2/P3 FIX: Add snooze, restrict, report to the more-options dropdown
             const isSnoozed    = friendData?.snoozed    || (friendData?.snoozedUntil && new Date(friendData.snoozedUntil) > new Date());
@@ -3527,6 +3549,15 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                         <button class="friend-dropdown-item" data-action="restrict" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;text-align:left;">
                             <i class="fas fa-user-lock" style="width:16px;opacity:.7;"></i>
                             ${isRestricted ? 'Unrestrict' : 'Restrict'}
+                        </button>
+                        <div style="height:1px;background:var(--border-color,#e0e0e0);margin:4px 0;"></div>
+                        <button class="friend-dropdown-item" data-action="block" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
+                            <i class="fas fa-ban" style="width:16px;opacity:.7;"></i>
+                            Block
+                        </button>
+                        <button class="friend-dropdown-item" data-action="remove" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
+                            <i class="fas fa-user-minus" style="width:16px;opacity:.7;"></i>
+                            Remove Friend
                         </button>
                         <button class="friend-dropdown-item" data-action="report" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
                             <i class="fas fa-flag" style="width:16px;opacity:.7;"></i>
@@ -3646,6 +3677,28 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                     const fid = btn.dataset.friendId;
                     btn.closest('.friend-more-dropdown').style.display = 'none';
                     showReportModal(fid, friendData?.displayName || friendData?.username || '');
+                } else if (action === 'block') {
+                    // FIX: Block was missing from the friend list entirely — blockUser() already
+                    // existed and worked (real backend call), it just had no UI entry point here.
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    const name = friendData?.displayName || friendData?.username || 'this user';
+                    if (confirm(`Block ${name}? They won't be able to message, call, or see your profile.`)) {
+                        blockUser(friendData).then(result => {
+                            showNotification?.(result?.success ? `${name} has been blocked` : 'Failed to block user', result?.success ? 'success' : 'error');
+                            if (result?.success) { renderFriends(); renderAllFriendsList(); updateFriendCounts(); }
+                        }).catch(() => showNotification?.('Failed to block user', 'error'));
+                    }
+                } else if (action === 'remove') {
+                    // FIX: Remove Friend (delete) was missing from the friend list entirely —
+                    // removeFriend() already existed and worked, it just had no UI entry point.
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    const name = friendData?.displayName || friendData?.username || 'this friend';
+                    if (confirm(`Remove ${name} from your friends?`)) {
+                        removeFriend(friendData).then(result => {
+                            showNotification?.(result?.success ? `${name} has been removed` : 'Failed to remove friend', result?.success ? 'success' : 'error');
+                            if (result?.success) { renderFriends(); renderAllFriendsList(); updateFriendCounts(); }
+                        }).catch(() => showNotification?.('Failed to remove friend', 'error'));
+                    }
                 } else {
                     logUI(`Unknown action: ${action}`);
                 }
@@ -3854,7 +3907,7 @@ function createUserSearchItemElement(user) {
             .substring(0, 2)
             .replace(/[^A-Z0-9]/g, 'U');
 
-        const isAlreadyFriend = safeFriends.some(f => f && f.id === userId);
+        const isAlreadyFriend = safeFriends.some(f => f && String(f.id) === String(userId));
         const hasPendingRequest = safeSentRequests.some(r => r && r.receiverId === userId);
         const hasIncomingRequest = safeFriendRequests.some(r => r && r.senderId === userId);
 
@@ -4089,7 +4142,11 @@ export const loadFriendDetails = async function(friendData, type) {
             let friendshipData = null;
 
             if (type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary') {
-                const friend = friends.find(f => f && f.id === friendData.id);
+                // BUG FIX: strict === failed on string-vs-number ID mismatches, silently
+                // falling back to defaults instead of this friend's real category/notes/
+                // trust score/added-date — the profile panel would open but show generic
+                // placeholder data instead of what was actually stored for this friendship.
+                const friend = friends.find(f => f && String(f.id) === String(friendData.id));
                 if (friend) {
                     friendshipData = {
                         category: friend.category || 'friend',
@@ -4143,9 +4200,9 @@ export const loadFriendDetails = async function(friendData, type) {
                 notes = escapeHtml(friendshipData.notes);
             }
 
-            const isPinned = pinnedFriends && pinnedFriends.some(f => f && f.id === friendId);
-            const isMuted = mutedFriends && mutedFriends.some(f => f && f.id === friendId);
-            const isAlreadyFriend = friends && friends.some(f => f && f.id === friendId);
+            const isPinned = pinnedFriends && pinnedFriends.some(f => f && String(f.id) === String(friendId));
+            const isMuted = mutedFriends && mutedFriends.some(f => f && String(f.id) === String(friendId));
+            const isAlreadyFriend = friends && friends.some(f => f && String(f.id) === String(friendId));
             const hasPendingRequest = sentRequests && sentRequests.some(r => r && r.receiverId === friendId);
             const hasIncomingRequest = friendRequests && friendRequests.some(r => r && r.senderId === friendId);
 
@@ -4774,8 +4831,8 @@ export const showFriendOptions = function(friendData) {
             .substring(0, 2)
             .replace(/[^A-Z0-9]/g, 'U');
 
-        const isPinned = pinnedFriends && pinnedFriends.some(f => f && f.id === friendId);
-        const isMuted = mutedFriends && mutedFriends.some(f => f && f.id === friendId);
+        const isPinned = pinnedFriends && pinnedFriends.some(f => f && String(f.id) === String(friendId));
+        const isMuted = mutedFriends && mutedFriends.some(f => f && String(f.id) === String(friendId));
 
         const optionsModal = document.createElement('div');
         optionsModal.className = 'add-friend-modal active';
@@ -5499,7 +5556,9 @@ const handleSendFriendRequest = async function() {
 
 function updateFriendPresence(userId, online, lastSeen) {
     [friends, pinnedFriends, mutedFriends, temporaryFriends].forEach(arr => {
-        const friend = arr.find(f => f && f.id === userId);
+        // BUG FIX: same string-vs-number ID mismatch as elsewhere in this file — could
+        // silently fail to find the right friend and skip a real-time presence update.
+        const friend = arr.find(f => f && String(f.id) === String(userId));
         if (friend) {
             friend.online = online;
             friend.status = online ? 'online' : 'offline';

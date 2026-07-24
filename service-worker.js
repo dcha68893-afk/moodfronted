@@ -9,26 +9,11 @@
 
 'use strict';
 
-// FIX v19.0.0: Bumped from v18 — messages-core.js was replaced by 3 companion
-// files (messages-core.bootstrap.js/.operations.js/.ui-bridge.js) and
-// message.html's script tags changed to load them. Without a version bump,
-// browsers that already installed the v18 service worker keep it (and its
-// cached message.html / old network-first list) until their own periodic
-// update check happens, so this deploy could look broken/unchanged for a
-// while after shipping. Bumping forces immediate cache eviction + control.
-//
-// FIX v20.0.0: Bumped from v19 — the calls/friend/group/Tool/status modules
-// had all been split into multiple files on disk (e.g. calls-core.part1-8.js,
-// group-core-bootstrap/operations/bridge.js, friend-core.ui-bridge.js,
-// status-core-state/transport/runtime.js) but the service worker still only
-// knew about the old monolithic filenames (calls-core.js, group-core.js,
-// Tool-core.js) or, for friend/status, didn't reference the module at all.
-// Installed PWAs were precaching dead filenames and never precaching the
-// files actually being loaded, so offline mode silently broke for those
-// modules and bug fixes to them weren't force-refreshed like calls/messages
-// already were. Bumping forces eviction of the old (wrong) cache.
-const SW_VERSION = '20.0.0';
-const CACHE_NAME = 'moodchat-static-v20'; // Bumped — old v19 cache auto-deleted on activate
+// FIX v18.0.0: Bumped from v17 — new cache name forces cache eviction on deploy.
+// skipWaiting() in install + clients.claim() in activate = new SW takes control
+// within seconds of deploy, both in browser tabs AND installed PWA.
+const SW_VERSION = '18.0.0';
+const CACHE_NAME = 'moodchat-static-v18'; // Bumped — old v17 cache auto-deleted on activate
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -45,81 +30,24 @@ const CORE_STATIC_ASSETS = [
   // FIX F-02: Removed /api.js (doesn't exist), /Tool.js (is Tool-ui.js), /group.js (is group-ui.js)
   '/Tool.css',
   '/Tool-ui.js',
-  // FIX v20.0.0: '/Tool-core.js' never existed as a loaded file — Tools.html
-  // actually loads Tool-core.part3.js plus these companion module files.
+  '/Tool-core.part1.js',
+  '/Tool-core.part2.js',
   '/Tool-core.part3.js',
-  '/tool-core-patch.js',
-  '/tool-ui-patch.js',
-  '/toolregistry.manage.js',
-  '/toolpermission.guard.js',
-  '/toolexecution.sandbox.js',
-  '/toolsync.engine.js',
-  '/localstore.tools.js',
-
   '/group-ui.js',
-  // FIX v20.0.0: '/group-core.js' was replaced by the bootstrap/operations/
-  // bridge split (plus patch files) that group.html actually loads.
-  '/group-core-bootstrap.js',
-  '/group-core-operations.js',
-  '/group-core-bridge.js',
-  '/group-core-patch.js',
-  '/group-ui-patch.js',
-  '/localStore-groups.js',
-  '/groupQueue-manager.js',
-  '/groupSync-engine.js',
+  '/group-core.js',
 
   // Pages
   '/friend.html',
   '/chat.html',
   '/calls.html',
-  // FIX v20.0.0: group/message/Tools/status pages were never precached, so
-  // loading them offline (or inside a chat.html iframe with no connection)
-  // fell through to the SPA fallback instead of the real page.
-  '/group.html',
-  '/message.html',
-  '/Tools.html',
-  '/status.html',
 
   // Calls module assets (critical for offline UI)
-  // FIX v20.0.0: '/calls-core.js' was replaced by the 8-file part split
-  // (calls-core.part1.js..part8.js) that calls.html actually loads.
-  '/calls-core.part1.js',
-  '/calls-core.part2.js',
-  '/calls-core.part3.js',
-  '/calls-core.part4.js',
-  '/calls-core.part5.js',
-  '/calls-core.part6.js',
-  '/calls-core.part7.js',
-  '/calls-core.part8.js',
+  '/calls-core.js',
   '/calls-ui.js',
   '/calls.css',
   '/callSession.manager.js',
   '/callRetry.engine.js',
-  '/callOverlay.manager.js',
   '/localStore.calls.js',
-
-  // FIX v20.0.0: Friend module split files — friend.html loads these but
-  // none of them were ever added to the precache list.
-  '/friend-core.ui-bridge.js',
-  '/friend-ui.js',
-  '/localStore.friends.js',
-  '/friendQueue.manager.js',
-  '/friendSync.engine.js',
-
-  // FIX v20.0.0: Message module split files — messages-core.bootstrap.js
-  // was already network-first but none of these were precached for offline
-  // fallback, and the other two companion files were missing entirely.
-  '/messages-core.bootstrap.js',
-  '/messages-core.operations.js',
-  '/messages-core.ui-bridge.js',
-  '/messages-ui.js',
-
-  // FIX v20.0.0: Status module had zero coverage in the service worker —
-  // status.html and all four of its scripts were completely un-cached.
-  '/status-core-state.js',
-  '/status-core-transport.js',
-  '/status-core-runtime.js',
-  '/status-ui.js',
 
   // ── ALL APP JS MODULES (must be cached for offline to work) ──────────────
   // API layer
@@ -188,50 +116,14 @@ const NETWORK_FIRST_PATTERNS = [
   /\/api\.core\.js/i,
 
   // ✅ NEW: Calls module — stale version caused connection timeout + call UI blank
-  // FIX v20.0.0: calls-core.js is gone, replaced by the 8-part split.
-  /\/calls-core\.part[1-8]\.js/i,
+  /\/calls-core\.js/i,
   /\/calls-ui\.js/i,
   /\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,
-  /\/callOverlay\.manager\.js/i,
 
-  // ✅ NEW: Messages module (messages-core.js replaced by 3 companion files)
-  /\/messages-core\.bootstrap\.js/i,
-  /\/messages-core\.operations\.js/i,
-  /\/messages-core\.ui-bridge\.js/i,
+  // ✅ NEW: Messages module
+  /\/messages-core\.js/i,
   /\/messages-ui\.js/i,
-
-  // FIX v20.0.0: Friend module split files — same class of bug as calls/
-  // messages above (fixes were going out but the split files were never
-  // forced fresh, so installed PWAs kept serving stale friend-core/friend-ui).
-  /\/friend-core\.ui-bridge\.js/i,
-  /\/friend-ui\.js/i,
-
-  // FIX v20.0.0: Group module split files.
-  /\/group-core-bootstrap\.js/i,
-  /\/group-core-operations\.js/i,
-  /\/group-core-bridge\.js/i,
-  /\/group-core-patch\.js/i,
-  /\/group-ui\.js/i,
-  /\/group-ui-patch\.js/i,
-
-  // FIX v20.0.0: Tool module split files.
-  /\/Tool-core\.part3\.js/i,
-  /\/Tool-ui\.js/i,
-  /\/tool-core-patch\.js/i,
-  /\/tool-ui-patch\.js/i,
-  /\/toolregistry\.manage\.js/i,
-  /\/toolpermission\.guard\.js/i,
-  /\/toolexecution\.sandbox\.js/i,
-  /\/toolsync\.engine\.js/i,
-
-  // FIX v20.0.0: Status module — was entirely absent from the service
-  // worker, so status.html never benefited from the instant-update strategy
-  // the other modules get.
-  /\/status-core-state\.js/i,
-  /\/status-core-transport\.js/i,
-  /\/status-core-runtime\.js/i,
-  /\/status-ui\.js/i,
 
   // ✅ NEW: Safety layer (handles localStorage, used by token reading)
   /\/kynecta\.safety\.layer\.js/i,
@@ -413,13 +305,7 @@ async function handleNavigation(request) {
     new URL('/index.html', self.location.origin).href,
     new URL('/', self.location.origin).href,
     new URL('/friend.html', self.location.origin).href,
-    new URL('/chat.html', self.location.origin).href,
-    // FIX v20.0.0: the other module pages are now precached too, so they
-    // should be reachable as an offline fallback like friend/chat already were.
-    new URL('/group.html', self.location.origin).href,
-    new URL('/message.html', self.location.origin).href,
-    new URL('/Tools.html', self.location.origin).href,
-    new URL('/status.html', self.location.origin).href
+    new URL('/chat.html', self.location.origin).href
   ];
 
   for (var i = 0; i < fallbackUrls.length; i++) {

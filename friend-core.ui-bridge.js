@@ -2082,23 +2082,32 @@ async function generateUniqueQRCode() {
         
         new QRCode(container, {
             text: qrData,
-            width: 200,
-            height: 200,
+            width: 280,
+            height: 280,
             colorDark: '#0084ff',
             colorLight: '#ffffff',
             correctLevel: QRCode.CorrectLevel.H
         });
-        
-        const infoDiv = document.createElement('div');
-        infoDiv.style.cssText = 'text-align: center; margin-top: 15px;';
-        
+
+        // BUG FIX: this info block used to be appended INSIDE #qrCodeContainer — the same
+        // fixed 200x200px, overflow:hidden box the QR image itself renders into. With both
+        // the QR canvas and this text competing for space in a flex container, the QR image
+        // got squeezed and clipped, losing resolution and its quiet-zone border — exactly why
+        // it wasn't reliably scannable. Render it as a sibling of the QR box instead, so the
+        // QR box only ever contains the QR image at full, unclipped size.
         const displayText = username ? `@${username}` : (displayName !== 'User' ? displayName : `User ${userId.substring(0, 8)}`);
+        let infoDiv = document.getElementById('qrCodeInfo');
+        if (!infoDiv) {
+            infoDiv = document.createElement('div');
+            infoDiv.id = 'qrCodeInfo';
+            infoDiv.style.cssText = 'text-align: center; margin-top: 15px;';
+            container.parentNode?.insertBefore(infoDiv, container.nextSibling);
+        }
         infoDiv.innerHTML = `
             <div style="font-size: 14px; font-weight: 500; color: var(--text-primary);">${escapeHtml(displayText)}</div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Scan to add as friend</div>
             <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; opacity: 0.6;">ID: ${userId}</div>
         `;
-        container.appendChild(infoDiv);
         
         SafeStorage.setItem(LOCAL_STORAGE_KEYS.UNIQUE_QR_CODE, qrData);
         
