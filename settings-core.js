@@ -7441,18 +7441,10 @@ const DEFAULT_SETTINGS = {
         allowReactions: true
     },
     calls: {
-        allowIncomingCalls: true,
         whoCanCallMe: 'friendsOnly',
-        autoAnswer: false,
-        autoReject: false,
-        callRingtone: 'default',
-        vibrateOnCall: true,
-        cameraOnStart: false,
+        callVibration: true,
         videoQuality: 'auto',
         voiceQuality: 'high',
-        noiseCancellation: true,
-        echoCancellation: true,
-        speakerDefault: true,
         allowScreenShare: true
     },
     friends: {

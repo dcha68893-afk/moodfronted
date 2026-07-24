@@ -14,6 +14,16 @@
     var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
     if (__CC.__aborted) { return; }
 
+/**
+ * PART 8/8 — UI BRIDGE, PUBLIC API & INIT
+ * Notification system, UI bridge, initialization sequence, top-level message handler (with its own PARENT_READY/signaling handling), the public API surface, the module core controller, final initialization, and the closing of the outer IIFE.
+ *
+ * This file is a SOURCE FRAGMENT of calls-core.js, not a standalone script.
+ * It shares the single closure of the original module and must be concatenated
+ * in numeric order (part 0..7) — see build.js — before it is served to the browser.
+ * Do NOT <script src> this file directly on its own; it will throw ReferenceErrors
+ * for symbols defined in the other parts of the same closure.
+ */
     // ==================== NOTIFICATION SYSTEM ====================
 
 

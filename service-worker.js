@@ -9,14 +9,11 @@
 
 'use strict';
 
-// FIX v19.0.0: Bumped from v18 — this deploy includes the messages-core
-// split (bootstrap/operations/ui-bridge), chat.html chat-panel-active fixes,
-// and multiple messages-ui.js fixes (three-dot menu, biometric unlock,
-// block/archive sync). Without a version bump, browsers with the old SW
-// already installed can keep serving old cached files until their own
-// periodic update check happens — bumping forces immediate eviction.
-const SW_VERSION = '19.0.0';
-const CACHE_NAME = 'moodchat-static-v19'; // Bumped — old v18 cache auto-deleted on activate
+// FIX v18.0.0: Bumped from v17 — new cache name forces cache eviction on deploy.
+// skipWaiting() in install + clients.claim() in activate = new SW takes control
+// within seconds of deploy, both in browser tabs AND installed PWA.
+const SW_VERSION = '18.0.0';
+const CACHE_NAME = 'moodchat-static-v18'; // Bumped — old v17 cache auto-deleted on activate
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -45,14 +42,7 @@ const CORE_STATIC_ASSETS = [
   '/calls.html',
 
   // Calls module assets (critical for offline UI)
-  '/calls-core.part1.js',
-  '/calls-core.part2.js',
-  '/calls-core.part3.js',
-  '/calls-core.part4.js',
-  '/calls-core.part5.js',
-  '/calls-core.part6.js',
-  '/calls-core.part7.js',
-  '/calls-core.part8.js',
+  '/calls-core.js',
   '/calls-ui.js',
   '/calls.css',
   '/callSession.manager.js',
@@ -126,7 +116,7 @@ const NETWORK_FIRST_PATTERNS = [
   /\/api\.core\.js/i,
 
   // ✅ NEW: Calls module — stale version caused connection timeout + call UI blank
-  /\/calls-core\.part[1-8]\.js/i,
+  /\/calls-core\.js/i,
   /\/calls-ui\.js/i,
   /\/callSession\.manager\.js/i,
   /\/callRetry\.engine\.js/i,

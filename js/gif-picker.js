@@ -289,11 +289,10 @@
     fetch(`${TENOR_BASE}/registershare?id=${id}&key=${TENOR_KEY}&client_key=${CLIENT_KEY}`).catch(() => {});
 
     // Use the same send path as existing messages
-    const core = global.messagesCore || global.__messagesCore;
+    const core = global.MessagesCore || global.messagesCore || global.__messagesCore;
     if (core && core.sendMessage) {
-      core.sendMessage({
+      core.sendMessage(title || 'GIF', {
         type: 'gif',
-        content: title || 'GIF',
         metadata: { gifUrl: tiny, gifFullUrl: full, gifTitle: title, gifId: id, powered: 'Tenor' },
       });
       return;

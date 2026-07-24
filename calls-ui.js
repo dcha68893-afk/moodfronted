@@ -373,13 +373,7 @@ const GlobalCallHistory = {
 
     // FIX: Set __callActive BEFORE forceResetCallState
     window.__callActive = true;
-    if (window.UIState) {
-        window.UIState.callActive = true;
-        window.UIState.callState = 'calling';
-        // FIX: speaker default now follows the "Default to Speakerphone" setting
-        // instead of always starting true.
-        window.UIState.isSpeakerOn = document.documentElement.getAttribute('data-calls-speaker-default') !== 'false';
-    }
+    if (window.UIState) { window.UIState.callActive = true; window.UIState.callState = 'calling'; }
 
     // Force reset any stale call state
     if (window.callCore && window.callCore.forceResetCallState) {
@@ -4979,73 +4973,53 @@ handleContactItemClick: function(e) {
                 }).catch(() => {});
             })();
 
-            // ── RINGTONE: musical chime for receiver, pattern chosen by Settings ──
+            // ── RINGTONE: play ringtone for receiver ─────────────────────────
+            // ── RINGTONE: musical ascending chime for receiver ──────────────
             (function _playRingtone() {
                 try {
                     if (window._incomingRingtone) {
                         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
                     }
-                    _tryWebAudioChime();
+                    // Use custom ringtone file if provided, else generate musical chime via Web Audio
+                    if (window.__callRingtoneUrl) {
+                        const ring = new Audio(window.__callRingtoneUrl);
+                        ring.loop = true; ring.volume = 0.85;
+                        ring.play().catch(() => _tryWebAudioChime());
+                        window._incomingRingtone = ring;
+                    } else {
+                        _tryWebAudioChime();
+                    }
                     function _tryWebAudioChime() {
                         try {
                             const ctx = new (window.AudioContext || window.webkitAudioContext)();
                             let ringing = true;
                             window._incomingRingtone = {
                                 _ctx: ctx,
-                                pause: function() {
-                                    ringing = false;
-                                    try { ctx.close(); } catch(e) {}
-                                    if (window._incomingVibration) { try { window._incomingVibration.stop(); } catch(e2) {} }
-                                },
+                                pause: function() { ringing = false; try { ctx.close(); } catch(e) {} },
                                 currentTime: 0
                             };
-                            // FIX: ringtone pattern now follows the user's "Call Ringtone" setting
-                            // instead of always playing the same fixed chime.
-                            const ringtoneChoice = (document.documentElement.getAttribute('data-calls-ringtone') || 'default');
-                            const PATTERNS = {
-                                // Default: ascending chime C5-E5-G5-C6
-                                default: { freqs: [523, 659, 784, 1047], noteGap: 0.12, noteDur: 0.5, cycleMs: 2500, wave: 'sine' },
-                                // Classic: two-tone alternating ring (old landline style)
-                                classic: { freqs: [880, 660], noteGap: 0.35, noteDur: 0.32, cycleMs: 1400, wave: 'square' },
-                                // Modern: bright descending triad, faster cycle
-                                modern:  { freqs: [1174, 988, 784], noteGap: 0.1, noteDur: 0.35, cycleMs: 1800, wave: 'triangle' },
-                            };
-                            const pattern = PATTERNS[ringtoneChoice] || PATTERNS.default;
+                            // Ascending chime: C5-E5-G5-C6, repeats every 2.5 s
+                            const freqs = [523, 659, 784, 1047];
                             (function chime() {
                                 if (!ringing || ctx.state === 'closed') return;
                                 const t = ctx.currentTime;
-                                pattern.freqs.forEach(function(f, i) {
+                                freqs.forEach(function(f, i) {
                                     const osc  = ctx.createOscillator();
                                     const gain = ctx.createGain();
                                     osc.connect(gain); gain.connect(ctx.destination);
-                                    osc.type = pattern.wave;
+                                    osc.type = 'sine';
                                     osc.frequency.value = f;
-                                    gain.gain.setValueAtTime(0, t + i * pattern.noteGap);
-                                    gain.gain.linearRampToValueAtTime(0.35, t + i * pattern.noteGap + 0.05);
-                                    gain.gain.exponentialRampToValueAtTime(0.001, t + i * pattern.noteGap + pattern.noteDur);
-                                    osc.start(t + i * pattern.noteGap);
-                                    osc.stop(t + i * pattern.noteGap + pattern.noteDur + 0.05);
+                                    gain.gain.setValueAtTime(0, t + i * 0.12);
+                                    gain.gain.linearRampToValueAtTime(0.35, t + i * 0.12 + 0.05);
+                                    gain.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.45);
+                                    osc.start(t + i * 0.12);
+                                    osc.stop(t + i * 0.12 + 0.5);
                                 });
-                                setTimeout(function() { if (ringing) chime(); }, pattern.cycleMs);
+                                setTimeout(function() { if (ringing) chime(); }, 2500);
                             })();
                         } catch(e) { /* silent fail */ }
                     }
                 } catch(e) { /* silent fail — ringtone is cosmetic */ }
-            })();
-
-            // ── VIBRATION: follows the "Vibrate on Call" setting ─────────────
-            (function _startVibration() {
-                try {
-                    const vibrationEnabled = document.documentElement.getAttribute('data-calls-vibration') !== 'false';
-                    if (!vibrationEnabled || typeof navigator.vibrate !== 'function') return;
-                    let vibrating = true;
-                    window._incomingVibration = { stop: function() { vibrating = false; try { navigator.vibrate(0); } catch(e) {} } };
-                    (function pulse() {
-                        if (!vibrating) return;
-                        navigator.vibrate([400, 200]);
-                        setTimeout(function() { if (vibrating) pulse(); }, 2500);
-                    })();
-                } catch(e) { /* silent fail — vibration is best-effort */ }
             })();
 
             // Track for later accept/decline
@@ -7700,19 +7674,9 @@ handleContactItemClick: function(e) {
                 elements.speakerBtn.setAttribute('title', UIState.isSpeakerOn ? 'Earpiece (S)' : 'Speaker (S)');
             }
 
-            UIEventHandlers.applySpeakerRouting();
-
-            if (coreInstance && coreInstance.setSpeakerEnabled) coreInstance.setSpeakerEnabled(UIState.isSpeakerOn);
-
-            showNotification(UIState.isSpeakerOn ? 'Speaker on' : 'Earpiece / headphones', 'info');
-        },
-
-        // FIX: extracted from toggleSpeaker so the "Default to Speakerphone" setting
-        // can apply routing automatically once a call connects, not only on manual toggle.
-        applySpeakerRouting: function() {
             // Collect ALL remote audio elements (1-on-1 + group call tiles)
             const audioEls = Array.from(document.querySelectorAll(
-                '#remoteAudio, audio[data-remote], [id^="remoteAudio_"], .participant-tile audio, .remote-stream-audio'
+                '#remoteAudio, audio[data-remote], .participant-tile audio, .remote-stream-audio'
             )).filter(Boolean);
             if (!audioEls.length) {
                 const ra = document.getElementById('remoteAudio');
@@ -7750,6 +7714,10 @@ handleContactItemClick: function(e) {
                 // Fallback: just adjust volume
                 audioEls.forEach(function(el) { el.volume = UIState.isSpeakerOn ? 1.0 : 0.7; });
             }
+
+            if (coreInstance && coreInstance.setSpeakerEnabled) coreInstance.setSpeakerEnabled(UIState.isSpeakerOn);
+
+            showNotification(UIState.isSpeakerOn ? 'Speaker on' : 'Earpiece / headphones', 'info');
         },
 
         // ── RECORDING (audio+video with visual indicator) ─────────────────
@@ -8560,8 +8528,6 @@ acceptIncomingCallGeneric: async function(asVideo) {
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
         window._incomingRingtone = null;
     }
-    // FIX: speaker default now follows the "Default to Speakerphone" setting
-    UIState.isSpeakerOn = document.documentElement.getAttribute('data-calls-speaker-default') !== 'false';
 
     const callerName = elements.incomingCallName?.textContent || 'Caller';
     const isVideoCall = elements.incomingCallType?.textContent?.includes('Video') || false;

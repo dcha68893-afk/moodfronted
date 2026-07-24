@@ -14,6 +14,16 @@
     var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
     if (__CC.__aborted) { return; }
 
+/**
+ * PART 4/8 — TRANSPORT & SIGNALING
+ * Configuration, environment detection, helpers, origin security, safe storage, message registry, iframe transport layer, and the real call-signaling message handlers that ride on top of it.
+ *
+ * This file is a SOURCE FRAGMENT of calls-core.js, not a standalone script.
+ * It shares the single closure of the original module and must be concatenated
+ * in numeric order (part 0..7) — see build.js — before it is served to the browser.
+ * Do NOT <script src> this file directly on its own; it will throw ReferenceErrors
+ * for symbols defined in the other parts of the same closure.
+ */
     // ==================== CONFIGURATION ====================
 
 
@@ -28,11 +38,9 @@
 
         PROTOCOL_VERSION: 'KYN-9.0',
 
-        // FIX: AUDIO_CONSTRAINTS/VIDEO_CONSTRAINTS used to be static literals that
-        // ignored the user's Noise Cancellation / Echo Cancellation / Video Quality
-        // settings entirely. They're now live accessors — see getAudioConstraints()
-        // and getVideoConstraints() below, which read the current settings at the
-        // moment a call actually requests media (getUserMedia), not at load time.
+        // FIX: Centralised audio constraints used by ALL call paths (caller + callee + reconnect).
+        // Previously callee used plain `audio: true` which skips echo cancellation on many devices,
+        // causing echo feedback and occasional null audio tracks on Android WebView.
         AUDIO_CONSTRAINTS: {
             echoCancellation: true,
             noiseSuppression: true,
@@ -193,51 +201,6 @@
 
 
     };
-
-    // FIX: live settings-aware media constraint accessors. These read the
-    // current data-calls-* attributes (kept in sync by applyCallsSettings())
-    // at the moment they're called, so a settings change takes effect on the
-    // very next call without needing a page reload.
-    window.__CallsCoreShared.getAudioConstraints = function () {
-        var root = document.documentElement;
-        var noiseCancel = root ? root.getAttribute('data-calls-noise-cancel') : null;
-        var echoCancel = root ? root.getAttribute('data-calls-echo-cancel') : null;
-        var base = window.__CallsCoreShared.CONFIG.AUDIO_CONSTRAINTS;
-        var constraints = {
-            echoCancellation: echoCancel === null ? base.echoCancellation : (echoCancel === 'true'),
-            noiseSuppression: noiseCancel === null ? base.noiseSuppression : (noiseCancel === 'true'),
-            autoGainControl:  base.autoGainControl,
-            sampleRate:       base.sampleRate,
-            channelCount:     base.channelCount,
-        };
-        // FIX: "microphoneDefault" — prefer the last microphone actually used,
-        // since there's no device-picker UI to set an explicit choice.
-        try {
-            var preferredMicId = localStorage.getItem('callsPreferredMicId');
-            if (preferredMicId) {
-                constraints.deviceId = { ideal: preferredMicId };
-            }
-        } catch (e) { /* localStorage unavailable — ignore */ }
-        return constraints;
-    };
-
-    window.__CallsCoreShared.getVideoConstraints = function (callType) {
-        if (callType !== 'video') return false;
-        var root = document.documentElement;
-        var quality = root ? (root.getAttribute('data-calls-video-quality') || 'auto') : 'auto';
-        var presets = {
-            sd:   { width: { ideal: 640 },  height: { ideal: 480 } },
-            auto: { width: { ideal: 1280 }, height: { ideal: 720 } },
-            hd:   { width: { ideal: 1920 }, height: { ideal: 1080 } },
-        };
-        var preset = presets[quality] || presets.auto;
-        return {
-            width: preset.width,
-            height: preset.height,
-            facingMode: 'user',
-        };
-    };
-
 
 
 

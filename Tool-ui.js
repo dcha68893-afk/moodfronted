@@ -6103,7 +6103,7 @@ const _JM_CATS = [
 
     .jm-cat-group-header {
         display:flex; align-items:center; justify-content:space-between;
-        padding:14px 16px 10px;
+        padding:8px 16px 6px;
     }
     .jm-cat-group-header span { font-weight:700; font-size:14px; color:#111; }
     .jm-cat-see-all {
@@ -6128,7 +6128,7 @@ const _JM_CATS = [
 
     /* ── Subcategory image ── */
     .jm-subcat-img-wrap {
-        width:72px; height:72px; border-radius:8px;
+        width:88px; height:88px; border-radius:8px;
         background:#f8f8f8; border:1px solid #eeeeee;
         overflow:hidden; display:flex; align-items:center; justify-content:center;
         margin-bottom:6px; flex-shrink:0;
@@ -6144,19 +6144,44 @@ const _JM_CATS = [
         line-height:1.3; font-weight:500;
         display:-webkit-box; -webkit-line-clamp:2;
         -webkit-box-orient:vertical; overflow:hidden;
-        max-width:72px;
+        max-width:88px;
     }
     `;
     document.head.appendChild(s);
 })();
+
+// Which top-level _JM_CATS entries belong to each browsing mode.
+// Everything not explicitly 'digital' or 'services' is treated as physical/retail.
+let _JM_CAT_TYPE = 'physical';
+function _catsForType(type) {
+    if (type === 'digital') return _JM_CATS.filter(c => c.id === 'digital');
+    if (type === 'service') return _JM_CATS.filter(c => c.id === 'services');
+    return _JM_CATS.filter(c => c.id !== 'digital' && c.id !== 'services');
+}
 
 function _renderCategories() {
     const sidebar = document.getElementById('jmCatSidebar');
     const content = document.getElementById('jmCatContent');
     if (!sidebar || !content) return;
 
+    const typeBar = document.getElementById('jmCatTypeBar');
+    if (typeBar && !typeBar._jmWired) {
+        typeBar._jmWired = true;
+        typeBar.querySelectorAll('.jm-cat-type-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.cattype === _JM_CAT_TYPE) return;
+                typeBar.querySelectorAll('.jm-cat-type-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                _JM_CAT_TYPE = btn.dataset.cattype;
+                _renderCategories();
+            });
+        });
+    }
+
+    const activeCats = _catsForType(_JM_CAT_TYPE);
+
     // Build sidebar list — text-only, no images, no emojis (clean Jumia style)
-    sidebar.innerHTML = _JM_CATS.map((c, i) => {
+    sidebar.innerHTML = activeCats.map((c, i) => {
         return `<div class="jm-cat-item${i===0?' active':''}" data-cat="${c.id}">${_esc(c.name)}</div>`;
     }).join('');
 
@@ -6165,7 +6190,7 @@ function _renderCategories() {
         item.addEventListener('click', () => {
             sidebar.querySelectorAll('.jm-cat-item').forEach(x => x.classList.remove('active'));
             item.classList.add('active');
-            const cat = _JM_CATS.find(c => c.id === item.dataset.cat);
+            const cat = activeCats.find(c => c.id === item.dataset.cat);
             if (cat) {
                 content.style.opacity = '0';
                 content.style.transform = 'translateX(12px)';
@@ -6180,9 +6205,10 @@ function _renderCategories() {
     });
 
     // Render first category
+
     content.style.opacity = '1';
     content.style.transform = 'none';
-    _renderCatContent(_JM_CATS[0], content);
+    _renderCatContent(activeCats[0], content);
 }
 
 function _renderCatContent(cat, container) {

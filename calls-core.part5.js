@@ -14,6 +14,16 @@
     var __CC = window.__CallsCoreShared = window.__CallsCoreShared || {};
     if (__CC.__aborted) { return; }
 
+/**
+ * PART 5/8 — MEDIA & WEBRTC
+ * Permission manager, media manager, the real WebRTC manager, and single-active-call enforcement.
+ *
+ * This file is a SOURCE FRAGMENT of calls-core.js, not a standalone script.
+ * It shares the single closure of the original module and must be concatenated
+ * in numeric order (part 0..7) — see build.js — before it is served to the browser.
+ * Do NOT <script src> this file directly on its own; it will throw ReferenceErrors
+ * for symbols defined in the other parts of the same closure.
+ */
     // ==================== PERMISSION MANAGER ====================
 
 
@@ -602,16 +612,7 @@
 
 
 
-        getLocalStream: async function(constraints) {
-
-            if (!constraints) {
-                constraints = {
-                    audio: window.__CallsCoreShared.getAudioConstraints(),
-                    video: window.__CallsCoreShared.getVideoConstraints(
-                        (window.__CallsCoreShared.callsState && window.__CallsCoreShared.callsState.callType) || 'voice'
-                    )
-                };
-            }
+        getLocalStream: async function(constraints = { audio: true, video: false }) {
 
 
 
@@ -684,18 +685,6 @@
 
 
                 window.__CallsCoreShared.callsState.cameraEnabled = this._videoTracks.length > 0;
-
-                // FIX: persist the microphone actually granted so getAudioConstraints()
-                // can prefer it next time ("microphoneDefault" setting has no device
-                // picker UI, so this makes it a real "remember my mic" behavior).
-                try {
-                    if (this._audioTracks[0]) {
-                        const _micSettings = this._audioTracks[0].getSettings ? this._audioTracks[0].getSettings() : {};
-                        if (_micSettings.deviceId) {
-                            localStorage.setItem('callsPreferredMicId', _micSettings.deviceId);
-                        }
-                    }
-                } catch (e) { /* best-effort only */ }
 
 
 
@@ -1950,14 +1939,6 @@
 
 
                 if (state === 'connected' || state === 'completed') {
-
-                    // FIX: record when the connection actually went live, so
-                    // handleCallEnded can sanity-check a suspiciously-quick
-                    // end signal (e.g. an ambiguous/automated "stale cleanup"
-                    // reason arriving seconds after a real connection) against
-                    // the media's actual live state instead of trusting the
-                    // signal blindly.
-                    window.__CallsCoreShared.callsState._iceConnectedAt = Date.now();
 
 
 

@@ -104,6 +104,7 @@ import {
     // Data Loading
     loadFriendsFromBackend,
     loadFriendRequestsFromBackend,
+    loadFriendSuggestions,
     loadSentRequestsFromBackend,
     loadPinnedFriendsFromBackend,
     loadMutedFriendsFromBackend,
@@ -174,7 +175,7 @@ import {
     setCurrentCategoryFilter,
     setCurrentSearchTerm
 
-} from './friend-core.js';
+} from './friend-core.ui-bridge.js';
 
 // =============================================
 // [2B] CHAT NAVIGATION FIX - FIXED with proper event
@@ -1365,6 +1366,7 @@ export const RenderPipeline = {
                 }).catch(() => {});
                 loadFriendRequestsFromBackend().then(() => renderFriendRequests()).catch(() => {});
                 loadSentRequestsFromBackend().then(() => renderSentRequests()).catch(() => {});
+                renderFriendSuggestions().catch(() => {});
             }, 500);
         });
         
@@ -1546,8 +1548,8 @@ export const RenderPipeline = {
             allToDisplay.forEach(item => {
                 if (!item?.id) return;
                 const friendElement = createFriendItemElement(item,
-                    pinnedArray.some(f => f && f.id === item.id) ? 'pinned' :
-                    friendArray.some(f => f && f.id === item.id) ? 'friend' : 'contact',
+                    pinnedArray.some(f => f && String(f.id) === String(item.id)) ? 'pinned' :
+                    friendArray.some(f => f && String(f.id) === String(item.id)) ? 'friend' : 'contact',
                     true
                 );
                 if (friendElement) fragment.appendChild(friendElement);
@@ -1989,6 +1991,22 @@ export const updateFriendCounts = function() {
         set('requestsSectionCount', requestArray.length);
         set('sentRequestsCount', sentArray.length);
         set('temporaryCount', temporaryArray.length);
+
+        // SETTINGS WIRING: friends.friendLimitWarning — default true. There was previously no
+        // limit defined anywhere to warn about; FRIEND_SOFT_LIMIT is a client-side soft ceiling
+        // (not backend-enforced) used purely to give the user a heads-up. Warn once per session
+        // at 90% and again at 100%, rather than on every render.
+        if (window.__friendLimitWarning !== false) {
+            const FRIEND_SOFT_LIMIT = 1000;
+            const count = friendArray.length;
+            if (count >= FRIEND_SOFT_LIMIT && !window.__friendLimitWarnedFull) {
+                window.__friendLimitWarnedFull = true;
+                showNotification?.(`You've reached ${FRIEND_SOFT_LIMIT} friends — the app may slow down beyond this point`, 'warning');
+            } else if (count >= Math.floor(FRIEND_SOFT_LIMIT * 0.9) && !window.__friendLimitWarnedNear) {
+                window.__friendLimitWarnedNear = true;
+                showNotification?.(`You're approaching the recommended friend limit (${count}/${FRIEND_SOFT_LIMIT})`, 'info');
+            }
+        }
     } catch(e) {
         console.warn('[updateFriendCounts] Error:', e);
     }
@@ -2109,9 +2127,9 @@ export const renderAllFriendsList = function() {
 
         const fragment = document.createDocumentFragment();
         uniqueItems.forEach(item => {
-            const type = pinnedArray.some(f => f && f.id === item.id) ? 'pinned' :
-                       friendArray.some(f => f && f.id === item.id) ? 'friend' :
-                       temporaryArray.some(f => f && f.id === item.id) ? 'temporary' : 'contact';
+            const type = pinnedArray.some(f => f && String(f.id) === String(item.id)) ? 'pinned' :
+                       friendArray.some(f => f && String(f.id) === String(item.id)) ? 'friend' :
+                       temporaryArray.some(f => f && String(f.id) === String(item.id)) ? 'temporary' : 'contact';
 
             const friendElement = createFriendItemElement(item, type);
             if (friendElement) fragment.appendChild(friendElement);
@@ -2336,11 +2354,33 @@ export const renderFriends = function() {
             }
         }
 
+        // SETTINGS WIRING: friends.sortFriendsBy — 'name' | 'status' | 'recent' (default 'recent').
+        // Pinned friends always float to the top regardless of sort mode; that's a separate
+        // feature, not something the sort-order setting is meant to override.
+        const sortMode = window.__sortFriendsBy || 'recent';
+        function lastActivityTime(f) {
+            const t = f.lastSeen || f.lastActive || f.lastInteraction || f.createdAt || 0;
+            const parsed = t ? new Date(t).getTime() : 0;
+            return Number.isFinite(parsed) ? parsed : 0;
+        }
         const sortedFriends = [...friendArray].sort((a, b) => {
             if (!a || !b) return 0;
-            const aPinned = pinnedArray.some(f => f && f.id === a.id);
-            const bPinned = pinnedArray.some(f => f && f.id === b.id);
+            const aPinned = pinnedArray.some(f => f && String(f.id) === String(a.id));
+            const bPinned = pinnedArray.some(f => f && String(f.id) === String(b.id));
             if (aPinned !== bPinned) return bPinned ? 1 : -1;
+
+            if (sortMode === 'name') {
+                return (a.displayName || '').localeCompare(b.displayName || '');
+            }
+
+            if (sortMode === 'recent') {
+                const diff = lastActivityTime(b) - lastActivityTime(a);
+                if (diff !== 0) return diff;
+                return (a.displayName || '').localeCompare(b.displayName || '');
+            }
+
+            // 'status' (also the fallback if an unrecognized value is stored) — online first,
+            // then alphabetical. This was the original hardcoded behavior.
             const aOnline = a.online === true || a.status === 'online';
             const bOnline = b.online === true || b.status === 'online';
             if (aOnline !== bOnline) return bOnline ? 1 : -1;
@@ -3286,6 +3326,38 @@ function renderFilteredUsersList(users, searchTerm) {
     });
     allUsersListElement.appendChild(fragment);
 }
+// SETTINGS WIRING: friends.friendSuggestions — default true. Fetches and renders "People you
+// may know" using the existing (previously unused) GET /api/friends/suggestions endpoint.
+// Reuses createUserSearchItemElement so suggestion cards get the same Add Friend / pending /
+// already-friends button states as search results, for free.
+async function renderFriendSuggestions() {
+    const container = document.getElementById('friendSuggestionsContainer');
+    const list = document.getElementById('friendSuggestionsList');
+    if (!container || !list) return;
+
+    if (window.__friendSuggestions === false) {
+        container.style.display = 'none';
+        return;
+    }
+
+    const result = await loadFriendSuggestions(10);
+    const suggestions = (result && result.suggestions) || [];
+
+    if (suggestions.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    list.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    suggestions.forEach(user => {
+        const item = createUserSearchItemElement(user);
+        if (item && item.nodeType === Node.ELEMENT_NODE) fragment.appendChild(item);
+    });
+    list.appendChild(fragment);
+    container.style.display = '';
+}
+
 // [9] UI ELEMENT CREATORS - STRICT LIFECYCLE COMPLIANCE
 // =============================================
 
@@ -3344,6 +3416,11 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             ? getUserOnlineStatusText(friendData) 
             : 'Offline';
 
+        // SETTINGS WIRING: friends.showOnlineStatus — default true. When disabled, hide the
+        // online/offline status dot entirely rather than always rendering it.
+        const showOnlineStatusSetting = window.__showOnlineStatus !== false;
+        const statusDotHtml = showOnlineStatusSetting ? `<div class="friend-status ${statusClass}"></div>` : '';
+
         // Safe last interaction fallback
         const lastInteraction = typeof getLastInteraction === 'function' 
             ? getLastInteraction(friendId) 
@@ -3362,8 +3439,12 @@ function createFriendItemElement(friendData, type, instantMode = false) {
             : friendCategories.friend || { name: 'Friend', icon: 'fas fa-user' };
 
         // Safe pinned/muted checks with array validation
-        const isPinned = Array.isArray(pinnedFriends) && pinnedFriends.some(f => f && f.id === friendId);
-        const isMuted = Array.isArray(mutedFriends) && mutedFriends.some(f => f && f.id === friendId);
+        // BUG FIX: strict === comparison failed whenever one array stored IDs as strings and
+        // the other as numbers (common when items come from different fetch/cache sources) —
+        // this silently misclassified real friends as plain contacts elsewhere in the file
+        // (wrong action icons shown) and could do the same to these badges. Coerce both sides.
+        const isPinned = Array.isArray(pinnedFriends) && pinnedFriends.some(f => f && String(f.id) === String(friendId));
+        const isMuted = Array.isArray(mutedFriends) && mutedFriends.some(f => f && String(f.id) === String(friendId));
         const isTemporary = friendData.isTemporary === true;
         const isBusiness = friendData.isBusiness === true;
 
@@ -3416,17 +3497,35 @@ function createFriendItemElement(friendData, type, instantMode = false) {
 
         let actionsHtml = '';
         if (type === 'contact') {
-            actionsHtml = `
-                <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
-                    <i class="fas fa-comments"></i>
-                </button>
-                <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
-                    <i class="fas fa-phone"></i>
-                </button>
-                <button class="friend-action-btn success" data-action="add" title="Add as Friend">
-                    <i class="fas fa-user-plus"></i>
-                </button>
-            `;
+            // FIX: a "contact" (from phone/device contacts) who is already a friend was still
+            // showing the "Add as Friend" plus icon regardless of relationship status. Check
+            // against the actual friends list and, once someone is a friend, show exactly the
+            // same two icons as everywhere else a friend appears — message and call, nothing more.
+            const alreadyFriend = friendData.friendshipStatus === 'friends' ||
+                (Array.isArray(window.friends) && window.friends.some(f => f && String(f.id) === String(friendId)));
+
+            if (alreadyFriend) {
+                actionsHtml = `
+                    <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
+                        <i class="fas fa-comments"></i>
+                    </button>
+                    <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                `;
+            } else {
+                actionsHtml = `
+                    <button class="friend-action-btn chat" data-action="start-chat" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Chat">
+                        <i class="fas fa-comments"></i>
+                    </button>
+                    <button class="friend-action-btn call" data-action="call" data-user-id="${friendId}" data-user-name="${displayName}" title="Start Call">
+                        <i class="fas fa-phone"></i>
+                    </button>
+                    <button class="friend-action-btn success" data-action="add" title="Add as Friend">
+                        <i class="fas fa-user-plus"></i>
+                    </button>
+                `;
+            }
         } else if (type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary') {
             // P2/P3 FIX: Add snooze, restrict, report to the more-options dropdown
             const isSnoozed    = friendData?.snoozed    || (friendData?.snoozedUntil && new Date(friendData.snoozedUntil) > new Date());
@@ -3451,6 +3550,15 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                             <i class="fas fa-user-lock" style="width:16px;opacity:.7;"></i>
                             ${isRestricted ? 'Unrestrict' : 'Restrict'}
                         </button>
+                        <div style="height:1px;background:var(--border-color,#e0e0e0);margin:4px 0;"></div>
+                        <button class="friend-dropdown-item" data-action="block" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
+                            <i class="fas fa-ban" style="width:16px;opacity:.7;"></i>
+                            Block
+                        </button>
+                        <button class="friend-dropdown-item" data-action="remove" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
+                            <i class="fas fa-user-minus" style="width:16px;opacity:.7;"></i>
+                            Remove Friend
+                        </button>
                         <button class="friend-dropdown-item" data-action="report" data-friend-id="${friendId}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;border:none;background:none;cursor:pointer;font-size:14px;color:#e53e3e;text-align:left;">
                             <i class="fas fa-flag" style="width:16px;opacity:.7;"></i>
                             Report
@@ -3463,7 +3571,7 @@ function createFriendItemElement(friendData, type, instantMode = false) {
         friendItem.innerHTML = `
             <div class="friend-avatar-wrapper">
                 ${avatarHtml}
-                <div class="friend-status ${statusClass}"></div>
+                ${statusDotHtml}
                 ${categoryBadgeHtml}
             </div>
             <div class="friend-info">
@@ -3569,6 +3677,28 @@ function createFriendItemElement(friendData, type, instantMode = false) {
                     const fid = btn.dataset.friendId;
                     btn.closest('.friend-more-dropdown').style.display = 'none';
                     showReportModal(fid, friendData?.displayName || friendData?.username || '');
+                } else if (action === 'block') {
+                    // FIX: Block was missing from the friend list entirely — blockUser() already
+                    // existed and worked (real backend call), it just had no UI entry point here.
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    const name = friendData?.displayName || friendData?.username || 'this user';
+                    if (confirm(`Block ${name}? They won't be able to message, call, or see your profile.`)) {
+                        blockUser(friendData).then(result => {
+                            showNotification?.(result?.success ? `${name} has been blocked` : 'Failed to block user', result?.success ? 'success' : 'error');
+                            if (result?.success) { renderFriends(); renderAllFriendsList(); updateFriendCounts(); }
+                        }).catch(() => showNotification?.('Failed to block user', 'error'));
+                    }
+                } else if (action === 'remove') {
+                    // FIX: Remove Friend (delete) was missing from the friend list entirely —
+                    // removeFriend() already existed and worked, it just had no UI entry point.
+                    btn.closest('.friend-more-dropdown').style.display = 'none';
+                    const name = friendData?.displayName || friendData?.username || 'this friend';
+                    if (confirm(`Remove ${name} from your friends?`)) {
+                        removeFriend(friendData).then(result => {
+                            showNotification?.(result?.success ? `${name} has been removed` : 'Failed to remove friend', result?.success ? 'success' : 'error');
+                            if (result?.success) { renderFriends(); renderAllFriendsList(); updateFriendCounts(); }
+                        }).catch(() => showNotification?.('Failed to remove friend', 'error'));
+                    }
                 } else {
                     logUI(`Unknown action: ${action}`);
                 }
@@ -3777,7 +3907,7 @@ function createUserSearchItemElement(user) {
             .substring(0, 2)
             .replace(/[^A-Z0-9]/g, 'U');
 
-        const isAlreadyFriend = safeFriends.some(f => f && f.id === userId);
+        const isAlreadyFriend = safeFriends.some(f => f && String(f.id) === String(userId));
         const hasPendingRequest = safeSentRequests.some(r => r && r.receiverId === userId);
         const hasIncomingRequest = safeFriendRequests.some(r => r && r.senderId === userId);
 
@@ -4012,7 +4142,11 @@ export const loadFriendDetails = async function(friendData, type) {
             let friendshipData = null;
 
             if (type === 'friend' || type === 'pinned' || type === 'muted' || type === 'temporary') {
-                const friend = friends.find(f => f && f.id === friendData.id);
+                // BUG FIX: strict === failed on string-vs-number ID mismatches, silently
+                // falling back to defaults instead of this friend's real category/notes/
+                // trust score/added-date — the profile panel would open but show generic
+                // placeholder data instead of what was actually stored for this friendship.
+                const friend = friends.find(f => f && String(f.id) === String(friendData.id));
                 if (friend) {
                     friendshipData = {
                         category: friend.category || 'friend',
@@ -4066,9 +4200,9 @@ export const loadFriendDetails = async function(friendData, type) {
                 notes = escapeHtml(friendshipData.notes);
             }
 
-            const isPinned = pinnedFriends && pinnedFriends.some(f => f && f.id === friendId);
-            const isMuted = mutedFriends && mutedFriends.some(f => f && f.id === friendId);
-            const isAlreadyFriend = friends && friends.some(f => f && f.id === friendId);
+            const isPinned = pinnedFriends && pinnedFriends.some(f => f && String(f.id) === String(friendId));
+            const isMuted = mutedFriends && mutedFriends.some(f => f && String(f.id) === String(friendId));
+            const isAlreadyFriend = friends && friends.some(f => f && String(f.id) === String(friendId));
             const hasPendingRequest = sentRequests && sentRequests.some(r => r && r.receiverId === friendId);
             const hasIncomingRequest = friendRequests && friendRequests.some(r => r && r.senderId === friendId);
 
@@ -4697,8 +4831,8 @@ export const showFriendOptions = function(friendData) {
             .substring(0, 2)
             .replace(/[^A-Z0-9]/g, 'U');
 
-        const isPinned = pinnedFriends && pinnedFriends.some(f => f && f.id === friendId);
-        const isMuted = mutedFriends && mutedFriends.some(f => f && f.id === friendId);
+        const isPinned = pinnedFriends && pinnedFriends.some(f => f && String(f.id) === String(friendId));
+        const isMuted = mutedFriends && mutedFriends.some(f => f && String(f.id) === String(friendId));
 
         const optionsModal = document.createElement('div');
         optionsModal.className = 'add-friend-modal active';
@@ -5387,7 +5521,9 @@ const handleSendFriendRequest = async function() {
             const categorySelect = document.getElementById('friendCategorySelect');
             const category = categorySelect?.value || 'friend';
             const noteInput = document.getElementById('friendNote');
-            const note = noteInput?.value.trim() || '';
+            // SETTINGS WIRING: friends.allowRequestMessage — default true. When disabled, never
+            // send a personal note along with a friend request, even if the field has stale text in it.
+            const note = (window.__allowRequestMessage !== false) ? (noteInput?.value.trim() || '') : '';
             const isBusiness = category === 'business';
 
             const result = await sendFriendRequest(user.id, category, note, false, null, isBusiness);
@@ -5420,7 +5556,9 @@ const handleSendFriendRequest = async function() {
 
 function updateFriendPresence(userId, online, lastSeen) {
     [friends, pinnedFriends, mutedFriends, temporaryFriends].forEach(arr => {
-        const friend = arr.find(f => f && f.id === userId);
+        // BUG FIX: same string-vs-number ID mismatch as elsewhere in this file — could
+        // silently fail to find the right friend and skip a real-time presence update.
+        const friend = arr.find(f => f && String(f.id) === String(userId));
         if (friend) {
             friend.online = online;
             friend.status = online ? 'online' : 'offline';
@@ -6413,6 +6551,18 @@ function initializeUI() {
         }, { once: true });
     }
 
+    // SETTINGS WIRING: friends.allowRequestMessage — default true. Hides the optional note
+    // field on the Add Friend form entirely when the user has turned this off, instead of
+    // silently ignoring whatever they type into it.
+    function applyFriendNoteFieldVisibility() {
+        const noteField = document.getElementById('friendNote');
+        const container = noteField?.closest('.input-group');
+        if (container) {
+            container.style.display = (window.__allowRequestMessage === false) ? 'none' : '';
+        }
+    }
+    applyFriendNoteFieldVisibility();
+
     // Legacy event listeners for backwards compatibility
     window.addEventListener('settingChanged', function(e) {
         const { section, key, value } = e.detail || {};
@@ -6424,6 +6574,34 @@ function initializeUI() {
                 void document.documentElement.offsetHeight;
                 document.documentElement.style.display = '';
             }
+        }
+    });
+
+    // SETTINGS WIRING: the friend module previously stored settings changes on `window.__xxx`
+    // but never reacted to them — a change only took effect the next time something else
+    // happened to trigger a render (e.g. switching sections). This makes the friends list,
+    // status dots, and request form respond immediately when a relevant setting changes.
+    window.addEventListener('settingChanged', function(e) {
+        const { section, key } = e.detail || {};
+        if (section !== 'friends') return;
+        if (key === 'sortFriendsBy' || key === 'showOnlineStatus') {
+            renderFriends();
+        }
+        if (key === 'friendLimitWarning') {
+            updateFriendCounts();
+        }
+        if (key === 'allowRequestMessage') {
+            applyFriendNoteFieldVisibility();
+        }
+        if (key === 'friendSuggestions') {
+            renderFriendSuggestions();
+        }
+    });
+    window.addEventListener('settingsUpdated', function(e) {
+        const { settings } = e.detail || {};
+        if (settings && settings.friends && typeof settings.friends === 'object') {
+            renderFriends();
+            updateFriendCounts();
         }
     });
     window.addEventListener('settingsUpdated', function(e) {
