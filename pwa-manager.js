@@ -194,20 +194,15 @@
         function _skipAndBanner(sw) {
             if (!sw) return;
             sw.postMessage({ type: 'SKIP_WAITING' });
-            // ── FIX: This previously showed the banner on every call based only
-            // on _hadControllerOnLoad, with no version check. 5-minute polling
-            // (for installed PWAs) could re-detect the same waiting SW and show
-            // the banner repeatedly for a version the user already saw.
-            // We don't know the new SW's version string here yet (it arrives via
-            // SW_UPDATED postMessage after activation), so just suppress a
-            // duplicate banner if one is already showing or was shown recently.
-            if (_hadControllerOnLoad && !document.getElementById('pwaUpdateBanner')) {
-                var lastShown = parseInt(localStorage.getItem('_update_banner_shown_at') || '0', 10);
-                if (Date.now() - lastShown > 60000) { // don't re-show within 60s
-                    localStorage.setItem('_update_banner_shown_at', String(Date.now()));
-                    _showUpdateBanner();
-                }
-            }
+            // ── FIX (real, replaces the previous non-fix): this function's only
+            // job is to tell the waiting worker to activate. It must NOT show
+            // the banner itself — it has no version string to compare against,
+            // so it can't tell a real update apart from a byte-identical
+            // re-install (which browsers do on relogin due to cache-header
+            // quirks). The ONLY place that's allowed to show the banner is the
+            // SW_UPDATED message handler above, which compares SW_VERSION
+            // against the last version seen. Once this posts SKIP_WAITING, the
+            // SW activates and sends SW_UPDATED — that handler decides.
             _hadControllerOnLoad = true;
         }
 

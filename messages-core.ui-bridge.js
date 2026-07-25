@@ -424,6 +424,15 @@ const UIStateManager = {
         
         _attachConversationListeners: function() {
             document.addEventListener('click', async (e) => {
+                // FIX (chat-more-btn-tap-swallowed): messages-ui.js's sanitizeHTML()
+                // strips the three-dot button's inline onclick/stopPropagation, so
+                // without this guard a tap on the three dots falls through to this
+                // delegated listener and opens the chat instead of the menu.
+                // messages-ui.js now installs a capture-phase listener that calls
+                // stopPropagation() for this case, but that listener must be loaded
+                // for it to work — this guard is a backup so a click on (or inside)
+                // .chat-more-btn is never treated as "open this chat" here either way.
+                if (e.target && e.target.closest && e.target.closest('.chat-more-btn')) return;
                 const conversationItem = e.target.closest('.chat-item');
                 if (conversationItem) {
                     const conversationId = conversationItem.dataset.chatId;

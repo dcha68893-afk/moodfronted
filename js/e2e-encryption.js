@@ -20,7 +20,28 @@
 
   const subtle    = global.crypto && global.crypto.subtle;
   const STORE_KEY = 'kyn_e2e_keypair_v1';   // localStorage key for encrypted private key
-  const PUB_CACHE = new Map();               // userId → CryptoKey (public key cache)
+  const PUB_CACHE = new Map();               // userId → CryptoKey (public key cache, this page load only)
+  // FIX-ROOT-CAUSE-DM-DECRYPT-FRAGILE: this is the actual reason DM send/receive
+  // failed far more often than group messages. Group sender keys, once fetched,
+  // are cached to localStorage forever (see groupEncryption.client.js) — a single
+  // network blip only costs one retry. Recipient PUBLIC keys here were cached
+  // ONLY in this in-memory Map, which is wiped on every reload, AND a failed
+  // fetch (timeout, Render free-tier cold start, a 401 during token refresh)
+  // was never retried and never remembered — every future message to/from that
+  // person kept re-fetching and re-failing for the rest of the session, with no
+  // backoff, hammering a possibly-still-cold backend.
+  // Fix: persist the raw (non-secret) public key bytes to localStorage so a
+  // successful fetch survives reloads exactly like the sender-key cache does,
+  // and retry a failed fetch a couple of times with backoff before giving up.
+  const PUB_KEY_STORE = 'kyn_e2e_pubkeys_v1'; // localStorage: { [userId]: { pub: base64, keyId } }
+
+  function _loadPubKeyStore() {
+    try { return JSON.parse(localStorage.getItem(PUB_KEY_STORE) || '{}'); } catch (_) { return {}; }
+  }
+  function _savePubKeyStore(store) {
+    try { localStorage.setItem(PUB_KEY_STORE, JSON.stringify(store)); } catch (_) {}
+  }
+  function _sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
   // ── Utility ───────────────────────────────────────────────────────────────
   function b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
@@ -276,16 +297,55 @@
   // ── Get recipient's public key ─────────────────────────────────────────────
   async function _getRecipientPublicKey(userId) {
     if (PUB_CACHE.has(userId)) return PUB_CACHE.get(userId);
-    const resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
-      headers: await _authHeaders(),
-      credentials: 'include',
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data.data?.publicKey) return null;
-    const key = await importPublicKey(data.data.publicKey);
-    PUB_CACHE.set(userId, { key, keyId: data.data.keyId });
-    return { key, keyId: data.data.keyId };
+
+    // FIX-ROOT-CAUSE-DM-DECRYPT-FRAGILE: check the persistent store before
+    // hitting the network at all — same treatment group sender keys already
+    // get. A key, once seen, doesn't change, so this is safe to trust
+    // indefinitely.
+    const store = _loadPubKeyStore();
+    const cached = store[userId];
+    if (cached && cached.pub) {
+      try {
+        const key = await importPublicKey(cached.pub);
+        const entry = { key, keyId: cached.keyId };
+        PUB_CACHE.set(userId, entry);
+        return entry;
+      } catch (_) { /* corrupted entry — fall through to re-fetch */ }
+    }
+
+    // Retry a transient failure (cold start, timeout, brief 401 during token
+    // refresh) a couple of times with backoff before giving up. Previously a
+    // single failed fetch here permanently broke E2E for that person for the
+    // rest of the session — no retry, no memory of the failure.
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await _sleep(500 * attempt);
+      try {
+        const resp = await fetch(`${await _apiBase()}/api/encryption/keys/${userId}`, {
+          headers: await _authHeaders(),
+          credentials: 'include',
+        });
+        if (!resp.ok) {
+          // Don't retry a definitive "no key" (404) — only retry things that
+          // look transient (5xx, or a 401 that might resolve after refresh).
+          if (resp.status === 404) return null;
+          lastErr = new Error(`Key fetch failed: ${resp.status}`);
+          continue;
+        }
+        const data = await resp.json();
+        if (!data.data?.publicKey) return null;
+        const key = await importPublicKey(data.data.publicKey);
+        const entry = { key, keyId: data.data.keyId };
+        PUB_CACHE.set(userId, entry);
+        store[userId] = { pub: data.data.publicKey, keyId: data.data.keyId };
+        _savePubKeyStore(store);
+        return entry;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    console.warn('[E2E] Failed to fetch recipient public key after retries:', lastErr && lastErr.message);
+    return null;
   }
 
   // ── Encrypt a message for a chat ──────────────────────────────────────────

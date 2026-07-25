@@ -23,6 +23,36 @@
     'use strict';
     const _uiLog = (...a) => { if (window.__MESSAGES_DEBUG__) console.log(...a); };
 
+    // FIX (chat-more-btn-tap-swallowed): safeSetHTML() runs every chat-list
+    // render through sanitizeHTML(), which strips ALL inline event handler
+    // attributes (onclick, onmousedown, etc.) — that's by design, to block
+    // script injection from any untrusted string that ends up in this HTML.
+    // The side effect: the three-dot button's own onclick, and the
+    // stopPropagation() calls that were supposed to protect it, never
+    // attach. The only thing still listening is an older delegated listener
+    // in messages-core.ui-bridge.js that opens the chat for ANY click inside
+    // a .chat-item — including a tap on the three dots.
+    //
+    // Fix: a real (non-inline, sanitizer-proof) delegated listener, attached
+    // in the CAPTURE phase so it runs before that legacy bubble-phase
+    // listener. If the click landed on or inside .chat-more-btn, this opens
+    // the context menu and calls stopPropagation() so the legacy listener
+    // never sees the event and can't also open the chat underneath.
+    if (!window.__chatMoreBtnDelegatedListenerBound) {
+        window.__chatMoreBtnDelegatedListenerBound = true;
+        document.addEventListener('click', function (e) {
+            const moreBtn = e.target && e.target.closest && e.target.closest('.chat-more-btn');
+            if (!moreBtn) return;
+            e.stopPropagation();
+            e.preventDefault();
+            document.body.classList.remove('chat-item-pressing');
+            const chatId = moreBtn.dataset && moreBtn.dataset.moreChatId;
+            if (chatId && window.messagesUI && typeof window.messagesUI._showChatContextMenu === 'function') {
+                window.messagesUI._showChatContextMenu(chatId, e);
+            }
+        }, true); // capture phase — runs before ui-bridge's bubble-phase listener
+    }
+
     // BUG FIX (PROFILE-LIVE-UPDATE-NOT-WIRED-TO-MESSAGES-MODULE): chat.html's
     // realtime bridge fans out backend profile:updated events (a contact
     // changed their own avatar) as REALTIME_EVENT:profile:updated to every
