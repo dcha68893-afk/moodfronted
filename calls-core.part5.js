@@ -2100,6 +2100,22 @@
 
                     window.__CallsCoreShared.callsState.callActive = true;
 
+                    // FIX-ROOT-CAUSE-2MIN-CALL-DROP: record the connection at
+                    // its true source (this WebRTC connectionState event)
+                    // rather than only via the later 'call_connected' listener
+                    // chain. _clearStaleCallState's 120s timer treats any
+                    // callId in this set as permanently safe from cleanup —
+                    // doing it here, immediately, closes the small window
+                    // where a slow/missed downstream listener could leave the
+                    // set unpopulated while the cleanup timer is mid-check.
+                    if (this._currentCallId) {
+                        if (!window.__CallsCoreShared.callsState._connectedCallIds) {
+                            window.__CallsCoreShared.callsState._connectedCallIds = new Set();
+                        }
+                        window.__CallsCoreShared.callsState._connectedCallIds.add(this._currentCallId);
+                    }
+
+
 
 
                     this._notifyListeners('call_connected', { callId: this._currentCallId });

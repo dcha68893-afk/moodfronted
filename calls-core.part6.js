@@ -1653,7 +1653,40 @@ _clearStaleCallState: function() {
         // 'connected'. The previous list was missing 'starting' and 'initiated', causing
         // live calls to be auto-terminated if connection took > 120s (common on TURN relays).
         const _ACTIVE_CALL_STATES = new Set(['connected','in-call','in_call','connecting','starting','initiated','ringing','incoming','in_progress']);
-        if (callDuration > 120000 && !_ACTIVE_CALL_STATES.has(window.__CallsCoreShared.callsState.callState)) {
+
+        // FIX-ROOT-CAUSE-2MIN-CALL-DROP: the app tracks call state in THREE
+        // separate places that are not guaranteed to stay in sync —
+        // window.__CallsCoreShared.callsState.callState (checked below),
+        // window.UIState.callState (calls-ui.js), and window.callsState
+        // (calls.html's own global). If a genuinely connected call ever left
+        // this specific tracker's callState string out of _ACTIVE_CALL_STATES
+        // — e.g. a transient value, a missed update on this tracker while
+        // another tracker correctly shows 'connected' — this 120s timer would
+        // silently end an active, still-in-progress call out from under two
+        // people who are actively talking. That is the "call ends itself
+        // after ~2 minutes even though we're still talking" bug.
+        //
+        // window.__CallsCoreShared.callsState._connectedCallIds (populated in
+        // handleCallConnected, cleared on resetCallState) is the one place
+        // that durably remembers "this callId has genuinely connected at
+        // least once" — independent of whatever any single callState string
+        // currently says. Treat it as authoritative: once a call has
+        // connected, this stale-cleanup timer must never end it. It also
+        // cross-checks the other two trackers directly as a second layer, so
+        // a fix to one tracker's state naming can't silently reopen this bug.
+        const _activeCallIdNow = window.__CallsCoreShared.callsState.activeCallId;
+        const _hasConnectedOnce = !!(
+            _activeCallIdNow &&
+            window.__CallsCoreShared.callsState._connectedCallIds &&
+            window.__CallsCoreShared.callsState._connectedCallIds.has(_activeCallIdNow)
+        );
+        const _otherTrackerSaysActive = _ACTIVE_CALL_STATES.has(
+            (window.UIState && window.UIState.callState) || ''
+        ) || _ACTIVE_CALL_STATES.has(
+            (window.callsState && window.callsState.callState) || ''
+        );
+
+        if (callDuration > 120000 && !_hasConnectedOnce && !_otherTrackerSaysActive && !_ACTIVE_CALL_STATES.has(window.__CallsCoreShared.callsState.callState)) {
 
 
 

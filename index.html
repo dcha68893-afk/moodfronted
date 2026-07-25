@@ -2623,6 +2623,45 @@
             .mobile-marketing-heading { text-align: center; margin-bottom: 16px; }
             .mobile-marketing-heading h2 { font-size: 20px; margin: 0 0 4px; color: var(--text-primary); }
             .mobile-marketing-heading p { font-size: 14px; color: var(--text-secondary); margin: 0; }
+
+            /* BUG FIX (WHITE-ON-WHITE-MOBILE-MARKETING): .feature-card,
+               .testimonial, .social-proof and .download-section were written
+               for the dark gradient #desktopSidebar (white text on a
+               translucent-white card, meant to sit on a colored background).
+               .mobile-marketing-panel reuses those same classes but lives on
+               the light .auth-panel background, so the white text and
+               translucent-white cards were invisible here — all that ever
+               showed was the emoji in each heading and the testimonial
+               avatar's own gradient background. Scope readable, on-brand
+               colors to this panel only; #desktopSidebar's own
+               .feature-showcase/.quick-tips/.social-proof/.download-section
+               are untouched and keep their original dark styling. */
+            .mobile-marketing-panel .feature-card,
+            .mobile-marketing-panel .testimonial,
+            .mobile-marketing-panel .download-badge {
+                background: var(--card-bg);
+                border: 1px solid var(--border-color);
+                backdrop-filter: none;
+            }
+            .mobile-marketing-panel .feature-icon {
+                background: var(--gradient-primary);
+                color: #fff;
+            }
+            .mobile-marketing-panel .feature-content h3,
+            .mobile-marketing-panel .social-proof h2,
+            .mobile-marketing-panel .download-section h2,
+            .mobile-marketing-panel .testimonial-author h4,
+            .mobile-marketing-panel .download-badge .badge-text span:last-child {
+                color: var(--text-primary);
+            }
+            .mobile-marketing-panel .feature-content p,
+            .mobile-marketing-panel .testimonial-content,
+            .mobile-marketing-panel .testimonial-author p,
+            .mobile-marketing-panel .download-badge .badge-text span:first-child {
+                color: var(--text-secondary);
+            }
+            .mobile-marketing-panel .download-badge { color: var(--text-primary); }
+            .mobile-marketing-panel .download-badge:hover { background: var(--sidebar-bg); }
         }
     </style>
 
