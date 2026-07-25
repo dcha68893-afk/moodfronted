@@ -18,8 +18,21 @@
 // file's own established practice of forcing immediate cache eviction
 // for already-installed PWA users on a meaningful deploy, rather than
 // waiting on their periodic update check.
-const SW_VERSION = '19.1.0';
-const CACHE_NAME = 'moodchat-static-v21'; // Bumped — landing screen + dead-redirect fixes
+//
+// FIX v19.2.0 (theme-flash bug, round 2): theme.colors.css — the file
+// that defines the actual dark-mode palette every module CSS keys off —
+// was cache-first with only a 7-day staleness check, and NOT in
+// NETWORK_FIRST_PATTERNS below. So every prior theme-flash fix touching
+// that file could sit in an already-installed user's cache for up to a
+// week before it was ever re-fetched, which is almost certainly why the
+// flash kept reappearing after being "fixed" — the fix was shipped, but
+// the browser kept serving the old cached CSS. theme.colors.css and
+// pwa-manager.js (actively patched, see its own fix history) are now both
+// network-first. Bumping the cache name here also forces an immediate,
+// one-time clean slate for every static asset already cached from
+// previous versions.
+const SW_VERSION = '19.2.0';
+const CACHE_NAME = 'moodchat-static-v22'; // Bumped — theme.colors.css/pwa-manager.js now network-first, forces stale-CSS eviction
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -142,6 +155,17 @@ const NETWORK_FIRST_PATTERNS = [
 
   // ✅ NEW: Safety layer (handles localStorage, used by token reading)
   /\/kynecta\.safety\.layer\.js/i,
+
+  // ✅ NEW (theme-flash bug, round 2): theme.colors.css defines the actual
+  // dark-mode palette every module's CSS keys off. It was falling under the
+  // generic cache-first static-asset rule below with only a 7-day staleness
+  // check, so theme fixes could take up to a week to reach an already-
+  // installed PWA — the most likely reason the "sparking" flash kept coming
+  // back after being fixed. pwa-manager.js is included for the same reason:
+  // it's the file that governs install-state detection and is actively
+  // patched.
+  /\/theme\.colors\.css/i,
+  /\/pwa-manager\.js/i,
 ];
 
 function isNetworkFirst(url) {

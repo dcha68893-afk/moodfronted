@@ -19,6 +19,24 @@
             document.referrer.startsWith('android-app://');
     };
 
+    // FIX (fake "Installed" state, same root cause as index.html): pwa_installed
+    // was being treated as permanent proof of installation with nothing to ever
+    // unset it, so a device that installed once and later uninstalled would keep
+    // suppressing the install banner forever even though it no longer had the
+    // app installed. isStandalone() stays the primary, always-live check; this
+    // adds an async correction using getInstalledRelatedApps() (where supported)
+    // to clear a stale flag when neither live signal actually confirms install.
+    (function _selfHealInstalledFlag() {
+        if (isStandalone()) return; // definitely installed and running as one right now — nothing to correct
+        if (localStorage.getItem('pwa_installed') !== '1') return; // nothing to correct
+        if (!navigator.getInstalledRelatedApps) return; // no live signal available, leave the flag alone
+        navigator.getInstalledRelatedApps().then(function (related) {
+            if (!related || related.length === 0) {
+                localStorage.removeItem('pwa_installed');
+            }
+        }).catch(function () {});
+    })();
+
     function _inject(id, html) {
         if (document.getElementById(id)) return;
         var d = document.createElement('div');

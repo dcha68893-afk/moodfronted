@@ -127,25 +127,33 @@
             --danger-color: #f87171;
         }
         
-        body[data-theme-color="ocean"] {
+        /* FIX (theme-color flash): the inline anti-flash script in <head> sets
+           data-theme-color on <html> BEFORE first paint (body doesn't exist yet
+           at that point). The old selectors here only matched `body[...]`, which
+           isn't set until initDashboardThemePicker() runs on DOMContentLoaded —
+           so the accent color visibly popped in after the page already painted.
+           Matching html[...] as well makes the color correct from the very first
+           frame; the body[...] selectors are kept so the later JS sync (and any
+           code that still only sets it on body) keeps working too. */
+        html[data-theme-color="ocean"], body[data-theme-color="ocean"] {
             --theme-primary: #0066cc;
             --theme-primary-dark: #004c99;
             --theme-accent: #00aaff;
             --theme-success: #00cc88;
         }
-        body[data-theme-color="sunset"] {
+        html[data-theme-color="sunset"], body[data-theme-color="sunset"] {
             --theme-primary: #ff6b6b;
             --theme-primary-dark: #ee5253;
             --theme-accent: #ff9f43;
             --theme-success: #10ac84;
         }
-        body[data-theme-color="forest"] {
+        html[data-theme-color="forest"], body[data-theme-color="forest"] {
             --theme-primary: #27ae60;
             --theme-primary-dark: #219150;
             --theme-accent: #f39c12;
             --theme-success: #2ecc71;
         }
-        body[data-theme-color="lavender"] {
+        html[data-theme-color="lavender"], body[data-theme-color="lavender"] {
             --theme-primary: #9b59b6;
             --theme-primary-dark: #8e44ad;
             --theme-accent: #f1c40f;
@@ -4669,9 +4677,6 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         }
-        function isInstalledPersisted() {
-            try { return localStorage.getItem('pwa_installed') === '1'; } catch (_) { return false; }
-        }
         function setInstallButtonsVisible(visible) {
             installButtons.forEach(function (btn) { btn.hidden = !visible; });
         }
@@ -4747,9 +4752,42 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             }
         }
 
-        if (isRunningInstalled() || isInstalledPersisted()) {
-            renderInstalledState();
-        } else if (installButtons.length) {
+        // FIX (fake "Installed" state): pwa_installed used to be treated as
+        // permanent proof of installation the moment it was set (on
+        // 'appinstalled' or accepting the native prompt) — nothing ever
+        // unset it. So a device that installed once and later uninstalled
+        // (or had the flag set some other way) would show "✓ Installed /
+        // Open App" forever, on every visit, in any browser tab, even
+        // though it was never actually running the installed app.
+        // isRunningInstalled() (display-mode/standalone/android referrer) is
+        // the only signal that's live and can't lie about the CURRENT tab.
+        // getInstalledRelatedApps(), where supported, adds a second live
+        // signal that also catches "installed but currently opened in a
+        // normal browser tab" instead of the standalone window.
+        async function isActuallyInstalled() {
+            if (isRunningInstalled()) return true;
+            try {
+                if (navigator.getInstalledRelatedApps) {
+                    var related = await navigator.getInstalledRelatedApps();
+                    if (related && related.length > 0) return true;
+                }
+            } catch (_) {}
+            return false;
+        }
+
+        isActuallyInstalled().then(function (reallyInstalled) {
+            if (reallyInstalled) {
+                try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
+                renderInstalledState();
+                return;
+            }
+
+            // Self-heal: if a stale flag claims "installed" but the live
+            // signal disagrees, stop trusting it so the real Install button
+            // (or iOS hint) comes back instead of staying hidden forever.
+            try { localStorage.removeItem('pwa_installed'); } catch (_) {}
+
+            if (!installButtons.length) return;
             if (isIOS()) {
                 renderIOSHint();
             } else {
@@ -4765,7 +4803,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                 try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
                 renderInstalledState();
             });
-        }
+        });
     })();
     </script>
 </body>

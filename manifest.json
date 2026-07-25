@@ -25,6 +25,11 @@
   ],
   "categories": ["social", "communication", "shopping"],
   "prefer_related_applications": false,
-  "related_applications": [],
+  "related_applications": [
+    {
+      "platform": "webapp",
+      "url": "https://moodchat-fy56.onrender.com/manifest.json"
+    }
+  ],
   "screenshots": []
 }
