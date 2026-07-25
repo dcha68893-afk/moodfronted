@@ -28,6 +28,24 @@
         function resolveEarlyTheme() {
             var raw = null;
             try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
+            // FIX (theme-flash audit, residual gap): every other module
+            // (chat/friend/group/calls/message/status/Tools/game) also falls
+            // back to the cached settings blob when neither theme key is set
+            // yet (e.g. first run before any explicit save). This page was
+            // the one place that fallback chain stopped one link short,
+            // so a user with cached settings but no app_theme/moodchat_theme
+            // key would flash light here while every other page correctly
+            // picked up their real theme from the cache.
+            if (!raw) {
+                try {
+                    var c = localStorage.getItem('knecta_settings_cache');
+                    if (c) {
+                        var cp = JSON.parse(c);
+                        var d = cp.data || cp;
+                        raw = (d && d.appearance && d.appearance.theme) || (d && d.theme);
+                    }
+                } catch (_) {}
+            }
             return raw === 'dark' ? 'dark' : 'light';
         }
         function resolveEarlyFontSize() {
@@ -45,11 +63,50 @@
         root.classList.toggle('dark-theme', theme === 'dark');
         root.style.fontSize = fontSize + 'px';
         root.style.setProperty('--base-font-size', fontSize + 'px');
+        // FIX-ROOT-CAUSE-THEME-SPARK: setting data-theme this early is only
+        // half the fix. `body { transition: background-color ... }` further
+        // down runs unconditionally — not just on the manual toggle button
+        // click it was meant for — so on EVERY load, the instant the browser
+        // resolves the CSS variables above, it visibly animates/fades from
+        // the default color into the real theme color instead of just
+        // showing it immediately. That fade IS the "spark": data-theme was
+        // already correct, but the transition made the correct color arrive
+        // gradually instead of instantly. `preload` is paired with a CSS
+        // rule (added right before </head>) that forces every transition
+        // off while it's present; it's removed once the page has actually
+        // finished loading, so the toggle button's own animation still
+        // works normally for an intentional, manual theme switch later.
+        root.classList.add('preload');
         try {
             var savedColor = localStorage.getItem('moodchat_dashboard_color');
             if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
         } catch (_) {}
     })();
+    </script>
+
+    <style>
+        /* FIX-ROOT-CAUSE-THEME-SPARK: see the inline script above for the
+           full explanation. Must stay a plain, unscoped rule (not nested
+           under any other selector) so it reliably beats every other
+           transition rule below regardless of source order/specificity. */
+        html.preload, html.preload * { transition: none !important; }
+    </style>
+
+    <script>
+        // Remove the preload guard once the page has actually finished
+        // loading (fonts, stylesheets, images) rather than on a fixed
+        // timer, so slower connections never get a residual flash right
+        // after the guard lifts. requestAnimationFrame (rather than acting
+        // immediately in the load handler) ensures the browser has painted
+        // at least one frame with the real theme before transitions are
+        // re-enabled.
+        window.addEventListener('load', function () {
+            requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                    document.documentElement.classList.remove('preload');
+                });
+            });
+        });
     </script>
 
     <link rel="manifest" href="manifest.json">
@@ -1663,19 +1720,19 @@
             </section>
 
             <section class="landing-more-features" aria-label="More MoodChat features">
-                <div class="landing-feature-chip"><i class="fas fa-gamepad"></i><span>Games</span></div>
-                <div class="landing-feature-chip"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
-                <div class="landing-feature-chip"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
-                <div class="landing-feature-chip"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-gamepad"></i><span>Games</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
+                <div class="landing-feature-chip reveal"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
             </section>
 
             <section class="landing-trust" aria-label="Why people trust MoodChat">
-                <div class="landing-trust-item"><i class="fas fa-lock"></i><span>Secure authentication</span></div>
-                <div class="landing-trust-item"><i class="fas fa-cloud"></i><span>Reliable cloud sync</span></div>
-                <div class="landing-trust-item"><i class="fas fa-bolt"></i><span>Fast delivery</span></div>
-                <div class="landing-trust-item"><i class="fas fa-layer-group"></i><span>Cross-platform</span></div>
-                <div class="landing-trust-item"><i class="fas fa-mobile-alt"></i><span>Progressive Web App</span></div>
-                <div class="landing-trust-item"><i class="fas fa-user-shield"></i><span>Private communication</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-lock"></i><span>Secure authentication</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-cloud"></i><span>Reliable cloud sync</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-bolt"></i><span>Fast delivery</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-layer-group"></i><span>Cross-platform</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-mobile-alt"></i><span>Progressive Web App</span></div>
+                <div class="landing-trust-item reveal"><i class="fas fa-user-shield"></i><span>Private communication</span></div>
             </section>
 
             <footer class="landing-footer">
@@ -1991,8 +2048,18 @@
             color: var(--text-primary);
             font-size: 0.82rem;
             font-weight: 700;
+            transition: transform 0.25s ease, box-shadow 0.25s ease, opacity 0.6s ease;
         }
-        .landing-feature-chip i { color: var(--primary-color); }
+        .landing-feature-chip:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.12); }
+        .landing-feature-chip i { color: var(--primary-color); display: inline-block; animation: float 3s ease-in-out infinite; }
+        /* Stagger each chip's scroll-reveal so they cascade in rather than
+           all popping in at once (they share one IntersectionObserver
+           threshold since they're all roughly the same distance down the
+           page). */
+        .landing-feature-chip:nth-child(1) { transition-delay: 0s; }
+        .landing-feature-chip:nth-child(2) { transition-delay: 0.08s; }
+        .landing-feature-chip:nth-child(3) { transition-delay: 0.16s; }
+        .landing-feature-chip:nth-child(4) { transition-delay: 0.24s; }
 
         .landing-trust {
             background: var(--sidebar-bg);
@@ -2011,8 +2078,16 @@
             color: var(--text-secondary);
             font-size: 0.82rem;
             font-weight: 600;
+            transition: transform 0.25s ease, color 0.25s ease, opacity 0.6s ease;
         }
+        .landing-trust-item:hover { transform: translateY(-2px); color: var(--text-primary); }
         .landing-trust-item i { color: var(--theme-success, var(--success-color)); }
+        .landing-trust-item:nth-child(1) { transition-delay: 0s; }
+        .landing-trust-item:nth-child(2) { transition-delay: 0.06s; }
+        .landing-trust-item:nth-child(3) { transition-delay: 0.12s; }
+        .landing-trust-item:nth-child(4) { transition-delay: 0.18s; }
+        .landing-trust-item:nth-child(5) { transition-delay: 0.24s; }
+        .landing-trust-item:nth-child(6) { transition-delay: 0.3s; }
 
         .landing-footer {
             background: var(--bg-color);
@@ -2047,6 +2122,8 @@
             .landing-screen, .landing-feature-card, .landing-ghost-btn { transition: none; }
             .reveal { opacity: 1; transform: none; transition: none; }
             .il-ring-pulse { animation: none; opacity: 0; }
+            .landing-feature-chip i { animation: none; }
+            .landing-feature-chip:hover, .landing-trust-item:hover { transform: none; }
         }
 
         /* Install affordance inside the login/register panel — the fallback
@@ -4612,7 +4689,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // Cheap, dependency-free: IntersectionObserver adds .is-visible once
         // per item and then stops observing it (no repeated fade in/out on
         // scroll-up, which reads as jittery rather than premium).
-        var revealItems = document.querySelectorAll('.landing-showcase .reveal');
+        var revealItems = document.querySelectorAll('.landing-showcase .reveal, .landing-more-features .reveal, .landing-trust .reveal');
         if (revealItems.length) {
             if ('IntersectionObserver' in window) {
                 var revealObserver = new IntersectionObserver(function (entries) {

@@ -13,6 +13,56 @@
     const MAX_RETRIES          = 3;
     const RETRY_DELAY          = 5000;
 
+    // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY: decryptFromChat(content, chatId, X)
+    // always needs X = "the OTHER participant in the 1:1 chat", because
+    // encryptForChat() on the sending side always derived its AES key using
+    // recipientUserId (the other party) — never "whoever happens to be the
+    // sender of this particular message". messages-ui.js already applies
+    // this correction (isSent ? otherPartyId : message.senderId) in its own
+    // render path, but this sync engine's two ingestion paths
+    // (ingestIncomingMessage, and the bulk-history loop in syncChat) were
+    // still passing rawMessage.senderId unconditionally.
+    //
+    // That's harmless for a message someone else sent (senderId IS the
+    // other party already) — but the moment a user's OWN message comes back
+    // through either of these paths (a socket echo/confirmation of a
+    // message you just sent, or that message being re-fetched on the next
+    // periodic/bulk history sync), senderId equals your OWN user id. Passed
+    // straight through, decryptFromChat fetches YOUR OWN public key as the
+    // "other party" and derives a shared secret with yourself — which is
+    // not the key the message was actually encrypted with, so decryption
+    // fails and the message renders as garbled/"[Decryption failed]" in
+    // your own chat panel. This is exactly what shows up as "the receiver's
+    // reply fails to decrypt" — it's the receiver's OWN client failing to
+    // re-read the reply IT just sent, once it round-trips back through sync.
+    function _resolveSenderIdForDecrypt(rawMessage) {
+        const rawSenderId = rawMessage.senderId || (rawMessage.sender && rawMessage.sender.id);
+        let myId = null;
+        try {
+            if (window.SessionManager && typeof window.SessionManager.getCurrentUserId === 'function') {
+                myId = window.SessionManager.getCurrentUserId();
+            }
+        } catch (_) {}
+        if (!myId) {
+            try {
+                if (window.MessagesCore && typeof window.MessagesCore.getCurrentUserId === 'function') {
+                    myId = window.MessagesCore.getCurrentUserId();
+                }
+            } catch (_) {}
+        }
+        if (!myId && window.currentUserId) myId = window.currentUserId;
+        if (!myId && window.__PARENT_SESSION__ && window.__PARENT_SESSION__.userId) {
+            myId = window.__PARENT_SESSION__.userId;
+        }
+
+        const isOwnMessage = myId != null && rawSenderId != null && String(rawSenderId) === String(myId);
+        if (!isOwnMessage) return rawSenderId;
+
+        const otherPartyId = rawMessage.receiverId || rawMessage.recipientId ||
+            (rawMessage.receiver && rawMessage.receiver.id) || (rawMessage.recipient && rawMessage.recipient.id);
+        return otherPartyId || rawSenderId; // fall back rather than block decryption entirely
+    }
+
     class MessageSyncEngine {
         constructor() {
             this._syncing     = false;
@@ -84,7 +134,7 @@
                                 m.content = await window.KynectaE2E.decryptFromChat(
                                     m.content,
                                     chatId,
-                                    m.senderId || m.sender.id
+                                    _resolveSenderIdForDecrypt(m)
                                 );
                             } catch (_) { /* leave as-is; decryptFromChat already returns a safe placeholder on failure */ }
                         }
@@ -182,7 +232,8 @@
             // socket event but revert to showing the raw envelope on next
             // reload, once it's read back from local storage instead.
             let _content = rawMessage.content || rawMessage.text || '';
-            const _senderIdForDecrypt = rawMessage.senderId || rawMessage.sender?.id;
+            const _rawSenderId = rawMessage.senderId || (rawMessage.sender && rawMessage.sender.id);
+            const _senderIdForDecrypt = _resolveSenderIdForDecrypt(rawMessage);
             if ((rawMessage.type || 'text') === 'text' && _content && _senderIdForDecrypt && window.KynectaE2E) {
                 const _claimKey = rawMessage.id || rawMessage.localId;
                 if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
@@ -196,7 +247,7 @@
                 serverId:    String(rawMessage.id),
                 chatId:      _chatIdStr,
                 conversationId: _chatIdStr,
-                senderId:    _senderIdForDecrypt,
+                senderId:    _rawSenderId,
                 content:     _content,
                 type:        rawMessage.type || 'text',
                 sender:      rawMessage.sender || null,

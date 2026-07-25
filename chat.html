@@ -47,6 +47,36 @@
         root.setAttribute('data-theme', theme);
         root.classList.toggle('theme-dark', theme === 'dark');
         root.classList.toggle('dark-theme', theme === 'dark');
+        // FIX-ROOT-CAUSE-THEME-SPARK-MODULES: data-theme is applied above, but the
+        // actual color VALUES for [data-theme] live in the external theme.colors.css
+        // (single source of truth for every module, loaded as a separate network
+        // request). Until that request finishes, this page has no idea what
+        // --kyn-bg-root/--kyn-text-primary/etc. should resolve to, so without this
+        // it would paint using whatever hardcoded CSS fallback (or none) happens to
+        // be baked into this page's own stylesheet — which was a FIXED direction
+        // regardless of the user's actual theme (e.g. always falling back to dark,
+        // or always to light), producing a visible flash in the wrong direction for
+        // roughly half of users. Setting the handful of paint-critical variables
+        // directly, synchronously, in JS closes that gap: theme.colors.css remains
+        // the single source of truth and simply reconfirms the same values once it
+        // loads (no visible change) — first paint is just never wrong while
+        // waiting on the network.
+        // NOTE: these literal values are mirrored from theme.colors.css's light and
+        // dark palettes — if that file's palette values ever change, update here too.
+        (function () {
+            var _kynCritical = theme === 'dark' ? {
+                '--kyn-bg-root': '#0f172a', '--kyn-bg-chat': '#020617', '--kyn-bg-header': '#0f172a',
+                '--kyn-text-primary': '#e5e7eb', '--kyn-text-secondary': '#9ca3af',
+                '--kyn-border': '#374151',
+                '--bg-color': '#0f172a', '--text-primary': '#e5e7eb'
+            } : {
+                '--kyn-bg-root': '#ffffff', '--kyn-bg-chat': '#efeae2', '--kyn-bg-header': '#f0f2f5',
+                '--kyn-text-primary': '#111b21', '--kyn-text-secondary': '#667781',
+                '--kyn-border': '#e9edef',
+                '--bg-color': '#ffffff', '--text-primary': '#111b21'
+            };
+            for (var _k in _kynCritical) { root.style.setProperty(_k, _kynCritical[_k]); }
+        })();
         root.style.fontSize = fontSize + 'px';
         root.style.setProperty('--base-font-size', fontSize + 'px');
     })();

@@ -1400,8 +1400,26 @@ const UIStateManager = {
                     const _claimKey = message.id || message.localId;
                     if (!window.__kynClaimDecrypt || window.__kynClaimDecrypt(_claimKey)) {
                     try {
+                        // FIX-ROOT-CAUSE-DECRYPT-OWN-REPLY: decryptFromChat's third
+                        // argument must always be "the OTHER participant", because
+                        // encryptForChat always derived the AES key using the
+                        // recipient's public key — never our own. The branch above
+                        // that reaches this point specifically handles messages WE
+                        // sent, arriving via another device/tab (_realtimeSenderId
+                        // === _realtimeCurrentUserId), so message.senderId here is
+                        // our own id — passing it straight through made us derive a
+                        // shared secret with ourselves and fail to decrypt our own
+                        // just-sent reply the moment it echoed back. Use the
+                        // recipient id instead whenever the sender is us.
+                        const _isOwnEchoedMessage = _realtimeSenderId && _realtimeCurrentUserId &&
+                            String(_realtimeSenderId) === String(_realtimeCurrentUserId);
+                        const _senderIdForDecrypt = _isOwnEchoedMessage
+                            ? (message.receiverId || message.recipientId ||
+                               (message.receiver && message.receiver.id) || (message.recipient && message.recipient.id) ||
+                               message.senderId)
+                            : message.senderId;
                         const _plaintext = await window.KynectaE2E.decryptFromChat(
-                            message.content, chatId, message.senderId
+                            message.content, chatId, _senderIdForDecrypt
                         );
                         if (_plaintext && _plaintext !== message.content &&
                             _plaintext.indexOf('[Decryption failed') !== 0) {
