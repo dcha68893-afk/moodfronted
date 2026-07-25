@@ -7166,7 +7166,19 @@ _escapeHtml: function(text) {
         window.__CallsCoreShared.callsState.callState = 'connecting';
         window.__CallsCoreShared.callsState.callActive = true;
 
-
+        // FIX-PREMATURE-45S-END-WHILE-RINGING (caller side): the connection
+        // timeout used to be armed the instant the caller started dialing,
+        // which cut calls off after 45s of ringing instead of the intended
+        // 3-minute window. It belongs here instead — now that the receiver
+        // has actually accepted, give ICE/media negotiation a bounded window
+        // to complete. window.__callReceiverAccepted (set by the UI layer
+        // when it processes this same acceptance) keeps this timer from
+        // firing once negotiation succeeds and the call is genuinely in-call.
+        try {
+            if (window.__CallsCoreShared.WebRTCManager && typeof window.__CallsCoreShared.WebRTCManager.setConnectionTimeout === 'function') {
+                window.__CallsCoreShared.WebRTCManager.setConnectionTimeout(window.__CallsCoreShared.CONFIG.CALL_CONNECTION_TIMEOUT);
+            }
+        } catch (_) {}
 
         window.__CallsCoreShared.notifyListeners('call_accepted', callData);
 

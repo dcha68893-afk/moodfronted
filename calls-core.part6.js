@@ -2412,7 +2412,18 @@ initiateCall: async function(callType, participants = [], options = {}) {
 
 
 
-        window.__CallsCoreShared.WebRTCManager.setConnectionTimeout(window.__CallsCoreShared.CONFIG.CALL_CONNECTION_TIMEOUT);
+        // FIX-PREMATURE-45S-END-WHILE-RINGING: setConnectionTimeout used to be
+        // armed here, the moment the caller starts dialing — well before the
+        // receiver has even seen the incoming call. That gave every outgoing
+        // call a hard 45s deadline instead of the intended 3-minute ring
+        // window (the frontend's own startRingTimer in calls-ui.js and the
+        // backend's RING_TIMEOUT_MS both already correctly implement that
+        // 3-minute no-answer timeout). If nobody answered within 45s, this
+        // fired 'call_timeout' and tore the call down over 2 minutes early.
+        // The connection timeout is a WebRTC/ICE negotiation safety net, not
+        // a ring timeout — it's now armed in handleCallAccepted() instead, so
+        // it only starts counting once there is actually a connection being
+        // negotiated.
 
 
 

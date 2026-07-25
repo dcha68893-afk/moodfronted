@@ -6110,6 +6110,49 @@ handleContactItemClick: function(e) {
 
     const _ap = data.payload || {};
 
+    // FIX-CALLID-RECONCILE-POSTMSG-PATH: this handler (reached via the
+    // postMessage-forwarded CALL_ACCEPTED route — the path the console logs
+    // show actually firing in production, via app.realtime.socket.js ->
+    // chat.html -> calls.html) was the one caller-side accept handler that
+    // never adopted the server's real callId into UIState.activeCallId.
+    // CoreIntegration.handleCallAccepted (the internal event listener) does
+    // this correctly, but when THIS handler runs first/instead, UIState.activeCallId
+    // stays pinned to the locally-generated `call_<timestamp>_<random>` id from
+    // initiateCall() for the rest of the call. Every later signal
+    // (call_ended/call_force_ended/call_rejected) then arrives tagged with the
+    // server's UUID, gets compared against that stale local id, is rejected as
+    // "mismatched callId", and the call silently desyncs: the far end tears
+    // down cleanly while this side is left orphaned — either a dark screen, or
+    // (once a real server call_ended finally lands) an abrupt end with no clean
+    // navigation back.
+    const _acceptedRealCallId = _ap.callId || _ap.id || (data && (data.callId || data.id)) || null;
+    if (_acceptedRealCallId) {
+        const _priorLocalId = UIState.activeCallId;
+        UIState.activeCallId = _acceptedRealCallId;
+        if (window.CallOverlayManager && typeof window.CallOverlayManager.reconcileCallId === 'function') {
+            try { window.CallOverlayManager.reconcileCallId(_acceptedRealCallId); } catch (_) {}
+        }
+        // Keep the core-layer alias map in sync too so window.callCore.resolveCallId()
+        // (used by handleCallEnded / CallOverlayManager's own mismatch guards) maps
+        // the old local id to the same real id this handler just adopted.
+        try {
+            if (window.__CallsCoreShared && window.__CallsCoreShared.callsState) {
+                if (!window.__CallsCoreShared.callsState._callIdAliases) {
+                    window.__CallsCoreShared.callsState._callIdAliases = new Map();
+                }
+                if (_priorLocalId && _priorLocalId !== _acceptedRealCallId) {
+                    window.__CallsCoreShared.callsState._callIdAliases.set(_priorLocalId, _acceptedRealCallId);
+                }
+                window.__CallsCoreShared.callsState._callIdAliases.set(_acceptedRealCallId, _acceptedRealCallId);
+                window.__CallsCoreShared.callsState.activeCallId = _acceptedRealCallId;
+                if (window.__CallsCoreShared.WebRTCManager && window.__CallsCoreShared.WebRTCManager._currentCallId &&
+                    window.__CallsCoreShared.WebRTCManager._currentCallId !== _acceptedRealCallId) {
+                    window.__CallsCoreShared.WebRTCManager._currentCallId = _acceptedRealCallId;
+                }
+            }
+        } catch (_) {}
+    }
+
     // ── ALWAYS stop ringtones immediately ────────────────────────────────
     if (window._incomingRingtone) {
         try { window._incomingRingtone.pause(); window._incomingRingtone.currentTime = 0; } catch(e) {}
@@ -6280,6 +6323,23 @@ handleContactItemClick: function(e) {
                         window.__activePeerType = null;
                         window.__activePeerAvatar = null;
                         UIEventHandlers.handleCallEnded && UIEventHandlers.handleCallEnded(data.payload || {});
+                        // FIX-DEAD-CODE-DUPLICATE-CASE: a second `case 'CALL_FORCE_ENDED':`
+                        // further down this same switch (now removed — see below) used to
+                        // carry the full state-reset (forceResetCallState/resetCallUI/dedup
+                        // lock clearing) but a switch statement only ever runs the FIRST
+                        // matching case label, so that logic was unreachable dead code for
+                        // every CALL_FORCE_ENDED/CALL_ENDED/CALL_REJECTED event. Concretely
+                        // this meant: after a caller cancelled or a receiver rejected while
+                        // still on the "calling" screen, or after a call self-terminated,
+                        // handleCallEnded() above ran but __uiCallDispatchLock/__earlyCallLock
+                        // dedup locks and the core module's own callsState were never cleared —
+                        // leaving the UI on a dark/idle screen that the next call attempt would
+                        // also silently refuse to replace. Run that reset here so it actually
+                        // executes, for every event type this case handles.
+                        if (coreInstance && coreInstance.forceResetCallState) coreInstance.forceResetCallState();
+                        UIEventHandlers.resetCallUI && UIEventHandlers.resetCallUI();
+                        if (window.__uiCallDispatchLock) window.__uiCallDispatchLock = { ts: 0, userId: null };
+                        if (window.__earlyCallLock) window.__earlyCallLock = { ts: 0, userId: null };
                         break;
                     }
                     case 'CALL_CANCELLED':
