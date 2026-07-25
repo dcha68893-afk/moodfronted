@@ -5304,7 +5304,24 @@ function _navDirect(page, subpage, _pushHistory) {
     document.querySelectorAll('.jm-page').forEach(p => { p.classList.remove('active'); p.style.cssText = ''; });
     document.querySelectorAll('.jm-nav-tab').forEach(t => t.classList.remove('active'));
 
-    const pageEl = document.getElementById('jmPage' + page.charAt(0).toUpperCase() + page.slice(1));
+    // FIX (MARKETPLACE-SUBPAGE-BLANK-SCREEN): the page container lookup below
+    // used to always compute the container id as 'jmPage' + capitalize-first-
+    // letter(page) — e.g. page 'wishlist' → 'jmPageWishlist', which matches
+    // that container's actual id. But three page keys don't follow that
+    // pattern: 'reviews-page' and 'follow-sellers' contain hyphens the naive
+    // scheme doesn't strip, and 'notifprefs' has a capital P mid-word in its
+    // actual container id ('jmPageNotifPrefs') that the naive scheme can't
+    // produce from a lowercase key. All three computed ids matched NO
+    // element in the DOM, so `pageEl` was always null for these three pages
+    // — nothing ever became visible, and it looked like an empty screen with
+    // no way back (the back button itself was fine; there was just nothing
+    // showing underneath it to prove navigation had happened).
+    const PAGE_ID_OVERRIDES = {
+        'notifprefs':    'jmPageNotifPrefs',
+        'follow-sellers': 'jmPageFollowSellers',
+        'reviews-page':   'jmPageReviews',
+    };
+    const pageEl = document.getElementById(PAGE_ID_OVERRIDES[page] || ('jmPage' + page.charAt(0).toUpperCase() + page.slice(1)));
     if (pageEl) pageEl.classList.add('active');
 
     const navTab = document.querySelector(`.jm-nav-tab[data-page="${page}"]`);

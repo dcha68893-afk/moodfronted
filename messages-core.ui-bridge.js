@@ -1288,8 +1288,17 @@ const UIStateManager = {
                 // ✅ FIX 4: Guard against String(undefined) = "undefined" poisoning the local store.
                 const _safeId = message.id != null ? String(message.id) : null;
                 const _safeLocalId = message.localId != null ? String(message.localId) : null;
-                // Reject messages with no usable id to prevent corrupt dedup state
-                if (!_safeId && !_safeLocalId && !message.content) return;
+                // FIX (MSG-NOT-DISPLAYED-CONTENT-FIELD-MISMATCH): this used to check only
+                // message.content, but the normalization step below (~30 lines down) already
+                // falls back to message.text when .content is absent. A message that arrives
+                // with only .text set — and, before any id/localId has been assigned/echoed
+                // back, which is the normal case for a message someone else just sent to us —
+                // was silently dropped right here, before it ever reached that fallback. The
+                // socket delivery, dedup, and every downstream render path all worked fine;
+                // this early return just discarded the message first. Matches the reported
+                // symptom exactly: the console shows the message being received, but nothing
+                // ever appears in the chat panel.
+                if (!_safeId && !_safeLocalId && !message.content && !message.text && !message.body) return;
 
                 // FIX: Dedup — chat.html posts 'message:new' AND 'new_message' for the same payload,
                 // and multiple event listeners can fire. Use a Set to process each message only once.
@@ -1415,7 +1424,7 @@ const UIStateManager = {
                     id:       _safeId || _safeLocalId || ('tmp_' + Date.now()),
                     serverId: _safeId || null,
                     localId:  _safeLocalId || null,
-                    content: message.content || message.text || '',
+                    content: message.content || message.text || message.body || '',
                     type: message.type || 'text',
                     senderId: message.senderId || (message.sender && message.sender.id),
                     sender: message.sender || null,
