@@ -983,9 +983,38 @@ function _patchSendGroupMessage(GC) {
 // =============================================================================
 function _patchRequestGroupList(GC) {
     GC.requestGroupList = async function () {
-        // Guard: must be ACTIVE
+        // BUG FIX (GROUPS-LOST-ON-RETURN-TO-TAB): this guard used to return
+        // { success:false, reason:'not_active' } immediately whenever the
+        // module's postMessage handshake with the parent hadn't finished
+        // reaching ACTIVE yet — which is exactly the state right after
+        // navigating back to the Groups module from elsewhere. Because that
+        // was a *resolved* promise (not a rejection), renderAllGroupsSecure's
+        // .then() ran anyway and re-rendered from the (now-empty, since a
+        // fresh GroupCore instance starts with groups=[]) in-memory arrays,
+        // permanently showing "no groups" until a full page reload. Instead,
+        // wait briefly for ACTIVE to be reached (it normally arrives within
+        // a few hundred ms) before giving up.
         if (typeof LifecycleState !== 'undefined' && !LifecycleState.isActive()) {
-            return { success: false, reason: 'not_active' };
+            const becameActive = await new Promise((resolve) => {
+                let settled = false;
+                const unsubscribe = LifecycleState.subscribe((state) => {
+                    if (settled) return;
+                    if (state === LifecycleState.STATES.ACTIVE) {
+                        settled = true;
+                        try { unsubscribe(); } catch (_) {}
+                        resolve(true);
+                    }
+                });
+                setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    try { unsubscribe(); } catch (_) {}
+                    resolve(false);
+                }, 5000);
+            });
+            if (!becameActive) {
+                return { success: false, reason: 'not_active' };
+            }
         }
 
         // Load from IDB cache first (offline-first)

@@ -49,9 +49,28 @@
     return 'Web';
   }
 
+  // BUG FIX (DEVICE-NAME-SHOWS-RENDER-ENGINE-VERSION): this used to build the
+  // device name as `${platform} · ${userAgent.split('/').pop().split(' ')[0]}`,
+  // which grabs whatever comes after the LAST "/" in the user-agent string.
+  // On Chrome/Android that's the WebKit build number from the trailing
+  // "Safari/537.36" token, not anything that identifies the browser — so
+  // every device showed up as the meaningless, near-identical "Android ·
+  // 537.36" in the sessions list. Detect the actual browser name instead.
+  function _getBrowserName() {
+    const ua = navigator.userAgent;
+    if (/Edg\//.test(ua))              return 'Edge';
+    if (/OPR\//.test(ua) || /Opera/.test(ua)) return 'Opera';
+    if (/Chrome\//.test(ua) && !/Chromium/.test(ua)) return 'Chrome';
+    if (/CriOS\//.test(ua))            return 'Chrome';
+    if (/FxiOS\//.test(ua))            return 'Firefox';
+    if (/Firefox\//.test(ua))          return 'Firefox';
+    if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) return 'Safari';
+    return 'Browser';
+  }
+
   async function registerDevice() {
     const deviceId   = _getOrCreateDeviceId();
-    const deviceName = `${_getPlatform()} · ${navigator.userAgent.split('/').pop()?.split(' ')[0] || 'Browser'}`;
+    const deviceName = `${_getPlatform()} · ${_getBrowserName()}`;
 
     try {
       await fetch(`${API_BASE()}/api/devices/link`, {

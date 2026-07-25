@@ -4043,7 +4043,18 @@ body.viewer-friend-mode #viewerControls { display:flex !important; }
     function init() {
         setupMoreMenu();
         setupHoldReveal();
-        setupViewersPanel();
+        // BUG FIX (TRIPLE-BOUND-SEEN-COUNT-PILL): setupViewersPanel() used to
+        // attach its own click listener to #viewerSeenCount, in addition to
+        // wireViewerSeenCount() below (which opens the Viewers Bottom Sheet)
+        // AND status-ui.js's _bindViewerSeenCountToggle() (which toggled a
+        // third, separate #inlineViewersList). All three fired on the same
+        // tap with no coordination, so the pill would show viewer names
+        // stacked/overlapping the count, and closing one panel left the
+        // others open — exactly the "names show together with the count"
+        // glitch after opening the list and navigating back. The Viewers
+        // Bottom Sheet (wireViewerSeenCount/openVbs) is the most complete
+        // implementation, so it's now the only one wired up.
+        // setupViewersPanel();
     }
 
     // ── Three-dots dropdown ──────────────────────────────────────────

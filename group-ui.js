@@ -2348,14 +2348,30 @@ export const renderAdminGroupsSecure = createUIErrorBoundary('renderAdminGroupsS
         
         adminList.innerHTML = '';
         
-        if (!adminGroups || adminGroups.length === 0) {
+        // BUG FIX (ADMIN-TAB-ALWAYS-ZERO): unlike renderMyGroupsSecure and
+        // renderJoinedGroupsSecure (which both prefer live window.GroupCore
+        // data with the plain imported array only as a fallback), this used
+        // to read ONLY the plain `adminGroups` import from
+        // group-core-bootstrap.js. That plain variable is kept in sync by
+        // setAdminGroups() calls scattered through group-core-bootstrap.js,
+        // but the actual data-loading path used today —
+        // _patchRequestGroupList() in group-core-patch.js — writes straight
+        // to `this.adminGroups` (i.e. window.GroupCore.adminGroups) and
+        // never calls setAdminGroups(), so the plain variable this function
+        // read stayed permanently empty even once the owner/admin's groups
+        // had actually loaded. Read the live object first, same as the
+        // other two tabs.
+        const _gcAdm = window.GroupCore;
+        const _liveAdmin = (_gcAdm && _gcAdm.adminGroups && _gcAdm.adminGroups.length > 0) ? _gcAdm.adminGroups : (adminGroups || []);
+        
+        if (!_liveAdmin || _liveAdmin.length === 0) {
             adminList.appendChild(createSecureEmptyStateElement('admin'));
             return;
         }
         
         const fragment = document.createDocumentFragment();
         
-        adminGroups.forEach(group => {
+        _liveAdmin.forEach(group => {
             if (typeof matchesFilters === 'function' ? matchesFilters(group) : true) {
                 const groupItem = createSecureGroupItemElement(group, 'admin');
                 if (groupItem) fragment.appendChild(groupItem);

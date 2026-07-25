@@ -1835,7 +1835,61 @@
                 </div>
             </div>
         </div>
+
+            <!-- BUG FIX (EMPTY-MOBILE-LANDING-SPACE): #desktopSidebar already
+                 contains a full "why join MoodChat" pitch — feature cards,
+                 a testimonial, and app-store badges — but it's display:none
+                 below 768px (see the max-width:768px media query), so mobile
+                 visitors, who are most of the audience on a phone, saw
+                 nothing but the bare login card and a large blank area
+                 below it. This reuses the same .feature-card / .testimonial
+                 / .download-section styles so it renders below the login
+                 card in normal document flow instead (placed outside the
+                 flex-row .auth-content so it stacks underneath rather than
+                 sitting beside the card), and only appears on mobile (hidden
+                 on desktop, where the real sidebar already shows this
+                 content) via .mobile-marketing-panel's own CSS. -->
+            <div class="mobile-marketing-panel">
+                <div class="mobile-marketing-heading">
+                    <h2>Why people love MoodChat</h2>
+                    <p>Real conversations, real-time — wherever you are.</p>
+                </div>
+                <div class="feature-grid">
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-lock"></i></div><div class="feature-content"><h3>End-to-End Encrypted</h3><p>Your messages stay private, always</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-phone-volume"></i></div><div class="feature-content"><h3>Crystal-Clear Calls</h3><p>HD voice &amp; video, no lag</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
+                    <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
+                </div>
+                <div class="social-proof">
+                    <h2>🌟 Success Stories</h2>
+                    <div class="testimonial">
+                        <div class="testimonial-content">"MoodChat helped me find amazing friends across continents!"</div>
+                        <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>Sarah Rodriguez</h4><p>Spain • Regular User</p></div></div>
+                    </div>
+                </div>
+                <div class="download-section">
+                    <h2>📱 Get The App</h2>
+                    <div class="badge-grid">
+                        <a href="#" class="download-badge"><i class="fab fa-google-play badge-icon"></i><div class="badge-text"><span>GET IT ON</span><span>Google Play</span></div></a>
+                        <a href="#" class="download-badge"><i class="fab fa-apple badge-icon"></i><div class="badge-text"><span>Download on the</span><span>App Store</span></div><div class="coming-soon">Soon</div></a>
+                    </div>
+                </div>
+            </div>
     </main>
+    <style>
+        .mobile-marketing-panel { display: none; }
+        @media (max-width: 768px) {
+            .mobile-marketing-panel {
+                display: block;
+                padding: 8px 20px 32px;
+                max-width: 500px;
+                margin: 0 auto;
+            }
+            .mobile-marketing-heading { text-align: center; margin-bottom: 16px; }
+            .mobile-marketing-heading h2 { font-size: 20px; margin: 0 0 4px; color: var(--text-primary); }
+            .mobile-marketing-heading p { font-size: 14px; color: var(--text-secondary); margin: 0; }
+        }
+    </style>
 
     <script src="/js/core/identity/IdentityProfileStore.js"></script>
     <script type="module" src="/js/AppSettings.js"></script>

@@ -2825,16 +2825,23 @@ function hookRT(){
         var sid=String(msg.senderId||msg.userId||(msg.sender&&msg.sender.id)||'');
         if(!box._seen)box._seen=new Set();
         if(sid===me&&msg.id){if(box._seen.has('id:'+String(msg.id)))return;var tmp=box.querySelector('[data-tmp]');if(tmp){tmp.removeAttribute('data-tmp');tmp.dataset.mid=String(msg.id);box._seen.add('id:'+String(msg.id));var t2=tmp.querySelector('.message-time');if(t2)t2.textContent=fmt(msg.createdAt||msg.created_at||new Date().toISOString());return;}}
-        // FIX-DUPLICATE-GROUP-RENDER: the check above only protected the sender's
-        // own optimistic bubble from being duplicated. Messages from every OTHER
-        // member had no id-based guard at all before falling through to
-        // appendBubble() below, so this handler being wired to 3 separate
-        // triggers (g.on('group:message-received'), g.on('group:message'), and
-        // the window 'message'/GROUP_MESSAGE postMessage listener further down)
-        // meant a single real message could render 2-3 times. Guard every
-        // message, not just self-sent ones, using the same box._seen set the
-        // bulk history renderer already relies on.
-        if(msg.id){var _key='id:'+String(msg.id);if(box._seen.has(_key))return;box._seen.add(_key);}
+        // BUG FIX (MESSAGES-SILENTLY-NEVER-RENDER): the FIX-DUPLICATE-GROUP-RENDER
+        // check that used to live here added 'id:'+msg.id to box._seen and THEN
+        // called appendBubble() below — but appendBubble() independently runs
+        // the exact same id-based check on the exact same box._seen Set
+        // (they share the same `box` element) as its own first line of
+        // defense. Since this handler had already marked the id "seen"
+        // moments earlier, appendBubble's own check always found it already
+        // present and returned immediately without ever creating the bubble.
+        // Net effect: every realtime message from another member that carried
+        // a real `.id` was silently swallowed — never rendered at all, not
+        // even a duplicate — and depending on timing could also block that
+        // same message from rendering later when history reloaded, since the
+        // id stayed marked "seen" in the DOM-attached Set. appendBubble()
+        // already guards against the 3-trigger duplicate-wiring problem this
+        // was trying to solve (by id, and by a content+sender+minute
+        // composite key for payloads missing an id) — so this pre-check was
+        // both redundant and actively breaking message delivery. Removed.
         /* FIX-GROUP-ENCRYPTION: same gap as renderMsgs above -- this is the
            realtime single-message path in this separate implementation.
            Decrypt msg.content in place before appendBubble ever sees it. */

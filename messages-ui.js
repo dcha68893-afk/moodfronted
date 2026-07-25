@@ -5043,7 +5043,7 @@
                                 ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
                                 ontouchcancel="document.body.classList.remove('chat-item-pressing');"
                                 onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');window.messagesUI?._showChatContextMenu('${chat.id}', event);"
-                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:6px 10px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;">
+                                style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:10px 12px;margin:-4px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;">
                                 <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                             </button>
 
@@ -12444,6 +12444,21 @@ Type: ${message.type || 'text'}`;
 
             }
 
+            // BUG FIX (CHAT-PANEL-SHOWS-SIDEBAR-HEADER): messages.css has a
+            // `body.chat-active #sidebar { transform: translateX(-100%)
+            // !important; }` rule, added specifically to force the sidebar
+            // off-screen and "prevent the brief two-panel flash" — i.e. the
+            // sidebar (and its own header/icons) briefly rendering on top of
+            // the chat panel. But that class was only ever being set by the
+            // popstate (back/forward) handler and the close-chat path — the
+            // ordinary tap-a-chat-from-history path (this function) removed
+            // sidebar's plain .active class but never set body.chat-active,
+            // so it never got the !important protection and could show the
+            // sidebar's header instead of the chat panel's, intermittently.
+            if (window.innerWidth <= 768) {
+                document.body.classList.add('chat-active');
+            }
+
             const core = getMessagesCore();
 
             const coreState = core?.getState?.();
@@ -12565,6 +12580,11 @@ Type: ${message.type || 'text'}`;
 
             // FIX: On mobile, HIDE sidebar when opening chat
             if (sidebar && window.innerWidth <= 768) { sidebar.classList.remove('active'); }
+            // BUG FIX (CHAT-PANEL-SHOWS-SIDEBAR-HEADER): see openChat() above —
+            // body.chat-active is what messages.css uses (with !important) to
+            // forcefully push the sidebar off-screen; without it here too,
+            // this entry point had the same intermittent header-flash bug.
+            if (window.innerWidth <= 768) { document.body.classList.add('chat-active'); }
 
             
 
@@ -13744,6 +13764,25 @@ Type: ${message.type || 'text'}`;
         };
         // Normal click (fires only when NOT long-press)
         window.messagesUI._chatItemClick = function(e, chatId, chatObj) {
+            // BUG FIX (MORE-BTN-CLICK-LEAKS-TO-ROW): touchstart/touchend on
+            // .chat-more-btn correctly stopPropagation() so the LONG-PRESS
+            // timer never starts on the parent row. But the browser's
+            // synthesized 'click' event that follows a tap is resolved
+            // separately, from the release coordinates via
+            // elementFromPoint() — not from whatever received touchstart.
+            // Because the button is small and sits right at the edge of the
+            // row, a slight finger-drift on release can make that synthetic
+            // click land on the row (chat-item) instead of the button, even
+            // though the button visually absorbed the tap. That bypassed
+            // the button's own onclick/stopPropagation entirely and fired
+            // _chatItemClick directly, opening the chat instead of the
+            // context menu — intermittent, exactly as reported. Guard here
+            // too: if the click's real target (or anything under the
+            // pointer) is the more-button, this is that stray click —
+            // ignore it, the button's own handler already opened the menu.
+            if (e.target && e.target.closest && e.target.closest('.chat-more-btn')) {
+                return;
+            }
             if (_lpActive) { e.preventDefault(); e.stopPropagation(); return; }
             // Check blocked — do not open blocked chats
             if (_setHas(STORAGE_KEY_BLOCKED, chatId)) {

@@ -3809,6 +3809,16 @@ function _loadReactionsForFriend(status) {
 // list on demand instead of it being shown automatically. Tapping again
 // closes it. Bound once per element (guarded with _seenCountBound).
 function _bindViewerSeenCountToggle() {
+    // BUG FIX (TRIPLE-BOUND-SEEN-COUNT-PILL): this used to attach a second,
+    // independent click handler to #viewerSeenCount that toggled its own
+    // #inlineViewersList, competing with status.html's setupViewersPanel()
+    // (a third handler) and wireViewerSeenCount()/openVbs() (the Viewers
+    // Bottom Sheet). All three fired on the same tap, so viewer names ended
+    // up rendered in multiple places at once, overlapping the count itself.
+    // The Bottom Sheet in status.html is now the single owner of this pill.
+    return;
+}
+function _bindViewerSeenCountToggle_DISABLED() {
     const pill = document.getElementById('viewerSeenCount');
     if (!pill || pill._seenCountBound) return;
     pill._seenCountBound = true;
@@ -4309,9 +4319,15 @@ function createTextStatusSlide(statusData) {
             slide.style.background = bgOption.gradient;
         }
     }
+    // BUG FIX (NAME-BAKED-INTO-STATUS-CONTENT): the viewer header
+    // (#viewerUserInfo, populated by loadViewerContent) already shows the
+    // author's avatar and name above every slide. This second "— Name"
+    // signature rendered inside the slide body itself duplicated it, and for
+    // your own status it read as "my name is displayed inside the status"
+    // rather than just the text you actually wrote. The content area now
+    // shows only what was created.
     slide.innerHTML = `
         <div class="text-status-content">${UISanitizer.sanitizeHTML(statusData.content || statusData.text || '')}</div>
-        <div class="text-status-author">— ${UISanitizer.sanitizeHTML(statusData.user?.displayName || 'Unknown User')}</div>
     `;
     const chosenFont = (statusData.metadata && statusData.metadata.fontFamily) || statusData.fontFamily;
     if (chosenFont) {
@@ -8024,7 +8040,24 @@ function renderStatusListInstantlyUI() {
 function applyOwnAvatarToStatusPreview(avatarEl) {
     if (!avatarEl) return;
     try {
-        const avatarUrl = localStorage.getItem('user_avatar');
+        // BUG FIX (REAL-PHOTO-NOT-SHOWN-STATUS-AVATAR): 'user_avatar' is only
+        // populated once chat.html's loadUserProfileFromStorage() has run and
+        // synced it, so opening/reloading the status iframe before that sync
+        // (or on an account that signed in via Google and never separately
+        // uploaded an avatar) fell straight to the generated-initials
+        // placeholder even though the real photo was already known from the
+        // login/session data. Fall back to reading the real photo directly
+        // out of kynecta_auth (avatar/photoURL, either at top level or under
+        // .user) before giving up and showing initials.
+        let avatarUrl = localStorage.getItem('user_avatar');
+        if (!avatarUrl) {
+            try {
+                const auth = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
+                const u = (auth && (auth.user || auth)) || null;
+                avatarUrl = u && (u.avatar || u.photoURL || u.profilePicture) || '';
+                if (avatarUrl) { try { localStorage.setItem('user_avatar', avatarUrl); } catch (_) {} }
+            } catch (_) { /* fall through to initials */ }
+        }
         if (avatarUrl) {
             avatarEl.style.backgroundImage = `url('${avatarUrl}')`;
             avatarEl.style.backgroundSize = 'cover';

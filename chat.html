@@ -2088,6 +2088,19 @@
                 if (savedCover) currentUserProfile.cover = savedCover;
                 const savedBio = localStorage.getItem('user_bio');
                 if (savedBio) currentUserProfile.bio = savedBio;
+                // BUG FIX (REAL-AVATAR-NEVER-PERSISTED-TO-USER_AVATAR-KEY): a user who
+                // signed in with Google (or whose avatar came from kynecta_auth on
+                // login) had a real photo in currentUserProfile.avatar, but the
+                // 'user_avatar' localStorage key — the single key every other module
+                // (status.html's iframe, header icons, etc.) reads to show the real
+                // photo — was only ever written when the user manually uploaded a new
+                // avatar via saveProfileUpdates(). So anyone who never uploaded one
+                // saw a generic initials/placeholder icon everywhere except this
+                // header, even though their real photo was known. Persist it here too,
+                // once, so every module resolves the same real photo consistently.
+                if (currentUserProfile.avatar && !savedAvatar) {
+                    try { localStorage.setItem('user_avatar', currentUserProfile.avatar); } catch(_) {}
+                }
                 updateProfileUI();
             } catch(e) {}
         }
