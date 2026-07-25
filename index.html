@@ -1486,11 +1486,17 @@
         #authPanel {
             visibility: hidden;
             opacity: 0;
-            transition: opacity 0.25s ease;
+            transform: scale(0.98) translateY(8px);
+            transition: opacity 0.35s ease, transform 0.4s cubic-bezier(.4,0,.2,1);
         }
         #authPanel.show-auth {
             visibility: visible;
             opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            #authPanel { transform: none; transition: opacity 0.25s ease; }
+            #authPanel.show-auth { transform: none; }
         }
     </style>
 </head>
@@ -1521,6 +1527,16 @@
                     <h1 class="landing-headline">One app for Messaging, Calls, Communities and Marketplace.</h1>
                     <p class="landing-subtitle">MoodChat brings your chats, voice &amp; video calls, groups and shopping into one fast, secure workspace — on any device.</p>
 
+                    <div class="landing-badge-row" aria-label="MoodChat highlights">
+                        <span class="landing-badge"><i class="fas fa-lock"></i> Encrypted</span>
+                        <span class="landing-badge"><i class="fas fa-bolt"></i> Real-time</span>
+                        <span class="landing-badge"><i class="fas fa-video"></i> Voice &amp; Video</span>
+                        <span class="landing-badge"><i class="fas fa-users"></i> Communities</span>
+                        <span class="landing-badge"><i class="fas fa-store"></i> Marketplace</span>
+                        <span class="landing-badge"><i class="fas fa-wifi"></i> Offline-Ready</span>
+                        <span class="landing-badge"><i class="fas fa-sync-alt"></i> Cross-Device</span>
+                    </div>
+
                     <div class="landing-cta-row">
                         <button type="button" class="btn btn-primary landing-cta" id="landingRegisterBtn">Create Account</button>
                         <button type="button" class="btn btn-secondary landing-cta" id="landingLoginBtn">Login</button>
@@ -1540,18 +1556,109 @@
                 </div>
             </header>
 
-            <section class="landing-features" aria-label="What you can do on MoodChat">
-                <div class="landing-feature-card"><i class="fas fa-comment-dots"></i><h3>Instant Messaging</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-phone-alt"></i><h3>Voice Calls</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-video"></i><h3>Video Calls</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-circle-notch"></i><h3>Status</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-store"></i><h3>Marketplace</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-users"></i><h3>Communities</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-user-friends"></i><h3>Groups</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-gamepad"></i><h3>Games</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-wifi"></i><h3>Offline Support</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-sync-alt"></i><h3>Cross-Device Sync</h3></div>
-                <div class="landing-feature-card"><i class="fas fa-bolt"></i><h3>Fast Performance</h3></div>
+            <section class="landing-showcase" aria-label="What you can do on MoodChat">
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-messaging">
+                            <rect x="14" y="18" width="120" height="72" rx="18" class="il-bubble il-bubble-a"/>
+                            <circle cx="38" cy="54" r="5" class="il-dot"/><circle cx="58" cy="54" r="5" class="il-dot"/><circle cx="78" cy="54" r="5" class="il-dot"/>
+                            <rect x="66" y="70" width="120" height="60" rx="16" class="il-bubble il-bubble-b"/>
+                            <rect x="82" y="88" width="70" height="8" rx="4" class="il-line"/>
+                            <rect x="82" y="102" width="46" height="8" rx="4" class="il-line"/>
+                            <circle cx="150" cy="34" r="14" class="il-accent-circle"/>
+                            <path d="M145 34l4 4 8-9" class="il-check"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Instant Messaging</h3>
+                        <p>Real-time text, media and reactions that sync the moment you send them — read receipts and typing indicators included.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-calls">
+                            <circle cx="100" cy="80" r="46" class="il-ring il-ring-pulse"/>
+                            <circle cx="100" cy="80" r="46" class="il-ring"/>
+                            <rect x="76" y="56" width="48" height="48" rx="24" class="il-badge"/>
+                            <path d="M89 72c0-3 2-5 5-5h4l3 8-4 3c2 5 5 8 10 10l3-4 8 3v4c0 3-2 5-5 5-14-1-24-11-24-24z" class="il-icon-shape"/>
+                            <rect x="24" y="112" width="34" height="24" rx="6" class="il-tile"/>
+                            <rect x="142" y="112" width="34" height="24" rx="6" class="il-tile"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Crystal-Clear Voice &amp; Video Calls</h3>
+                        <p>One-on-one or group calls with adaptive quality that holds up on slow connections, not just fast ones.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-groups">
+                            <circle cx="76" cy="60" r="26" class="il-avatar il-avatar-1"/>
+                            <circle cx="124" cy="60" r="26" class="il-avatar il-avatar-2"/>
+                            <circle cx="100" cy="100" r="26" class="il-avatar il-avatar-3"/>
+                            <path d="M60 130q40-26 80 0" class="il-arc"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Groups &amp; Communities</h3>
+                        <p>Organize the people who matter into groups, or grow a whole community with roles, invites and shared spaces.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-marketplace">
+                            <path d="M52 56h96l-8 68a10 10 0 01-10 9H70a10 10 0 01-10-9z" class="il-bag"/>
+                            <path d="M76 56v-8a24 24 0 0148 0v8" class="il-bag-handle"/>
+                            <circle cx="100" cy="90" r="4" class="il-dot"/>
+                            <rect x="126" y="30" width="40" height="24" rx="6" class="il-tag"/>
+                            <circle cx="136" cy="42" r="3" class="il-tag-hole"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Marketplace</h3>
+                        <p>Buy, sell and browse listings from people you already trust — without leaving the app you chat in.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-status">
+                            <circle cx="70" cy="80" r="30" class="il-story-ring"/>
+                            <circle cx="70" cy="80" r="23" class="il-avatar il-avatar-1"/>
+                            <circle cx="130" cy="80" r="30" class="il-story-ring il-story-ring-b"/>
+                            <circle cx="130" cy="80" r="23" class="il-avatar il-avatar-2"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Status &amp; Stories</h3>
+                        <p>Share what's happening in a 24-hour story that friends can react to — no separate app required.</p>
+                    </div>
+                </div>
+
+                <div class="showcase-item reveal reverse">
+                    <div class="showcase-art" aria-hidden="true">
+                        <svg viewBox="0 0 200 160" class="il-security">
+                            <path d="M100 24l52 18v34c0 38-22 62-52 74-30-12-52-36-52-74V42z" class="il-shield"/>
+                            <path d="M78 84l16 16 28-32" class="il-check-big"/>
+                        </svg>
+                    </div>
+                    <div class="showcase-copy">
+                        <h3>Private by Design</h3>
+                        <p>End-to-end encrypted direct messages with forward secrecy, so conversations stay between you and the people in them.</p>
+                    </div>
+                </div>
+
+            </section>
+
+            <section class="landing-more-features" aria-label="More MoodChat features">
+                <div class="landing-feature-chip"><i class="fas fa-gamepad"></i><span>Games</span></div>
+                <div class="landing-feature-chip"><i class="fas fa-wifi"></i><span>Offline Support</span></div>
+                <div class="landing-feature-chip"><i class="fas fa-sync-alt"></i><span>Cross-Device Sync</span></div>
+                <div class="landing-feature-chip"><i class="fas fa-bolt"></i><span>Fast Performance</span></div>
             </section>
 
             <section class="landing-trust" aria-label="Why people trust MoodChat">
@@ -1595,12 +1702,25 @@
             background: var(--gradient-primary);
             opacity: 1;
             visibility: visible;
-            transition: opacity 0.4s ease;
+            transform: scale(1);
+            filter: blur(0);
+            transition: opacity 0.4s ease, transform 0.45s cubic-bezier(.4,0,.2,1), filter 0.45s ease;
         }
+        /* Step 4: landing doesn't just vanish — it recedes (scale down +
+           soft blur) while fading, and the auth panel underneath grows in
+           to meet it, so it reads as one continuous surface transitioning
+           rather than a hard cut/reload. Landing stays mounted (display
+           untouched) so Back can reverse the same transition instantly. */
         .landing-screen.landing-hidden {
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
+            transform: scale(1.04);
+            filter: blur(6px);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .landing-screen { transition: opacity 0.4s ease; }
+            .landing-screen.landing-hidden { transform: none; filter: none; }
         }
         .landing-scroll { min-height: 100%; display: flex; flex-direction: column; }
 
@@ -1718,6 +1838,29 @@
             margin: 0 0 26px;
         }
 
+        .landing-badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin: 0 0 24px;
+        }
+        .landing-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.28);
+            color: rgba(255,255,255,0.95);
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            backdrop-filter: blur(6px);
+        }
+        .landing-badge i { font-size: 0.78rem; opacity: 0.9; }
+
         .landing-cta-row {
             display: flex;
             gap: 12px;
@@ -1744,25 +1887,104 @@
         }
         .landing-ghost-btn:hover { background: rgba(255,255,255,0.2); transform: translateY(-1px); }
 
-        .landing-features {
+        /* ================================================================ */
+        /* SHOWCASE — illustrated, alternating feature sections (Phase 17,  */
+        /* Step 3/7). Each item: SVG illustration + heading + copy, reveals */
+        /* on scroll. Illustrations are hand-authored inline SVG (no        */
+        /* network requests, crisp at any DPI) and pull their color from    */
+        /* the same theme variables as the rest of the app.                */
+        /* ================================================================ */
+        .landing-showcase {
             background: var(--bg-color);
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            gap: 14px;
-            padding: 40px 24px;
+            padding: 56px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 56px;
+            max-width: 880px;
+            margin: 0 auto;
         }
-        .landing-feature-card {
+        .showcase-item {
+            display: flex;
+            align-items: center;
+            gap: 36px;
+        }
+        .showcase-item.reverse { flex-direction: row-reverse; }
+        .showcase-art { flex: 0 0 auto; width: 200px; max-width: 42%; }
+        .showcase-art svg { width: 100%; height: auto; display: block; }
+        .showcase-copy { flex: 1 1 auto; min-width: 0; }
+        .showcase-copy h3 {
+            margin: 0 0 10px;
+            font-size: 1.3rem;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+        .showcase-copy p {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+        }
+
+        /* Scroll reveal */
+        .reveal {
+            opacity: 0;
+            transform: translateY(28px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+        .reveal.reverse { transform: translateY(28px); }
+        .reveal.is-visible { opacity: 1; transform: translateY(0); }
+
+        /* Illustration palette — theme-aware via existing custom properties */
+        .showcase-art svg .il-bubble { fill: var(--theme-primary, var(--primary-color)); opacity: 0.92; }
+        .showcase-art svg .il-bubble-b { fill: var(--theme-accent, var(--accent-color)); opacity: 0.85; }
+        .showcase-art svg .il-dot, .showcase-art svg .il-line { fill: rgba(255,255,255,0.85); }
+        .showcase-art svg .il-accent-circle { fill: var(--theme-success, var(--success-color)); }
+        .showcase-art svg .il-check { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+        .showcase-art svg .il-ring { fill: none; stroke: var(--theme-primary, var(--primary-color)); stroke-width: 3; opacity: 0.35; }
+        .showcase-art svg .il-ring-pulse { animation: ilPulse 2.4s ease-out infinite; transform-origin: 100px 80px; }
+        @keyframes ilPulse { from { opacity: 0.5; transform: scale(0.9); } to { opacity: 0; transform: scale(1.25); } }
+        .showcase-art svg .il-badge { fill: var(--theme-accent, var(--accent-color)); }
+        .showcase-art svg .il-icon-shape { fill: #fff; }
+        .showcase-art svg .il-tile { fill: var(--border-color); }
+        .showcase-art svg .il-avatar { fill: var(--theme-primary, var(--primary-color)); }
+        .showcase-art svg .il-avatar-2 { fill: var(--theme-accent, var(--accent-color)); }
+        .showcase-art svg .il-avatar-3 { fill: var(--theme-success, var(--success-color)); }
+        .showcase-art svg .il-arc { fill: none; stroke: var(--border-color); stroke-width: 3; stroke-linecap: round; }
+        .showcase-art svg .il-bag { fill: var(--theme-primary, var(--primary-color)); }
+        .showcase-art svg .il-bag-handle { fill: none; stroke: var(--theme-primary, var(--primary-color)); stroke-width: 6; }
+        .showcase-art svg .il-tag { fill: var(--theme-accent, var(--accent-color)); transform-origin: 146px 42px; transform: rotate(18deg); }
+        .showcase-art svg .il-tag-hole { fill: var(--bg-color); }
+        .showcase-art svg .il-story-ring { fill: none; stroke: var(--theme-success, var(--success-color)); stroke-width: 4; }
+        .showcase-art svg .il-story-ring-b { stroke: var(--theme-accent, var(--accent-color)); }
+        .showcase-art svg .il-shield { fill: var(--theme-primary, var(--primary-color)); }
+        .showcase-art svg .il-check-big { fill: none; stroke: #fff; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+
+        @media (max-width: 620px) {
+            .showcase-item, .showcase-item.reverse { flex-direction: column; text-align: center; }
+            .showcase-art { width: 160px; max-width: 60%; }
+        }
+
+        .landing-more-features {
+            background: var(--sidebar-bg);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px;
+            padding: 30px 24px 40px;
+        }
+        .landing-feature-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             background: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: var(--card-radius, 12px);
-            padding: 18px 12px;
-            text-align: center;
+            border-radius: 999px;
+            padding: 10px 18px;
             color: var(--text-primary);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            font-size: 0.82rem;
+            font-weight: 700;
         }
-        .landing-feature-card:hover { transform: translateY(-3px); box-shadow: 0 10px 22px var(--shadow-color); }
-        .landing-feature-card i { font-size: 1.4rem; color: var(--primary-color); margin-bottom: 8px; display: block; }
-        .landing-feature-card h3 { margin: 0; font-size: 0.82rem; font-weight: 700; }
+        .landing-feature-chip i { color: var(--primary-color); }
 
         .landing-trust {
             background: var(--sidebar-bg);
@@ -1808,12 +2030,15 @@
         @media (max-width: 480px) {
             .landing-headline { font-size: 1.4rem; }
             .landing-cta { min-width: 0; flex: 1 1 45%; }
+            .landing-badge { font-size: 0.66rem; padding: 5px 10px; }
         }
 
         @media (prefers-reduced-motion: reduce) {
             .landing-hero-inner { animation: none; }
             .landing-phone-bubble { animation: none; opacity: 1; }
             .landing-screen, .landing-feature-card, .landing-ghost-btn { transition: none; }
+            .reveal { opacity: 1; transform: none; transition: none; }
+            .il-ring-pulse { animation: none; opacity: 0; }
         }
 
         /* Install affordance inside the login/register panel — the fallback
@@ -4334,6 +4559,28 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                 ? document.getElementById('registerDisplayName')
                 : document.getElementById('loginIdentifier');
             if (focusTarget) setTimeout(function () { focusTarget.focus(); }, 350);
+        }
+
+        // ---- Scroll reveal for illustrated showcase (Phase 17, Step 3) --------
+        // Cheap, dependency-free: IntersectionObserver adds .is-visible once
+        // per item and then stops observing it (no repeated fade in/out on
+        // scroll-up, which reads as jittery rather than premium).
+        var revealItems = document.querySelectorAll('.landing-showcase .reveal');
+        if (revealItems.length) {
+            if ('IntersectionObserver' in window) {
+                var revealObserver = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('is-visible');
+                            revealObserver.unobserve(entry.target);
+                        }
+                    });
+                }, { threshold: 0.2, rootMargin: '0px 0px -60px 0px' });
+                revealItems.forEach(function (el) { revealObserver.observe(el); });
+            } else {
+                // No IntersectionObserver support — just show everything.
+                revealItems.forEach(function (el) { el.classList.add('is-visible'); });
+            }
         }
 
         var registerBtn = document.getElementById('landingRegisterBtn');
