@@ -26,6 +26,19 @@
 
     window.__CallsCoreShared.MODULE_NAME = 'calls';  // EXACT module name per contract
 
+    // FIX (notifyListeners race): part8.js is the only file that assigns
+    // window.__CallsCoreShared.notifyListeners (with the real Set-backed
+    // listener registry). Message events (postMessage) can be dispatched and
+    // handled by part4's handleIncoming as soon as part1-4 have executed —
+    // before part8 has finished loading/executing — so calls to
+    // notifyListeners() at that point throw 'notifyListeners is not a
+    // function', aborting whatever handling followed in that branch. Define
+    // a harmless no-op here so it is never undefined; part8 replaces this
+    // with the full implementation once it loads.
+    if (typeof window.__CallsCoreShared.notifyListeners !== 'function') {
+        window.__CallsCoreShared.notifyListeners = function notifyListeners() {};
+    }
+
     // FIX (calls-core split): applySettingToCallsModule was a bare top-level
     // function in the pre-split monolithic calls-core.js, callable from every
     // closure in that single file. The 8-way split wraps each part in its own

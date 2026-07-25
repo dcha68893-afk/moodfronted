@@ -5087,7 +5087,7 @@
                                 onmouseup="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
                                 ontouchend="event.stopPropagation();document.body.classList.remove('chat-item-pressing');"
                                 ontouchcancel="document.body.classList.remove('chat-item-pressing');"
-                                onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');window.messagesUI?._showChatContextMenu('${chat.id}', event);"
+                                onclick="event.stopPropagation();event.preventDefault();document.body.classList.remove('chat-item-pressing');if(window.messagesUI&&typeof window.messagesUI._showChatContextMenu==='function'){window.messagesUI._showChatContextMenu('${chat.id}', event);}"
                                 style="border:none;background:none;cursor:pointer;color:var(--text-secondary,#9ca3af);padding:10px 12px;margin:-4px;border-radius:8px;font-size:16px;flex-shrink:0;line-height:1;position:relative;z-index:2;min-width:40px;min-height:40px;display:flex;align-items:center;justify-content:center;">
                                 <i class="fas fa-ellipsis-v" style="pointer-events:none;"></i>
                             </button>

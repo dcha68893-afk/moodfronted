@@ -2517,11 +2517,11 @@ const GroupCore = {
   async mergeWithServerData(serverData) {
     try {
       const serverGroups = serverData.groups || [];
-      const serverMap = new Map(serverGroups.map(g => [g.id, g]));
+      const serverMap = new Map(serverGroups.map(g => [String(g.id), g]));
 
       // Update existing groups or add new ones
       for (const [id, serverGroup] of serverMap) {
-        const existingIndex = this.groups.findIndex(g => g.id === id);
+        const existingIndex = this.groups.findIndex(g => String(g.id) === id);
         if (existingIndex >= 0) {
           // Merge - server data wins but preserve local-only fields
           const existing = this.groups[existingIndex];
@@ -2553,7 +2553,7 @@ const GroupCore = {
       try {
         _deletedGIDs = new Set(JSON.parse(localStorage.getItem('kyn_deleted_groups_v1') || '[]').map(String));
       } catch (_) {}
-      this.groups = this.groups.filter(g => !_deletedGIDs.has(String(g.id)) && (g.isLocalOnly || serverMap.has(g.id)));
+      this.groups = this.groups.filter(g => !_deletedGIDs.has(String(g.id)) && (g.isLocalOnly || serverMap.has(String(g.id))));
       const _uid = this.currentUser?.uid || this.currentUser?.id;
       this.myGroups = this.groups.filter(g => g.isCreator === true || g.role === 'owner' || _uid && String(g.createdBy) === String(_uid));
       this.joinedGroups = this.groups.filter(g => !g.isCreator && g.role !== 'owner' && !(_uid && String(g.createdBy) === String(_uid)));
