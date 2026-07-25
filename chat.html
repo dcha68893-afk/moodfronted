@@ -2870,13 +2870,6 @@
                     doc.head.insertBefore(style, doc.head.firstChild);
                 }
                 style.textContent = isDark ? `
-                let style = doc.getElementById('kyn-theme-inline');
-                if (!style) {
-                    style = doc.createElement('style');
-                    style.id = 'kyn-theme-inline';
-                    doc.head.insertBefore(style, doc.head.firstChild);
-                }
-                style.textContent = isDark ? `
                     html, body {
                         background: #0f172a !important;
                         color: #e5e7eb !important;
