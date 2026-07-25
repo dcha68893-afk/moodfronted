@@ -120,26 +120,6 @@
     return subtle.deriveBits({ name: 'ECDH', public: theirPubKey }, myPrivKey, 256);
   }
 
-  // FIX (X3DH-UPGRADE): the session bootstrap used to combine exactly two DH
-  // outputs with byte-wise XOR. XOR isn't how X3DH (or Signal's ratchet spec)
-  // actually combines DH outputs — the spec concatenates them (with a fixed
-  // 32-byte 0xFF prefix, "F", specifically so a X3DH-derived secret can never
-  // collide with a secret from a different protocol reusing the same curve)
-  // and feeds that concatenation into HKDF as one input. XOR also doesn't
-  // extend cleanly to X3DH's 3-or-4-DH combine (identity+signedPreKey,
-  // ephemeral+identity, ephemeral+signedPreKey, and optionally
-  // ephemeral+oneTimePreKey) the way concatenation does. This replaces the
-  // old 2-DH XOR combine with a proper N-DH concatenation combine.
-  const X3DH_F_PREFIX = new Uint8Array(32).fill(0xFF);
-  function _x3dhCombine(dhOutputs) {
-    const parts = [X3DH_F_PREFIX, ...dhOutputs.map(d => new Uint8Array(d))];
-    const total = parts.reduce((n, p) => n + p.length, 0);
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const p of parts) { out.set(p, offset); offset += p.length; }
-    return out.buffer;
-  }
-
   // ── Session state persistence ────────────────────────────────────────────────
   // State is stored per conversation: 'kyn_dr_session_v2_<chatId>'
   // Encrypted at rest using e2e-encryption.js _localWrapKey via wrapForLocalStorage
@@ -154,13 +134,6 @@
       myEphPubB64:    state.myEphPubB64,
       theirEphPubB64: state.theirEphPubB64,
       myEphPrivB64:   state.myEphPrivB64,   // stored encrypted
-      // X3DH: which of the recipient's prekeys this session was bootstrapped
-      // with, so the first envelope we send can tell them which of their own
-      // local private prekeys to load in initRecv(). Cleared after the first
-      // message is sent (see encrypt() below) — never needed again once the
-      // ratchet has taken over.
-      x3dhSpkId:      state.x3dhSpkId || null,
-      x3dhOpkId:      state.x3dhOpkId || null,
       skippedKeys:    Object.fromEntries(   // dh_pub + msg_num → message_key
         Array.from(state.skippedKeys || new Map())
       ),
@@ -204,43 +177,24 @@
 
   // ── Session initialization ───────────────────────────────────────────────────
   // Alice (initiator) calls initSend; Bob (receiver) calls initRecv
+  // Both need each other's identity public keys (from /api/encryption/keys/:userId)
 
-  // `theirBundle` is the result of KynectaE2E.fetchPrekeyBundle(recipientId):
-  // { identityPubKey, signedPreKey:{keyId,publicKey,signature}|null,
-  //   oneTimePreKey:{keyId,publicKey}|null, verified }. When signedPreKey is
-  // null (recipient hasn't uploaded X3DH prekeys yet — an account that
-  // predates this upgrade, or hasn't logged in since), this falls back to
-  // the legacy identity-only handshake so messaging still works; that
-  // fallback no longer has the forward-secrecy guarantee X3DH adds for the
-  // first message, exactly as before this upgrade.
-  async function initSend(chatId, myIdentityPrivKey, theirBundle) {
-    const theirIdentityPubB64 = typeof theirBundle === 'string' ? theirBundle : theirBundle.identityPubKey;
-    const spk = (theirBundle && typeof theirBundle === 'object') ? theirBundle.signedPreKey : null;
-    const opk = (theirBundle && typeof theirBundle === 'object') ? theirBundle.oneTimePreKey : null;
-
+  async function initSend(chatId, myIdentityPrivKey, theirIdentityPubB64) {
     // Generate ephemeral key pair for this session
     const ephKP     = await _generateEphemeralKeyPair();
     const myEphPub  = await _exportPublicKey(ephKP);
     const myEphPriv = b64(await subtle.exportKey('pkcs8', ephKP.privateKey));
 
-    let dhOutputs;
-    if (spk && spk.publicKey) {
-      // Real X3DH: DH1=IK_a·SPK_b, DH2=EK_a·IK_b, DH3=EK_a·SPK_b, [DH4=EK_a·OPK_b]
-      const dh1 = await _dhRatchetStep(myIdentityPrivKey, spk.publicKey);
-      const dh2 = await _dhRatchetStep(ephKP.privateKey,  theirIdentityPubB64);
-      const dh3 = await _dhRatchetStep(ephKP.privateKey,  spk.publicKey);
-      dhOutputs = [dh1, dh2, dh3];
-      if (opk && opk.publicKey) {
-        dhOutputs.push(await _dhRatchetStep(ephKP.privateKey, opk.publicKey));
-      }
-    } else {
-      // Legacy fallback: identity-only 2-DH (no signed/one-time prekey available)
-      const dh1 = await _dhRatchetStep(myIdentityPrivKey, theirIdentityPubB64);
-      const dh2 = await _dhRatchetStep(ephKP.privateKey,  theirIdentityPubB64);
-      dhOutputs = [dh1, dh2];
-    }
+    // DH(identity, their_identity) XOR DH(ephemeral, their_identity)
+    const dh1 = await _dhRatchetStep(myIdentityPrivKey, theirIdentityPubB64);
+    const dh2 = await _dhRatchetStep(ephKP.privateKey,  theirIdentityPubB64);
 
-    const rootBits = await _hkdf(_x3dhCombine(dhOutputs), str2ab('WhisperX3DH'), 'RootKey', 512);
+    // Root key = HKDF(dh1 XOR dh2, ...)
+    const combined = new Uint8Array(32);
+    const d1 = new Uint8Array(dh1), d2 = new Uint8Array(dh2);
+    for (let i = 0; i < 32; i++) combined[i] = d1[i] ^ d2[i];
+
+    const rootBits = await _hkdf(combined.buffer, str2ab('WhisperX3DH'), 'RootKey', 512);
     const rootArr  = new Uint8Array(rootBits);
 
     const state = {
@@ -252,11 +206,6 @@
       myEphPubB64:    myEphPub,
       myEphPrivB64:   myEphPriv,
       theirEphPubB64: theirIdentityPubB64,
-      // Tell the recipient which of their own prekeys we used, so their
-      // initRecv() can load the matching local private keys. Only needed on
-      // the very first envelope — see encrypt() below.
-      x3dhSpkId:      spk ? spk.keyId : null,
-      x3dhOpkId:      (spk && opk) ? opk.keyId : null,
       skippedKeys:    new Map(),
       initialized:    true,
     };
@@ -265,43 +214,16 @@
     return { state, ephPubB64: myEphPub };
   }
 
-  // `usedSpkId`/`usedOpkId` come from the first envelope's x3dhSpkId/x3dhOpkId
-  // fields (see encrypt()/decrypt() below) — they tell us which of our OWN
-  // locally-cached prekey private keys to use. If we can't find a matching
-  // local signed-prekey private key (e.g. this browser/device never
-  // generated one, or local storage was cleared), falls back to the legacy
-  // identity-only 2-DH so the message can still be read.
-  async function initRecv(chatId, myIdentityPrivKey, senderEphPubB64, senderIdentityPubB64, usedSpkId, usedOpkId) {
-    const mySpkPriv = usedSpkId && global.KynectaE2E?.loadPrekeyPrivate
-      ? await global.KynectaE2E.loadPrekeyPrivate(usedSpkId) : null;
-    const myOpkPriv = (usedOpkId && mySpkPriv && global.KynectaE2E?.loadPrekeyPrivate)
-      ? await global.KynectaE2E.loadPrekeyPrivate(usedOpkId) : null;
+  async function initRecv(chatId, myIdentityPrivKey, senderEphPubB64, senderIdentityPubB64) {
+    const dh1 = await _dhRatchetStep(myIdentityPrivKey, senderIdentityPubB64);
+    const dh2 = await _dhRatchetStep(myIdentityPrivKey, senderEphPubB64);
 
-    let dhOutputs;
-    if (mySpkPriv) {
-      // Mirrors Alice's DH1..DH4 exactly, from Bob's side.
-      const dh1 = await _dhRatchetStep(mySpkPriv,         senderIdentityPubB64);
-      const dh2 = await _dhRatchetStep(myIdentityPrivKey, senderEphPubB64);
-      const dh3 = await _dhRatchetStep(mySpkPriv,         senderEphPubB64);
-      dhOutputs = [dh1, dh2, dh3];
-      if (myOpkPriv) {
-        dhOutputs.push(await _dhRatchetStep(myOpkPriv, senderEphPubB64));
-      }
-    } else {
-      const dh1 = await _dhRatchetStep(myIdentityPrivKey, senderIdentityPubB64);
-      const dh2 = await _dhRatchetStep(myIdentityPrivKey, senderEphPubB64);
-      dhOutputs = [dh1, dh2];
-    }
+    const combined = new Uint8Array(32);
+    const d1 = new Uint8Array(dh1), d2 = new Uint8Array(dh2);
+    for (let i = 0; i < 32; i++) combined[i] = d1[i] ^ d2[i];
 
-    const rootBits = await _hkdf(_x3dhCombine(dhOutputs), str2ab('WhisperX3DH'), 'RootKey', 512);
+    const rootBits = await _hkdf(combined.buffer, str2ab('WhisperX3DH'), 'RootKey', 512);
     const rootArr  = new Uint8Array(rootBits);
-
-    // A one-time prekey is, by definition, used at most once — delete our
-    // local copy now so it can never be reused even if the same envelope
-    // metadata is somehow replayed to initRecv again.
-    if (usedOpkId && myOpkPriv && global.KynectaE2E?.deletePrekeyPrivate) {
-      global.KynectaE2E.deletePrekeyPrivate(usedOpkId);
-    }
 
     // Generate our ephemeral for the reply ratchet
     const replyKP     = await _generateEphemeralKeyPair();
@@ -317,8 +239,6 @@
       myEphPubB64:    replyEphPub,
       myEphPrivB64:   replyEphPriv,
       theirEphPubB64: senderEphPubB64,
-      x3dhSpkId:      null, // we're the receiver of the bootstrap, nothing to send
-      x3dhOpkId:      null,
       skippedKeys:    new Map(),
       initialized:    true,
     };
@@ -360,16 +280,6 @@
     const ad      = `v2:${chatId}:${msgNum}`; // associated data for authenticity
     const { iv, ct } = await _aesgcmEncrypt(aesKey, plaintext, ad);
 
-    // X3DH: the very first message of a session needs to tell the recipient
-    // which of their own prekeys we used, so their initRecv() can find the
-    // matching local private keys. Only msgNum 0 needs this — after that the
-    // ratchet is fully established and these fields would just be dead
-    // weight on every subsequent envelope, so clear them from state now.
-    const x3dhFields = (msgNum === 0 && (state.x3dhSpkId || state.x3dhOpkId))
-      ? { spkId: state.x3dhSpkId, opkId: state.x3dhOpkId } : null;
-    state.x3dhSpkId = null;
-    state.x3dhOpkId = null;
-
     await _saveState(chatId, state);
 
     return JSON.stringify({
@@ -378,7 +288,6 @@
       n:   msgNum,              // message number in chain
       iv,
       ct,
-      ...(x3dhFields || {}),
     });
   }
 
@@ -407,7 +316,7 @@
 
     // Bootstrap session if first message
     if (!state?.initialized) {
-      const result = await initRecv(chatId, myIdentityPrivKey, envelope.eph, senderIdentityPubB64, envelope.spkId || null, envelope.opkId || null);
+      const result = await initRecv(chatId, myIdentityPrivKey, envelope.eph, senderIdentityPubB64);
       state = result.state;
     }
 
@@ -559,20 +468,9 @@
           let hasSess = await hasSession(ctx);
           if (!hasSess) {
             const myPriv = global.KynectaE2E.getMyIdentityPrivateKey();
-            // X3DH: fetch their full prekey bundle (identity + signed prekey +
-            // maybe a one-time prekey), not just the bare identity key, so
-            // initSend can do a real 3-4-DH handshake instead of the old
-            // identity-only 2-DH. fetchPrekeyBundle() itself already verifies
-            // the signed prekey's signature and returns signedPreKey:null if
-            // that fails or they haven't uploaded X3DH prekeys yet, in which
-            // case initSend() transparently falls back to the legacy 2-DH.
-            const theirBundle = global.KynectaE2E.fetchPrekeyBundle
-              ? await global.KynectaE2E.fetchPrekeyBundle(recipientUserId).catch(() => null)
-              : null;
-            const theirPub = theirBundle?.identityPubKey
-              || await global.KynectaE2E.getIdentityPublicKeyB64(recipientUserId);
+            const theirPub = await global.KynectaE2E.getIdentityPublicKeyB64(recipientUserId);
             if (myPriv && theirPub) {
-              await initSend(ctx, myPriv, theirBundle || theirPub);
+              await initSend(ctx, myPriv, theirPub);
               hasSess = true;
             }
           }
