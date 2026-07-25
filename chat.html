@@ -5396,8 +5396,16 @@
                                     type: 'RETURN_FROM_CALL',
                                     payload: {
                                         returnFromCall: true,
-                                        groupId: ctx.groupId || null,
-                                        groupName: ctx.groupName || null,
+                                        // FIX (CALL-END-NAV-CRASH): ctx is legitimately null here on
+                                        // the receiver side of a call (see "Receiver side has no ctx"
+                                        // comment above) — this branch dereferenced ctx.groupId/
+                                        // groupName directly instead of using optional chaining like
+                                        // the sibling 'messages' branch does, so returning from a call
+                                        // that was answered (not started) from the group module threw
+                                        // "Cannot read properties of null (reading 'groupId')" and
+                                        // aborted the whole post-call navigation.
+                                        groupId: ctx?.groupId || null,
+                                        groupName: ctx?.groupName || null,
                                         timestamp: Date.now()
                                     },
                                     source: 'parent-frame'

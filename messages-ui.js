@@ -3108,11 +3108,26 @@
                         if (_uid) currentUser = { id: _uid, userId: _uid };
                     }
                     const _ts = function(m) { const v = m.createdAt || m.timestamp || 0; return typeof v === 'string' ? new Date(v).getTime() : Number(v); };
+                    // FIX-MSG-VANISH-B: same root cause as FIX-MSG-VANISH-A in
+                    // messages-core.ui-bridge.js's renderRealtimeUpdate, but that
+                    // fix only normalized the 'pending_' prefix in ITS OWN filter —
+                    // this handler runs a second, independent chatId match right
+                    // after and was never given the same normalization. A message
+                    // stored under chatId 'pending_5' (sent before the server
+                    // confirmed the real numeric id) failed this raw `mid === cid`
+                    // check the instant currentChat.id became the real '5' — e.g.
+                    // exactly when the other user's reply arrived — silently
+                    // wiping the whole panel to an empty render even though
+                    // renderRealtimeUpdate had already found and forwarded the
+                    // message correctly.
+                    const _stripPend2 = function(s) { s = String(s || ''); return s.startsWith('pending_') ? s.slice(8) : s; };
                     if (currentChat && currentChat.id && messages.length > 0) {
                         const cid = String(currentChat.id);
+                        const cidStripped = _stripPend2(cid);
                         const filtered = messages.filter(function(m) {
                             const mid = String(m.chatId || m.conversationId || '');
-                            return mid === cid || mid === '';
+                            const midStripped = _stripPend2(mid);
+                            return mid === cid || mid === '' || midStripped === cidStripped;
                         });
                         if (filtered.length > 0) {
                             messages = filtered.sort(function(a,b) { return _ts(a)-_ts(b); });
@@ -14696,8 +14711,13 @@ Type: ${message.type || 'text'}`;
         );
         const msgChatId = String(payload.chatId || payload.conversationId || '');
 
-        // Only append if this message belongs to the open chat
-        if (activeChatId && msgChatId && activeChatId !== msgChatId) return;
+        // Only append if this message belongs to the open chat (FIX-MSG-VANISH-B:
+        // tolerate a 'pending_' prefix on either side, same as the primary
+        // render pipeline, so this fallback doesn't reject a message the
+        // primary pipeline would have accepted).
+        const _stripPend3 = function(s) { return s.startsWith('pending_') ? s.slice(8) : s; };
+        if (activeChatId && msgChatId && activeChatId !== msgChatId &&
+            _stripPend3(activeChatId) !== _stripPend3(msgChatId)) return;
 
         // Use a small delay to let the normal render pipeline try first
         setTimeout(function() {
