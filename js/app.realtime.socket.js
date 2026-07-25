@@ -548,6 +548,31 @@
 
             this._socket = socketIOClient(socketUrl, socketOptions);
 
+            // FIX-ROOT-CAUSE-SILENT-MESSAGE-LOSS: _registerMessageBridgeListeners()
+            // (called below in _onSocketIOConnect on EVERY successful connect,
+            // including reconnects) guards each event name with
+            // `this._registeredSocketListeners.has(eventType) → return`, to avoid
+            // attaching duplicate listeners on the SAME socket. But
+            // `_registeredSocketListeners` was only ever created once in the
+            // constructor and never cleared — while `this._socket` above is a
+            // brand-new Socket.IO client instance on every reconnect. So after the
+            // very first successful connect, every later reconnect's call to
+            // _registerMessageBridgeListeners() silently no-ops for every event
+            // ('message:new', 'call:incoming', etc.) because the event name is
+            // already marked "registered" from the OLD (now-dead) socket. The new
+            // socket object ends up with zero listeners for incoming messages/calls
+            // — nothing throws, nothing logs, the event just has nowhere to go.
+            // That's the "receiver's console shows nothing at all" bug: any device
+            // that has reconnected even once (background/foreground, ping timeout,
+            // DEGRADED recovery — all common, all visible in the app's own logs)
+            // stops receiving real-time events for the rest of that page session.
+            // Fix: reset the tracking Set (and the stale per-socket handler map)
+            // whenever we create a new socket instance, so listeners are freshly
+            // attached to the socket that's actually live.
+            this._registeredSocketListeners = new Set();
+            this._socketHandlerMap = new Map();
+            this._bridgeListenersLogged = false;
+
             this._lastConnectLogState = this._lastConnectLogState || 'disconnected';
 
             this._socket.on('connect', () => {

@@ -1652,7 +1652,26 @@ _clearStaleCallState: function() {
         // streams are being set up, and 'connected' only after RTCPeerConnection fires
         // 'connected'. The previous list was missing 'starting' and 'initiated', causing
         // live calls to be auto-terminated if connection took > 120s (common on TURN relays).
-        const _ACTIVE_CALL_STATES = new Set(['connected','in-call','in_call','connecting','starting','initiated','ringing','incoming','in_progress']);
+        //
+        // FIX-ROOT-CAUSE-2MIN-CALL-DROP-2 (found via forensic log analysis):
+        // The ONLY place that ever sets callsState.callState to this string is
+        // line ~3647 of calls-core.part5.js, and the literal value it writes is
+        // 'initiating' (present continuous) — NOT 'initiated' (past tense).
+        // Because this set only listed 'initiated', a call that was still
+        // legitimately negotiating (callState === 'initiating') was NEVER
+        // recognized as "safe" by this first, general 120s check. It was only
+        // meant to be governed by the SECOND, dedicated check further down in
+        // this same function, which allows 'initiating' calls a full 300s
+        // (5 min) before cleanup — but that second check never got a chance to
+        // run, because this first 120s check fired first and reset the call.
+        // This is the exact "call ends itself after ~2 minutes even though
+        // we're still talking" bug reproduced in the console log: state was
+        // 'initiating' and duration was ~125000ms when "Cleaning up stale call
+        // state" fired. Adding 'initiating' here restores the intent described
+        // in the FIX-ROOT-CAUSE-2MIN-CALL-DROP comment below: this 120s check
+        // should never fire for a call still in initiating/negotiating states —
+        // only the dedicated 'initiating' timeout (300s) below should.
+        const _ACTIVE_CALL_STATES = new Set(['connected','in-call','in_call','connecting','starting','initiated','initiating','ringing','incoming','in_progress']);
 
         // FIX-ROOT-CAUSE-2MIN-CALL-DROP: the app tracks call state in THREE
         // separate places that are not guaranteed to stay in sync —
@@ -1742,9 +1761,17 @@ _clearStaleCallState: function() {
 
         const callDuration = Date.now() - window.__CallsCoreShared.callsState.callStartTime;
 
+        // Same safety net as the block above: if this callId has genuinely
+        // connected at least once, never auto-end it here either, no matter
+        // what this tracker's callState string currently says.
+        const _activeCallIdNow2 = window.__CallsCoreShared.callsState.activeCallId;
+        const _hasConnectedOnce2 = !!(
+            _activeCallIdNow2 &&
+            window.__CallsCoreShared.callsState._connectedCallIds &&
+            window.__CallsCoreShared.callsState._connectedCallIds.has(_activeCallIdNow2)
+        );
 
-
-        if (callDuration > 300000) { // PHASE15 FIX: 300s (5min) — was 120s which killed calls on slow TURN relays
+        if (callDuration > 300000 && !_hasConnectedOnce2) { // PHASE15 FIX: 300s (5min) — was 120s which killed calls on slow TURN relays
 
 
 
