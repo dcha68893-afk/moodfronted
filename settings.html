@@ -3310,7 +3310,11 @@
       const r = await api('DELETE', '/api/settings/account', { confirmation: conf, password: pass });
       if (r.status === 'success') {
         d.remove(); toast('Account deleted. Logging out…', 'success');
-        setTimeout(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/auth.html'; }, 2000);
+        // FIX (DEAD-AUTH-STUB): /auth.html is a leftover placeholder file with
+        // no real content (no head/body, just a script tag) — it was never
+        // wired up to anything real. The actual login/register entry point
+        // the whole app serves at "/" is index.html, so redirect there.
+        setTimeout(() => { localStorage.clear(); sessionStorage.clear(); window.location.href = '/index.html'; }, 2000);
       } else {
         err.textContent = r.message || 'Failed — check your password.'; err.style.display = 'block';
         this.disabled = false; this.textContent = 'Delete My Account';

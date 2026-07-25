@@ -4259,7 +4259,11 @@ export function loadDangerSection(container) {
                             if (window.parent && window.parent !== window) {
                                 window.parent.postMessage({ type: 'ACCOUNT_DELETED', source: 'settings' }, '*');
                             } else {
-                                window.location.href = '/login.html';
+                                // FIX (DEAD-LOGIN-STUB): '/login.html' is not a real file in
+                                // this app (it only "worked" by accident via the server's
+                                // SPA catch-all serving index.html for any unmatched HTML
+                                // route). Point at the real entry page explicitly.
+                                window.location.href = '/index.html';
                             }
                         }, 800);
                     } else {

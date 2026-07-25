@@ -9,14 +9,17 @@
 
 'use strict';
 
-// FIX v19.0.0: Bumped from v18 — this deploy includes the messages-core
-// split (bootstrap/operations/ui-bridge), chat.html chat-panel-active fixes,
-// and multiple messages-ui.js fixes (three-dot menu, biometric unlock,
-// block/archive sync). Without a version bump, browsers with the old SW
-// already installed can keep serving old cached files until their own
-// periodic update check happens — bumping forces immediate eviction.
-const SW_VERSION = '19.0.0';
-const CACHE_NAME = 'moodchat-static-v20'; // Bumped — group-core.js cache entry was stale (still referenced pre-split file)
+// FIX v19.1.0: Bumped — index.html now has a landing screen (opt-in
+// Login/Register/Google/Install navigation before the auth form),
+// settings.html + settings-ui.js had two dead-page redirects fixed
+// (/auth.html and /login.html both didn't exist as real files).
+// Navigation requests are network-first already, so online users pick
+// this up automatically either way — but bumping still matches this
+// file's own established practice of forcing immediate cache eviction
+// for already-installed PWA users on a meaningful deploy, rather than
+// waiting on their periodic update check.
+const SW_VERSION = '19.1.0';
+const CACHE_NAME = 'moodchat-static-v21'; // Bumped — landing screen + dead-redirect fixes
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
