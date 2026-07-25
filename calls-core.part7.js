@@ -7515,6 +7515,19 @@ _escapeHtml: function(text) {
 
         window.__CallsCoreShared.callsState.callState = 'connected';
 
+        // FIX-ROOT-CAUSE-45S-FORCE-END (completing the fix described on
+        // WebRTCManager.clearConnectionTimeout): explicitly cancel the
+        // connection timer now that the call is genuinely connected, rather
+        // than only relying on the reactive callState check inside the timer
+        // callback — that check runs at the exact moment the timer fires and
+        // can miss a transient state reset. This was defined but never
+        // actually invoked anywhere in the codebase.
+        try {
+            if (window.__CallsCoreShared.WebRTCManager && typeof window.__CallsCoreShared.WebRTCManager.clearConnectionTimeout === 'function') {
+                window.__CallsCoreShared.WebRTCManager.clearConnectionTimeout();
+            }
+        } catch (_) {}
+
 
 
         window.__CallsCoreShared.callsState.callActive = true;

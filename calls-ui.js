@@ -4953,6 +4953,26 @@ handleContactItemClick: function(e) {
                 return;
             }
 
+            // ── FIX (3-MIN-TIMEOUT-KILLS-CONNECTED-CALL): a stale/duplicate
+            // 'call:incoming' event arriving AFTER the receiver already
+            // accepted (retry, socket-reconnect replay, or a callId that
+            // doesn't string-match due to the local/server id aliasing
+            // documented in calls-core.js) used to slip past the id-equality
+            // dedup below and re-run this whole function mid-call — re-
+            // showing the ring modal and restarting a fresh 3-minute decline
+            // timer that then force-ended the already-connected call. State
+            // can't be spoofed by an id mismatch, so check that first: if
+            // we're already accepting/negotiating/connected for ANY call,
+            // this event is necessarily stale and must be dropped outright.
+            const _alreadyInCall =
+                window.__callActive === true ||
+                (UIState.callState && ['connecting', 'connected', 'in-call', 'in_call'].includes(UIState.callState)) ||
+                (typeof coreInstance !== 'undefined' && coreInstance && typeof coreInstance.isInCall === 'function' && coreInstance.isInCall());
+            if (_alreadyInCall) {
+                console.warn('[Calls UI] handleIncomingCall: ignoring stale/duplicate incoming-call event — already accepted/connected', incomingId);
+                return;
+            }
+
             // ── DEDUP: ignore if same call already ringing ───────────────────
             if (window._currentIncomingCallId && window._currentIncomingCallId === incomingId) {
                 return; // already showing this call

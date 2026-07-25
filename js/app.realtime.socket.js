@@ -1127,13 +1127,23 @@
 
                 if (evType === 'message:new' || evType === 'new_message' || evType === 'chat:message') {
                     try {
-                        var _msgFrames = document.querySelectorAll('iframe');
-                        _msgFrames.forEach(function(f) {
-                            try {
-                                f.contentWindow.postMessage({ type: 'message:new', payload: payload }, '*');
-                                f.contentWindow.postMessage({ type: 'new_message',  payload: payload }, '*');
-                            } catch(_) {}
-                        });
+                        // FIX (MESSAGE-RELAY-CONSOLIDATION): this broadcasts to
+                        // every iframe under two different event names AND
+                        // dispatches kyn:message:new below (which chat.html's
+                        // own relay listener also acts on) — confirmed to
+                        // triple-deliver the same message alongside chat.html's
+                        // two relay paths. Only proceed if the shared gate says
+                        // nothing has claimed this message yet.
+                        var _claimedFirst = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', payload);
+                        if (_claimedFirst) {
+                            var _msgFrames = document.querySelectorAll('iframe');
+                            _msgFrames.forEach(function(f) {
+                                try {
+                                    f.contentWindow.postMessage({ type: 'message:new', payload: payload }, '*');
+                                    f.contentWindow.postMessage({ type: 'new_message',  payload: payload }, '*');
+                                } catch(_) {}
+                            });
+                        }
                         // PHASE15 FIX: Also fire on parent window so chat.html catches it
                         // even when messages-core runs in the same frame (no iframe).
                         try { window.dispatchEvent(new CustomEvent('kyn:message:new', { detail: payload })); } catch(_) {}
@@ -2173,6 +2183,14 @@
             // We do this by registering our own always-active listeners
             ['new_message', 'message:new', 'chat:message'].forEach(function(evt) {
                 _origOn(evt, function(payload) {
+                    // FIX (MESSAGE-RELAY-CONSOLIDATION): this is explicitly a
+                    // third fan-out mechanism layered on top of the other two
+                    // in this same file ("supplements the wildcard .on('*')
+                    // bridge" per the comment above) — gate it through the
+                    // shared registry so it only actually delivers if neither
+                    // of the other paths already has.
+                    var _claimed = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', payload || {});
+                    if (!_claimed) return;
                     var iframes = document.querySelectorAll('iframe');
                     iframes.forEach(function(f) {
                         try {

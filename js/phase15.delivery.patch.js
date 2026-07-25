@@ -14,12 +14,22 @@
     // ── 1. Message delivery to iframes ───────────────────────────────────────
     function _ensureMessageDelivery(payload) {
         if (!payload) return;
-        var iframes = document.querySelectorAll('iframe');
         var msg = typeof payload === 'object' ? payload : { content: payload };
-        iframes.forEach(function(f) {
-            try { f.contentWindow.postMessage({ type: 'message:new', payload: msg }, '*'); } catch(_) {}
-            try { f.contentWindow.postMessage({ type: 'new_message',  payload: msg }, '*'); } catch(_) {}
-        });
+        // FIX (MESSAGE-RELAY-CONSOLIDATION): this is the 5th independent code
+        // path in this codebase that posts message:new into iframes (2 in
+        // chat.html, 2 in app.realtime.socket.js, this one) — each added over
+        // time as a "guarantee" on top of the last without removing the
+        // earlier ones. Gate through the shared registry defined in
+        // chat.html so only the first path to see a given message actually
+        // delivers it, instead of every path racing to deliver it separately.
+        var _claimed = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', msg);
+        if (_claimed) {
+            var iframes = document.querySelectorAll('iframe');
+            iframes.forEach(function(f) {
+                try { f.contentWindow.postMessage({ type: 'message:new', payload: msg }, '*'); } catch(_) {}
+                try { f.contentWindow.postMessage({ type: 'new_message',  payload: msg }, '*'); } catch(_) {}
+            });
+        }
         // Also dispatch as a document-level event for same-window listeners
         try { document.dispatchEvent(new CustomEvent('message:new', { detail: msg })); } catch(_) {}
     }

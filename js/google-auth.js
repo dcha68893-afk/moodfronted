@@ -235,6 +235,25 @@
         window.addEventListener('orientationchange', () => {
             setTimeout(reRenderVisible, 300);
         });
+
+        // FIX (GOOGLE-BUTTON-RENDER-ROBUSTNESS): the tab-switch/resize/
+        // orientation listeners above cover the known ways a container's
+        // visibility or width can change, but any other path (a CSS
+        // transition finishing, a parent panel animating open, a layout
+        // shift from late-loading content) would leave a stale/blank button
+        // with nothing to trigger a re-render. A ResizeObserver on each
+        // container catches box-size changes from any cause, so this acts as
+        // a final safety net on top of the explicit listeners.
+        if (typeof ResizeObserver === 'function') {
+            const ro = new ResizeObserver(() => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(reRenderVisible, 250);
+            });
+            [
+                document.getElementById('googleSignInLoginContainer'),
+                document.getElementById('googleSignInRegisterContainer')
+            ].filter(Boolean).forEach((el) => ro.observe(el));
+        }
     }
 
     if (document.readyState === 'loading') {

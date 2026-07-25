@@ -1128,6 +1128,13 @@
                 visibility: visible !important;
                 pointer-events: auto !important;
                 display: block !important;
+                /* FIX (call-header-bleed-through): belt-and-suspenders — the
+                   iframe itself has no opaque background by default, so if
+                   anything underneath ever painted before the in-call UI
+                   loaded, it could show through the edges. Force transparent
+                   here (the call UI inside the iframe supplies its own
+                   opaque background) rather than relying on paint order. */
+                background: transparent !important;
             }
 
             #globalHeader {
@@ -1153,6 +1160,20 @@
                 opacity: 1 !important;
                 visibility: visible !important;
                 pointer-events: auto !important;
+            }
+            /* FIX (call-header-bleed-through): body.call-screen-active and
+               body.chat-panel-active #globalHeader rules above have identical
+               specificity. When a call starts from inside an already-open
+               chat, both classes land on <body> at once, and because the
+               chat-panel-active rule appears later in this stylesheet it won
+               the cascade — leaving the old chat header (name/avatar/message
+               icon) visibly bleeding through on top of the fullscreen call
+               UI. An active call must always win regardless of source order. */
+            body.call-screen-active.chat-panel-active #globalHeader,
+            body.call-screen-active.group-panel-active #globalHeader {
+                opacity: 0 !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
             }
             .header-module-subtitle {
                 display: none;
@@ -3403,6 +3424,14 @@
                 if (data.type === 'CHAT_OPENED' || data.type === 'CONVERSATION_OPENED') {
                     // Apply on all widths — CSS only shows effect on mobile
                     document.body.classList.add('chat-panel-active');
+                    // FIX (back-navigation-skips-chat): opening a 1:1 chat never
+                    // pushed a browser history entry, unlike group/status panels
+                    // (see syncBrowserHistoryState calls below). So pressing back
+                    // skipped straight past "close chat, return to list" to
+                    // whatever older page-level entry was actually next in the
+                    // stack — landing on a random other module. Push a history
+                    // entry here to match the existing group/status pattern.
+                    syncBrowserHistoryState(window.__currentPage, false);
                     // Clear pending_chat so all retry loops stop
                     try { sessionStorage.removeItem('pending_chat'); } catch (_) {}
                     // FIX: render the header immediately with whatever we already
@@ -3798,6 +3827,47 @@
     <!-- ====================================================================== -->
     <!-- SESSION VALIDATION FOR CHAT PAGE - FIXED VERSION -->
     <!-- ====================================================================== -->
+    <script>
+        // ── FIX (MESSAGE-RELAY-CONSOLIDATION): this codebase grew 5 separate,
+        // uncoordinated code paths that each independently postMessage a
+        // 'message:new' event into the messages iframe (2 in this file, 2 in
+        // app.realtime.socket.js, 1 in phase15.delivery.patch.js) — each one
+        // added over time as a "safety net" when a symptom was diagnosed,
+        // without ever removing the earlier path that was actually the real
+        // culprit. Multiple paths racing to deliver the same message can
+        // cause duplicate/garbled renders, or a malformed early delivery
+        // getting processed first while dedup logic on the receiving end
+        // silently drops the correct, fuller delivery that arrives right
+        // after it — a plausible root cause of "message logged as received
+        // but never rendered."
+        //
+        // window.__kynRelayMessageOnce(iframeWindow, type, payload) is now
+        // the single gate every one of those 5 call-sites routes through: it
+        // performs the actual postMessage but only for the FIRST caller per
+        // unique message (by serverId/localId/broadcastId + chatId), so the
+        // other 4 become safe no-ops instead of duplicate deliveries. This
+        // preserves every path as a fallback (none were deleted, since I
+        // can't verify live which one is safe to remove) while guaranteeing
+        // only one delivery actually reaches the iframe.
+        window.__kynRelayedMsgIds = window.__kynRelayedMsgIds || new Set();
+        window.__kynRelayMessageOnce = function (iframeWindow, type, payload) {
+            try {
+                const p = (payload && payload.payload) ? payload.payload : payload; // tolerate either shape
+                const chatId = String((p && (p.chatId || p.conversationId)) || '');
+                const msgId  = String((p && (p.id || p.serverId || p.localId || p._broadcastId)) || '');
+                const key = (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || Date.now());
+                if (window.__kynRelayedMsgIds.has(key)) return false; // already delivered by another path
+                window.__kynRelayedMsgIds.add(key);
+                setTimeout(function () { window.__kynRelayedMsgIds.delete(key); }, 15000);
+                if (!iframeWindow) return true; // registration-only call — caller already posted directly
+                iframeWindow.postMessage(
+                    (payload && payload.type) ? payload : { type: type || 'message:new', payload: p, source: 'ws-bridge' },
+                    '*'
+                );
+                return true;
+            } catch (_) { return false; }
+        };
+    </script>
     <script>
         (function() {
             function afterShellRender(callback) {
@@ -7037,6 +7107,13 @@
                     if (!_enriched.chatId && _enriched.roomId)         _enriched.chatId = _enriched.roomId;
 
                     msgIframe.contentWindow.postMessage({ type: 'message:new', payload: _enriched, source: 'ws-bridge' }, '*');
+                    // Mark this delivery in the shared gate too, so the other
+                    // 4 relay paths (2 in app.realtime.socket.js, 1 in
+                    // phase15.delivery.patch.js, plus this file's own second
+                    // call-site below) treat it as already delivered.
+                    try {
+                        if (window.__kynRelayMessageOnce) window.__kynRelayMessageOnce(null, 'message:new', { chatId: _enriched.chatId, id: _enriched.id, serverId: _enriched.serverId, localId: _enriched.localId, _broadcastId: _enriched._broadcastId });
+                    } catch (_) {}
 
                     const _cid = _enriched.chatId;
                     if (_cid) {
@@ -7647,6 +7724,15 @@
                 ['kyn:message:received', 'kyn:message:new', 'kyn:new_message'].forEach(evt => {
                     window.addEventListener(evt, (e) => {
                         const p = e.detail || {};
+                        // FIX (MESSAGE-RELAY-CONSOLIDATION): gate through the
+                        // shared dedup registry — this DOM-CustomEvent-driven
+                        // path can fire for the same message the direct
+                        // socket.on('message:new') path above already
+                        // delivered. __kynRelayMessageOnce returns true only
+                        // the FIRST time a given message is claimed; skip if
+                        // another path already claimed it.
+                        const _isFirstClaim = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', p);
+                        if (!_isFirstClaim) return;
                         _post('messagesIframe', 'message:new', p);
                         if (p.chatId) _post('messagesIframe', 'CONVERSATION_UPDATED', { chatId: p.chatId, lastMessage: p.content, lastMessageAt: p.createdAt || Date.now() });
                     });

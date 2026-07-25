@@ -14726,7 +14726,12 @@ Type: ${message.type || 'text'}`;
         if (type !== 'message:new' && type !== 'new_message' && type !== 'MESSAGE_RECEIVED') return;
 
         const payload = evt.data.payload || evt.data;
-        if (!payload || !payload.content) return;
+        // FIX (matches MSG-NOT-DISPLAYED-CONTENT-FIELD-MISMATCH elsewhere in
+        // this codebase): this required payload.content specifically, but
+        // some payload shapes carry the text under .text or .body instead —
+        // silently dropping this fallback's only chance to append the
+        // message if the primary render pipeline also missed it.
+        if (!payload || !(payload.content || payload.text || payload.body)) return;
 
         // Check if a chat panel is open
         const panel = document.getElementById('chatPanel');

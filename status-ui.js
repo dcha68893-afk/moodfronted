@@ -5197,19 +5197,15 @@ function renderSectionContent(sectionId) {
     let container, data;
     switch(sectionId) {
         case 'allStatusSection':
-            container = UIElements.allStatusList;
-            // Merge friend statuses with own statuses, excluding own from friends list
-            {
-                const _currentUid = String((window.currentUser && (window.currentUser.id || window.currentUser.userId)) || '');
-                const _friendOnly = Array.isArray(friendsStatuses)
-                    ? friendsStatuses.filter(s => {
-                        const _ownerId = String(s.userId || s.user_id || (s.user && s.user.id) || '');
-                        return !_currentUid || _ownerId !== _currentUid;
-                    })
-                    : [];
-                data = filterStatusesByPrivacy(_friendOnly);
+            // FIX: This used to duplicate the split logic and dump ALL friend
+            // statuses (viewed + unviewed) into #allStatusList, clobbering the
+            // Recent/Viewed split that renderStatusListInstantlyUI() computes.
+            // Delegate to the single source of truth instead so the split
+            // survives filter changes, socket events, and tab switches.
+            if (typeof renderStatusListInstantlyUI === 'function') {
+                renderStatusListInstantlyUI();
             }
-            break;
+            return;
         case 'friendsStatusSection':
             container = UIElements.friendsStatusList;
             data = filterStatusesByType('friends');
@@ -8054,7 +8050,16 @@ function applyOwnAvatarToStatusPreview(avatarEl) {
             try {
                 const auth = JSON.parse(localStorage.getItem('kynecta_auth') || 'null');
                 const u = (auth && (auth.user || auth)) || null;
-                avatarUrl = u && (u.avatar || u.photoURL || u.profilePicture) || '';
+                // IDENTITY-CENTRALIZATION: prefer the shared resolver (checks
+                // avatar/photoURL/avatarUrl/profileImage/profilePhoto/picture/
+                // userAvatar/photo, plus the live identity cache) so accounts
+                // whose avatar came back under a field name this file wasn't
+                // explicitly checking still resolve correctly.
+                avatarUrl = (u && window.Identity && typeof window.Identity.resolveAvatar === 'function'
+                    ? window.Identity.resolveAvatar(u)
+                    : null)
+                    || (u && (u.avatar || u.photoURL || u.avatarUrl || u.profilePicture || u.profileImage || u.profilePhoto || u.picture || u.userAvatar || u.photo))
+                    || '';
                 if (avatarUrl) { try { localStorage.setItem('user_avatar', avatarUrl); } catch (_) {} }
             } catch (_) { /* fall through to initials */ }
         }
