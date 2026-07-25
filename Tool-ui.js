@@ -4601,7 +4601,7 @@ window.addEventListener('tools:active', function() {
     function applyUISettingChange(section, key, value) {
         if (section === "appearance") {
             if (key === "theme") {
-                var t = value === "auto" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : value;
+                var t = (value === "dark" ? "dark" : "light");
                 document.documentElement.setAttribute("data-theme", t);
                 document.body.setAttribute("data-theme", t);
                 document.body.classList.toggle("dark-theme", t === "dark");

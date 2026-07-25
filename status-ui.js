@@ -9346,9 +9346,7 @@ UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v8.2
         try {
             if (section === 'appearance') {
                 if (key === 'theme') {
-                    const resolved = value === 'auto'
-                        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                        : value;
+                    const resolved = (value === 'dark' ? 'dark' : 'light');
                     document.documentElement.setAttribute('data-theme', resolved);
                     document.body.setAttribute('data-theme', resolved);
                 }

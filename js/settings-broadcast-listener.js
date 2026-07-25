@@ -16,9 +16,12 @@
     'use strict';
 
     // ── Resolve theme from raw value ─────────────────────────────────────────
+    // 'auto' removed app-wide. FIX: this used to default an unset/unrecognized
+    // value to 'dark', which meant any iframe that received a settings object
+    // without an explicit theme (e.g. a partial update) could silently flip to
+    // dark. Defaults to 'light' now, matching every other module.
     function _resolveTheme(t) {
-        if (t === 'auto') return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        return t || 'dark';
+        return t === 'dark' ? 'dark' : 'light';
     }
 
     // ── Apply a full settings object to this iframe's DOM ────────────────────
@@ -32,14 +35,25 @@
         if (ap.theme) {
             var th = _resolveTheme(ap.theme);
             root.setAttribute('data-theme', th);
+            root.classList.toggle('theme-dark', th === 'dark');
+            root.classList.toggle('dark-theme', th === 'dark');
             if (body) body.setAttribute('data-theme', th);
+            try { localStorage.setItem('app_theme', th); } catch (_) {}
         }
         if (ap.accentColor) root.style.setProperty('--accent-color', ap.accentColor);
         if (ap.fontSize) {
-            var fmap = { small: '13px', medium: '15px', large: '17px', 'x-large': '19px' };
-            var fs = fmap[ap.fontSize] || ap.fontSize;
-            root.style.setProperty('--base-font-size', fs);
-            if (body) body.style.fontSize = fs;
+            // FIX: fontSize is always a numeric px value app-wide (12/14/16/18),
+            // not a small/medium/large/x-large label. The old lookup never
+            // matched a number and fell through to setting --base-font-size
+            // with no unit at all (e.g. "16" instead of "16px"), which is
+            // invalid CSS and silently no-opped every var(--base-font-size)
+            // consumer.
+            var fs = parseInt(ap.fontSize, 10);
+            if (!fs || fs < 10 || fs > 28) fs = 16;
+            root.style.setProperty('--base-font-size', fs + 'px');
+            root.style.fontSize = fs + 'px';
+            if (body) body.style.fontSize = fs + 'px';
+            try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
         }
         if (ap.compactMode !== undefined) {
             root.setAttribute('data-compact', ap.compactMode ? 'true' : 'false');

@@ -4741,25 +4741,18 @@
       }
 
       try {
+        // FIX (theme flash / competing-theme audit): same issue as
+        // js/app.core.js — a private 'moodchat_theme' key, dark-by-default,
+        // classes-only (no data-theme attribute), plus a dead matchMedia
+        // 'auto' listener. Unified with the shared 'app_theme' key/attribute.
         const html = document.documentElement;
-        const savedTheme = localStorage.getItem("moodchat_theme") || "dark";
+        const savedTheme = (localStorage.getItem("app_theme") || localStorage.getItem("moodchat_theme")) === "dark" ? "dark" : "light";
 
         html.classList.remove("theme-dark", "theme-light", "theme-auto");
-
-        if (savedTheme === "auto") {
-          const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          html.classList.add(prefersDark ? "theme-dark" : "theme-light");
-          html.classList.add("theme-auto");
-        } else {
-          html.classList.add(`theme-${savedTheme}`);
-        }
-
-        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
-          if (savedTheme === "auto") {
-            html.classList.remove("theme-dark", "theme-light");
-            html.classList.add(e.matches ? "theme-dark" : "theme-light");
-          }
-        });
+        html.classList.add(`theme-${savedTheme}`);
+        html.classList.toggle("dark-theme", savedTheme === "dark");
+        html.setAttribute("data-theme", savedTheme);
+        try { localStorage.setItem("app_theme", savedTheme); } catch (_) {}
 
         console.log(`✅ Theme initialized: ${savedTheme}`);
 

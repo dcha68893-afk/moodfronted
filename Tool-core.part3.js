@@ -1530,9 +1530,7 @@ async function loadUserSettings() {
             const { section, key, value } = payload;
             
             if (section === 'appearance' && key === 'theme') {
-                const theme = value === 'auto'
-                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                    : value;
+                const theme = (value === 'dark' ? 'dark' : 'light');
                 document.documentElement.setAttribute('data-theme', theme);
                 document.body.setAttribute('data-theme', theme);
             }
@@ -1550,11 +1548,12 @@ async function loadUserSettings() {
             const s = payload.settings;
             
             if (s.appearance?.theme) {
-                const theme = s.appearance.theme === 'auto'
-                    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                    : s.appearance.theme;
+                const theme = s.appearance.theme === 'dark' ? 'dark' : 'light';
                 document.documentElement.setAttribute('data-theme', theme);
                 document.body.setAttribute('data-theme', theme);
+                document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+                document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+                try { localStorage.setItem('app_theme', theme); } catch (_) {}
             }
             
             if (s.appearance?.fontSize) {
@@ -3781,9 +3780,11 @@ export async function checkDarkMode() {
             document.body.setAttribute('data-theme', preference);
             return;
         }
-        const theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-        document.documentElement.setAttribute('data-theme', theme);
-        document.body.setAttribute('data-theme', theme);
+        // No saved preference yet — default to light, same first-run default
+        // as the rest of the app (this used to fall back to the OS preference,
+        // which was a leftover from the removed 'auto' theme).
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.body.setAttribute('data-theme', 'light');
     } catch {}
 }
 
@@ -4921,7 +4922,7 @@ export default marketplace;
     function applySettingToToolsModule(section, key, value) {
         if (section === 'appearance') {
             if (key === 'theme') {
-                var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+                var theme = (value === 'dark' ? 'dark' : 'light');
                 document.documentElement.setAttribute('data-theme', theme);
                 document.body.setAttribute('data-theme', theme);
             }

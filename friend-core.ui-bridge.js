@@ -3804,7 +3804,7 @@ window.debugUserDiscovery = function() {
 function applySettingToFriendModule(section, key, value) {
     if (section === 'appearance') {
         if (key === 'theme') {
-            var theme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+            var theme = (value === 'dark' ? 'dark' : 'light');
             document.documentElement.setAttribute('data-theme', theme);
             document.body.setAttribute('data-theme', theme);
         }

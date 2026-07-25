@@ -645,12 +645,12 @@ const SettingsState = {
     _applyTheme(theme) {
         try {
             const root = document.documentElement;
-            if (theme === 'auto') {
-                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                root.setAttribute('data-theme', isDark ? 'dark' : 'light');
-            } else {
-                root.setAttribute('data-theme', theme);
-            }
+            // 'auto' removed app-wide — only 'light'/'dark' are valid.
+            const resolved = theme === 'dark' ? 'dark' : 'light';
+            root.setAttribute('data-theme', resolved);
+            root.classList.toggle('theme-dark', resolved === 'dark');
+            root.classList.toggle('dark-theme', resolved === 'dark');
+            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
             
             const event = new CustomEvent('themeApplied', {
                 detail: { theme, timestamp: Date.now() }

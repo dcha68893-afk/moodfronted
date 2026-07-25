@@ -608,13 +608,12 @@ function applyTheme(theme) {
     
     try {
         const root = document.documentElement;
-        
-        if (theme === 'auto') {
-            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            root.setAttribute('data-theme', isDark ? 'dark' : 'light');
-        } else {
-            root.setAttribute('data-theme', theme);
-        }
+        // 'auto' removed app-wide — only 'light'/'dark' are valid.
+        const resolved = theme === 'dark' ? 'dark' : 'light';
+        root.setAttribute('data-theme', resolved);
+        root.classList.toggle('theme-dark', resolved === 'dark');
+        root.classList.toggle('dark-theme', resolved === 'dark');
+        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
         
         const event = new CustomEvent('themeApplied', {
             detail: { theme, timestamp: Date.now() }
@@ -852,7 +851,7 @@ async function saveSettings() {
         }
         
         if (userSettings.appearance) {
-            applyTheme(userSettings.appearance.theme || 'auto');
+            applyTheme(userSettings.appearance.theme || 'light');
         }
         
         // If offline, queue the entire settings object for later sync
@@ -2086,7 +2085,7 @@ const DEFAULT_SETTINGS = {
         emailNotifications: false
     },
     appearance: {
-        theme: 'auto',
+        theme: 'light',
         accentColor: '#0084ff',
         fontSize: 16,
         language: 'en',
@@ -2375,9 +2374,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Apply appearance/theme immediately before any async work
                     if (data.appearance?.theme) {
                         const t = data.appearance.theme;
-                        const resolved = t === 'auto'
-                            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                            : t;
+                        const resolved = (t === 'dark' ? 'dark' : 'light');
                         document.documentElement.setAttribute('data-theme', resolved);
                     }
                     if (data.appearance?.fontSize) {

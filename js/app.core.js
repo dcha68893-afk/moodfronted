@@ -434,18 +434,21 @@
       window.SETTINGS_SERVICE = {
         current: {},
         applyTheme: function() {
-          const savedTheme = localStorage.getItem('moodchat_theme') || 'dark';
+          // FIX (theme flash / competing-theme audit): this used to read a
+          // completely separate 'moodchat_theme' key (not the shared
+          // 'app_theme' key every other module uses), default new users to
+          // DARK when unset, and only ever toggle theme-dark/theme-light
+          // classes — never the `data-theme` attribute that almost every
+          // stylesheet actually keys off. That's a 7th disconnected theme
+          // system that could silently fight the real one. Now reads the
+          // shared key, defaults to light, and keeps data-theme in sync.
+          const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme')) === 'dark' ? 'dark' : 'light';
           const html = document.documentElement;
-          
           html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
-          
-          if (savedTheme === 'auto') {
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            html.classList.add(prefersDark ? 'theme-dark' : 'theme-light');
-            html.classList.add('theme-auto');
-          } else {
-            html.classList.add(`theme-${savedTheme}`);
-          }
+          html.classList.add(`theme-${savedTheme}`);
+          html.classList.toggle('dark-theme', savedTheme === 'dark');
+          html.setAttribute('data-theme', savedTheme);
+          try { localStorage.setItem('app_theme', savedTheme); } catch (_) {}
         },
         getSetting: function(key) {
           try {
@@ -2672,27 +2675,18 @@ window.isPublicPage = function() {
       
       // Fallback theme initialization
       const html = document.documentElement;
-      const savedTheme = localStorage.getItem('moodchat_theme') || 'dark';
-      
+      // FIX: see applyTheme() above — same 7th-theme-system issue existed
+      // here too (separate key, dark-by-default, classes only, and a
+      // matchMedia 'auto' listener with nothing left to drive since 'auto'
+      // no longer exists).
+      const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme')) === 'dark' ? 'dark' : 'light';
+
       // Remove all theme classes
       html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
-      
-      // Apply saved theme
-      if (savedTheme === 'auto') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        html.classList.add(prefersDark ? 'theme-dark' : 'theme-light');
-        html.classList.add('theme-auto');
-      } else {
-        html.classList.add(`theme-${savedTheme}`);
-      }
-      
-      // Listen for theme changes
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-        if (savedTheme === 'auto') {
-          html.classList.remove('theme-dark', 'theme-light');
-          html.classList.add(e.matches ? 'theme-dark' : 'theme-light');
-        }
-      });
+      html.classList.add(`theme-${savedTheme}`);
+      html.classList.toggle('dark-theme', savedTheme === 'dark');
+      html.setAttribute('data-theme', savedTheme);
+      try { localStorage.setItem('app_theme', savedTheme); } catch (_) {}
       
       console.log(`✅ Theme initialized: ${savedTheme}`);
       
@@ -5520,7 +5514,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         }
       } else {
         // Fallback theme management
-        const savedTheme = localStorage.getItem('moodchat_theme') || 'dark';
+        const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme')) === 'dark' ? 'dark' : 'light';
         this.applyTheme(savedTheme);
         
         // Theme toggle button
@@ -5551,6 +5545,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           const currentTheme = document.documentElement.classList.contains('theme-dark') ? 'dark' : 'light';
           const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
           this.applyTheme(newTheme);
+          try { localStorage.setItem('app_theme', newTheme); } catch (_) {}
           localStorage.setItem('moodchat_theme', newTheme);
         });
         
@@ -5561,17 +5556,14 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     // Apply theme
     applyTheme: function(theme) {
       const html = document.documentElement;
-      
+      const resolved = theme === 'dark' ? 'dark' : 'light';
+
       // Remove all theme classes
       html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
-      
-      if (theme === 'auto') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        html.classList.add(prefersDark ? 'theme-dark' : 'theme-light');
-        html.classList.add('theme-auto');
-      } else {
-        html.classList.add(`theme-${theme}`);
-      }
+      html.classList.add(`theme-${resolved}`);
+      html.classList.toggle('dark-theme', resolved === 'dark');
+      html.setAttribute('data-theme', resolved);
+      try { localStorage.setItem('app_theme', resolved); } catch (_) {}
       
       // Dispatch theme change event
       const event = new CustomEvent('moodchat-theme-change', {

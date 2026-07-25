@@ -9,6 +9,12 @@
      which only arrives after this document has already parsed/painted. -->
 <script>
 (function () {
+    // 'auto' theme has been removed app-wide (it was a major source of the
+    // theme-flash / "sparking" bug: it required an async matchMedia check
+    // that ran differently across pages, so different modules would settle
+    // on different themes for a frame or two). Only 'light' and 'dark' are
+    // valid now; any legacy 'auto' (or unrecognized) value saved from
+    // before this change quietly falls back to 'light'.
     function resolveEarlyTheme() {
         var raw = null;
         try { raw = localStorage.getItem('app_theme'); } catch (_) {}
@@ -18,12 +24,29 @@
                 if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
             } catch (_) {}
         }
-        if (raw === 'auto') {
-            try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
-        }
         return raw === 'dark' ? 'dark' : 'light';
     }
-    document.documentElement.setAttribute('data-theme', resolveEarlyTheme());
+    function resolveEarlyFontSize() {
+        var fs = null;
+        try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
+        if (!fs) {
+            try {
+                var c = localStorage.getItem('knecta_settings_cache');
+                if (c) { var cp = JSON.parse(c); var d = cp.data || cp; fs = d && d.appearance && d.appearance.fontSize; }
+            } catch (_) {}
+        }
+        fs = parseInt(fs, 10);
+        if (!fs || fs < 10 || fs > 28) fs = 16;
+        return fs;
+    }
+    var root = document.documentElement;
+    var theme = resolveEarlyTheme();
+    var fontSize = resolveEarlyFontSize();
+    root.setAttribute('data-theme', theme);
+    root.classList.toggle('theme-dark', theme === 'dark');
+    root.classList.toggle('dark-theme', theme === 'dark');
+    root.style.fontSize = fontSize + 'px';
+    root.style.setProperty('--base-font-size', fontSize + 'px');
 })();
 </script>
 

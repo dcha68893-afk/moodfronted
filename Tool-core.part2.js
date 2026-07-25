@@ -651,9 +651,7 @@ this.registerHandler('SETTING_CHANGED', (message) => {
     
     // Apply relevant settings immediately
     if (section === 'appearance' && key === 'theme') {
-        const theme = value === 'auto'
-            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-            : value;
+        const theme = (value === 'dark' ? 'dark' : 'light');
         document.documentElement.setAttribute('data-theme', theme);
         document.body.setAttribute('data-theme', theme);
         
@@ -703,11 +701,12 @@ this.registerHandler('SETTINGS_UPDATED', (message) => {
         const s = settings.appearance;
         
         if (s.theme) {
-            const theme = s.theme === 'auto'
-                ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                : s.theme;
+            const theme = s.theme === 'dark' ? 'dark' : 'light';
             document.documentElement.setAttribute('data-theme', theme);
             document.body.setAttribute('data-theme', theme);
+            document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+            document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+            try { localStorage.setItem('app_theme', theme); } catch (_) {}
             safeStorage.set('user_theme_preference', theme);
         }
         

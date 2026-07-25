@@ -37,25 +37,11 @@
 
     if (global.SettingsModuleSubscriptions) return;
 
-    // FIX: the four applyXSettings() functions below each did
-    // `root.setAttribute('data-theme', settings.appearance.theme)` using the
-    // RAW appearance.theme value. "Auto" is the default theme (see the
-    // themeSelect markup in settings-ui.js) and is not a real paintable
-    // theme — AppSettings.js's own applyToDOM() resolves it against the OS
-    // preference before writing data-theme="light"/"dark". Subscribers here
-    // run right after applyToDOM on every settings change (see notifySubscribers
-    // in AppSettings.js), so writing the literal string "auto" back onto
-    // data-theme immediately overwrote the correct value with something no
-    // [data-theme="light"|"dark"] CSS selector anywhere in the app matches —
-    // silently breaking theming on this page until the next full reload.
-    // This is why Status (and Friends/Calls/Groups, which share this same
-    // bug) stopped following theme changes made in Settings.
+    // 'auto' theme has been removed app-wide, so this is now a plain
+    // light/dark normalizer — kept as a single shared helper (rather than
+    // each subscriber re-implementing its own) so every module module
+    // agrees on how an unrecognized/missing theme value resolves.
     function _resolveThemeForDOM(theme) {
-        if (theme === 'auto') {
-            try {
-                return (global.matchMedia && global.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-            } catch (_) { return 'light'; }
-        }
         return theme === 'dark' ? 'dark' : 'light';
     }
     global.__resolveThemeForDOM = global.__resolveThemeForDOM || _resolveThemeForDOM;

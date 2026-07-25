@@ -1625,13 +1625,13 @@
         }
 
         .dark-theme {
-            --bg-color: #1a1a1a;
-            --sidebar-bg: #252525;
-            --card-bg: #2d2d2d;
-            --text-color: #ffffff;
-            --text-secondary: #aaaaaa;
-            --border-color: #404040;
-            --hover-color: #363636;
+            --bg-color: #0f172a;
+            --sidebar-bg: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #e5e7eb;
+            --text-secondary: #9ca3af;
+            --border-color: #374151;
+            --hover-color: #1f2c33;
             --shadow-color: rgba(0, 0, 0, 0.3);
         }
 
@@ -1881,11 +1881,26 @@
     -->
     <script>
     (function() {
+        // FIX (theme flash / competing-theme audit): settings.html used to
+        // read theme from THREE different cached-settings blobs (never the
+        // shared 'app_theme' key everything else uses), resolve a now-removed
+        // 'auto' value against matchMedia, and then paint its own private
+        // dark palette (#1a1a1a background) that didn't match the #0f172a
+        // palette every other module uses — so opening Settings visibly
+        // "sparked" to a different-looking dark mode than the rest of the
+        // app. This now reads the same 'app_theme' key first (falling back
+        // to the cached blobs only for a first-run before that key exists),
+        // never resolves 'auto' (it no longer exists), and applies the exact
+        // same color values as the rest of the app.
         function _readTheme() {
             try {
-                var raw = localStorage.getItem('app_settings_global');
-                if (raw) {
-                    var p = JSON.parse(raw);
+                var raw = localStorage.getItem('app_theme');
+                if (raw) return raw;
+            } catch (_) {}
+            try {
+                var raw0 = localStorage.getItem('app_settings_global');
+                if (raw0) {
+                    var p = JSON.parse(raw0);
                     if (p && p.data && p.data.appearance && p.data.appearance.theme) return p.data.appearance.theme;
                 }
             } catch (_) {}
@@ -1907,54 +1922,45 @@
             } catch (_) {}
             return null;
         }
-        var theme = _readTheme();
-        // FIX (theme flash audit): 'auto' used to be written straight to
-        // data-theme with no resolved light/dark variables, so the page
-        // painted once as unstyled "auto", then again once settings-core.js's
-        // _applyTheme() resolved prefers-color-scheme and dispatched
-        // themeApplied — that double-paint was the visible flash between
-        // auto/dark/light. Resolve 'auto' here too, the same way
-        // _applyTheme() does, so the very first paint already matches.
-        var resolvedTheme = theme;
-        if (!resolvedTheme || resolvedTheme === 'auto') {
-            try {
-                resolvedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-            } catch (_) {
-                resolvedTheme = 'light';
-            }
-        }
+        var resolvedTheme = _readTheme() === 'dark' ? 'dark' : 'light';
         var root = document.documentElement;
         root.setAttribute('data-theme', resolvedTheme);
-        root.classList.add('theme-' + resolvedTheme);
+        root.classList.toggle('theme-dark', resolvedTheme === 'dark');
+        root.classList.toggle('dark-theme', resolvedTheme === 'dark');
         if (resolvedTheme === 'dark') {
-            root.style.setProperty('--bg-color', '#1a1a1a');
-            root.style.setProperty('--text-color', '#ffffff');
-            root.style.setProperty('--text-primary', '#ffffff');
-            root.style.setProperty('--sidebar-bg', '#252525');
-            root.style.setProperty('--card-bg', '#2d2d2d');
-            root.style.setProperty('--border-color', '#404040');
-            root.style.setProperty('--hover-color', '#363636');
+            root.style.setProperty('--bg-color', '#0f172a');
+            root.style.setProperty('--text-color', '#e5e7eb');
+            root.style.setProperty('--text-primary', '#e5e7eb');
+            root.style.setProperty('--text-secondary', '#9ca3af');
+            root.style.setProperty('--sidebar-bg', '#0f172a');
+            root.style.setProperty('--card-bg', '#1e293b');
+            root.style.setProperty('--border-color', '#374151');
+            root.style.setProperty('--hover-color', '#1f2c33');
         }
-        // Also read accent color
+        // Accent color
         try {
             var accentRaw = localStorage.getItem('app_settings_global');
             if (accentRaw) {
                 var accentP = JSON.parse(accentRaw);
                 var accent = accentP && accentP.data && accentP.data.appearance && accentP.data.appearance.accentColor;
-                if (accent) document.documentElement.style.setProperty('--primary-color', accent);
+                if (accent) root.style.setProperty('--primary-color', accent);
             }
         } catch (_) {}
-        // Font size
+        // Font size — instant, before first paint, same key every page uses
         try {
-            var fsRaw = localStorage.getItem('app_settings_global');
-            if (fsRaw) {
-                var fsP = JSON.parse(fsRaw);
-                var fs = fsP && fsP.data && fsP.data.appearance && fsP.data.appearance.fontSize;
-                if (fs) {
-                    document.documentElement.style.setProperty('--base-font-size', fs + 'px');
-                    document.documentElement.style.fontSize = fs + 'px';
+            var fs = null;
+            try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
+            if (!fs) {
+                var fsRaw = localStorage.getItem('app_settings_global');
+                if (fsRaw) {
+                    var fsP = JSON.parse(fsRaw);
+                    fs = fsP && fsP.data && fsP.data.appearance && fsP.data.appearance.fontSize;
                 }
             }
+            fs = parseInt(fs, 10);
+            if (!fs || fs < 10 || fs > 28) fs = 16;
+            root.style.setProperty('--base-font-size', fs + 'px');
+            root.style.fontSize = fs + 'px';
         } catch (_) {}
     })();
     </script>

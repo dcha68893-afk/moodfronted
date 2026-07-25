@@ -12,17 +12,39 @@
     -->
     <script>
     (function () {
+        // FIX (theme flash / competing-theme audit): index.html used to be the
+        // ONE page in the whole app that tracked theme with its own private
+        // 'moodchat_theme' key and a `.theme-dark` class with its own hardcoded
+        // color palette in the <style> block below — completely disconnected
+        // from the `data-theme` attribute + shared color variables every other
+        // module (chat/friend/group/calls/message/status/Tools/game/settings)
+        // uses. That's exactly why the login/dashboard screen could visibly
+        // "spark" to a different look than the rest of the app on open: two
+        // independent theme systems, sometimes disagreeing. This page now sets
+        // `data-theme` like everywhere else and keeps `.theme-dark` only as a
+        // mirrored class for the <style> block below (still driven by the same
+        // resolved value, never read independently). 'auto' theme has also
+        // been removed app-wide — only 'light' and 'dark' are valid.
         function resolveEarlyTheme() {
             var raw = null;
             try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
-            if (raw === 'auto') {
-                try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
-            }
             return raw === 'dark' ? 'dark' : 'light';
         }
-        if (resolveEarlyTheme() === 'dark') {
-            document.documentElement.classList.add('theme-dark');
+        function resolveEarlyFontSize() {
+            var fs = null;
+            try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
+            fs = parseInt(fs, 10);
+            if (!fs || fs < 10 || fs > 28) fs = 16;
+            return fs;
         }
+        var root = document.documentElement;
+        var theme = resolveEarlyTheme();
+        var fontSize = resolveEarlyFontSize();
+        root.setAttribute('data-theme', theme);
+        root.classList.toggle('theme-dark', theme === 'dark');
+        root.classList.toggle('dark-theme', theme === 'dark');
+        root.style.fontSize = fontSize + 'px';
+        root.style.setProperty('--base-font-size', fontSize + 'px');
         try {
             var savedColor = localStorage.getItem('moodchat_dashboard_color');
             if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
@@ -87,7 +109,7 @@
             --theme-success: #2ecc71;
         }
         
-        .theme-dark {
+        [data-theme="dark"] {
             --bg-color: #1a1a2e;
             --sidebar-bg: #16213e;
             --panel-bg: #0f3460;
@@ -2036,9 +2058,6 @@
         function resolveAppTheme() {
             var raw = null;
             try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
-            if (raw === 'auto') {
-                return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-            }
             return raw === 'dark' ? 'dark' : 'light';
         }
 
@@ -2057,8 +2076,11 @@
             btns.forEach(btn => {
                 if (btn) btn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    document.documentElement.classList.toggle('theme-dark');
-                    const isDark = document.documentElement.classList.contains('theme-dark');
+                    const root = document.documentElement;
+                    const isDark = root.getAttribute('data-theme') !== 'dark';
+                    root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+                    root.classList.toggle('theme-dark', isDark);
+                    root.classList.toggle('dark-theme', isDark);
                     try { localStorage.setItem('app_theme', isDark ? 'dark' : 'light'); } catch (_) {}
                     localStorage.setItem('moodchat_theme', isDark ? 'dark' : 'light');
                     btns.forEach(b => { if (b) b.innerHTML = isDark ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });

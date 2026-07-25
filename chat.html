@@ -11,6 +11,12 @@
          down this file has run. -->
     <script>
     (function () {
+        // 'auto' theme has been removed app-wide (it was a major source of the
+        // theme-flash / "sparking" bug: it required an async matchMedia check
+        // that ran differently across pages, so different modules would settle
+        // on different themes for a frame or two). Only 'light' and 'dark' are
+        // valid now; any legacy 'auto' (or unrecognized) value saved from
+        // before this change quietly falls back to 'light'.
         function resolveEarlyTheme() {
             var raw = null;
             try { raw = localStorage.getItem('app_theme'); } catch (_) {}
@@ -20,12 +26,29 @@
                     if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
                 } catch (_) {}
             }
-            if (raw === 'auto') {
-                try { return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; } catch (_) { return 'light'; }
-            }
             return raw === 'dark' ? 'dark' : 'light';
         }
-        document.documentElement.setAttribute('data-theme', resolveEarlyTheme());
+        function resolveEarlyFontSize() {
+            var fs = null;
+            try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
+            if (!fs) {
+                try {
+                    var c = localStorage.getItem('knecta_settings_cache');
+                    if (c) { var cp = JSON.parse(c); var d = cp.data || cp; fs = d && d.appearance && d.appearance.fontSize; }
+                } catch (_) {}
+            }
+            fs = parseInt(fs, 10);
+            if (!fs || fs < 10 || fs > 28) fs = 16;
+            return fs;
+        }
+        var root = document.documentElement;
+        var theme = resolveEarlyTheme();
+        var fontSize = resolveEarlyFontSize();
+        root.setAttribute('data-theme', theme);
+        root.classList.toggle('theme-dark', theme === 'dark');
+        root.classList.toggle('dark-theme', theme === 'dark');
+        root.style.fontSize = fontSize + 'px';
+        root.style.setProperty('--base-font-size', fontSize + 'px');
     })();
     </script>
     <meta charset="UTF-8">
@@ -2702,19 +2725,15 @@
         // ======================================================================
         // RESOLVE ACTIVE THEME
         // Single source of truth for "what theme is the app in right now",
-        // used before pushing colors into any child iframe. Mirrors the same
-        // 'auto' -> system-preference resolution already used elsewhere in
-        // this file for the parent document, so parent and iframes never
-        // disagree about which theme is active.
+        // used before pushing colors into any child iframe, so parent and
+        // iframes never disagree about which theme is active. Only 'light'
+        // and 'dark' are valid themes app-wide ('auto' has been removed).
         // ======================================================================
         function getResolvedTheme() {
             try {
                 var stored = null;
                 try { stored = localStorage.getItem('app_theme'); } catch (_) {}
                 var raw = document.documentElement.getAttribute('data-theme') || stored || 'light';
-                if (raw === 'auto') {
-                    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-                }
                 return raw === 'dark' ? 'dark' : 'light';
             } catch (_) {
                 return 'light';
@@ -2794,8 +2813,26 @@
                 if (!doc || !doc.head) return;
                 const isDark = theme === 'dark';
 
-                // 1) Inject theme.colors.css link (once)
-                if (!doc.getElementById('kyn-theme-link')) {
+                // FIX (theme flash / "sparking" audit): every module page now
+                // applies its own correct data-theme + theme.colors.css before
+                // its first paint (see the inline script at the top of each
+                // page's <head>). This function used to unconditionally
+                // rewrite the override <style> block's textContent on EVERY
+                // iframe load/reapply regardless of whether the theme had
+                // actually changed, which forces the browser to recompute
+                // styles for the whole iframe a second time right after it
+                // already painted correctly — that redundant second paint was
+                // the visible "spark" on every module open or switch. Now this
+                // is a no-op whenever the iframe is already showing the theme
+                // we're about to apply.
+                if (doc.documentElement && doc.documentElement.getAttribute('data-theme') === theme
+                    && doc.getElementById('kyn-theme-inline')) {
+                    return;
+                }
+
+                // 1) Inject theme.colors.css link (once) — only for pages that
+                // don't already load it themselves in their own <head>.
+                if (!doc.getElementById('kyn-theme-link') && !doc.querySelector('link[href="theme.colors.css"]')) {
                     const link = doc.createElement('link');
                     link.id = 'kyn-theme-link';
                     link.rel = 'stylesheet';
@@ -2803,10 +2840,23 @@
                     doc.head.insertBefore(link, doc.head.firstChild);
                 }
 
+                if (doc.documentElement) {
+                    doc.documentElement.setAttribute('data-theme', theme);
+                    doc.documentElement.classList.toggle('theme-dark', isDark);
+                    doc.documentElement.classList.toggle('dark-theme', isDark);
+                }
+
                 // 2) Inject/update override <style> for hard-coded values.
-                // Re-runs every time so a live theme toggle actually updates
-                // iframes that are already open, instead of only affecting
-                // the next fresh load.
+                // Re-runs only when the theme actually changed (see guard
+                // above), so a live theme toggle still updates iframes that
+                // are already open without repainting on every no-op call.
+                let style = doc.getElementById('kyn-theme-inline');
+                if (!style) {
+                    style = doc.createElement('style');
+                    style.id = 'kyn-theme-inline';
+                    doc.head.insertBefore(style, doc.head.firstChild);
+                }
+                style.textContent = isDark ? `
                 let style = doc.getElementById('kyn-theme-inline');
                 if (!style) {
                     style = doc.createElement('style');
@@ -5524,9 +5574,11 @@
                         }
                     } catch(e) {}
                     if (settings.appearance?.theme || settings.theme) {
-                        const theme = settings.appearance?.theme || settings.theme;
+                        const theme = (settings.appearance?.theme || settings.theme) === 'dark' ? 'dark' : 'light';
                         document.documentElement.setAttribute('data-theme', theme);
                         document.body.setAttribute('data-theme', theme);
+                        document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+                        document.documentElement.classList.toggle('dark-theme', theme === 'dark');
                         try { localStorage.setItem('app_theme', theme); } catch(e) {}
                         reapplyThemeToAllIframes();
                     }
@@ -5563,12 +5615,11 @@
                         } catch (_) {}
                         // 3. Apply theme directly to parent document (parent has its own DOM)
                         if (s && s.appearance && s.appearance.theme) {
-                            var _t = s.appearance.theme;
-                            var _resolved = _t === 'auto'
-                                ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                                : _t;
+                            var _resolved = s.appearance.theme === 'dark' ? 'dark' : 'light';
                             document.documentElement.setAttribute('data-theme', _resolved);
                             document.body.setAttribute('data-theme', _resolved);
+                            document.documentElement.classList.toggle('theme-dark', _resolved === 'dark');
+                            document.documentElement.classList.toggle('dark-theme', _resolved === 'dark');
                             try { localStorage.setItem('app_theme', _resolved); } catch(_) {}
                             reapplyThemeToAllIframes();
                         }
@@ -5576,9 +5627,17 @@
                             document.documentElement.style.setProperty('--accent-color', s.appearance.accentColor);
                         }
                         if (s && s.appearance && s.appearance.fontSize) {
-                            var _fmap = { small: '13px', medium: '15px', large: '17px', 'x-large': '19px' };
-                            var _fs = _fmap[s.appearance.fontSize] || s.appearance.fontSize;
-                            document.documentElement.style.setProperty('--base-font-size', _fs);
+                            // fontSize is always a numeric px value app-wide (12/14/16/18).
+                            // FIX: this used to look it up in a stale small/medium/large/
+                            // x-large string map that never matched a number, silently
+                            // falling through to setting --base-font-size with NO unit
+                            // (e.g. "16" instead of "16px"), which is invalid CSS and made
+                            // every var(--base-font-size) consumer ignore the change.
+                            var _fs = parseInt(s.appearance.fontSize, 10);
+                            if (!_fs || _fs < 10 || _fs > 28) _fs = 16;
+                            document.documentElement.style.fontSize = _fs + 'px';
+                            document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
+                            try { localStorage.setItem('app_font_size', String(_fs)); } catch(_) {}
                         }
                     })(settings);
                 }
@@ -5593,13 +5652,21 @@
                     // ── appearance ─────────────────────────────────────────────
                     if (section === 'appearance') {
                         if (key === 'theme') {
-                            const resolvedTheme = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+                            const resolvedTheme = value === 'dark' ? 'dark' : 'light';
                             document.documentElement.setAttribute('data-theme', resolvedTheme);
                             document.body.setAttribute('data-theme', resolvedTheme);
+                            document.documentElement.classList.toggle('theme-dark', resolvedTheme === 'dark');
+                            document.documentElement.classList.toggle('dark-theme', resolvedTheme === 'dark');
                             try { localStorage.setItem('app_theme', resolvedTheme); } catch(e) {}
                             reapplyThemeToAllIframes();
                         }
-                        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+                        if (key === 'fontSize') {
+                            let _fs = parseInt(value, 10);
+                            if (!_fs || _fs < 10 || _fs > 28) _fs = 16;
+                            document.documentElement.style.fontSize = _fs + 'px';
+                            document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
+                            try { localStorage.setItem('app_font_size', String(_fs)); } catch(e) {}
+                        }
                         if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
                         if (key === 'language') { document.documentElement.setAttribute('lang', value); try { localStorage.setItem('app_language', value); } catch(e) {} }
                         if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }

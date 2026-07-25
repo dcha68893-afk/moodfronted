@@ -273,7 +273,7 @@
     // ─── Validation ───────────────────────────────────────────────────────────────
     function validate(path, value) {
         const rules = {
-            'theme': v => (['light','dark','system'].includes(v) ? true : 'Must be light|dark|system'),
+            'theme': v => (['light','dark'].includes(v) ? true : 'Must be light|dark'),
             'language': v => (typeof v === 'string' && v.length >= 2 ? true : 'Must be a 2+ char string'),
             'notifications.messages': v => (typeof v === 'boolean' ? true : 'Must be boolean'),
             'notifications.calls':    v => (typeof v === 'boolean' ? true : 'Must be boolean'),

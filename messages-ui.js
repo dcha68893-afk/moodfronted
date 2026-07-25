@@ -13238,7 +13238,7 @@ Type: ${message.type || 'text'}`;
 
             if (key === 'theme') {
 
-                var t = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+                var t = (value === 'dark' ? 'dark' : 'light');
 
                 document.documentElement.setAttribute('data-theme', t);
 

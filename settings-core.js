@@ -713,15 +713,14 @@ const SettingsState = {
     _applyTheme(theme) {
         try {
             const root = document.documentElement;
-            if (theme === 'auto') {
-                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-                root.setAttribute('data-theme', isDark ? 'dark' : 'light');
-            } else {
-                root.setAttribute('data-theme', theme);
-            }
+            const resolved = theme === 'dark' ? 'dark' : 'light';
+            root.setAttribute('data-theme', resolved);
+            root.classList.toggle('theme-dark', resolved === 'dark');
+            root.classList.toggle('dark-theme', resolved === 'dark');
+            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
             
             const event = new CustomEvent('themeApplied', {
-                detail: { theme, timestamp: Date.now() }
+                detail: { theme: resolved, timestamp: Date.now() }
             });
             window.dispatchEvent(event);
         } catch (error) {}
@@ -5954,16 +5953,14 @@ function applyTheme(theme) {
     
     try {
         const root = document.documentElement;
-        
-        if (theme === 'auto') {
-            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            root.setAttribute('data-theme', isDark ? 'dark' : 'light');
-        } else {
-            root.setAttribute('data-theme', theme);
-        }
-        
+        const resolved = theme === 'dark' ? 'dark' : 'light';
+        root.setAttribute('data-theme', resolved);
+        root.classList.toggle('theme-dark', resolved === 'dark');
+        root.classList.toggle('dark-theme', resolved === 'dark');
+        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+
         const event = new CustomEvent('themeApplied', {
-            detail: { theme, timestamp: Date.now() }
+            detail: { theme: resolved, timestamp: Date.now() }
         });
         window.dispatchEvent(event);
     } catch (error) {}
@@ -6198,7 +6195,7 @@ async function saveSettings() {
         }
         
         if (userSettings.appearance) {
-            applyTheme(userSettings.appearance.theme || 'auto');
+            applyTheme(userSettings.appearance.theme || 'light');
         }
         
         // If offline, queue the entire settings object for later sync
@@ -7451,7 +7448,7 @@ const DEFAULT_SETTINGS = {
         emailNotifications: false
     },
     appearance: {
-        theme: 'auto',
+        theme: 'light',
         accentColor: '#0084ff',
         fontSize: 16,
         language: 'en',
@@ -7761,14 +7758,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     SettingsState.loaded = true;
                     // Apply appearance/theme immediately before any async work
                     if (data.appearance?.theme) {
-                        const t = data.appearance.theme;
-                        const resolved = t === 'auto'
-                            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                            : t;
+                        const resolved = data.appearance.theme === 'dark' ? 'dark' : 'light';
                         document.documentElement.setAttribute('data-theme', resolved);
+                        document.documentElement.classList.toggle('theme-dark', resolved === 'dark');
+                        document.documentElement.classList.toggle('dark-theme', resolved === 'dark');
+                        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
                     }
                     if (data.appearance?.fontSize) {
-                        document.documentElement.style.fontSize = data.appearance.fontSize + 'px';
+                        const fs = parseInt(data.appearance.fontSize, 10) || 16;
+                        document.documentElement.style.fontSize = fs + 'px';
+                        document.documentElement.style.setProperty('--base-font-size', fs + 'px');
+                        try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
                     }
                     if (data.appearance?.accentColor) {
                         document.documentElement.style.setProperty('--accent-color', data.appearance.accentColor);

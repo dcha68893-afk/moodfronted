@@ -127,9 +127,9 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
             }
 
             if (key === 'theme') {
+                // 'system'/'auto' removed app-wide — only 'light'/'dark' valid.
                 const t = String(value).toLowerCase();
-                if (['light','dark','system'].includes(t)) return t;
-                if (t === 'auto') return 'system';
+                if (t === 'dark') return 'dark';
                 return 'light';
             }
 
@@ -227,10 +227,13 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
         function _applyImmediateVisuals(local) {
             try {
                 if (local.theme) {
-                    const t = local.theme === 'system'
-                        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-                        : local.theme;
-                    document.documentElement.setAttribute('data-theme', t);
+                    // 'system'/'auto' removed app-wide — only 'light'/'dark' valid.
+                    const t = local.theme === 'dark' ? 'dark' : 'light';
+                    const root = document.documentElement;
+                    root.setAttribute('data-theme', t);
+                    root.classList.toggle('theme-dark', t === 'dark');
+                    root.classList.toggle('dark-theme', t === 'dark');
+                    try { localStorage.setItem('app_theme', t); } catch (_) {}
                 }
                 if (local.chat && local.chat.fontSize) {
                     const px = { small: '14px', medium: '16px', large: '18px' };

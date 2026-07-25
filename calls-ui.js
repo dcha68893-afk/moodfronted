@@ -9983,7 +9983,7 @@ setupFriendsListListener();
         }
         if (section === 'appearance') {
             if (key === 'theme') {
-                const t = value === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : value;
+                const t = (value === 'dark' ? 'dark' : 'light');
                 document.documentElement.setAttribute('data-theme', t);
                 document.body.setAttribute('data-theme', t);
             }
@@ -10595,11 +10595,16 @@ if (detectExistingCore()) {
 
     // ── Theme detection ───────────────────────────────────────────────────
     function _isDark() {
+        // FIX: this used to fall back to the OS's prefers-color-scheme when
+        // none of the class/attribute checks matched, which could report the
+        // call overlay as dark even while the user had explicitly chosen
+        // Light in Settings (a mismatch between this overlay and the rest of
+        // the app). data-theme is now always set correctly on <html> before
+        // first paint, so it's the only check needed.
         return document.documentElement.classList.contains('dark') ||
                document.body.classList.contains('dark-mode') ||
                document.body.classList.contains('theme-dark') ||
-               document.documentElement.getAttribute('data-theme') === 'dark' ||
-               window.matchMedia('(prefers-color-scheme: dark)').matches;
+               document.documentElement.getAttribute('data-theme') === 'dark';
     }
 
     // ── Ensure sidebar & main content ALWAYS remain visible ──────────────

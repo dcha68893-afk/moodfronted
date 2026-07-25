@@ -1456,17 +1456,25 @@ export function updateAccentColor(color) {
 }
 
 // Apply theme
+// FIX (theme flash / competing-theme audit): this used to only toggle a
+// 'dark-theme' class on <body>, but almost every stylesheet in the app
+// (theme.colors.css, chat.css, calls.css, etc.) keys off the `data-theme`
+// attribute on <html> instead — so picking a theme here visually updated
+// the Settings page itself (which happens to have its own .dark-theme
+// rules) but left the rest of the running app on the old theme until the
+// next full reload. 'auto' has also been removed app-wide — only 'light'
+// and 'dark' are valid themes now.
 export function applyTheme(theme) {
-    if (theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-        document.body.classList.add('dark-theme');
-        document.documentElement.style.colorScheme = 'dark';
-    } else {
-        document.body.classList.remove('dark-theme');
-        document.documentElement.style.colorScheme = 'light';
-    }
-    
+    const resolved = theme === 'dark' ? 'dark' : 'light';
+    const root = document.documentElement;
+    root.setAttribute('data-theme', resolved);
+    root.classList.toggle('theme-dark', resolved === 'dark');
+    document.body.classList.toggle('dark-theme', resolved === 'dark');
+    root.style.colorScheme = resolved;
+    try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+
     // Update through SettingsState for REAL backend persistence
-    SettingsState.update('appearance', 'theme', theme).then(() => {
+    SettingsState.update('appearance', 'theme', resolved).then(() => {
         unsavedChanges = true;
         updateSaveButton();
     }).catch(error => {
@@ -1474,13 +1482,17 @@ export function applyTheme(theme) {
     });
 }
 
-// Apply font size
+// Apply font size — applies instantly to this page and persists it under
+// the same 'app_font_size' key every module's early-init script reads, so
+// text size stays in sync across modules without waiting for a reload.
 export function applyFontSize(size) {
-    document.documentElement.style.fontSize = `${size}px`;
-    document.documentElement.style.setProperty('--base-font-size', `${size}px`);
-    
+    const fontSize = parseInt(size, 10) || 16;
+    document.documentElement.style.fontSize = `${fontSize}px`;
+    document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
+    try { localStorage.setItem('app_font_size', String(fontSize)); } catch (_) {}
+
     // Update through SettingsState for REAL backend persistence
-    SettingsState.update('appearance', 'fontSize', parseInt(size)).then(() => {
+    SettingsState.update('appearance', 'fontSize', fontSize).then(() => {
         unsavedChanges = true;
         updateSaveButton();
     }).catch(error => {
@@ -3545,13 +3557,12 @@ export function loadAppearanceSection(container) {
                 <div class="setting-item">
                     <div class="setting-info">
                         <div class="setting-label">Theme Mode</div>
-                        <div class="setting-description">Choose light, dark, or auto theme</div>
+                        <div class="setting-description">Choose light or dark theme</div>
                     </div>
                     <div class="setting-control">
                         <select class="setting-dropdown" id="themeSelect">
-                            <option value="light" ${settings.theme === 'light' ? 'selected' : ''}>Light</option>
+                            <option value="light" ${settings.theme !== 'dark' ? 'selected' : ''}>Light</option>
                             <option value="dark" ${settings.theme === 'dark' ? 'selected' : ''}>Dark</option>
-                            <option value="auto" ${(settings.theme === 'auto' || !settings.theme) ? 'selected' : ''}>Auto</option>
                         </select>
                     </div>
                 </div>

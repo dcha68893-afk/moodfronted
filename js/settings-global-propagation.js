@@ -59,32 +59,40 @@
         if (!app) return;
         const root = _dom();
 
-        // Theme classes + CSS variables
+        // Theme classes + CSS variables. 'auto' removed app-wide.
+        // FIX: this used to paint its own private #1a1a1a dark palette,
+        // different from the #0f172a palette every other module uses
+        // (theme.colors.css, AppSettings.js, settings-core.js) — yet another
+        // competing color set contributing to the theme "sparking" bug.
+        // Now uses the same values as everywhere else.
         if (app.theme) {
+            const theme = app.theme === 'dark' ? 'dark' : 'light';
             root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
-            root.classList.add('theme-' + app.theme);
-            root.setAttribute('data-theme', app.theme);
+            root.classList.add('theme-' + theme);
+            root.classList.toggle('dark-theme', theme === 'dark');
+            root.setAttribute('data-theme', theme);
+            try { localStorage.setItem('app_theme', theme); } catch (_) {}
 
-            if (app.theme === 'dark') {
-                _cssVar('--bg-color',        '#1a1a1a');
-                _cssVar('--text-primary',    '#ffffff');
-                _cssVar('--text-secondary',  '#b0b3b8');
-                _cssVar('--card-bg',         '#242526');
-                _cssVar('--border-color',    '#3e4042');
-                _cssVar('--input-bg',        '#3a3b3c');
-                _cssVar('--hover-bg',        '#2d2e2f');
+            if (theme === 'dark') {
+                _cssVar('--bg-color',        '#0f172a');
+                _cssVar('--text-primary',    '#e5e7eb');
+                _cssVar('--text-secondary',  '#9ca3af');
+                _cssVar('--card-bg',         '#1e293b');
+                _cssVar('--border-color',    '#374151');
+                _cssVar('--input-bg',        '#1e293b');
+                _cssVar('--hover-bg',        '#1f2c33');
             } else {
                 _cssVar('--bg-color',        '#ffffff');
-                _cssVar('--text-primary',    '#050505');
-                _cssVar('--text-secondary',  '#65676b');
+                _cssVar('--text-primary',    '#111b21');
+                _cssVar('--text-secondary',  '#667781');
                 _cssVar('--card-bg',         '#ffffff');
-                _cssVar('--border-color',    '#dddfe2');
+                _cssVar('--border-color',    '#d1d7db');
                 _cssVar('--input-bg',        '#f0f2f5');
-                _cssVar('--hover-bg',        '#f2f2f2');
+                _cssVar('--hover-bg',        '#f5f6f6');
             }
 
             // Notify iframe children
-            _broadcastToFrames('THEME_CHANGED', { theme: app.theme });
+            _broadcastToFrames('THEME_CHANGED', { theme });
         }
 
         if (app.accentColor) {
@@ -95,8 +103,10 @@
         }
 
         if (app.fontSize) {
-            _cssVar('--base-font-size', app.fontSize + 'px');
-            root.style.fontSize = app.fontSize + 'px';
+            const fs = parseInt(app.fontSize, 10) || 16;
+            _cssVar('--base-font-size', fs + 'px');
+            root.style.fontSize = fs + 'px';
+            try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
         }
 
         if (app.language) {

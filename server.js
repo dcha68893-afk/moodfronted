@@ -936,9 +936,10 @@ function normalizeFontSize(value) {
 }
 
 function normalizeTheme(theme, darkMode = null) {
-  if (theme === "dark" || theme === "light" || theme === "auto" || theme === "system") {
-    return theme === "system" ? "auto" : theme;
-  }
+  // 'auto'/'system' removed app-wide (frontend audit) — the API should
+  // never persist or return a theme value the client no longer resolves.
+  // Legacy stored values of 'auto'/'system' fall back to 'light' here too.
+  if (theme === "dark" || theme === "light") return theme;
   if (darkMode === true) return "dark";
   if (darkMode === false) return "light";
   return "light";
