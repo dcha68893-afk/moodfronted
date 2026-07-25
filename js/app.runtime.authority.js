@@ -6,6 +6,14 @@
 
     const LOGIN_PATHS = new Set(['/', '/index.html']);
     const CHAT_ENTRY = 'chat.html';
+    // FIX (auth bypass): this marker is set ONLY inside persistSession(), i.e.
+    // only after a genuine successful login/token exchange, and is removed
+    // inside clearSession() (explicit logout or invalidated session). It's the
+    // thing that makes hasOfflineBootData() below actually mean "this device
+    // was legitimately logged in before", instead of just "some cache blob
+    // happens to exist" — see the FIX comment there for why that distinction
+    // matters.
+    const EVER_AUTHENTICATED_KEY = 'kynecta_ever_authenticated';
     const SESSION_EVENTS = {
         restored: 'SESSION_RESTORED',
         updated: 'SESSION_UPDATED',
@@ -213,6 +221,7 @@
         updateParentSession(normalized);
         mirrorLegacyAuth(normalized);
         hydrateStoreFromSession(normalized);
+        try { localStorage.setItem(EVER_AUTHENTICATED_KEY, '1'); } catch (_error) {}
 
         if (options.emit !== false) {
             emit(options.eventName || SESSION_EVENTS.updated, normalized);
@@ -238,6 +247,7 @@
         }
 
         clearMirroredAuth();
+        try { localStorage.removeItem(EVER_AUTHENTICATED_KEY); } catch (_error) {}
 
         if (window.KynectaStore) {
             window.KynectaStore.set('session', {
@@ -365,6 +375,28 @@
 
     function hasOfflineBootData() {
         try {
+            // FIX (auth bypass): this used to be "does ANY of these cache blobs
+            // exist" — but several of them (knecta_settings_cache especially)
+            // get written to localStorage on every visit regardless of login
+            // state (e.g. default settings get cached for guests browsing the
+            // landing page). That meant bootstrap()'s missing-session check
+            // below almost never actually redirected to login: as soon as
+            // *anyone* had ever loaded any page once, this returned true and
+            // chat.html was reachable directly with zero authentication —
+            // including via the landing page's "Open App" button, which just
+            // navigates straight to chat.html and relies entirely on this
+            // check to enforce login.
+            //
+            // The offline-access exception this function exists for is only
+            // supposed to cover ONE case: a device that was genuinely logged
+            // in before and is now offline (so a live token-refresh can't
+            // happen). EVER_AUTHENTICATED_KEY is set exclusively by
+            // persistSession() after a real successful login, and cleared by
+            // clearSession() on logout / confirmed-invalid session — so it's
+            // a true signal of "this device previously authenticated", unlike
+            // the cache blobs, which prove nothing about auth state.
+            if (localStorage.getItem(EVER_AUTHENTICATED_KEY) !== '1') return false;
+
             const candidates = [
                 'kynecta_messages_cache',
                 'kynecta_friends_cache',
