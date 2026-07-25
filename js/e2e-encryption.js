@@ -86,6 +86,35 @@
     return subtle.importKey('pkcs8', unb64(b64Pkcs8), { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']);
   }
 
+  // ── X3DH: identity signing key (separate from the ECDH identity key) ──────
+  // FIX (X3DH-UPGRADE): the 1:1 ratchet handshake (js/double-ratchet.js) used
+  // to bootstrap a session from nothing but each side's long-term identity
+  // key (a simplified 2-DH combine). That means anyone who later steals a
+  // user's long-term identity private key could retroactively decrypt the
+  // FIRST message of every past 1:1 conversation that user was ever part of
+  // (every message after the first stays protected by the ratchet itself).
+  // Real X3DH — a separate signing identity key, a rotating signed prekey
+  // (proves the DH key really belongs to this identity), and a pool of
+  // one-time prekeys (each used for at most one session, then discarded) —
+  // closes that gap the same way Signal's protocol does. WebCrypto ties a
+  // P-256 key's algorithm (ECDH vs ECDSA) at generation time, so this needs
+  // its own key pair — it can't reuse the ECDH identity key above.
+  async function generateSigningKeyPair() {
+    return subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  }
+  async function exportSigningPublicKey(kp) {
+    return b64(await subtle.exportKey('spki', kp.publicKey));
+  }
+  async function exportSigningPrivateKey(kp) {
+    return b64(await subtle.exportKey('pkcs8', kp.privateKey));
+  }
+  async function importSigningPublicKey(b64Spki) {
+    return subtle.importKey('spki', unb64(b64Spki), { name: 'ECDSA', namedCurve: 'P-256' }, true, ['verify']);
+  }
+  async function importSigningPrivateKey(b64Pkcs8) {
+    return subtle.importKey('pkcs8', unb64(b64Pkcs8), { name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign']);
+  }
+
   // ── Encrypt private key with user password ────────────────────────────────
   async function _encryptPrivateKey(pkcs8B64, password) {
     const salt    = global.crypto.getRandomValues(new Uint8Array(32));
@@ -202,6 +231,12 @@
   let _myPubKeyB64 = null;  // base64 SPKI
   let _myKeyId     = null;
   let _enabled     = false;
+  // X3DH: identity signing key pair, persisted alongside the ECDH identity
+  // key (same encrypted blob, see STORE_KEY below). Used to sign this
+  // device's rotating signed prekey so recipients can verify it really came
+  // from this identity before trusting it for a session handshake.
+  let _mySigningPrivKey   = null; // CryptoKey
+  let _mySigningPubKeyB64 = null; // base64 SPKI
   // GROUP ENCRYPTION: a CryptoKey derived once per session (during init,
   // from the same password) and cached in memory, used to encrypt Sender
   // Keys before they're written to localStorage. Re-deriving via PBKDF2
@@ -254,7 +289,27 @@
         _myPubKeyB64  = obj.pubKey;
         _myKeyId      = obj.keyId;
         _enabled      = true;
+
+        // X3DH: load or (for pre-upgrade accounts) generate-and-persist the
+        // signing key pair. Older stored blobs won't have encSigningPrivKey
+        // yet — generate one now rather than leaving X3DH permanently
+        // unavailable for accounts created before this upgrade shipped.
+        if (obj.encSigningPrivKey && obj.signingPubKey) {
+          const signingPkcs8   = await _decryptPrivateKey(obj.encSigningPrivKey, password);
+          _mySigningPrivKey    = await importSigningPrivateKey(signingPkcs8);
+          _mySigningPubKeyB64  = obj.signingPubKey;
+        } else {
+          const signingKp = await generateSigningKeyPair();
+          _mySigningPubKeyB64 = await exportSigningPublicKey(signingKp);
+          _mySigningPrivKey   = signingKp.privateKey;
+          const signingPrivB64 = await exportSigningPrivateKey(signingKp);
+          obj.encSigningPrivKey = await _encryptPrivateKey(signingPrivB64, password);
+          obj.signingPubKey     = _mySigningPubKeyB64;
+          localStorage.setItem(STORE_KEY, JSON.stringify(obj));
+        }
+
         console.log('[E2E] ✅ Keys loaded from storage');
+        _ensurePrekeysUploaded().catch(e => console.warn('[E2E] Prekey upload failed:', e.message));
         return true;
       } catch (e) {
         console.warn('[E2E] Could not load stored keys:', e.message);
@@ -267,6 +322,12 @@
     const privKeyB64  = await exportPrivateKey(kp);
     const encPrivKey  = await _encryptPrivateKey(privKeyB64, password);
     const keyId       = b64(global.crypto.getRandomValues(new Uint8Array(16)));
+
+    // X3DH: generate the signing identity key pair alongside the ECDH one.
+    const signingKp        = await generateSigningKeyPair();
+    const signingPubKeyB64 = await exportSigningPublicKey(signingKp);
+    const signingPrivB64   = await exportSigningPrivateKey(signingKp);
+    const encSigningPrivKey = await _encryptPrivateKey(signingPrivB64, password);
 
     // Upload public key to server
     try {
@@ -285,12 +346,18 @@
     }
 
     // Store encrypted private key locally
-    localStorage.setItem(STORE_KEY, JSON.stringify({ encPrivKey, pubKey: pubKeyB64, keyId: _myKeyId }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      encPrivKey, pubKey: pubKeyB64, keyId: _myKeyId,
+      encSigningPrivKey, signingPubKey: signingPubKeyB64,
+    }));
 
     _myPrivKey   = kp.privateKey;
     _myPubKeyB64 = pubKeyB64;
+    _mySigningPrivKey   = signingKp.privateKey;
+    _mySigningPubKeyB64 = signingPubKeyB64;
     _enabled     = true;
     console.log('[E2E] ✅ New key pair generated and registered');
+    _ensurePrekeysUploaded().catch(e => console.warn('[E2E] Prekey upload failed:', e.message));
     return true;
   }
 
@@ -538,6 +605,153 @@
     return b64(pt);
   }
 
+  // ── X3DH: signed prekey + one-time prekeys ─────────────────────────────────
+  // FIX (X3DH-UPGRADE): see backend src/routes/encryption.js for the server
+  // side. Private halves of the signed prekey and one-time prekeys never
+  // leave this device — only their public halves (plus the signed prekey's
+  // signature) are uploaded. Private halves are cached at rest wrapped by
+  // _localWrapKey, keyed by their own keyId, so a later session on this same
+  // device/browser can find the matching private key when a first message
+  // referencing that keyId arrives (see js/double-ratchet.js initRecv()).
+  const PREKEY_PRIV_PREFIX = 'kyn_e2e_pk_'; // + keyId
+  const SPK_CURRENT_KEY    = 'kyn_e2e_spk_current_id';
+  const SPK_CURRENT_PUB    = 'kyn_e2e_spk_current_pub';
+  const SPK_CURRENT_SIG    = 'kyn_e2e_spk_current_sig';
+  const OTPK_LOW_WATERMARK = 10;
+  const OTPK_BATCH_SIZE    = 20;
+
+  async function _storePrekeyPrivate(keyId, pkcs8B64) {
+    if (_localWrapKey) {
+      try {
+        const wrapped = await wrapForLocalStorage(pkcs8B64);
+        if (wrapped) { localStorage.setItem(PREKEY_PRIV_PREFIX + keyId, wrapped); return; }
+      } catch (_) {}
+    }
+    localStorage.setItem(PREKEY_PRIV_PREFIX + keyId, pkcs8B64); // fallback, unwrapped
+  }
+
+  // Exposed for js/double-ratchet.js — it needs the raw CryptoKey, not the
+  // base64 bytes, to run the DH steps.
+  async function loadPrekeyPrivate(keyId) {
+    const raw = localStorage.getItem(PREKEY_PRIV_PREFIX + keyId);
+    if (!raw) return null;
+    let pkcs8B64 = raw;
+    if (_localWrapKey) {
+      try { pkcs8B64 = await unwrapFromLocalStorage(raw); } catch (_) { /* assume unwrapped fallback */ }
+    }
+    try {
+      return await subtle.importKey('pkcs8', unb64(pkcs8B64), { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey', 'deriveBits']);
+    } catch (_) { return null; }
+  }
+
+  function deletePrekeyPrivate(keyId) {
+    localStorage.removeItem(PREKEY_PRIV_PREFIX + keyId);
+  }
+
+  async function _generateSignedPreKey() {
+    const kp = await generateKeyPair(); // ECDH P-256, same as identity key
+    const keyId = b64(global.crypto.getRandomValues(new Uint8Array(16)));
+    const pubB64 = await exportPublicKey(kp);
+    const sig = await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, _mySigningPrivKey, unb64(pubB64));
+    await _storePrekeyPrivate(keyId, await exportPrivateKey(kp));
+    localStorage.setItem(SPK_CURRENT_KEY, keyId);
+    localStorage.setItem(SPK_CURRENT_PUB, pubB64);
+    localStorage.setItem(SPK_CURRENT_SIG, b64(sig));
+    return { keyId, publicKey: pubB64, signature: b64(sig) };
+  }
+
+  async function _generateOneTimePreKeys(count) {
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const kp = await generateKeyPair();
+      const keyId = b64(global.crypto.getRandomValues(new Uint8Array(16)));
+      const pubB64 = await exportPublicKey(kp);
+      await _storePrekeyPrivate(keyId, await exportPrivateKey(kp));
+      out.push({ keyId, publicKey: pubB64 });
+    }
+    return out;
+  }
+
+  // Called after every successful init(): makes sure a signed prekey exists
+  // and the server-side one-time prekey pool isn't running low. Cheap no-op
+  // on most logins (existing signed prekey is reused; one-time prekeys only
+  // regenerated when the server reports a low remaining count).
+  async function _ensurePrekeysUploaded() {
+    if (!_enabled || !_mySigningPrivKey) return;
+
+    let remaining = 0;
+    try {
+      const resp = await fetch(`${await _apiBase()}/api/encryption/prekeys/count`, { headers: await _authHeaders(), credentials: 'include' });
+      if (resp.ok) remaining = (await resp.json())?.data?.count ?? 0;
+    } catch (_) { /* treat as 0 — server will just get a fresh batch */ }
+
+    const existingSpkId = localStorage.getItem(SPK_CURRENT_KEY);
+    const haveSpk = existingSpkId && !!(await loadPrekeyPrivate(existingSpkId));
+
+    if (haveSpk && remaining > OTPK_LOW_WATERMARK) return; // nothing to do
+
+    const signedPreKey = haveSpk
+      ? null // reuse existing — see below
+      : await _generateSignedPreKey();
+    const oneTimePreKeys = remaining <= OTPK_LOW_WATERMARK ? await _generateOneTimePreKeys(OTPK_BATCH_SIZE) : [];
+
+    if (!signedPreKey && oneTimePreKeys.length === 0) return;
+
+    const body = {
+      signingPubKey: _mySigningPubKeyB64,
+      // Server requires signedPreKey on every upload call (it's the primary
+      // key of the row); if we're only topping up one-time prekeys, resend
+      // the current one unchanged rather than generating a new one.
+      signedPreKey: signedPreKey || (() => {
+        const pubB64 = localStorage.getItem(SPK_CURRENT_PUB);
+        const sigB64 = localStorage.getItem(SPK_CURRENT_SIG);
+        if (!pubB64 || !sigB64) return null; // shouldn't happen given haveSpk check above
+        return { keyId: existingSpkId, publicKey: pubB64, signature: sigB64 };
+      })(),
+      oneTimePreKeys,
+    };
+
+    if (!body.signedPreKey) return; // inconsistent local cache — nothing safe to upload this round
+
+    try {
+      await fetch(`${await _apiBase()}/api/encryption/prekeys`, {
+        method: 'POST', headers: await _authHeaders(), credentials: 'include', body: JSON.stringify(body),
+      });
+    } catch (e) {
+      console.warn('[E2E] X3DH prekey upload request failed:', e.message);
+    }
+  }
+
+  // Fetch and verify another user's X3DH prekey bundle. Returns null if they
+  // haven't enabled encryption at all. Returns { verified:false, ... } rather
+  // than throwing if they haven't uploaded X3DH prekeys yet or the signature
+  // check fails, so callers (js/double-ratchet.js) can fall back to the
+  // older identity-only handshake instead of the request looking like a
+  // network error.
+  async function fetchPrekeyBundle(userId) {
+    const resp = await fetch(`${await _apiBase()}/api/encryption/prekeys/${userId}`, { headers: await _authHeaders(), credentials: 'include' });
+    if (!resp.ok) return null;
+    const data = (await resp.json())?.data;
+    if (!data || !data.identityPubKey) return null;
+    if (!data.signedPreKey || !data.signingPubKey) {
+      return { identityPubKey: data.identityPubKey, signedPreKey: null, oneTimePreKey: null, verified: false };
+    }
+    let verified = false;
+    try {
+      const signingPub = await importSigningPublicKey(data.signingPubKey);
+      verified = await subtle.verify(
+        { name: 'ECDSA', hash: 'SHA-256' }, signingPub,
+        unb64(data.signedPreKey.signature), unb64(data.signedPreKey.publicKey)
+      );
+    } catch (_) { verified = false; }
+    return {
+      identityPubKey: data.identityPubKey,
+      signedPreKey: verified ? data.signedPreKey : null,
+      oneTimePreKey: verified ? data.oneTimePreKey : null,
+      verified,
+    };
+  }
+
   // ── Auto-init on login event ──────────────────────────────────────────────
   window.addEventListener('kyn:loggedIn', async (e) => {
     const password = e.detail?.password;
@@ -569,12 +783,18 @@
       return _getRecipientPublicKey(userId).then(r => r?.key ? exportPublicKey({ publicKey: r.key }) : null);
     },
     getEncryptionContext: _chatContext,
+    // X3DH — used by js/double-ratchet.js to bootstrap a real 3-4-DH session
+    // instead of the old identity-only 2-DH combine.
+    fetchPrekeyBundle,
+    loadPrekeyPrivate,
+    deletePrekeyPrivate,
     get enabled() { return _enabled; },
     get publicKey() { return _myPubKeyB64; },
     get keyId() { return _myKeyId; },
     clearKeys() {
       localStorage.removeItem(STORE_KEY);
       _myPrivKey = null; _myPubKeyB64 = null; _myKeyId = null; _enabled = false;
+      _mySigningPrivKey = null; _mySigningPubKeyB64 = null;
       PUB_CACHE.clear();
     },
   };
