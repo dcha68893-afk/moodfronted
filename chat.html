@@ -4860,6 +4860,38 @@
                     }
                     return;
                 }
+
+                // FIX (live theme sync, Phase 17 follow-up): Settings used to only
+                // update its own document + localStorage when the user toggled
+                // theme/font size — chat.html (this shell) and every sibling
+                // iframe had no way to know until each independently reloaded,
+                // which is exactly the "sparking"/stale-theme-until-refresh
+                // behavior users saw. Apply here immediately, then relay to every
+                // other live iframe (skip the sender — it already applied its own
+                // change) so the whole app updates together, live.
+                if (data.type === 'THEME_CHANGED' && data.theme) {
+                    var _resolvedTheme = data.theme === 'dark' ? 'dark' : 'light';
+                    document.documentElement.setAttribute('data-theme', _resolvedTheme);
+                    document.documentElement.classList.toggle('theme-dark', _resolvedTheme === 'dark');
+                    document.documentElement.classList.toggle('dark-theme', _resolvedTheme === 'dark');
+                    try { localStorage.setItem('app_theme', _resolvedTheme); } catch (_) {}
+                    document.querySelectorAll('iframe').forEach(function (f) {
+                        if (f.contentWindow === event.source) return;
+                        try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
+                    });
+                    return;
+                }
+                if (data.type === 'FONT_SIZE_CHANGED' && data.fontSize) {
+                    var _fs = parseInt(data.fontSize, 10) || 16;
+                    document.documentElement.style.fontSize = _fs + 'px';
+                    document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
+                    try { localStorage.setItem('app_font_size', String(_fs)); } catch (_) {}
+                    document.querySelectorAll('iframe').forEach(function (f) {
+                        if (f.contentWindow === event.source) return;
+                        try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
+                    });
+                    return;
+                }
                 if (data.type) {
                     emitGlobalAppEvent('MODULE_MESSAGE', {
                         type: data.type,

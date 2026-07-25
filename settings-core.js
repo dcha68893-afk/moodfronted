@@ -7756,15 +7756,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (ageMs < 86400000) { // < 24h
                     SettingsState.data = data;
                     SettingsState.loaded = true;
-                    // Apply appearance/theme immediately before any async work
-                    if (data.appearance?.theme) {
+                    // FIX (theme-sparking-on-refresh bug): this cached settings
+                    // blob can be up to 24h stale — it's a snapshot from the
+                    // last time the FULL settings object was fetched/saved, not
+                    // necessarily the theme the user most recently picked. The
+                    // early inline script at the very top of <head> already
+                    // applied the correct, always-current theme/font-size from
+                    // the 'app_theme'/'app_font_size' keys (which applyTheme()/
+                    // applyFontSize() in settings-ui.js write on every change,
+                    // with no staleness window) before this DOMContentLoaded
+                    // handler ever runs. Re-applying the cache's theme here
+                    // unconditionally could silently revert that correct value
+                    // back to whatever was cached last — exactly the "settings
+                    // sparks back to light after refresh/relogin" bug. Now only
+                    // fall back to the cache's theme/font-size when the
+                    // authoritative key is missing entirely (true first run).
+                    if (data.appearance?.theme && !localStorage.getItem('app_theme')) {
                         const resolved = data.appearance.theme === 'dark' ? 'dark' : 'light';
                         document.documentElement.setAttribute('data-theme', resolved);
                         document.documentElement.classList.toggle('theme-dark', resolved === 'dark');
                         document.documentElement.classList.toggle('dark-theme', resolved === 'dark');
                         try { localStorage.setItem('app_theme', resolved); } catch (_) {}
                     }
-                    if (data.appearance?.fontSize) {
+                    if (data.appearance?.fontSize && !localStorage.getItem('app_font_size')) {
                         const fs = parseInt(data.appearance.fontSize, 10) || 16;
                         document.documentElement.style.fontSize = fs + 'px';
                         document.documentElement.style.setProperty('--base-font-size', fs + 'px');

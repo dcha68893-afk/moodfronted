@@ -1473,6 +1473,21 @@ export function applyTheme(theme) {
     root.style.colorScheme = resolved;
     try { localStorage.setItem('app_theme', resolved); } catch (_) {}
 
+    // FIX (live theme sync, Phase 17 follow-up): this used to only touch
+    // localStorage + this document, so chat.html and every sibling iframe
+    // (friend/group/calls/message/status/Tools/game) had no way to know the
+    // theme changed until each of them separately reloaded — which is why
+    // switching themes here never showed up "live" anywhere else, and why
+    // reopening/relogging could momentarily flash the OLD theme before each
+    // module's own early-init script caught up. Broadcast it the same way
+    // the accent-color picker already does; chat.html now relays this to
+    // every other iframe (see chat.html's THEME_CHANGED handler).
+    sendMessageToParent({
+        type: 'THEME_CHANGED',
+        theme: resolved,
+        timestamp: Date.now()
+    }).catch(() => {});
+
     // Update through SettingsState for REAL backend persistence
     SettingsState.update('appearance', 'theme', resolved).then(() => {
         unsavedChanges = true;
@@ -1490,6 +1505,14 @@ export function applyFontSize(size) {
     document.documentElement.style.fontSize = `${fontSize}px`;
     document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
     try { localStorage.setItem('app_font_size', String(fontSize)); } catch (_) {}
+
+    // FIX (live sync, same reasoning as applyTheme above): broadcast so
+    // other open modules pick up the new font size immediately.
+    sendMessageToParent({
+        type: 'FONT_SIZE_CHANGED',
+        fontSize: fontSize,
+        timestamp: Date.now()
+    }).catch(() => {});
 
     // Update through SettingsState for REAL backend persistence
     SettingsState.update('appearance', 'fontSize', fontSize).then(() => {

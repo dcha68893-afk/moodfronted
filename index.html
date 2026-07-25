@@ -1528,6 +1528,14 @@
                     <div class="landing-cta-row landing-cta-row-secondary">
                         <button type="button" class="landing-ghost-btn" id="landingGoogleBtn"><i class="fab fa-google"></i> Continue with Google</button>
                         <button type="button" class="landing-ghost-btn" id="landingInstallBtn" hidden><i class="fas fa-arrow-down"></i> Install App</button>
+                        <div class="pwa-status" id="landingPwaStatus" hidden>
+                            <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
+                            <button type="button" class="pwa-status-btn" id="landingOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open App</button>
+                            <button type="button" class="pwa-status-btn" id="landingCheckUpdateBtn"><i class="fas fa-sync-alt"></i> Check for Updates</button>
+                            <span class="pwa-status-meta" id="landingPwaVersion"></span>
+                            <span class="pwa-status-meta" id="landingPwaOffline"></span>
+                        </div>
+                        <p class="pwa-install-hint" id="landingPwaHint" hidden></p>
                     </div>
                 </div>
             </header>
@@ -1830,6 +1838,86 @@
             box-shadow: 0 4px 10px var(--shadow-color);
         }
         .auth-install-btn:hover { transform: translateY(-1px); }
+
+        /* PWA install-state UI (Phase 17, Step 5) — replaces the Install
+           button once the app is actually installed, or explains why no
+           install button is available (e.g. iOS Safari, which never fires
+           beforeinstallprompt) instead of leaving a dead/hidden button. */
+        .pwa-status {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 0.78rem;
+        }
+        .pwa-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--theme-success, #2ecc71);
+            font-weight: 700;
+        }
+        .pwa-status-meta {
+            color: rgba(255,255,255,0.75);
+            font-weight: 500;
+        }
+        .pwa-status-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.35);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: var(--button-radius, 8px);
+            font-weight: 600;
+            font-size: 0.78rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .pwa-status-btn:hover { background: rgba(255,255,255,0.2); }
+        .pwa-status-btn:disabled { opacity: 0.6; cursor: default; }
+
+        /* Auth-panel variant sits where authInstallBtn sat (top-right of the
+           card), so it inherits the light card background instead of the
+           dark hero background. */
+        .auth-container .pwa-status {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 6px 10px;
+            box-shadow: 0 4px 10px var(--shadow-color);
+        }
+        .auth-container .pwa-status-badge { color: var(--theme-success, var(--success-color)); }
+        .auth-container .pwa-status-meta { color: var(--text-secondary); }
+        .auth-container .pwa-status-btn {
+            background: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--primary-color);
+            padding: 4px 8px;
+            font-size: 0.72rem;
+        }
+        .auth-container .pwa-status-btn:hover { background: var(--sidebar-bg); }
+
+        .pwa-install-hint {
+            font-size: 0.72rem;
+            color: rgba(255,255,255,0.75);
+            max-width: 220px;
+            line-height: 1.35;
+        }
+        .auth-container .pwa-install-hint {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            color: var(--text-secondary);
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 6px 10px;
+            box-shadow: 0 4px 10px var(--shadow-color);
+        }
     </style>
 
     <div id="app-container"></div>
@@ -1999,6 +2087,13 @@
             <div class="auth-container" id="auth-container">
                 <div class="auth-header">
                     <button type="button" class="auth-install-btn" id="authInstallBtn" hidden title="Install MoodChat"><i class="fas fa-arrow-down"></i> Install App</button>
+                    <div class="pwa-status" id="authPwaStatus" hidden>
+                        <span class="pwa-status-badge"><i class="fas fa-check-circle"></i> Installed</span>
+                        <button type="button" class="pwa-status-btn" id="authOpenAppBtn"><i class="fas fa-external-link-alt"></i> Open</button>
+                        <button type="button" class="pwa-status-btn" id="authCheckUpdateBtn"><i class="fas fa-sync-alt"></i> Update</button>
+                        <span class="pwa-status-meta" id="authPwaVersion"></span>
+                    </div>
+                    <p class="pwa-install-hint" id="authPwaHint" hidden></p>
                     <div class="double-clock"><i class="fas fa-clock"></i></div>
                     <h2 id="panelTitle">Welcome to MoodChat</h2>
                     <p id="panelSubtitle">Login to continue</p>
@@ -3882,19 +3977,17 @@
 
 
     <!-- ====================================================================== -->
-    <script>
-    console.log('[SW-REG] Service Worker temporarily disabled to test redirect loop issue');
-    
-    // Clear any existing service worker registration
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for(var i = 0; i < registrations.length; i++) {
-          registrations[i].unregister();
-          console.log('[SW-REG] Unregistered existing service worker');
-        }
-      });
-    }
-    </script>
+    <!-- FIX (install-flow audit, Phase 17): this block used to unregister
+         EVERY service worker on every load of index.html — a leftover
+         debug hack ("temporarily disabled to test redirect loop issue")
+         that was still live in production. Because it ran async
+         (getRegistrations().then(...)) it raced against the real
+         navigator.serviceWorker.register('/service-worker.js') call
+         further down this same page and could win, leaving the page with
+         no active service worker. Chrome's installability criteria
+         require an active, controlling SW with a fetch handler — without
+         one, beforeinstallprompt never fires at all, which is why the
+         Install button looked permanently broken. Removed. -->
     <!-- ═══ Phase 2 Hybrid Transport Foundation ══════════════════════════════════════════
   Auto-loads Phase 1 + Phase 2 modules. Non-destructive.
   DO NOT move above existing scripts.
@@ -4304,32 +4397,126 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         var installButtons = [landingInstallBtn, authInstallBtn].filter(Boolean);
         var deferredInstallPrompt = null;
 
+        // ---- Install-state UI (Phase 17, Step 5) ---------------------------
+        // Once installed, the Install button is replaced with a small status
+        // group (✓ Installed / Open App / Check for Updates / version /
+        // offline-ready), matching the pattern chat.html's pwa-manager.js
+        // uses for the update banner. Browsers that never fire
+        // beforeinstallprompt (notably iOS Safari) get an explanatory hint
+        // instead of a dead, permanently-hidden button.
+        var statusGroups = [
+            { install: landingInstallBtn, status: document.getElementById('landingPwaStatus'), hint: document.getElementById('landingPwaHint'),
+              openBtn: document.getElementById('landingOpenAppBtn'), updateBtn: document.getElementById('landingCheckUpdateBtn'),
+              versionEl: document.getElementById('landingPwaVersion'), offlineEl: document.getElementById('landingPwaOffline') },
+            { install: authInstallBtn, status: document.getElementById('authPwaStatus'), hint: document.getElementById('authPwaHint'),
+              openBtn: document.getElementById('authOpenAppBtn'), updateBtn: document.getElementById('authCheckUpdateBtn'),
+              versionEl: document.getElementById('authPwaVersion'), offlineEl: null }
+        ].filter(function (g) { return g.install; });
+
         function isRunningInstalled() {
             return window.matchMedia('(display-mode: standalone)').matches ||
                 window.navigator.standalone === true ||
                 document.referrer.startsWith('android-app://');
         }
+        function isIOS() {
+            return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        }
+        function isInstalledPersisted() {
+            try { return localStorage.getItem('pwa_installed') === '1'; } catch (_) { return false; }
+        }
         function setInstallButtonsVisible(visible) {
             installButtons.forEach(function (btn) { btn.hidden = !visible; });
         }
+
+        function fetchSwInfo(callback) {
+            if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) { callback(null); return; }
+            try {
+                var channel = new MessageChannel();
+                var done = false;
+                channel.port1.onmessage = function (e) {
+                    if (done) return;
+                    done = true;
+                    callback(e.data || null);
+                };
+                navigator.serviceWorker.controller.postMessage({ type: 'GET_CACHE_INFO' }, [channel.port2]);
+                setTimeout(function () { if (!done) { done = true; callback(null); } }, 3000);
+            } catch (_) { callback(null); }
+        }
+
+        function renderInstalledState() {
+            setInstallButtonsVisible(false);
+            statusGroups.forEach(function (g) {
+                if (g.hint) g.hint.hidden = true;
+                if (g.status) g.status.hidden = false;
+            });
+            fetchSwInfo(function (info) {
+                statusGroups.forEach(function (g) {
+                    if (g.versionEl) g.versionEl.textContent = info && info.version ? 'v' + info.version : '';
+                    if (g.offlineEl) g.offlineEl.textContent = info && info.count > 0 ? 'Offline ready' : 'Setting up offline support…';
+                });
+            });
+        }
+
+        function renderIOSHint() {
+            statusGroups.forEach(function (g) {
+                if (g.status) g.status.hidden = true;
+                if (g.hint) {
+                    g.hint.textContent = 'To install: tap Share, then "Add to Home Screen".';
+                    g.hint.hidden = false;
+                }
+            });
+        }
+
+        statusGroups.forEach(function (g) {
+            if (g.openBtn) g.openBtn.addEventListener('click', function () { window.location.href = '/chat.html'; });
+            if (g.updateBtn) g.updateBtn.addEventListener('click', function () {
+                if (!('serviceWorker' in navigator)) return;
+                var label = g.updateBtn.innerHTML;
+                g.updateBtn.disabled = true;
+                g.updateBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Checking…';
+                navigator.serviceWorker.getRegistration().then(function (reg) {
+                    return reg ? reg.update() : null;
+                }).then(function () {
+                    g.updateBtn.innerHTML = '<i class="fas fa-check"></i> Up to date';
+                }).catch(function () {
+                    g.updateBtn.innerHTML = label;
+                }).finally(function () {
+                    setTimeout(function () { g.updateBtn.disabled = false; g.updateBtn.innerHTML = label; }, 2500);
+                });
+            });
+        });
+
         async function handleInstallClick() {
             if (!deferredInstallPrompt) return;
             deferredInstallPrompt.prompt();
-            try { await deferredInstallPrompt.userChoice; } finally {
+            try {
+                var choice = await deferredInstallPrompt.userChoice;
+                if (choice && choice.outcome === 'accepted') {
+                    try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
+                }
+            } finally {
                 deferredInstallPrompt = null;
-                setInstallButtonsVisible(false);
             }
         }
-        if (installButtons.length && !isRunningInstalled()) {
-            window.addEventListener('beforeinstallprompt', function (e) {
-                e.preventDefault();
-                deferredInstallPrompt = e;
-                setInstallButtonsVisible(true);
-            });
-            installButtons.forEach(function (btn) { btn.addEventListener('click', handleInstallClick); });
+
+        if (isRunningInstalled() || isInstalledPersisted()) {
+            renderInstalledState();
+        } else if (installButtons.length) {
+            if (isIOS()) {
+                renderIOSHint();
+            } else {
+                window.addEventListener('beforeinstallprompt', function (e) {
+                    e.preventDefault();
+                    deferredInstallPrompt = e;
+                    setInstallButtonsVisible(true);
+                });
+                installButtons.forEach(function (btn) { btn.addEventListener('click', handleInstallClick); });
+            }
             window.addEventListener('appinstalled', function () {
                 deferredInstallPrompt = null;
-                setInstallButtonsVisible(false);
+                try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
+                renderInstalledState();
             });
         }
     })();
