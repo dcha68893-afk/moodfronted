@@ -587,6 +587,56 @@
             line-height: 1.4;
         }
         
+        /* Quick Tips — practical "how it's best to use" guidance, distinct
+           from .feature-showcase above (which just lists what exists). */
+        .quick-tips {
+            margin-bottom: 30px;
+        }
+        .quick-tips h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: white;
+            text-align: center;
+        }
+        .tips-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .tip-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(10px);
+            border-radius: var(--card-radius);
+            padding: 12px 14px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .tip-number {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .tip-text {
+            font-size: 12.5px;
+            color: rgba(255, 255, 255, 0.85);
+            line-height: 1.5;
+        }
+        .tip-text strong {
+            color: white;
+            font-weight: 600;
+        }
+
         .social-proof {
             margin-bottom: 30px;
         }
@@ -1511,6 +1561,15 @@
                 </div>
             </div>
             
+            <div class="quick-tips">
+                <h2>💡 Quick Tips</h2>
+                <div class="tips-list">
+                    <div class="tip-card"><div class="tip-number">1</div><div class="tip-text">Turn on <strong>AI Translation</strong> in a chat's settings before joining a global room — messages arrive already translated, no copy-pasting.</div></div>
+                    <div class="tip-card"><div class="tip-number">2</div><div class="tip-text">Add 2–3 interests to your profile first. Rooms and people are suggested from them, so a filled-out profile means better matches from minute one.</div></div>
+                    <div class="tip-card"><div class="tip-number">3</div><div class="tip-text">On video calls, join with your mic muted and camera off — you can turn both on once you're in, and it avoids a noisy entrance.</div></div>
+                </div>
+            </div>
+
             <div class="social-proof">
                 <h2>🌟 Testimonials</h2>
                 <div class="testimonial">
@@ -1554,6 +1613,16 @@
                 </div>
             </div>
             
+            <div class="quick-tips">
+                <h2>💡 Quick Tips</h2>
+                <div class="tips-list">
+                    <div class="tip-card"><div class="tip-number">1</div><div class="tip-text">Turn on <strong>AI Translation</strong> in a chat's settings before joining a global room — messages arrive already translated, no copy-pasting.</div></div>
+                    <div class="tip-card"><div class="tip-number">2</div><div class="tip-text">Add 2–3 interests to your profile first. Rooms and people are suggested from them, so a filled-out profile means better matches from minute one.</div></div>
+                    <div class="tip-card"><div class="tip-number">3</div><div class="tip-text">On video calls, join with your mic muted and camera off — you can turn both on once you're in, and it avoids a noisy entrance.</div></div>
+                    <div class="tip-card"><div class="tip-number">4</div><div class="tip-text">Pin your most active chats from the chat list menu so they stay at the top instead of getting buried by new conversations.</div></div>
+                </div>
+            </div>
+
             <div class="social-proof">
                 <h2>🌟 Success Stories</h2>
                 <div class="testimonial">
@@ -2282,6 +2351,28 @@
         function finalizeLoginSuccess(response, password) {
             const token = response.token || response.data?.token || response.accessToken;
             const user = response.user || response.data?.user;
+            // FIX (TWO-ACCOUNTS-PER-DEVICE): the actual dead-code bug was that
+            // window.AccountLimit.registerDeviceAccount() was never called from
+            // any of the real login/register code paths — only from the unused
+            // window.AuthGateway wrapper that the buttons below bypass entirely.
+            // finalizeLoginSuccess() is the one function BOTH the password-login
+            // success branch and the MFA-verified success branch (via
+            // doVerify() -> finalizeLoginSuccess()) funnel through before
+            // persisting a session, so this is the single correct place to
+            // enforce the device cap for logins. Already-known accounts on this
+            // device (registerDeviceAccount returns {success:true, existing:true})
+            // always pass through unaffected; only a genuine 3rd distinct
+            // account gets refused, and refusal happens BEFORE the session is
+            // persisted/redirected so the user is never left half-logged-in.
+            if (user && window.AccountLimit) {
+                const userId = user.id || user._id || user.userId;
+                const limitResult = window.AccountLimit.registerDeviceAccount(userId, user.email, user.username || user.displayName);
+                if (!limitResult.success) {
+                    window.CoreUtils.showNotification('Error', limitResult.error || `Maximum ${window.AccountLimit.MAX_ACCOUNTS} accounts per device. Please use another device or remove an existing account.`, 'error');
+                    setButtonLoadingState('login-button', 'loginButtonText', 'loginSpinner', 'Login to MoodChat', false);
+                    return;
+                }
+            }
             if (token) {
                 window.AppRuntimeAuthority?.persistSession?.({
                     token, refreshToken: response.refreshToken || response.data?.refreshToken || null,
@@ -2525,6 +2616,16 @@
                     const accept = document.getElementById('acceptTerms').checked;
                     clearErrorMessages();
                     if (!validateRegisterInputs(displayName, username, email, password, confirm, accept)) return;
+                    // FIX (TWO-ACCOUNTS-PER-DEVICE): this button calls
+                    // window.api.auth.register directly a few lines below,
+                    // never window.AuthGateway.register — so the limit check
+                    // that previously only lived in AuthGateway.register never
+                    // actually ran. Check here instead, before the API call.
+                    if (window.AccountLimit && !window.AccountLimit.canRegisterNewAccount()) {
+                        window.CoreUtils.showNotification('Error', `Maximum ${window.AccountLimit.MAX_ACCOUNTS} accounts per device. Please use another device or remove an existing account.`, 'error');
+                        showError('registerEmail', `Maximum ${window.AccountLimit.MAX_ACCOUNTS} accounts per device.`);
+                        return;
+                    }
                     setButtonLoadingState('register-button', 'registerButtonText', 'registerSpinner', 'Creating account...', true);
 
                     // FIX: Only show "waking up" if the health probe actually fails/times out
@@ -2587,6 +2688,9 @@
                                 try { window.SessionState.setToken(token); } catch(_) {}
                                 try { if (user) window.SessionState.setUser(user); } catch(_) {}
                                 try { if (window.SessionManager && user) window.SessionManager.createSession(user, token, true); } catch(_) {}
+                            }
+                            if (window.AccountLimit && user) {
+                                window.AccountLimit.registerDeviceAccount(user.id || user._id || user.userId, user.email, user.username || user.displayName);
                             }
                             clearTimeout(wakeTimerReg);
                             window.CoreUtils.showNotification('Success', 'Account created! Please login to continue.', 'success');
@@ -2783,6 +2887,11 @@
                 document.getElementById('panelSubtitle').textContent = 'Welcome back!';
             }
             clearErrorMessages();
+            // FIX (GOOGLE-BUTTON-NOT-DISPLAYING): let google-auth.js know a
+            // tab switch may have just made a previously display:none Google
+            // Sign-In container visible for the first time, so it can render
+            // (or re-render at the correct width) into it now.
+            window.dispatchEvent(new CustomEvent('auth-form-switched', { detail: { formName } }));
         }
         
         function validateLoginInputs(identifier, password, method) {

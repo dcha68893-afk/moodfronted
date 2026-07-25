@@ -59,6 +59,21 @@
             const now = Date.now();
             const expiresAt = now + ((data.expiresIn || 24 * 60 * 60) * 1000);
 
+            // FIX (TWO-ACCOUNTS-PER-DEVICE): Google sign-in was the third real
+            // login entry point that never touched window.AccountLimit at all
+            // (only the unused AuthGateway wrapper did). Check/register here,
+            // before persisting the session, same as password login. Already-
+            // known accounts on this device always pass; only a genuine 3rd
+            // distinct account gets refused.
+            if (user && window.AccountLimit) {
+                const userId = user.id || user._id || user.userId;
+                const limitResult = window.AccountLimit.registerDeviceAccount(userId, user.email, user.username || user.displayName);
+                if (!limitResult.success) {
+                    showError(limitResult.error || `Maximum ${window.AccountLimit.MAX_ACCOUNTS} accounts per device. Please use another device or remove an existing account.`);
+                    return;
+                }
+            }
+
             // Persist exactly the way the rest of the app expects (all legacy
             // localStorage keys + kynecta_auth) via the shared AuthStorage helper.
             if (window.AuthStorage && typeof window.AuthStorage.saveAuth === 'function') {
@@ -95,28 +110,83 @@
         }
     }
 
-    function renderButtons() {
-        if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+    let _initialized = false;
+    // Track which containers we've already successfully rendered a button
+    // into, so switching tabs back and forth doesn't stack duplicate buttons.
+    const _rendered = new WeakSet();
 
-        window.google.accounts.id.initialize({
-            client_id: GOOGLE_CLIENT_ID,
-            callback: handleCredentialResponse,
-            auto_select: false
-        });
+    // FIX (GOOGLE-BUTTON-NOT-DISPLAYING): the register tab's container
+    // (#googleSignInRegisterContainer) lives inside .register-container,
+    // which is `display:none` until the user switches tabs. Google Identity
+    // Services measures the container's box at the moment renderButton() is
+    // called and never re-measures later — so calling renderButton() once at
+    // page load (when the register tab is still hidden) silently produced a
+    // broken/invisible button that never self-corrected once the tab became
+    // visible. It also always requested a fixed width:280, which could clip
+    // on narrow phones.
+    //
+    // Fix: only render into containers that are ACTUALLY VISIBLE right now;
+    // re-run rendering whenever a tab switch or viewport resize could have
+    // changed which container is visible or how wide it is; size the button
+    // to the container's real width; and show a visible fallback message if
+    // Google's script never loads instead of leaving a blank space.
+    function isVisible(el) {
+        // offsetParent is null for display:none elements (and their
+        // descendants) but not for visibility:hidden, which is what we want
+        // here since ancestors use display:none to hide inactive tabs.
+        return !!el && el.offsetParent !== null && el.offsetWidth > 0;
+    }
 
-        const containers = [
-            document.getElementById('googleSignInLoginContainer'),
-            document.getElementById('googleSignInRegisterContainer')
-        ].filter(Boolean);
-
-        containers.forEach((container) => {
+    function renderInto(container) {
+        if (!container || !isVisible(container) || _rendered.has(container)) return;
+        container.innerHTML = ''; // clear any stale fallback message
+        const width = Math.max(200, Math.min(320, container.offsetWidth || 280));
+        try {
             window.google.accounts.id.renderButton(container, {
                 theme: 'outline',
                 size: 'large',
-                width: 280,
+                width,
                 text: 'continue_with',
                 shape: 'pill'
             });
+            _rendered.add(container);
+        } catch (e) {
+            console.warn('[GoogleAuth] renderButton failed:', e.message);
+        }
+    }
+
+    function renderButtons() {
+        if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+        if (!_initialized) {
+            window.google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleCredentialResponse,
+                auto_select: false
+            });
+            _initialized = true;
+        }
+
+        [
+            document.getElementById('googleSignInLoginContainer'),
+            document.getElementById('googleSignInRegisterContainer')
+        ].filter(Boolean).forEach(renderInto);
+    }
+
+    function showFallback(container) {
+        if (!container || _rendered.has(container)) return;
+        container.innerHTML = '<div style="font-size:13px;color:rgba(255,255,255,0.6);text-align:center;padding:8px 0;">Google sign-in is unavailable right now — please use email/password instead.</div>';
+    }
+
+    function reRenderVisible() {
+        [
+            document.getElementById('googleSignInLoginContainer'),
+            document.getElementById('googleSignInRegisterContainer')
+        ].filter(Boolean).forEach((container) => {
+            if (isVisible(container)) {
+                _rendered.delete(container);
+                renderInto(container);
+            }
         });
     }
 
@@ -124,17 +194,47 @@
         // The GIS script (accounts.google.com/gsi/client) is loaded via a
         // <script> tag in index.html; poll briefly in case this file executes
         // first.
-        if (window.google && window.google.accounts && window.google.accounts.id) {
-            renderButtons();
-            return;
-        }
-        const interval = setInterval(() => {
+        const tryRender = () => {
             if (window.google && window.google.accounts && window.google.accounts.id) {
-                clearInterval(interval);
                 renderButtons();
+                return true;
             }
-        }, 200);
-        setTimeout(() => clearInterval(interval), 15000);
+            return false;
+        };
+
+        if (!tryRender()) {
+            const interval = setInterval(() => {
+                if (tryRender()) clearInterval(interval);
+            }, 200);
+            setTimeout(() => {
+                clearInterval(interval);
+                if (!window.google || !window.google.accounts || !window.google.accounts.id) {
+                    // Google's script never loaded (blocked, offline, etc.) —
+                    // show a visible message instead of a permanently blank box.
+                    showFallback(document.getElementById('googleSignInLoginContainer'));
+                    showFallback(document.getElementById('googleSignInRegisterContainer'));
+                }
+            }, 15000);
+        }
+
+        // Re-render whenever a tab switch could reveal a previously-hidden
+        // container (index.html's switchForm() dispatches this — see fix
+        // there). Cheap no-op via isVisible()/_rendered guard if nothing
+        // actually changed.
+        window.addEventListener('auth-form-switched', reRenderVisible);
+
+        // Re-render on resize/orientation change so the button width tracks
+        // the container instead of staying clipped/oversized. Google doesn't
+        // support resizing an already-rendered button in place, so re-render
+        // from scratch for any visible container.
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(reRenderVisible, 250);
+        });
+        window.addEventListener('orientationchange', () => {
+            setTimeout(reRenderVisible, 300);
+        });
     }
 
     if (document.readyState === 'loading') {
