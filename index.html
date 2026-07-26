@@ -218,6 +218,13 @@
         }
 
         #app-container, #iframe-container, #bottom-nav { display: none; }
+        /* FIX (LOGIN-PAGE-DEAD-APP-NAV): #bottom-nav (Home/Explore/Notifications/
+           Profile/Settings/Close — the authenticated app's nav, all dead href="#"
+           links) was already hidden above, but its round toggle button was not,
+           so it stayed visible and clickable on the login/landing page and could
+           slide that irrelevant nav open over the login form. Hiding the toggle
+           too means there's nothing left pre-login that can open it. */
+        .bottom-nav-toggle { display: none; }
         footer { display: none; }
 
         .theme-toggle-btn {
@@ -444,6 +451,13 @@
             background-clip: text;
         }
         
+        /* FIX (LOGIN-PAGE-REDUNDANT-DRAWER-TOGGLE): this button opens #mobileSidebar,
+           a second copy of the same marketing content (stats/features/tips/testimonials)
+           that .mobile-marketing-panel already renders inline below the login form on
+           mobile. Pre-login there's nothing else to navigate to, so the button is just
+           a dead-end control sitting in the header. Overridden to display:none just
+           below (rule kept here as-is so #mobileSidebar's own toggle logic elsewhere
+           isn't touched); the logo stays visible. */
         .mobile-menu-toggle {
             background: rgba(255, 255, 255, 0.2);
             border: none;
@@ -457,6 +471,7 @@
             justify-content: center;
             font-size: 18px;
         }
+        .mobile-menu-toggle { display: none; }
         
         .mobile-sidebar-overlay {
             display: none;
@@ -1445,6 +1460,19 @@
             .sidebar.mobile { display: block; }
             .auth-panel { margin-left: 0; padding-top: var(--header-height); }
             .auth-content { padding: 15px; padding-top: calc(var(--header-height) + 15px); align-items: flex-start; }
+
+            /* FIX (LOGIN-FORM-CLIPPED-ON-MOBILE): .auth-panel is a fixed-height
+               (height:100vh) flex column containing .auth-content (the login form)
+               and .mobile-marketing-panel as siblings. Flexbox gives the marketing
+               panel its natural size first, then crushes .auth-content into
+               whatever's left — and because .auth-content has its own
+               overflow-y:auto, that squeeze doesn't grow the page, it just clips
+               the login form (Google button, "Sign up here"/"Forgot password"
+               links, footer) into an invisible internal scrollbar. Letting both
+               take their natural height on mobile makes the whole page scroll
+               normally instead. */
+            .auth-panel { height: auto; min-height: 100vh; overflow-y: visible; }
+            .auth-content { flex: none; overflow-y: visible; min-height: 0; }
             .auth-container { box-shadow: none; border-radius: 0; }
             .auth-body { padding: 20px; }
             .auth-footer { padding: 15px 20px; }
@@ -2739,6 +2767,38 @@
             }
             .mobile-marketing-panel .download-badge { color: var(--text-primary); }
             .mobile-marketing-panel .download-badge:hover { background: var(--sidebar-bg); }
+
+            /* FIX (LOGIN-PAGE-CARDS-NOT-ACTUALLY-TWO-PER-ROW): .feature-grid and
+               .badge-grid are shared with #mobileSidebar and #desktopSidebar, and
+               both are hardcoded to `flex-direction: column` everywhere (including
+               a later @media (max-width:480px) override that forces .badge-grid
+               back to column) — so a "two-per-row" fix never actually landed here;
+               every card and badge still stacked one-per-line. Scoping a grid
+               override to .mobile-marketing-panel only (higher specificity than
+               the plain .feature-grid/.badge-grid rules, so it wins regardless of
+               source order) fixes it here without touching the sidebars. */
+            .mobile-marketing-panel .feature-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+            .mobile-marketing-panel .feature-card {
+                flex-direction: column;
+                text-align: center;
+                gap: 8px;
+                padding: 14px 10px;
+            }
+            .mobile-marketing-panel .badge-grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+            .mobile-marketing-panel .download-badge {
+                flex-direction: column;
+                text-align: center;
+                gap: 6px;
+                padding: 12px 8px;
+            }
         }
     </style>
 

@@ -1353,7 +1353,7 @@
             display: flex; align-items: center; gap: 10px;
             width: 100%; padding: 10px 14px;
             background: none; border: none; font-size: 13px;
-            color: var(--text-primary, #e5e7eb);
+            color: var(--text-primary);
             cursor: pointer; text-align: left; transition: background .15s;
         }
         .hgm-item:hover { background: rgba(255,255,255,.06); }
@@ -1376,7 +1376,7 @@
             animation: gcrPulse 1s infinite;
         }
         @keyframes gcrPulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
-        #gcRecordTimer { font-size:16px; font-weight:700; flex:1; color:var(--text-primary,#e5e7eb); font-variant-numeric:tabular-nums; }
+        #gcRecordTimer { font-size:16px; font-weight:700; flex:1; color:var(--text-primary); font-variant-numeric:tabular-nums; }
         .gcr-action { border: none; cursor: pointer; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; }
         #gcRecordCancel { background: rgba(255,255,255,.1); color: var(--text-secondary,#9ca3af); }
         #gcRecordSend   { background: #0084ff; color: #fff; }
@@ -1588,7 +1588,7 @@
                 <i class="fas fa-user"></i>
             </div>
             <div style="flex:1;min-width:0;cursor:pointer;" id="hdrChatInfo">
-                <div id="hdrChatName" style="font-weight:600;font-size:14px;color:var(--text-primary,#e5e7eb);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Chat</div>
+                <div id="hdrChatName" style="font-weight:600;font-size:14px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Chat</div>
                 <div id="hdrChatStatus" style="font-size:11px;color:var(--text-secondary,#9ca3af);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Offline</div>
             </div>
             <button class="hgm-btn" id="hdrChatCall"  title="Voice call"><i class="fas fa-phone"></i></button>
@@ -1606,7 +1606,7 @@
             <div id="hdrGroupAvatar" style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#0084ff,#0055cc);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700;font-size:13px;color:#fff;cursor:pointer;user-select:none;">G</div>
             <!-- Name + meta -->
             <div style="flex:1;min-width:0;">
-                <div id="hdrGroupName" style="font-weight:600;font-size:14px;color:var(--text-primary,#e5e7eb);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Group</div>
+                <div id="hdrGroupName" style="font-weight:600;font-size:14px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">Group</div>
                 <div id="hdrGroupMeta" style="font-size:11px;color:var(--text-secondary,#9ca3af);line-height:1.2;">0 members</div>
             </div>
             <!-- Actions -->

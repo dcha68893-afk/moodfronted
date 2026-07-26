@@ -1154,14 +1154,14 @@
        nothing changes visually until the user actually switches theme.
        ═══════════════════════════════════════════════════════════ */
     :root {
-        --background-color: var(--bg-color, #f5f5f5);
+        --background-color: var(--bg-color);
         --surface-color: var(--card-bg, #ffffff);
     }
 
     /* Full app background now follows the live theme */
     html, body, .app-container, .sidebar, .sidebar.active {
-        background: var(--bg-color, #f5f5f5);
-        color: var(--text-primary, #111111);
+        background: var(--bg-color);
+        color: var(--text-primary);
     }
 
     /* Header — bug: this was pinned to a literal #ffffff/#e5e7eb regardless
@@ -1181,7 +1181,7 @@
     }
     .jm-search-input {
         background: transparent !important;
-        color: var(--text-primary, #111111) !important;
+        color: var(--text-primary) !important;
     }
     .jm-search-input::placeholder { color: var(--text-secondary, #9ca3af) !important; }
     .jm-search-icon, .jm-icon-btn i { color: var(--text-secondary, #667781) !important; }
@@ -1191,7 +1191,7 @@
         font-weight: 700 !important;
         font-size: 16px !important;
         padding: 14px 16px !important;
-        color: var(--text-primary, #111111) !important;
+        color: var(--text-primary) !important;
         display: flex !important;
         align-items: center !important;
         gap: 8px !important;
@@ -1429,9 +1429,9 @@
     }
 
     /* Detail panel — same header-hardcoding bug as .jm-header above */
-    .marketplace-detail-panel { background: var(--card-bg, #ffffff) !important; color: var(--text-primary, #111111) !important; }
+    .marketplace-detail-panel { background: var(--card-bg, #ffffff) !important; color: var(--text-primary) !important; }
     .marketplace-detail-header { background: var(--card-bg, #ffffff) !important; border-bottom: 1px solid var(--border-color, #e5e7eb) !important; }
-    .marketplace-detail-name, .marketplace-detail-time { color: var(--text-primary, #111111) !important; }
+    .marketplace-detail-name, .marketplace-detail-time { color: var(--text-primary) !important; }
     .listing-price { color: #f57224 !important; }
 
     /* Misc text */
@@ -1565,7 +1565,7 @@
 
                 <!-- Products grid count -->
                 <div class="jm-section-header" style="padding:4px 12px 2px">
-                    <span style="font-size:13px;font-weight:700;color:var(--text-primary,#111)">All Products</span>
+                    <span style="font-size:13px;font-weight:700;color:var(--text-primary)">All Products</span>
                     <span id="jmProductCount" style="font-size:12px;color:#6b7280"></span>
                 </div>
 

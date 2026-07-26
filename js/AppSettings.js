@@ -833,7 +833,35 @@
                 root.style.setProperty('--hover-bg', '#f5f6f6');
             }
 
-            // FIX: several pages (settings.html, friend.html, status.html,
+            // FIX (KYN-CRITICAL-VARS-STUCK-ON-LIVE-THEME-CHANGE): chat.html,
+            // friend.html, Tools.html, calls.html, status.html, message.html,
+            // and group.html each set --kyn-bg-root/--kyn-bg-chat/--kyn-bg-header/
+            // --kyn-text-primary/--kyn-text-secondary/--kyn-border directly via an
+            // inline script at page load, purely to avoid a first-paint flash while
+            // theme.colors.css loads over the network. Those are plain inline
+            // styles on <html>, so once set they permanently beat theme.colors.css
+            // in the cascade — including on every *live* theme change afterward.
+            // This function used to only touch --bg-color/--text-primary/etc., so
+            // switching themes in Settings while one of those pages was open left
+            // the --kyn-* variables (and anything styled from them) stuck on
+            // whatever theme was active at load, even as everything else updated
+            // instantly. Reapplying the same values here on every live change
+            // closes that gap.
+            if (theme === 'dark') {
+                root.style.setProperty('--kyn-bg-root', '#0f172a');
+                root.style.setProperty('--kyn-bg-chat', '#020617');
+                root.style.setProperty('--kyn-bg-header', '#0f172a');
+                root.style.setProperty('--kyn-text-primary', '#e5e7eb');
+                root.style.setProperty('--kyn-text-secondary', '#9ca3af');
+                root.style.setProperty('--kyn-border', '#374151');
+            } else {
+                root.style.setProperty('--kyn-bg-root', '#ffffff');
+                root.style.setProperty('--kyn-bg-chat', '#efeae2');
+                root.style.setProperty('--kyn-bg-header', '#f0f2f5');
+                root.style.setProperty('--kyn-text-primary', '#111b21');
+                root.style.setProperty('--kyn-text-secondary', '#667781');
+                root.style.setProperty('--kyn-border', '#e9edef');
+            }
             // chat.html, admin-calls.html, game.html, index.html) style panels
             // and cards using var(--surface, ...), var(--accent, ...) and
             // var(--border, ...) — variable names this function never actually

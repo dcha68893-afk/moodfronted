@@ -39,6 +39,33 @@
             root.classList.toggle('dark-theme', th === 'dark');
             if (body) body.setAttribute('data-theme', th);
             try { localStorage.setItem('app_theme', th); } catch (_) {}
+
+            // FIX (KYN-CRITICAL-VARS-STUCK-ON-LIVE-THEME-CHANGE): this page's own
+            // early inline script sets --kyn-bg-root/--kyn-bg-chat/--kyn-bg-header/
+            // --kyn-text-primary/--kyn-text-secondary/--kyn-border directly on
+            // <html> at load, purely to avoid a first-paint flash before
+            // theme.colors.css arrives over the network. Because those are
+            // inline styles, they permanently beat theme.colors.css in the
+            // cascade — including when a live SETTINGS_UPDATED arrives here
+            // later. Without reapplying them on every live change too, this
+            // iframe's header/root/chat colors would stay stuck on whatever
+            // theme was active when the page first loaded, even as everything
+            // else driven by theme.colors.css updated instantly.
+            if (th === 'dark') {
+                root.style.setProperty('--kyn-bg-root', '#0f172a');
+                root.style.setProperty('--kyn-bg-chat', '#020617');
+                root.style.setProperty('--kyn-bg-header', '#0f172a');
+                root.style.setProperty('--kyn-text-primary', '#e5e7eb');
+                root.style.setProperty('--kyn-text-secondary', '#9ca3af');
+                root.style.setProperty('--kyn-border', '#374151');
+            } else {
+                root.style.setProperty('--kyn-bg-root', '#ffffff');
+                root.style.setProperty('--kyn-bg-chat', '#efeae2');
+                root.style.setProperty('--kyn-bg-header', '#f0f2f5');
+                root.style.setProperty('--kyn-text-primary', '#111b21');
+                root.style.setProperty('--kyn-text-secondary', '#667781');
+                root.style.setProperty('--kyn-border', '#e9edef');
+            }
         }
         if (ap.accentColor) root.style.setProperty('--accent-color', ap.accentColor);
         if (ap.fontSize) {
