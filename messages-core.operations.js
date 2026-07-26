@@ -664,30 +664,36 @@ const ChatManager = {
                     queued: true,
                 };
             } else {
-                // ── ONLINE PATH: try transport in priority order ─────────────
-                // 1. LAN direct (same subnet, no internet needed)
-                let lanSent = false;
-                if (bestTransport === 'LAN' && lanEngine?.hasPeers?.()) {
-                    try {
-                        // PHASE11: Prefer COR for orchestrated LAN delivery
-                        const _cor = window.__COR;
-                        if (_cor) {
-                            const _r = await _cor.send('message:send', requestBody, { transport: 'LAN' }).catch(() => null);
-                            lanSent = _r?.ok === true;
-                        } else {
-                            lanSent = lanEngine.send({ ...requestBody, _via: 'LAN' });
-                        }
-                        if (lanSent) {
-                            hybridEngine?.recordSuccess?.('LAN', 0);
-                            debugLog('[ChatManager] ✅ PHASE11 LAN delivery');
-                        }
-                    } catch (_lanErr) {
-                        hybridEngine?.recordFailure?.('LAN');
-                        lanSent = false;
-                    }
-                }
+                // ── ONLINE PATH ────────────────────────────────────────────
+                // FIX-RATCHET-DESYNC: this used to ALSO speculatively fire a LAN
+                // direct send here, in parallel with the internet POST below,
+                // whenever bestTransport()/lanEngine.hasPeers() believed a LAN
+                // peer was present (the comment literally called this "additive
+                // not exclusive"). Both sends carried the exact same already
+                // double-ratchet-encrypted requestBody.content — one real
+                // ciphertext, delivered to the receiver via TWO independent code
+                // paths (chat.html's 'lan:message' handler vs its normal
+                // 'message:new' handler). LAN delivery is near-instant
+                // (direct peer-to-peer / mesh) while the internet path is a full
+                // round trip (POST → DB save → Socket.IO broadcast, ~1-2s per the
+                // FORENSIC logs), so sending two messages in quick succession let
+                // message #2's LAN copy arrive before message #1's internet copy.
+                // The double-ratchet's skipped-key window tolerates ordinary
+                // out-of-order arrival, but a genuine duplicate of the same
+                // ciphertext racing in through two differently-shaped delivery
+                // paths corrupted ratchet ordering — surfacing as intermittent
+                // "[Decryption failed — message may be out of order or
+                // corrupted]" and one-directional delivery breakage. It also
+                // contradicted the backend's own internet-first / LAN-fallback-
+                // only design for time-sensitive events (see HybridTransportRuntime
+                // PRIORITY / UnifiedRuntimeOrchestrator.deliver's timesSensitive
+                // branch) — the frontend was opportunistically parallel-sending
+                // where the backend never does. LAN/mesh is still reachable below
+                // as a genuine fallback (step "Mesh relay fallback"), which only
+                // fires if the internet POST actually fails — never in parallel
+                // with it.
 
-                // 2. Internet (primary) — always attempted; LAN is additive not exclusive
+                // Internet (primary, and now the ONLY path attempted up front)
                 try {
                     result = await makeApiRequest('/messages', 'POST', requestBody);
                     hybridEngine?.recordSuccess?.('INTERNET', 0);
