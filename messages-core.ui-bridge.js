@@ -1499,14 +1499,35 @@ const UIStateManager = {
                 // FIX-MSG-DELIVERY-ACK: Phase 2 — tell server we received this message
                 // so the sender gets 'message:delivered' and delivery timeout is cleared.
                 try {
+                    var _ackPayload = {
+                        messageId: normalizedMessage.serverId || normalizedMessage.id,
+                        chatId:    normalizedMessage.chatId || normalizedMessage.conversationId,
+                        senderId:  normalizedMessage.senderId || normalizedMessage.userId,
+                    };
                     var _delSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
-                    if (_delSocket && typeof _delSocket.emit === 'function') {
-                        _delSocket.emit('message:delivery_ack', {
-                            messageId: normalizedMessage.serverId || normalizedMessage.id,
-                            chatId:    normalizedMessage.chatId || normalizedMessage.conversationId,
-                            senderId:  normalizedMessage.senderId || normalizedMessage.userId,
-                        });
+                    var _ackSentDirectly = false;
+                    if (_delSocket && typeof _delSocket.emit === 'function' && _delSocket.connected !== false) {
+                        _delSocket.emit('message:delivery_ack', _ackPayload);
+                        _ackSentDirectly = true;
                     }
+                    // FIX-ACK-SILENT-FAIL: this iframe keeps its own independent socket
+                    // connection, which can be momentarily disconnected/reconnecting or
+                    // simply not yet initialized when a message arrives, causing the
+                    // ack above to silently no-op — the message still renders correctly,
+                    // but the sender's 10s delivery-timeout fires anyway because the
+                    // server never heard back. The parent frame (chat.html) keeps its
+                    // own always-on socket connection for the same authenticated user,
+                    // so we always also relay the ack up to it as a reliable fallback;
+                    // the server-side handler is idempotent (it just clears a timer).
+                    try {
+                        if (window.parent && window.parent !== window) {
+                            window.parent.postMessage({
+                                type: 'message:client_delivery_ack',
+                                payload: _ackPayload,
+                                source: 'messages'
+                            }, '*');
+                        }
+                    } catch(_pErr) { /* silent — best-effort fallback */ }
                 } catch(_dErr) { /* silent — delivery ack is best-effort */ }
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}

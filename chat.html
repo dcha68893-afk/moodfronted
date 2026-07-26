@@ -4908,6 +4908,24 @@
                     // Fall through — still handled below by FRIENDS_DATA/FRIENDS_SYNC blocks
                 }
 
+                // FIX-ACK-SILENT-FAIL: the messages iframe keeps its own independent
+                // socket connection and normally sends 'message:delivery_ack' directly
+                // over it. That connection can be momentarily disconnected/reconnecting
+                // when a message arrives, which silently drops the ack and leaves the
+                // sender's 10s delivery-timeout to fire even though the message was
+                // genuinely displayed. The iframe also relays the same ack here as a
+                // fallback; forward it over this shell's own always-on socket. The
+                // server-side handler is idempotent (it just clears a timer), so it's
+                // safe even if the iframe's direct emit also succeeded.
+                if (data.type === 'message:client_delivery_ack' && data.payload) {
+                    try {
+                        if (window.wsService && typeof window.wsService.emit === 'function') {
+                            window.wsService.emit('message:delivery_ack', data.payload);
+                        }
+                    } catch (_ackRelayErr) {}
+                    return;
+                }
+
                 if (data.type === 'SW_UPDATE_AVAILABLE' || data.type === 'SW_ACTIVATED') {
                     if (!window.__swReloadPending) {
                         window.__swReloadPending = true;
