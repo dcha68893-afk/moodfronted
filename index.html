@@ -1609,23 +1609,51 @@
                     <div class="landing-logo"><i class="fas fa-comments"></i><span>MoodChat</span></div>
 
                     <div class="landing-mockup" aria-hidden="true">
-                        <div class="landing-phone">
+                        <div class="landing-phone landing-phone-lg">
                             <div class="landing-phone-notch"></div>
-                            <div class="landing-phone-bubble b1"><i class="fas fa-check-double"></i> Hey, join the group!</div>
-                            <div class="landing-phone-bubble b2">On my way 🎉</div>
-                            <div class="landing-phone-bubble b3 call"><i class="fas fa-phone"></i> Incoming call…</div>
+                            <div class="landing-phone-tabs">
+                                <span class="landing-phone-tab active" data-screen="chat"><i class="fas fa-comment-dots"></i></span>
+                                <span class="landing-phone-tab" data-screen="call"><i class="fas fa-phone"></i></span>
+                                <span class="landing-phone-tab" data-screen="market"><i class="fas fa-store"></i></span>
+                            </div>
+                            <div class="landing-phone-screens">
+                                <div class="landing-phone-screen active" data-screen="chat">
+                                    <div class="lp-row"><div class="lp-avatar"></div><div class="lp-lines"><span class="lp-line w70"></span><span class="lp-line w40 dim"></span></div></div>
+                                    <div class="lp-bubble other">Hey, join the group! <i class="fas fa-check-double lp-tick"></i></div>
+                                    <div class="lp-bubble mine">On my way 🎉</div>
+                                    <div class="lp-bubble other lp-typing"><span></span><span></span><span></span></div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="call">
+                                    <div class="lp-call-avatar"><i class="fas fa-user"></i><span class="lp-call-pulse"></span></div>
+                                    <div class="lp-call-name">Alex Rivera</div>
+                                    <div class="lp-call-status"><i class="fas fa-video"></i> Video call · 03:42</div>
+                                    <div class="lp-call-actions"><span class="lp-call-btn mute"><i class="fas fa-microphone"></i></span><span class="lp-call-btn end"><i class="fas fa-phone"></i></span><span class="lp-call-btn cam"><i class="fas fa-video"></i></span></div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="market">
+                                    <div class="lp-market-grid">
+                                        <div class="lp-market-card"><div class="lp-market-thumb a"></div><span class="lp-line w60"></span></div>
+                                        <div class="lp-market-card"><div class="lp-market-thumb b"></div><span class="lp-line w60"></span></div>
+                                        <div class="lp-market-card"><div class="lp-market-thumb c"></div><span class="lp-line w60"></span></div>
+                                        <div class="lp-market-card"><div class="lp-market-thumb d"></div><span class="lp-line w60"></span></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     <h1 class="landing-headline">One app for Messaging, Calls, Communities and Marketplace.</h1>
                     <p class="landing-subtitle">MoodChat brings your chats, voice &amp; video calls, groups and shopping into one fast, secure workspace — on any device.</p>
 
+                    <div class="landing-stat-row" aria-label="MoodChat by the numbers">
+                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-star"></i> 4.8</span><span class="landing-stat-label">User rating</span></div>
+                        <div class="landing-stat"><span class="landing-stat-num">120+</span><span class="landing-stat-label">Countries</span></div>
+                        <div class="landing-stat"><span class="landing-stat-num">99.9%</span><span class="landing-stat-label">Uptime</span></div>
+                        <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
+                    </div>
+
                     <div class="landing-badge-row" aria-label="MoodChat highlights">
-                        <span class="landing-badge"><i class="fas fa-lock"></i> Encrypted</span>
                         <span class="landing-badge"><i class="fas fa-bolt"></i> Real-time</span>
-                        <span class="landing-badge"><i class="fas fa-video"></i> Voice &amp; Video</span>
                         <span class="landing-badge"><i class="fas fa-users"></i> Communities</span>
-                        <span class="landing-badge"><i class="fas fa-store"></i> Marketplace</span>
                         <span class="landing-badge"><i class="fas fa-wifi"></i> Offline-Ready</span>
                         <span class="landing-badge"><i class="fas fa-sync-alt"></i> Cross-Device</span>
                     </div>
@@ -1848,10 +1876,21 @@
         }
         .landing-hero-bg {
             position: absolute;
-            inset: -10%;
+            inset: -20%;
             background:
-                radial-gradient(circle at 15% 20%, rgba(255,255,255,0.18), transparent 40%),
-                radial-gradient(circle at 85% 75%, rgba(255,255,255,0.14), transparent 45%);
+                radial-gradient(circle at 15% 20%, rgba(255,255,255,0.20), transparent 40%),
+                radial-gradient(circle at 85% 75%, rgba(255,255,255,0.16), transparent 45%),
+                linear-gradient(120deg, #667eea, #764ba2, #8e44ad, #667eea);
+            background-size: 200% 200%, 200% 200%, 300% 300%;
+            animation: landingGradientDrift 16s ease-in-out infinite;
+        }
+        @keyframes landingGradientDrift {
+            0%   { background-position: 0% 0%, 100% 100%, 0% 50%; }
+            50%  { background-position: 30% 20%, 70% 80%, 100% 50%; }
+            100% { background-position: 0% 0%, 100% 100%, 0% 50%; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .landing-hero-bg { animation: none; }
         }
 
         .landing-hero-inner {
@@ -1871,52 +1910,119 @@
         .landing-logo {
             display: inline-flex;
             align-items: center;
-            gap: 10px;
-            font-size: 1.4rem;
-            font-weight: 800;
-            letter-spacing: 0.3px;
-            margin-bottom: 18px;
+            gap: 12px;
+            font-size: 2.1rem;
+            font-weight: 900;
+            letter-spacing: 0.2px;
+            margin-bottom: 22px;
+            text-shadow: 0 4px 24px rgba(0,0,0,0.18);
         }
-        .landing-logo i { font-size: 1.7rem; }
-
-        .landing-mockup { margin: 0 auto 22px; display: flex; justify-content: center; }
-        .landing-phone {
-            position: relative;
-            width: 148px;
-            height: 148px;
-            border-radius: 28px;
-            background: rgba(255,255,255,0.12);
+        .landing-logo i {
+            font-size: 2.4rem;
+            background: rgba(255,255,255,0.16);
             border: 1px solid rgba(255,255,255,0.3);
-            backdrop-filter: blur(6px);
-            box-shadow: 0 20px 45px rgba(0,0,0,0.25);
+            width: 52px; height: 52px;
+            display: inline-flex; align-items: center; justify-content: center;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+
+        .landing-mockup { margin: 0 auto 24px; display: flex; justify-content: center; }
+        .landing-phone-lg {
+            position: relative;
+            width: 216px;
+            height: 280px;
+            border-radius: 30px;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.28);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.3);
+            padding: 30px 12px 14px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
         }
         .landing-phone-notch {
-            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-            width: 36px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.4);
+            position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+            width: 40px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.4);
         }
-        .landing-phone-bubble {
-            position: absolute;
-            max-width: 168px;
-            background: #fff;
-            color: #2c3e50;
-            font-size: 0.68rem;
-            font-weight: 600;
-            padding: 7px 10px;
-            border-radius: 12px;
-            box-shadow: 0 8px 18px rgba(0,0,0,0.25);
-            white-space: nowrap;
-            opacity: 0;
-            animation: landingBubbleIn 0.6s ease forwards;
+        .landing-phone-tabs {
+            display: flex; justify-content: center; gap: 8px; margin-bottom: 10px;
         }
-        .landing-phone-bubble i { color: #34d399; margin-right: 4px; }
-        .landing-phone-bubble.call i { color: #2ecc71; }
-        .landing-phone-bubble.b1 { top: 24px; left: -56px; animation-delay: 0.5s; }
-        .landing-phone-bubble.b2 { top: 68px; right: -48px; animation-delay: 0.9s; }
-        .landing-phone-bubble.b3 { bottom: 12px; left: -40px; animation-delay: 1.3s; }
-        @keyframes landingBubbleIn {
-            from { opacity: 0; transform: translateY(8px) scale(0.94); }
-            to   { opacity: 1; transform: translateY(0) scale(1); }
+        .landing-phone-tab {
+            width: 26px; height: 26px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 0.65rem; color: rgba(255,255,255,0.55);
+            background: rgba(255,255,255,0.08);
+            transition: all 0.25s ease;
         }
+        .landing-phone-tab.active {
+            color: #667eea; background: #fff;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+        }
+        .landing-phone-screens { position: relative; flex: 1; }
+        .landing-phone-screen {
+            position: absolute; inset: 0;
+            opacity: 0; transform: translateY(6px);
+            pointer-events: none;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            background: rgba(255,255,255,0.92);
+            border-radius: 16px;
+            padding: 10px;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+        .landing-phone-screen.active { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+        /* -- chat mini-screen -- */
+        .lp-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        .lp-avatar { width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg,#667eea,#764ba2); flex: 0 0 auto; }
+        .lp-lines { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .lp-line { height: 6px; border-radius: 3px; background: #cbd5e1; display: block; }
+        .lp-line.dim { background: #e2e8f0; }
+        .lp-line.w70 { width: 70%; } .lp-line.w60 { width: 60%; margin-top: 6px; } .lp-line.w40 { width: 40%; }
+        .lp-bubble {
+            max-width: 80%; font-size: 0.62rem; font-weight: 600; color: #1f2937;
+            padding: 6px 9px; border-radius: 10px; margin-bottom: 6px; width: fit-content;
+        }
+        .lp-bubble.other { background: #eef1ff; border-bottom-left-radius: 3px; }
+        .lp-bubble.mine { background: #667eea; color: #fff; margin-left: auto; border-bottom-right-radius: 3px; }
+        .lp-tick { color: #34d399; margin-left: 3px; }
+        .lp-typing { display: flex; align-items: center; gap: 3px; padding: 8px 10px; }
+        .lp-typing span { width: 5px; height: 5px; border-radius: 50%; background: #94a3b8; animation: lpTypingDot 1.2s infinite ease-in-out; }
+        .lp-typing span:nth-child(2) { animation-delay: 0.15s; } .lp-typing span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes lpTypingDot { 0%,60%,100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-3px); opacity: 1; } }
+
+        /* -- call mini-screen -- */
+        .landing-phone-screen[data-screen="call"] { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(160deg,#1f2540,#2d3358); }
+        .lp-call-avatar { position: relative; width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.2rem; margin-bottom: 8px; }
+        .lp-call-pulse { position: absolute; inset: -8px; border-radius: 50%; border: 2px solid rgba(102,126,234,0.6); animation: lpPulse 1.8s infinite ease-out; }
+        @keyframes lpPulse { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.5); opacity: 0; } }
+        .lp-call-name { color: #fff; font-weight: 700; font-size: 0.78rem; margin-bottom: 2px; }
+        .lp-call-status { color: #a5b4fc; font-size: 0.6rem; margin-bottom: 14px; }
+        .lp-call-actions { display: flex; gap: 10px; }
+        .lp-call-btn { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fff; background: rgba(255,255,255,0.15); }
+        .lp-call-btn.end { background: #ef4444; transform: rotate(135deg); }
+
+        /* -- marketplace mini-screen -- */
+        .lp-market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .lp-market-card { display: flex; flex-direction: column; gap: 4px; }
+        .lp-market-thumb { height: 34px; border-radius: 8px; }
+        .lp-market-thumb.a { background: linear-gradient(135deg,#fbbf24,#f97316); }
+        .lp-market-thumb.b { background: linear-gradient(135deg,#34d399,#059669); }
+        .lp-market-thumb.c { background: linear-gradient(135deg,#60a5fa,#3b82f6); }
+        .lp-market-thumb.d { background: linear-gradient(135deg,#f472b6,#db2777); }
+
+        .landing-stat-row {
+            display: flex; justify-content: center; flex-wrap: wrap; gap: 22px;
+            margin: 4px 0 18px; padding: 14px 10px;
+            border-top: 1px solid rgba(255,255,255,0.18);
+            border-bottom: 1px solid rgba(255,255,255,0.18);
+        }
+        .landing-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+        .landing-stat-num { font-size: 1.05rem; font-weight: 800; color: #fff; }
+        .landing-stat-num i { color: #fbbf24; margin-right: 3px; }
+        .landing-stat-label { font-size: 0.62rem; color: rgba(255,255,255,0.72); text-transform: uppercase; letter-spacing: 0.4px; }
 
         .landing-headline {
             font-size: clamp(1.5rem, 4.2vw, 2.15rem);
@@ -2214,6 +2320,23 @@
         }
         .pwa-status-btn:hover { background: rgba(255,255,255,0.2); }
         .pwa-status-btn:disabled { opacity: 0.6; cursor: default; }
+        .login-security-note {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            font-size: 0.72rem; color: var(--text-secondary);
+            margin-top: 10px;
+        }
+        .login-security-note i { color: var(--success-color); }
+        .pwa-status-btn.pwa-update-available {
+            background: #fbbf24;
+            color: #1f2937;
+            font-weight: 700;
+            animation: pwaUpdatePulse 2s ease-in-out infinite;
+        }
+        .pwa-status-btn.pwa-update-available:hover { background: #f59e0b; }
+        @keyframes pwaUpdatePulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(251,191,36,0.5); }
+            50% { box-shadow: 0 0 0 6px rgba(251,191,36,0); }
+        }
 
         /* Auth-panel variant sits where authInstallBtn sat (top-right of the
            card), so it inherits the light card background instead of the
@@ -2433,8 +2556,8 @@
                     </div>
                     <p class="pwa-install-hint" id="authPwaHint" hidden></p>
                     <div class="double-clock"><i class="fas fa-clock"></i></div>
-                    <h2 id="panelTitle">Welcome to MoodChat</h2>
-                    <p id="panelSubtitle">Login to continue</p>
+                    <h2 id="panelTitle">Welcome back</h2>
+                    <p id="panelSubtitle">Securely continue your conversations</p>
                 </div>
                 
                 <div class="auth-tabs" id="authTabs">
@@ -2483,6 +2606,7 @@
                                     <span id="loginButtonText">Login to MoodChat</span>
                                     <div class="spinner" id="loginSpinner"></div>
                                 </button>
+                                <p class="login-security-note"><i class="fas fa-shield-alt"></i> Protected by secure, encrypted authentication</p>
                             </div>
                             
                             <!-- GOOGLE SIGN-IN -->
@@ -3713,8 +3837,8 @@
             
             if (formName === 'login') {
                 if (loginContainer) loginContainer.classList.add('active');
-                document.getElementById('panelTitle').textContent = 'Welcome to MoodChat';
-                document.getElementById('panelSubtitle').textContent = 'Login to continue';
+                document.getElementById('panelTitle').textContent = 'Welcome back';
+                document.getElementById('panelSubtitle').textContent = 'Securely continue your conversations';
             } else if (formName === 'register') {
                 if (registerContainer) registerContainer.classList.add('active');
                 document.getElementById('panelTitle').textContent = 'Create Account';
@@ -4784,6 +4908,35 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // second, competing GSI render pass from the landing screen itself.
         if (googleBtn) googleBtn.addEventListener('click', function () { goToForm('login'); });
 
+        // ---- hero phone mockup: auto-cycle Chat / Call / Market screens --------
+        (function () {
+            var order = ['chat', 'call', 'market'];
+            var tabs = document.querySelectorAll('.landing-phone-tab');
+            var screens = document.querySelectorAll('.landing-phone-screen');
+            if (!tabs.length || !screens.length) return;
+            var idx = 0;
+            var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            function show(name) {
+                tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.screen === name); });
+                screens.forEach(function (s) { s.classList.toggle('active', s.dataset.screen === name); });
+            }
+            tabs.forEach(function (t) {
+                t.addEventListener('click', function () {
+                    idx = order.indexOf(t.dataset.screen);
+                    show(t.dataset.screen);
+                });
+            });
+            if (reduceMotion) return;
+            var timer = setInterval(function () {
+                if (document.hidden) return;
+                idx = (idx + 1) % order.length;
+                show(order[idx]);
+            }, 3200);
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) { clearInterval(timer); }
+            });
+        })();
+
         // ---- returning-user shortcut -------------------------------------------
         // If a remembered session produces the Quick Login card or takes the
         // user straight to the dashboard panel, don't make them click through
@@ -4917,15 +5070,67 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
 
         async function handleInstallClick() {
             if (!deferredInstallPrompt) return;
-            deferredInstallPrompt.prompt();
+            var clickedBtns = installButtons.filter(function (b) { return !b.hidden; });
+            var originalLabels = clickedBtns.map(function (b) { return b.innerHTML; });
+            clickedBtns.forEach(function (b) {
+                b.disabled = true;
+                b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Installing…';
+            });
             try {
+                deferredInstallPrompt.prompt();
                 var choice = await deferredInstallPrompt.userChoice;
                 if (choice && choice.outcome === 'accepted') {
                     try { localStorage.setItem('pwa_installed', '1'); } catch (_) {}
+                    // renderInstalledState() will also run from the 'appinstalled'
+                    // event, but call it here too so the UI updates immediately
+                    // rather than waiting on that event to fire.
+                    renderInstalledState();
+                } else {
+                    clickedBtns.forEach(function (b, i) { b.disabled = false; b.innerHTML = originalLabels[i]; });
                 }
+            } catch (_) {
+                clickedBtns.forEach(function (b, i) { b.disabled = false; b.innerHTML = originalLabels[i]; });
             } finally {
                 deferredInstallPrompt = null;
             }
+        }
+
+        // ---- "Update available" detection ---------------------------------------
+        // A service worker registration exposes an update the moment it's
+        // downloaded and waiting to activate (registration.waiting / the
+        // 'updatefound' -> installstate 'installed' transition while a
+        // controller already exists). Surface that as a distinct, higher-
+        // urgency state instead of folding it into the same "Check for
+        // Updates" button that silently says "Up to date" either way.
+        function markUpdateAvailable(reg) {
+            statusGroups.forEach(function (g) {
+                if (!g.updateBtn) return;
+                g.updateBtn.classList.add('pwa-update-available');
+                g.updateBtn.innerHTML = '<i class="fas fa-arrow-circle-up"></i> Update Available';
+                g.updateBtn.onclick = function () {
+                    g.updateBtn.disabled = true;
+                    g.updateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating…';
+                    if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    navigator.serviceWorker.addEventListener('controllerchange', function () {
+                        window.location.reload();
+                    }, { once: true });
+                };
+            });
+        }
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistration().then(function (reg) {
+                if (!reg) return;
+                if (reg.waiting && navigator.serviceWorker.controller) markUpdateAvailable(reg);
+                reg.addEventListener('updatefound', function () {
+                    var installing = reg.installing;
+                    if (!installing) return;
+                    installing.addEventListener('statechange', function () {
+                        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                            markUpdateAvailable(reg);
+                        }
+                    });
+                });
+            }).catch(function () {});
         }
 
         // FIX (fake "Installed" state): pwa_installed used to be treated as
@@ -4973,6 +5178,21 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                     setInstallButtonsVisible(true);
                 });
                 installButtons.forEach(function (btn) { btn.addEventListener('click', handleInstallClick); });
+                // Give the browser a reasonable window to fire
+                // beforeinstallprompt (it can take a moment after load, or
+                // never fire at all if this browser/context doesn't support
+                // installable PWAs — e.g. desktop Firefox, most in-app
+                // browsers). If it hasn't shown up by then, say so plainly
+                // instead of leaving a dead, permanently-hidden button.
+                setTimeout(function () {
+                    if (deferredInstallPrompt || isRunningInstalled()) return;
+                    statusGroups.forEach(function (g) {
+                        if (g.hint) {
+                            g.hint.textContent = 'Install not supported in this browser.';
+                            g.hint.hidden = false;
+                        }
+                    });
+                }, 4000);
             }
             window.addEventListener('appinstalled', function () {
                 deferredInstallPrompt = null;
