@@ -3804,11 +3804,21 @@ window.debugUserDiscovery = function() {
 function applySettingToFriendModule(section, key, value) {
     if (section === 'appearance') {
         if (key === 'theme') {
+            // FIX (Phase 17 — single theme owner): delegate to
+            // window.ThemeManager instead of painting independently — this
+            // was one of several duplicate per-module theme controllers
+            // causing the module-by-module flicker on live settings changes.
             var theme = (value === 'dark' ? 'dark' : 'light');
-            document.documentElement.setAttribute('data-theme', theme);
-            document.body.setAttribute('data-theme', theme);
+            if (window.ThemeManager) window.ThemeManager.setTheme(theme);
+            else {
+                document.documentElement.setAttribute('data-theme', theme);
+                document.body.setAttribute('data-theme', theme);
+            }
         }
-        if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+        if (key === 'fontSize') {
+            if (window.ThemeManager) window.ThemeManager.setFontSize(parseInt(value, 10));
+            else document.documentElement.style.fontSize = value + 'px';
+        }
         if (key === 'language') { window.__appLanguage = value; document.documentElement.setAttribute('lang', value); }
         if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
         if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }

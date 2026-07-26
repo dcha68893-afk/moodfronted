@@ -13312,19 +13312,25 @@ Type: ${message.type || 'text'}`;
 
             if (key === 'theme') {
 
+                // FIX (Phase 17 — single theme owner): delegate to
+                // window.ThemeManager instead of painting independently.
                 var t = (value === 'dark' ? 'dark' : 'light');
 
-                document.documentElement.setAttribute('data-theme', t);
-
-                document.body.setAttribute('data-theme', t);
-
-                document.body.classList.toggle('dark-theme', t === 'dark');
-
-                document.documentElement.style.colorScheme = t;
+                if (window.ThemeManager) {
+                    window.ThemeManager.setTheme(t);
+                } else {
+                    document.documentElement.setAttribute('data-theme', t);
+                    document.body.setAttribute('data-theme', t);
+                    document.body.classList.toggle('dark-theme', t === 'dark');
+                    document.documentElement.style.colorScheme = t;
+                }
 
             }
 
-            if (key === 'fontSize') document.documentElement.style.fontSize = parseInt(value) + 'px';
+            if (key === 'fontSize') {
+                if (window.ThemeManager) window.ThemeManager.setFontSize(parseInt(value, 10));
+                else document.documentElement.style.fontSize = parseInt(value) + 'px';
+            }
 
             if (key === 'accentColor') {
 

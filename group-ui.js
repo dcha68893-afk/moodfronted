@@ -2024,7 +2024,12 @@ export function handleUIRefresh(payload) {
  */
 export function handleUITheme(payload) {
     if (payload && payload.theme) {
-        document.body.setAttribute('data-theme', sanitizeInput(payload.theme));
+        // FIX (Phase 17 — single theme owner): delegate to
+        // window.ThemeManager instead of painting body-only, independently
+        // of <html> and the CSS-variable pipeline the rest of the app uses.
+        const theme = sanitizeInput(payload.theme);
+        if (window.ThemeManager) window.ThemeManager.setTheme(theme);
+        else document.body.setAttribute('data-theme', theme);
     }
 }
 

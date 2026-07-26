@@ -1508,14 +1508,29 @@ function initializeModule() {
         // Add this function right after logOnce('init', 'Tools module booting');
 async function loadUserSettings() {
     try {
+        // FIX (Phase 17 — single theme owner): theme.engine.js already
+        // resolves and paints the theme synchronously before first paint,
+        // from the very first script in Tools.html's <head>. Re-painting
+        // it again here, later, from a *different* storage key
+        // ('user_theme_preference' vs the canonical 'app_theme') was a
+        // second, independently-timed paint that could disagree with (and
+        // visibly flash over) what ThemeManager already painted.
         const savedTheme = await safeStorage.get('user_theme_preference');
         if (savedTheme) {
-            document.documentElement.setAttribute('data-theme', savedTheme);
-            document.body.setAttribute('data-theme', savedTheme);
+            if (window.ThemeManager) {
+                window.ThemeManager.setTheme(savedTheme);
+            } else {
+                document.documentElement.setAttribute('data-theme', savedTheme);
+                document.body.setAttribute('data-theme', savedTheme);
+            }
         }
         const savedFontSize = await safeStorage.get('user_font_size');
         if (savedFontSize) {
-            document.documentElement.style.fontSize = savedFontSize + 'px';
+            if (window.ThemeManager) {
+                window.ThemeManager.setFontSize(parseInt(savedFontSize, 10));
+            } else {
+                document.documentElement.style.fontSize = savedFontSize + 'px';
+            }
         }
     } catch (error) {}
 }
@@ -1530,13 +1545,24 @@ async function loadUserSettings() {
             const { section, key, value } = payload;
             
             if (section === 'appearance' && key === 'theme') {
+                // FIX (Phase 17 — single theme owner): delegate to
+                // window.ThemeManager instead of painting data-theme
+                // independently on this iframe's own timing.
                 const theme = (value === 'dark' ? 'dark' : 'light');
-                document.documentElement.setAttribute('data-theme', theme);
-                document.body.setAttribute('data-theme', theme);
+                if (window.ThemeManager) {
+                    window.ThemeManager.setTheme(theme);
+                } else {
+                    document.documentElement.setAttribute('data-theme', theme);
+                    document.body.setAttribute('data-theme', theme);
+                }
             }
             
             if (section === 'appearance' && key === 'fontSize') {
-                document.documentElement.style.fontSize = parseInt(value) + 'px';
+                if (window.ThemeManager) {
+                    window.ThemeManager.setFontSize(parseInt(value, 10));
+                } else {
+                    document.documentElement.style.fontSize = parseInt(value) + 'px';
+                }
             }
             
             window.dispatchEvent(new CustomEvent('settingChanged', {
@@ -3781,15 +3807,25 @@ export async function checkDarkMode() {
         let preference = null;
         try { preference = await safeStorage.get('user_theme_preference'); } catch {}
         if (preference === 'light' || preference === 'dark') {
-            document.documentElement.setAttribute('data-theme', preference);
-            document.body.setAttribute('data-theme', preference);
+            // FIX (Phase 17 — single theme owner): delegate instead of
+            // independently painting — theme.engine.js has already painted
+            // the correct theme before first paint, so this call is just
+            // confirming/broadcasting through the same owner, not racing it.
+            if (window.ThemeManager) window.ThemeManager.setTheme(preference);
+            else {
+                document.documentElement.setAttribute('data-theme', preference);
+                document.body.setAttribute('data-theme', preference);
+            }
             return;
         }
         // No saved preference yet — default to light, same first-run default
         // as the rest of the app (this used to fall back to the OS preference,
         // which was a leftover from the removed 'auto' theme).
-        document.documentElement.setAttribute('data-theme', 'light');
-        document.body.setAttribute('data-theme', 'light');
+        if (window.ThemeManager) window.ThemeManager.setTheme('light');
+        else {
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.body.setAttribute('data-theme', 'light');
+        }
     } catch {}
 }
 
@@ -4877,15 +4913,26 @@ export async function updateTeamMemberRole(changes) {
 
 export async function loadUserSettings() {
     try {
+        // FIX (Phase 17 — single theme owner): see the non-exported
+        // loadUserSettings() above — same fix, delegate to ThemeManager
+        // instead of independently painting data-theme a second time.
         const savedTheme = await safeStorage.get('user_theme_preference');
         if (savedTheme) {
-            document.documentElement.setAttribute('data-theme', savedTheme);
-            document.body.setAttribute('data-theme', savedTheme);
+            if (window.ThemeManager) {
+                window.ThemeManager.setTheme(savedTheme);
+            } else {
+                document.documentElement.setAttribute('data-theme', savedTheme);
+                document.body.setAttribute('data-theme', savedTheme);
+            }
         }
-        
+
         const savedFontSize = await safeStorage.get('user_font_size');
         if (savedFontSize) {
-            document.documentElement.style.fontSize = savedFontSize + 'px';
+            if (window.ThemeManager) {
+                window.ThemeManager.setFontSize(parseInt(savedFontSize, 10));
+            } else {
+                document.documentElement.style.fontSize = savedFontSize + 'px';
+            }
         }
         
         logOnce('ready', 'User settings loaded from storage');
@@ -4927,11 +4974,19 @@ export default marketplace;
     function applySettingToToolsModule(section, key, value) {
         if (section === 'appearance') {
             if (key === 'theme') {
+                // FIX (Phase 17 — single theme owner): delegate to
+                // window.ThemeManager instead of painting independently.
                 var theme = (value === 'dark' ? 'dark' : 'light');
-                document.documentElement.setAttribute('data-theme', theme);
-                document.body.setAttribute('data-theme', theme);
+                if (window.ThemeManager) window.ThemeManager.setTheme(theme);
+                else {
+                    document.documentElement.setAttribute('data-theme', theme);
+                    document.body.setAttribute('data-theme', theme);
+                }
             }
-            if (key === 'fontSize') document.documentElement.style.fontSize = parseInt(value) + 'px';
+            if (key === 'fontSize') {
+                if (window.ThemeManager) window.ThemeManager.setFontSize(parseInt(value, 10));
+                else document.documentElement.style.fontSize = parseInt(value) + 'px';
+            }
             if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
             if (key === 'compactMode') { document.documentElement.setAttribute('data-compact', value ? 'true' : 'false'); document.body.classList.toggle('compact-mode', !!value); }
             if (key === 'animationsEnabled' || key === 'animations') { document.documentElement.setAttribute('data-animations', value ? 'true' : 'false'); document.body.classList.toggle('no-animations', !value); }

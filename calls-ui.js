@@ -10063,11 +10063,19 @@ setupFriendsListListener();
         }
         if (section === 'appearance') {
             if (key === 'theme') {
+                // FIX (Phase 17 — single theme owner): delegate to
+                // window.ThemeManager instead of painting independently.
                 const t = (value === 'dark' ? 'dark' : 'light');
-                document.documentElement.setAttribute('data-theme', t);
-                document.body.setAttribute('data-theme', t);
+                if (window.ThemeManager) window.ThemeManager.setTheme(t);
+                else {
+                    document.documentElement.setAttribute('data-theme', t);
+                    document.body.setAttribute('data-theme', t);
+                }
             }
-            if (key === 'fontSize') document.documentElement.style.fontSize = value + 'px';
+            if (key === 'fontSize') {
+                if (window.ThemeManager) window.ThemeManager.setFontSize(parseInt(value, 10));
+                else document.documentElement.style.fontSize = value + 'px';
+            }
             if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
             if (key === 'compactMode') {
                 document.documentElement.setAttribute('data-compact', value ? 'true' : 'false');

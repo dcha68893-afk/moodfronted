@@ -9384,11 +9384,19 @@ UILogger.info('StatusUI', 'Resilient UI controller initialized successfully v8.2
         try {
             if (section === 'appearance') {
                 if (key === 'theme') {
+                    // FIX (Phase 17 — single theme owner): delegate to
+                    // window.ThemeManager instead of painting independently.
                     const resolved = (value === 'dark' ? 'dark' : 'light');
-                    document.documentElement.setAttribute('data-theme', resolved);
-                    document.body.setAttribute('data-theme', resolved);
+                    if (window.ThemeManager) window.ThemeManager.setTheme(resolved);
+                    else {
+                        document.documentElement.setAttribute('data-theme', resolved);
+                        document.body.setAttribute('data-theme', resolved);
+                    }
                 }
-                if (key === 'fontSize' && value) document.documentElement.style.fontSize = value + 'px';
+                if (key === 'fontSize' && value) {
+                    if (window.ThemeManager) window.ThemeManager.setFontSize(parseInt(value, 10));
+                    else document.documentElement.style.fontSize = value + 'px';
+                }
                 if (key === 'accentColor' && value) document.documentElement.style.setProperty('--accent-color', value);
                 if (key === 'compactMode') {
                     document.documentElement.setAttribute('data-compact', value ? 'true' : 'false');

@@ -651,12 +651,23 @@ this.registerHandler('SETTING_CHANGED', (message) => {
     
     // Apply relevant settings immediately
     if (section === 'appearance' && key === 'theme') {
+        // FIX (Phase 17 — single theme owner): this used to paint
+        // data-theme on this iframe's own <html>/<body> directly, on its
+        // own timing, independent of the parent shell and every other
+        // module iframe — one of the "multiple theme controllers" causing
+        // the module-by-module flicker. Now delegates to this iframe's own
+        // window.ThemeManager (js/theme.engine.js, loaded first in
+        // Tools.html's <head>) so painting goes through the same single
+        // pipeline (CSS variables + data-theme + persistence) as every
+        // other module, instead of only setting the attribute.
         const theme = (value === 'dark' ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme', theme);
-        document.body.setAttribute('data-theme', theme);
-        
-        // Also save to storage
-        safeStorage.set('user_theme_preference', theme);
+        if (window.ThemeManager) {
+            window.ThemeManager.setTheme(theme);
+        } else {
+            document.documentElement.setAttribute('data-theme', theme);
+            document.body.setAttribute('data-theme', theme);
+            safeStorage.set('user_theme_preference', theme);
+        }
     }
     
     if (section === 'appearance' && key === 'fontSize') {
