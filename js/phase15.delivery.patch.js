@@ -11,6 +11,45 @@
 (function() {
     'use strict';
 
+    // FIX-ROOT-CAUSE-RELAY-GUARD-UNDEFINED: window.__kynRelayMessageOnce is
+    // only ever *defined* inline in chat.html. But this same patch file (and
+    // app.realtime.socket.js) is ALSO loaded standalone inside message.html,
+    // group.html, and calls.html — each of which runs as its own iframe with
+    // its own separate `window`, and none of them ever get chat.html's
+    // definition (iframes don't share global scope with their parent, even
+    // same-origin). So inside those iframe windows,
+    // `!window.__kynRelayMessageOnce` was always true, every "only if
+    // claimed" gate below always evaluated as claimed, and NONE of the
+    // dedup this file's own comments describe was actually happening there —
+    // every relay path fired independently for every message, racing
+    // chat.html's own (correctly deduped) parent-frame delivery of the same
+    // message. Define a real fallback registry here, in this shared file,
+    // idempotently: if chat.html's richer version defines
+    // window.__kynRelayMessageOnce afterward in its own window, it simply
+    // overwrites this one there — but in any window where nothing else ever
+    // defines it (every iframe), this fallback is what actually runs instead
+    // of silently no-op'ing.
+    if (!window.__kynRelayMessageOnce) {
+        window.__kynRelayedMsgIds = window.__kynRelayedMsgIds || new Set();
+        window.__kynRelayMessageOnce = function (iframeWindow, type, payload) {
+            try {
+                var p = (payload && payload.payload) ? payload.payload : payload;
+                var chatId = String((p && (p.chatId || p.conversationId)) || '');
+                var msgId  = String((p && (p.id || p.serverId || p.localId || p._broadcastId)) || '');
+                var key = (type || 'message:new') + ':' + chatId + ':' + (msgId || (p && p.content) || Date.now());
+                if (window.__kynRelayedMsgIds.has(key)) return false; // already delivered by another path in THIS window
+                window.__kynRelayedMsgIds.add(key);
+                setTimeout(function () { window.__kynRelayedMsgIds.delete(key); }, 15000);
+                if (!iframeWindow) return true; // registration-only call — caller already posted directly
+                iframeWindow.postMessage(
+                    (payload && payload.type) ? payload : { type: type || 'message:new', payload: p, source: 'ws-bridge' },
+                    '*'
+                );
+                return true;
+            } catch (_) { return false; }
+        };
+    }
+
     // ── 1. Message delivery to iframes ───────────────────────────────────────
     function _ensureMessageDelivery(payload) {
         if (!payload) return;
@@ -19,19 +58,25 @@
         // path in this codebase that posts message:new into iframes (2 in
         // chat.html, 2 in app.realtime.socket.js, this one) — each added over
         // time as a "guarantee" on top of the last without removing the
-        // earlier ones. Gate through the shared registry defined in
-        // chat.html so only the first path to see a given message actually
-        // delivers it, instead of every path racing to deliver it separately.
-        var _claimed = !window.__kynRelayMessageOnce || window.__kynRelayMessageOnce(null, 'message:new', msg);
+        // earlier ones. Gate through the shared registry so only the first
+        // path to see a given message actually delivers it, instead of every
+        // path racing to deliver it separately.
+        var _claimed = window.__kynRelayMessageOnce(null, 'message:new', msg);
         if (_claimed) {
             var iframes = document.querySelectorAll('iframe');
             iframes.forEach(function(f) {
                 try { f.contentWindow.postMessage({ type: 'message:new', payload: msg }, '*'); } catch(_) {}
                 try { f.contentWindow.postMessage({ type: 'new_message',  payload: msg }, '*'); } catch(_) {}
             });
+            // FIX: this dispatchEvent used to run unconditionally outside the
+            // `if (_claimed)` block, so every unclaimed (i.e. deduped) call
+            // still fired a fresh document-level 'message:new' event — which
+            // defeated the dedup for any same-window listener (like
+            // messages-core.ui-bridge.js's document.addEventListener), since
+            // it received one event per relay path regardless of the claim
+            // result. Only dispatch when this path actually won the claim.
+            try { document.dispatchEvent(new CustomEvent('message:new', { detail: msg })); } catch(_) {}
         }
-        // Also dispatch as a document-level event for same-window listeners
-        try { document.dispatchEvent(new CustomEvent('message:new', { detail: msg })); } catch(_) {}
     }
 
     // ── 2. Call delivery to iframes ───────────────────────────────────────────

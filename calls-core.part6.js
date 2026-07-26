@@ -1770,8 +1770,25 @@ _clearStaleCallState: function() {
             window.__CallsCoreShared.callsState._connectedCallIds &&
             window.__CallsCoreShared.callsState._connectedCallIds.has(_activeCallIdNow2)
         );
+        // FIX-ROOT-CAUSE-5MIN-CALL-DROP: this check only ever looked at
+        // _hasConnectedOnce2, unlike the 120s check above it which also
+        // cross-checks window.UIState.callState, window.callsState.callState,
+        // and now _cmTimerDelegated (set the moment CallManager takes over
+        // owning the call-duration timer for a connected call — see
+        // calls-core.part7.js's CALLMANAGER BRIDGE). If THIS tracker's
+        // callState string ever fails to advance past 'initiating' while the
+        // call is genuinely connected and every other tracker/CallManager
+        // knows it, this was the one stale-call check with no safety net —
+        // it would silently end an active, in-progress call ~5 minutes after
+        // it started ringing. Apply the same cross-tracker guard here.
+        const _otherTrackerSaysActive2 = _ACTIVE_CALL_STATES.has(
+            (window.UIState && window.UIState.callState) || ''
+        ) || _ACTIVE_CALL_STATES.has(
+            (window.callsState && window.callsState.callState) || ''
+        );
+        const _cmOwnsTimer2 = !!window.__CallsCoreShared._cmTimerDelegated;
 
-        if (callDuration > 300000 && !_hasConnectedOnce2) { // PHASE15 FIX: 300s (5min) — was 120s which killed calls on slow TURN relays
+        if (callDuration > 300000 && !_hasConnectedOnce2 && !_otherTrackerSaysActive2 && !_cmOwnsTimer2) { // PHASE15 FIX: 300s (5min) — was 120s which killed calls on slow TURN relays
 
 
 
