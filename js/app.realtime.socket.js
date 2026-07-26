@@ -1389,7 +1389,25 @@
 
         _sendMessage(message, options = {}) {
             return new Promise((resolve, reject) => {
-                if (!this._socket || (!this._socket.connected && !this._socket.readyState === WebSocket.OPEN)) {
+                // FIX-ACK-LOST-ON-RECONNECT: this used to read
+                // `!this._socket.readyState === WebSocket.OPEN`, which — due to JS
+                // operator precedence — evaluates `!this._socket.readyState` FIRST
+                // (a boolean) and then compares that boolean to the numeric constant
+                // WebSocket.OPEN (1). A boolean is never strictly equal to 1, so this
+                // half of the condition was always false, collapsing the whole check
+                // down to just `!this._socket`. Practically: as long as a socket
+                // object existed at all — even mid-reconnect, even fully
+                // disconnected — this code skipped the retry-queue and emitted
+                // directly on the old socket instance. _connectSocketIO() replaces
+                // `this._socket` wholesale on every reconnect, so anything emitted
+                // into a disconnected socket during that window (e.g. the receiver's
+                // 'message:delivery_ack') was silently discarded when the old socket
+                // got torn down — never retried, because _queueMessage()'s
+                // reconnect-flush path was never reached. Fixed to properly check
+                // readyState so a not-yet-open/torn-down socket falls through to
+                // _queueMessage(), which _processQueue() correctly re-sends once the
+                // new socket authenticates.
+                if (!this._socket || (!this._socket.connected && this._socket.readyState !== WebSocket.OPEN)) {
                     if (options.retry !== false) {
                         this._queueMessage(message, { ...options, _resolve: resolve, _reject: reject });
                         return;
