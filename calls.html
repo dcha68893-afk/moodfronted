@@ -407,6 +407,31 @@ window.__CALLS_IFRAME__ = {
 
 </script>
     <script src="/js/kynecta.safety.layer.js"></script>
+    <style id="kynCriticalHeaderFix">
+        /* FIX-ROOT-CAUSE-HEADER-BODY-MISMATCH: mirrors theme.colors.css's header-forcing
+           rule (headers & toolbars section) inline so it takes effect immediately,
+           instead of waiting on that external stylesheet's network request. Until now,
+           each module's header showed its own hardcoded gradient/color on first paint
+           while the body (already corrected via the critical vars above) was right —
+           a visible header/body mismatch. This reuses the same --kyn-bg-header /
+           --kyn-border / --kyn-text-primary variables set synchronously above, so once
+           theme.colors.css does load it recomputes the identical values — no visible
+           change, just no longer a race. */
+        header,
+        .header,
+        .top-bar,
+        .toolbar,
+        .app-header,
+        .chat-header,
+        .module-header,
+        [class*="header"],
+        [class*="topbar"],
+        [class*="top-bar"] {
+            background: var(--kyn-bg-header) !important;
+            border-color: var(--kyn-border) !important;
+            color: var(--kyn-text-primary) !important;
+        }
+    </style>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
     <title>Call - Secure Voice & Video Calls</title>
