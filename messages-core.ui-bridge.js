@@ -1240,6 +1240,78 @@ const UIStateManager = {
         const _realtimeSentIds      = window.__realtimeSentIds;
         const _realtimeDeliveredAckIds = window.__realtimeDeliveredAckIds;
 
+        // FIX-MSG-DELIVERY-ACK-RETRY: previously the delivery_ack send (below) was pure
+        // fire-and-forget — a single emit attempt with no persistence. If BOTH the
+        // iframe's own socket AND the chat.html relay happened to be unavailable at the
+        // exact moment a message arrived (e.g. right after a page reload, or a brief
+        // dual-disconnect), the ack was lost forever and the sender's 10s delivery
+        // timeout always fired even though the message had genuinely arrived. Outgoing
+        // messages already get this resilience via messageQueue.manager.js; delivery
+        // acks did not. This mirrors that same queue-and-retry pattern for acks.
+        const _PENDING_ACK_KEY = 'kyn_pending_delivery_acks';
+        function _readPendingAcks() {
+            try { return JSON.parse(localStorage.getItem(_PENDING_ACK_KEY) || '[]'); }
+            catch(_) { return []; }
+        }
+        function _writePendingAcks(list) {
+            try { localStorage.setItem(_PENDING_ACK_KEY, JSON.stringify(list.slice(-200))); }
+            catch(_) {}
+        }
+        function _queuePendingAck(payload) {
+            const list = _readPendingAcks();
+            if (!list.some(function(p) { return String(p.messageId) === String(payload.messageId); })) {
+                list.push(Object.assign({}, payload, { _queuedAt: Date.now() }));
+                _writePendingAcks(list);
+            }
+        }
+        function _attemptAckDelivery(payload) {
+            // Returns true only if we had a live channel to actually hand the ack to —
+            // best-effort like the rest of this pipeline (no ack-of-ack exists yet),
+            // but now retried instead of dropped when neither channel is available.
+            var sent = false;
+            var _delSocket = window.KynectaRealtime && window.KynectaRealtime._socket;
+            if (_delSocket && typeof _delSocket.emit === 'function' && _delSocket.connected) {
+                _delSocket.emit('message:delivery_ack', payload);
+                sent = true;
+            }
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'message:client_delivery_ack',
+                        payload: payload,
+                        source: 'messages'
+                    }, '*');
+                    sent = true; // parent relay is itself best-effort, but count it as an attempt
+                }
+            } catch(_pErr) { /* best-effort */ }
+            return sent;
+        }
+        function _flushPendingAcks() {
+            const list = _readPendingAcks();
+            if (!list.length) return;
+            const remaining = [];
+            list.forEach(function(payload) {
+                // Drop anything stuck for over 10 minutes — the message itself will
+                // have long since been marked undelivered server-side by then anyway.
+                if (Date.now() - (payload._queuedAt || 0) > 600000) return;
+                if (!_attemptAckDelivery(payload)) remaining.push(payload);
+            });
+            _writePendingAcks(remaining);
+        }
+        // Retry on every reconnect (most important moment — this is exactly when a
+        // previously-stranded ack becomes deliverable) and on a slow periodic sweep
+        // as a catch-all for cases the 'connect' event alone might miss.
+        if (!window.__kynAckRetryWired) {
+            window.__kynAckRetryWired = true;
+            if (window.KynectaRealtime && typeof window.KynectaRealtime.on === 'function') {
+                window.KynectaRealtime.on('connect', _flushPendingAcks);
+            }
+            setInterval(_flushPendingAcks, 15000);
+            // Also sweep once on load in case any acks were stranded by a page
+            // reload before they could be delivered.
+            setTimeout(_flushPendingAcks, 3000);
+        }
+
         const ackMessageDelivered = async function(message) {
             const chatId = String(message?.chatId || message?.conversationId || '');
             const messageId = String(message?.serverId || message?.id || '');
@@ -1504,30 +1576,20 @@ const UIStateManager = {
                         chatId:    normalizedMessage.chatId || normalizedMessage.conversationId,
                         senderId:  normalizedMessage.senderId || normalizedMessage.userId,
                     };
-                    var _delSocket = window.__socket || window.__io || (window.KynectaRealtime && window.KynectaRealtime._socket);
-                    var _ackSentDirectly = false;
-                    if (_delSocket && typeof _delSocket.emit === 'function' && _delSocket.connected !== false) {
-                        _delSocket.emit('message:delivery_ack', _ackPayload);
-                        _ackSentDirectly = true;
-                    }
                     // FIX-ACK-SILENT-FAIL: this iframe keeps its own independent socket
                     // connection, which can be momentarily disconnected/reconnecting or
-                    // simply not yet initialized when a message arrives, causing the
-                    // ack above to silently no-op — the message still renders correctly,
+                    // simply not yet initialized when a message arrives, causing a bare
+                    // emit here to silently no-op — the message still renders correctly,
                     // but the sender's 10s delivery-timeout fires anyway because the
-                    // server never heard back. The parent frame (chat.html) keeps its
-                    // own always-on socket connection for the same authenticated user,
-                    // so we always also relay the ack up to it as a reliable fallback;
-                    // the server-side handler is idempotent (it just clears a timer).
-                    try {
-                        if (window.parent && window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'message:client_delivery_ack',
-                                payload: _ackPayload,
-                                source: 'messages'
-                            }, '*');
-                        }
-                    } catch(_pErr) { /* silent — best-effort fallback */ }
+                    // server never heard back. _attemptAckDelivery tries both the direct
+                    // socket and the chat.html relay; if NEITHER is available right now
+                    // (both momentarily down), queue it instead of dropping it — it will
+                    // be retried automatically on the next reconnect and on the periodic
+                    // sweep (see _flushPendingAcks above). The server-side handler is
+                    // idempotent (it just clears a timer), so retrying is always safe.
+                    if (!_attemptAckDelivery(_ackPayload)) {
+                        _queuePendingAck(_ackPayload);
+                    }
                 } catch(_dErr) { /* silent — delivery ack is best-effort */ }
                 EventBus.emit('message:received', normalizedMessage);
                 try { window.dispatchEvent(new CustomEvent('newMessage', { detail: { message: normalizedMessage } })); } catch (_e) {}

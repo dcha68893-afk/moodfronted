@@ -6405,6 +6405,28 @@
                     }
                 }
 
+                // FIX-MSG-DELIVERY-ACK-RELAY: message.html (messagesIframe) keeps its own
+                // independent socket connection, which can be momentarily disconnected or
+                // still reconnecting when a message arrives — silently no-op'ing the direct
+                // 'message:delivery_ack' emit. messages-core.ui-bridge.js already posts this
+                // fallback up to us as a safety net (see FIX-ACK-SILENT-FAIL there), but until
+                // now nothing here ever listened for it, so the sender's 10s delivery timeout
+                // fired anyway even though the receiver had the message. Same root cause and
+                // same fix pattern as CALL_CHAT_MESSAGE above: relay it out through the one
+                // real, always-on socket connection, which lives here in chat.html.
+                if (data.type === 'message:client_delivery_ack') {
+                    const p = data.payload || {};
+                    if (p && p.messageId && p.senderId) {
+                        if (window.wsService && typeof window.wsService.emit === 'function') {
+                            window.wsService.emit('message:delivery_ack', p);
+                        } else if (window.KynectaRealtime && window.KynectaRealtime._socket) {
+                            window.KynectaRealtime._socket.emit('message:delivery_ack', p);
+                        } else {
+                            console.warn('[Parent] message:client_delivery_ack: no socket available to send');
+                        }
+                    }
+                }
+
 
                 // ── GROUP CALL — triggered by parent header call/video buttons ──────────
                 // postToGroup sends PARENT_GROUP_CALL to group iframe, which re-posts
