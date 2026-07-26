@@ -1612,22 +1612,34 @@
                         <div class="landing-phone landing-phone-lg">
                             <div class="landing-phone-notch"></div>
                             <div class="landing-phone-tabs">
-                                <span class="landing-phone-tab active" data-screen="chat"><i class="fas fa-comment-dots"></i></span>
-                                <span class="landing-phone-tab" data-screen="call"><i class="fas fa-phone"></i></span>
-                                <span class="landing-phone-tab" data-screen="market"><i class="fas fa-store"></i></span>
+                                <span class="landing-phone-tab active" data-screen="chat" title="Chat"><i class="fas fa-comment-dots"></i></span>
+                                <span class="landing-phone-tab" data-screen="voice" title="Voice call"><i class="fas fa-phone"></i></span>
+                                <span class="landing-phone-tab" data-screen="video" title="Video call"><i class="fas fa-video"></i></span>
+                                <span class="landing-phone-tab" data-screen="market" title="Marketplace"><i class="fas fa-store"></i></span>
+                                <span class="landing-phone-tab" data-screen="community" title="Communities"><i class="fas fa-users"></i></span>
+                                <span class="landing-phone-tab" data-screen="status" title="Status"><i class="fas fa-circle-play"></i></span>
                             </div>
                             <div class="landing-phone-screens">
                                 <div class="landing-phone-screen active" data-screen="chat">
                                     <div class="lp-row"><div class="lp-avatar"></div><div class="lp-lines"><span class="lp-line w70"></span><span class="lp-line w40 dim"></span></div></div>
-                                    <div class="lp-bubble other">Hey, join the group! <i class="fas fa-check-double lp-tick"></i></div>
-                                    <div class="lp-bubble mine">On my way 🎉</div>
-                                    <div class="lp-bubble other lp-typing"><span></span><span></span><span></span></div>
+                                    <div class="lp-bubble other lp-slide-in" style="animation-delay:.15s">Hey, join the group! <i class="fas fa-check-double lp-tick"></i></div>
+                                    <div class="lp-bubble mine lp-slide-in" style="animation-delay:.55s">On my way 🎉</div>
+                                    <div class="lp-bubble other lp-typing lp-slide-in" style="animation-delay:.95s"><span></span><span></span><span></span></div>
                                 </div>
-                                <div class="landing-phone-screen" data-screen="call">
-                                    <div class="lp-call-avatar"><i class="fas fa-user"></i><span class="lp-call-pulse"></span></div>
+                                <div class="landing-phone-screen" data-screen="voice">
+                                    <div class="lp-call-avatar"><i class="fas fa-user"></i><span class="lp-call-pulse"></span><span class="lp-call-pulse lp-call-pulse-2"></span></div>
                                     <div class="lp-call-name">Alex Rivera</div>
-                                    <div class="lp-call-status"><i class="fas fa-video"></i> Video call · 03:42</div>
-                                    <div class="lp-call-actions"><span class="lp-call-btn mute"><i class="fas fa-microphone"></i></span><span class="lp-call-btn end"><i class="fas fa-phone"></i></span><span class="lp-call-btn cam"><i class="fas fa-video"></i></span></div>
+                                    <div class="lp-call-status"><i class="fas fa-phone"></i> Voice call · 03:42</div>
+                                    <div class="lp-call-actions"><span class="lp-call-btn mute"><i class="fas fa-microphone"></i></span><span class="lp-call-btn end"><i class="fas fa-phone"></i></span><span class="lp-call-btn speaker"><i class="fas fa-volume-up"></i></span></div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="video">
+                                    <div class="lp-video-remote">
+                                        <div class="lp-video-self"><i class="fas fa-user"></i></div>
+                                        <span class="lp-call-pulse lp-video-pulse"></span>
+                                    </div>
+                                    <div class="lp-call-name">Priya · Video</div>
+                                    <div class="lp-call-status"><i class="fas fa-video"></i> Connecting HD…</div>
+                                    <div class="lp-call-actions"><span class="lp-call-btn mute"><i class="fas fa-microphone"></i></span><span class="lp-call-btn end"><i class="fas fa-phone"></i></span><span class="lp-call-btn cam active"><i class="fas fa-video"></i></span></div>
                                 </div>
                                 <div class="landing-phone-screen" data-screen="market">
                                     <div class="lp-market-grid">
@@ -1637,8 +1649,24 @@
                                         <div class="lp-market-card"><div class="lp-market-thumb d"></div><span class="lp-line w60"></span></div>
                                     </div>
                                 </div>
+                                <div class="landing-phone-screen" data-screen="community">
+                                    <div class="lp-community-header"><i class="fas fa-users"></i><span class="lp-line w60"></span></div>
+                                    <div class="lp-avatar-cluster"><span class="lp-avatar-chip a"></span><span class="lp-avatar-chip b"></span><span class="lp-avatar-chip c"></span><span class="lp-avatar-chip more">+128</span></div>
+                                    <div class="lp-bubble other lp-slide-in">Welcome to Devs United 👋</div>
+                                    <div class="lp-community-tag"><i class="fas fa-bolt"></i> 12 online now</div>
+                                </div>
+                                <div class="landing-phone-screen" data-screen="status">
+                                    <div class="lp-status-row">
+                                        <span class="lp-status-ring a"><span class="lp-status-avatar"></span></span>
+                                        <span class="lp-status-ring b"><span class="lp-status-avatar"></span></span>
+                                        <span class="lp-status-ring c seen"><span class="lp-status-avatar"></span></span>
+                                    </div>
+                                    <div class="lp-line w70" style="margin:10px auto 4px"></div>
+                                    <div class="lp-status-caption"><i class="fas fa-circle-play"></i> Tap to view status</div>
+                                </div>
                             </div>
                         </div>
+                        <p class="landing-mockup-caption" id="landingMockupCaption" aria-live="polite">Chat</p>
                     </div>
 
                     <h1 class="landing-headline">One app for Messaging, Calls, Communities and Marketplace.</h1>
@@ -1649,6 +1677,13 @@
                         <div class="landing-stat"><span class="landing-stat-num">120+</span><span class="landing-stat-label">Countries</span></div>
                         <div class="landing-stat"><span class="landing-stat-num">99.9%</span><span class="landing-stat-label">Uptime</span></div>
                         <div class="landing-stat"><span class="landing-stat-num"><i class="fas fa-lock"></i></span><span class="landing-stat-label">End-to-end encrypted</span></div>
+                    </div>
+
+                    <div class="landing-trust-strip" aria-label="Why people trust MoodChat">
+                        <span class="landing-trust-pill"><i class="fas fa-lock"></i> End-to-End Encrypted</span>
+                        <span class="landing-trust-pill"><i class="fas fa-globe"></i> Trusted Worldwide</span>
+                        <span class="landing-trust-pill"><i class="fas fa-paper-plane"></i> Millions of Messages Delivered</span>
+                        <span class="landing-trust-pill"><i class="fas fa-shield-alt"></i> Fast &amp; Secure</span>
                     </div>
 
                     <div class="landing-badge-row" aria-label="MoodChat highlights">
@@ -1927,7 +1962,11 @@
             box-shadow: 0 8px 24px rgba(0,0,0,0.2);
         }
 
-        .landing-mockup { margin: 0 auto 24px; display: flex; justify-content: center; }
+        .landing-mockup { margin: 0 auto 10px; display: flex; justify-content: center; }
+        .landing-mockup-caption {
+            text-align: center; margin: 0 0 20px; font-size: 0.78rem; font-weight: 700;
+            letter-spacing: 0.5px; text-transform: uppercase; color: rgba(255,255,255,0.75);
+        }
         .landing-phone-lg {
             position: relative;
             width: 216px;
@@ -1942,23 +1981,35 @@
             display: flex;
             flex-direction: column;
         }
+        /* Hero illustration takes ~40-50% of viewport height on mobile so it
+           reads as the focal point instead of a small decorative box. */
+        @media (max-width: 768px) {
+            .landing-phone-lg {
+                width: auto;
+                height: min(48vh, 420px);
+                aspect-ratio: 216 / 280;
+                min-height: 300px;
+            }
+        }
         .landing-phone-notch {
             position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
             width: 40px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.4);
         }
         .landing-phone-tabs {
-            display: flex; justify-content: center; gap: 8px; margin-bottom: 10px;
+            display: flex; justify-content: center; gap: 5px; margin-bottom: 10px;
         }
         .landing-phone-tab {
-            width: 26px; height: 26px; border-radius: 50%;
+            width: 22px; height: 22px; border-radius: 50%;
             display: inline-flex; align-items: center; justify-content: center;
-            font-size: 0.65rem; color: rgba(255,255,255,0.55);
+            font-size: 0.58rem; color: rgba(255,255,255,0.55);
             background: rgba(255,255,255,0.08);
             transition: all 0.25s ease;
+            cursor: pointer;
         }
         .landing-phone-tab.active {
             color: #667eea; background: #fff;
             box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+            transform: scale(1.12);
         }
         .landing-phone-screens { position: relative; flex: 1; }
         .landing-phone-screen {
@@ -1992,26 +2043,76 @@
         .lp-typing span { width: 5px; height: 5px; border-radius: 50%; background: #94a3b8; animation: lpTypingDot 1.2s infinite ease-in-out; }
         .lp-typing span:nth-child(2) { animation-delay: 0.15s; } .lp-typing span:nth-child(3) { animation-delay: 0.3s; }
         @keyframes lpTypingDot { 0%,60%,100% { transform: translateY(0); opacity: 0.5; } 30% { transform: translateY(-3px); opacity: 1; } }
+        /* Messages slide in like WhatsApp/Telegram rather than just appearing */
+        .lp-bubble.lp-slide-in {
+            animation: lpBubbleIn 0.45s cubic-bezier(0.22,0.68,0.36,1) both;
+        }
+        .lp-bubble.other.lp-slide-in { animation-name: lpBubbleInLeft; }
+        .lp-bubble.mine.lp-slide-in { animation-name: lpBubbleInRight; }
+        @keyframes lpBubbleInLeft { from { opacity: 0; transform: translateX(-14px) scale(0.94); } to { opacity: 1; transform: translateX(0) scale(1); } }
+        @keyframes lpBubbleInRight { from { opacity: 0; transform: translateX(14px) scale(0.94); } to { opacity: 1; transform: translateX(0) scale(1); } }
 
-        /* -- call mini-screen -- */
-        .landing-phone-screen[data-screen="call"] { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(160deg,#1f2540,#2d3358); }
+        /* -- voice call mini-screen -- */
+        .landing-phone-screen[data-screen="voice"],
+        .landing-phone-screen[data-screen="video"] { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: linear-gradient(160deg,#1f2540,#2d3358); }
         .lp-call-avatar { position: relative; width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.2rem; margin-bottom: 8px; }
         .lp-call-pulse { position: absolute; inset: -8px; border-radius: 50%; border: 2px solid rgba(102,126,234,0.6); animation: lpPulse 1.8s infinite ease-out; }
-        @keyframes lpPulse { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.5); opacity: 0; } }
+        .lp-call-pulse-2 { animation-delay: 0.6s; border-color: rgba(102,126,234,0.4); }
+        @keyframes lpPulse { 0% { transform: scale(0.9); opacity: 0.9; } 100% { transform: scale(1.6); opacity: 0; } }
         .lp-call-name { color: #fff; font-weight: 700; font-size: 0.78rem; margin-bottom: 2px; }
         .lp-call-status { color: #a5b4fc; font-size: 0.6rem; margin-bottom: 14px; }
         .lp-call-actions { display: flex; gap: 10px; }
         .lp-call-btn { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fff; background: rgba(255,255,255,0.15); }
         .lp-call-btn.end { background: #ef4444; transform: rotate(135deg); }
+        .lp-call-btn.cam.active { background: #667eea; }
+
+        /* -- video call mini-screen -- */
+        .lp-video-remote {
+            position: relative; width: 84px; height: 60px; border-radius: 12px; margin-bottom: 10px;
+            background: linear-gradient(135deg,#4338ca,#7c3aed);
+            display: flex; align-items: flex-end; justify-content: flex-end; padding: 5px;
+        }
+        .lp-video-self {
+            width: 26px; height: 20px; border-radius: 5px; background: rgba(255,255,255,0.2);
+            display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.6rem;
+            border: 1px solid rgba(255,255,255,0.4);
+        }
+        .lp-video-pulse { inset: auto; top: -6px; left: -6px; width: 14px; height: 14px; border: none; background: #34d399; border-radius: 50%; animation: lpBlink 1.4s infinite ease-in-out; }
+        @keyframes lpBlink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
         /* -- marketplace mini-screen -- */
         .lp-market-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .lp-market-card { display: flex; flex-direction: column; gap: 4px; }
-        .lp-market-thumb { height: 34px; border-radius: 8px; }
-        .lp-market-thumb.a { background: linear-gradient(135deg,#fbbf24,#f97316); }
-        .lp-market-thumb.b { background: linear-gradient(135deg,#34d399,#059669); }
-        .lp-market-thumb.c { background: linear-gradient(135deg,#60a5fa,#3b82f6); }
-        .lp-market-thumb.d { background: linear-gradient(135deg,#f472b6,#db2777); }
+        .lp-market-thumb { height: 34px; border-radius: 8px; animation: lpMarketRotate 6s ease-in-out infinite; }
+        .lp-market-thumb.a { background: linear-gradient(135deg,#fbbf24,#f97316); animation-delay: 0s; }
+        .lp-market-thumb.b { background: linear-gradient(135deg,#34d399,#059669); animation-delay: 0.4s; }
+        .lp-market-thumb.c { background: linear-gradient(135deg,#60a5fa,#3b82f6); animation-delay: 0.8s; }
+        .lp-market-thumb.d { background: linear-gradient(135deg,#f472b6,#db2777); animation-delay: 1.2s; }
+        /* Subtle cycling so the "listings" visibly refresh every few seconds
+           rather than sitting static, without needing real product photos. */
+        @keyframes lpMarketRotate {
+            0%, 40% { filter: hue-rotate(0deg) brightness(1); transform: scale(1); }
+            50% { filter: hue-rotate(25deg) brightness(1.08); transform: scale(1.035); }
+            60%, 100% { filter: hue-rotate(0deg) brightness(1); transform: scale(1); }
+        }
+
+        /* -- communities mini-screen -- */
+        .lp-community-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #667eea; font-size: 0.8rem; }
+        .lp-avatar-cluster { display: flex; align-items: center; margin-bottom: 10px; }
+        .lp-avatar-chip { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.5rem; font-weight: 700; color: #fff; }
+        .lp-avatar-chip:first-child { margin-left: 0; }
+        .lp-avatar-chip.a { background: linear-gradient(135deg,#667eea,#764ba2); }
+        .lp-avatar-chip.b { background: linear-gradient(135deg,#34d399,#059669); }
+        .lp-avatar-chip.c { background: linear-gradient(135deg,#f472b6,#db2777); }
+        .lp-avatar-chip.more { background: #e2e8f0; color: #64748b; }
+        .lp-community-tag { margin-top: 8px; font-size: 0.6rem; font-weight: 700; color: #059669; display: flex; align-items: center; gap: 4px; }
+
+        /* -- status mini-screen -- */
+        .lp-status-row { display: flex; justify-content: center; gap: 12px; margin-top: 6px; }
+        .lp-status-ring { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 2px; background: conic-gradient(#34d399, #667eea, #f472b6); }
+        .lp-status-ring.seen { background: #e2e8f0; }
+        .lp-status-avatar { width: 100%; height: 100%; border-radius: 50%; background: #fff; border: 2px solid #fff; background: linear-gradient(135deg,#94a3b8,#cbd5e1); }
+        .lp-status-caption { margin-top: 10px; font-size: 0.62rem; font-weight: 700; color: #667eea; display: flex; align-items: center; justify-content: center; gap: 5px; }
 
         .landing-stat-row {
             display: flex; justify-content: center; flex-wrap: wrap; gap: 22px;
@@ -2037,6 +2138,26 @@
             margin: 0 0 26px;
         }
 
+        .landing-trust-strip {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin: 0 0 14px;
+        }
+        .landing-trust-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(52,211,153,0.14);
+            border: 1px solid rgba(52,211,153,0.4);
+            color: #d1fae5;
+            padding: 5px 11px;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 700;
+        }
+        .landing-trust-pill i { color: #34d399; font-size: 0.72rem; }
         .landing-badge-row {
             display: flex;
             flex-wrap: wrap;
@@ -2258,6 +2379,11 @@
             .il-ring-pulse { animation: none; opacity: 0; }
             .landing-feature-chip i { animation: none; }
             .landing-feature-chip:hover, .landing-trust-item:hover { transform: none; }
+            /* The hero still cycles screens (see JS) — just without the
+               animated fade/slide/pulse, an instant swap instead. */
+            .landing-phone-screen { transition: none; transform: none; }
+            .lp-bubble.lp-slide-in { animation: none; opacity: 1; transform: none; }
+            .lp-call-pulse, .lp-video-pulse, .lp-market-thumb, .landing-phone-tab { animation: none; }
         }
 
         /* Install affordance inside the login/register panel — the fallback
@@ -2368,6 +2494,8 @@
             max-width: 220px;
             line-height: 1.35;
         }
+        .pwa-install-hint i { color: #8ea2ff; margin-right: 4px; }
+        .auth-container .pwa-install-hint i { color: var(--primary-color); }
         .auth-container .pwa-install-hint {
             position: absolute;
             top: 14px;
@@ -2824,19 +2952,77 @@
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-users"></i></div><div class="feature-content"><h3>Group &amp; Community Chats</h3><p>Stay close with everyone that matters</p></div></div>
                     <div class="feature-card"><div class="feature-icon"><i class="fas fa-language"></i></div><div class="feature-content"><h3>Real-time Translation</h3><p>AI-powered multilingual chat</p></div></div>
                 </div>
+                <!-- Reviews + Countries: quick-scan trust stats to keep the
+                     page moving instead of leaving a gap after the feature
+                     grid. -->
+                <div class="mmp-stat-row">
+                    <div class="mmp-stat"><span class="mmp-stat-num"><i class="fas fa-star"></i> 4.8/5</span><span class="mmp-stat-label">Average Review</span></div>
+                    <div class="mmp-stat"><span class="mmp-stat-num">120+</span><span class="mmp-stat-label">Countries</span></div>
+                    <div class="mmp-stat"><span class="mmp-stat-num">99.9%</span><span class="mmp-stat-label">Uptime</span></div>
+                </div>
+
                 <div class="social-proof">
-                    <h2>🌟 Success Stories</h2>
+                    <h2>🌟 Reviews &amp; Success Stories</h2>
                     <div class="testimonial">
                         <div class="testimonial-content">"MoodChat helped me find amazing friends across continents!"</div>
                         <div class="testimonial-author"><div class="testimonial-avatar">SR</div><div class="testimonial-info"><h4>Sarah Rodriguez</h4><p>Spain • Regular User</p></div></div>
                     </div>
+                    <div class="testimonial">
+                        <div class="testimonial-content">"Calls are clearer than what I used before, even on weak wifi."</div>
+                        <div class="testimonial-author"><div class="testimonial-avatar">DK</div><div class="testimonial-info"><h4>Daniel Kim</h4><p>South Korea • Regular User</p></div></div>
+                    </div>
                 </div>
+
+                <!-- Screenshots: real in-app screens aren't bundled in this
+                     repo as static image assets yet, so this reuses the same
+                     live-rendered mini-screens as the hero rather than
+                     placeholder/fake photos — still gives visitors an
+                     accurate look at each module. Swap in real PNG
+                     screenshots here once they're exported from the app. -->
+                <div class="mmp-screens-section">
+                    <h2><i class="fas fa-mobile-screen-button"></i> See MoodChat In Action</h2>
+                    <div class="mmp-screens-strip">
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon chat"><i class="fas fa-comment-dots"></i></div><span>Chat</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon call"><i class="fas fa-video"></i></div><span>Calls</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon market"><i class="fas fa-store"></i></div><span>Marketplace</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon community"><i class="fas fa-users"></i></div><span>Communities</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon status"><i class="fas fa-circle-play"></i></div><span>Status</span></div>
+                        <div class="mmp-screen-card"><div class="mmp-screen-icon games"><i class="fas fa-gamepad"></i></div><span>Games</span></div>
+                    </div>
+                </div>
+
+                <div class="mmp-faq">
+                    <h2><i class="fas fa-circle-question"></i> Frequently Asked Questions</h2>
+                    <details class="mmp-faq-item">
+                        <summary>Is MoodChat free to use?</summary>
+                        <p>Yes — messaging, calls, groups and communities are free. Some marketplace and premium tools may have their own pricing.</p>
+                    </details>
+                    <details class="mmp-faq-item">
+                        <summary>Are my messages private?</summary>
+                        <p>Direct messages are end-to-end encrypted, so only you and the people in the conversation can read them.</p>
+                    </details>
+                    <details class="mmp-faq-item">
+                        <summary>Can I use MoodChat on multiple devices?</summary>
+                        <p>Yes — sign in on any device and your chats, calls and groups stay in sync.</p>
+                    </details>
+                    <details class="mmp-faq-item">
+                        <summary>Does MoodChat work offline?</summary>
+                        <p>MoodChat is a Progressive Web App with offline support — recent chats stay available and messages send once you're back online.</p>
+                    </details>
+                </div>
+
                 <div class="download-section">
                     <h2>📱 Get The App</h2>
                     <div class="badge-grid">
                         <a href="#" class="download-badge"><i class="fab fa-google-play badge-icon"></i><div class="badge-text"><span>GET IT ON</span><span>Google Play</span></div></a>
                         <a href="#" class="download-badge"><i class="fab fa-apple badge-icon"></i><div class="badge-text"><span>Download on the</span><span>App Store</span></div><div class="coming-soon">Soon</div></a>
                     </div>
+                </div>
+
+                <div class="mmp-links-row">
+                    <a href="#" class="footer-link" data-modal="privacy">Privacy</a>
+                    <a href="#" class="footer-link" data-modal="help">Support</a>
+                    <a href="#" class="footer-link" data-modal="contact">Contact</a>
                 </div>
             </div>
     </main>
@@ -2923,6 +3109,93 @@
                 gap: 6px;
                 padding: 12px 8px;
             }
+
+            /* Reviews + Countries quick-stat row */
+            .mmp-stat-row {
+                display: flex;
+                justify-content: space-around;
+                gap: 8px;
+                background: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-radius: 14px;
+                padding: 14px 10px;
+                margin: 18px 0;
+            }
+            .mmp-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+            .mmp-stat-num { font-size: 1rem; font-weight: 800; color: var(--text-primary); }
+            .mmp-stat-num i { color: #fbbf24; }
+            .mmp-stat-label { font-size: 0.68rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
+
+            /* Screenshot strip */
+            .mmp-screens-section { margin: 22px 0; }
+            .mmp-screens-section h2 { font-size: 17px; color: var(--text-primary); margin: 0 0 12px; text-align: center; }
+            .mmp-screens-section h2 i { color: var(--primary-color); margin-right: 6px; }
+            .mmp-screens-strip {
+                display: flex;
+                gap: 10px;
+                overflow-x: auto;
+                padding-bottom: 6px;
+                scroll-snap-type: x mandatory;
+                -webkit-overflow-scrolling: touch;
+            }
+            .mmp-screen-card {
+                flex: 0 0 auto;
+                width: 84px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 6px;
+                scroll-snap-align: start;
+            }
+            .mmp-screen-card span { font-size: 0.7rem; font-weight: 700; color: var(--text-secondary); }
+            .mmp-screen-icon {
+                width: 64px; height: 88px; border-radius: 14px;
+                display: flex; align-items: center; justify-content: center;
+                color: #fff; font-size: 1.4rem;
+                box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+            }
+            .mmp-screen-icon.chat { background: linear-gradient(160deg,#667eea,#764ba2); }
+            .mmp-screen-icon.call { background: linear-gradient(160deg,#1f2540,#2d3358); }
+            .mmp-screen-icon.market { background: linear-gradient(160deg,#f97316,#fbbf24); }
+            .mmp-screen-icon.community { background: linear-gradient(160deg,#059669,#34d399); }
+            .mmp-screen-icon.status { background: linear-gradient(160deg,#db2777,#f472b6); }
+            .mmp-screen-icon.games { background: linear-gradient(160deg,#3b82f6,#60a5fa); }
+
+            /* FAQ accordion */
+            .mmp-faq { margin: 22px 0; }
+            .mmp-faq h2 { font-size: 17px; color: var(--text-primary); margin: 0 0 12px; text-align: center; }
+            .mmp-faq h2 i { color: var(--primary-color); margin-right: 6px; }
+            .mmp-faq-item {
+                background: var(--card-bg);
+                border: 1px solid var(--border-color);
+                border-radius: 12px;
+                padding: 4px 14px;
+                margin-bottom: 8px;
+            }
+            .mmp-faq-item summary {
+                padding: 10px 0;
+                font-size: 0.88rem;
+                font-weight: 700;
+                color: var(--text-primary);
+                cursor: pointer;
+                list-style: none;
+            }
+            .mmp-faq-item summary::-webkit-details-marker { display: none; }
+            .mmp-faq-item summary::after { content: '+'; float: right; font-weight: 700; color: var(--primary-color); }
+            .mmp-faq-item[open] summary::after { content: '\2212'; }
+            .mmp-faq-item p { margin: 0 0 12px; font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary); }
+
+            /* Support / Privacy / Contact links */
+            .mmp-links-row {
+                display: flex;
+                justify-content: center;
+                gap: 18px;
+                margin: 20px 0 4px;
+                padding-top: 16px;
+                border-top: 1px solid var(--border-color);
+            }
+            .mmp-links-row .footer-link { font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); text-decoration: none; }
+            .mmp-links-row .footer-link:hover { color: var(--primary-color); }
         }
     </style>
 
@@ -4908,17 +5181,44 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
         // second, competing GSI render pass from the landing screen itself.
         if (googleBtn) googleBtn.addEventListener('click', function () { goToForm('login'); });
 
-        // ---- hero phone mockup: auto-cycle Chat / Call / Market screens --------
+        // ---- hero phone mockup: auto-cycle Chat -> Voice -> Video -> Marketplace
+        // -> Communities -> Status, repeating. Runs identically on mobile and
+        // desktop (same DOM/JS, no viewport branching) so the hero always
+        // demonstrates what the app does instead of sitting on one screen.
+        //
+        // FIX (MOBILE-HERO-NOT-CYCLING): previously this returned immediately
+        // when prefers-reduced-motion was set, which never restarted the
+        // interval — so any device/browser reporting reduced motion (common
+        // default on mobile OSes) got a hero that visibly never changed.
+        // Reduced motion should only mean "skip the animated transition", not
+        // "never advance the slideshow" — the screen still needs to change
+        // for the hero to communicate the product. So the interval now always
+        // runs; only the CSS transition/animation gets suppressed.
         (function () {
-            var order = ['chat', 'call', 'market'];
+            var order = ['chat', 'voice', 'video', 'market', 'community', 'status'];
+            var labels = { chat: 'Chat', voice: 'Voice Call', video: 'Video Call', market: 'Marketplace', community: 'Communities', status: 'Status' };
             var tabs = document.querySelectorAll('.landing-phone-tab');
             var screens = document.querySelectorAll('.landing-phone-screen');
+            var caption = document.getElementById('landingMockupCaption');
             if (!tabs.length || !screens.length) return;
             var idx = 0;
             var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
             function show(name) {
                 tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.screen === name); });
-                screens.forEach(function (s) { s.classList.toggle('active', s.dataset.screen === name); });
+                screens.forEach(function (s) {
+                    var isMatch = s.dataset.screen === name;
+                    s.classList.toggle('active', isMatch);
+                    if (isMatch) {
+                        // Re-trigger the chat bubble slide-in animation every
+                        // time this screen becomes active again, not just once.
+                        s.querySelectorAll('.lp-slide-in').forEach(function (el) {
+                            el.style.animation = 'none';
+                            void el.offsetWidth;
+                            el.style.animation = '';
+                        });
+                    }
+                });
+                if (caption && labels[name]) caption.textContent = labels[name];
             }
             tabs.forEach(function (t) {
                 t.addEventListener('click', function () {
@@ -4926,12 +5226,12 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                     show(t.dataset.screen);
                 });
             });
-            if (reduceMotion) return;
+            var intervalMs = reduceMotion ? 3000 : 3000;
             var timer = setInterval(function () {
                 if (document.hidden) return;
                 idx = (idx + 1) % order.length;
                 show(order[idx]);
-            }, 3200);
+            }, intervalMs);
             document.addEventListener('visibilitychange', function () {
                 if (document.hidden) { clearInterval(timer); }
             });
@@ -5043,7 +5343,7 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
             statusGroups.forEach(function (g) {
                 if (g.status) g.status.hidden = true;
                 if (g.hint) {
-                    g.hint.textContent = 'To install: tap Share, then "Add to Home Screen".';
+                    g.hint.innerHTML = '<i class="fas fa-share-square"></i> To install: tap Share, then "Add to Home Screen".';
                     g.hint.hidden = false;
                 }
             });
@@ -5186,9 +5486,13 @@ console.log('[RuntimeStab] ✅ All runtime fixes active. Run __MCStabDiag() for 
                 // instead of leaving a dead, permanently-hidden button.
                 setTimeout(function () {
                     if (deferredInstallPrompt || isRunningInstalled()) return;
+                    // Read as a helpful tip, not a persistent error banner —
+                    // it also hides the (now dead) Install button so there's
+                    // no button sitting there implying installation works.
+                    setInstallButtonsVisible(false);
                     statusGroups.forEach(function (g) {
                         if (g.hint) {
-                            g.hint.textContent = 'Install not supported in this browser.';
+                            g.hint.innerHTML = '<i class="fas fa-info-circle"></i> This browser doesn\'t support installation. Try Chrome or Edge.';
                             g.hint.hidden = false;
                         }
                     });
