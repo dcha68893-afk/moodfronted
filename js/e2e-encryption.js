@@ -294,16 +294,35 @@
     return true;
   }
 
+  // FIX-STALE-RECIPIENT-KEY: public keys were cached (in-memory PUB_CACHE and
+  // persistent PUB_KEY_STORE) forever, on the assumption a key never changes.
+  // That assumption breaks the moment the other person regenerates their
+  // keypair (new device, cleared storage, reinstall) — every message from
+  // them then fails decryption permanently, because we keep computing shared
+  // bits against their old, now-wrong public key and never look again.
+  // This drops both the in-memory and persisted copy for one userId so the
+  // next _getRecipientPublicKey call is forced back out to the network.
+  function _purgeCachedRecipientKey(userId) {
+    PUB_CACHE.delete(userId);
+    const store = _loadPubKeyStore();
+    if (store[userId]) {
+      delete store[userId];
+      _savePubKeyStore(store);
+    }
+  }
+
   // ── Get recipient's public key ─────────────────────────────────────────────
-  async function _getRecipientPublicKey(userId) {
-    if (PUB_CACHE.has(userId)) return PUB_CACHE.get(userId);
+  // forceRefresh=true skips both the in-memory and persisted cache and goes
+  // straight to the network — used by decryptFromChat's stale-key retry.
+  async function _getRecipientPublicKey(userId, forceRefresh) {
+    if (!forceRefresh && PUB_CACHE.has(userId)) return PUB_CACHE.get(userId);
 
     // FIX-ROOT-CAUSE-DM-DECRYPT-FRAGILE: check the persistent store before
     // hitting the network at all — same treatment group sender keys already
-    // get. A key, once seen, doesn't change, so this is safe to trust
-    // indefinitely.
+    // get. A key, once seen, is trusted until _purgeCachedRecipientKey says
+    // otherwise (see FIX-STALE-RECIPIENT-KEY above).
     const store = _loadPubKeyStore();
-    const cached = store[userId];
+    const cached = !forceRefresh && store[userId];
     if (cached && cached.pub) {
       try {
         const key = await importPublicKey(cached.pub);
@@ -372,24 +391,39 @@
 
     if (!_enabled || !_myPrivKey) return '[Encrypted message — unlock your key to read]';
 
-    const sender = await _getRecipientPublicKey(senderUserId);
+    // FIX-STALE-RECIPIENT-KEY: allow one retry against a forced-fresh key
+    // fetch if decryption fails against whatever key we currently have
+    // cached for this sender — see _purgeCachedRecipientKey above.
+    let usedForceRefresh = false;
+    let sender = await _getRecipientPublicKey(senderUserId);
     if (!sender) return '[Encrypted — sender key not found]';
 
-    const sharedBits = await _computeSharedBits(_myPrivKey, sender.key);
+    while (true) {
+      const sharedBits = await _computeSharedBits(_myPrivKey, sender.key);
 
-    // FIX-E2E-CHATID: try the stable per-pair context first (current scheme,
-    // used by encryptForChat above). Fall back to the legacy literal-chatId
-    // context for any message encrypted before this fix was deployed, so
-    // existing history already at rest stays readable.
-    try {
-      const aesKey = await _hkdf(sharedBits, _chatContext(chatId, senderUserId));
-      return await _aesDecrypt(envelope, aesKey);
-    } catch (_) {
+      // FIX-E2E-CHATID: try the stable per-pair context first (current
+      // scheme, used by encryptForChat above). Fall back to the legacy
+      // literal-chatId context for any message encrypted before this fix
+      // was deployed, so existing history already at rest stays readable.
       try {
-        const legacyKey = await _hkdf(sharedBits, String(chatId));
-        return await _aesDecrypt(envelope, legacyKey);
-      } catch (e) {
-        return '[Decryption failed]';
+        const aesKey = await _hkdf(sharedBits, _chatContext(chatId, senderUserId));
+        return await _aesDecrypt(envelope, aesKey);
+      } catch (_) {
+        try {
+          const legacyKey = await _hkdf(sharedBits, String(chatId));
+          return await _aesDecrypt(envelope, legacyKey);
+        } catch (e) {
+          if (usedForceRefresh) return '[Decryption failed]';
+          // Both context attempts failed against the cached key — most
+          // likely it's stale (sender regenerated their keypair). Purge it
+          // and retry exactly once against a freshly-fetched key.
+          usedForceRefresh = true;
+          _purgeCachedRecipientKey(senderUserId);
+          const fresh = await _getRecipientPublicKey(senderUserId, true);
+          if (!fresh) return '[Encrypted — sender key not found]';
+          sender = fresh;
+          continue;
+        }
       }
     }
   }

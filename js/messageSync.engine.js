@@ -141,6 +141,25 @@
                     }
                 }
 
+                // FIX-BACKSTOP-SILENT-DELIVERY: figure out, before merging, which of
+                // these server messages we didn't already have locally. The live
+                // socket path (ingestIncomingMessage, above) fires 'kyn:incomingMessage'
+                // for every message it writes — that's what makes the chat re-render
+                // and the sidebar/badge update immediately. This periodic/background
+                // path backstops the socket when it drops messages during reconnect
+                // gaps, but it only ever called mergeServerMessages() straight to
+                // storage — so a message delivered only through this path was really
+                // there, just invisible until the recipient happened to open the chat
+                // (whatever next read the store painted it in). Same signal, same
+                // shape as the live path, so the existing listener in messages-ui.js
+                // handles both identically.
+                const _newlyArrived = [];
+                for (const m of serverMessages) {
+                    const _sid = m && m.id != null ? String(m.id) : null;
+                    const _already = _sid ? await localStore.getMessageByServerId(_sid) : null;
+                    if (!_already) _newlyArrived.push(m);
+                }
+
                 // Merge: server meta wins, local data preserved if unconfirmed
                 await localStore.mergeServerMessages(chatId, serverMessages);
                 await localStore.setSyncMeta(`last_sync_${chatId}`, Date.now());
@@ -149,6 +168,15 @@
 
                 // Notify UI
                 this._emitChatUpdated(chatId);
+
+                for (const m of _newlyArrived) {
+                    try {
+                        window.dispatchEvent(new CustomEvent('kyn:incomingMessage', {
+                            detail: { message: m, chatId: String(chatId) }
+                        }));
+                    } catch (_) {}
+                }
+
                 console.log(`[SyncEngine] ✅ Synced ${serverMessages.length} msgs for chat ${chatId}`);
 
             } catch (err) {

@@ -3951,7 +3951,7 @@
 
                 core.formatMessageText(message.content) : 
 
-                message.content);
+                _safeEscapeHtml(message.content));
 
             const pendingDecryptClass = _isEncryptedEnvelope ? 'pending-decrypt' : '';
 
@@ -4590,7 +4590,7 @@
 
                 core.formatMessageText(message.content) : 
 
-                message.content;
+                _safeEscapeHtml(message.content);
 
             const time = core?.formatTime ? 
 
