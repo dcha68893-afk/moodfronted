@@ -1088,11 +1088,14 @@ export function setupEventListeners() {
                     }, '*');
                 } catch (e) {}
                 // Also try via sendMessageToParent for compatibility
+                // FIX: sendMessageToParent() (settings-core.js) returns a plain boolean,
+                // not a Promise — chaining .catch() on it threw a TypeError that
+                // interrupted this function every time it ran.
                 sendMessageToParent({
                     type: 'CHILD_CLOSING',
                     childId: 'settings',
                     timestamp: Date.now()
-                }).catch(() => {});
+                });
             };
 
             if (unsavedChanges) {
@@ -1385,11 +1388,12 @@ export function initializeColorPicker() {
                     updateSaveButton();
                     updateAccentColor(hexColor);
                     
+                    // FIX: sendMessageToParent() returns a boolean, not a Promise.
                     sendMessageToParent({
                         type: 'THEME_CHANGED',
                         accentColor: hexColor,
                         timestamp: Date.now()
-                    }).catch(() => {});
+                    });
                 }).catch(error => {
                     debugLog('Error saving accent color:', error);
                     showNotification('Error saving accent color', 'error');
@@ -1488,11 +1492,12 @@ export function applyTheme(theme) {
     // module's own early-init script caught up. Broadcast it the same way
     // the accent-color picker already does; chat.html now relays this to
     // every other iframe (see chat.html's THEME_CHANGED handler).
+    // FIX: sendMessageToParent() returns a boolean, not a Promise.
     sendMessageToParent({
         type: 'THEME_CHANGED',
         theme: resolved,
         timestamp: Date.now()
-    }).catch(() => {});
+    });
 
     // Update through SettingsState for REAL backend persistence
     SettingsState.update('appearance', 'theme', resolved).then(() => {
@@ -1517,11 +1522,12 @@ export function applyFontSize(size) {
 
     // FIX (live sync, same reasoning as applyTheme above): broadcast so
     // other open modules pick up the new font size immediately.
+    // FIX: sendMessageToParent() returns a boolean, not a Promise.
     sendMessageToParent({
         type: 'FONT_SIZE_CHANGED',
         fontSize: fontSize,
         timestamp: Date.now()
-    }).catch(() => {});
+    });
 
     // Update through SettingsState for REAL backend persistence
     SettingsState.update('appearance', 'fontSize', fontSize).then(() => {
@@ -1735,11 +1741,12 @@ export async function saveSettings() {
         updateSaveButton();
         
         // Notify parent about settings update - use safeSend through core
+        // FIX: sendMessageToParent() returns a boolean, not a Promise.
         sendMessageToParent({
             type: 'SETTINGS_UPDATED',
             section: currentSection,
             timestamp: Date.now()
-        }).catch(() => {});
+        });
         
         return true;
         
