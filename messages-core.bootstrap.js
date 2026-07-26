@@ -2563,3 +2563,26 @@ try {
         }
         return !!(window.__CHILD_SESSION__ && window.__CHILD_SESSION__.token);
     }
+
+    // =========================================================================
+    // MESSAGE LIFECYCLE REBUILD (messages-only scope, added 2026-07-26)
+    // -------------------------------------------------------------------------
+    // Purely additive. Initializes the new reliable send/receive pipeline
+    // (js/core/message/MessageLifecycleClient.js) alongside everything else
+    // already running in this file — it does not replace or disable any
+    // existing render/relay logic. See that file's header comment for the
+    // full rationale and the two concrete gaps it closes.
+    // =========================================================================
+    (function initMessageLifecycleClient(attempt) {
+        attempt = attempt || 0;
+        if (!window.MessageLifecycleClient) {
+            if (attempt < 50) setTimeout(() => initMessageLifecycleClient(attempt + 1), 200);
+            return;
+        }
+        const uid = getCurrentUserId();
+        if (!uid) {
+            if (attempt < 50) setTimeout(() => initMessageLifecycleClient(attempt + 1), 200);
+            return;
+        }
+        window.MessageLifecycleClient.init({ currentUserId: uid });
+    })();
