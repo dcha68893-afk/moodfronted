@@ -123,8 +123,19 @@
                 if (currentUserId && Array.isArray(message.deletedFor) && message.deletedFor.includes(String(currentUserId))) return false;
                 return true;
             });
-            if (options.before) filtered = filtered.filter((message) => Number(message.createdAt || 0) < Number(options.before));
-            filtered.sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+            // FIX (message-order-scramble-on-refresh): createdAt can be either an epoch-ms
+            // number (locally composed messages) or an ISO string (messages merged in from
+            // the server via mergeServerMessages). Number("2026-07-26T...") is NaN, which
+            // broke both this before-filter and the sort below whenever a chat had a mix of
+            // the two -- i.e. after every refresh/reload. Normalize through Date parsing for
+            // strings, plain Number() for anything else.
+            const _tsNum = (v) => {
+                if (v == null || v === '') return 0;
+                if (typeof v === 'string') return new Date(v).getTime() || 0;
+                return Number(v) || 0;
+            };
+            if (options.before) filtered = filtered.filter((message) => _tsNum(message.createdAt) < _tsNum(options.before));
+            filtered.sort((a, b) => _tsNum(a.createdAt) - _tsNum(b.createdAt));
             const limit = options.limit || 200;
             return filtered.slice(-limit);
         }
@@ -315,7 +326,15 @@
         async getAllConversations() {
             await this.ready();
             const records = await window.AppCache.getAll('chats');
-            return records.sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+            // FIX (message-order-scramble-on-refresh, same root cause as getMessagesByChat
+            // below): updatedAt can be an ISO string (from the server) or an epoch-ms number
+            // (locally created), and Number() on an ISO string is NaN.
+            const _tsNum = (v) => {
+                if (v == null || v === '') return 0;
+                if (typeof v === 'string') return new Date(v).getTime() || 0;
+                return Number(v) || 0;
+            };
+            return records.sort((a, b) => _tsNum(b.updatedAt) - _tsNum(a.updatedAt));
         }
 
         async updateConversationLastMessage(chatId, message) {

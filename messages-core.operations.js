@@ -1092,8 +1092,13 @@ const ChatManager = {
             }
 
             const uniqueMessages = Array.from(byId.values());
-            const ts = m => m.createdAt || m.timestamp || 0;
-            uniqueMessages.sort((a, b) => ts(a) - ts(b));
+            // FIX (message-order-scramble-on-refresh): was `m.createdAt || m.timestamp || 0`
+            // compared via plain subtraction, which returns NaN whenever createdAt is an
+            // ISO string (server-fetched messages) mixed with epoch-ms numbers (locally
+            // composed messages) — the array then sorts unpredictably. _normalizeTs (from
+            // messages-core.bootstrap.js, shared lexical scope) parses both formats to
+            // comparable numbers, matching every other sort site in this module.
+            uniqueMessages.sort((a, b) => _normalizeTs(a) - _normalizeTs(b));
 
             this._messages = uniqueMessages;
             this._rebuildMessagesMap();
