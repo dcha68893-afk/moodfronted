@@ -4318,6 +4318,28 @@ window.__CALLS_IFRAME__ = {
         var _callConnectedAt   = 0;  // when call connected
         var _callEndedAt       = 0;  // when call ended
         var _lastCallEndedId   = null;
+
+        // FIX (postMessage storm / header-sidebar flicker): handleCallInitiated /
+        // _showCallingNow can legitimately fire several times in a row for the
+        // exact same call (the iframe's own socket AND the parent's relayed
+        // postMessage both deliver it, plus callRetry.engine.js retries) —
+        // previously every single one re-posted CALL_SCREEN_ACTIVE/
+        // HIDE_SIDEBAR_ICONS to the parent, which re-ran the parent's
+        // show/hide toggle each time and visibly flickered. Collapse
+        // identical (type + state) posts within a short window into one.
+        var _lastParentPost = Object.create(null);
+        function _postToParentDebounced(type, payload, minGapMs) {
+            try {
+                if (!window.parent || window.parent === window) return;
+                var stateKey = JSON.stringify(payload == null ? null : payload);
+                var last = _lastParentPost[type];
+                var now = Date.now();
+                if (last && last.stateKey === stateKey && (now - last.at) < (minGapMs || 800)) return;
+                _lastParentPost[type] = { stateKey: stateKey, at: now };
+                window.parent.postMessage({ type: type, payload: payload }, '*');
+            } catch (_) {}
+        }
+        window._postToParentDebounced = _postToParentDebounced;
         var _isResetting       = false;
 
         // ── 1. COMPLETE STATE RESET (called before every new call) ────────
@@ -4457,11 +4479,7 @@ window.__CALLS_IFRAME__ = {
                 _container.style.setProperty('display', 'flex', 'important');
             }
             // Also ensure the calls iframe wrapper is not hidden in the parent
-            try {
-                if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-                }
-            } catch (_) {}
+            _postToParentDebounced('CALL_SCREEN_ACTIVE', { active: true });
 
             if (typeof window.showScreen === 'function') window.showScreen('calling');
             _startOutgoingRingtone();

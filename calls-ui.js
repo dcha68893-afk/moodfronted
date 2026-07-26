@@ -31,6 +31,28 @@ if (typeof UIEventHandlers === 'undefined') {
 // ==================== EARLY OPEN_CALL_WITH_USER LISTENER ====================
 // Set up immediately when script loads, before any initialization
 
+// FIX (postMessage storm / header flicker): collapse repeated identical
+// posts to the parent into one within a short window. Prefers the shared
+// helper defined in calls.html's inline script (window._postToParentDebounced)
+// so state is deduped consistently across both files; falls back to a raw
+// send if that helper isn't available yet (e.g. very early in load order).
+const _uiLastParentPost = Object.create(null);
+function _postToParentDebounced(type, extra, minGapMs) {
+    if (typeof window._postToParentDebounced === 'function') {
+        window._postToParentDebounced(type, extra, minGapMs);
+        return;
+    }
+    try {
+        if (!window.parent || window.parent === window) return;
+        const stateKey = JSON.stringify(extra == null ? null : extra);
+        const last = _uiLastParentPost[type];
+        const now = Date.now();
+        if (last && last.stateKey === stateKey && (now - last.at) < (minGapMs || 800)) return;
+        _uiLastParentPost[type] = { stateKey, at: now };
+        window.parent.postMessage(Object.assign({ type }, extra), '*');
+    } catch (_) {}
+}
+
 // ==================== UI STATE DEFINITION ====================
 const UIState = {
     // Call state
@@ -274,9 +296,7 @@ function showCallingScreenViaPatch(callInfo) {
     window.__callActive     = true;
     document.body.classList.add('call-active');
 
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-    }
+    _postToParentDebounced('CALL_SCREEN_ACTIVE', { active: true });
     console.log('[UI] Caller outgoing screen VISIBLE ✓');
 }
 
@@ -817,9 +837,7 @@ function showIdleScreen(force) {
     document.body.classList.remove('call-active');
     document.body.classList.remove('call-connected');
 
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
-    }
+    _postToParentDebounced('CALL_SCREEN_ACTIVE', { active: false });
     console.log('[UI] Idle screen VISIBLE ✓');
 }
 
@@ -1028,9 +1046,7 @@ function transitionToInCall(callInfo) {
     document.body.classList.add('call-active');
     document.body.classList.add('call-connected'); // suppresses callingScreen + incomingModal via CSS
 
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: true } }, '*');
-    }
+    _postToParentDebounced('CALL_SCREEN_ACTIVE', { active: true });
 
     // ── Volume slider: inject once into incall controls ───────────────────
     if (!document.getElementById('remoteVolumeSlider')) {
@@ -5228,9 +5244,7 @@ handleContactItemClick: function(e) {
             if (sidebar) sidebar.style.display = 'flex'; // Always keep sidebar visible
             
             // Hide sidebar icons in parent frame
-            if (window.parent && window.parent !== window) {
-                window.parent.postMessage({ type: 'HIDE_SIDEBAR_ICONS', module: 'calls' }, '*');
-            }
+            _postToParentDebounced('HIDE_SIDEBAR_ICONS', { module: 'calls' });
             
             const participantNames = UIState.callParticipants.map(p => p.name).join(', ') || 'Call';
             if (elements.callWithName) {
@@ -5677,7 +5691,7 @@ handleContactItemClick: function(e) {
             if (window._callRingTimer)       { clearInterval(window._callRingTimer);       window._callRingTimer       = null; }
             if (window._currentCallTimer)    { clearInterval(window._currentCallTimer);    window._currentCallTimer    = null; }
             if (window._modalGuardObserver) { try { window._modalGuardObserver.disconnect(); } catch(e) {} window._modalGuardObserver = null; }
-            if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'CALL_SCREEN_ACTIVE', payload: { active: false } }, '*');
+            _postToParentDebounced('CALL_SCREEN_ACTIVE', { active: false });
             // FIX-CALL4: Always hide all call screens and restore idle screen,
             // so the iframe is not dark on the second call initiation.
             (function _resetScreens() {
