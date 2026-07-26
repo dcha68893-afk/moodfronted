@@ -4752,7 +4752,7 @@
         html.classList.add(`theme-${savedTheme}`);
         html.classList.toggle("dark-theme", savedTheme === "dark");
         html.setAttribute("data-theme", savedTheme);
-        try { localStorage.setItem("app_theme", savedTheme); } catch (_) {}
+        try { (window.ThemeManager ? window.ThemeManager.setTheme(savedTheme) : localStorage.setItem("app_theme", savedTheme)); } catch (_) {}
 
         console.log(`✅ Theme initialized: ${savedTheme}`);
 

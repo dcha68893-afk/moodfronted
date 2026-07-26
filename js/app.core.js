@@ -448,7 +448,7 @@
           html.classList.add(`theme-${savedTheme}`);
           html.classList.toggle('dark-theme', savedTheme === 'dark');
           html.setAttribute('data-theme', savedTheme);
-          try { localStorage.setItem('app_theme', savedTheme); } catch (_) {}
+          try { (window.ThemeManager ? window.ThemeManager.setTheme(savedTheme) : localStorage.setItem('app_theme', savedTheme)); } catch (_) {}
         },
         getSetting: function(key) {
           try {
@@ -2686,7 +2686,7 @@ window.isPublicPage = function() {
       html.classList.add(`theme-${savedTheme}`);
       html.classList.toggle('dark-theme', savedTheme === 'dark');
       html.setAttribute('data-theme', savedTheme);
-      try { localStorage.setItem('app_theme', savedTheme); } catch (_) {}
+      try { (window.ThemeManager ? window.ThemeManager.setTheme(savedTheme) : localStorage.setItem('app_theme', savedTheme)); } catch (_) {}
       
       console.log(`✅ Theme initialized: ${savedTheme}`);
       
@@ -5545,7 +5545,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           const currentTheme = document.documentElement.classList.contains('theme-dark') ? 'dark' : 'light';
           const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
           this.applyTheme(newTheme);
-          try { localStorage.setItem('app_theme', newTheme); } catch (_) {}
+          try { (window.ThemeManager ? window.ThemeManager.setTheme(newTheme) : localStorage.setItem('app_theme', newTheme)); } catch (_) {}
           localStorage.setItem('nexopa_theme', newTheme);
         });
         
@@ -5563,7 +5563,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       html.classList.add(`theme-${resolved}`);
       html.classList.toggle('dark-theme', resolved === 'dark');
       html.setAttribute('data-theme', resolved);
-      try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+      try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
       
       // Dispatch theme change event
       const event = new CustomEvent('nexopa-theme-change', {

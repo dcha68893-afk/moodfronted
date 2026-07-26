@@ -3357,7 +3357,7 @@
                         root.setAttribute('data-theme', next);
                         root.classList.toggle('theme-dark', next === 'dark');
                         root.classList.toggle('dark-theme', next === 'dark');
-                        try { localStorage.setItem('app_theme', next); } catch (_) {}
+                        try { (window.ThemeManager ? window.ThemeManager.setTheme(next) : localStorage.setItem('app_theme', next)); } catch (_) {}
                     }
                     localStorage.setItem('nexopa_theme', next); // legacy key, kept for older readers
                     btns.forEach(b => { if (b) b.innerHTML = next === 'dark' ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });

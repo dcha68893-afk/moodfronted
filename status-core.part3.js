@@ -613,7 +613,7 @@ function applyTheme(theme) {
         root.setAttribute('data-theme', resolved);
         root.classList.toggle('theme-dark', resolved === 'dark');
         root.classList.toggle('dark-theme', resolved === 'dark');
-        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+        try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
         
         const event = new CustomEvent('themeApplied', {
             detail: { theme, timestamp: Date.now() }

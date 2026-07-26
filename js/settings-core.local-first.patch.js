@@ -235,7 +235,7 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
                         root.setAttribute('data-theme', t);
                         root.classList.toggle('theme-dark', t === 'dark');
                         root.classList.toggle('dark-theme', t === 'dark');
-                        try { localStorage.setItem('app_theme', t); } catch (_) {}
+                        try { (window.ThemeManager ? window.ThemeManager.setTheme(t) : localStorage.setItem('app_theme', t)); } catch (_) {}
                     }
                 }
                 if (local.chat && local.chat.fontSize) {

@@ -1582,7 +1582,7 @@ async function loadUserSettings() {
                     document.body.setAttribute('data-theme', theme);
                     document.documentElement.classList.toggle('theme-dark', theme === 'dark');
                     document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-                    try { localStorage.setItem('app_theme', theme); } catch (_) {}
+                    try { (window.ThemeManager ? window.ThemeManager.setTheme(theme) : localStorage.setItem('app_theme', theme)); } catch (_) {}
                 }
             }
             

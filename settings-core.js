@@ -721,7 +721,7 @@ const SettingsState = {
                 root.setAttribute('data-theme', resolved);
                 root.classList.toggle('theme-dark', resolved === 'dark');
                 root.classList.toggle('dark-theme', resolved === 'dark');
-                try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+                try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
             }
 
             const event = new CustomEvent('themeApplied', {
@@ -5966,7 +5966,7 @@ function applyTheme(theme) {
             root.setAttribute('data-theme', resolved);
             root.classList.toggle('theme-dark', resolved === 'dark');
             root.classList.toggle('dark-theme', resolved === 'dark');
-            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+            try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
         }
 
         const event = new CustomEvent('themeApplied', {
@@ -7788,7 +7788,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             document.documentElement.setAttribute('data-theme', resolved);
                             document.documentElement.classList.toggle('theme-dark', resolved === 'dark');
                             document.documentElement.classList.toggle('dark-theme', resolved === 'dark');
-                            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+                            try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
                         }
                     }
                     if (data.appearance?.fontSize && !localStorage.getItem('app_font_size')) {

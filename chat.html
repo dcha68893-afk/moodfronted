@@ -4628,7 +4628,7 @@
                         document.documentElement.setAttribute('data-theme', _resolvedTheme);
                         document.documentElement.classList.toggle('theme-dark', _resolvedTheme === 'dark');
                         document.documentElement.classList.toggle('dark-theme', _resolvedTheme === 'dark');
-                        try { localStorage.setItem('app_theme', _resolvedTheme); } catch (_) {}
+                        try { (window.ThemeManager ? window.ThemeManager.setTheme(_resolvedTheme) : localStorage.setItem('app_theme', _resolvedTheme)); } catch (_) {}
                     }
                     document.querySelectorAll('iframe').forEach(function (f) {
                         if (f.contentWindow === event.source) return;
@@ -5479,7 +5479,7 @@
                             document.body.setAttribute('data-theme', theme);
                             document.documentElement.classList.toggle('theme-dark', theme === 'dark');
                             document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-                            try { localStorage.setItem('app_theme', theme); } catch(e) {}
+                            try { (window.ThemeManager ? window.ThemeManager.setTheme(theme) : localStorage.setItem('app_theme', theme)); } catch(e) {}
                         }
                         reapplyThemeToAllIframes();
                     }
@@ -5524,7 +5524,7 @@
                                 document.body.setAttribute('data-theme', _resolved);
                                 document.documentElement.classList.toggle('theme-dark', _resolved === 'dark');
                                 document.documentElement.classList.toggle('dark-theme', _resolved === 'dark');
-                                try { localStorage.setItem('app_theme', _resolved); } catch(_) {}
+                                try { (window.ThemeManager ? window.ThemeManager.setTheme(_resolved) : localStorage.setItem('app_theme', _resolved)); } catch(_) {}
                             }
                             reapplyThemeToAllIframes();
                         }
@@ -5564,7 +5564,7 @@
                                 document.body.setAttribute('data-theme', resolvedTheme);
                                 document.documentElement.classList.toggle('theme-dark', resolvedTheme === 'dark');
                                 document.documentElement.classList.toggle('dark-theme', resolvedTheme === 'dark');
-                                try { localStorage.setItem('app_theme', resolvedTheme); } catch(e) {}
+                                try { (window.ThemeManager ? window.ThemeManager.setTheme(resolvedTheme) : localStorage.setItem('app_theme', resolvedTheme)); } catch(e) {}
                             }
                             reapplyThemeToAllIframes();
                         }

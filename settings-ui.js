@@ -1476,7 +1476,7 @@ export function applyTheme(theme) {
         root.classList.toggle('theme-dark', resolved === 'dark');
         document.body.classList.toggle('dark-theme', resolved === 'dark');
         root.style.colorScheme = resolved;
-        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+        try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
     }
 
     // FIX (live theme sync, Phase 17 follow-up): this used to only touch

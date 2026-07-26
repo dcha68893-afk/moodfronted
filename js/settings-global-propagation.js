@@ -81,7 +81,7 @@
                 root.classList.add('theme-' + theme);
                 root.classList.toggle('dark-theme', theme === 'dark');
                 root.setAttribute('data-theme', theme);
-                try { localStorage.setItem('app_theme', theme); } catch (_) {}
+                try { (window.ThemeManager ? window.ThemeManager.setTheme(theme) : localStorage.setItem('app_theme', theme)); } catch (_) {}
 
                 if (theme === 'dark') {
                     _cssVar('--bg-color',        '#0f172a');

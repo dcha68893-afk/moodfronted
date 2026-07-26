@@ -42,7 +42,7 @@
                 root.classList.toggle('theme-dark', th === 'dark');
                 root.classList.toggle('dark-theme', th === 'dark');
                 if (body) body.setAttribute('data-theme', th);
-                try { localStorage.setItem('app_theme', th); } catch (_) {}
+                try { (window.ThemeManager ? window.ThemeManager.setTheme(th) : localStorage.setItem('app_theme', th)); } catch (_) {}
 
                 if (th === 'dark') {
                     root.style.setProperty('--kyn-bg-root', '#0f172a');

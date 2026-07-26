@@ -827,7 +827,7 @@
                 root.style.setProperty('--base-font-size', `${settings.appearance?.fontSize || 16}px`);
                 root.style.setProperty('--primary-color', settings.appearance?.accentColor || '#4F46E5');
                 try {
-                    localStorage.setItem('app_theme', theme);
+                    (window.ThemeManager ? window.ThemeManager.setTheme(theme) : localStorage.setItem('app_theme', theme));
                     localStorage.setItem('app_font_size', String(settings.appearance?.fontSize || 16));
                 } catch (_) {}
 

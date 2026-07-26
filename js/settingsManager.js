@@ -445,7 +445,7 @@
             if (!window.ThemeManager) {
                 html.classList.toggle('dark-theme', resolved === 'dark');
                 html.setAttribute('data-theme', resolved);
-                try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+                try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
                 if (resolved === 'dark') {
                     this.setCssVariable('--bg-color', '#0f172a');
                     this.setCssVariable('--text-primary', '#e5e7eb');
