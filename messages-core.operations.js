@@ -551,7 +551,24 @@ const ChatManager = {
             let _recipientUserIdForEncryption = null;
             
             if (isPending) {
-                const pendingConv = this._conversationsMap.get(conversationId);
+                let pendingConv = this._conversationsMap.get(conversationId);
+                // FIX-ROOT-CAUSE-MISSING-RECEIVERID (defense in depth): this
+                // iframe's local _conversationsMap can be missing or stale if
+                // the postMessage that was supposed to seed this pending
+                // conversation (e.g. OPEN_CHAT_WITH_USER) got dropped or hasn't
+                // landed yet — see the ALLOWED_SOURCES fix in
+                // messages-core.bootstrap.js for the main cause. Since the
+                // receiverId is embedded in the conversationId itself
+                // ('pending_<receiverId>'), recover it from there rather than
+                // failing the send outright.
+                if (!pendingConv || !pendingConv.pendingReceiverId) {
+                    const _fallbackReceiverId = conversationId.slice('pending_'.length);
+                    if (_fallbackReceiverId) {
+                        debugLog(`[ChatManager] ⚠️ Pending conversation missing/incomplete in local map — recovering receiverId from conversationId: ${_fallbackReceiverId}`);
+                        pendingConv = pendingConv || {};
+                        pendingConv.pendingReceiverId = pendingConv.pendingReceiverId || _fallbackReceiverId;
+                    }
+                }
                 if (!pendingConv || !pendingConv.pendingReceiverId) {
                     throw new Error('Invalid pending conversation: missing receiverId');
                 }

@@ -1575,7 +1575,18 @@ try {
             // invalid_source, which both spammed the console and meant real
             // updates (delivery flushes, sender display-name/avatar changes,
             // settings changes) never reached the messages module.
-            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast', 'background-sync', 'realtime-socket', 'message-iframe', 'parent-socket-relay', 'parent-chat-hdr']);
+            // FIX-ROOT-CAUSE-MISSING-RECEIVERID-2: 'marketplace-bridge' was still
+            // missing — it's the source chat.html uses for OPEN_CHAT_WITH_USER
+            // when a chat is opened from the marketplace/tools flow
+            // (chat.html:6823), which seeds this iframe's local ChatManager with
+            // the new conversation's pendingReceiverId. Being dropped here meant
+            // the conversation showed up with no receiverId, so the next
+            // sendMessage() threw "Invalid pending conversation: missing
+            // receiverId" and nothing was ever sent to the network. Also adding
+            // the other real source strings found in chat.html targeting this
+            // iframe that were likewise missing: 'kyn-global-bridge',
+            // 'parent-mp-bridge', 'parent-shell', 'stale-echo-retry'.
+            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast', 'background-sync', 'realtime-socket', 'message-iframe', 'parent-socket-relay', 'parent-chat-hdr', 'marketplace-bridge', 'kyn-global-bridge', 'parent-mp-bridge', 'parent-shell', 'stale-echo-retry']);
             if (data.source && !ALLOWED_SOURCES.has(data.source)) {
                 return { valid: false, reason: 'invalid_source' };
             }
