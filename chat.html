@@ -2,105 +2,10 @@
 <html lang="en">
 <head>
     <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com";</script>
-    <!-- THEME FLASH PREVENTION — this is the parent shell every user loads
-         first, so it needs the earliest possible theme application of all
-         the module pages. Same snippet as message.html/index.html/group.html
-         (see those for the fuller iframe-specific rationale) so the very
-         first paint already matches the saved theme instead of flashing
-         default → resolved theme once the deeper theme-apply logic further
-         down this file has run. -->
-    <script>
-    (function () {
-        // 'auto' theme has been removed app-wide (it was a major source of the
-        // theme-flash / "sparking" bug: it required an async matchMedia check
-        // that ran differently across pages, so different modules would settle
-        // on different themes for a frame or two). Only 'light' and 'dark' are
-        // valid now; any legacy 'auto' (or unrecognized) value saved from
-        // before this change quietly falls back to 'light'.
-        function resolveEarlyTheme() {
-            var raw = null;
-            try { raw = localStorage.getItem('app_theme'); } catch (_) {}
-            if (!raw) {
-                try {
-                    var c = localStorage.getItem('knecta_settings_cache');
-                    if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
-                } catch (_) {}
-            }
-            return raw === 'dark' ? 'dark' : 'light';
-        }
-        function resolveEarlyFontSize() {
-            var fs = null;
-            try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
-            if (!fs) {
-                try {
-                    var c = localStorage.getItem('knecta_settings_cache');
-                    if (c) { var cp = JSON.parse(c); var d = cp.data || cp; fs = d && d.appearance && d.appearance.fontSize; }
-                } catch (_) {}
-            }
-            fs = parseInt(fs, 10);
-            if (!fs || fs < 10 || fs > 28) fs = 16;
-            return fs;
-        }
-        var root = document.documentElement;
-        var theme = resolveEarlyTheme();
-        var fontSize = resolveEarlyFontSize();
-        root.setAttribute('data-theme', theme);
-        root.classList.toggle('theme-dark', theme === 'dark');
-        root.classList.toggle('dark-theme', theme === 'dark');
-        // FIX-ROOT-CAUSE-THEME-SPARK-MODULES: data-theme is applied above, but the
-        // actual color VALUES for [data-theme] live in the external theme.colors.css
-        // (single source of truth for every module, loaded as a separate network
-        // request). Until that request finishes, this page has no idea what
-        // --kyn-bg-root/--kyn-text-primary/etc. should resolve to, so without this
-        // it would paint using whatever hardcoded CSS fallback (or none) happens to
-        // be baked into this page's own stylesheet — which was a FIXED direction
-        // regardless of the user's actual theme (e.g. always falling back to dark,
-        // or always to light), producing a visible flash in the wrong direction for
-        // roughly half of users. Setting the handful of paint-critical variables
-        // directly, synchronously, in JS closes that gap: theme.colors.css remains
-        // the single source of truth and simply reconfirms the same values once it
-        // loads (no visible change) — first paint is just never wrong while
-        // waiting on the network.
-        // NOTE: these literal values are mirrored from theme.colors.css's light and
-        // dark palettes — if that file's palette values ever change, update here too.
-        (function () {
-            var _kynCritical = theme === 'dark' ? {
-                '--kyn-bg-root': '#0f172a', '--kyn-bg-chat': '#020617', '--kyn-bg-header': '#0f172a',
-                '--kyn-text-primary': '#e5e7eb', '--kyn-text-secondary': '#9ca3af',
-                '--kyn-border': '#374151',
-                '--bg-color': '#0f172a', '--text-primary': '#e5e7eb'
-            } : {
-                '--kyn-bg-root': '#ffffff', '--kyn-bg-chat': '#efeae2', '--kyn-bg-header': '#f0f2f5',
-                '--kyn-text-primary': '#111b21', '--kyn-text-secondary': '#667781',
-                '--kyn-border': '#e9edef',
-                '--bg-color': '#ffffff', '--text-primary': '#111b21'
-            };
-            for (var _k in _kynCritical) { root.style.setProperty(_k, _kynCritical[_k]); }
-        })();
-        root.style.fontSize = fontSize + 'px';
-        root.style.setProperty('--base-font-size', fontSize + 'px');
-    })();
-    </script>
+    <script src="/js/theme.engine.js"></script>
     <style id="kynCriticalHeaderFix">
-        /* FIX-ROOT-CAUSE-HEADER-BODY-MISMATCH: mirrors theme.colors.css's header-forcing
-           rule (headers & toolbars section) inline so it takes effect immediately,
-           instead of waiting on that external stylesheet's network request. Until now,
-           each module's header showed its own hardcoded gradient/color on first paint
-           while the body (already corrected via the critical vars above) was right —
-           a visible header/body mismatch. This reuses the same --kyn-bg-header /
-           --kyn-border / --kyn-text-primary variables set synchronously above, so once
-           theme.colors.css does load it recomputes the identical values — no visible
-           change, just no longer a race. */
-        header,
-        .header,
-        .top-bar,
-        .toolbar,
-        .app-header,
-        .chat-header,
-        .module-header,
-        [class*="header"],
-        [class*="topbar"],
-        [class*="top-bar"] {
+        header, .header, .top-bar, .toolbar, .app-header, .chat-header,
+        .module-header, [class*="header"], [class*="topbar"], [class*="top-bar"] {
             background: var(--kyn-bg-header) !important;
             border-color: var(--kyn-border) !important;
             color: var(--kyn-text-primary) !important;
@@ -2812,258 +2717,31 @@
         }
 
         // ======================================================================
-        // RESOLVE ACTIVE THEME
-        // Single source of truth for "what theme is the app in right now",
-        // used before pushing colors into any child iframe, so parent and
-        // iframes never disagree about which theme is active. Only 'light'
-        // and 'dark' are valid themes app-wide ('auto' has been removed).
+        // THEME — now fully delegated to js/theme.engine.js (window.ThemeManager).
+        // These are thin wrappers kept only so the many call sites below
+        // ("getResolvedTheme()", "reapplyThemeToAllIframes()", etc.) don't
+        // all need renaming; the actual resolution, painting, and iframe
+        // injection logic lives in ONE place now instead of being duplicated
+        // in this file.
         // ======================================================================
         function getResolvedTheme() {
-            try {
-                var stored = null;
-                try { stored = localStorage.getItem('app_theme'); } catch (_) {}
-                var raw = document.documentElement.getAttribute('data-theme') || stored || 'light';
-                return raw === 'dark' ? 'dark' : 'light';
-            } catch (_) {
-                return 'light';
-            }
+            return window.ThemeManager ? window.ThemeManager.getTheme() : 'light';
         }
 
         function reapplyThemeToAllIframes() {
-            try {
-                document.querySelectorAll('.content-iframe').forEach((iframe) => {
-                    applyParentShellToIframe(iframe, iframe.dataset && iframe.dataset.module);
-                });
-            } catch (_) {}
+            if (window.ThemeManager) window.ThemeManager.broadcastToAllIframes('.content-iframe');
         }
 
         function applyParentShellToIframe(iframe, page) {
-            try {
-                if (!iframe || !iframe.contentWindow) return;
-                const doc = iframe.contentDocument || iframe.contentWindow.document;
-                if (!doc || !doc.body) return;
-                const isDark = getResolvedTheme() === 'dark';
-                const shellVars = isDark ? {
-                    '--primary-color': '#22c55e',
-                    '--primary-dark': '#16a34a',
-                    '--primary-light': '#166534',
-                    '--secondary-color': '#1e293b',
-                    '--background-color': '#0f172a',
-                    '--surface-color': '#1e293b',
-                    '--card-background': '#1e293b',
-                    '--border-color': '#374151',
-                    '--text-primary': '#e5e7eb',
-                    '--text-secondary': '#9ca3af',
-                    '--accent-color': '#8b5cf6',
-                    '--accent-soft': '#1e293b',
-                    '--header-gradient': 'linear-gradient(135deg, #0f172a 0%, #1e293b 62%, #0f172a 100%)'
-                } : {
-                    '--primary-color': '#22c55e',
-                    '--primary-dark': '#16a34a',
-                    '--primary-light': '#dcfce7',
-                    '--secondary-color': '#f0f2f5',
-                    '--background-color': '#ffffff',
-                    '--surface-color': '#ffffff',
-                    '--card-background': '#ffffff',
-                    '--border-color': '#d1d7db',
-                    '--text-primary': '#111b21',
-                    '--text-secondary': '#667781',
-                    '--accent-color': '#8b5cf6',
-                    '--accent-soft': '#f5f3ff',
-                    '--header-gradient': 'linear-gradient(135deg, #ffffff 0%, #f0f2f5 62%, #ffffff 100%)'
-                };
-                doc.body.setAttribute('data-parent-shell', 'true');
-                doc.body.setAttribute('data-parent-module', page || iframe.dataset.module || '');
-                if (doc.documentElement) {
-                    doc.documentElement.setAttribute('data-parent-shell', 'true');
-                    doc.documentElement.setAttribute('data-parent-module', page || iframe.dataset.module || '');
-                }
-                Object.entries(shellVars).forEach(([key, value]) => {
-                    doc.documentElement?.style?.setProperty(key, value);
-                    doc.body?.style?.setProperty(key, value);
-                });
-
-                // Inject the currently active theme into this iframe
-                injectThemeIntoIframe(iframe, isDark ? 'dark' : 'light');
-            } catch (_error) {}
+            if (window.ThemeManager) window.ThemeManager.broadcastToIframe(iframe, page);
         }
 
-
-        // ======================================================================
-        // THEME INJECTION INTO IFRAMES
-        // Injects theme.colors.css + a <style> block into every child iframe
-        // so ALL modules render consistently with whichever theme (light or
-        // dark) the user actually has selected in Settings > Appearance.
-        // ======================================================================
         function injectThemeIntoIframe(iframe, theme) {
-            try {
-                if (!iframe || !iframe.contentDocument) return;
-                const doc = iframe.contentDocument;
-                if (!doc || !doc.head) return;
-                const isDark = theme === 'dark';
-
-                // FIX (theme flash / "sparking" audit): every module page now
-                // applies its own correct data-theme + theme.colors.css before
-                // its first paint (see the inline script at the top of each
-                // page's <head>). This function used to unconditionally
-                // rewrite the override <style> block's textContent on EVERY
-                // iframe load/reapply regardless of whether the theme had
-                // actually changed, which forces the browser to recompute
-                // styles for the whole iframe a second time right after it
-                // already painted correctly — that redundant second paint was
-                // the visible "spark" on every module open or switch. Now this
-                // is a no-op whenever the iframe is already showing the theme
-                // we're about to apply.
-                if (doc.documentElement && doc.documentElement.getAttribute('data-theme') === theme
-                    && doc.getElementById('kyn-theme-inline')) {
-                    return;
-                }
-
-                // 1) Inject theme.colors.css link (once) — only for pages that
-                // don't already load it themselves in their own <head>.
-                if (!doc.getElementById('kyn-theme-link') && !doc.querySelector('link[href="theme.colors.css"]')) {
-                    const link = doc.createElement('link');
-                    link.id = 'kyn-theme-link';
-                    link.rel = 'stylesheet';
-                    link.href = 'theme.colors.css';
-                    doc.head.insertBefore(link, doc.head.firstChild);
-                }
-
-                if (doc.documentElement) {
-                    doc.documentElement.setAttribute('data-theme', theme);
-                    doc.documentElement.classList.toggle('theme-dark', isDark);
-                    doc.documentElement.classList.toggle('dark-theme', isDark);
-                }
-
-                // 2) Inject/update override <style> for hard-coded values.
-                // Re-runs only when the theme actually changed (see guard
-                // above), so a live theme toggle still updates iframes that
-                // are already open without repainting on every no-op call.
-                let style = doc.getElementById('kyn-theme-inline');
-                if (!style) {
-                    style = doc.createElement('style');
-                    style.id = 'kyn-theme-inline';
-                    doc.head.insertBefore(style, doc.head.firstChild);
-                }
-                style.textContent = isDark ? `
-                    html, body {
-                        background: #0f172a !important;
-                        color: #e5e7eb !important;
-                    }
-                    .app-container, .main-content, .content-area, .page-wrapper {
-                        background: #0f172a !important;
-                    }
-                    :root {
-                        --bg-color: #0f172a !important;
-                        --text-primary: #e5e7eb !important;
-                        --text-secondary: #9ca3af !important;
-                        --border-color: #374151 !important;
-                        --secondary-color: #1e293b !important;
-                        --kynecta-light: #0f172a !important;
-                        --kynecta-dark: #e5e7eb !important;
-                        --kynecta-border: #374151 !important;
-                        --offline-overlay: rgba(15,23,42,0.97) !important;
-                    }
-                    input, textarea, select {
-                        background: #1e293b !important;
-                        color: #e5e7eb !important;
-                        border-color: #374151 !important;
-                    }
-                    input::placeholder, textarea::placeholder {
-                        color: #9ca3af !important;
-                    }
-                ` : `
-                    html, body {
-                        background: #ffffff !important;
-                        color: #111b21 !important;
-                    }
-                    .app-container, .main-content, .content-area, .page-wrapper {
-                        background: #ffffff !important;
-                    }
-                    :root {
-                        --bg-color: #ffffff !important;
-                        --text-primary: #111b21 !important;
-                        --text-secondary: #667781 !important;
-                        --border-color: #d1d7db !important;
-                        --secondary-color: #f0f2f5 !important;
-                        --kynecta-light: #ffffff !important;
-                        --kynecta-dark: #111b21 !important;
-                        --kynecta-border: #d1d7db !important;
-                        --offline-overlay: rgba(255,255,255,0.97) !important;
-                    }
-                    input, textarea, select {
-                        background: #f0f2f5 !important;
-                        color: #111b21 !important;
-                        border-color: #d1d7db !important;
-                    }
-                    input::placeholder, textarea::placeholder {
-                        color: #667781 !important;
-                    }
-                `;
-                // The in-call overlay always uses the same dark, high-contrast
-                // treatment regardless of app theme (matches native call UIs),
-                // so it's appended once and never toggled.
-                if (!doc.getElementById('kyn-theme-calling')) {
-                    const callingStyle = doc.createElement('style');
-                    callingStyle.id = 'kyn-theme-calling';
-                    callingStyle.textContent = `
-                    .calling-overlay,
-                    .incoming-call-modal {
-                        background: linear-gradient(160deg,
-                            #0d1b2a 0%, #1a2744 35%,
-                            #112240 65%, #0a1628 100%) !important;
-                        color: #ffffff !important;
-                    }
-                    .calling-name,
-                    .incoming-call-name {
-                        color: #ffffff !important;
-                    }
-                    .calling-status,
-                    .calling-type,
-                    .calling-encryption,
-                    .calling-ctrl-label {
-                        color: rgba(255,255,255,0.90) !important;
-                    }
-                    .calling-ctrl-btn {
-                        background: #ffffff !important;
-                        color: #111111 !important;
-                    }
-                    .calling-ctrl-btn i,
-                    .calling-ctrl-btn .fas,
-                    .calling-ctrl-btn .far {
-                        color: #111111 !important;
-                    }
-                    .calling-end-btn {
-                        background: #e11d1d !important;
-                        color: #ffffff !important;
-                    }
-                    .calling-end-btn i { color: #ffffff !important; }
-                    .calling-accept-btn {
-                        background: #16a34a !important;
-                        color: #ffffff !important;
-                    }
-                    .calling-accept-btn i { color: #ffffff !important; }
-                    .calling-video-btn {
-                        background: #1d4ed8 !important;
-                        color: #ffffff !important;
-                    }
-                    .calling-video-btn i { color: #ffffff !important; }
-                    .calling-top-btn {
-                        background: #ffffff !important;
-                        color: #111111 !important;
-                    }
-                    .calling-top-btn i { color: #111111 !important; }
-                    `;
-                    doc.head.insertBefore(callingStyle, doc.head.firstChild);
-                }
-
-                // 3) Apply the actual resolved data-theme, not a hardcoded value
-                doc.documentElement.setAttribute('data-theme', theme);
-                if (doc.body) doc.body.setAttribute('data-theme', theme);
-
-            } catch (err) {
-                // Cross-origin iframes throw — safe to ignore
-            }
+            // Kept as a no-op-safe wrapper for any external call sites; the
+            // real injection now happens inside broadcastToIframe() above,
+            // which ThemeManager.broadcastToIframe() already triggers.
+            if (!window.ThemeManager) return;
+            window.ThemeManager.broadcastToIframe(iframe, iframe && iframe.dataset && iframe.dataset.module);
         }
 
         function logProcessStatus(processKey, isSuccess, detail) {
@@ -4943,11 +4621,15 @@
                 // other live iframe (skip the sender — it already applied its own
                 // change) so the whole app updates together, live.
                 if (data.type === 'THEME_CHANGED' && data.theme) {
-                    var _resolvedTheme = data.theme === 'dark' ? 'dark' : 'light';
-                    document.documentElement.setAttribute('data-theme', _resolvedTheme);
-                    document.documentElement.classList.toggle('theme-dark', _resolvedTheme === 'dark');
-                    document.documentElement.classList.toggle('dark-theme', _resolvedTheme === 'dark');
-                    try { localStorage.setItem('app_theme', _resolvedTheme); } catch (_) {}
+                    if (window.ThemeManager) {
+                        window.ThemeManager.setTheme(data.theme);
+                    } else {
+                        var _resolvedTheme = data.theme === 'dark' ? 'dark' : 'light';
+                        document.documentElement.setAttribute('data-theme', _resolvedTheme);
+                        document.documentElement.classList.toggle('theme-dark', _resolvedTheme === 'dark');
+                        document.documentElement.classList.toggle('dark-theme', _resolvedTheme === 'dark');
+                        try { localStorage.setItem('app_theme', _resolvedTheme); } catch (_) {}
+                    }
                     document.querySelectorAll('iframe').forEach(function (f) {
                         if (f.contentWindow === event.source) return;
                         try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
@@ -4955,10 +4637,14 @@
                     return;
                 }
                 if (data.type === 'FONT_SIZE_CHANGED' && data.fontSize) {
-                    var _fs = parseInt(data.fontSize, 10) || 16;
-                    document.documentElement.style.fontSize = _fs + 'px';
-                    document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
-                    try { localStorage.setItem('app_font_size', String(_fs)); } catch (_) {}
+                    if (window.ThemeManager) {
+                        window.ThemeManager.setFontSize(data.fontSize);
+                    } else {
+                        var _fs = parseInt(data.fontSize, 10) || 16;
+                        document.documentElement.style.fontSize = _fs + 'px';
+                        document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
+                        try { localStorage.setItem('app_font_size', String(_fs)); } catch (_) {}
+                    }
                     document.querySelectorAll('iframe').forEach(function (f) {
                         if (f.contentWindow === event.source) return;
                         try { f.contentWindow.postMessage(data, '*'); } catch (_) {}
@@ -5785,12 +5471,16 @@
                         }
                     } catch(e) {}
                     if (settings.appearance?.theme || settings.theme) {
-                        const theme = (settings.appearance?.theme || settings.theme) === 'dark' ? 'dark' : 'light';
-                        document.documentElement.setAttribute('data-theme', theme);
-                        document.body.setAttribute('data-theme', theme);
-                        document.documentElement.classList.toggle('theme-dark', theme === 'dark');
-                        document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-                        try { localStorage.setItem('app_theme', theme); } catch(e) {}
+                        if (window.ThemeManager) {
+                            window.ThemeManager.setTheme(settings.appearance?.theme || settings.theme);
+                        } else {
+                            const theme = (settings.appearance?.theme || settings.theme) === 'dark' ? 'dark' : 'light';
+                            document.documentElement.setAttribute('data-theme', theme);
+                            document.body.setAttribute('data-theme', theme);
+                            document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+                            document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+                            try { localStorage.setItem('app_theme', theme); } catch(e) {}
+                        }
                         reapplyThemeToAllIframes();
                     }
                     emitGlobalAppEvent('SETTINGS_UPDATED', {
@@ -5826,29 +5516,32 @@
                         } catch (_) {}
                         // 3. Apply theme directly to parent document (parent has its own DOM)
                         if (s && s.appearance && s.appearance.theme) {
-                            var _resolved = s.appearance.theme === 'dark' ? 'dark' : 'light';
-                            document.documentElement.setAttribute('data-theme', _resolved);
-                            document.body.setAttribute('data-theme', _resolved);
-                            document.documentElement.classList.toggle('theme-dark', _resolved === 'dark');
-                            document.documentElement.classList.toggle('dark-theme', _resolved === 'dark');
-                            try { localStorage.setItem('app_theme', _resolved); } catch(_) {}
+                            if (window.ThemeManager) {
+                                window.ThemeManager.setTheme(s.appearance.theme);
+                            } else {
+                                var _resolved = s.appearance.theme === 'dark' ? 'dark' : 'light';
+                                document.documentElement.setAttribute('data-theme', _resolved);
+                                document.body.setAttribute('data-theme', _resolved);
+                                document.documentElement.classList.toggle('theme-dark', _resolved === 'dark');
+                                document.documentElement.classList.toggle('dark-theme', _resolved === 'dark');
+                                try { localStorage.setItem('app_theme', _resolved); } catch(_) {}
+                            }
                             reapplyThemeToAllIframes();
                         }
                         if (s && s.appearance && s.appearance.accentColor) {
+                            if (window.ThemeManager) window.ThemeManager.setAccentColor(s.appearance.accentColor);
                             document.documentElement.style.setProperty('--accent-color', s.appearance.accentColor);
                         }
                         if (s && s.appearance && s.appearance.fontSize) {
-                            // fontSize is always a numeric px value app-wide (12/14/16/18).
-                            // FIX: this used to look it up in a stale small/medium/large/
-                            // x-large string map that never matched a number, silently
-                            // falling through to setting --base-font-size with NO unit
-                            // (e.g. "16" instead of "16px"), which is invalid CSS and made
-                            // every var(--base-font-size) consumer ignore the change.
-                            var _fs = parseInt(s.appearance.fontSize, 10);
-                            if (!_fs || _fs < 10 || _fs > 28) _fs = 16;
-                            document.documentElement.style.fontSize = _fs + 'px';
-                            document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
-                            try { localStorage.setItem('app_font_size', String(_fs)); } catch(_) {}
+                            if (window.ThemeManager) {
+                                window.ThemeManager.setFontSize(s.appearance.fontSize);
+                            } else {
+                                var _fs = parseInt(s.appearance.fontSize, 10);
+                                if (!_fs || _fs < 10 || _fs > 28) _fs = 16;
+                                document.documentElement.style.fontSize = _fs + 'px';
+                                document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
+                                try { localStorage.setItem('app_font_size', String(_fs)); } catch(_) {}
+                            }
                         }
                     })(settings);
                 }
@@ -5863,20 +5556,28 @@
                     // ── appearance ─────────────────────────────────────────────
                     if (section === 'appearance') {
                         if (key === 'theme') {
-                            const resolvedTheme = value === 'dark' ? 'dark' : 'light';
-                            document.documentElement.setAttribute('data-theme', resolvedTheme);
-                            document.body.setAttribute('data-theme', resolvedTheme);
-                            document.documentElement.classList.toggle('theme-dark', resolvedTheme === 'dark');
-                            document.documentElement.classList.toggle('dark-theme', resolvedTheme === 'dark');
-                            try { localStorage.setItem('app_theme', resolvedTheme); } catch(e) {}
+                            if (window.ThemeManager) {
+                                window.ThemeManager.setTheme(value);
+                            } else {
+                                const resolvedTheme = value === 'dark' ? 'dark' : 'light';
+                                document.documentElement.setAttribute('data-theme', resolvedTheme);
+                                document.body.setAttribute('data-theme', resolvedTheme);
+                                document.documentElement.classList.toggle('theme-dark', resolvedTheme === 'dark');
+                                document.documentElement.classList.toggle('dark-theme', resolvedTheme === 'dark');
+                                try { localStorage.setItem('app_theme', resolvedTheme); } catch(e) {}
+                            }
                             reapplyThemeToAllIframes();
                         }
                         if (key === 'fontSize') {
-                            let _fs = parseInt(value, 10);
-                            if (!_fs || _fs < 10 || _fs > 28) _fs = 16;
-                            document.documentElement.style.fontSize = _fs + 'px';
-                            document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
-                            try { localStorage.setItem('app_font_size', String(_fs)); } catch(e) {}
+                            if (window.ThemeManager) {
+                                window.ThemeManager.setFontSize(value);
+                            } else {
+                                let _fs = parseInt(value, 10);
+                                if (!_fs || _fs < 10 || _fs > 28) _fs = 16;
+                                document.documentElement.style.fontSize = _fs + 'px';
+                                document.documentElement.style.setProperty('--base-font-size', _fs + 'px');
+                                try { localStorage.setItem('app_font_size', String(_fs)); } catch(e) {}
+                            }
                         }
                         if (key === 'accentColor') document.documentElement.style.setProperty('--accent-color', value);
                         if (key === 'language') { document.documentElement.setAttribute('lang', value); try { localStorage.setItem('app_language', value); } catch(e) {} }

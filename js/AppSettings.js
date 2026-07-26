@@ -793,74 +793,84 @@
     function applyToDOM(settings) {
         try {
             const root = document.documentElement;
-            // 'auto' theme has been removed app-wide — it required an async
-            // matchMedia resolution that ran independently (and sometimes
-            // inconsistently) on every page, which was one of the causes of
-            // the theme "sparking" between modules. Only 'light' and 'dark'
-            // are valid now; anything else falls back to 'light'.
-            const theme = settings.appearance?.theme === 'dark' ? 'dark' : 'light';
-
-            root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
-            root.classList.add(`theme-${theme}`);
-            root.classList.toggle('dark-theme', theme === 'dark');
-            root.setAttribute('data-theme', theme);
-            root.setAttribute('data-theme-preference', theme);
-            root.setAttribute('lang', settings.appearance?.language || 'en');
-            root.style.fontSize = `${settings.appearance?.fontSize || 16}px`;
-            root.style.setProperty('--base-font-size', `${settings.appearance?.fontSize || 16}px`);
-            root.style.setProperty('--primary-color', settings.appearance?.accentColor || '#4F46E5');
-            root.classList.toggle('reduce-motion', !!settings.appearance?.reduceMotion);
-            try {
-                localStorage.setItem('app_theme', theme);
-                localStorage.setItem('app_font_size', String(settings.appearance?.fontSize || 16));
-            } catch (_) {}
-
-            if (theme === 'dark') {
-                root.style.setProperty('--bg-color', '#111b21');
-                root.style.setProperty('--text-primary', '#e9edef');
-                root.style.setProperty('--text-secondary', '#8696a0');
-                root.style.setProperty('--card-bg', '#202c33');
-                root.style.setProperty('--border-color', '#2f3b43');
-                root.style.setProperty('--input-bg', '#233138');
-                root.style.setProperty('--hover-bg', '#1f2c33');
-            } else {
-                root.style.setProperty('--bg-color', '#ffffff');
-                root.style.setProperty('--text-primary', '#111b21');
-                root.style.setProperty('--text-secondary', '#667781');
-                root.style.setProperty('--card-bg', '#ffffff');
-                root.style.setProperty('--border-color', '#d1d7db');
-                root.style.setProperty('--input-bg', '#f0f2f5');
-                root.style.setProperty('--hover-bg', '#f5f6f6');
+            // Theme/font-size/critical-CSS-var painting + persistence now
+            // goes through the single canonical engine (js/theme.engine.js
+            // / window.ThemeManager) instead of this function keeping its
+            // own copy — that duplication (a third private dark palette
+            // here, #111b21, different again from the other two files'
+            // #0f172a and #1a1a1a) was one of the sources of the theme
+            // "sparking" bug. This function still owns everything
+            // ThemeManager doesn't know about: language, reduce-motion, the
+            // --surface/--accent/--border aliasing below, and every
+            // notification/privacy/chat/calls/groups/status data-attribute.
+            const theme = window.ThemeManager
+                ? window.ThemeManager.setTheme(settings.appearance?.theme)
+                : (settings.appearance?.theme === 'dark' ? 'dark' : 'light');
+            if (window.ThemeManager && settings.appearance?.fontSize) {
+                window.ThemeManager.setFontSize(settings.appearance.fontSize);
+            }
+            if (window.ThemeManager && settings.appearance?.accentColor) {
+                window.ThemeManager.setAccentColor(settings.appearance.accentColor);
             }
 
-            // FIX (KYN-CRITICAL-VARS-STUCK-ON-LIVE-THEME-CHANGE): chat.html,
-            // friend.html, Tools.html, calls.html, status.html, message.html,
-            // and group.html each set --kyn-bg-root/--kyn-bg-chat/--kyn-bg-header/
-            // --kyn-text-primary/--kyn-text-secondary/--kyn-border directly via an
-            // inline script at page load, purely to avoid a first-paint flash while
-            // theme.colors.css loads over the network. Those are plain inline
-            // styles on <html>, so once set they permanently beat theme.colors.css
-            // in the cascade — including on every *live* theme change afterward.
-            // This function used to only touch --bg-color/--text-primary/etc., so
-            // switching themes in Settings while one of those pages was open left
-            // the --kyn-* variables (and anything styled from them) stuck on
-            // whatever theme was active at load, even as everything else updated
-            // instantly. Reapplying the same values here on every live change
-            // closes that gap.
-            if (theme === 'dark') {
-                root.style.setProperty('--kyn-bg-root', '#0f172a');
-                root.style.setProperty('--kyn-bg-chat', '#020617');
-                root.style.setProperty('--kyn-bg-header', '#0f172a');
-                root.style.setProperty('--kyn-text-primary', '#e5e7eb');
-                root.style.setProperty('--kyn-text-secondary', '#9ca3af');
-                root.style.setProperty('--kyn-border', '#374151');
+            root.setAttribute('data-theme-preference', theme);
+            root.setAttribute('lang', settings.appearance?.language || 'en');
+            root.classList.toggle('reduce-motion', !!settings.appearance?.reduceMotion);
+
+            if (!window.ThemeManager) {
+                // Fallback only if theme.engine.js somehow failed to load.
+                root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+                root.classList.add(`theme-${theme}`);
+                root.classList.toggle('dark-theme', theme === 'dark');
+                root.setAttribute('data-theme', theme);
+                root.style.fontSize = `${settings.appearance?.fontSize || 16}px`;
+                root.style.setProperty('--base-font-size', `${settings.appearance?.fontSize || 16}px`);
+                root.style.setProperty('--primary-color', settings.appearance?.accentColor || '#4F46E5');
+                try {
+                    localStorage.setItem('app_theme', theme);
+                    localStorage.setItem('app_font_size', String(settings.appearance?.fontSize || 16));
+                } catch (_) {}
+
+                if (theme === 'dark') {
+                    root.style.setProperty('--bg-color', '#111b21');
+                    root.style.setProperty('--text-primary', '#e9edef');
+                    root.style.setProperty('--text-secondary', '#8696a0');
+                    root.style.setProperty('--card-bg', '#202c33');
+                    root.style.setProperty('--border-color', '#2f3b43');
+                    root.style.setProperty('--input-bg', '#233138');
+                    root.style.setProperty('--hover-bg', '#1f2c33');
+                    root.style.setProperty('--kyn-bg-root', '#0f172a');
+                    root.style.setProperty('--kyn-bg-chat', '#020617');
+                    root.style.setProperty('--kyn-bg-header', '#0f172a');
+                    root.style.setProperty('--kyn-text-primary', '#e5e7eb');
+                    root.style.setProperty('--kyn-text-secondary', '#9ca3af');
+                    root.style.setProperty('--kyn-border', '#374151');
+                } else {
+                    root.style.setProperty('--bg-color', '#ffffff');
+                    root.style.setProperty('--text-primary', '#111b21');
+                    root.style.setProperty('--text-secondary', '#667781');
+                    root.style.setProperty('--card-bg', '#ffffff');
+                    root.style.setProperty('--border-color', '#d1d7db');
+                    root.style.setProperty('--input-bg', '#f0f2f5');
+                    root.style.setProperty('--hover-bg', '#f5f6f6');
+                    root.style.setProperty('--kyn-bg-root', '#ffffff');
+                    root.style.setProperty('--kyn-bg-chat', '#efeae2');
+                    root.style.setProperty('--kyn-bg-header', '#f0f2f5');
+                    root.style.setProperty('--kyn-text-primary', '#111b21');
+                    root.style.setProperty('--kyn-text-secondary', '#667781');
+                    root.style.setProperty('--kyn-border', '#e9edef');
+                }
             } else {
-                root.style.setProperty('--kyn-bg-root', '#ffffff');
-                root.style.setProperty('--kyn-bg-chat', '#efeae2');
-                root.style.setProperty('--kyn-bg-header', '#f0f2f5');
-                root.style.setProperty('--kyn-text-primary', '#111b21');
-                root.style.setProperty('--kyn-text-secondary', '#667781');
-                root.style.setProperty('--kyn-border', '#e9edef');
+                // ThemeManager already set --bg-color/--card-bg/--border-color/
+                // --kyn-*/etc. (see its PALETTES table); --input-bg/--hover-bg
+                // aren't part of that shared set, so keep setting those two here.
+                if (theme === 'dark') {
+                    root.style.setProperty('--input-bg', '#233138');
+                    root.style.setProperty('--hover-bg', '#1f2c33');
+                } else {
+                    root.style.setProperty('--input-bg', '#f0f2f5');
+                    root.style.setProperty('--hover-bg', '#f5f6f6');
+                }
             }
             // chat.html, admin-calls.html, game.html, index.html) style panels
             // and cards using var(--surface, ...), var(--accent, ...) and

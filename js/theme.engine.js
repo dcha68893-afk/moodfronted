@@ -69,13 +69,27 @@
             '--kyn-bg-root': '#0f172a', '--kyn-bg-chat': '#020617', '--kyn-bg-header': '#0f172a',
             '--kyn-text-primary': '#e5e7eb', '--kyn-text-secondary': '#9ca3af',
             '--kyn-border': '#374151',
-            '--bg-color': '#0f172a', '--text-primary': '#e5e7eb'
+            '--bg-color': '#0f172a', '--text-primary': '#e5e7eb',
+            // FIX: settings.html/settingsManager.js (and settings-core.js's
+            // fallback path) key off this second, differently-named set of
+            // variables — not the --kyn-* set above. The original committed
+            // palette only covered --bg-color/--text-primary, which left
+            // settings.html's cards/borders/hover states permanently
+            // unstyled (not just flashing — settings.html doesn't load
+            // theme.colors.css at all, so nothing was ever going to fill
+            // these in later).
+            '--text-color': '#e5e7eb', '--text-secondary': '#9ca3af',
+            '--sidebar-bg': '#0f172a', '--card-bg': '#1e293b',
+            '--border-color': '#374151', '--hover-color': '#1f2c33'
         },
         light: {
             '--kyn-bg-root': '#ffffff', '--kyn-bg-chat': '#efeae2', '--kyn-bg-header': '#f0f2f5',
             '--kyn-text-primary': '#111b21', '--kyn-text-secondary': '#667781',
             '--kyn-border': '#e9edef',
-            '--bg-color': '#ffffff', '--text-primary': '#111b21'
+            '--bg-color': '#ffffff', '--text-primary': '#111b21',
+            '--text-color': '#111b21', '--text-secondary': '#667781',
+            '--sidebar-bg': '#ffffff', '--card-bg': '#ffffff',
+            '--border-color': '#d1d7db', '--hover-color': '#f5f5f5'
         }
     };
 

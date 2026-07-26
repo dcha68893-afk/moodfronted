@@ -33,54 +33,52 @@
         // — appearance —
         var ap = settings.appearance || {};
         if (ap.theme) {
-            var th = _resolveTheme(ap.theme);
-            root.setAttribute('data-theme', th);
-            root.classList.toggle('theme-dark', th === 'dark');
-            root.classList.toggle('dark-theme', th === 'dark');
-            if (body) body.setAttribute('data-theme', th);
-            try { localStorage.setItem('app_theme', th); } catch (_) {}
+            // Paint + persist now go through the single canonical engine
+            // (js/theme.engine.js / window.ThemeManager) instead of this
+            // listener keeping its own copy.
+            var th = window.ThemeManager ? window.ThemeManager.setTheme(ap.theme) : _resolveTheme(ap.theme);
+            if (!window.ThemeManager) {
+                root.setAttribute('data-theme', th);
+                root.classList.toggle('theme-dark', th === 'dark');
+                root.classList.toggle('dark-theme', th === 'dark');
+                if (body) body.setAttribute('data-theme', th);
+                try { localStorage.setItem('app_theme', th); } catch (_) {}
 
-            // FIX (KYN-CRITICAL-VARS-STUCK-ON-LIVE-THEME-CHANGE): this page's own
-            // early inline script sets --kyn-bg-root/--kyn-bg-chat/--kyn-bg-header/
-            // --kyn-text-primary/--kyn-text-secondary/--kyn-border directly on
-            // <html> at load, purely to avoid a first-paint flash before
-            // theme.colors.css arrives over the network. Because those are
-            // inline styles, they permanently beat theme.colors.css in the
-            // cascade — including when a live SETTINGS_UPDATED arrives here
-            // later. Without reapplying them on every live change too, this
-            // iframe's header/root/chat colors would stay stuck on whatever
-            // theme was active when the page first loaded, even as everything
-            // else driven by theme.colors.css updated instantly.
-            if (th === 'dark') {
-                root.style.setProperty('--kyn-bg-root', '#0f172a');
-                root.style.setProperty('--kyn-bg-chat', '#020617');
-                root.style.setProperty('--kyn-bg-header', '#0f172a');
-                root.style.setProperty('--kyn-text-primary', '#e5e7eb');
-                root.style.setProperty('--kyn-text-secondary', '#9ca3af');
-                root.style.setProperty('--kyn-border', '#374151');
-            } else {
-                root.style.setProperty('--kyn-bg-root', '#ffffff');
-                root.style.setProperty('--kyn-bg-chat', '#efeae2');
-                root.style.setProperty('--kyn-bg-header', '#f0f2f5');
-                root.style.setProperty('--kyn-text-primary', '#111b21');
-                root.style.setProperty('--kyn-text-secondary', '#667781');
-                root.style.setProperty('--kyn-border', '#e9edef');
+                if (th === 'dark') {
+                    root.style.setProperty('--kyn-bg-root', '#0f172a');
+                    root.style.setProperty('--kyn-bg-chat', '#020617');
+                    root.style.setProperty('--kyn-bg-header', '#0f172a');
+                    root.style.setProperty('--kyn-text-primary', '#e5e7eb');
+                    root.style.setProperty('--kyn-text-secondary', '#9ca3af');
+                    root.style.setProperty('--kyn-border', '#374151');
+                } else {
+                    root.style.setProperty('--kyn-bg-root', '#ffffff');
+                    root.style.setProperty('--kyn-bg-chat', '#efeae2');
+                    root.style.setProperty('--kyn-bg-header', '#f0f2f5');
+                    root.style.setProperty('--kyn-text-primary', '#111b21');
+                    root.style.setProperty('--kyn-text-secondary', '#667781');
+                    root.style.setProperty('--kyn-border', '#e9edef');
+                }
+            } else if (body) {
+                body.setAttribute('data-theme', th);
             }
         }
-        if (ap.accentColor) root.style.setProperty('--accent-color', ap.accentColor);
+        if (ap.accentColor) {
+            if (window.ThemeManager) window.ThemeManager.setAccentColor(ap.accentColor);
+            root.style.setProperty('--accent-color', ap.accentColor);
+        }
         if (ap.fontSize) {
-            // FIX: fontSize is always a numeric px value app-wide (12/14/16/18),
-            // not a small/medium/large/x-large label. The old lookup never
-            // matched a number and fell through to setting --base-font-size
-            // with no unit at all (e.g. "16" instead of "16px"), which is
-            // invalid CSS and silently no-opped every var(--base-font-size)
-            // consumer.
-            var fs = parseInt(ap.fontSize, 10);
-            if (!fs || fs < 10 || fs > 28) fs = 16;
-            root.style.setProperty('--base-font-size', fs + 'px');
-            root.style.fontSize = fs + 'px';
-            if (body) body.style.fontSize = fs + 'px';
-            try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+            if (window.ThemeManager) {
+                window.ThemeManager.setFontSize(ap.fontSize);
+                if (body) body.style.fontSize = window.ThemeManager.getFontSize() + 'px';
+            } else {
+                var fs = parseInt(ap.fontSize, 10);
+                if (!fs || fs < 10 || fs > 28) fs = 16;
+                root.style.setProperty('--base-font-size', fs + 'px');
+                root.style.fontSize = fs + 'px';
+                if (body) body.style.fontSize = fs + 'px';
+                try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+            }
         }
         if (ap.compactMode !== undefined) {
             root.setAttribute('data-compact', ap.compactMode ? 'true' : 'false');

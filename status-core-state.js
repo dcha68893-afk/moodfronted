@@ -644,14 +644,18 @@ const SettingsState = {
     
     _applyTheme(theme) {
         try {
-            const root = document.documentElement;
-            // 'auto' removed app-wide — only 'light'/'dark' are valid.
-            const resolved = theme === 'dark' ? 'dark' : 'light';
-            root.setAttribute('data-theme', resolved);
-            root.classList.toggle('theme-dark', resolved === 'dark');
-            root.classList.toggle('dark-theme', resolved === 'dark');
-            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
-            
+            // Paint + persist now go through the single canonical engine
+            // (js/theme.engine.js / window.ThemeManager) instead of this
+            // file keeping its own copy of the same logic.
+            const resolved = window.ThemeManager ? window.ThemeManager.setTheme(theme) : (theme === 'dark' ? 'dark' : 'light');
+            if (!window.ThemeManager) {
+                const root = document.documentElement;
+                root.setAttribute('data-theme', resolved);
+                root.classList.toggle('theme-dark', resolved === 'dark');
+                root.classList.toggle('dark-theme', resolved === 'dark');
+                try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+            }
+
             const event = new CustomEvent('themeApplied', {
                 detail: { theme, timestamp: Date.now() }
             });

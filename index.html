@@ -2,111 +2,26 @@
 <html lang="en">
 <head>
     <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
-    <!--
-        THEME FLASH PREVENTION — first thing in <head>, before any CSS.
-        Applies the saved theme class to <html> immediately so the page
-        never paints light-then-dark on load/refresh. initThemeToggle()
-        further down still runs on DOMContentLoaded to wire up the
-        toggle buttons, but the visual theme itself is already correct
-        by the time anything is drawn.
-    -->
+    <script src="/js/theme.engine.js"></script>
     <script>
-    (function () {
-        // FIX (theme flash / competing-theme audit): index.html used to be the
-        // ONE page in the whole app that tracked theme with its own private
-        // 'moodchat_theme' key and a `.theme-dark` class with its own hardcoded
-        // color palette in the <style> block below — completely disconnected
-        // from the `data-theme` attribute + shared color variables every other
-        // module (chat/friend/group/calls/message/status/Tools/game/settings)
-        // uses. That's exactly why the login/dashboard screen could visibly
-        // "spark" to a different look than the rest of the app on open: two
-        // independent theme systems, sometimes disagreeing. This page now sets
-        // `data-theme` like everywhere else and keeps `.theme-dark` only as a
-        // mirrored class for the <style> block below (still driven by the same
-        // resolved value, never read independently). 'auto' theme has also
-        // been removed app-wide — only 'light' and 'dark' are valid.
-        function resolveEarlyTheme() {
-            var raw = null;
-            try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
-            // FIX (theme-flash audit, residual gap): every other module
-            // (chat/friend/group/calls/message/status/Tools/game) also falls
-            // back to the cached settings blob when neither theme key is set
-            // yet (e.g. first run before any explicit save). This page was
-            // the one place that fallback chain stopped one link short,
-            // so a user with cached settings but no app_theme/moodchat_theme
-            // key would flash light here while every other page correctly
-            // picked up their real theme from the cache.
-            if (!raw) {
-                try {
-                    var c = localStorage.getItem('knecta_settings_cache');
-                    if (c) {
-                        var cp = JSON.parse(c);
-                        var d = cp.data || cp;
-                        raw = (d && d.appearance && d.appearance.theme) || (d && d.theme);
-                    }
-                } catch (_) {}
+        // PRELOAD FLASH GUARD: theme.engine.js paints synchronously above,
+        // but CSS transitions defined in stylesheets loaded slightly later
+        // could still animate from their default state to the correct one
+        // on first paint. Suppress transitions until the page has settled.
+        (function () {
+            var root = document.documentElement;
+            root.classList.add('preload');
+            var guardStyle = document.createElement('style');
+            guardStyle.id = 'kynPreloadGuard';
+            guardStyle.textContent = 'html.preload, html.preload * { transition: none !important; }';
+            (document.head || root).appendChild(guardStyle);
+            function release() { root.classList.remove('preload'); }
+            if (document.readyState === 'complete') {
+                requestAnimationFrame(release);
+            } else {
+                window.addEventListener('load', function () { requestAnimationFrame(release); }, { once: true });
             }
-            return raw === 'dark' ? 'dark' : 'light';
-        }
-        function resolveEarlyFontSize() {
-            var fs = null;
-            try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
-            fs = parseInt(fs, 10);
-            if (!fs || fs < 10 || fs > 28) fs = 16;
-            return fs;
-        }
-        var root = document.documentElement;
-        var theme = resolveEarlyTheme();
-        var fontSize = resolveEarlyFontSize();
-        root.setAttribute('data-theme', theme);
-        root.classList.toggle('theme-dark', theme === 'dark');
-        root.classList.toggle('dark-theme', theme === 'dark');
-        root.style.fontSize = fontSize + 'px';
-        root.style.setProperty('--base-font-size', fontSize + 'px');
-        // FIX-ROOT-CAUSE-THEME-SPARK: setting data-theme this early is only
-        // half the fix. `body { transition: background-color ... }` further
-        // down runs unconditionally — not just on the manual toggle button
-        // click it was meant for — so on EVERY load, the instant the browser
-        // resolves the CSS variables above, it visibly animates/fades from
-        // the default color into the real theme color instead of just
-        // showing it immediately. That fade IS the "spark": data-theme was
-        // already correct, but the transition made the correct color arrive
-        // gradually instead of instantly. `preload` is paired with a CSS
-        // rule (added right before </head>) that forces every transition
-        // off while it's present; it's removed once the page has actually
-        // finished loading, so the toggle button's own animation still
-        // works normally for an intentional, manual theme switch later.
-        root.classList.add('preload');
-        try {
-            var savedColor = localStorage.getItem('moodchat_dashboard_color');
-            if (savedColor) document.documentElement.setAttribute('data-theme-color', savedColor);
-        } catch (_) {}
-    })();
-    </script>
-
-    <style>
-        /* FIX-ROOT-CAUSE-THEME-SPARK: see the inline script above for the
-           full explanation. Must stay a plain, unscoped rule (not nested
-           under any other selector) so it reliably beats every other
-           transition rule below regardless of source order/specificity. */
-        html.preload, html.preload * { transition: none !important; }
-    </style>
-
-    <script>
-        // Remove the preload guard once the page has actually finished
-        // loading (fonts, stylesheets, images) rather than on a fixed
-        // timer, so slower connections never get a residual flash right
-        // after the guard lifts. requestAnimationFrame (rather than acting
-        // immediately in the load handler) ensures the browser has painted
-        // at least one frame with the real theme before transitions are
-        // re-enabled.
-        window.addEventListener('load', function () {
-            requestAnimationFrame(function () {
-                requestAnimationFrame(function () {
-                    document.documentElement.classList.remove('preload');
-                });
-            });
-        });
+        })();
     </script>
 
     <link rel="manifest" href="manifest.json">
@@ -3418,34 +3333,34 @@
         // does, and keeps both keys in sync going forward so this page and
         // the rest of the app never disagree about which theme is active.
         function resolveAppTheme() {
-            var raw = null;
-            try { raw = localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme'); } catch (_) {}
-            return raw === 'dark' ? 'dark' : 'light';
+            return window.ThemeManager ? window.ThemeManager.getTheme() : 'light';
         }
 
         function initThemeToggle() {
             const btns = [document.getElementById('mobileThemeToggle'), document.getElementById('desktopThemeToggle')].filter(Boolean);
             const saved = resolveAppTheme();
-            // NOTE: the actual theme class is already applied to <html> by the
-            // inline flash-prevention script at the very top of <head> (runs
-            // before first paint). We only sync the button labels here and
-            // keep <html> as the single source of truth going forward instead
-            // of also toggling a separate class on <body>, which previously
-            // caused the two to drift out of sync after a manual toggle.
+            // NOTE: the actual theme class is already applied to <html> by
+            // js/theme.engine.js (window.ThemeManager) before first paint.
+            // We only sync the button labels here.
             if (saved === 'dark') {
                 btns.forEach(btn => { if (btn) btn.innerHTML = '<i class="fas fa-sun"></i> Light Mode'; });
             }
             btns.forEach(btn => {
                 if (btn) btn.addEventListener('click', function(e) {
                     e.preventDefault();
-                    const root = document.documentElement;
-                    const isDark = root.getAttribute('data-theme') !== 'dark';
-                    root.setAttribute('data-theme', isDark ? 'dark' : 'light');
-                    root.classList.toggle('theme-dark', isDark);
-                    root.classList.toggle('dark-theme', isDark);
-                    try { localStorage.setItem('app_theme', isDark ? 'dark' : 'light'); } catch (_) {}
-                    localStorage.setItem('moodchat_theme', isDark ? 'dark' : 'light');
-                    btns.forEach(b => { if (b) b.innerHTML = isDark ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });
+                    const current = resolveAppTheme();
+                    const next = current === 'dark' ? 'light' : 'dark';
+                    if (window.ThemeManager) {
+                        window.ThemeManager.setTheme(next);
+                    } else {
+                        const root = document.documentElement;
+                        root.setAttribute('data-theme', next);
+                        root.classList.toggle('theme-dark', next === 'dark');
+                        root.classList.toggle('dark-theme', next === 'dark');
+                        try { localStorage.setItem('app_theme', next); } catch (_) {}
+                    }
+                    localStorage.setItem('moodchat_theme', next); // legacy key, kept for older readers
+                    btns.forEach(b => { if (b) b.innerHTML = next === 'dark' ? '<i class="fas fa-sun"></i> Light Mode' : '<i class="fas fa-moon"></i> Dark Mode'; });
                 });
             });
         }

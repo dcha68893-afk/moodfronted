@@ -701,17 +701,22 @@ this.registerHandler('SETTINGS_UPDATED', (message) => {
         const s = settings.appearance;
         
         if (s.theme) {
-            const theme = s.theme === 'dark' ? 'dark' : 'light';
-            document.documentElement.setAttribute('data-theme', theme);
-            document.body.setAttribute('data-theme', theme);
-            document.documentElement.classList.toggle('theme-dark', theme === 'dark');
-            document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-            try { localStorage.setItem('app_theme', theme); } catch (_) {}
-            safeStorage.set('user_theme_preference', theme);
+            if (window.ThemeManager) {
+                window.ThemeManager.setTheme(s.theme);
+            } else {
+                const theme = s.theme === 'dark' ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+                document.body.setAttribute('data-theme', theme);
+                document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+                document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+                try { localStorage.setItem('app_theme', theme); } catch (_) {}
+            }
+            safeStorage.set('user_theme_preference', window.ThemeManager ? window.ThemeManager.getTheme() : (s.theme === 'dark' ? 'dark' : 'light'));
         }
         
         if (s.fontSize) {
-            document.documentElement.style.fontSize = parseInt(s.fontSize) + 'px';
+            if (window.ThemeManager) window.ThemeManager.setFontSize(s.fontSize);
+            else document.documentElement.style.fontSize = parseInt(s.fontSize) + 'px';
             safeStorage.set('user_font_size', parseInt(s.fontSize));
         }
     }

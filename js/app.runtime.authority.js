@@ -318,13 +318,21 @@
         if (!settings) return;
 
         const theme = settings.appearance?.theme || settings.theme || 'light';
-        document.documentElement.setAttribute('data-theme', theme);
-        document.documentElement.classList.toggle('theme-dark', theme === 'dark');
-        document.documentElement.classList.toggle('theme-light', theme !== 'dark');
-        document.body.classList.toggle('theme-dark', theme === 'dark');
+        // Painting now goes through the single canonical engine
+        // (js/theme.engine.js / window.ThemeManager) instead of this
+        // function keeping its own copy of the same data-theme logic.
+        if (window.ThemeManager) {
+            window.ThemeManager.setTheme(theme);
+        } else {
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+            document.documentElement.classList.toggle('theme-light', theme !== 'dark');
+            document.body.classList.toggle('theme-dark', theme === 'dark');
+        }
 
         const accentColor = settings.appearance?.accentColor || settings.accentColor;
         if (accentColor) {
+            if (window.ThemeManager) window.ThemeManager.setAccentColor(accentColor);
             document.documentElement.style.setProperty('--theme-accent', accentColor);
             document.documentElement.style.setProperty('--primary-color', accentColor);
         }

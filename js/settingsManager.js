@@ -430,31 +430,35 @@
         }
 
         applyTheme(theme) {
-            // 'auto' removed app-wide — only 'light'/'dark' are valid.
-            // FIX: this also used to paint its own private dark palette
-            // (#1a1a1a) that didn't match the #0f172a palette every other
-            // module uses (theme.colors.css, AppSettings.js, settings-core.js)
-            // — a third competing color set contributing to the theme
-            // "sparking" bug. Now uses the same values as everywhere else.
-            const resolved = theme === 'dark' ? 'dark' : 'light';
+            // Paint + persist (data-theme, critical CSS vars, localStorage)
+            // now go through the single canonical engine (js/theme.engine.js
+            // / window.ThemeManager) instead of this file keeping its own
+            // copy — that duplication (a private #1a1a1a dark palette here
+            // vs the #0f172a palette everywhere else) was a third competing
+            // color set contributing to the theme "sparking" bug.
+            const resolved = window.ThemeManager ? window.ThemeManager.setTheme(theme) : (theme === 'dark' ? 'dark' : 'light');
             const html = document.documentElement;
+            // Kept: this file's own theme-light/theme-dark class pair
+            // (settings.css keys off it), on top of ThemeManager's paint.
             html.classList.remove('theme-light', 'theme-dark', 'theme-auto');
             html.classList.add('theme-' + resolved);
-            html.classList.toggle('dark-theme', resolved === 'dark');
-            html.setAttribute('data-theme', resolved);
-            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
-            if (resolved === 'dark') {
-                this.setCssVariable('--bg-color', '#0f172a');
-                this.setCssVariable('--text-primary', '#e5e7eb');
-                this.setCssVariable('--text-secondary', '#9ca3af');
-                this.setCssVariable('--card-bg', '#1e293b');
-                this.setCssVariable('--border-color', '#374151');
-            } else {
-                this.setCssVariable('--bg-color', '#ffffff');
-                this.setCssVariable('--text-primary', '#111b21');
-                this.setCssVariable('--text-secondary', '#667781');
-                this.setCssVariable('--card-bg', '#ffffff');
-                this.setCssVariable('--border-color', '#d1d7db');
+            if (!window.ThemeManager) {
+                html.classList.toggle('dark-theme', resolved === 'dark');
+                html.setAttribute('data-theme', resolved);
+                try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+                if (resolved === 'dark') {
+                    this.setCssVariable('--bg-color', '#0f172a');
+                    this.setCssVariable('--text-primary', '#e5e7eb');
+                    this.setCssVariable('--text-secondary', '#9ca3af');
+                    this.setCssVariable('--card-bg', '#1e293b');
+                    this.setCssVariable('--border-color', '#374151');
+                } else {
+                    this.setCssVariable('--bg-color', '#ffffff');
+                    this.setCssVariable('--text-primary', '#111b21');
+                    this.setCssVariable('--text-secondary', '#667781');
+                    this.setCssVariable('--card-bg', '#ffffff');
+                    this.setCssVariable('--border-color', '#d1d7db');
+                }
             }
         }
 
@@ -465,10 +469,12 @@
         }
 
         applyFontSize(size) {
-            const fs = parseInt(size, 10) || 16;
-            this.setCssVariable('--base-font-size', fs + 'px');
-            document.documentElement.style.fontSize = fs + 'px';
-            try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+            const fs = window.ThemeManager ? window.ThemeManager.setFontSize(size) : (parseInt(size, 10) || 16);
+            if (!window.ThemeManager) {
+                this.setCssVariable('--base-font-size', fs + 'px');
+                document.documentElement.style.fontSize = fs + 'px';
+                try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+            }
         }
 
         applyLanguage(language) {

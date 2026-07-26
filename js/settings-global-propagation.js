@@ -65,30 +65,41 @@
         // (theme.colors.css, AppSettings.js, settings-core.js) — yet another
         // competing color set contributing to the theme "sparking" bug.
         // Now uses the same values as everywhere else.
+        // Theme classes + CSS variables + persistence now go through the
+        // single canonical engine (js/theme.engine.js / window.ThemeManager)
+        // instead of this function keeping its own copy — this was yet
+        // another private #1a1a1a-style dark palette competing with the
+        // others, and one of the sources of the theme "sparking" bug.
+        // The _broadcastToFrames() postMessage relay below is a distinct,
+        // still-needed mechanism (cross-frame settings sync over
+        // postMessage, separate from ThemeManager's same-origin
+        // contentDocument CSS injection) and is kept as-is.
         if (app.theme) {
-            const theme = app.theme === 'dark' ? 'dark' : 'light';
-            root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
-            root.classList.add('theme-' + theme);
-            root.classList.toggle('dark-theme', theme === 'dark');
-            root.setAttribute('data-theme', theme);
-            try { localStorage.setItem('app_theme', theme); } catch (_) {}
+            const theme = global.ThemeManager ? global.ThemeManager.setTheme(app.theme) : (app.theme === 'dark' ? 'dark' : 'light');
+            if (!global.ThemeManager) {
+                root.classList.remove('theme-light', 'theme-dark', 'theme-auto');
+                root.classList.add('theme-' + theme);
+                root.classList.toggle('dark-theme', theme === 'dark');
+                root.setAttribute('data-theme', theme);
+                try { localStorage.setItem('app_theme', theme); } catch (_) {}
 
-            if (theme === 'dark') {
-                _cssVar('--bg-color',        '#0f172a');
-                _cssVar('--text-primary',    '#e5e7eb');
-                _cssVar('--text-secondary',  '#9ca3af');
-                _cssVar('--card-bg',         '#1e293b');
-                _cssVar('--border-color',    '#374151');
-                _cssVar('--input-bg',        '#1e293b');
-                _cssVar('--hover-bg',        '#1f2c33');
-            } else {
-                _cssVar('--bg-color',        '#ffffff');
-                _cssVar('--text-primary',    '#111b21');
-                _cssVar('--text-secondary',  '#667781');
-                _cssVar('--card-bg',         '#ffffff');
-                _cssVar('--border-color',    '#d1d7db');
-                _cssVar('--input-bg',        '#f0f2f5');
-                _cssVar('--hover-bg',        '#f5f6f6');
+                if (theme === 'dark') {
+                    _cssVar('--bg-color',        '#0f172a');
+                    _cssVar('--text-primary',    '#e5e7eb');
+                    _cssVar('--text-secondary',  '#9ca3af');
+                    _cssVar('--card-bg',         '#1e293b');
+                    _cssVar('--border-color',    '#374151');
+                    _cssVar('--input-bg',        '#1e293b');
+                    _cssVar('--hover-bg',        '#1f2c33');
+                } else {
+                    _cssVar('--bg-color',        '#ffffff');
+                    _cssVar('--text-primary',    '#111b21');
+                    _cssVar('--text-secondary',  '#667781');
+                    _cssVar('--card-bg',         '#ffffff');
+                    _cssVar('--border-color',    '#d1d7db');
+                    _cssVar('--input-bg',        '#f0f2f5');
+                    _cssVar('--hover-bg',        '#f5f6f6');
+                }
             }
 
             // Notify iframe children
@@ -96,17 +107,22 @@
         }
 
         if (app.accentColor) {
-            _cssVar('--primary-color', app.accentColor);
+            if (global.ThemeManager) window.ThemeManager.setAccentColor(app.accentColor);
+            else _cssVar('--primary-color', app.accentColor);
             // Derive a darker shade for hover states
             _cssVar('--primary-dark', _shadeColor(app.accentColor, -20));
             try { localStorage.setItem('moodchat_accent_color', app.accentColor); } catch (_) {}
         }
 
         if (app.fontSize) {
-            const fs = parseInt(app.fontSize, 10) || 16;
-            _cssVar('--base-font-size', fs + 'px');
-            root.style.fontSize = fs + 'px';
-            try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+            if (global.ThemeManager) {
+                global.ThemeManager.setFontSize(app.fontSize);
+            } else {
+                const fs = parseInt(app.fontSize, 10) || 16;
+                _cssVar('--base-font-size', fs + 'px');
+                root.style.fontSize = fs + 'px';
+                try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+            }
         }
 
         if (app.language) {

@@ -227,13 +227,16 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
         function _applyImmediateVisuals(local) {
             try {
                 if (local.theme) {
-                    // 'system'/'auto' removed app-wide — only 'light'/'dark' valid.
-                    const t = local.theme === 'dark' ? 'dark' : 'light';
-                    const root = document.documentElement;
-                    root.setAttribute('data-theme', t);
-                    root.classList.toggle('theme-dark', t === 'dark');
-                    root.classList.toggle('dark-theme', t === 'dark');
-                    try { localStorage.setItem('app_theme', t); } catch (_) {}
+                    if (window.ThemeManager) {
+                        window.ThemeManager.setTheme(local.theme);
+                    } else {
+                        const t = local.theme === 'dark' ? 'dark' : 'light';
+                        const root = document.documentElement;
+                        root.setAttribute('data-theme', t);
+                        root.classList.toggle('theme-dark', t === 'dark');
+                        root.classList.toggle('dark-theme', t === 'dark');
+                        try { localStorage.setItem('app_theme', t); } catch (_) {}
+                    }
                 }
                 if (local.chat && local.chat.fontSize) {
                     const px = { small: '14px', medium: '16px', large: '18px' };

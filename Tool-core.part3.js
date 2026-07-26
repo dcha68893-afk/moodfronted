@@ -1548,16 +1548,21 @@ async function loadUserSettings() {
             const s = payload.settings;
             
             if (s.appearance?.theme) {
-                const theme = s.appearance.theme === 'dark' ? 'dark' : 'light';
-                document.documentElement.setAttribute('data-theme', theme);
-                document.body.setAttribute('data-theme', theme);
-                document.documentElement.classList.toggle('theme-dark', theme === 'dark');
-                document.documentElement.classList.toggle('dark-theme', theme === 'dark');
-                try { localStorage.setItem('app_theme', theme); } catch (_) {}
+                if (window.ThemeManager) {
+                    window.ThemeManager.setTheme(s.appearance.theme);
+                } else {
+                    const theme = s.appearance.theme === 'dark' ? 'dark' : 'light';
+                    document.documentElement.setAttribute('data-theme', theme);
+                    document.body.setAttribute('data-theme', theme);
+                    document.documentElement.classList.toggle('theme-dark', theme === 'dark');
+                    document.documentElement.classList.toggle('dark-theme', theme === 'dark');
+                    try { localStorage.setItem('app_theme', theme); } catch (_) {}
+                }
             }
             
             if (s.appearance?.fontSize) {
-                document.documentElement.style.fontSize = parseInt(s.appearance.fontSize) + 'px';
+                if (window.ThemeManager) window.ThemeManager.setFontSize(s.appearance.fontSize);
+                else document.documentElement.style.fontSize = parseInt(s.appearance.fontSize) + 'px';
             }
             
             window.dispatchEvent(new CustomEvent('settingsUpdated', {

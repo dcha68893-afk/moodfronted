@@ -712,13 +712,18 @@ const SettingsState = {
     
     _applyTheme(theme) {
         try {
-            const root = document.documentElement;
-            const resolved = theme === 'dark' ? 'dark' : 'light';
-            root.setAttribute('data-theme', resolved);
-            root.classList.toggle('theme-dark', resolved === 'dark');
-            root.classList.toggle('dark-theme', resolved === 'dark');
-            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
-            
+            // Paint + persist now go through the single canonical engine
+            // (js/theme.engine.js / window.ThemeManager) instead of this
+            // file keeping its own copy of the same logic.
+            const resolved = window.ThemeManager ? window.ThemeManager.setTheme(theme) : (theme === 'dark' ? 'dark' : 'light');
+            if (!window.ThemeManager) {
+                const root = document.documentElement;
+                root.setAttribute('data-theme', resolved);
+                root.classList.toggle('theme-dark', resolved === 'dark');
+                root.classList.toggle('dark-theme', resolved === 'dark');
+                try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+            }
+
             const event = new CustomEvent('themeApplied', {
                 detail: { theme: resolved, timestamp: Date.now() }
             });
@@ -5950,14 +5955,19 @@ async function loadFromLocalStorage() {
 function applyTheme(theme) {
     if (!theme) return;
     if (currentState !== LifecycleState.ACTIVE) return;
-    
+
     try {
-        const root = document.documentElement;
-        const resolved = theme === 'dark' ? 'dark' : 'light';
-        root.setAttribute('data-theme', resolved);
-        root.classList.toggle('theme-dark', resolved === 'dark');
-        root.classList.toggle('dark-theme', resolved === 'dark');
-        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+        // Paint + persist now go through the single canonical engine
+        // (js/theme.engine.js / window.ThemeManager) instead of this file
+        // keeping its own copy of the same data-theme/localStorage logic.
+        const resolved = window.ThemeManager ? window.ThemeManager.setTheme(theme) : (theme === 'dark' ? 'dark' : 'light');
+        if (!window.ThemeManager) {
+            const root = document.documentElement;
+            root.setAttribute('data-theme', resolved);
+            root.classList.toggle('theme-dark', resolved === 'dark');
+            root.classList.toggle('dark-theme', resolved === 'dark');
+            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+        }
 
         const event = new CustomEvent('themeApplied', {
             detail: { theme: resolved, timestamp: Date.now() }
@@ -7772,19 +7782,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     // fall back to the cache's theme/font-size when the
                     // authoritative key is missing entirely (true first run).
                     if (data.appearance?.theme && !localStorage.getItem('app_theme')) {
-                        const resolved = data.appearance.theme === 'dark' ? 'dark' : 'light';
-                        document.documentElement.setAttribute('data-theme', resolved);
-                        document.documentElement.classList.toggle('theme-dark', resolved === 'dark');
-                        document.documentElement.classList.toggle('dark-theme', resolved === 'dark');
-                        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+                        if (window.ThemeManager) window.ThemeManager.setTheme(data.appearance.theme);
+                        else {
+                            const resolved = data.appearance.theme === 'dark' ? 'dark' : 'light';
+                            document.documentElement.setAttribute('data-theme', resolved);
+                            document.documentElement.classList.toggle('theme-dark', resolved === 'dark');
+                            document.documentElement.classList.toggle('dark-theme', resolved === 'dark');
+                            try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+                        }
                     }
                     if (data.appearance?.fontSize && !localStorage.getItem('app_font_size')) {
-                        const fs = parseInt(data.appearance.fontSize, 10) || 16;
-                        document.documentElement.style.fontSize = fs + 'px';
-                        document.documentElement.style.setProperty('--base-font-size', fs + 'px');
-                        try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+                        if (window.ThemeManager) window.ThemeManager.setFontSize(data.appearance.fontSize);
+                        else {
+                            const fs = parseInt(data.appearance.fontSize, 10) || 16;
+                            document.documentElement.style.fontSize = fs + 'px';
+                            document.documentElement.style.setProperty('--base-font-size', fs + 'px');
+                            try { localStorage.setItem('app_font_size', String(fs)); } catch (_) {}
+                        }
                     }
                     if (data.appearance?.accentColor) {
+                        if (window.ThemeManager) window.ThemeManager.setAccentColor(data.appearance.accentColor);
                         document.documentElement.style.setProperty('--accent-color', data.appearance.accentColor);
                     }
                     if (data.appearance?.compactMode) {

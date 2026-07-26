@@ -2,108 +2,15 @@
 <html lang="en">
 <head>
 <script>window.API_BASE_URL = "https://moodchat-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://moodchat-fy56.onrender.com/api";</script>
-<!-- THEME FLASH PREVENTION — see chat.html for the full rationale. This
-     iframe document is (re)loaded fresh every time it's opened, so it
-     needs its own copy of the same early data-theme application rather
-     than waiting for the parent's postMessage-based injectThemeIntoIframe,
-     which only arrives after this document has already parsed/painted. -->
-<script>
-(function () {
-    // 'auto' theme has been removed app-wide (it was a major source of the
-    // theme-flash / "sparking" bug: it required an async matchMedia check
-    // that ran differently across pages, so different modules would settle
-    // on different themes for a frame or two). Only 'light' and 'dark' are
-    // valid now; any legacy 'auto' (or unrecognized) value saved from
-    // before this change quietly falls back to 'light'.
-    function resolveEarlyTheme() {
-        var raw = null;
-        try { raw = localStorage.getItem('app_theme'); } catch (_) {}
-        if (!raw) {
-            try {
-                var c = localStorage.getItem('knecta_settings_cache');
-                if (c) { var cp = JSON.parse(c); var d = cp.data || cp; raw = (d && d.appearance && d.appearance.theme) || (d && d.theme); }
-            } catch (_) {}
-        }
-        return raw === 'dark' ? 'dark' : 'light';
+<script src="/js/theme.engine.js"></script>
+<style id="kynCriticalHeaderFix">
+    header, .header, .top-bar, .toolbar, .app-header, .chat-header,
+    .module-header, [class*="header"], [class*="topbar"], [class*="top-bar"] {
+        background: var(--kyn-bg-header) !important;
+        border-color: var(--kyn-border) !important;
+        color: var(--kyn-text-primary) !important;
     }
-    function resolveEarlyFontSize() {
-        var fs = null;
-        try { fs = localStorage.getItem('app_font_size'); } catch (_) {}
-        if (!fs) {
-            try {
-                var c = localStorage.getItem('knecta_settings_cache');
-                if (c) { var cp = JSON.parse(c); var d = cp.data || cp; fs = d && d.appearance && d.appearance.fontSize; }
-            } catch (_) {}
-        }
-        fs = parseInt(fs, 10);
-        if (!fs || fs < 10 || fs > 28) fs = 16;
-        return fs;
-    }
-    var root = document.documentElement;
-    var theme = resolveEarlyTheme();
-    var fontSize = resolveEarlyFontSize();
-    root.setAttribute('data-theme', theme);
-    root.classList.toggle('theme-dark', theme === 'dark');
-    root.classList.toggle('dark-theme', theme === 'dark');
-    // FIX-ROOT-CAUSE-THEME-SPARK-MODULES: data-theme is applied above, but the
-    // actual color VALUES for [data-theme] live in the external theme.colors.css
-    // (single source of truth for every module, loaded as a separate network
-    // request). Until that request finishes, this page has no idea what
-    // --kyn-bg-root/--kyn-text-primary/etc. should resolve to, so without this
-    // it would paint using whatever hardcoded CSS fallback (or none) happens to
-    // be baked into this page's own stylesheet — which was a FIXED direction
-    // regardless of the user's actual theme (e.g. always falling back to dark,
-    // or always to light), producing a visible flash in the wrong direction for
-    // roughly half of users. Setting the handful of paint-critical variables
-    // directly, synchronously, in JS closes that gap: theme.colors.css remains
-    // the single source of truth and simply reconfirms the same values once it
-    // loads (no visible change) — first paint is just never wrong while
-    // waiting on the network.
-    // NOTE: these literal values are mirrored from theme.colors.css's light and
-    // dark palettes — if that file's palette values ever change, update here too.
-    (function () {
-        var _kynCritical = theme === 'dark' ? {
-            '--kyn-bg-root': '#0f172a', '--kyn-bg-chat': '#020617', '--kyn-bg-header': '#0f172a',
-            '--kyn-text-primary': '#e5e7eb', '--kyn-text-secondary': '#9ca3af',
-            '--kyn-border': '#374151',
-            '--bg-color': '#0f172a', '--text-primary': '#e5e7eb'
-        } : {
-            '--kyn-bg-root': '#ffffff', '--kyn-bg-chat': '#efeae2', '--kyn-bg-header': '#f0f2f5',
-            '--kyn-text-primary': '#111b21', '--kyn-text-secondary': '#667781',
-            '--kyn-border': '#e9edef',
-            '--bg-color': '#ffffff', '--text-primary': '#111b21'
-        };
-        for (var _k in _kynCritical) { root.style.setProperty(_k, _kynCritical[_k]); }
-    })();
-    root.style.fontSize = fontSize + 'px';
-    root.style.setProperty('--base-font-size', fontSize + 'px');
-})();
-</script>
-    <style id="kynCriticalHeaderFix">
-        /* FIX-ROOT-CAUSE-HEADER-BODY-MISMATCH: mirrors theme.colors.css's header-forcing
-           rule (headers & toolbars section) inline so it takes effect immediately,
-           instead of waiting on that external stylesheet's network request. Until now,
-           each module's header showed its own hardcoded gradient/color on first paint
-           while the body (already corrected via the critical vars above) was right —
-           a visible header/body mismatch. This reuses the same --kyn-bg-header /
-           --kyn-border / --kyn-text-primary variables set synchronously above, so once
-           theme.colors.css does load it recomputes the identical values — no visible
-           change, just no longer a race. */
-        header,
-        .header,
-        .top-bar,
-        .toolbar,
-        .app-header,
-        .chat-header,
-        .module-header,
-        [class*="header"],
-        [class*="topbar"],
-        [class*="top-bar"] {
-            background: var(--kyn-bg-header) !important;
-            border-color: var(--kyn-border) !important;
-            color: var(--kyn-text-primary) !important;
-        }
-    </style>
+</style>
 <script>
 // BUG FIX (update banner shows with "no real changes" + refresh causes an
 // endless "opening-loading, opening-loading" cycle): this iframe used to run

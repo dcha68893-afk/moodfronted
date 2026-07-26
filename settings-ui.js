@@ -1465,13 +1465,19 @@ export function updateAccentColor(color) {
 // next full reload. 'auto' has also been removed app-wide — only 'light'
 // and 'dark' are valid themes now.
 export function applyTheme(theme) {
-    const resolved = theme === 'dark' ? 'dark' : 'light';
-    const root = document.documentElement;
-    root.setAttribute('data-theme', resolved);
-    root.classList.toggle('theme-dark', resolved === 'dark');
-    document.body.classList.toggle('dark-theme', resolved === 'dark');
-    root.style.colorScheme = resolved;
-    try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+    // Paint + persist now go through the single canonical engine (see
+    // js/theme.engine.js / window.ThemeManager) instead of this file
+    // keeping its own copy of the same data-theme/localStorage logic.
+    const resolved = window.ThemeManager ? window.ThemeManager.setTheme(theme) : (theme === 'dark' ? 'dark' : 'light');
+    if (!window.ThemeManager) {
+        // Fallback only if theme.engine.js somehow failed to load.
+        const root = document.documentElement;
+        root.setAttribute('data-theme', resolved);
+        root.classList.toggle('theme-dark', resolved === 'dark');
+        document.body.classList.toggle('dark-theme', resolved === 'dark');
+        root.style.colorScheme = resolved;
+        try { localStorage.setItem('app_theme', resolved); } catch (_) {}
+    }
 
     // FIX (live theme sync, Phase 17 follow-up): this used to only touch
     // localStorage + this document, so chat.html and every sibling iframe
@@ -1501,10 +1507,13 @@ export function applyTheme(theme) {
 // the same 'app_font_size' key every module's early-init script reads, so
 // text size stays in sync across modules without waiting for a reload.
 export function applyFontSize(size) {
-    const fontSize = parseInt(size, 10) || 16;
-    document.documentElement.style.fontSize = `${fontSize}px`;
-    document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
-    try { localStorage.setItem('app_font_size', String(fontSize)); } catch (_) {}
+    const fontSize = window.ThemeManager ? window.ThemeManager.setFontSize(size) : (parseInt(size, 10) || 16);
+    if (!window.ThemeManager) {
+        // Fallback only if theme.engine.js somehow failed to load.
+        document.documentElement.style.fontSize = `${fontSize}px`;
+        document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
+        try { localStorage.setItem('app_font_size', String(fontSize)); } catch (_) {}
+    }
 
     // FIX (live sync, same reasoning as applyTheme above): broadcast so
     // other open modules pick up the new font size immediately.
