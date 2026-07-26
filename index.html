@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://nexopa-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexopa-fy56.onrender.com/api";</script>
+    <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexora-3bla.onrender.com/api";</script>
     <script src="/js/theme.engine.js"></script>
     <script>
         // PRELOAD FLASH GUARD: theme.engine.js paints synchronously above,
@@ -3660,7 +3660,7 @@
                     // Probe the health endpoint: if it doesn't respond within 3s, server is sleeping
                     (async () => {
                         try {
-                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://nexopa-fy56.onrender.com';
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://nexora-3bla.onrender.com';
                             const ctrl = new AbortController();
                             const tid = setTimeout(() => { ctrl.abort(); _showWakeNotice(); }, 3000);
                             const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
@@ -3675,7 +3675,7 @@
                     const doLogin = async () => {
                         const baseUrl = window.__getApiOrigin
                             ? window.__getApiOrigin()
-                            : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexopa-fy56.onrender.com');
+                            : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexora-3bla.onrender.com');
                         if (window.api?.auth?.login) {
                             // FIX: 65s timeout to survive Render cold start (~50s)
                             const loginPromise = window.api.auth.login({ identifier, password, rememberMe });
@@ -3794,7 +3794,7 @@
                     };
                     (async () => {
                         try {
-                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://nexopa-fy56.onrender.com';
+                            const _hBase = window.__getApiOrigin ? window.__getApiOrigin().replace(/\/api\/?$/, '') : 'https://nexora-3bla.onrender.com';
                             const ctrl = new AbortController();
                             const tid = setTimeout(() => { ctrl.abort(); _showWakeNoticeReg(); }, 3000);
                             const hr = await fetch(_hBase + '/health', { method: 'GET', cache: 'no-store', signal: ctrl.signal });
@@ -3813,7 +3813,7 @@
                             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timed out. The server may be starting up — please try again in a moment.')), 65000));
                             response = await Promise.race([regPromise, timeout]);
                         } else {
-                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexopa-fy56.onrender.com');
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexora-3bla.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/register`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ email: email, username: username, password: password, displayName: displayName || username, name: displayName || username, acceptPrivacyPolicy: accept })
@@ -3889,7 +3889,7 @@
                         if (window.api?.auth?.forgotPassword) {
                             response = await window.api.auth.forgotPassword({ email: email });
                         } else {
-                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexopa-fy56.onrender.com');
+                            const baseUrl = window.__getApiOrigin ? window.__getApiOrigin() : (location.hostname === 'localhost' ? 'http://localhost:3000' : 'https://nexora-3bla.onrender.com');
                             const res = await fetch(`${baseUrl}/api/auth/forgot-password`, {
                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ email: email })

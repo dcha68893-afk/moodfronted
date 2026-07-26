@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script>window.API_BASE_URL = "https://nexopa-fy56.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexopa-fy56.onrender.com/api";</script>
+    <script>window.API_BASE_URL = "https://nexora-3bla.onrender.com"; window.__kynAPI = window.__kynAPI || {}; window.__kynAPI.baseUrl = "https://nexora-3bla.onrender.com/api";</script>
 <script src="/js/theme.engine.js"></script>
     <style id="kynCriticalHeaderFix">
         /* Mirrors theme.colors.css's header-forcing rule inline so it takes
@@ -2382,7 +2382,7 @@
 'use strict';
 
 /* ─── helpers ─────────────────────────────────────────────────── */
-var BASE=(window.__API_BASE)||(window.__getApiBase&&window.__getApiBase())||'https://nexopa-fy56.onrender.com/api';
+var BASE=(window.__API_BASE)||(window.__getApiBase&&window.__getApiBase())||'https://nexora-3bla.onrender.com/api';
 function tok(){
     return (window.__PARENT_SESSION__&&window.__PARENT_SESSION__.token)||
            (window.KynectaStore&&window.KynectaStore.get&&window.KynectaStore.get('auth.token'))||
@@ -3809,7 +3809,7 @@ window._openSmartGroupOSFromSidebar = function() {
                 var session = {};
                 try { session = JSON.parse(localStorage.getItem('kyn_session') || '{}'); } catch(_) {}
                 var token = session.token || localStorage.getItem('kyn_token') || '';
-                var apiBase = (window.__kynAPI && window.__kynAPI.baseUrl) || 'https://nexopa-fy56.onrender.com/api';
+                var apiBase = (window.__kynAPI && window.__kynAPI.baseUrl) || 'https://nexora-3bla.onrender.com/api';
                 fetch(apiBase + '/groups', { headers: token ? { 'Authorization': 'Bearer ' + token } : {} })
                     .then(function(r) { return r.ok ? r.json() : { groups: [] }; })
                     .then(function(d) { _renderGroupPicker(d.groups || d || []); })
