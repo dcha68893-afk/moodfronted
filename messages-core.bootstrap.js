@@ -22,9 +22,21 @@
     const MODULE_VERSION = '8.0.7';
     
     // =============================================
-    // DEBUG MODE (DISABLED IN PRODUCTION)
+    // DEBUG MODE
+    // FIX (SILENT-CONSOLE): this was hardcoded `false`, which meant every
+    // 📤/📥 send/receive log in this file AND messages-core.operations.js
+    // (39 call sites) was permanently silenced — a working pipeline and a
+    // broken one produced identical (zero) console output, so delivery
+    // failures were undiagnosable from the browser console.
+    // Now defaults ON, and can be toggled at runtime without a code edit:
+    //   localStorage.setItem('kyn_debug_messages', '0')  -> silence
+    //   localStorage.setItem('kyn_debug_messages', '1')  -> verbose (default)
     // =============================================
-    const DEBUG = false;
+    let DEBUG = true;
+    try {
+        const _dbgOverride = window.localStorage && window.localStorage.getItem('kyn_debug_messages');
+        if (_dbgOverride === '0' || _dbgOverride === 'false') DEBUG = false;
+    } catch (_) { /* localStorage unavailable (privacy mode etc.) — keep default */ }
     const ALLOWED_LOGS = new Set(['INIT', 'READY', 'ERROR', 'STATE_CHANGE', 'HANDSHAKE', 'LIFECYCLE_GUARD', 'SESSION', 'API_REQUEST', 'API_RESPONSE', 'UI']);
     
     function debugLog(...args) {

@@ -3902,7 +3902,16 @@
             let replyIndicator = '';
             if (message.replyTo || message.replyToId) {
                 const rd = message.replyTo || {};
-                const rContent = rd.content || rd.text || '';
+                const _rRawContent = rd.content || rd.text || '';
+                // FIX (ciphertext leak in reply quotes): the main message body
+                // already hides undecrypted E2E envelopes via _isEncryptedEnvelope
+                // below, but this reply-quote preview used rd.content directly —
+                // so replying to / being replied to on a message that hadn't
+                // finished decrypting yet showed raw ciphertext JSON in the quote
+                // bar. Apply the same envelope heuristic here.
+                const _rIsEncryptedEnvelope = !rd._decrypted && typeof _rRawContent === 'string' &&
+                    _rRawContent.charAt(0) === '{' && _rRawContent.indexOf('"v"') !== -1;
+                const rContent = _rIsEncryptedEnvelope ? '' : _rRawContent;
                 const rSender = rd.senderName || (rd.sender && rd.sender.username) || '';
                 const rPreview = rContent.length > 60 ? rContent.substring(0, 60) + '\u2026' : rContent;
                 const rId = String(rd.id || rd.messageId || '').replace(/[^0-9]/g, ''); // numeric-only, no injection
