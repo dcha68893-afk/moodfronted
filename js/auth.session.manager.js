@@ -527,7 +527,7 @@
             // Resolve backend base URL the same way api_auth.js does
             const baseUrl = (window.API && window.API.baseUrl)
                 || (window._API_CONFIG && window._API_CONFIG.baseUrl)
-                || 'https://nexopa-fy56.onrender.com/api';
+                || 'https://nexora-3bla.onrender.com/api';
 
             console.log('[SessionManager] Calling /auth/refresh directly');
             const response = await fetch(`${baseUrl}/auth/refresh`, {

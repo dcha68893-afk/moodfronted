@@ -286,7 +286,7 @@ const FriendRequestManager = {
 
         // ── Online path ──────────────────────────────────────────────────────
         // FIX: Use direct fetch — postMessage bridge POST can silently time out (30s).
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('nexopa_token') || '';
         try {
             let response;
@@ -445,7 +445,7 @@ const FriendRequestManager = {
         }
 
         // ── Online path (direct fetch — bridge POST silently times out) ──────
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('nexopa_token') || '';
         try {
             let response;

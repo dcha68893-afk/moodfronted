@@ -6591,7 +6591,7 @@ clearActiveCall: function() {
                     window.__apiBaseUrl ||
                     (window.parent && window.parent.__apiBaseUrl) ||
                     (window.parent && window.parent.__getApiBase && window.parent.__getApiBase()) ||
-                    'https://nexopa-fy56.onrender.com'
+                    'https://nexora-3bla.onrender.com'
                 ).replace(/\/+$/, '');
                 fetch(baseUrl + '/api/calls/ice-config', {
                     method: 'GET',

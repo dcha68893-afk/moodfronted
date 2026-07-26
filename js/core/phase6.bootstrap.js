@@ -224,7 +224,7 @@
       }
 
       // 3. Fall back to REST API (same as normal send) — most reliable
-      const apiBase = window.__getApiBase?.() || 'https://nexopa-fy56.onrender.com/api';
+      const apiBase = window.__getApiBase?.() || 'https://nexora-3bla.onrender.com/api';
       const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
       const endpoint = msg.groupId ? `${apiBase}/groups/${msg.groupId}/messages` : `${apiBase}/messages`;
 

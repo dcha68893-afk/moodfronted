@@ -19,7 +19,7 @@
         window.__kynApiBase ||
         window.__API_BASE ||
         (window.__getApiBase && window.__getApiBase()) ||
-        'https://nexopa-fy56.onrender.com/api'
+        'https://nexora-3bla.onrender.com/api'
     ).replace(/\/$/, '');
     const BASE = _apiOrigin.endsWith('/api')
         ? _apiOrigin + '/groups'

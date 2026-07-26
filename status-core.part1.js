@@ -2125,7 +2125,7 @@ const TrustedOrigins = {
             }
         } catch (e) {}
         
-        this.addTrustedOrigin('https://nexopa-fy56.onrender.com');
+        this.addTrustedOrigin('https://nexora-3bla.onrender.com');
         this.addTrustedOrigin('https://nexopa.onrender.com');
     },
     

@@ -787,7 +787,7 @@ const ALLOWED_ORIGINS = [
     'http://127.0.0.1',
     'http://localhost:4000',
     'http://127.0.0.1:4000',
-    'https://nexopa-fy56.onrender.com',
+    'https://nexora-3bla.onrender.com',
     'https://nexopa.onrender.com',
     null,
     'null'

@@ -225,7 +225,7 @@
               // Fallback to direct fetch — build absolute URL so it hits the backend, not the static frontend
               const _apiBase = (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null)
                 || (typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() + '/api' : null)
-                || 'https://nexopa-fy56.onrender.com/api';
+                || 'https://nexora-3bla.onrender.com/api';
               const _absEndpoint = endpoint.startsWith('http') ? endpoint : _apiBase + (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
               fetch(_absEndpoint, options)
                 .then(response => response.json())

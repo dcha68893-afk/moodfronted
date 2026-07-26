@@ -78,7 +78,7 @@ const IframeEnvironment = {
         backendReachable: true
     },
     _detected: false,
-    _backendUrl: 'https://nexopa-fy56.onrender.com',
+    _backendUrl: 'https://nexora-3bla.onrender.com',
     _frontendUrl: 'https://nexopa.onrender.com',
     _detectionComplete: false,
     
@@ -532,7 +532,7 @@ const OriginAdapter = {
     _validationCache: new Map(),
     _parentOrigin: null,
     _parentVerified: false,
-    _backendOrigin: 'https://nexopa-fy56.onrender.com',
+    _backendOrigin: 'https://nexora-3bla.onrender.com',
     _frontendOrigin: 'https://nexopa.onrender.com',
     
     init() {

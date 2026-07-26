@@ -15,7 +15,7 @@
 
     function getApiOrigin() {
         if (typeof window.__getApiOrigin === 'function') return window.__getApiOrigin();
-        return window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://nexopa-fy56.onrender.com';
+        return window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://nexora-3bla.onrender.com';
     }
 
     function showError(message) {

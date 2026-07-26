@@ -1843,7 +1843,7 @@ export function registerMessageHandlers() {
                 'http://localhost:4000',
                 'http://localhost:3000',
                 'https://nexopa.onrender.com',
-                'https://nexopa-fy56.onrender.com'
+                'https://nexora-3bla.onrender.com'
             ];
             if (!allowedOrigins.includes(event.origin) && event.origin !== 'null' && event.origin !== '') {
                 return;
@@ -2709,7 +2709,7 @@ async function _fetchInvites() {
     try {
         const tok = (window.KynectaStore && window.KynectaStore.get && window.KynectaStore.get('auth.token')) ||
                     localStorage.getItem('token') || localStorage.getItem('authToken') || '';
-        const BASE = (window.__API_BASE) || (window.__getApiBase && window.__getApiBase()) || 'https://nexopa-fy56.onrender.com/api';
+        const BASE = (window.__API_BASE) || (window.__getApiBase && window.__getApiBase()) || 'https://nexora-3bla.onrender.com/api';
         const res = await fetch(BASE + '/group-members/invitations?status=pending', {
             headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
         });
@@ -4535,7 +4535,7 @@ function getAuthToken() {
 // FIX-PANEL-FETCH-WRONG-ORIGIN: this used a bare relative path ('/api/groups/public...')
 // with plain fetch(), which resolves against whatever origin THIS document is served
 // from — the frontend (nexopa.onrender.com), not the backend API
-// (nexopa-fy56.onrender.com). Every panelFetch call (Discover, Explore Public,
+// (nexora-3bla.onrender.com). Every panelFetch call (Discover, Explore Public,
 // Events, Invitations, Friends-for-invite) was therefore 404ing against the frontend
 // and silently falling into the catch block, rendering "No public groups found" /
 // "Could not load" etc. even when the backend had real data. group.html's own api()
@@ -5117,7 +5117,7 @@ async function _directCreateGroup(groupData) {
         (window.parent && window.parent.__apiBaseUrl) ||
         (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
         (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
-        'https://nexopa-fy56.onrender.com/api'
+        'https://nexora-3bla.onrender.com/api'
     );
     const token = (
         (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||

@@ -1457,7 +1457,7 @@ function savePrivateNote(friendId, note) {
         // Using fire-and-forget: UI reflects change immediately, DB catches up async.
         (function() {
             try {
-                const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+                const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
                 const _token = (typeof __session !== 'undefined' && __session?.token)
                     || localStorage.getItem('token')
                     || localStorage.getItem('authToken')
@@ -1487,7 +1487,7 @@ function savePrivateNote(friendId, note) {
 function hydratePrivateNotesFromDB() {
     setTimeout(() => {
         try {
-            const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+            const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
             const _token = (typeof __session !== 'undefined' && __session?.token)
                 || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
             const friendIds = (window.friends || []).map(f => f.id).filter(Boolean).slice(0, 100);
@@ -3255,7 +3255,7 @@ const NearbyManager = {
 async function snoozeFriend(friendId, days = 7) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/snooze`, {
@@ -3285,7 +3285,7 @@ async function snoozeFriend(friendId, days = 7) {
 async function unsnoozeFriend(friendId) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/snooze`, {
@@ -3311,7 +3311,7 @@ async function unsnoozeFriend(friendId) {
 async function restrictFriend(friendId) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/restrict`, {
@@ -3338,7 +3338,7 @@ async function restrictFriend(friendId) {
 async function unrestrictFriend(friendId) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/restrict`, {
@@ -3364,7 +3364,7 @@ async function reportFriend(friendId, reason, description = '') {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     if (!reason) return { success: false, error: 'Reason required' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/report`, {
@@ -3412,7 +3412,7 @@ async function importPhoneContacts() {
 
         if (phoneHashes.length === 0) return { success: true, data: { matches: [] } };
 
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
 
@@ -3439,7 +3439,7 @@ async function importPhoneContacts() {
 
 async function getFriendPrivacySettings() {
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/privacy`, {
@@ -3455,7 +3455,7 @@ async function getFriendPrivacySettings() {
 
 async function updateFriendPrivacySettings(settings = {}) {
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/privacy`, {
@@ -3475,7 +3475,7 @@ async function updateFriendPrivacySettings(settings = {}) {
 
 async function exportFriendsCSV() {
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexora-3bla.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/export/csv`, {

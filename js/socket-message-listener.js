@@ -41,7 +41,7 @@
             return window.__kynAPI.baseUrl.replace('/api', '');
         if (window.API_BASE_URL)
             return window.API_BASE_URL.replace('/api', '');
-        return 'https://nexopa-fy56.onrender.com';
+        return 'https://nexora-3bla.onrender.com';
     })();
 
     // ── Bridge SESSION_DATA / AUTH_READY from parent to the singleton ────────

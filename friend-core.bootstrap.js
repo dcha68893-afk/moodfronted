@@ -1641,7 +1641,7 @@ const SecurityValidator = {
         // PRODUCTION FIX: Trust known Render.com origins explicitly
         const KNOWN_ORIGINS = [
             'https://nexopa.onrender.com',
-            'https://nexopa-fy56.onrender.com'
+            'https://nexora-3bla.onrender.com'
         ];
         if (KNOWN_ORIGINS.includes(origin)) return true;
 

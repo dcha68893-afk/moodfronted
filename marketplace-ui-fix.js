@@ -11,7 +11,7 @@
 // ── 1. API BASE URL FIX (must run first, before any API call) ──────────────
 // FIX-MARKETPLACE-URL: window.location.origin here is the FRONTEND host
 // (nexopa.onrender.com). The API lives on a DIFFERENT host
-// (nexopa-fy56.onrender.com). Falling back to window.location.origin + '/api'
+// (nexora-3bla.onrender.com). Falling back to window.location.origin + '/api'
 // silently pointed every marketplace fetch at the frontend's own domain,
 // which has no /api routes — corrupting all marketplace calls (listings,
 // wishlist, categories, spotlight, etc. all failed with 404/fetch errors).
@@ -34,7 +34,7 @@ function _resolveNexopaApiBase() {
     }
 
     // Production fallback: the known backend host, NOT window.location.origin.
-    return 'https://nexopa-fy56.onrender.com/api';
+    return 'https://nexora-3bla.onrender.com/api';
 }
 
 (function _fixApiBase() {

@@ -58,7 +58,7 @@
         if (normalizedUrl.startsWith('/api/') || normalizedUrl.startsWith('/socket.io/')) {
             const apiOrigin = (typeof window !== 'undefined' && window.__getApiOrigin)
                 ? window.__getApiOrigin()
-                : 'https://nexopa-fy56.onrender.com';
+                : 'https://nexora-3bla.onrender.com';
             normalizedUrl = apiOrigin + normalizedUrl;
         }
 

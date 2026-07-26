@@ -320,16 +320,16 @@ function resolveBaseURL() {
         if (env === ENVIRONMENTS.LOCAL || env === ENVIRONMENTS.DEVELOPMENT) {
             return 'http://localhost:4000/api';  
         } else {
-            return 'https://nexopa-fy56.onrender.com/api';  
+            return 'https://nexora-3bla.onrender.com/api';  
         }
     } catch (error) {
         console.error('[ENV] Base URL resolution error:', error);
-        return 'https://nexopa-fy56.onrender.com/api';
+        return 'https://nexora-3bla.onrender.com/api';
     }
 }
 
 BASE_URLS = {
-    [ENVIRONMENTS.PRODUCTION]: 'https://nexopa-fy56.onrender.com/api',
+    [ENVIRONMENTS.PRODUCTION]: 'https://nexora-3bla.onrender.com/api',
     [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:4000/api',
     [ENVIRONMENTS.DEMO]: 'https://demo.nexopa.onrender.com/api',
     [ENVIRONMENTS.STAGING]: 'https://staging.nexopa.onrender.com/api',
@@ -340,7 +340,7 @@ BASE_URLS = {
 
 ENVIRONMENT_DETECTION_RULES = [
     { pattern: /localhost|127\.0\.0\.1|::1|0\.0\.0\.0/i, env: ENVIRONMENTS.LOCAL },
-    { pattern: /render\.com|onrender\.com|nexopa-fy56/i, env: ENVIRONMENTS.PRODUCTION },
+    { pattern: /render\.com|onrender\.com|nexora-3bla/i, env: ENVIRONMENTS.PRODUCTION },
     { pattern: /staging|stage/i, env: ENVIRONMENTS.STAGING },
     { pattern: /demo|testdrive/i, env: ENVIRONMENTS.DEMO },
     { pattern: /test|testing/i, env: ENVIRONMENTS.TEST },
@@ -3906,7 +3906,7 @@ function isValidEndpoint(url, baseUrl) {
             const urlObj = new URL(url);
             
             const allowedDomains = [
-                'nexopa-fy56.onrender.com',
+                'nexora-3bla.onrender.com',
                 'nexopa.onrender.com',
                 'localhost',
                 '127.0.0.1'
@@ -6783,7 +6783,7 @@ checkNetworkStatus = async function() {
             ['/api/users/../config', false],
             ['/api/users/%2e%2e/config', false],
             ['https://evil.com/api/steal', false],
-            ['https://nexopa-fy56.onrender.com/api/users', true],
+            ['https://nexora-3bla.onrender.com/api/users', true],
             ['http://localhost:4000/api/users', isLocalhost()]
         ];
         
