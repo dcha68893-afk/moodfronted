@@ -3331,12 +3331,27 @@ body[data-module="status"] .sidebar-header,
 }
 
 /* ================================================================
-   FORCE LIGHT MODE — STATUS MODULE ALWAYS LIGHT
-   Android/iOS dark system theme must NOT affect this module.
-   All colors are explicitly white/light regardless of OS setting.
+   THEME AUDIT FIX (Phase 17 — single theme owner):
+   This block used to be titled "FORCE LIGHT MODE — STATUS MODULE
+   ALWAYS LIGHT" but its rules did the opposite of what the comment
+   said: everything below (except the html.dark-mode rule) applied
+   hardcoded DARK colors (#111b21 / #1f2c34 / #e9edef) unconditionally
+   to bare selectors (html, body, .sidebar, .status-categories,
+   .quick-action-btn, .modal-content, etc.) with !important and no
+   [data-theme] or .dark-mode gate at all. Because it appears later in
+   the cascade than the correct var(--bg-color)/var(--text-primary)/
+   var(--secondary-color) rules already defined earlier in this file
+   (which DO correctly flip between the :root/[data-theme="light"]
+   palettes), this block permanently overrode them — the Status module
+   was stuck dark regardless of what theme the user selected, and
+   never updated when the theme was changed and saved.
+   Removed the unconditional duplicate rules entirely (the earlier,
+   correctly var-driven definitions of these exact classes already
+   theme them properly). Kept only a legacy .dark-mode class shim,
+   properly scoped, in case any older JS path still toggles that class
+   instead of going through window.ThemeManager / [data-theme].
    ================================================================ */
 
-/* Override any dark-mode class the JS may have added */
 html.dark-mode,
 html.dark-mode body,
 html.dark-mode .app-container,
@@ -3352,67 +3367,13 @@ html.dark-mode .modal,
 html.dark-mode .modal-content,
 html.dark-mode .status-viewer-panel,
 html.dark-mode .viewer-container {
-  --bg-color: #111b21 !important;
-  --text-primary: #e9edef !important;
-  --text-secondary: #8696a0 !important;
-  --border-color: #2a3942 !important;
-  --secondary-color: #2a3942 !important;
-  background-color: #111b21 !important;
-  color: #e9edef !important;
-}
-
-/* Dark theme body */
-html, body, .app-container {
-  background-color: #111b21 !important;
-  color: #e9edef !important;
-}
-
-/* Status list items dark */
-.status-list-content,
-.status-item,
-.status-content,
-.sidebar {
-  background-color: #111b21 !important;
-  color: #e9edef !important;
-}
-
-/* Status preview text */
-.status-preview,
-.status-name-text,
-.status-time,
-.status-details {
-  color: var(--text-secondary, #8696a0) !important;
-}
-
-/* Category tabs dark */
-.status-categories {
-  background-color: #1f2c34 !important;
-  border-bottom: 1px solid #2a3942 !important;
-}
-
-.category-btn {
-  color: #8696a0 !important;
-  background: transparent !important;
-}
-
-.category-btn.active {
-  color: #00a884 !important;
-  border-bottom-color: #00a884 !important;
-}
-
-/* Quick action cards dark */
-.quick-action-btn {
-  background-color: #1f2c34 !important;
-  color: #e9edef !important;
-  border: 1px solid #2a3942 !important;
-}
-
-/* Modals dark */
-.modal-content,
-.create-status-modal,
-.viewer-modal {
-  background-color: #1f2c34 !important;
-  color: #e9edef !important;
+  --bg-color: #111b21;
+  --text-primary: #e9edef;
+  --text-secondary: #8696a0;
+  --border-color: #2a3942;
+  --secondary-color: #2a3942;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
 }
 
 /* ================================================================
