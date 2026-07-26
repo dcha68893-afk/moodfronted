@@ -2915,6 +2915,18 @@ const renderers = {
 // Helper Functions (Stubs - These would be fully implemented)
 // =============================================
 // SIMPLIFIED: Removed isActive() checks from showCreateListingModal
+// BUGFIX (Uncaught ReferenceError: showCreateListingModal is not defined):
+// Tool-ui.js is loaded as <script type="module">, so top-level function
+// declarations are module-scoped and never become window properties on
+// their own. The old guard near the top of this file
+// (`if (typeof showCreateListingModal !== 'function') window.showCreateListingModal = ...`)
+// was meant to cover that, but function declarations are hoisted to the
+// top of the module, so by the time that guard ran, this real function
+// already existed in module scope and `typeof showCreateListingModal`
+// was already 'function' — so the guard's window assignment never fired.
+// Every inline onclick="showCreateListingModal()" in the HTML runs in
+// global scope and could never find it. Explicitly attaching it to
+// `window` right here guarantees the real implementation is reachable.
 function showCreateListingModal() {
     // FIX (2026-07-22): close any other open header panel first so features
     // don't stack on top of each other. Shared with Tool-core.js's openModal.
@@ -2932,6 +2944,7 @@ function showCreateListingModal() {
         alert('Create Listing feature - modal not found');
     }
 }
+window.showCreateListingModal = showCreateListingModal;
 
 function hideCreateListingModal() {
     if (DOM.createListingModal) {

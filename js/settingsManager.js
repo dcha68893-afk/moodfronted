@@ -896,6 +896,36 @@
     const instance = new SettingsManager();
     window.NexopaSettingsManager      = instance;
     window.NexopaSettingsManagerClass = SettingsManager;
+    // BUGFIX (Uncaught QuotaExceededError at settingsManager.js save()):
+    // save() previously called localStorage.setItem() with zero error
+    // handling. When a large base64 photo data: URL (from settings-ui.js's
+    // savePhoto/saveCoverPhoto) ended up in this.data, the write could
+    // exceed the localStorage quota and throw an UNCAUGHT exception,
+    // breaking the calling code path entirely (see AppSettings.js's
+    // stripLargeDataUrisForCache for the same root cause on that store).
+    // This local helper mirrors that fix: strip oversized data: URLs before
+    // writing the local cache, and always catch/log instead of throwing.
+    function _stripLargeDataUrisForLocalCache(value) {
+        if (typeof value === 'string') {
+            return (value.length > 2048 && value.slice(0, 5) === 'data:')
+                ? '__CACHED_ELSEWHERE__'
+                : value;
+        }
+        if (Array.isArray(value)) {
+            return value.map(_stripLargeDataUrisForLocalCache);
+        }
+        if (value && typeof value === 'object') {
+            const out = {};
+            for (const k in value) {
+                if (Object.prototype.hasOwnProperty.call(value, k)) {
+                    out[k] = _stripLargeDataUrisForLocalCache(value[k]);
+                }
+            }
+            return out;
+        }
+        return value;
+    }
+
     window.SettingsStore = window.SettingsStore || {
         data: {},
         listeners: {},
@@ -904,7 +934,12 @@
             return this.data;
         },
         save() {
-            localStorage.setItem('app_settings', JSON.stringify(this.data));
+            try {
+                const cacheable = _stripLargeDataUrisForLocalCache(this.data);
+                localStorage.setItem('app_settings', JSON.stringify(cacheable));
+            } catch (error) {
+                console.warn('[SettingsStore] Failed to persist local cache (non-fatal):', error && error.message);
+            }
         },
         set(key, value) {
             // Validate key and value to prevent undefined logging

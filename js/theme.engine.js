@@ -204,7 +204,79 @@
 
     // ---- Apply (paint-critical, synchronous, idempotent) -------------------
 
-    function paint(theme, fontSize, accentColor) {
+    // ROOT CAUSE OF THE VISIBLE "SPARKLE/BLINK" ON THEME SWAP, REFRESH AND
+    // RELOGIN: every module stylesheet (chat.css, calls.css, Tool.css,
+    // friend.css, group.css, status.css, messages.css, settings.css,
+    // responsive.css...) has its own `transition: background-color .2s`,
+    // `transition: color .2s ease` etc. rules sprinkled on buttons, cards,
+    // rows, headers — usually intended for hover/press feedback, not theme
+    // changes. Those properties are also exactly the ones the CSS variables
+    // this engine sets feed into. So even though every CSS variable updates
+    // in the same synchronous paint() call below, each element with its own
+    // transition duration/easing animates its own repaint over ~0.2-0.3s
+    // independently — hundreds of elements crossfading on their own
+    // schedule reads as staggered blinking/sparkling instead of one instant
+    // change. This is NOT specific to a live toggle: on refresh/relogin the
+    // very first paint is genuinely instant (this script runs synchronously
+    // before any stylesheet), but any element whose class/module CSS hasn't
+    // finished parsing yet still lands on those same transitioned
+    // properties once it does, producing the identical visible effect.
+    //
+    // Fix: for the brief moment paint() is actually changing something,
+    // force every element's transitions off, apply the new theme in that
+    // frozen frame, then release the freeze one frame later so normal
+    // hover/press transitions are completely unaffected during regular use.
+    var TRANSITION_SUPPRESS_ID = 'kyn-theme-suppress-transitions';
+
+    function suppressTransitions(doc) {
+        try {
+            if (!doc || !doc.head) return;
+            var style = doc.getElementById(TRANSITION_SUPPRESS_ID);
+            if (!style) {
+                style = doc.createElement('style');
+                style.id = TRANSITION_SUPPRESS_ID;
+                doc.head.appendChild(style);
+            }
+            style.textContent = '*, *::before, *::after { transition: none !important; animation: none !important; }';
+        } catch (_) {}
+    }
+
+    function releaseTransitions(doc) {
+        try {
+            if (!doc) return;
+            var style = doc.getElementById(TRANSITION_SUPPRESS_ID);
+            if (style && style.parentNode) style.parentNode.removeChild(style);
+        } catch (_) {}
+    }
+
+    // Suppress on this document, force one synchronous layout so the browser
+    // commits "transitions off" before the new colors are applied (otherwise
+    // the off-then-on could still be batched into the same animation frame
+    // as the color change and not actually prevent it), then release after
+    // the paint has had a frame to land.
+    function withTransitionsSuppressed(doc, fn) {
+        var win = (doc && doc.defaultView) || global;
+        suppressTransitions(doc);
+        try { if (doc && doc.documentElement) { void doc.documentElement.offsetHeight; } } catch (_) {}
+        fn();
+        var release = function () { releaseTransitions(doc); };
+        // Two rAFs is the standard "wait for the new styles to actually
+        // paint" signal; falls back to a short timeout if rAF is unavailable
+        // (e.g. a not-yet-visible iframe document). Driven by the target
+        // document's own window so a background/inactive iframe (whose rAF
+        // can be throttled differently than the parent's) still releases.
+        try {
+            if (win && win.requestAnimationFrame) {
+                win.requestAnimationFrame(function () { win.requestAnimationFrame(release); });
+            } else {
+                setTimeout(release, 50);
+            }
+        } catch (_) {
+            setTimeout(release, 50);
+        }
+    }
+
+    function paintNow(theme, fontSize, accentColor) {
         var root = document.documentElement;
         root.setAttribute('data-theme', theme);
         root.classList.toggle('theme-dark', theme === 'dark');
@@ -229,6 +301,24 @@
         if (document.body) {
             document.body.classList.toggle('dark-theme', theme === 'dark');
         }
+    }
+
+    function paint(theme, fontSize, accentColor) {
+        // The very first paint (script-evaluation time, before state.locked
+        // is set below) has nothing on screen yet to visibly fade from, so
+        // it runs at full speed with no suppression overhead. Every paint
+        // after that is a real, visible update (toggle, cross-tab sync,
+        // settings-fetch correction, etc.) and goes through the
+        // transition-freeze so it lands as one instant change instead of
+        // however many independently-timed CSS transitions the touched
+        // elements happen to carry.
+        if (!state.locked) {
+            paintNow(theme, fontSize, accentColor);
+            return;
+        }
+        withTransitionsSuppressed(document, function () {
+            paintNow(theme, fontSize, accentColor);
+        });
     }
 
     // ---- Engine state (locked after init) -----------------------------------
@@ -353,21 +443,23 @@
                     doc.head.insertBefore(link, doc.head.firstChild);
                 }
 
-                doc.documentElement.setAttribute('data-theme', theme);
-                doc.documentElement.classList.toggle('theme-dark', isDark);
-                doc.documentElement.classList.toggle('dark-theme', isDark);
-                if (doc.body) doc.body.classList.toggle('dark-theme', isDark);
-                doc.documentElement.style.setProperty('--base-font-size', state.fontSize + 'px');
+                withTransitionsSuppressed(doc, function () {
+                    doc.documentElement.setAttribute('data-theme', theme);
+                    doc.documentElement.classList.toggle('theme-dark', isDark);
+                    doc.documentElement.classList.toggle('dark-theme', isDark);
+                    if (doc.body) doc.body.classList.toggle('dark-theme', isDark);
+                    doc.documentElement.style.setProperty('--base-font-size', state.fontSize + 'px');
 
-                if (doc.head) {
-                    var style = doc.getElementById('kyn-theme-inline');
-                    if (!style) {
-                        style = doc.createElement('style');
-                        style.id = 'kyn-theme-inline';
-                        doc.head.insertBefore(style, doc.head.firstChild);
+                    if (doc.head) {
+                        var style = doc.getElementById('kyn-theme-inline');
+                        if (!style) {
+                            style = doc.createElement('style');
+                            style.id = 'kyn-theme-inline';
+                            doc.head.insertBefore(style, doc.head.firstChild);
+                        }
+                        style.textContent = isDark ? IFRAME_OVERRIDE_CSS_DARK : IFRAME_OVERRIDE_CSS_LIGHT;
                     }
-                    style.textContent = isDark ? IFRAME_OVERRIDE_CSS_DARK : IFRAME_OVERRIDE_CSS_LIGHT;
-                }
+                });
             } catch (_) {}
         },
 

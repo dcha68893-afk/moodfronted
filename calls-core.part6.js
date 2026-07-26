@@ -1636,6 +1636,16 @@ _clearStaleCallState: function() {
 
     // it's likely stale - clean it up
 
+    // BUGFIX (ReferenceError: _ACTIVE_CALL_STATES is not defined): this Set
+    // used to be declared with `const` INSIDE the first `if` block below.
+    // Because `const`/`let` are block-scoped in JS, that made it invisible
+    // to the second, sibling `if` block further down in this same function
+    // (the "initiating" stale-call check), which also references it. Any
+    // call that reached that second check threw an uncaught ReferenceError
+    // and skipped its stale-call cleanup entirely. Hoisting the declaration
+    // to the top of the function makes it visible to both blocks.
+    const _ACTIVE_CALL_STATES = new Set(['connected','in-call','in_call','connecting','starting','initiated','initiating','ringing','incoming','in_progress']);
+
 
 
     if (window.__CallsCoreShared.callsState.callActive && window.__CallsCoreShared.callsState.callStartTime) {
@@ -1671,7 +1681,9 @@ _clearStaleCallState: function() {
         // in the FIX-ROOT-CAUSE-2MIN-CALL-DROP comment below: this 120s check
         // should never fire for a call still in initiating/negotiating states —
         // only the dedicated 'initiating' timeout (300s) below should.
-        const _ACTIVE_CALL_STATES = new Set(['connected','in-call','in_call','connecting','starting','initiated','initiating','ringing','incoming','in_progress']);
+        // (_ACTIVE_CALL_STATES is declared once at the top of this function
+        // — see BUGFIX comment there — so both this block and the sibling
+        // 'initiating' block below it can both see it now.)
 
         // FIX-ROOT-CAUSE-2MIN-CALL-DROP: the app tracks call state in THREE
         // separate places that are not guaranteed to stay in sync —

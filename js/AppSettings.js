@@ -658,12 +658,53 @@
         };
     }
 
+    // BUGFIX (QuotaExceededError: Setting the value of 'app_settings_global:2'
+    // exceeded the quota): when a user picks a new avatar or cover photo,
+    // settings-ui.js stores the raw base64 data: URL straight into
+    // profile.photoUrl / profile.coverPhotoUrl (see savePhoto/saveCoverPhoto
+    // in settings-ui.js). A single photo can be several MB as base64, and
+    // persist() used to write the ENTIRE _data blob into localStorage under
+    // FOUR separate keys on every single settings change (storageKeyForUser,
+    // LEGACY_CACHE_KEY, and 'kyn_app_settings', each wrapping a full copy of
+    // _data) — so one photo pick could multiply into 10-20MB+ of localStorage
+    // writes and blow the ~5-10MB per-origin quota almost immediately. That
+    // then broke ALL subsequent settings persistence (not just the photo),
+    // because every future persist() call kept re-throwing on the same
+    // oversized keys. The actual photo itself is (and always was) sent to
+    // the backend separately via the normal settings PUT/update API call —
+    // localStorage here is only a fast-read local cache, so it never needed
+    // to hold the raw image bytes at all. This helper deep-clones _data and
+    // replaces any base64 data: URL with a small placeholder before the
+    // cache is written, so the local cache stays tiny while the real image
+    // data still round-trips through the backend as before.
+    function stripLargeDataUrisForCache(value) {
+        if (typeof value === 'string') {
+            return (value.length > 2048 && value.slice(0, 5) === 'data:')
+                ? '__CACHED_ELSEWHERE__'
+                : value;
+        }
+        if (Array.isArray(value)) {
+            return value.map(stripLargeDataUrisForCache);
+        }
+        if (value && typeof value === 'object') {
+            const out = {};
+            for (const key in value) {
+                if (Object.prototype.hasOwnProperty.call(value, key)) {
+                    out[key] = stripLargeDataUrisForCache(value[key]);
+                }
+            }
+            return out;
+        }
+        return value;
+    }
+
     function persist() {
+        const cacheableData = stripLargeDataUrisForCache(_data);
         const payload = {
             version: VERSION,
             userId: _activeUserId,
             updatedAt: Date.now(),
-            data: _data
+            data: cacheableData
         };
 
         try {
@@ -672,7 +713,7 @@
             localStorage.setItem(LEGACY_CACHE_KEY, JSON.stringify(payload));
             // FIX-009: Write canonical key so all iframes can read settings on init
             // without waiting for postMessage/BroadcastChannel delivery
-            localStorage.setItem('kyn_app_settings', JSON.stringify(_data));
+            localStorage.setItem('kyn_app_settings', JSON.stringify(cacheableData));
         } catch (error) {
             console.warn('[AppSettings] Failed to persist cache:', error.message);
         }
