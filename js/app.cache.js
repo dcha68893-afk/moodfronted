@@ -348,7 +348,7 @@
       // Deleted chats/groups must never resurrect from IDB on hydration.
       if (storeName === 'chats' || storeName === 'groups') {
         const tombstones = (() => {
-          try { return JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}'); } catch (_) { return {}; }
+          try { return JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}'); } catch (_) { return {}; }
         })();
         if (Object.keys(tombstones).length > 0) {
           records = records.filter((r) => {
@@ -417,9 +417,9 @@
       const id = String(chatId);
       // 1. Write tombstone
       try {
-        const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+        const tombstones = JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}');
         tombstones[id] = { deletedAt: nowTs(), entityType: 'chat', syncRevision: 1 };
-        localStorage.setItem('moodchat_tombstones_v1', JSON.stringify(tombstones));
+        localStorage.setItem('nexopa_tombstones_v1', JSON.stringify(tombstones));
       } catch (_) {}
       // 2. Remove from IDB
       await this.remove('chats', id).catch(() => {});
@@ -437,9 +437,9 @@
     async deleteGroup(groupId) {
       const id = String(groupId);
       try {
-        const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+        const tombstones = JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}');
         tombstones[id] = { deletedAt: nowTs(), entityType: 'group', syncRevision: 1 };
-        localStorage.setItem('moodchat_tombstones_v1', JSON.stringify(tombstones));
+        localStorage.setItem('nexopa_tombstones_v1', JSON.stringify(tombstones));
       } catch (_) {}
       await this.remove('groups', id).catch(() => {});
       try { window.dispatchEvent(new CustomEvent('kyn:group:deleted', { detail: { groupId: id } })); } catch (_) {}
@@ -481,12 +481,12 @@
       if (!session || !session.token) return false;
       try {
         localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-        ["authToken", "token", "accessToken", "moodchat_token", "USER_TOKEN"].forEach((key) => {
+        ["authToken", "token", "accessToken", "nexopa_token", "USER_TOKEN"].forEach((key) => {
           localStorage.setItem(key, session.token);
         });
         if (session.user) {
           const userJson = JSON.stringify(session.user);
-          ["currentUser", "user", "moodchat_user"].forEach((key) => localStorage.setItem(key, userJson));
+          ["currentUser", "user", "nexopa_user"].forEach((key) => localStorage.setItem(key, userJson));
         }
         localStorage.setItem("isLoggedIn", "true");
         return true;
@@ -498,7 +498,7 @@
     clearSession() {
       try {
         localStorage.removeItem(SESSION_KEY);
-        ["authToken", "token", "accessToken", "moodchat_token", "USER_TOKEN", "currentUser", "user", "moodchat_user", "isLoggedIn"].forEach((key) => localStorage.removeItem(key));
+        ["authToken", "token", "accessToken", "nexopa_token", "USER_TOKEN", "currentUser", "user", "nexopa_user", "isLoggedIn"].forEach((key) => localStorage.removeItem(key));
         return true;
       } catch (_error) {
         return false;

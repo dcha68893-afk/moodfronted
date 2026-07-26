@@ -10,7 +10,7 @@
  *  - Push wake recovery
  *
  * Integrates with existing BackgroundSyncService (Phase 2) — extends it.
- * Uses moodchat_ prefix for storage keys.
+ * Uses nexopa_ prefix for storage keys.
  *
  * @version 5.0.0
  * @phase 5 — Background Reliability
@@ -21,10 +21,10 @@
 
   if (window.__BackgroundReliabilityService) return;
 
-  const BC_CHANNEL_NAME   = 'moodchat_bg_sync';
+  const BC_CHANNEL_NAME   = 'nexopa_bg_sync';
   const LEADER_PING_MS    = 10000;
   const LEADER_TIMEOUT_MS = 25000;
-  const SW_SYNC_TAG       = 'moodchat-bg-sync-v5';
+  const SW_SYNC_TAG       = 'nexopa-bg-sync-v5';
   const HIDDEN_SYNC_THRESHOLD_S = 20;
 
   // ─── BroadcastChannelCoordinator ─────────────────────────────────────────
@@ -146,7 +146,7 @@
       // Use localStorage events as fallback for cross-tab communication
       this._isLeader = true; // Assume leader if no BroadcastChannel
       window.addEventListener('storage', e => {
-        if (e.key !== 'moodchat_bc_msg') return;
+        if (e.key !== 'nexopa_bc_msg') return;
         try {
           const data = JSON.parse(e.newValue || '{}');
           this._onMessage(data);

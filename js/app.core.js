@@ -1,4 +1,4 @@
-// app.core.js - MoodChat Core Services & Bootstrapping - ENHANCED VERSION
+// app.core.js - Nexopa Core Services & Bootstrapping - ENHANCED VERSION
 // UPDATED: Enhanced application bootstrap with proper coordination
 // UPDATED: Improved session state coordination with event-driven architecture
 // UPDATED: Robust UI orchestration with failure recovery
@@ -110,15 +110,15 @@
       console.log('⚠️ AUTH_STATE not defined, creating safe shim');
       window.AUTH_STATE = {
         hasToken: function() {
-          const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+          const token = localStorage.getItem('accessToken') || localStorage.getItem('nexopa_jwt_token');
           return !!token;
         },
         getToken: function() {
-          return localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+          return localStorage.getItem('accessToken') || localStorage.getItem('nexopa_jwt_token');
         },
         getUser: function() {
           try {
-            const userStr = localStorage.getItem('moodchat_user') || sessionStorage.getItem('moodchat_user');
+            const userStr = localStorage.getItem('nexopa_user') || sessionStorage.getItem('nexopa_user');
             return userStr ? JSON.parse(userStr) : null;
           } catch (e) {
             return null;
@@ -145,19 +145,19 @@
         setAuthState: function(user, token) {
           if (token) {
             localStorage.setItem('accessToken', token);
-            localStorage.setItem('moodchat_jwt_token', token);
+            localStorage.setItem('nexopa_jwt_token', token);
           }
           if (user) {
-            localStorage.setItem('moodchat_user', JSON.stringify(user));
+            localStorage.setItem('nexopa_user', JSON.stringify(user));
           }
         },
         clearAuthState: function() {
           localStorage.removeItem('accessToken');
-          localStorage.removeItem('moodchat_jwt_token');
-          localStorage.removeItem('moodchat_user');
+          localStorage.removeItem('nexopa_jwt_token');
+          localStorage.removeItem('nexopa_user');
           localStorage.removeItem('tokenExpiresAt');
-          localStorage.removeItem('moodchat-auth-state');
-          sessionStorage.removeItem('moodchat_user');
+          localStorage.removeItem('nexopa-auth-state');
+          sessionStorage.removeItem('nexopa_user');
         },
         _tokenExpiry: null
       };
@@ -171,7 +171,7 @@
           // Check for modular API
           return typeof window.api !== 'undefined' || 
                  (window.api && window.api.core && window.api.auth && window.api.request) ||
-                 window.__MOODCHAT_API_READY === true;
+                 window.__NEXOPA_API_READY === true;
         },
         waitForApi: function() {
           return new Promise((resolve) => {
@@ -225,7 +225,7 @@
               // Fallback to direct fetch — build absolute URL so it hits the backend, not the static frontend
               const _apiBase = (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null)
                 || (typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() + '/api' : null)
-                || 'https://moodchat-fy56.onrender.com/api';
+                || 'https://nexopa-fy56.onrender.com/api';
               const _absEndpoint = endpoint.startsWith('http') ? endpoint : _apiBase + (endpoint.startsWith('/') ? endpoint : '/' + endpoint);
               fetch(_absEndpoint, options)
                 .then(response => response.json())
@@ -386,7 +386,7 @@
       window.DATA_CACHE = {
         getInstant: function(key) {
           try {
-            const data = localStorage.getItem(`moodchat_cache_${key}`);
+            const data = localStorage.getItem(`nexopa_cache_${key}`);
             return data ? JSON.parse(data) : null;
           } catch (e) {
             return null;
@@ -394,17 +394,17 @@
         },
         setInstant: function(key, data) {
           try {
-            localStorage.setItem(`moodchat_cache_${key}`, JSON.stringify(data));
+            localStorage.setItem(`nexopa_cache_${key}`, JSON.stringify(data));
           } catch (e) {
             console.log('Failed to cache data:', e);
           }
         },
         remove: function(key) {
-          localStorage.removeItem(`moodchat_cache_${key}`);
+          localStorage.removeItem(`nexopa_cache_${key}`);
         },
         clearAll: function() {
           Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('moodchat_cache_')) {
+            if (key.startsWith('nexopa_cache_')) {
               localStorage.removeItem(key);
             }
           });
@@ -412,9 +412,9 @@
         getAllCachedTabData: function() {
           const cachedData = {};
           Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('moodchat_cache_')) {
+            if (key.startsWith('nexopa_cache_')) {
               try {
-                cachedData[key.replace('moodchat_cache_', '')] = JSON.parse(localStorage.getItem(key));
+                cachedData[key.replace('nexopa_cache_', '')] = JSON.parse(localStorage.getItem(key));
               } catch (e) {
                 // Skip invalid data
               }
@@ -435,14 +435,14 @@
         current: {},
         applyTheme: function() {
           // FIX (theme flash / competing-theme audit): this used to read a
-          // completely separate 'moodchat_theme' key (not the shared
+          // completely separate 'nexopa_theme' key (not the shared
           // 'app_theme' key every other module uses), default new users to
           // DARK when unset, and only ever toggle theme-dark/theme-light
           // classes — never the `data-theme` attribute that almost every
           // stylesheet actually keys off. That's a 7th disconnected theme
           // system that could silently fight the real one. Now reads the
           // shared key, defaults to light, and keeps data-theme in sync.
-          const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme')) === 'dark' ? 'dark' : 'light';
+          const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('nexopa_theme')) === 'dark' ? 'dark' : 'light';
           const html = document.documentElement;
           html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
           html.classList.add(`theme-${savedTheme}`);
@@ -452,14 +452,14 @@
         },
         getSetting: function(key) {
           try {
-            const settings = JSON.parse(localStorage.getItem('moodchat_settings') || '{}');
+            const settings = JSON.parse(localStorage.getItem('nexopa_settings') || '{}');
             return settings[key];
           } catch (e) {
             return null;
           }
         },
         clearUserSettings: function() {
-          localStorage.removeItem('moodchat_settings');
+          localStorage.removeItem('nexopa_settings');
         },
         registerPageCallback: function(name, callback) {
           // Simple callback registration
@@ -540,7 +540,7 @@ if (typeof APP_CONFIG === 'undefined') {
     navigation: {
       container: '#nav-container, .navigation-container, nav',
       persistState: true,
-      storageKey: 'moodchat_nav_state',
+      storageKey: 'nexopa_nav_state',
       validateBeforeLoad: true,
       sessionFirst: true  // Navigation loads after session is ready
     },
@@ -896,7 +896,7 @@ window.isPublicPage = function() {
     },
     
     trackProgress: function(event) {
-      const progressEvent = new CustomEvent('moodchat-bootstrap-progress', {
+      const progressEvent = new CustomEvent('nexopa-bootstrap-progress', {
         detail: {
           event: event,
           phase: this.currentPhase,
@@ -909,7 +909,7 @@ window.isPublicPage = function() {
     },
     
     broadcastPhaseChange: function(newPhase, oldPhase) {
-      const phaseChangeEvent = new CustomEvent('moodchat-bootstrap-phase-change', {
+      const phaseChangeEvent = new CustomEvent('nexopa-bootstrap-phase-change', {
         detail: {
           newPhase: newPhase,
           oldPhase: oldPhase,
@@ -925,7 +925,7 @@ window.isPublicPage = function() {
       const finalPhase = success ? this.PHASES.READY : this.PHASES.FAILED;
       this.setPhase(finalPhase);
       
-      const completionEvent = new CustomEvent('moodchat-bootstrap-complete', {
+      const completionEvent = new CustomEvent('nexopa-bootstrap-complete', {
         detail: {
           success: success,
           message: message,
@@ -1152,9 +1152,9 @@ window.isPublicPage = function() {
           () => window.api && window.api.core && window.api.core.initialize,
           () => window.api && window.api.auth && window.api.auth.getUser,
           () => window.api && window.api.request && window.api.request.secureFetch,
-          () => window.__MOODCHAT_API_READY === true,
-          () => window.MoodChatConfig && window.MoodChatConfig.api,
-          () => window.__MOODCHAT_API_EVENTS && window.__MOODCHAT_API_EVENTS.includes('ready')
+          () => window.__NEXOPA_API_READY === true,
+          () => window.NexopaConfig && window.NexopaConfig.api,
+          () => window.__NEXOPA_API_EVENTS && window.__NEXOPA_API_EVENTS.includes('ready')
         ];
         
         // Try immediate detection
@@ -1211,7 +1211,7 @@ window.isPublicPage = function() {
         }
         
         // Listen for modular API ready events
-        const eventTypes = ['api-ready', 'apiready', 'apiReady', 'moodchat-api-ready', 'api.core-ready'];
+        const eventTypes = ['api-ready', 'apiready', 'apiReady', 'nexopa-api-ready', 'api.core-ready'];
         let eventReceived = false;
         
         const eventHandler = () => {
@@ -1420,7 +1420,7 @@ window.isPublicPage = function() {
         }
         
         // Listen for auth ready events
-        const eventTypes = ['auth-ready', 'authReady', 'moodchat-auth-ready'];
+        const eventTypes = ['auth-ready', 'authReady', 'nexopa-auth-ready'];
         let eventReceived = false;
         
         const eventHandler = () => {
@@ -1668,7 +1668,7 @@ window.isPublicPage = function() {
         }
       } else {
         // Fallback to localStorage check
-        const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+        const token = localStorage.getItem('accessToken') || localStorage.getItem('nexopa_jwt_token');
         authState.hasToken = !!token;
         
         if (authState.hasToken) {
@@ -1933,7 +1933,7 @@ window.isPublicPage = function() {
     
     // Direct validation call (fallback)
     validateWithDirectCall: async function() {
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('nexopa_jwt_token');
       if (!token) {
         return { valid: false, reason: 'No token found' };
       }
@@ -2163,8 +2163,8 @@ window.isPublicPage = function() {
         events: {
           // Listen for event
           on: function(eventName, callback) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.on(eventName, callback);
+            if (typeof NexopaEvents !== 'undefined') {
+              NexopaEvents.on(eventName, callback);
             } else {
               window.addEventListener(eventName, (event) => {
                 callback(event.detail);
@@ -2174,8 +2174,8 @@ window.isPublicPage = function() {
           
           // Remove event listener
           off: function(eventName, callback) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.off(eventName, callback);
+            if (typeof NexopaEvents !== 'undefined') {
+              NexopaEvents.off(eventName, callback);
             } else {
               window.removeEventListener(eventName, callback);
             }
@@ -2183,8 +2183,8 @@ window.isPublicPage = function() {
           
           // Emit event
           emit: function(eventName, data) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.emit(eventName, data);
+            if (typeof NexopaEvents !== 'undefined') {
+              NexopaEvents.emit(eventName, data);
             } else {
               const event = new CustomEvent(eventName, {
                 detail: data,
@@ -2197,8 +2197,8 @@ window.isPublicPage = function() {
           
           // Listen for event once
           once: function(eventName, callback) {
-            if (typeof MoodChatEvents !== 'undefined') {
-              MoodChatEvents.once(eventName, callback);
+            if (typeof NexopaEvents !== 'undefined') {
+              NexopaEvents.once(eventName, callback);
             } else {
               const onceCallback = (event) => {
                 callback(event.detail);
@@ -2275,11 +2275,11 @@ window.isPublicPage = function() {
             };
           },
           
-          // Get MoodChatCore status
-          getMoodChatCoreStatus: function() {
+          // Get NexopaCore status
+          getNexopaCoreStatus: function() {
             return {
-              exists: typeof window.MoodChatCore !== 'undefined',
-              components: window.MoodChatCore ? Object.keys(window.MoodChatCore) : []
+              exists: typeof window.NexopaCore !== 'undefined',
+              components: window.NexopaCore ? Object.keys(window.NexopaCore) : []
             };
           }
         },
@@ -2382,7 +2382,7 @@ window.isPublicPage = function() {
       }
       
       // Dispatch event for UI components
-      const event = new CustomEvent('moodchat-auth-ui-required', {
+      const event = new CustomEvent('nexopa-auth-ui-required', {
         detail: {
           timestamp: new Date().toISOString(),
           reason: 'Public page or no valid session'
@@ -2408,7 +2408,7 @@ window.isPublicPage = function() {
       }
       
       // Dispatch event for UI components
-      const event = new CustomEvent('moodchat-dashboard-ui-required', {
+      const event = new CustomEvent('nexopa-dashboard-ui-required', {
         detail: {
           timestamp: new Date().toISOString(),
           user: window.currentUser || AUTH_STATE?.getUser()
@@ -2432,7 +2432,7 @@ window.isPublicPage = function() {
       if (!isAuthPage) {
         // Store redirect path for after login
         const returnPath = currentPath + window.location.search;
-        sessionStorage.setItem('moodchat_return_path', returnPath);
+        sessionStorage.setItem('nexopa_return_path', returnPath);
         
         // Small delay to allow event processing
         setTimeout(() => {
@@ -2534,7 +2534,7 @@ window.isPublicPage = function() {
             sidebar.classList.toggle('collapsed');
             
             // Dispatch event for other components
-            const event = new CustomEvent('moodchat-sidebar-toggle', {
+            const event = new CustomEvent('nexopa-sidebar-toggle', {
               detail: {
                 collapsed: sidebar.classList.contains('collapsed'),
                 timestamp: new Date().toISOString()
@@ -2632,7 +2632,7 @@ window.isPublicPage = function() {
       }
       
       // Dispatch navigation event
-      const event = new CustomEvent('moodchat-navigation', {
+      const event = new CustomEvent('nexopa-navigation', {
         detail: {
           page: page,
           timestamp: new Date().toISOString(),
@@ -2679,7 +2679,7 @@ window.isPublicPage = function() {
       // here too (separate key, dark-by-default, classes only, and a
       // matchMedia 'auto' listener with nothing left to drive since 'auto'
       // no longer exists).
-      const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme')) === 'dark' ? 'dark' : 'light';
+      const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('nexopa_theme')) === 'dark' ? 'dark' : 'light';
 
       // Remove all theme classes
       html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
@@ -2884,7 +2884,7 @@ window.isPublicPage = function() {
       }
       
       // Dispatch responsive change event
-      const event = new CustomEvent('moodchat-responsive-change', {
+      const event = new CustomEvent('nexopa-responsive-change', {
         detail: {
           isMobile: isMobile,
           isTablet: isTablet,
@@ -2917,7 +2917,7 @@ loadAppContent: function() {
   
   // Step 1: Dispatch content loading event with session info
   const user = window.currentUser || (AUTH_STATE && AUTH_STATE.getUser());
-  const event = new CustomEvent('moodchat-content-loading', {
+  const event = new CustomEvent('nexopa-content-loading', {
     detail: {
       timestamp: new Date().toISOString(),
       user: user,
@@ -3081,7 +3081,7 @@ initializeNavigationContainer: function() {
     }
     
     // Mark navigation as ready
-    window.dispatchEvent(new CustomEvent('moodchat-navigation-ready', {
+    window.dispatchEvent(new CustomEvent('nexopa-navigation-ready', {
       detail: { timestamp: new Date().toISOString() }
     }));
     
@@ -3096,7 +3096,7 @@ determinePageToLoad: function() {
   // Priority 1: Check for valid session storage value
   let savedPageKey = null;
   try {
-    const savedValue = sessionStorage.getItem('moodchat_last_page');
+    const savedValue = sessionStorage.getItem('nexopa_last_page');
     
     if (savedValue) {
       // Validate it's not [object Object] or malformed
@@ -3104,7 +3104,7 @@ determinePageToLoad: function() {
           savedValue.includes('Object]') || 
           savedValue.trim() === '') {
         console.warn('⚠️ Invalid session storage value detected, removing:', savedValue);
-        sessionStorage.removeItem('moodchat_last_page');
+        sessionStorage.removeItem('nexopa_last_page');
         savedPageKey = null;
       } else if (APP_CONFIG.pages && APP_CONFIG.pages[savedValue]) {
         // Valid page key
@@ -3125,7 +3125,7 @@ determinePageToLoad: function() {
     }
   } catch (error) {
     console.error('❌ Error reading session storage:', error);
-    sessionStorage.removeItem('moodchat_last_page');
+    sessionStorage.removeItem('nexopa_last_page');
   }
   
   // Priority 2: Use default page from APP_CONFIG
@@ -3199,7 +3199,7 @@ loadPageSafely: function(pageKey) {
   // Save to session storage safely
   try {
     // Store only the page key, not the object
-    sessionStorage.setItem('moodchat_last_page', pageKey);
+    sessionStorage.setItem('nexopa_last_page', pageKey);
     console.log('💾 Saved page key to session storage:', pageKey);
   } catch (error) {
     console.error('❌ Failed to save to session storage:', error);
@@ -3304,7 +3304,7 @@ loadIframePage: function(pageConfig) {
     this.propagateSessionToIframe(iframe, pageConfig);
     
     // Dispatch page loaded event
-    window.dispatchEvent(new CustomEvent('moodchat-page-loaded', {
+    window.dispatchEvent(new CustomEvent('nexopa-page-loaded', {
       detail: {
         pageId: pageConfig.id,
         pageKey: Object.keys(APP_CONFIG.pages).find(key => APP_CONFIG.pages[key].id === pageConfig.id),
@@ -3337,7 +3337,7 @@ propagateSessionToIframe: function(iframe, pageConfig) {
     const sendSession = () => {
       if (iframe.contentWindow) {
         const sessionData = {
-          type: 'moodchat-session-data',
+          type: 'nexopa-session-data',
           user: window.currentUser || (AUTH_STATE && AUTH_STATE.getUser()),
           isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
           token: AUTH_STATE ? AUTH_STATE.getToken() : null,
@@ -3370,7 +3370,7 @@ loadMainPage: function(pageConfig) {
     this.updateActiveNavigation(Object.keys(APP_CONFIG.pages).find(key => APP_CONFIG.pages[key].id === pageConfig.id));
     
     // Dispatch page loaded event
-    window.dispatchEvent(new CustomEvent('moodchat-page-loaded', {
+    window.dispatchEvent(new CustomEvent('nexopa-page-loaded', {
       detail: {
         pageId: pageConfig.id,
         pageKey: Object.keys(APP_CONFIG.pages).find(key => APP_CONFIG.pages[key].id === pageConfig.id),
@@ -3508,7 +3508,7 @@ initializeIframeCoordination: function() {
       }
       
       // Create event bridge for cross-component communication
-      window.MoodChatEvents = {
+      window.NexopaEvents = {
         listeners: new Map(),
         
         on: function(eventName, callback) {
@@ -3555,7 +3555,7 @@ initializeIframeCoordination: function() {
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         const originalDispatch = window.dispatchEvent;
         window.dispatchEvent = function(event) {
-          if (event.type.startsWith('moodchat-')) {
+          if (event.type.startsWith('nexopa-')) {
             console.log(`📡 Event: ${event.type}`, event.detail || '');
           }
           return originalDispatch.call(this, event);
@@ -3588,7 +3588,7 @@ initializeIframeCoordination: function() {
       }
       
       // Store iframe references
-      window.MoodChatIframes = new Map();
+      window.NexopaIframes = new Map();
       
       // Listen for iframe messages
       window.addEventListener('message', (event) => {
@@ -3603,35 +3603,35 @@ initializeIframeCoordination: function() {
         
         // Handle different message types
         switch(data?.type) {
-          case 'moodchat-iframe-ready':
+          case 'nexopa-iframe-ready':
             this.handleIframeReady(event.source, data);
             break;
             
-          case 'moodchat-iframe-auth-request':
+          case 'nexopa-iframe-auth-request':
             this.handleIframeAuthRequest(event.source, data);
             break;
             
-          case 'moodchat-iframe-data-request':
+          case 'nexopa-iframe-data-request':
             this.handleIframeDataRequest(event.source, data);
             break;
             
-          case 'moodchat-iframe-action':
+          case 'nexopa-iframe-action':
             this.handleIframeAction(event.source, data);
             break;
             
-          case 'moodchat-iframe-navigate':
+          case 'nexopa-iframe-navigate':
             this.handleIframeNavigate(data);
             break;
         }
       });
       
       // Provide API for iframes to communicate
-      window.MoodChatIframeAPI = {
+      window.NexopaIframeAPI = {
         sendToParent: function(type, data) {
           window.parent.postMessage({
             type: type,
             data: data,
-            source: 'moodchat-iframe',
+            source: 'nexopa-iframe',
             timestamp: new Date().toISOString()
           }, '*');
         },
@@ -3639,28 +3639,28 @@ initializeIframeCoordination: function() {
         requestAuthState: function() {
           return new Promise((resolve) => {
             const listener = (event) => {
-              if (event.data?.type === 'moodchat-auth-state-response') {
+              if (event.data?.type === 'nexopa-auth-state-response') {
                 window.removeEventListener('message', listener);
                 resolve(event.data.data);
               }
             };
             window.addEventListener('message', listener);
             
-            this.sendToParent('moodchat-iframe-auth-request');
+            this.sendToParent('nexopa-iframe-auth-request');
           });
         },
         
         requestData: function(key) {
           return new Promise((resolve) => {
             const listener = (event) => {
-              if (event.data?.type === 'moodchat-data-response' && event.data.key === key) {
+              if (event.data?.type === 'nexopa-data-response' && event.data.key === key) {
                 window.removeEventListener('message', listener);
                 resolve(event.data.data);
               }
             };
             window.addEventListener('message', listener);
             
-            this.sendToParent('moodchat-iframe-data-request', { key: key });
+            this.sendToParent('nexopa-iframe-data-request', { key: key });
           });
         }
       };
@@ -3683,7 +3683,7 @@ initializeIframeCoordination: function() {
       console.log('🖼️ Iframe ready:', data.iframeId);
       
       // Store iframe reference
-      window.MoodChatIframes.set(data.iframeId, {
+      window.NexopaIframes.set(data.iframeId, {
         window: iframeWindow,
         id: data.iframeId,
         ready: true,
@@ -3700,7 +3700,7 @@ initializeIframeCoordination: function() {
       
       // Send auth state to iframe
       iframeWindow.postMessage({
-        type: 'moodchat-auth-state-response',
+        type: 'nexopa-auth-state-response',
         data: {
           user: window.currentUser || AUTH_STATE?.getUser(),
           isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
@@ -3727,7 +3727,7 @@ initializeIframeCoordination: function() {
         case 'networkStatus':
           responseData = {
             status: API_COORDINATION?.getNetworkStatus() || 'unknown',
-            backendReachable: window.MoodChatConfig?.backendReachable,
+            backendReachable: window.NexopaConfig?.backendReachable,
             isOnline: API_COORDINATION?.getNetworkStatus() === 'online'
           };
           break;
@@ -3740,7 +3740,7 @@ initializeIframeCoordination: function() {
       
       // Send response
       iframeWindow.postMessage({
-        type: 'moodchat-data-response',
+        type: 'nexopa-data-response',
         key: data.key,
         data: responseData,
         timestamp: new Date().toISOString()
@@ -3791,7 +3791,7 @@ initializeIframeCoordination: function() {
     // Send initial state to iframe
     sendInitialStateToIframe: function(iframeWindow) {
       const initialState = {
-        type: 'moodchat-initial-state',
+        type: 'nexopa-initial-state',
         auth: {
           user: window.currentUser || AUTH_STATE?.getUser(),
           isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
@@ -3799,7 +3799,7 @@ initializeIframeCoordination: function() {
         },
         network: {
           status: API_COORDINATION?.getNetworkStatus() || 'unknown',
-          backendReachable: window.MoodChatConfig?.backendReachable,
+          backendReachable: window.NexopaConfig?.backendReachable,
           isOnline: API_COORDINATION?.getNetworkStatus() === 'online'
         },
         settings: SETTINGS_SERVICE?.current || {},
@@ -3870,7 +3870,7 @@ initializeIframeCoordination: function() {
         this.showErrorToUser('An unexpected error occurred. The app will continue to work in limited mode.');
         
         // Dispatch error event for other components
-        const errorEvent = new CustomEvent('moodchat-global-error', {
+        const errorEvent = new CustomEvent('nexopa-global-error', {
           detail: {
             error: event.error,
             message: event.message,
@@ -3891,7 +3891,7 @@ initializeIframeCoordination: function() {
         this.showErrorToUser('An operation failed. Please try again.');
         
         // Dispatch error event
-        const errorEvent = new CustomEvent('moodchat-unhandled-rejection', {
+        const errorEvent = new CustomEvent('nexopa-unhandled-rejection', {
           detail: {
             reason: event.reason,
             promise: event.promise,
@@ -4035,7 +4035,7 @@ initializeIframeCoordination: function() {
       }
       
       // Dispatch inactivity event
-      const event = new CustomEvent('moodchat-user-inactivity', {
+      const event = new CustomEvent('nexopa-user-inactivity', {
         detail: {
           duration: '30m',
           timestamp: new Date().toISOString()
@@ -4366,21 +4366,21 @@ initializeIframeCoordination: function() {
       
       return new Promise((resolve, reject) => {
         const successHandler = () => {
-          window.removeEventListener('moodchat-bootstrap-complete', successHandler);
-          window.removeEventListener('moodchat-bootstrap-complete', errorHandler);
+          window.removeEventListener('nexopa-bootstrap-complete', successHandler);
+          window.removeEventListener('nexopa-bootstrap-complete', errorHandler);
           resolve();
         };
         
         const errorHandler = (event) => {
           if (!event.detail.success) {
-            window.removeEventListener('moodchat-bootstrap-complete', successHandler);
-            window.removeEventListener('moodchat-bootstrap-complete', errorHandler);
+            window.removeEventListener('nexopa-bootstrap-complete', successHandler);
+            window.removeEventListener('nexopa-bootstrap-complete', errorHandler);
             reject(new Error(event.detail.message));
           }
         };
         
-        window.addEventListener('moodchat-bootstrap-complete', successHandler);
-        window.addEventListener('moodchat-bootstrap-complete', errorHandler);
+        window.addEventListener('nexopa-bootstrap-complete', successHandler);
+        window.addEventListener('nexopa-bootstrap-complete', errorHandler);
       });
     },
     
@@ -4475,7 +4475,7 @@ handleIframeReady: function(iframeWindow, data) {
 sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
   // Prepare session data
   const sessionData = {
-    type: 'moodchat-complete-session-data',
+    type: 'nexopa-complete-session-data',
     auth: {
       isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated && AUTH_STATE.isAuthenticated())),
       user: window.currentUser || (AUTH_STATE && AUTH_STATE.getUser()),
@@ -4484,7 +4484,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     },
     network: {
       status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-      backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+      backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
       isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
     },
     ui: UI_ORCHESTRATOR ? UI_ORCHESTRATOR.getState() : null,
@@ -4516,31 +4516,31 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     // Setup event listeners
     setupEventListeners: function() {
       // Listen for login events
-      window.addEventListener('moodchat-login-success', (event) => {
+      window.addEventListener('nexopa-login-success', (event) => {
         this.handleLoginSuccess(event.detail);
       });
       
-      window.addEventListener('moodchat-login-failed', (event) => {
+      window.addEventListener('nexopa-login-failed', (event) => {
         this.handleLoginFailed(event.detail);
       });
       
       // Listen for logout events
-      window.addEventListener('moodchat-logout', (event) => {
+      window.addEventListener('nexopa-logout', (event) => {
         this.handleLogout(event.detail);
       });
       
       // Listen for token expiration
-      window.addEventListener('moodchat-token-expired', (event) => {
+      window.addEventListener('nexopa-token-expired', (event) => {
         this.handleTokenExpired(event.detail);
       });
       
       // Listen for session invalidation
-      window.addEventListener('moodchat-session-invalid', (event) => {
+      window.addEventListener('nexopa-session-invalid', (event) => {
         this.handleSessionInvalid(event.detail);
       });
       
       // Listen for session refresh
-      window.addEventListener('moodchat-session-refreshed', (event) => {
+      window.addEventListener('nexopa-session-refreshed', (event) => {
         this.handleSessionRefreshed(event.detail);
       });
     },
@@ -4625,7 +4625,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           console.log('✅ Token refreshed successfully');
           
           // Notify components
-          window.dispatchEvent(new CustomEvent('moodchat-session-refreshed', {
+          window.dispatchEvent(new CustomEvent('nexopa-session-refreshed', {
             detail: { 
               token: refreshResult.token,
               timestamp: new Date().toISOString()
@@ -4643,7 +4643,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           this.showReauthenticationWarning();
           
           // Notify components
-          window.dispatchEvent(new CustomEvent('moodchat-reauthentication-required', {
+          window.dispatchEvent(new CustomEvent('nexopa-reauthentication-required', {
             detail: {
               reason: 'Token refresh failed',
               timestamp: new Date().toISOString()
@@ -4664,10 +4664,10 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Clear local storage tokens
       localStorage.removeItem('accessToken');
-      localStorage.removeItem('moodchat_jwt_token');
+      localStorage.removeItem('nexopa_jwt_token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('tokenExpiresAt');
-      localStorage.removeItem('moodchat-auth-state');
+      localStorage.removeItem('nexopa-auth-state');
       
       // Update UI
       this.updateUIForUnauthenticatedState();
@@ -4759,7 +4759,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Refresh via API call
     refreshViaApiCall: async function() {
-      const token = localStorage.getItem('accessToken') || localStorage.getItem('moodchat_jwt_token');
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('nexopa_jwt_token');
       if (!token) {
         throw new Error('No token to refresh');
       }
@@ -4855,7 +4855,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Add button handlers
       document.getElementById('reauth-now').addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('moodchat-reauthentication-required', {
+        window.dispatchEvent(new CustomEvent('nexopa-reauthentication-required', {
           detail: { reason: 'User requested re-authentication' }
         }));
         warning.remove();
@@ -5025,7 +5025,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         
         // If expired, trigger token expired event
         if (timeUntilExpiry <= 0) {
-          window.dispatchEvent(new CustomEvent('moodchat-token-expired', {
+          window.dispatchEvent(new CustomEvent('nexopa-token-expired', {
             detail: {
               reason: 'Token has expired',
               expiredAt: AUTH_STATE._tokenExpiry,
@@ -5067,7 +5067,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     setupCrossTabSync: function() {
       window.addEventListener('storage', (event) => {
         // Sync auth state across tabs
-        if (event.key === 'moodchat-auth-state') {
+        if (event.key === 'nexopa-auth-state') {
           try {
             const authData = JSON.parse(event.newValue);
             
@@ -5093,7 +5093,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Broadcast session change
     broadcastSessionChange: function(type, user) {
-      const event = new CustomEvent('moodchat-session-change', {
+      const event = new CustomEvent('nexopa-session-change', {
         detail: {
           type: type,
           user: user,
@@ -5113,12 +5113,12 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Broadcast to iframes
     broadcastToIframes: function(type, data) {
-      if (!window.MoodChatIframes) return;
+      if (!window.NexopaIframes) return;
       
-      window.MoodChatIframes.forEach((iframe, id) => {
+      window.NexopaIframes.forEach((iframe, id) => {
         try {
           iframe.window.postMessage({
-            type: `moodchat-${type}`,
+            type: `nexopa-${type}`,
             data: data,
             timestamp: new Date().toISOString()
           }, '*');
@@ -5135,7 +5135,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       }
       this.listeners.get(eventType).push(callback);
       
-      window.addEventListener(`moodchat-${eventType}`, (event) => {
+      window.addEventListener(`nexopa-${eventType}`, (event) => {
         callback(event.detail);
       });
     },
@@ -5414,22 +5414,22 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     // Setup UI event listeners
     setupUIEventListeners: function() {
       // Listen for responsive changes
-      window.addEventListener('moodchat-responsive-change', (event) => {
+      window.addEventListener('nexopa-responsive-change', (event) => {
         this.handleResponsiveChange(event.detail);
       });
       
       // Listen for theme changes
-      window.addEventListener('moodchat-theme-change', (event) => {
+      window.addEventListener('nexopa-theme-change', (event) => {
         this.handleThemeChange(event.detail);
       });
       
       // Listen for session changes
-      window.addEventListener('moodchat-session-change', (event) => {
+      window.addEventListener('nexopa-session-change', (event) => {
         this.handleSessionChange(event.detail);
       });
       
       // Listen for navigation events
-      window.addEventListener('moodchat-navigation', (event) => {
+      window.addEventListener('nexopa-navigation', (event) => {
         this.handleNavigation(event.detail);
       });
     },
@@ -5483,7 +5483,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       this.uiState.isDesktop = isDesktop;
       
       // Dispatch responsive change event
-      const event = new CustomEvent('moodchat-ui-responsive-change', {
+      const event = new CustomEvent('nexopa-ui-responsive-change', {
         detail: {
           isMobile: isMobile,
           isTablet: isTablet,
@@ -5514,7 +5514,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         }
       } else {
         // Fallback theme management
-        const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('moodchat_theme')) === 'dark' ? 'dark' : 'light';
+        const savedTheme = (localStorage.getItem('app_theme') || localStorage.getItem('nexopa_theme')) === 'dark' ? 'dark' : 'light';
         this.applyTheme(savedTheme);
         
         // Theme toggle button
@@ -5546,7 +5546,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
           this.applyTheme(newTheme);
           try { localStorage.setItem('app_theme', newTheme); } catch (_) {}
-          localStorage.setItem('moodchat_theme', newTheme);
+          localStorage.setItem('nexopa_theme', newTheme);
         });
         
         document.body.appendChild(themeToggle);
@@ -5566,7 +5566,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       try { localStorage.setItem('app_theme', resolved); } catch (_) {}
       
       // Dispatch theme change event
-      const event = new CustomEvent('moodchat-theme-change', {
+      const event = new CustomEvent('nexopa-theme-change', {
         detail: {
           theme: theme,
           timestamp: new Date().toISOString()
@@ -5786,7 +5786,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       this.uiState.sidebarOpen = component.state.open;
       
       // Dispatch event
-      const event = new CustomEvent('moodchat-sidebar-toggle', {
+      const event = new CustomEvent('nexopa-sidebar-toggle', {
         detail: {
           open: component.state.open,
           timestamp: new Date().toISOString()
@@ -5806,7 +5806,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       component.element.classList.remove('collapsed');
       this.uiState.sidebarOpen = true;
       
-      const event = new CustomEvent('moodchat-sidebar-toggle', {
+      const event = new CustomEvent('nexopa-sidebar-toggle', {
         detail: {
           open: true,
           timestamp: new Date().toISOString()
@@ -5824,7 +5824,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       component.element.classList.add('collapsed');
       this.uiState.sidebarOpen = false;
       
-      const event = new CustomEvent('moodchat-sidebar-toggle', {
+      const event = new CustomEvent('nexopa-sidebar-toggle', {
         detail: {
           open: false,
           timestamp: new Date().toISOString()
@@ -5881,7 +5881,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       this.updateActiveNavigation(tabName);
       
       // Dispatch event
-      const event = new CustomEvent('moodchat-tab-switch', {
+      const event = new CustomEvent('nexopa-tab-switch', {
         detail: {
           tab: tabName,
           timestamp: new Date().toISOString()
@@ -5906,7 +5906,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       this.updateActiveNavigation(page);
       
       // Dispatch event
-      const event = new CustomEvent('moodchat-navigation', {
+      const event = new CustomEvent('nexopa-navigation', {
         detail: {
           page: page,
           timestamp: new Date().toISOString(),
@@ -5932,7 +5932,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       modal.style.display = 'flex';
       
       // Dispatch event
-      const event = new CustomEvent('moodchat-modal-open', {
+      const event = new CustomEvent('nexopa-modal-open', {
         detail: {
           modalId: modalId,
           stackSize: this.uiState.modalStack.length,
@@ -5960,7 +5960,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       modal.style.display = 'none';
       
       // Dispatch event
-      const event = new CustomEvent('moodchat-modal-close', {
+      const event = new CustomEvent('nexopa-modal-close', {
         detail: {
           modalId: modalId,
           stackSize: this.uiState.modalStack.length,
@@ -5985,7 +5985,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       this.uiState.modalStack = [];
       
       // Dispatch event
-      const event = new CustomEvent('moodchat-modal-close-all', {
+      const event = new CustomEvent('nexopa-modal-close-all', {
         detail: {
           timestamp: new Date().toISOString()
         }
@@ -6200,7 +6200,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Register UI event listener
     on: function(eventType, callback) {
-      window.addEventListener(`moodchat-${eventType}`, (event) => {
+      window.addEventListener(`nexopa-${eventType}`, (event) => {
         callback(event.detail);
       });
     },
@@ -6267,35 +6267,35 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         
         // Handle different message types
         switch(data.type) {
-          case 'moodchat-iframe-ready':
+          case 'nexopa-iframe-ready':
             this.handleIframeReady(event.source, data);
             break;
             
-          case 'moodchat-page-ready':
+          case 'nexopa-page-ready':
             this.handlePageReady(event.source, data);
             break;
             
-          case 'moodchat-state-request':
+          case 'nexopa-state-request':
             this.handleStateRequest(event.source, data);
             break;
             
-          case 'moodchat-state-update':
+          case 'nexopa-state-update':
             this.handleStateUpdate(event.source, data);
             break;
             
-          case 'moodchat-action-request':
+          case 'nexopa-action-request':
             this.handleActionRequest(event.source, data);
             break;
             
-          case 'moodchat-data-request':
+          case 'nexopa-data-request':
             this.handleDataRequest(event.source, data);
             break;
             
-          case 'moodchat-cached-data-request':
+          case 'nexopa-cached-data-request':
             this.handleCachedDataRequest(event.source, data);
             break;
             
-          case 'moodchat-broadcast':
+          case 'nexopa-broadcast':
             this.handleBroadcast(event.source, data);
             break;
         }
@@ -6309,8 +6309,8 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         currentOrigin,
         'http://localhost',
         'http://127.0.0.1',
-        'https://moodchat.app',
-        'https://*.moodchat.app'
+        'https://nexopa.app',
+        'https://*.nexopa.app'
       ];
       
       return trustedOrigins.some(trusted => {
@@ -6400,7 +6400,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       }
       
       // Update main page state when ready
-      window.addEventListener('moodchat-bootstrap-complete', () => {
+      window.addEventListener('nexopa-bootstrap-complete', () => {
         this.updatePageState('main', {
           ready: true,
           authState: {
@@ -6409,7 +6409,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           },
           networkState: {
             status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-            backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null
+            backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null
           },
           uiState: UI_ORCHESTRATOR.getState(),
           lastUpdate: new Date().toISOString()
@@ -6417,7 +6417,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       });
       
       // Update state on changes
-      window.addEventListener('moodchat-session-change', () => {
+      window.addEventListener('nexopa-session-change', () => {
         this.updatePageState('main', {
           authState: {
             isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
@@ -6427,11 +6427,11 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         });
       });
       
-      window.addEventListener('moodchat-network-change', (event) => {
+      window.addEventListener('nexopa-network-change', (event) => {
         this.updatePageState('main', {
           networkState: {
             status: event.detail.status,
-            backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null
+            backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null
           },
           lastUpdate: new Date().toISOString()
         });
@@ -6552,7 +6552,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       if (requestedState === 'all' || requestedState === 'network') {
         stateData.network = {
           status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-          backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+          backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
           isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
         };
       }
@@ -6571,7 +6571,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Send response
       sourceWindow.postMessage({
-        type: 'moodchat-state-response',
+        type: 'nexopa-state-response',
         requestId: requestId,
         state: requestedState,
         data: stateData,
@@ -6699,7 +6699,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
             if (window.api && window.api.auth && window.api.auth.getUser) {
               return window.api.auth.getUser().then(user => {
                 sourceWindow.postMessage({
-                  type: 'moodchat-action-response',
+                  type: 'nexopa-action-response',
                   requestId: requestId,
                   action: action,
                   result: { valid: !!user, user: user, validated: true },
@@ -6708,7 +6708,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
                 }, '*');
               }).catch(err => {
                 sourceWindow.postMessage({
-                  type: 'moodchat-action-response',
+                  type: 'nexopa-action-response',
                   requestId: requestId,
                   action: action,
                   result: null,
@@ -6719,7 +6719,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
             } else if (typeof API_COORDINATION !== 'undefined' && API_COORDINATION.checkAuthMe) {
               return API_COORDINATION.checkAuthMe().then(authResult => {
                 sourceWindow.postMessage({
-                  type: 'moodchat-action-response',
+                  type: 'nexopa-action-response',
                   requestId: requestId,
                   action: action,
                   result: authResult,
@@ -6728,7 +6728,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
                 }, '*');
               }).catch(err => {
                 sourceWindow.postMessage({
-                  type: 'moodchat-action-response',
+                  type: 'nexopa-action-response',
                   requestId: requestId,
                   action: action,
                   result: null,
@@ -6749,7 +6749,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       // Send response (if not already sent for async actions)
       if (action !== 'checkAuthMe') {
         sourceWindow.postMessage({
-          type: 'moodchat-action-response',
+          type: 'nexopa-action-response',
           requestId: requestId,
           action: action,
           result: result,
@@ -6802,7 +6802,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           case 'networkStatus':
             responseData = {
               status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-              backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+              backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
               isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
             };
             break;
@@ -6834,7 +6834,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Send response
       sourceWindow.postMessage({
-        type: 'moodchat-data-response',
+        type: 'nexopa-data-response',
         requestId: requestId,
         dataType: dataType,
         data: responseData,
@@ -6876,7 +6876,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Send response
       sourceWindow.postMessage({
-        type: 'moodchat-cached-data-response',
+        type: 'nexopa-cached-data-response',
         requestId: requestId,
         data: cachedData,
         instant: instant,
@@ -6895,7 +6895,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Broadcast to other iframes/pages (excluding source)
       this.broadcastToOthers(sourceId, {
-        type: 'moodchat-broadcast-received',
+        type: 'nexopa-broadcast-received',
         eventType: eventType,
         eventData: eventData,
         sourceId: sourceId,
@@ -6903,7 +6903,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       });
       
       // Also dispatch on main window for local components
-      window.dispatchEvent(new CustomEvent(`moodchat-${eventType}`, {
+      window.dispatchEvent(new CustomEvent(`nexopa-${eventType}`, {
         detail: eventData
       }));
       
@@ -6928,7 +6928,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           try {
             // Try to send readiness check
             iframe.element.contentWindow.postMessage({
-              type: 'moodchat-readiness-check',
+              type: 'nexopa-readiness-check',
               timestamp: new Date().toISOString()
             }, '*');
           } catch (error) {
@@ -6941,7 +6941,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     // Send initial state to iframe
     sendInitialStateToIframe: function(iframeWindow, iframeId) {
       const initialState = {
-        type: 'moodchat-initial-state',
+        type: 'nexopa-initial-state',
         iframeId: iframeId,
         auth: {
           isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
@@ -6950,7 +6950,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         },
         network: {
           status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-          backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+          backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
           isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
         },
         ui: UI_ORCHESTRATOR.getState(),
@@ -6967,7 +6967,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     // Send initial state to page
     sendInitialStateToPage: function(pageWindow, pageId) {
       const initialState = {
-        type: 'moodchat-initial-state',
+        type: 'nexopa-initial-state',
         pageId: pageId,
         auth: {
           isAuthenticated: !!(window.currentUser || (AUTH_STATE && AUTH_STATE.isAuthenticated())),
@@ -6976,7 +6976,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         },
         network: {
           status: API_COORDINATION ? API_COORDINATION.getNetworkStatus() : 'unknown',
-          backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+          backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
           isOnline: API_COORDINATION ? API_COORDINATION.getNetworkStatus() === 'online' : false
         },
         ui: UI_ORCHESTRATOR.getState(),
@@ -7017,7 +7017,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         if (iframe.ready && iframe.window && id !== excludeSourceId) {
           try {
             iframe.window.postMessage({
-              type: 'moodchat-state-update-broadcast',
+              type: 'nexopa-state-update-broadcast',
               stateType: stateType,
               state: stateData,
               timestamp: new Date().toISOString()
@@ -7033,7 +7033,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         if (page.ready && page.window && id !== excludeSourceId) {
           try {
             page.window.postMessage({
-              type: 'moodchat-state-update-broadcast',
+              type: 'nexopa-state-update-broadcast',
               stateType: stateType,
               state: stateData,
               timestamp: new Date().toISOString()
@@ -7126,7 +7126,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Expose coordination API
     exposeCoordinationAPI: function() {
-      window.MoodChatCoordination = {
+      window.NexopaCoordination = {
         // Iframe management
         getIframes: () => Array.from(this.iframes.values()),
         getIframe: (id) => this.iframes.get(id),
@@ -7179,7 +7179,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           this.iframes.forEach((iframe, id) => {
             if (iframe.ready && iframe.window) {
               iframe.window.postMessage({
-                type: 'moodchat-state-request',
+                type: 'nexopa-state-request',
                 state: stateType,
                 requestId: `${requestId}-${id}`,
                 timestamp: new Date().toISOString()
@@ -7191,7 +7191,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
           this.pageStates.forEach((page, id) => {
             if (page.ready && page.window && id !== 'main') {
               page.window.postMessage({
-                type: 'moodchat-state-request',
+                type: 'nexopa-state-request',
                 state: stateType,
                 requestId: `${requestId}-${id}`,
                 timestamp: new Date().toISOString()
@@ -7448,7 +7448,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       // Only in production
       if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
         // Setup error reporting to backend if available
-        window.addEventListener('moodchat-error-reported', (event) => {
+        window.addEventListener('nexopa-error-reported', (event) => {
           this.reportErrorToBackend(event.detail);
         });
       }
@@ -7853,7 +7853,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     // Dispatch error event safely (without triggering console interception)
     dispatchErrorEvent: function(errorType, details) {
       try {
-        const event = new CustomEvent('moodchat-error', {
+        const event = new CustomEvent('nexopa-error', {
           detail: {
             type: errorType,
             details: details,
@@ -7864,7 +7864,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
         window.dispatchEvent(event);
         
         // Also dispatch specific event
-        const specificEvent = new CustomEvent(`moodchat-${errorType}`, {
+        const specificEvent = new CustomEvent(`nexopa-${errorType}`, {
           detail: details
         });
         window.dispatchEvent(specificEvent);
@@ -7925,7 +7925,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       
       // Dispatch critical error event safely
       try {
-        const event = new CustomEvent('moodchat-error-threshold-exceeded', {
+        const event = new CustomEvent('nexopa-error-threshold-exceeded', {
           detail: {
             errorCount: this.errorCount,
             threshold: this.errorThreshold,
@@ -8056,7 +8056,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Register error handler
     onError: function(callback) {
-      window.addEventListener('moodchat-error', (event) => {
+      window.addEventListener('nexopa-error', (event) => {
         try {
           callback(event.detail);
         } catch (err) {
@@ -8239,7 +8239,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       }
       
       // Session changes → UI updates
-      window.addEventListener('moodchat-session-change', (event) => {
+      window.addEventListener('nexopa-session-change', (event) => {
         UI_ORCHESTRATOR.handleSessionChange(event.detail);
         IFRAME_COORDINATOR.broadcastStateUpdate('auth', event.detail);
         
@@ -8254,7 +8254,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       });
       
       // Network changes → UI updates
-      window.addEventListener('moodchat-network-change', (event) => {
+      window.addEventListener('nexopa-network-change', (event) => {
         UI_ORCHESTRATOR.handleResponsiveChange(event.detail);
         IFRAME_COORDINATOR.broadcastStateUpdate('network', event.detail);
         
@@ -8269,7 +8269,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       });
       
       // UI changes → Session updates
-      window.addEventListener('moodchat-sidebar-toggle', (event) => {
+      window.addEventListener('nexopa-sidebar-toggle', (event) => {
         // Update UI state in session coordinator if needed
         // Record cross-system event
         if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.coordinationSystem) {
@@ -8282,7 +8282,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       });
       
       // Errors → All systems
-      window.addEventListener('moodchat-error', (event) => {
+      window.addEventListener('nexopa-error', (event) => {
         // Log error in all systems
         console.error('🚨 Coordination system error:', event.detail);
         
@@ -8297,10 +8297,10 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       });
       
       // Bootstrap progress → All systems
-      window.addEventListener('moodchat-bootstrap-progress', (event) => {
+      window.addEventListener('nexopa-bootstrap-progress', (event) => {
         // Update all systems with bootstrap progress
         IFRAME_COORDINATOR.broadcastToOthers(null, {
-          type: 'moodchat-bootstrap-progress',
+          type: 'nexopa-bootstrap-progress',
           data: event.detail,
           timestamp: new Date().toISOString()
         });
@@ -8320,7 +8320,7 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
     
     // Expose coordination API
     exposeCoordinationAPI: function() {
-      window.MoodChatCoordination = {
+      window.NexopaCoordination = {
         // Bootstrap
         bootstrap: APP_BOOTSTRAP,
         
@@ -8455,7 +8455,7 @@ validateSessionBeforeIframeLoad: function(iframeElement, pageConfig) {
   
   // Enhanced initialization function
   async function enhancedInitializeApp() {
-    console.log('🚀 Starting enhanced MoodChat initialization...');
+    console.log('🚀 Starting enhanced Nexopa initialization...');
     
     // Record enhanced initialization start
     if (window.app && window.app._dependencyGraph) {
@@ -8481,7 +8481,7 @@ validateSessionBeforeIframeLoad: function(iframeElement, pageConfig) {
       // Setup enhanced error boundaries
       setupEnhancedErrorBoundaries();
       
-      console.log('✅ Enhanced MoodChat initialization completed');
+      console.log('✅ Enhanced Nexopa initialization completed');
       
       // Record successful initialization
       if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.enhancedInitialization) {
@@ -8491,7 +8491,7 @@ validateSessionBeforeIframeLoad: function(iframeElement, pageConfig) {
       }
       
       // Dispatch final ready event
-      window.dispatchEvent(new CustomEvent('moodchat-enhanced-ready', {
+      window.dispatchEvent(new CustomEvent('nexopa-enhanced-ready', {
         detail: {
           timestamp: new Date().toISOString(),
           bootstrap: APP_BOOTSTRAP.getStatus(),
@@ -8925,8 +8925,8 @@ validateSessionBeforeIframeLoad: function(iframeElement, pageConfig) {
     }
     
     // Expose coordination system
-    if (typeof window.MoodChatCore === 'undefined') {
-      window.MoodChatCore = {
+    if (typeof window.NexopaCore === 'undefined') {
+      window.NexopaCore = {
         auth: AUTH_STATE,
         api: SECURE_API,
         token: TOKEN_VALIDATION,
@@ -8937,10 +8937,10 @@ validateSessionBeforeIframeLoad: function(iframeElement, pageConfig) {
         coordination: COORDINATION_SYSTEM
       };
       
-      // Record MoodChatCore exposure
+      // Record NexopaCore exposure
       if (window.app && window.app._dependencyGraph && window.app._dependencyGraph.backwardCompatibility) {
-        window.app._dependencyGraph.backwardCompatibility.moodChatCoreExposed = true;
-        window.app._dependencyGraph.backwardCompatibility.moodChatCoreComponents = Object.keys(window.MoodChatCore);
+        window.app._dependencyGraph.backwardCompatibility.nexopaChatCoreExposed = true;
+        window.app._dependencyGraph.backwardCompatibility.nexopaChatCoreComponents = Object.keys(window.NexopaCore);
       }
     }
     
@@ -9133,5 +9133,5 @@ validateSessionBeforeIframeLoad: function(iframeElement, pageConfig) {
     }
   }
   
-  console.log('✅ MoodChat Enhanced Core Services loaded with comprehensive coordination and modular API integration');
+  console.log('✅ Nexopa Enhanced Core Services loaded with comprehensive coordination and modular API integration');
 })();

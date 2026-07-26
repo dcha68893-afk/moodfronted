@@ -60,4 +60,4 @@ where the reported bug actually was).
    wait a few seconds, turn networking back on. The message should now
    reliably appear (previously the ~intermittent drop you reported).
 3. Check browser dev tools → Application → IndexedDB →
-   `moodchat_message_lifecycle_v1` to see the local store/queue.
+   `nexopa_message_lifecycle_v1` to see the local store/queue.

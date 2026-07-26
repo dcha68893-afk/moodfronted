@@ -122,7 +122,7 @@
         account: {
             displayName: 'User',
             username: 'user',
-            bio: "Hello! I'm using MoodChat",
+            bio: "Hello! I'm using Nexopa",
             profileVisibility: 'everyone',
             photoVisibility: 'everyone',
             lastSeen: 'everyone',
@@ -511,7 +511,7 @@
 
         target.clearUserSettings = function () {
             try {
-                localStorage.removeItem('moodchat_settings');
+                localStorage.removeItem('nexopa_settings');
             } catch (_) {}
             AppSettings.reset();
         };
@@ -732,7 +732,7 @@
             try {
                 token = localStorage.getItem('authToken')
                     || localStorage.getItem('token')
-                    || localStorage.getItem('moodchat_token')
+                    || localStorage.getItem('nexopa_token')
                     || localStorage.getItem('accessToken')
                     || null;
             } catch (_) {}
@@ -943,8 +943,8 @@
         } catch (_) {}
 
         try {
-            if (global.MoodChatSettingsManager && global.MoodChatSettingsManager.currentSettings) {
-                global.MoodChatSettingsManager.currentSettings = clone(_data);
+            if (global.NexopaSettingsManager && global.NexopaSettingsManager.currentSettings) {
+                global.NexopaSettingsManager.currentSettings = clone(_data);
             }
         } catch (_) {}
 

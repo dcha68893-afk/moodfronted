@@ -1,5 +1,5 @@
 /**
- * view-once.js — View-once photo/video for MoodChat
+ * view-once.js — View-once photo/video for Nexopa
  *
  * Phase 1 feature: View Once
  *

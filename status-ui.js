@@ -189,7 +189,7 @@ function ensureUIActive(actionName) {
     // FIX: Also allow if we have any valid session data stored (handles timing issues)
     try {
         const storedToken = localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
-                            localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+                            localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken');
         if (storedToken) return true;
     } catch(e) {}
     
@@ -377,7 +377,7 @@ function syncDataFromCore() {
             readLocalJson('kynecta_auth', null)?.user ||
             null;
         userData = currentUser;
-        isTokenReady = !!(localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token'));
+        isTokenReady = !!(localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token'));
     }
     
     // Sync parent ready
@@ -1130,7 +1130,7 @@ const UIFailsafe_StatusUI = {
             if (forceEnabled) return;
             try {
                 const hasToken = !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
-                                   localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'));
+                                   localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'));
                 if (hasToken) {
                     forceEnabled = true;
                     this._enableUI();
@@ -4760,7 +4760,7 @@ function handleCreateStatusClick() {
     const hasToken = (() => {
         try {
             return !!(localStorage.getItem('kynecta_auth') || localStorage.getItem('token') ||
-                      localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'));
+                      localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'));
         } catch(e) { return false; }
     })();
     if (!ensureUIActive('createStatus') && !hasToken) {

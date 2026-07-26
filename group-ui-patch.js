@@ -68,7 +68,7 @@
                 localStorage.getItem('token') ||
                 localStorage.getItem('accessToken') ||
                 localStorage.getItem('USER_TOKEN') ||
-                localStorage.getItem('moodchat_token') ||
+                localStorage.getItem('nexopa_token') ||
                 sessionStorage.getItem('authToken') ||
                 sessionStorage.getItem('auth_token') ||
                 sessionStorage.getItem('token') ||
@@ -87,7 +87,7 @@
             (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
             (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
             window.__API_BASE_URL || window.API_BASE_URL ||
-            'https://moodchat-fy56.onrender.com/api'
+            'https://nexopa-fy56.onrender.com/api'
         );
         // base ends in /api — strip leading /api from path to avoid double
         const cleanPath = path.replace(/^\/api\//, '/').replace(/^\/api$/, '/');

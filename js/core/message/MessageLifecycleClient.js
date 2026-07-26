@@ -62,7 +62,7 @@
 (function (global) {
   'use strict';
 
-  const DB_NAME = 'moodchat_message_lifecycle_v1';
+  const DB_NAME = 'nexopa_message_lifecycle_v1';
   const DB_VERSION = 1;
   const STORE_OUTGOING = 'outgoing_queue';
   const STORE_MESSAGES = 'messages';

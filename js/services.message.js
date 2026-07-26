@@ -309,7 +309,7 @@
             const token = window.__PARENT_SESSION__?.token
                 || window.AUTH_SESSION?.token
                 || localStorage.getItem('token')
-                || localStorage.getItem('moodchat_token')
+                || localStorage.getItem('nexopa_token')
                 || null;
 
             const headers = {

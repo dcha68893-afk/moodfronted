@@ -1,5 +1,5 @@
 /**
- * message-select.js — Multi-select message mode for MoodChat
+ * message-select.js — Multi-select message mode for Nexopa
  *
  * Phase 2 feature: Long-press → select multiple messages → delete / forward
  *

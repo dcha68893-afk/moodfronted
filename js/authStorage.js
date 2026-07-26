@@ -7,8 +7,8 @@
 
     const AUTH_STORAGE_KEY = 'kynecta_auth';
     const LOGIN_STATE_KEY = 'isLoggedIn';
-    const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token', 'auth_token', 'kyn_token', 'kyn_access_token'];
-    const LEGACY_USER_KEYS = ['currentUser', 'user', 'moodchat_user'];
+    const LEGACY_TOKEN_KEYS = ['authToken', 'accessToken', 'token', 'nexopa_token', 'USER_TOKEN', 'kynecta_token', 'auth_token', 'kyn_token', 'kyn_access_token'];
+    const LEGACY_USER_KEYS = ['currentUser', 'user', 'nexopa_user'];
 
     function withAuthMutation(fn) {
         const previous = window.__allowAuthStorageMutation__;
@@ -43,10 +43,10 @@
     // ------------------------------------------------------------------
     const KNOWN_INDEXEDDB_NAMES = [
         'KnectaToolsDB', 'kynectaMesh', 'AppDB', 'calls-db', 'KnectaStatusDB',
-        'kyn_offline_queue', 'moodchat_repair_v1', 'kyn_stories_v1', 'moodchat_dq_v1'
+        'kyn_offline_queue', 'nexopa_repair_v1', 'kyn_stories_v1', 'nexopa_dq_v1'
     ];
     // Device-level (not account) keys that are safe to keep across switches.
-    const WIPE_ALLOWLIST = ['moodchat_theme', 'moodchat_nav_state'];
+    const WIPE_ALLOWLIST = ['nexopa_theme', 'nexopa_nav_state'];
 
     function getStoredUserId() {
         try {

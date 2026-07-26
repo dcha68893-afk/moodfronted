@@ -324,7 +324,7 @@
 
             // FIX #2: Never restore tombstoned conversations from server
             var tombstones = {};
-            try { tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}'); } catch (_) {}
+            try { tombstones = JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}'); } catch (_) {}
 
             for (const conv of serverConversations) {
                 const id = String(conv.id || conv.chatId || conv.conversationId || '');

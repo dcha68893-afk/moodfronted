@@ -447,8 +447,8 @@
             window.location.origin,
             'http://localhost',
             'http://127.0.0.1',
-            'https://moodchat-fy56.onrender.com',
-            'https://moodfronted.onrender.com',
+            'https://nexopa-fy56.onrender.com',
+            'https://nexopa.onrender.com',
             'null'
         ]),
         

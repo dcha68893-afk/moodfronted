@@ -4109,7 +4109,7 @@ export function loadBackupSection(container) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `moodchat-settings-backup-${Date.now()}.json`;
+            a.download = `nexopa-settings-backup-${Date.now()}.json`;
             document.body.appendChild(a);
             a.click();
             a.remove();

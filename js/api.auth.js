@@ -405,8 +405,8 @@
     const CONFIG = {
         // CRITICAL: Single source of truth for auth storage
         AUTH_STORAGE_KEY: 'kynecta_auth',
-        TOKEN_KEYS: ['USER_TOKEN', 'accessToken', 'moodchat_token', 'token'],
-        USER_DATA_KEYS: ['USER_DATA', 'authUser', 'moodchat_auth_user', 'userData'],
+        TOKEN_KEYS: ['USER_TOKEN', 'accessToken', 'nexopa_token', 'token'],
+        USER_DATA_KEYS: ['USER_DATA', 'authUser', 'nexopa_auth_user', 'userData'],
         REFRESH_TOKEN_KEY: 'REFRESH_TOKEN',
         TOKEN_EXPIRY_KEY: 'TOKEN_EXPIRY',
         AUTH_STATE_KEY: 'AUTH_STATE',
@@ -668,7 +668,7 @@
             // PATCH v1.3: Client-side expiry check REMOVED.
             // Previously: if (Date.now() > timestamp + expiresIn) → clear session.
             // This wiped kynecta_auth silently after 1 hour while other keys
-            // (kynecta_session, moodchat_accessToken) survived, creating a corrupted
+            // (kynecta_session, nexopa_accessToken) survived, creating a corrupted
             // partial state that caused the reopen loop on every device.
             // Server enforces expiry via 401. Background validator handles that case.
             
@@ -758,8 +758,8 @@
         if (window.__API_REQUEST) {
             return window.__API_REQUEST;
         }
-        if (window.MoodChatRequest) {
-            return window.MoodChatRequest;
+        if (window.NexopaRequest) {
+            return window.NexopaRequest;
         }
         return null;
     }
@@ -817,8 +817,8 @@
             }
             
             // Priority 5: Production default
-            console.log('[AUTH] Base URL from production default: https://moodchat-fy56.onrender.com');
-            return 'https://moodchat-fy56.onrender.com';
+            console.log('[AUTH] Base URL from production default: https://nexopa-fy56.onrender.com');
+            return 'https://nexopa-fy56.onrender.com';
         } catch (error) {
             console.error('[AUTH] Error getting base URL:', error);
             return typeof window.__getApiOrigin === 'function' ? window.__getApiOrigin() : 'http://localhost:4000';
@@ -1230,14 +1230,14 @@
             });
         };
         
-        if (!window.MoodChatAuth) {
-            window.MoodChatAuth = {};
+        if (!window.NexopaAuth) {
+            window.NexopaAuth = {};
         }
         
         const requiredLegacyMethods = ['login', 'register', 'logout', 'getCurrentUser', 'getUser'];
         requiredLegacyMethods.forEach(methodName => {
-            if (!window.MoodChatAuth[methodName] && publicApi[methodName]) {
-                window.MoodChatAuth[methodName] = publicApi[methodName];
+            if (!window.NexopaAuth[methodName] && publicApi[methodName]) {
+                window.NexopaAuth[methodName] = publicApi[methodName];
             }
         });
         
@@ -1912,7 +1912,7 @@
             }
             
             // Priority 3: Direct localStorage keys (in order)
-            const keys = ['token', 'accessToken', 'moodchat_token', 'USER_TOKEN', 'jwt'];
+            const keys = ['token', 'accessToken', 'nexopa_token', 'USER_TOKEN', 'jwt'];
             for (const key of keys) {
                 const token = localStorage.getItem(key);
                 if (token && token.length > 20 && token !== 'undefined' && token !== 'null') {
@@ -2160,8 +2160,8 @@
                         localStorage.removeItem('kynecta_auth');
                     }
                     // Clear ALL parallel session keys so no stale state survives
-                    ['kynecta_session','accessToken','moodchat_token','USER_TOKEN','token',
-                     'moodchat_accessToken','moodchat_user','moodchat_tokenExpiry',
+                    ['kynecta_session','accessToken','nexopa_token','USER_TOKEN','token',
+                     'nexopa_accessToken','nexopa_user','nexopa_tokenExpiry',
                      'auth_token','auth_user','currentUser','user','REFRESH_TOKEN','TOKEN_EXPIRY']
                         .forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });
                     window.__SESSION__ = null;
@@ -2253,7 +2253,7 @@
                 // PATCH v1.4: Atomically clear every old token location BEFORE writing
                 // the new token so no stale copy can survive alongside the fresh one.
                 // Previously the new token was simply written on top, leaving legacy keys
-                // (authToken, moodchat_token, etc.) holding the expired value.
+                // (authToken, nexopa_token, etc.) holding the expired value.
                 // api_core.js and iframes reading those keys would then send the old,
                 // rejected token and receive 401s even though the refresh succeeded.
                 try {
@@ -2804,7 +2804,7 @@
             window.currentUser = null;
             
             _safeStorageRemove('authUser');
-            _safeStorageRemove('moodchat_auth_user');
+            _safeStorageRemove('nexopa_auth_user');
             _safeStorageRemove('userData');
             // FIX-E2E-WIRING: clear the password handoff (see index.html login
             // success handler) on logout — it should never outlive the
@@ -2905,7 +2905,7 @@
         localStorage.setItem('auth_token', token);
         localStorage.setItem('authToken', token);
         localStorage.setItem('accessToken', token);
-        localStorage.setItem('moodchat_token', token);
+        localStorage.setItem('nexopa_token', token);
         localStorage.setItem('auth_user', JSON.stringify(user));
 
         const tokenStored = setUserToken(token, expiresIn);
@@ -3298,7 +3298,7 @@
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('USER_TOKEN', token);
-                    localStorage.setItem('moodchat_token', token);
+                    localStorage.setItem('nexopa_token', token);
                     localStorage.setItem('kynecta_auth', JSON.stringify({ token, user, timestamp: Date.now() }));
                     window.token = token;
                     window.accessToken = token;
@@ -3796,7 +3796,7 @@
             const legacyUser = localStorage.getItem('auth_user') ||
                                localStorage.getItem('currentUser') ||
                                localStorage.getItem('user') ||
-                               localStorage.getItem('moodchat_user');
+                               localStorage.getItem('nexopa_user');
             return legacyUser ? JSON.parse(legacyUser) : null;
         } catch {
             return null;

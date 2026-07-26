@@ -1,18 +1,18 @@
 # Centralized Identity System — What Was Actually Fixed
 
-This documents the real, verified changes made to `moodfronted` and `moodchat`.
+This documents the real, verified changes made to `moodfronted` and `nexopa`.
 No architecture, folder structure, or unrelated business logic was changed —
 every fix below is additive or a targeted correction inside existing files.
 
 ## The real bugs found (verified in your code, not assumed)
 
 1. **Three different avatar/cover write paths that disagreed with each other:**
-   - `moodchat/src/services/profileService.js` — Cloudinary-backed, writes the
+   - `nexopa/src/services/profileService.js` — Cloudinary-backed, writes the
      real `avatar` / `coverPhoto` columns. Correct.
-   - `moodchat/src/routes/settings.js` `updateProfileHandler` — the endpoint
+   - `nexopa/src/routes/settings.js` `updateProfileHandler` — the endpoint
      your Settings UI actually calls (`PUT/PATCH /api/settings/profile`).
      Also Cloudinary-backed and correct.
-   - `moodchat/src/controllers/userController.js` `updateAvatar` — dead code
+   - `nexopa/src/controllers/userController.js` `updateAvatar` — dead code
      (not wired to any route) that wrote a fake `/uploads/avatars/...` local
      path with a comment literally saying *"we'll simulate it"*. Fixed to
      delegate to the real Cloudinary path so it can never silently break
@@ -48,7 +48,7 @@ every fix below is additive or a targeted correction inside existing files.
 
 ## What was built
 
-### Backend (`moodchat`)
+### Backend (`nexopa`)
 
 - **`src/utils/identityNormalizer.js`** *(new)* — `toPublicIdentity(row)`
   returns one canonical shape:

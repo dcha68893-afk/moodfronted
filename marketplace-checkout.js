@@ -33,7 +33,7 @@ async function _api(method, endpoint, body=null) {
         const token = window.__kynToken||window.__accessToken||
             window.__PARENT_SESSION__?.token||
             localStorage.getItem('authToken')||localStorage.getItem('token')||
-            localStorage.getItem('moodchat_token')||localStorage.getItem('accessToken')||'';
+            localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
         const base = (window.__kynAPI?.baseUrl||'').replace(/\/api$/,'').replace(/\/$/,'') ||
             (typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'') ||
             'http://localhost:4000';

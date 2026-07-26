@@ -111,7 +111,7 @@
             else _cssVar('--primary-color', app.accentColor);
             // Derive a darker shade for hover states
             _cssVar('--primary-dark', _shadeColor(app.accentColor, -20));
-            try { localStorage.setItem('moodchat_accent_color', app.accentColor); } catch (_) {}
+            try { localStorage.setItem('nexopa_accent_color', app.accentColor); } catch (_) {}
         }
 
         if (app.fontSize) {

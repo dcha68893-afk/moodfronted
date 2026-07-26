@@ -320,27 +320,27 @@ function resolveBaseURL() {
         if (env === ENVIRONMENTS.LOCAL || env === ENVIRONMENTS.DEVELOPMENT) {
             return 'http://localhost:4000/api';  
         } else {
-            return 'https://moodchat-fy56.onrender.com/api';  
+            return 'https://nexopa-fy56.onrender.com/api';  
         }
     } catch (error) {
         console.error('[ENV] Base URL resolution error:', error);
-        return 'https://moodchat-fy56.onrender.com/api';
+        return 'https://nexopa-fy56.onrender.com/api';
     }
 }
 
 BASE_URLS = {
-    [ENVIRONMENTS.PRODUCTION]: 'https://moodchat-fy56.onrender.com/api',
+    [ENVIRONMENTS.PRODUCTION]: 'https://nexopa-fy56.onrender.com/api',
     [ENVIRONMENTS.DEVELOPMENT]: 'http://localhost:4000/api',
-    [ENVIRONMENTS.DEMO]: 'https://demo.moodchat.onrender.com/api',
-    [ENVIRONMENTS.STAGING]: 'https://staging.moodchat.onrender.com/api',
-    [ENVIRONMENTS.TEST]: 'https://test.moodchat.onrender.com/api',
+    [ENVIRONMENTS.DEMO]: 'https://demo.nexopa.onrender.com/api',
+    [ENVIRONMENTS.STAGING]: 'https://staging.nexopa.onrender.com/api',
+    [ENVIRONMENTS.TEST]: 'https://test.nexopa.onrender.com/api',
     [ENVIRONMENTS.LOCAL]: 'http://localhost:4000/api',  // ADD /api HERE
     [ENVIRONMENTS.AUTO]: null
 };
 
 ENVIRONMENT_DETECTION_RULES = [
     { pattern: /localhost|127\.0\.0\.1|::1|0\.0\.0\.0/i, env: ENVIRONMENTS.LOCAL },
-    { pattern: /render\.com|onrender\.com|moodchat-fy56/i, env: ENVIRONMENTS.PRODUCTION },
+    { pattern: /render\.com|onrender\.com|nexopa-fy56/i, env: ENVIRONMENTS.PRODUCTION },
     { pattern: /staging|stage/i, env: ENVIRONMENTS.STAGING },
     { pattern: /demo|testdrive/i, env: ENVIRONMENTS.DEMO },
     { pattern: /test|testing/i, env: ENVIRONMENTS.TEST },
@@ -618,12 +618,12 @@ getBackendBaseUrl = getBaseUrl;
 const AUTH_STORAGE_KEY = 'kynecta_auth';
 const TOKEN_PRIORITY_KEYS = [
     'token',
-    'moodchat_token',
+    'nexopa_token',
     'accessToken',
     'jwt',
     'authToken',
     'userToken',
-    'moodchat_auth_token'
+    'nexopa_auth_token'
 ];
 
 function getStorageBridge() {
@@ -723,7 +723,7 @@ function _saveAuthToStorage(token, user = null) {
         getStorageBridge().set(AUTH_STORAGE_KEY, authData);
         
         // Also store in legacy location for compatibility
-        getStorageBridge().set('moodchat_token', token);
+        getStorageBridge().set('nexopa_token', token);
         
         return true;
     } catch (error) {
@@ -741,7 +741,7 @@ function _clearAuthFromStorage() {
     
     try {
         getStorageBridge().remove(AUTH_STORAGE_KEY);
-        getStorageBridge().remove('moodchat_token');
+        getStorageBridge().remove('nexopa_token');
         
         // Clear legacy keys
         for (const key of TOKEN_PRIORITY_KEYS) {
@@ -1168,7 +1168,7 @@ if (requiresAuth) {
     
     if (!token) {
         token = localStorage.getItem('token') || 
-                localStorage.getItem('moodchat_token') || 
+                localStorage.getItem('nexopa_token') || 
                 localStorage.getItem('accessToken');
     }
     
@@ -2466,7 +2466,7 @@ window.addEventListener('message', async (event) => {
 // ============================================================================
 
 SecureStorage = {
-    _encryptionKey: 'moodchat_secure_v24_2026',
+    _encryptionKey: 'nexopa_secure_v24_2026',
     _prefix: 'sc_v24_',
     _version: '24.0.4',
     _salt: Math.random().toString(36).substring(2, 15),
@@ -2910,7 +2910,7 @@ TokenManager = {
     migrateLegacyTokens: function() {
         try {
             const legacyKeys = [
-                'accessToken', 'moodchat_token', 'token', 'moodchat_auth_token',
+                'accessToken', 'nexopa_token', 'token', 'nexopa_auth_token',
                 'authToken', 'userToken', 'jwt', 'access_token'
             ];
             
@@ -3869,7 +3869,7 @@ getAuthHeaders = function(endpoint) {
         // Also try other keys
         if (!token) {
             token = localStorage.getItem('token') || 
-                    localStorage.getItem('moodchat_token') || 
+                    localStorage.getItem('nexopa_token') || 
                     localStorage.getItem('accessToken');
         }
         
@@ -3906,8 +3906,8 @@ function isValidEndpoint(url, baseUrl) {
             const urlObj = new URL(url);
             
             const allowedDomains = [
-                'moodchat-fy56.onrender.com',
-                'moodfronted.onrender.com',
+                'nexopa-fy56.onrender.com',
+                'nexopa.onrender.com',
                 'localhost',
                 '127.0.0.1'
             ];
@@ -4354,7 +4354,7 @@ SAIC.initialize();
             
             if (!skipLegacy) {
                 try {
-                    localStorage.setItem('moodchat_auth_user', JSON.stringify(safeData));
+                    localStorage.setItem('nexopa_auth_user', JSON.stringify(safeData));
                     
                     const authUserStr = localStorage.getItem('authUser');
                     if (authUserStr) {
@@ -4400,8 +4400,8 @@ SAIC.initialize();
             }
             
             const legacyKeys = [
-                'accessToken', 'moodchat_token', 'token', 'moodchat_auth_token',
-                'authToken', 'authUser', 'moodchat_auth_user', 'userData',
+                'accessToken', 'nexopa_token', 'token', 'nexopa_auth_token',
+                'authToken', 'authUser', 'nexopa_auth_user', 'userData',
                 'currentUser', 'user', 'jwt', 'access_token'
             ];
             
@@ -6783,7 +6783,7 @@ checkNetworkStatus = async function() {
             ['/api/users/../config', false],
             ['/api/users/%2e%2e/config', false],
             ['https://evil.com/api/steal', false],
-            ['https://moodchat-fy56.onrender.com/api/users', true],
+            ['https://nexopa-fy56.onrender.com/api/users', true],
             ['http://localhost:4000/api/users', isLocalhost()]
         ];
         

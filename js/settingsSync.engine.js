@@ -135,7 +135,7 @@
             if (auth) { const p = JSON.parse(auth); if (p.token) return p.token; }
         } catch (_) {}
         return localStorage.getItem('token') ||
-               localStorage.getItem('moodchat_token') ||
+               localStorage.getItem('nexopa_token') ||
                localStorage.getItem('accessToken') || null;
     }
 

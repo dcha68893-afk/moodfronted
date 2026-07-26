@@ -229,7 +229,7 @@
 
       // FIX #10 — Also persist to localStorage as fallback
       try {
-        const viewKey = 'moodchat_status_views_v1';
+        const viewKey = 'nexopa_status_views_v1';
         const views = JSON.parse(localStorage.getItem(viewKey) || '{}');
         views[String(storyId) + ':' + String(viewerId)] = {
           storyId: String(storyId), viewerId: String(viewerId),

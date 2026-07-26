@@ -1,5 +1,5 @@
 /**
- * sticker-picker.js — Sticker packs for MoodChat
+ * sticker-picker.js — Sticker packs for Nexopa
  *
  * Phase 2 feature: Sticker packs
  *

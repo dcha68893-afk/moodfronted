@@ -78,8 +78,8 @@ const IframeEnvironment = {
         backendReachable: true
     },
     _detected: false,
-    _backendUrl: 'https://moodchat-fy56.onrender.com',
-    _frontendUrl: 'https://moodfronted.onrender.com',
+    _backendUrl: 'https://nexopa-fy56.onrender.com',
+    _frontendUrl: 'https://nexopa.onrender.com',
     _detectionComplete: false,
     
     detect() {
@@ -532,8 +532,8 @@ const OriginAdapter = {
     _validationCache: new Map(),
     _parentOrigin: null,
     _parentVerified: false,
-    _backendOrigin: 'https://moodchat-fy56.onrender.com',
-    _frontendOrigin: 'https://moodfronted.onrender.com',
+    _backendOrigin: 'https://nexopa-fy56.onrender.com',
+    _frontendOrigin: 'https://nexopa.onrender.com',
     
     init() {
         initLog('OriginAdapter initializing');

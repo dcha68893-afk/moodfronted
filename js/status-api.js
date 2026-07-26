@@ -66,8 +66,8 @@ class StatusAPI {
                 // In-memory cache set by status-core.js
                 window.__kynToken ||
                 (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
-                // localStorage — check all known key names, moodchat_token first
-                localStorage.getItem('moodchat_token') ||
+                // localStorage — check all known key names, nexopa_token first
+                localStorage.getItem('nexopa_token') ||
                 localStorage.getItem('authToken') ||
                 localStorage.getItem('token') ||
                 localStorage.getItem('accessToken') ||

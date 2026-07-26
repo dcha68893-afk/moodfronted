@@ -479,7 +479,7 @@
           (window.Session && typeof window.Session.getToken === 'function' && window.Session.getToken()) ||
           (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
           (window.AUTH_SESSION && window.AUTH_SESSION.token) ||
-          localStorage.getItem('token') || localStorage.getItem('accessToken') || localStorage.getItem('moodchat_token') ||
+          localStorage.getItem('token') || localStorage.getItem('accessToken') || localStorage.getItem('nexopa_token') ||
           null
         );
       };

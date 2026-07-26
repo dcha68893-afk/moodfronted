@@ -54,7 +54,7 @@
     var FONT_KEY = 'app_font_size';
     var ACCENT_LEGACY_KEY = 'app_settings_global';
     var SETTINGS_CACHE_KEY = 'knecta_settings_cache';
-    var SETTINGS_CACHE_KEY_LEGACY = 'moodchat_settings_default';
+    var SETTINGS_CACHE_KEY_LEGACY = 'nexopa_settings_default';
     var VALID_THEMES = { light: true, dark: true };
     var MIN_FONT = 10;
     var MAX_FONT = 28;

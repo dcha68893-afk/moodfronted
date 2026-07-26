@@ -1,5 +1,5 @@
 /**
- * double-ratchet.js — Double Ratchet Algorithm for MoodChat
+ * double-ratchet.js — Double Ratchet Algorithm for Nexopa
  *
  * Phase 3 feature: Per-message key ratcheting / forward secrecy
  *

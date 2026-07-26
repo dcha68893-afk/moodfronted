@@ -653,14 +653,14 @@
             // own window (the parent frame) — never on this friend.html iframe's window,
             // so those two checks always failed here. 'kynecta_token' is also never
             // written to localStorage anywhere in the app (the real keys are 'token',
-            // 'authToken', 'moodchat_token', as used by friend-core.js in this same
+            // 'authToken', 'nexopa_token', as used by friend-core.js in this same
             // iframe). This made every sync call in this engine permanently fail.
             const token = window.FriendCore?.getToken?.()
                 || window.__PARENT_SESSION__?.token
                 || window.AUTH_SESSION?.token
                 || localStorage.getItem('token')
                 || localStorage.getItem('authToken')
-                || localStorage.getItem('moodchat_token')
+                || localStorage.getItem('nexopa_token')
                 || sessionStorage.getItem('token')
                 || sessionStorage.getItem('authToken');
 

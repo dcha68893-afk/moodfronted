@@ -435,7 +435,7 @@
 
     _detectUserId() {
       try {
-        const authRaw = localStorage.getItem('kynecta_auth') || localStorage.getItem('moodchat_auth');
+        const authRaw = localStorage.getItem('kynecta_auth') || localStorage.getItem('nexopa_auth');
         if (authRaw) {
           const auth = JSON.parse(authRaw);
           return auth?.user?.id || auth?.userId || null;
@@ -477,7 +477,7 @@
   const tryStart = () => {
     const userId = (() => {
       try {
-        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('moodchat_auth');
+        const raw = localStorage.getItem('kynecta_auth') || localStorage.getItem('nexopa_auth');
         if (!raw) return null;
         const auth = JSON.parse(raw);
         return auth?.user?.id || auth?.userId || null;

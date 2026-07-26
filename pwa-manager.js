@@ -71,9 +71,9 @@
             'animation:_pwaSlideUp .35s cubic-bezier(.4,0,.2,1)">' +
             '<style>@keyframes _pwaSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}' +
             '@keyframes _pwaSlideDownOut{from{transform:translateY(0)}to{transform:translateY(100%)}}</style>' +
-            '<img src="/moodchat-192.png" style="width:46px;height:46px;border-radius:12px;flex-shrink:0;object-fit:cover" onerror="this.style.display=\'none\'">' +
+            '<img src="/nexopa-192.png" style="width:46px;height:46px;border-radius:12px;flex-shrink:0;object-fit:cover" onerror="this.style.display=\'none\'">' +
             '<div style="flex:1;min-width:0">' +
-            '  <div style="font-weight:800;font-size:14px;color:#111;line-height:1.2">Install MoodChat</div>' +
+            '  <div style="font-weight:800;font-size:14px;color:#111;line-height:1.2">Install Nexopa</div>' +
             '  <div style="font-size:12px;color:#6b7280;margin-top:2px">Fast, offline-ready app experience</div>' +
             '</div>' +
             '<button onclick="window._pwaDoInstall()" style="background:#667eea;color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;touch-action:manipulation">Install</button>' +

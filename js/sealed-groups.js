@@ -1,5 +1,5 @@
 /**
- * sealed-groups.js — Sealed group membership for MoodChat
+ * sealed-groups.js — Sealed group membership for Nexopa
  *
  * Phase 4 feature: Server cannot determine group membership from metadata
  *
@@ -190,7 +190,7 @@
     // The invite URL contains:
     //   - path: /join/{opaqueToken}  (server can route but not read)
     //   - fragment: #key={keyB64}    (never sent to server)
-    const appBase = global.location?.origin || 'https://moodfronted.onrender.com';
+    const appBase = global.location?.origin || 'https://nexopa.onrender.com';
     const inviteUrl = `${appBase}/join?invite=${res.token}#key=${encodeURIComponent(keyB64)}`;
     return { inviteUrl, token: res.token, keyB64 };
   }

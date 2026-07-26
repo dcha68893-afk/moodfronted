@@ -11,7 +11,7 @@
  *       window.SettingsState. Also supports window.__SETTINGS_STATE_OBJ__ as an
  *       opt-in escape hatch settings-core.js can use: window.__SETTINGS_STATE_OBJ__ = SettingsState
  *   ✅  initLocalFirstLoad no longer races with SettingsState init
- *   ✅  Coordinates with MoodChatSettingsManager after local load
+ *   ✅  Coordinates with NexopaSettingsManager after local load
  *   ✅  No _directFetch /api double-append (fixed in settingsSync.engine.js)
  *
  * LOAD ORDER (settings.html):
@@ -185,7 +185,7 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
                 if (settings) {
                     const store = _store();
                     if (store) { try { store.merge(settings); } catch (_) {} }
-                    _syncToMoodChatManager(settings);
+                    _syncToNexopaManager(settings);
                 }
             }
             _tryPatchSettingsState();
@@ -220,7 +220,7 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
                 }
             }
 
-            _syncToMoodChatManager(local);
+            _syncToNexopaManager(local);
             console.log('[settings-core:patch] ✅ Local settings applied on startup');
         }
 
@@ -273,8 +273,8 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
             return out;
         }
 
-        function _syncToMoodChatManager(settings) {
-            const mgr = window.MoodChatSettingsManager;
+        function _syncToNexopaManager(settings) {
+            const mgr = window.NexopaSettingsManager;
             if (!mgr || !mgr.initialized) return;
             try {
                 if (settings.theme)    mgr.setNestedValue(mgr.currentSettings, 'appearance.theme',    settings.theme);
@@ -303,7 +303,7 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
                     } catch (_) {}
                 }
                 if (event === 'synced' && data.direction === 'pull') {
-                    const mgr = window.MoodChatSettingsManager;
+                    const mgr = window.NexopaSettingsManager;
                     if (mgr) mgr.loadSettings().catch(() => {});
                 }
             });
@@ -319,7 +319,7 @@ if (window.__SETTINGS_LOCAL_FIRST_PATCH__) {
             if (e.detail && e.detail.settings && !e.detail.fromLocal) {
                 const store = _store();
                 if (store) { try { store.merge(e.detail.settings); } catch (_) {} }
-                _syncToMoodChatManager(e.detail.settings);
+                _syncToNexopaManager(e.detail.settings);
             }
         });
 

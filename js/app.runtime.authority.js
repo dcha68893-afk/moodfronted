@@ -73,7 +73,7 @@
     }
 
     function getApiOrigin() {
-        return detectLocalEnvironment() ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+        return detectLocalEnvironment() ? 'http://localhost:4000' : 'https://nexopa-fy56.onrender.com';
     }
 
     function getApiBase() {
@@ -134,7 +134,7 @@
             localStorage.getItem('authToken') ||
             localStorage.getItem('accessToken') ||
             localStorage.getItem('token') ||
-            localStorage.getItem('moodchat_token');
+            localStorage.getItem('nexopa_token');
 
         if (!fallbackToken) return null;
 
@@ -144,7 +144,7 @@
             user:
                 safeJsonParse(localStorage.getItem('currentUser')) ||
                 safeJsonParse(localStorage.getItem('user')) ||
-                safeJsonParse(localStorage.getItem('moodchat_user')),
+                safeJsonParse(localStorage.getItem('nexopa_user')),
             expiresAt: null
         });
     }
@@ -171,14 +171,14 @@
         if (!auth || !auth.token) return;
 
         const userJson = auth.user ? JSON.stringify(auth.user) : null;
-        const tokenKeys = ['authToken', 'token', 'accessToken', 'USER_TOKEN', 'moodchat_token'];
+        const tokenKeys = ['authToken', 'token', 'accessToken', 'USER_TOKEN', 'nexopa_token'];
 
         tokenKeys.forEach((key) => localStorage.setItem(key, auth.token));
         if (auth.refreshToken) localStorage.setItem('refreshToken', auth.refreshToken);
         localStorage.setItem('isLoggedIn', 'true');
         if (auth.userId) localStorage.setItem('currentUserId', auth.userId);
         if (userJson) {
-            ['currentUser', 'user', 'moodchat_user'].forEach((key) => localStorage.setItem(key, userJson));
+            ['currentUser', 'user', 'nexopa_user'].forEach((key) => localStorage.setItem(key, userJson));
             window.currentUser = auth.user;
         }
     }
@@ -189,12 +189,12 @@
             'token',
             'accessToken',
             'USER_TOKEN',
-            'moodchat_token',
+            'nexopa_token',
             'refreshToken',
             'isLoggedIn',
             'currentUser',
             'user',
-            'moodchat_user',
+            'nexopa_user',
             'currentUserId'
         ].forEach((key) => localStorage.removeItem(key));
 

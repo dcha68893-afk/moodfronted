@@ -430,7 +430,7 @@ Z.push @ contentscript.js:14082
 app.realtime.socket.js:48 [Realtime] ✅ Socket.IO compatible manager initialized (v3.1.0)
 app.realtime.socket.js:48 [Realtime] ✅ Ready (Socket.IO compatible v3.3.0)
 app.realtime.socket.js:48 [Realtime] 🔑 Connecting with token (first 20 chars): eyJhbGciOiJIUzI1NiIs... length: 259
-app.realtime.socket.js:48 [Realtime] Connecting Socket.IO to https://moodchat-fy56.onrender.com
+app.realtime.socket.js:48 [Realtime] Connecting Socket.IO to https://nexopa-fy56.onrender.com
 app.realtime.socket.js:48 [CACHE] Message local store booting
 app.realtime.socket.js:48 [CACHE] Message local store ready
 app.realtime.socket.js:48 [MsgQueue] ✅ Initialized {pending: 0}
@@ -1272,9 +1272,9 @@ app.realtime.socket.js:48 [GroupHdr] v1.0 loaded
 app.realtime.socket.js:48 [SAIC] State transition: UNINITIALIZED -> INITIALIZING {timestamp: '2026-06-07T14:26:05.096Z', duration: 0, hasError: false}
 app.realtime.socket.js:48 [API-CORE] Initializing API Gateway v24.0.4
 app.realtime.socket.js:48 [SAIC] Stage environment: âœ“
-app.realtime.socket.js:48 [ENV] ✅ Detected PRODUCTION environment from: moodfronted.onrender.com
+app.realtime.socket.js:48 [ENV] ✅ Detected PRODUCTION environment from: nexopa.onrender.com
 app.realtime.socket.js:48 [SAIC] Stage baseUrl: âœ“
-app.realtime.socket.js:48 [ENV] 📍 Using backend URL: https://moodchat-fy56.onrender.com/api (env: production)
+app.realtime.socket.js:48 [ENV] 📍 Using backend URL: https://nexopa-fy56.onrender.com/api (env: production)
 app.realtime.socket.js:48 [SAIC] Stage storage: âœ“
 app.realtime.socket.js:48 [SAIC] Stage origin: âœ“
 app.realtime.socket.js:48 [SAIC] Stage token: âœ“
@@ -1311,11 +1311,11 @@ initializeGateway @ api.core.js:6551
 (anonymous) @ api.core.js:6906
 (anonymous) @ api.core.js:7156
 app.realtime.socket.js:48 [TOKEN] Skipping storage clear - self-test mode active
-app.realtime.socket.js:48 [API-CORE] âœ… Fully loaded {environment: 'production', baseUrl: 'https://moodchat-fy56.onrender.com/api', version: '24.0.4', state: 'INITIALIZING', stages: 10, …}
+app.realtime.socket.js:48 [API-CORE] âœ… Fully loaded {environment: 'production', baseUrl: 'https://nexopa-fy56.onrender.com/api', version: '24.0.4', state: 'INITIALIZING', stages: 10, …}
 app.realtime.socket.js:48 [SAIC] Stage network: âœ“
 app.realtime.socket.js:48 [SAIC] State transition: INITIALIZING -> READY {timestamp: '2026-06-07T14:26:05.110Z', duration: 14, hasError: false}
-app.realtime.socket.js:48 [API-CORE] âœ… Initialized successfully {environment: 'production', baseUrl: 'https://moodchat-fy56.onrender.com/api', version: '24.0.4', state: 'READY', duration: 15, …}
-app.realtime.socket.js:48 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+app.realtime.socket.js:48 [API-CORE] âœ… Initialized successfully {environment: 'production', baseUrl: 'https://nexopa-fy56.onrender.com/api', version: '24.0.4', state: 'READY', duration: 15, …}
+app.realtime.socket.js:48 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 app.realtime.socket.js:48 [Navigation] Attaching navigation listeners...
 app.realtime.socket.js:48 [Navigation] Found navigation elements: 12
 app.realtime.socket.js:48 [Navigation] Setting up listener for element 0: messages nav-icon active
@@ -1456,9 +1456,9 @@ settings-core.js:2125 [settings] 🚀 UIBridge initializing []
 settings-core.js:2122 [settings] ✅ UIBridge initialized []
 settings-core.js:2125 [settings] 🚀 ModuleCoreController initializing []
 settings-core.js:2122 [settings] ✅ ModuleCoreController initialized []
-phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 group-os-integration.js:182 [GroupOSIntegration] ✅ Loaded
-phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 status-websocket.js:82 [StatusWebSocket] ✅ Initialized via KynectaRealtime/wsService
 settings-core.local-first.patch.js:178 [settings-core:patch] ✅ SettingsState patched
 settings-core.local-first.patch.js:224 [settings-core:patch] ✅ Local settings applied on startup
@@ -1498,7 +1498,7 @@ callSession.manager.js:361 [CallSession] ✅ Singleton ready
 callRetry.engine.js:23 [CallRetry] ✅ Initialized 
 callRetry.engine.js:220 [CallRetry] ✅ Engine ready
 status-ui.js:72 [UI] UIFailsafe: Initialized 
-phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 settings-global-propagation.js:394 [SettingsPropagation] ✅ Hooked into AppSettings
 settings-global-propagation.js:422 [SettingsPropagation] Module loaded
 settings-module-subscriptions.js:158 [SettingsModuleSubs] Module loaded
@@ -1583,7 +1583,7 @@ Tool-ui.js:4268 [DIRECT] Tab attached: spotlightTab
 Tool-ui.js:4328 [DIRECT] All handlers attached
 Tool-ui.js:4357 [FIX] Starting emergency click handler initialization
 Tool-ui.js:4470 [FIX] Handlers attached once
-phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 settings-ui.js:211 [SettingsUI] Loading profile section
 settings-ui.js:966 [SettingsUI] ✅ Successfully loaded section: profile
 settings-module-subscriptions.js:62 [SettingsModuleSubs] ✅ Registered: friends
@@ -1591,11 +1591,11 @@ settings-module-subscriptions.js:62 [SettingsModuleSubs] ✅ Registered: calls
 settings-module-subscriptions.js:62 [SettingsModuleSubs] ✅ Registered: groups
 settings-module-subscriptions.js:62 [SettingsModuleSubs] ✅ Registered: status
 back-nav.js:80 [BackNav] ✅ Universal back navigation installed
-calls.html:4141 [calls.html] SW registered. Scope: https://moodfronted.onrender.com/
+calls.html:4141 [calls.html] SW registered. Scope: https://nexopa.onrender.com/
 localStore-groups.js:116 [CACHE] Group local store ready
 app.realtime.socket.js:48 [CACHE] DB initialized
-app.realtime.socket.js:48 [Message HTML] Environment detected: render (moodfronted.onrender.com)
-app.realtime.socket.js:48 [Message HTML] Parent communication initialized. Environment: render, Host: moodfronted.onrender.com
+app.realtime.socket.js:48 [Message HTML] Environment detected: render (nexopa.onrender.com)
+app.realtime.socket.js:48 [Message HTML] Parent communication initialized. Environment: render, Host: nexopa.onrender.com
 settingsManager.js:687 [SettingsManager] Storage event error: TypeError: Cannot read properties of undefined (reading 'toString')
     at SettingsManager.applyNotificationSetting (settingsManager.js:501:85)
     at SettingsManager.applySetting (settingsManager.js:403:61)
@@ -1604,7 +1604,7 @@ settingsManager.js:687 [SettingsManager] Storage event error: TypeError: Cannot 
     at settingsManager.js:682:29
 (anonymous) @ settingsManager.js:687
 app.cache.js:130 [CACHE] DB initialized
-friend.html:3051 [friend.html] SW registered. Scope: https://moodfronted.onrender.com/
+friend.html:3051 [friend.html] SW registered. Scope: https://nexopa.onrender.com/
 app.realtime.socket.js:48 [MeshBridge] Registered device with relay: dev_4a5a1187a6f042e7
 app.realtime.socket.js:48 [MeshBridge] ✅ Bridge installed for device dev_4a5a1187a6f042e7
 app.realtime.socket.js:48 [MeshBridge] Waiting for MeshEngine…
@@ -1625,7 +1625,7 @@ app.realtime.socket.js:48 [2026-06-07T14:26:08.017Z] [UIStateManager] [INFO] Ini
 app.realtime.socket.js:48 [CallHandler] Call handlers initialized
 app.realtime.socket.js:48 [KynPatch v3.0] ✅ All runtime patches installed
 app.realtime.socket.js:48 [KynPatch v4.0] ✅ Message visibility patch installed
-app.realtime.socket.js:48 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+app.realtime.socket.js:48 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 app.realtime.socket.js:48 [MeshTransport] ✅ Transport layer initialised, deviceId: dev_4a5a1187a6f042e7
 app.realtime.socket.js:48 [MessageUI] Setting up auto-open chat listener
 app.realtime.socket.js:48 [MeshRouter] ✅ Router ready, deviceId: dev_4a5a1187a6f042e7
@@ -1638,10 +1638,10 @@ toolregistry.manage.js:139 [ToolRegistry] ✅ Initialized — 0 tools registered
 api.core.js:4038 [SAIC] State transition: UNINITIALIZED -> INITIALIZING {timestamp: '2026-06-07T14:26:08.245Z', duration: 0, hasError: false}
 api.core.js:6452 [API-CORE] Initializing API Gateway v24.0.4
 api.core.js:4076 [SAIC] Stage environment: âœ“
-api.core.js:385 [ENV] ✅ Detected PRODUCTION environment from: moodfronted.onrender.com
+api.core.js:385 [ENV] ✅ Detected PRODUCTION environment from: nexopa.onrender.com
 api.core.js:4076 [SAIC] Stage environment: âœ“
 api.core.js:4076 [SAIC] Stage baseUrl: âœ“
-api.core.js:557 [ENV] 📍 Using backend URL: https://moodchat-fy56.onrender.com/api (env: production)
+api.core.js:557 [ENV] 📍 Using backend URL: https://nexopa-fy56.onrender.com/api (env: production)
 api.core.js:4076 [SAIC] Stage baseUrl: âœ“
 api.core.js:4076 [SAIC] Stage storage: âœ“
 api.core.js:4076 [SAIC] Stage storage: âœ“
@@ -1659,14 +1659,14 @@ api.core.js:4076 [SAIC] Stage endpoint: âœ“
 api.core.js:4076 [SAIC] Stage endpoint: âœ“
 api.core.js:4076 [SAIC] Stage selftest: âœ“
 api.core.js:738 [TOKEN] Skipping storage clear - self-test mode active
-api.core.js:385 [ENV] ✅ Detected PRODUCTION environment from: moodfronted.onrender.com
-api.core.js:7116 [API-CORE] âœ… Fully loaded {environment: 'production', baseUrl: 'https://moodchat-fy56.onrender.com/api', version: '24.0.4', state: 'INITIALIZING', stages: 10, …}
+api.core.js:385 [ENV] ✅ Detected PRODUCTION environment from: nexopa.onrender.com
+api.core.js:7116 [API-CORE] âœ… Fully loaded {environment: 'production', baseUrl: 'https://nexopa-fy56.onrender.com/api', version: '24.0.4', state: 'INITIALIZING', stages: 10, …}
 api.core.js:4076 [SAIC] Stage selftest: âœ“
 api.core.js:4076 [SAIC] Stage network: âœ“
 api.core.js:4076 [SAIC] Stage network: âœ“
 api.core.js:4038 [SAIC] State transition: INITIALIZING -> READY {timestamp: '2026-06-07T14:26:08.259Z', duration: 14, hasError: false}
-api.core.js:6665 [API-CORE] âœ… Initialized successfully {environment: 'production', baseUrl: 'https://moodchat-fy56.onrender.com/api', version: '24.0.4', state: 'READY', duration: 14, …}
-phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+api.core.js:6665 [API-CORE] âœ… Initialized successfully {environment: 'production', baseUrl: 'https://nexopa-fy56.onrender.com/api', version: '24.0.4', state: 'READY', duration: 14, …}
+phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 calls-core.js:4961 [CallsCore] ℹ️ Environment detected: production 
 calls-core.js:5181 [CallsCore] 🔵 OriginSecurity initialized 
 calls-core.js:5181 [CallsCore] 🔵 SafeStorage initialized (proxy) 
@@ -1709,7 +1709,7 @@ callOverlay.manager.js:386 [CallOverlay] 3-state overlay system initialized
 calls.html:3541 [CallProfessionalFix] professional call fix installed
 calls.html:4203 [MasterFix] ✅ Core listener hooked
 calls.html:4203 [MasterFix] ✅ Master fix v3.0 booted
-phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 MoodChat loading 35 modules from https://moodfronted.onrender.com/js/core/
+phase6.bootstrap.js:114 [Phase6Bootstrap] 🚀 Nexopa loading 35 modules from https://nexopa.onrender.com/js/core/
 friend-core.js:1429 [friends] 🔵 READY - FriendCacheManager initialized
 friend-core.js:10801 [friend-core] ✅ Settings bootstrapped from cache
 friend-ui.js:391 [UI] DOM Elements loaded {addFriendBtn: true, allTab: true, friendsTab: true, requestsTab: true, allFriendsList: true}
@@ -1775,7 +1775,7 @@ friend-ui.js:391 [UI] Parent ready event received in UI
 friend-ui.js:391 [UI] Parent ready event received in CoreIntegration 
 friend-ui.js:391 [UI] Parent ready event received in UI 
 friend-ui.js:391 [UI] Lifecycle changed to ACTIVE in CoreIntegration 
-calls-core.js:4961 [CallsCore] ℹ️ Parent origin locked {origin: 'https://moodfronted.onrender.com'}
+calls-core.js:4961 [CallsCore] ℹ️ Parent origin locked {origin: 'https://nexopa.onrender.com'}
 calls-core.js:1115 [calls][SessionClient] Valid session received: {authenticated: true, userId: 2, sessionId: 1780842368879}
 calls-core.js:1115 [calls][SessionClient] Valid session received: {authenticated: true, userId: 2, sessionId: 1780842368881}
 calls-core.js:2269 [calls][handleParentReady] Session data received: {hasPayload: true, hasSessionInPayload: true, hasDirectSession: false, sessionDataKeys: Array(7)}
@@ -3861,7 +3861,7 @@ Tool-core.js:643 [Tools] 🔵 READY - Heartbeat responder ready
 Tool-core.js:5803 [safeApiCall] → GET /api/marketplace/listings?page=1&limit=20 null
 Tool-core.js:1474 [Tools][SessionWrapper] Processing session: {userId: 2, hasToken: true}
 Tool-core.js:1531 [Tools][SessionWrapper] Session accepted, userId: 2
-Tool-core.js:5730 [secureApiCall] GET https://moodchat-fy56.onrender.com/api/tools/marketplace/listings?page=1&limit=20 
+Tool-core.js:5730 [secureApiCall] GET https://nexopa-fy56.onrender.com/api/tools/marketplace/listings?page=1&limit=20 
 tool-core-patch.js:685 [ToolPatch] Bootstrapping fixed tool system…
 tool-core-patch.js:713 [ToolPatch] ✅ Bootstrap complete
 Tool-ui.js:4153 [Tool-ui] tools:active received, re-binding UI events
@@ -3948,9 +3948,9 @@ NotificationStabilizationLayer.js:158 [NotifStab] ✅ Initialized
 NotificationStabilizationLayer.js:309 [NotifStab] ✅ Ready
 PresenceEngineFoundation.js:241 [PresenceEngine] ✅ Started for user 2
 PresenceEngineFoundation.js:482 [PresenceEngine] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/presence/PresenceEngineFoundation.js
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/queue/QueueFoundationLayer.js
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/notification/NotificationStabilizationLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/presence/PresenceEngineFoundation.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/queue/QueueFoundationLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/notification/NotificationStabilizationLayer.js
 PresenceEngineFoundation.js:241 [PresenceEngine] ✅ Started for user 2
 PresenceEngineFoundation.js:482 [PresenceEngine] ✅ Ready
 NotificationStabilizationLayer.js:297 [NotifStab] Notification constructor patched for dedup
@@ -3968,7 +3968,7 @@ NotificationStabilizationLayer.js:158 [NotifStab] ✅ Initialized
 NotificationStabilizationLayer.js:309 [NotifStab] ✅ Ready
 PersistenceStabilizationLayer.js:291 [PersistenceStab] ✅ Initialized (version=4)
 PersistenceStabilizationLayer.js:407 [PersistenceStab] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/cache/CacheFoundationLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/cache/CacheFoundationLayer.js
 app.realtime.socket.js:48 [CacheFoundation] ✅ Initialized
 app.realtime.socket.js:48 [CacheFoundation] ✅ Ready
 app.realtime.socket.js:48 [PHASE10] DeletionRegistry ✅ active
@@ -3979,7 +3979,7 @@ RealtimeStabilizationLayer.js:288 [RealtimeStab] ✅ Started
 RealtimeStabilizationLayer.js:475 [RealtimeStab] ✅ Ready
 app.realtime.socket.js:48 [QueueFoundation] ✅ Started
 app.realtime.socket.js:48 [QueueFoundation] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/persistence/PersistenceStabilizationLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/persistence/PersistenceStabilizationLayer.js
 QueueFoundationLayer.js:270 [QueueFoundation] ✅ Started
 QueueFoundationLayer.js:355 [QueueFoundation] ✅ Ready
 PersistenceStabilizationLayer.js:291 [PersistenceStab] ✅ Initialized (version=4)
@@ -4005,7 +4005,7 @@ NotificationStabilizationLayer.js:297 [NotifStab] Notification constructor patch
 NotificationStabilizationLayer.js:158 [NotifStab] ✅ Initialized
 NotificationStabilizationLayer.js:309 [NotifStab] ✅ Ready
 Tool-core.js:643 [Tools] ✅ SUCCESS - pageCore initialization complete 
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/monitoring/MonitoringFoundation.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/monitoring/MonitoringFoundation.js
 Tool-ui.js:3986 [pageCore] UI initialized v7.1
 Tool-ui.js:4001 [Tool-ui.js] Resilient UI controller ready v7.1 (Handshake aligned - Simplified)
 MonitoringFoundation.js:319 [Monitoring] ✅ Initialized
@@ -4014,7 +4014,7 @@ MonitoringFoundation.js:319 [Monitoring] ✅ Initialized
 MonitoringFoundation.js:342 [Monitoring] ✅ Ready — run __KynDiag() to print diagnostics
 app.realtime.socket.js:48 [NetworkIntel] ✅ Started
 app.realtime.socket.js:48 [NetworkIntel] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/realtime/RealtimeStabilizationLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/realtime/RealtimeStabilizationLayer.js
 Tool-ui.js:4041 [Tool-ui] Force binding all UI events...
 MonitoringFoundation.js:319 [Monitoring] ✅ Initialized
 MonitoringFoundation.js:342 [Monitoring] ✅ Ready — run __KynDiag() to print diagnostics
@@ -4024,9 +4024,9 @@ Tool-ui.js:4041 [Tool-ui] Force binding all UI events...
 app.realtime.socket.js:48 [PersistenceStab] ✅ Initialized (version=4)
 app.realtime.socket.js:48 [PersistenceStab] ✅ Ready
 Tool-core.js:5803 [safeApiCall] → GET /api/marketplace/listings null
-Tool-core.js:5730 [secureApiCall] GET https://moodchat-fy56.onrender.com/api/tools/marketplace/listings 
+Tool-core.js:5730 [secureApiCall] GET https://nexopa-fy56.onrender.com/api/tools/marketplace/listings 
 Tool-core.js:5803 [safeApiCall] → GET /api/marketplace/spotlight null
-Tool-core.js:5730 [secureApiCall] GET https://moodchat-fy56.onrender.com/api/tools/marketplace/spotlight 
+Tool-core.js:5730 [secureApiCall] GET https://nexopa-fy56.onrender.com/api/tools/marketplace/spotlight 
 app.realtime.socket.js:48 [CacheFoundation] ✅ Initialized
 app.realtime.socket.js:48 [CacheFoundation] ✅ Ready
 app.realtime.socket.js:48 [PHASE10] DeletionRegistry ✅ active
@@ -4045,7 +4045,7 @@ HybridTransportEngine.js:191 [HybridTransport] ✅ Started — caps: {internetAv
 HybridTransportEngine.js:384 [HybridTransport] ✅ Ready
 MonitoringFoundation.js:319 [Monitoring] ✅ Initialized
 MonitoringFoundation.js:342 [Monitoring] ✅ Ready — run __KynDiag() to print diagnostics
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/network/HybridTransportEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/network/HybridTransportEngine.js
 HybridTransportEngine.js:191 [HybridTransport] ✅ Started — caps: {internetAvailable: true, lanAvailable: false, webRTCAvailable: true, serviceWorker: true, indexedDB: true, …}
 HybridTransportEngine.js:384 [HybridTransport] ✅ Ready
 Tool-ui.js:4134 [Tool-ui] Force binding complete - bound 17 elements
@@ -4074,7 +4074,7 @@ MonitoringFoundation.js:342 [Monitoring] ✅ Ready — run __KynDiag() to print 
 HybridTransportEngine.js:191 [HybridTransport] ✅ Started — caps: {internetAvailable: true, lanAvailable: false, webRTCAvailable: true, serviceWorker: true, indexedDB: true, …}
 HybridTransportEngine.js:384 [HybridTransport] ✅ Ready
 MonitoringFoundation.js:100 [Monitoring] NetworkMetricsCollector attached
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/network/LANCommunicationEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/network/LANCommunicationEngine.js
 LANCommunicationEngine.js:362 [LAN] ✅ Ready
 MonitoringFoundation.js:171 [Monitoring] SyncFailureDetector attached
 HybridTransportEngine.js:191 [HybridTransport] ✅ Started — caps: {internetAvailable: true, lanAvailable: false, webRTCAvailable: true, serviceWorker: true, indexedDB: true, …}
@@ -4150,7 +4150,7 @@ MeshRelayEngine.js:148 [MeshRelay] ✅ Started
 MeshRelayEngine.js:287 [MeshRelay] ✅ Ready
 app.realtime.socket.js:48 [Monitoring] SyncFailureDetector attached
 MonitoringFoundation.js:233 [Monitoring] HydrationMetricsCollector attached
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/network/MeshRelayEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/network/MeshRelayEngine.js
 app.realtime.socket.js:48 [MeshRelay] ✅ Started
 app.realtime.socket.js:48 [MeshRelay] ✅ Ready
 app.realtime.socket.js:48 [Monitoring] SocketMetricsMonitor attached
@@ -4167,7 +4167,7 @@ MonitoringFoundation.js:233 [Monitoring] HydrationMetricsCollector attached
 OfflineMessageQueue.js:395 [OfflineQueue] ✅ Ready
 OfflineMessageQueue.js:168 [OfflineQueue] ✅ Initialized — 0 queued
 OfflineMessageQueue.js:168 [OfflineQueue] ✅ Initialized — 0 queued
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/queue/OfflineMessageQueue.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/queue/OfflineMessageQueue.js
 OfflineMessageQueue.js:395 [OfflineQueue] ✅ Ready
 OfflineMessageQueue.js:168 [OfflineQueue] ✅ Initialized — 0 queued
 MeshRelayEngine.js:148 [MeshRelay] ✅ Started
@@ -4184,7 +4184,7 @@ OfflineMessageQueue.js:395 [OfflineQueue] ✅ Ready
 OfflineMessageQueue.js:168 [OfflineQueue] ✅ Initialized — 0 queued
 MeshRelayEngine.js:148 [MeshRelay] ✅ Started
 MeshRelayEngine.js:287 [MeshRelay] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/realtime/ReliableDeliveryEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/realtime/ReliableDeliveryEngine.js
 OfflineMessageQueue.js:395 [OfflineQueue] ✅ Ready
 ReliableDeliveryEngine.js:208 [ReliableDelivery] ✅ Started
 ReliableDeliveryEngine.js:335 [ReliableDelivery] ✅ Ready
@@ -4199,7 +4199,7 @@ RealtimeSyncEngine.js:203 [RealtimeSync] ✅ Started
 RealtimeSyncEngine.js:324 [RealtimeSync] ✅ Ready
 ReliableDeliveryEngine.js:208 [ReliableDelivery] ✅ Started
 ReliableDeliveryEngine.js:335 [ReliableDelivery] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/realtime/RealtimeSyncEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/realtime/RealtimeSyncEngine.js
 RealtimeSyncEngine.js:203 [RealtimeSync] ✅ Started
 RealtimeSyncEngine.js:324 [RealtimeSync] ✅ Ready
 RealtimeSyncEngine.js:203 [RealtimeSync] ✅ Started
@@ -4212,7 +4212,7 @@ BackgroundSyncService.js:188 [BGSync] ✅ Started
 RealtimeSyncEngine.js:203 [RealtimeSync] ✅ Started
 RealtimeSyncEngine.js:324 [RealtimeSync] ✅ Ready
 service-worker.js:736 [SW] Background sync event: kyn-message-sync
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/realtime/BackgroundSyncService.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/realtime/BackgroundSyncService.js
 BackgroundSyncService.js:248 [BGSync] ✅ Ready
 app.realtime.socket.js:48 [RealtimeSync] ✅ Started
 app.realtime.socket.js:48 [RealtimeSync] ✅ Ready
@@ -4259,9 +4259,9 @@ CallStateMachine.js:189 [CallState] ✅ Ready
 DeviceMediaManager.js:390 [DeviceMedia] ✅ Ready
 PeerConnectionManager.js:419 [PeerConn] ✅ Started
 PeerConnectionManager.js:534 [PeerConn] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/calls/DeviceMediaManager.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/calls/DeviceMediaManager.js
 DeviceMediaManager.js:390 [DeviceMedia] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/calls/PeerConnectionManager.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/calls/PeerConnectionManager.js
 PeerConnectionManager.js:419 [PeerConn] ✅ Started
 PeerConnectionManager.js:534 [PeerConn] ✅ Ready
 CallStateMachine.js:189 [CallState] ✅ Ready
@@ -4281,7 +4281,7 @@ WebRTCSessionOrchestrator.js:75 [CallOrchestrator] ✅ Started
 WebRTCSessionOrchestrator.js:571 [CallOrchestrator] ✅ Ready
 app.realtime.socket.js:48 [CallState] ✅ Ready
 app.realtime.socket.js:48 [PeerConn] ✅ Started
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/calls/WebRTCSessionOrchestrator.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/calls/WebRTCSessionOrchestrator.js
 app.realtime.socket.js:48 [PeerConn] ✅ Ready
 DeviceMediaManager.js:390 [DeviceMedia] ✅ Ready
 app.realtime.socket.js:48 [DeviceMedia] ✅ Ready
@@ -4312,7 +4312,7 @@ PeerConnectionManager.js:419 [PeerConn] ✅ Started
 PeerConnectionManager.js:534 [PeerConn] ✅ Ready
 WebRTCSessionOrchestrator.js:75 [CallOrchestrator] ✅ Started
 WebRTCSessionOrchestrator.js:571 [CallOrchestrator] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/calls/GroupCallEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/calls/GroupCallEngine.js
 GroupCallEngine.js:490 [GroupCall] ✅ Ready
 GroupCallEngine.js:490 [GroupCall] ✅ Ready
 Tool-core.js:643 [Tools] 🔵 READY - User settings loaded from storage 
@@ -4320,7 +4320,7 @@ AdaptiveBitrateEngine.js:154 [CallRecovery] Attached
 AdaptiveBitrateEngine.js:259 [AdaptiveBR] ✅ Started
 AdaptiveBitrateEngine.js:337 [AdaptiveBR] ✅ Ready
 app.realtime.socket.js:48 [GroupCall] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/calls/AdaptiveBitrateEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/calls/AdaptiveBitrateEngine.js
 app.realtime.socket.js:48 [CallRecovery] Attached
 app.realtime.socket.js:48 [AdaptiveBR] ✅ Started
 app.realtime.socket.js:48 [AdaptiveBR] ✅ Ready
@@ -4340,7 +4340,7 @@ app.realtime.socket.js:48 [GroupCall] ✅ Ready
 app.realtime.socket.js:48 [CallRecovery] Attached
 app.realtime.socket.js:48 [AdaptiveBR] ✅ Started
 app.realtime.socket.js:48 [AdaptiveBR] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/calls/LANCallEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/calls/LANCallEngine.js
 app.realtime.socket.js:48 [LANCall] ✅ Started
 app.realtime.socket.js:48 [LANCall] ✅ Ready
 GroupCallEngine.js:490 [GroupCall] ✅ Ready
@@ -4358,7 +4358,7 @@ LANCallEngine.js:113 [LANCall] ✅ Started
 LANCallEngine.js:205 [LANCall] ✅ Ready
 LANCallEngine.js:113 [LANCall] ✅ Started
 LANCallEngine.js:205 [LANCall] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/groups/GroupOrchestrator.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/groups/GroupOrchestrator.js
 GroupOrchestrator.js:520 [GroupOrchestrator] ✅ Ready
 GroupOrchestrator.js:520 [GroupOrchestrator] ✅ Ready
 LANCallEngine.js:113 [LANCall] ✅ Started
@@ -4378,7 +4378,7 @@ GroupModerationEngine.js:166 [GroupModeration] ✅ Started
 GroupModerationEngine.js:316 [SocialGraph] ✅ Started
 GroupModerationEngine.js:414 [GroupModeration] ✅ Ready
 GroupModerationEngine.js:415 [SocialGraph] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/groups/GroupModerationEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/groups/GroupModerationEngine.js
 app.realtime.socket.js:48 [GroupModeration] ✅ Started
 app.realtime.socket.js:48 [SocialGraph] ✅ Started
 app.realtime.socket.js:48 [GroupModeration] ✅ Ready
@@ -4401,7 +4401,7 @@ GroupModerationEngine.js:316 [SocialGraph] ✅ Started
 GroupModerationEngine.js:414 [GroupModeration] ✅ Ready
 GroupModerationEngine.js:415 [SocialGraph] ✅ Ready
 GroupOrchestrator.js:520 [GroupOrchestrator] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/groups/GroupPresenceCacheEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/groups/GroupPresenceCacheEngine.js
 app.realtime.socket.js:48 [GroupPresenceCache] ✅ Started
 app.realtime.socket.js:48 [GroupPresenceCache] ✅ Ready
 GroupPresenceCacheEngine.js:369 [GroupPresenceCache] ✅ Ready
@@ -4425,10 +4425,10 @@ SocialNotificationEngine.js:368 [SocialNotif] ✅ Ready
 StatusStoryEngine.js:564 [StoryEngine] ✅ Ready
 StatusStoryEngine.js:495 [StoryEngine] Hydrated 0 active stories
 StatusStoryEngine.js:503 [StoryEngine] ✅ Started
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/groups/SocialNotificationEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/groups/SocialNotificationEngine.js
 SocialNotificationEngine.js:196 [SocialNotif] ✅ Started
 SocialNotificationEngine.js:368 [SocialNotif] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/status/StatusStoryEngine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/status/StatusStoryEngine.js
 StatusStoryEngine.js:564 [StoryEngine] ✅ Ready
 StatusStoryEngine.js:495 [StoryEngine] Hydrated 0 active stories
 StatusStoryEngine.js:503 [StoryEngine] ✅ Started
@@ -4445,7 +4445,7 @@ SocialNotificationEngine.js:368 [SocialNotif] ✅ Ready
 SecurityLayer.js:406 [Security] ✅ Ready
 SecurityLayer.js:322 [Security] ✅ Initialized — deviceId: dev_3687…
 StatusStoryEngine.js:564 [StoryEngine] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/security/SecurityLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/security/SecurityLayer.js
 StatusStoryEngine.js:495 [StoryEngine] Hydrated 0 active stories
 StatusStoryEngine.js:503 [StoryEngine] ✅ Started
 SecurityLayer.js:406 [Security] ✅ Ready
@@ -4468,7 +4468,7 @@ StatusStoryEngine.js:503 [StoryEngine] ✅ Started
 SecurityLayer.js:406 [Security] ✅ Ready
 SecurityLayer.js:322 [Security] ✅ Initialized — deviceId: dev_3687…
 SecurityLayer.js:406 [Security] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/recovery/ReconnectOrchestrator.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/recovery/ReconnectOrchestrator.js
 SecurityLayer.js:322 [Security] ✅ Initialized — deviceId: dev_3687…
 ReconnectOrchestrator.js:454 [Reconnect] ✅ Ready
 ReconnectOrchestrator.js:454 [Reconnect] ✅ Ready
@@ -4488,7 +4488,7 @@ app.realtime.socket.js:48 [Reconnect] ✅ Ready
 DurableQueueLayer.js:459 [DurableQueue] ✅ Ready
 DurableQueueLayer.js:210 [DurableQueue] ✅ Initialized — 0 ops loaded
 ReconnectOrchestrator.js:454 [Reconnect] ✅ Ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/recovery/DurableQueueLayer.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/recovery/DurableQueueLayer.js
 DurableQueueLayer.js:459 [DurableQueue] ✅ Ready
 DurableQueueLayer.js:210 [DurableQueue] ✅ Initialized — 0 ops loaded
 DurableQueueLayer.js:459 [DurableQueue] ✅ Ready
@@ -4501,64 +4501,64 @@ DurableQueueLayer.js:459 [DurableQueue] ✅ Ready
 DurableQueueLayer.js:210 [DurableQueue] ✅ Initialized — 0 ops loaded
 BackgroundReliabilityService.js:53 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842389608_tj2h
 BackgroundReliabilityService.js:373 [BGReliability] ✅ Ready
-BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://moodfronted.onrender.com/
+BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://nexopa.onrender.com/
 BackgroundReliabilityService.js:265 [BGReliability] ✅ Started — leader: false
 DurableQueueLayer.js:459 [DurableQueue] ✅ Ready
 DurableQueueLayer.js:210 [DurableQueue] ✅ Initialized — 0 ops loaded
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/recovery/BackgroundReliabilityService.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/recovery/BackgroundReliabilityService.js
 BackgroundReliabilityService.js:53 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842389631_ei7c
 BackgroundReliabilityService.js:373 [BGReliability] ✅ Ready
-BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://moodfronted.onrender.com/
+BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://nexopa.onrender.com/
 BackgroundReliabilityService.js:265 [BGReliability] ✅ Started — leader: false
 BackgroundReliabilityService.js:53 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842389741_d63a
 BackgroundReliabilityService.js:373 [BGReliability] ✅ Ready
-BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://moodfronted.onrender.com/
+BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://nexopa.onrender.com/
 BackgroundReliabilityService.js:265 [BGReliability] ✅ Started — leader: false
 DurableQueueLayer.js:459 [DurableQueue] ✅ Ready
 DurableQueueLayer.js:210 [DurableQueue] ✅ Initialized — 0 ops loaded
-ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
+ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
 BackgroundReliabilityService.js:53 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842389901_mxum
 BackgroundReliabilityService.js:373 [BGReliability] ✅ Ready
-BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://moodfronted.onrender.com/
+BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://nexopa.onrender.com/
 BackgroundReliabilityService.js:265 [BGReliability] ✅ Started — leader: false
 app.realtime.socket.js:48 [DurableQueue] ✅ Ready
 app.realtime.socket.js:48 [DurableQueue] ✅ Initialized — 0 ops loaded
-ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
+ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
 app.realtime.socket.js:48 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842390029_3r0x
 app.realtime.socket.js:48 [BGReliability] ✅ Ready
-app.realtime.socket.js:48 [BGReliability] SW ready: https://moodfronted.onrender.com/
+app.realtime.socket.js:48 [BGReliability] SW ready: https://nexopa.onrender.com/
 app.realtime.socket.js:48 [BGReliability] ✅ Started — leader: false
 BackgroundReliabilityService.js:53 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842390145_g4dx
 BackgroundReliabilityService.js:373 [BGReliability] ✅ Ready
-BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://moodfronted.onrender.com/
+BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://nexopa.onrender.com/
 BackgroundReliabilityService.js:265 [BGReliability] ✅ Started — leader: false
-ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
+ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
 app.realtime.socket.js:48 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842390968_8005
 app.realtime.socket.js:48 [BGReliability] ✅ Ready
-app.realtime.socket.js:48 [BGReliability] SW ready: https://moodfronted.onrender.com/
+app.realtime.socket.js:48 [BGReliability] SW ready: https://nexopa.onrender.com/
 app.realtime.socket.js:48 [BGReliability] ✅ Started — leader: false
 BackgroundReliabilityService.js:53 [BGReliability] BroadcastChannel initialized, tabId: tab_1780842390980_otgg
 BackgroundReliabilityService.js:373 [BGReliability] ✅ Ready
-BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://moodfronted.onrender.com/
+BackgroundReliabilityService.js:170 [BGReliability] SW ready: https://nexopa.onrender.com/
 BackgroundReliabilityService.js:265 [BGReliability] ✅ Started — leader: false
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/recovery/ProductionMonitoringLayer.js
-ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
-app.realtime.socket.js:48 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
-ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
-app.realtime.socket.js:48 [ProductionMonitor] ✅ Started — run __MoodChatDiag() for full snapshot
-app.realtime.socket.js:48 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/recovery/ProductionMonitoringLayer.js
+ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
+app.realtime.socket.js:48 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
+ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
+app.realtime.socket.js:48 [ProductionMonitor] ✅ Started — run __NexopaDiag() for full snapshot
+app.realtime.socket.js:48 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
 CacheRepairEngine.js:391 [CacheRepair] ✅ Ready
 CacheRepairEngine.js:276 [CacheRepair] ✅ Started
 CacheRepairEngine.js:391 [CacheRepair] ✅ Ready
-ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/session/CacheRepairEngine.js
+ProductionMonitoringLayer.js:372 [ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/session/CacheRepairEngine.js
 CacheRepairEngine.js:391 [CacheRepair] ✅ Ready
 RuntimeIntegrationValidator.js:378 [Phase6] ✅ Runtime Integration Validator ready
 CacheRepairEngine.js:276 [CacheRepair] ✅ Started
 CacheRepairEngine.js:276 [CacheRepair] ✅ Started
 CacheRepairEngine.js:391 [CacheRepair] ✅ Ready
 CacheRepairEngine.js:276 [CacheRepair] ✅ Started
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/recovery/RuntimeIntegrationValidator.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/recovery/RuntimeIntegrationValidator.js
 RuntimeIntegrationValidator.js:378 [Phase6] ✅ Runtime Integration Validator ready
 CacheRepairEngine.js:391 [CacheRepair] ✅ Ready
 CacheRepairEngine.js:276 [CacheRepair] ✅ Started
@@ -4566,7 +4566,7 @@ RuntimeIntegrationValidator.js:378 [Phase6] ✅ Runtime Integration Validator re
 HybridTransportRuntime.js:190 [Phase10] TransportRuntime ✅ active — best: INTERNET
 phase6.bootstrap.js:120 [Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded
 RuntimeIntegrationValidator.js:378 [Phase6] ✅ Runtime Integration Validator ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/transport/HybridTransportRuntime.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/transport/HybridTransportRuntime.js
 RuntimeIntegrationValidator.js:378 [Phase6] ✅ Runtime Integration Validator ready
 app.realtime.socket.js:48 [CacheRepair] ✅ Ready
 HybridTransportRuntime.js:190 [Phase10] TransportRuntime ✅ active — best: INTERNET
@@ -4585,7 +4585,7 @@ CacheRepairEngine.js:276 [CacheRepair] ✅ Started
 RuntimeIntegrationValidator.js:378 [Phase6] ✅ Runtime Integration Validator ready
 HybridTransportRuntime.js:190 [Phase10] TransportRuntime ✅ active — best: INTERNET
 phase6.bootstrap.js:120 [Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/mesh/mesh-crypto.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/mesh/mesh-crypto.js
 app.realtime.socket.js:48 [Phase6Bootstrap] ✅ Phase 11 Central Orchestration Runtime loaded
 app.realtime.socket.js:48 [Phase6Bootstrap] ✅ 37/35 modules in 23987ms
 app.realtime.socket.js:48 [Phase6Bootstrap] OfflineQueue send handler wired
@@ -4595,13 +4595,13 @@ app.realtime.socket.js:48 [Phase10] TransportRuntime active — best: INTERNET
 app.realtime.socket.js:48 [Phase10] LAN engine active — peers: 0
 app.realtime.socket.js:48 [Phase10] All production hardening systems wired ✅
 app.realtime.socket.js:48 [Phase11] CentralOrchestrationRuntime active ✅
-app.realtime.socket.js:48 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+app.realtime.socket.js:48 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 HybridTransportRuntime.js:190 [Phase10] TransportRuntime ✅ active — best: INTERNET
 phase6.bootstrap.js:120 [Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded
 app.realtime.socket.js:48 [CacheRepair] ✅ Ready
 app.realtime.socket.js:48 [CacheRepair] ✅ Started
 app.realtime.socket.js:48 [Phase6] ✅ Runtime Integration Validator ready
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/mesh/mesh-transport.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/mesh/mesh-transport.js
 app.realtime.socket.js:48 [Phase10] TransportRuntime ✅ active — best: INTERNET
 app.realtime.socket.js:48 [Phase6Bootstrap] ✅ Phase 10 production hardening modules loaded
 mesh-transport.js:310 [MeshTransport] ✅ Transport layer initialised, deviceId: dev_4a5a1187a6f042e7
@@ -4613,8 +4613,8 @@ mesh-engine.js:437 [MeshEngine] ✅ Initialised | Phase 4 | DeviceId: dev_4a5a11
 mesh-messages-bridge.js:180 [MeshBridge] ✅ Bridge installed for device dev_4a5a1187a6f042e7
 mesh-messages-bridge.js:200 [MeshBridge] Waiting for MeshEngine…
 phase6.bootstrap.js:126 [Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/mesh/mesh-engine.js
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/js/core/orchestration/CentralOrchestrationRuntime.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/mesh/mesh-engine.js
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/js/core/orchestration/CentralOrchestrationRuntime.js
 phase6.bootstrap.js:133 [Phase6Bootstrap] ✅ Phase 11 Central Orchestration Runtime loaded
 phase6.bootstrap.js:136 [Phase6Bootstrap] ✅ 42/35 modules in 26797ms
 phase6.bootstrap.js:248 [Phase6Bootstrap] OfflineQueue send handler wired
@@ -4623,7 +4623,7 @@ phase6.bootstrap.js:343 [Phase10] TransportRuntime active — best: INTERNET
 phase6.bootstrap.js:370 [Phase10] LAN engine active — peers: 0
 phase6.bootstrap.js:431 [Phase10] All production hardening systems wired ✅
 phase6.bootstrap.js:435 [Phase11] CentralOrchestrationRuntime active ✅
-phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 mesh-messages-bridge.js:180 [MeshBridge] ✅ Bridge installed for device dev_4a5a1187a6f042e7
 mesh-messages-bridge.js:200 [MeshBridge] Waiting for MeshEngine…
 phase6.bootstrap.js:126 [Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)
@@ -4635,7 +4635,7 @@ phase6.bootstrap.js:343 [Phase10] TransportRuntime active — best: INTERNET
 phase6.bootstrap.js:370 [Phase10] LAN engine active — peers: 0
 phase6.bootstrap.js:431 [Phase10] All production hardening systems wired ✅
 phase6.bootstrap.js:435 [Phase11] CentralOrchestrationRuntime active ✅
-phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 app.realtime.socket.js:48 [MeshTransport] ✅ Transport layer initialised, deviceId: dev_4a5a1187a6f042e7
 app.realtime.socket.js:48 [MeshBridge] Registered device with relay: dev_4a5a1187a6f042e7
 app.realtime.socket.js:48 [MeshBridge] ✅ Bridge installed for device dev_4a5a1187a6f042e7
@@ -4649,7 +4649,7 @@ app.realtime.socket.js:48 [MeshRouter] ✅ Router ready, deviceId: dev_4a5a1187a
 app.realtime.socket.js:48 [MeshEngine] ✅ Initialised | Phase 4 | DeviceId: dev_4a5a1187a6f042e7
 mesh-router.js:490 [MeshRouter] ✅ Router ready, deviceId: dev_4a5a1187a6f042e7
 mesh-engine.js:437 [MeshEngine] ✅ Initialised | Phase 4 | DeviceId: dev_4a5a1187a6f042e7
-service-worker.js:389 [SW] Cache hit: https://moodfronted.onrender.com/theme.colors.css
+service-worker.js:389 [SW] Cache hit: https://nexopa.onrender.com/theme.colors.css
 mesh-router.js:490 [MeshRouter] ✅ Router ready, deviceId: dev_4a5a1187a6f042e7
 mesh-engine.js:437 [MeshEngine] ✅ Initialised | Phase 4 | DeviceId: dev_4a5a1187a6f042e7
 mesh-router.js:490 [MeshRouter] ✅ Router ready, deviceId: dev_4a5a1187a6f042e7
@@ -4666,7 +4666,7 @@ app.realtime.socket.js:48 [Phase10] TransportRuntime active — best: INTERNET
 app.realtime.socket.js:48 [Phase10] LAN engine active — peers: 0
 app.realtime.socket.js:48 [Phase10] All production hardening systems wired ✅
 app.realtime.socket.js:48 [Phase11] CentralOrchestrationRuntime active ✅
-app.realtime.socket.js:48 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+app.realtime.socket.js:48 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 mesh-messages-bridge.js:180 [MeshBridge] ✅ Bridge installed for device dev_4a5a1187a6f042e7
 mesh-messages-bridge.js:200 [MeshBridge] Waiting for MeshEngine…
 phase6.bootstrap.js:126 [Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)
@@ -4678,7 +4678,7 @@ phase6.bootstrap.js:343 [Phase10] TransportRuntime active — best: INTERNET
 phase6.bootstrap.js:370 [Phase10] LAN engine active — peers: 0
 phase6.bootstrap.js:431 [Phase10] All production hardening systems wired ✅
 phase6.bootstrap.js:435 [Phase11] CentralOrchestrationRuntime active ✅
-phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 calls-core.js:1115 [calls][SessionClient] Valid session received: {authenticated: true, userId: 2, sessionId: 1780842394679}
 calls-core.js:1115 [calls][SessionClient] Valid session received: {authenticated: true, userId: 2, sessionId: 1780842394680}
 app.realtime.socket.js:48 [COR] ✅ Canonical event wiring active
@@ -4695,7 +4695,7 @@ phase6.bootstrap.js:343 [Phase10] TransportRuntime active — best: INTERNET
 phase6.bootstrap.js:370 [Phase10] LAN engine active — peers: 0
 phase6.bootstrap.js:431 [Phase10] All production hardening systems wired ✅
 phase6.bootstrap.js:435 [Phase11] CentralOrchestrationRuntime active ✅
-phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 mesh-messages-bridge.js:180 [MeshBridge] ✅ Bridge installed for device dev_4a5a1187a6f042e7
 mesh-messages-bridge.js:200 [MeshBridge] Waiting for MeshEngine…
 phase6.bootstrap.js:126 [Phase6Bootstrap] ✅ Mesh engine stack loaded (MeshCrypto + MeshTransport + MeshRouter + MeshEngine)
@@ -4714,7 +4714,7 @@ phase6.bootstrap.js:343 [Phase10] TransportRuntime active — best: INTERNET
 phase6.bootstrap.js:370 [Phase10] LAN engine active — peers: 0
 phase6.bootstrap.js:431 [Phase10] All production hardening systems wired ✅
 phase6.bootstrap.js:435 [Phase11] CentralOrchestrationRuntime active ✅
-phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 phase6.bootstrap.js:133 [Phase6Bootstrap] ✅ Phase 11 Central Orchestration Runtime loaded
 phase6.bootstrap.js:136 [Phase6Bootstrap] ✅ 42/35 modules in 27641ms
 phase6.bootstrap.js:248 [Phase6Bootstrap] OfflineQueue send handler wired
@@ -4723,7 +4723,7 @@ phase6.bootstrap.js:343 [Phase10] TransportRuntime active — best: INTERNET
 phase6.bootstrap.js:370 [Phase10] LAN engine active — peers: 0
 phase6.bootstrap.js:431 [Phase10] All production hardening systems wired ✅
 phase6.bootstrap.js:435 [Phase11] CentralOrchestrationRuntime active ✅
-phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics
+phase6.bootstrap.js:151 [Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics
 ReconnectOrchestrator.js:182 [Reconnect] Boot grace period ended
 ReconnectOrchestrator.js:182 [Reconnect] Boot grace period ended
 ReconnectOrchestrator.js:182 [Reconnect] Boot grace period ended

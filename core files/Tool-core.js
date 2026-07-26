@@ -778,8 +778,8 @@ const ALLOWED_ORIGINS = [
     'http://127.0.0.1',
     'http://localhost:4000',
     'http://127.0.0.1:4000',
-    'https://moodchat-fy56.onrender.com',
-    'https://moodfronted.onrender.com',
+    'https://nexopa-fy56.onrender.com',
+    'https://nexopa.onrender.com',
     null,
     'null'
 ];
@@ -2504,8 +2504,8 @@ class SecurityValidator {
             'http://127.0.0.1:3000',
             'https://*.onrender.com',
             'http://*.onrender.com',
-            'https://moodchat-fy56.onrender.com',
-            'https://moodfronted.onrender.com',
+            'https://nexopa-fy56.onrender.com',
+            'https://nexopa.onrender.com',
             'null'
         ];
         

@@ -9,7 +9,7 @@
  *  - Coordinates with Phase 1 PersistenceStabilizationLayer
  *  - Runs on reconnect, visibility restore, and explicit triggers
  *
- * Uses moodchat_ prefix for all keys.
+ * Uses nexopa_ prefix for all keys.
  *
  * @version 5.0.0
  * @phase 5 — Cache Repair
@@ -20,7 +20,7 @@
 
   if (window.__CacheRepairEngine) return;
 
-  const REPAIR_DB_NAME    = 'moodchat_repair_v1';
+  const REPAIR_DB_NAME    = 'nexopa_repair_v1';
   const DELETED_STORE     = 'deleted_entities';
   const MAX_DELETED_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -149,10 +149,10 @@
     async _purgeIDBStores(type, id) {
       // Purge from known IDB databases
       const dbTargets = [
-        { name: 'moodchat_offline_queue', store: 'pending_messages' },
+        { name: 'nexopa_offline_queue', store: 'pending_messages' },
         { name: 'kyn_offline_queue',      store: 'pending_messages' },
         { name: 'kyn_stories_v1',         store: 'stories' },
-        { name: 'moodchat_dq_v1',         store: 'ops' },
+        { name: 'nexopa_dq_v1',         store: 'ops' },
       ];
 
       for (const target of dbTargets) {

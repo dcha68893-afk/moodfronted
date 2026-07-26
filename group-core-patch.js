@@ -319,7 +319,7 @@ async function _loadMemberPicker(GC) {
                     // the /api suffix — this was silently winning over the correctly-suffixed
                     // window.__kynAPI.baseUrl and producing 404s (e.g. /groups/user instead of
                     // /api/groups/user). Prefer the properly-suffixed source and normalize.
-                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://nexopa-fy56.onrender.com/api';
                     return /\/api$/.test(b) ? b : (b.replace(/\/$/, '') + '/api');
                 })();
                 const res = await fetch(`${base}/friends`, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
@@ -625,7 +625,7 @@ async function _inviteMembers(groupId, memberIds, myUserId) {
                     // the /api suffix — this was silently winning over the correctly-suffixed
                     // window.__kynAPI.baseUrl and producing 404s (e.g. /groups/user instead of
                     // /api/groups/user). Prefer the properly-suffixed source and normalize.
-                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://nexopa-fy56.onrender.com/api';
                     return /\/api$/.test(b) ? b : (b.replace(/\/$/, '') + '/api');
                 })();
     for (const uid of memberIds) {
@@ -661,7 +661,7 @@ async function _rawFetch(endpoint, method = 'GET', body = null) {
                     // the /api suffix — this was silently winning over the correctly-suffixed
                     // window.__kynAPI.baseUrl and producing 404s (e.g. /groups/user instead of
                     // /api/groups/user). Prefer the properly-suffixed source and normalize.
-                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+                    var b = (window.__kynAPI && window.__kynAPI.baseUrl) || window.__API_BASE_URL || window.API_BASE_URL || window.__API_BASE || (window.__getApiBase && window.__getApiBase()) || 'https://nexopa-fy56.onrender.com/api';
                     return /\/api$/.test(b) ? b : (b.replace(/\/$/, '') + '/api');
                 })();
     const token = _getToken();

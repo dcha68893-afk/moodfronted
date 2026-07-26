@@ -2133,8 +2133,8 @@ const TrustedOrigins = {
             }
         } catch (e) {}
         
-        this.addTrustedOrigin('https://moodchat-fy56.onrender.com');
-        this.addTrustedOrigin('https://moodfronted.onrender.com');
+        this.addTrustedOrigin('https://nexopa-fy56.onrender.com');
+        this.addTrustedOrigin('https://nexopa.onrender.com');
     },
     
     addTrustedOrigin(origin) {

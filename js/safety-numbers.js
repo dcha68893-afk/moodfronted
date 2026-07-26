@@ -1,5 +1,5 @@
 /**
- * safety-numbers.js — Key verification / Safety numbers screen for MoodChat
+ * safety-numbers.js — Key verification / Safety numbers screen for Nexopa
  *
  * Phase 3 feature: Safety numbers screen
  *

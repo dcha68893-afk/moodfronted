@@ -43,7 +43,7 @@ function _toast(msg, type='info', icon='ℹ️') {
 
 async function _api(method, endpoint, body=null) {
     try {
-        const token=window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('moodchat_token')||localStorage.getItem('accessToken')||'';
+        const token=window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
         let base = '';
         if (window.__kynAPI?.baseUrl) base = window.__kynAPI.baseUrl.replace(/\/api$/, '').replace(/\/$/, '');
         else if (typeof window.__getApiBase === 'function') base = window.__getApiBase().replace(/\/api$/, '').replace(/\/$/, '');

@@ -47,8 +47,8 @@ const _toast = (msg,type='info',icon='ℹ️') => {
 
 async function _api(method, endpoint, body=null) {
     try {
-        const token = window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('moodchat_token')||localStorage.getItem('accessToken')||'';
-        const _mh=window.location?.hostname||'';const _mIsLocal=_mh==='localhost'||_mh==='127.0.0.1'||_mh.startsWith('192.168.');const base=(window.API_BASE_URL||window.BACKEND_URL||'').replace(/\/api$|\/$/,'')||(window.__kynAPI?.baseUrl||'').replace(/\/api$|\/$/,'')||(typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')||(typeof window.__getApiOrigin==='function'?window.__getApiOrigin():'')||(_mIsLocal?'http://localhost:4000':'https://moodchat-fy56.onrender.com');
+        const token = window.__kynToken||window.__accessToken||localStorage.getItem('authToken')||localStorage.getItem('token')||localStorage.getItem('nexopa_token')||localStorage.getItem('accessToken')||'';
+        const _mh=window.location?.hostname||'';const _mIsLocal=_mh==='localhost'||_mh==='127.0.0.1'||_mh.startsWith('192.168.');const base=(window.API_BASE_URL||window.BACKEND_URL||'').replace(/\/api$|\/$/,'')||(window.__kynAPI?.baseUrl||'').replace(/\/api$|\/$/,'')||(typeof window.__getApiBase==='function'?window.__getApiBase().replace(/\/api$/,''):'')||(typeof window.__getApiOrigin==='function'?window.__getApiOrigin():'')||(_mIsLocal?'http://localhost:4000':'https://nexopa-fy56.onrender.com');
         const res   = await fetch(base+'/api'+endpoint, { method:method.toUpperCase(), headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, ...(body&&method!=='GET'?{body:JSON.stringify(body)}:{}) });
         if (!res.ok) return null;
         return await res.json();

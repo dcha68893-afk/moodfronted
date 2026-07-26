@@ -1,4 +1,4 @@
-// app.core.session.js - MoodChat Session Coordination & Authentication System
+// app.core.session.js - Nexopa Session Coordination & Authentication System
 // HARDENED VERSION - Single Source of Truth for Authentication & Session Management
 // VERSION: 3.0 - CENTRALIZED SESSION AUTHORITY WITH FULL BACKWARD COMPATIBILITY
 // 
@@ -301,7 +301,7 @@
             window.Session._validated = true;
           }
           try {
-            window.dispatchEvent(new CustomEvent('moodchat-session-validated', {
+            window.dispatchEvent(new CustomEvent('nexopa-session-validated', {
               detail: { session: sessionData, timestamp: Date.now(), source: 'background_validation' }
             }));
           } catch (e) {}
@@ -338,7 +338,7 @@
       
       // Fire session invalid event
       try {
-        window.dispatchEvent(new CustomEvent('moodchat-session-invalid', {
+        window.dispatchEvent(new CustomEvent('nexopa-session-invalid', {
           detail: { 
             timestamp: Date.now(), 
             reason: reason,
@@ -472,10 +472,10 @@
       // causing userLoggedIn() to return true on the next boot despite no valid session.
       const PARALLEL_KEYS = [
         'kynecta_session', 'accessToken', 'refreshToken',
-        'moodchat_token', 'USER_TOKEN', 'token',
-        'moodchat_accessToken', 'moodchat_refreshToken', 'moodchat_user',
-        'moodchat_tokenExpiry', 'moodchat_issuedAt', 'moodchat_validated',
-        'moodchat_validationTimestamp', 'auth_token', 'auth_user',
+        'nexopa_token', 'USER_TOKEN', 'token',
+        'nexopa_accessToken', 'nexopa_refreshToken', 'nexopa_user',
+        'nexopa_tokenExpiry', 'nexopa_issuedAt', 'nexopa_validated',
+        'nexopa_validationTimestamp', 'auth_token', 'auth_user',
         'currentUser', 'user', 'REFRESH_TOKEN', 'TOKEN_EXPIRY',
         'isLoggedIn', 'kynecta_token'
       ];
@@ -619,7 +619,7 @@
       __SESSION_READY_FORCE_TIMEOUT = null;
     }
     
-    window.dispatchEvent(new CustomEvent('moodchat-session-ready', {
+    window.dispatchEvent(new CustomEvent('nexopa-session-ready', {
       detail: {
         forced: true,
         reason: reason,
@@ -661,7 +661,7 @@
         __SESSION_READY_FORCE_TIMEOUT = null;
       }
       
-      window.dispatchEvent(new CustomEvent('moodchat-session-ready', {
+      window.dispatchEvent(new CustomEvent('nexopa-session-ready', {
         detail: {
           forced: false,
           authStateInitialized: authStateInitialized,
@@ -1075,7 +1075,7 @@
           _refreshExpiry: null,
           _validated: false,
           _validationTimestamp: null,
-          _storageKeyPrefix: 'moodchat_',
+          _storageKeyPrefix: 'nexopa_',
           _sessionState: SESSION_STATES.UNINITIALIZED,
           _stateTransitionLock: false,
           _tabId: 'tab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
@@ -1118,7 +1118,7 @@
             this._sessionState = newState;
             
             setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('moodchat-session-state-changed', {
+              window.dispatchEvent(new CustomEvent('nexopa-session-state-changed', {
                 detail: {
                   previousState: currentState,
                   newState: newState,
@@ -1222,8 +1222,8 @@
               
               if (!this._user) {
                 const userStr = localStorage.getItem(this._storageKeyPrefix + 'user') || 
-                               localStorage.getItem('moodchat_user') || 
-                               sessionStorage.getItem('moodchat_user');
+                               localStorage.getItem('nexopa_user') || 
+                               sessionStorage.getItem('nexopa_user');
                 if (userStr) {
                   try {
                     this._user = JSON.parse(userStr);
@@ -1311,11 +1311,11 @@
               if (this._user) {
                 const userStr = JSON.stringify(this._user);
                 localStorage.setItem(this._storageKeyPrefix + 'user', userStr);
-                localStorage.setItem('moodchat_user', userStr);
+                localStorage.setItem('nexopa_user', userStr);
               } else {
                 localStorage.removeItem(this._storageKeyPrefix + 'user');
-                localStorage.removeItem('moodchat_user');
-                sessionStorage.removeItem('moodchat_user');
+                localStorage.removeItem('nexopa_user');
+                sessionStorage.removeItem('nexopa_user');
               }
               
               if (this._tokenExpiry) {
@@ -1342,7 +1342,7 @@
               
               this._saveToKynectaAuth();
               
-              const storageEvent = new CustomEvent('moodchat-storage-update', {
+              const storageEvent = new CustomEvent('nexopa-storage-update', {
                 detail: {
                   sourceTab: this._tabId,
                   timestamp: new Date().toISOString(),
@@ -1395,7 +1395,7 @@
               if (event.key === this._storageKeyPrefix + 'accessToken' || 
                   event.key === 'accessToken' ||
                   event.key === this._storageKeyPrefix + 'user' ||
-                  event.key === 'moodchat_user' ||
+                  event.key === 'nexopa_user' ||
                   event.key === STORAGE_KEY) {
                 
                 setTimeout(() => {
@@ -1405,14 +1405,14 @@
                     
                     if (event.key.includes('accessToken') || event.key === STORAGE_KEY) {
                       if (this._token) {
-                        window.dispatchEvent(new CustomEvent('moodchat-token-synced', {
+                        window.dispatchEvent(new CustomEvent('nexopa-token-synced', {
                           detail: {
                             source: 'storage_event',
                             timestamp: new Date().toISOString()
                           }
                         }));
                       } else {
-                        window.dispatchEvent(new CustomEvent('moodchat-token-cleared', {
+                        window.dispatchEvent(new CustomEvent('nexopa-token-cleared', {
                           detail: {
                             source: 'storage_event',
                             timestamp: new Date().toISOString()
@@ -1423,7 +1423,7 @@
                     
                     if (event.key.includes('user') || event.key === STORAGE_KEY) {
                       if (this._user) {
-                        window.dispatchEvent(new CustomEvent('moodchat-user-synced', {
+                        window.dispatchEvent(new CustomEvent('nexopa-user-synced', {
                           detail: {
                             source: 'storage_event',
                             user: this._user,
@@ -1431,7 +1431,7 @@
                           }
                         }));
                       } else {
-                        window.dispatchEvent(new CustomEvent('moodchat-user-cleared', {
+                        window.dispatchEvent(new CustomEvent('nexopa-user-cleared', {
                           detail: {
                             source: 'storage_event',
                             timestamp: new Date().toISOString()
@@ -1444,7 +1444,7 @@
               }
             });
             
-            window.addEventListener('moodchat-storage-update', (event) => {
+            window.addEventListener('nexopa-storage-update', (event) => {
               if (event.detail.sourceTab !== this._tabId) {
                 executeSafely('AUTH_STATE.customStorageEvent', this._loadFromStorage, this);
               }
@@ -1472,10 +1472,10 @@
             this._issuedAt = null;
 
             // PATCH v1.3: Wipe AUTH_STATE's own parallel localStorage keys.
-            // These keys (moodchat_accessToken, moodchat_user etc.) survived logout
+            // These keys (nexopa_accessToken, nexopa_user etc.) survived logout
             // and were read back on reopen, creating a ghost session that conflicted
             // with the main kynecta_auth state and caused the reopen loop.
-            const prefix = this._storageKeyPrefix || 'moodchat_';
+            const prefix = this._storageKeyPrefix || 'nexopa_';
             ['accessToken','refreshToken','user','tokenExpiry','issuedAt','validated','validationTimestamp']
                 .forEach(k => { try { localStorage.removeItem(prefix + k); } catch(_) {} });
             // Also clear the accessToken shadow key that AUTH_STATE writes without prefix
@@ -1563,7 +1563,7 @@
               }
             }));
             
-            window.dispatchEvent(new CustomEvent('moodchat-auth-state-changed', {
+            window.dispatchEvent(new CustomEvent('nexopa-auth-state-changed', {
               detail: {
                 user: user,
                 hasToken: !!token,
@@ -1604,13 +1604,13 @@
                 localStorage.removeItem(this._storageKeyPrefix + 'issuedAt');
                 
                 localStorage.removeItem('accessToken');
-                localStorage.removeItem('moodchat_jwt_token');
+                localStorage.removeItem('nexopa_jwt_token');
                 localStorage.removeItem('refreshToken');
-                localStorage.removeItem('moodchat_user');
+                localStorage.removeItem('nexopa_user');
                 localStorage.removeItem('tokenExpiresAt');
-                localStorage.removeItem('moodchat-auth-state');
+                localStorage.removeItem('nexopa-auth-state');
                 localStorage.removeItem(STORAGE_KEY);
-                sessionStorage.removeItem('moodchat_user');
+                sessionStorage.removeItem('nexopa_user');
               }
             } catch (error) {
               // Silent
@@ -1628,7 +1628,7 @@
               }
             }));
             
-            window.dispatchEvent(new CustomEvent('moodchat-auth-state-cleared', {
+            window.dispatchEvent(new CustomEvent('nexopa-auth-state-cleared', {
               detail: {
                 timestamp: new Date().toISOString(),
                 sessionState: this._sessionState,
@@ -2839,61 +2839,61 @@
         },
         
         setupEventListeners: function() {
-          window.addEventListener('moodchat-login-success', (event) => {
+          window.addEventListener('nexopa-login-success', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLoginSuccess', () => {
               this.handleLoginSuccess(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-login-failed', (event) => {
+          window.addEventListener('nexopa-login-failed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLoginFailed', () => {
               this.handleLoginFailed(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-logout', (event) => {
+          window.addEventListener('nexopa-logout', (event) => {
             executeSafely('SESSION_COORDINATOR.handleLogout', () => {
               this.handleLogout(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-token-expired', (event) => {
+          window.addEventListener('nexopa-token-expired', (event) => {
             executeSafely('SESSION_COORDINATOR.handleTokenExpired', () => {
               this.handleTokenExpired(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-session-invalid', (event) => {
+          window.addEventListener('nexopa-session-invalid', (event) => {
             executeSafely('SESSION_COORDINATOR.handleSessionInvalid', () => {
               this.handleSessionInvalid(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-session-refreshed', (event) => {
+          window.addEventListener('nexopa-session-refreshed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleSessionRefreshed', () => {
               this.handleSessionRefreshed(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-auth-state-changed', (event) => {
+          window.addEventListener('nexopa-auth-state-changed', (event) => {
             executeSafely('SESSION_COORDINATOR.handleAuthStateChanged', () => {
               this.handleAuthStateChanged(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-auth-state-cleared', (event) => {
+          window.addEventListener('nexopa-auth-state-cleared', (event) => {
             executeSafely('SESSION_COORDINATOR.handleAuthStateCleared', () => {
               this.handleAuthStateCleared(event.detail);
             });
           });
           
-          window.addEventListener('moodchat-token-synced', (event) => {
+          window.addEventListener('nexopa-token-synced', (event) => {
             executeSafely('SESSION_COORDINATOR.broadcastSynced', () => {
               this.broadcastSessionChange('synced', AUTH_STATE && typeof AUTH_STATE.getUser === 'function' ? AUTH_STATE.getUser() : null);
             });
           });
           
-          window.addEventListener('moodchat-user-synced', (event) => {
+          window.addEventListener('nexopa-user-synced', (event) => {
             executeSafely('SESSION_COORDINATOR.updateUISynced', () => {
               if (event.detail && event.detail.user) {
                 this.updateUIForAuthenticatedState(event.detail.user);
@@ -2901,7 +2901,7 @@
             });
           });
           
-          window.addEventListener('moodchat-session-state-changed', (event) => {
+          window.addEventListener('nexopa-session-state-changed', (event) => {
             if (event.detail.newState === SESSION_STATES.RECOVERY) {
               this.enterRecoveryMode();
             }
@@ -3115,7 +3115,7 @@
             this.attemptTokenRefresh().then(refreshResult => {
               if (refreshResult && refreshResult.success) {
                 executeSafely('SESSION_COORDINATOR.dispatchRefreshed', () => {
-                  window.dispatchEvent(new CustomEvent('moodchat-session-refreshed', {
+                  window.dispatchEvent(new CustomEvent('nexopa-session-refreshed', {
                     detail: { 
                       token: refreshResult.token,
                       timestamp: new Date().toISOString()
@@ -3147,7 +3147,7 @@
                 });
                 
                 executeSafely('SESSION_COORDINATOR.dispatchReauthRequired', () => {
-                  window.dispatchEvent(new CustomEvent('moodchat-reauthentication-required', {
+                  window.dispatchEvent(new CustomEvent('nexopa-reauthentication-required', {
                     detail: {
                       reason: 'Token refresh failed',
                       timestamp: new Date().toISOString()
@@ -3273,7 +3273,7 @@
               executeSafely(`pauseIframe.${iframeId}`, () => {
                 try {
                   iframe.window.postMessage({
-                    type: 'moodchat-session-pause',
+                    type: 'nexopa-session-pause',
                     reason: 'recovery_mode',
                     timestamp: new Date().toISOString()
                   }, '*');
@@ -3464,7 +3464,7 @@
           document.body.appendChild(warning);
           
           document.getElementById('reauth-now').addEventListener('click', () => {
-            window.dispatchEvent(new CustomEvent('moodchat-reauthentication-required', {
+            window.dispatchEvent(new CustomEvent('nexopa-reauthentication-required', {
               detail: { reason: 'User requested re-authentication' }
             }));
             warning.remove();
@@ -3669,7 +3669,7 @@
                 TOKEN_VALIDATION.validateWithBackend().then(result => {
                   if (!result || !result.valid) {
                     executeSafely('SESSION_COORDINATOR.dispatchSessionInvalid', () => {
-                      window.dispatchEvent(new CustomEvent('moodchat-session-invalid', {
+                      window.dispatchEvent(new CustomEvent('nexopa-session-invalid', {
                         detail: {
                           reason: 'Session validation failed',
                           timestamp: new Date().toISOString()
@@ -3688,7 +3688,7 @@
           if (timeToExpiry !== null) {
             if (timeToExpiry <= 0) {
               executeSafely('SESSION_COORDINATOR.dispatchTokenExpired', () => {
-                window.dispatchEvent(new CustomEvent('moodchat-token-expired', {
+                window.dispatchEvent(new CustomEvent('nexopa-token-expired', {
                   detail: {
                     reason: 'Token has expired',
                     timestamp: new Date().toISOString()
@@ -3793,7 +3793,7 @@
         //     one place that could actually act on it.
         //  2. Even at the fixed 30 minutes, `handleUserInactivity` only ever
         //     showed a "session will expire soon" toast and dispatched a
-        //     `moodchat-user-inactivity` event that nothing in the codebase
+        //     `nexopa-user-inactivity` event that nothing in the codebase
         //     ever listens for — no logout ever actually happened.
         //  3. app.core.bootstrap.js runs a second, fully independent,
         //     also-hardcoded 30-minute inactivity timer in parallel (see
@@ -3877,7 +3877,7 @@
           }
           
           executeSafely('SESSION_COORDINATOR.dispatchInactivity', () => {
-            window.dispatchEvent(new CustomEvent('moodchat-user-inactivity', {
+            window.dispatchEvent(new CustomEvent('nexopa-user-inactivity', {
               detail: {
                 minutesUntilLogout: minutesLeft,
                 timestamp: new Date().toISOString()
@@ -3903,7 +3903,7 @@
         setupCrossTabSync: function() {
           if (typeof BroadcastChannel !== 'undefined') {
             try {
-              this._broadcastChannel = new BroadcastChannel('moodchat_session');
+              this._broadcastChannel = new BroadcastChannel('nexopa_session');
               
               this._broadcastChannel.addEventListener('message', (event) => {
                 executeSafely('SESSION_COORDINATOR.broadcastMessage', () => {
@@ -3970,19 +3970,19 @@
                 return;
               }
               
-              if (data && data.type === 'moodchat-iframe-ready') {
+              if (data && data.type === 'nexopa-iframe-ready') {
                 this._handleIframeReadySecure(event.source, data);
               }
               
-              if (data && data.type === 'moodchat-iframe-auth-request') {
+              if (data && data.type === 'nexopa-iframe-auth-request') {
                 this.handleIframeAuthRequest(event.source, data);
               }
               
-              if (data && data.type === 'moodchat-iframe-data-request') {
+              if (data && data.type === 'nexopa-iframe-data-request') {
                 this.handleIframeDataRequest(event.source, data);
               }
               
-              if (data && data.type === 'moodchat-handshake-response') {
+              if (data && data.type === 'nexopa-handshake-response') {
                 this._handleHandshakeResponse(event.source, data);
               }
             });
@@ -4003,8 +4003,8 @@
             currentOrigin,
             'http://localhost',
             'http://127.0.0.1',
-            'https://moodchat.app',
-            'https://*.moodchat.app'
+            'https://nexopa.app',
+            'https://*.nexopa.app'
           ];
           
           return trustedOrigins.some(trusted => {
@@ -4020,7 +4020,7 @@
           if (!data || typeof data !== 'object') return false;
           if (!data.type || typeof data.type !== 'string') return false;
           
-          const typesRequiringId = ['moodchat-handshake-response', 'moodchat-iframe-auth-request', 'moodchat-iframe-data-request'];
+          const typesRequiringId = ['nexopa-handshake-response', 'nexopa-iframe-auth-request', 'nexopa-iframe-data-request'];
           if (typesRequiringId.includes(data.type) && (!data.messageId || typeof data.messageId !== 'string')) {
             return false;
           }
@@ -4084,7 +4084,7 @@
           }
           
           const handshakeMessage = {
-            type: 'moodchat-handshake-request',
+            type: 'nexopa-handshake-request',
             messageId: messageId,
             iframeId: iframeId,
             pageKey: pageKey,
@@ -4139,7 +4139,7 @@
           const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
           
           const sessionData = {
-            type: 'moodchat-complete-session-data',
+            type: 'nexopa-complete-session-data',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             auth: safeSession ? {
               isAuthenticated: true,
@@ -4160,7 +4160,7 @@
             },
             network: {
               status: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() : 'unknown',
-              backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+              backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
               isOnline: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() === 'online' : false
             },
             ui: typeof UI_ORCHESTRATOR !== 'undefined' && UI_ORCHESTRATOR !== null && typeof UI_ORCHESTRATOR.getState === 'function' ? UI_ORCHESTRATOR.getState() : null,
@@ -4230,7 +4230,7 @@
           const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
           
           const response = {
-            type: 'moodchat-auth-state-response',
+            type: 'nexopa-auth-state-response',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             requestId: data.requestId,
             data: safeSession ? {
@@ -4276,7 +4276,7 @@
             case 'networkStatus':
               responseData = {
                 status: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() : 'unknown',
-                backendReachable: window.MoodChatConfig ? window.MoodChatConfig.backendReachable : null,
+                backendReachable: window.NexopaConfig ? window.NexopaConfig.backendReachable : null,
                 isOnline: API_COORDINATION && typeof API_COORDINATION.getNetworkStatus === 'function' ? API_COORDINATION.getNetworkStatus() === 'online' : false
               };
               break;
@@ -4287,7 +4287,7 @@
           }
           
           const response = {
-            type: 'moodchat-data-response',
+            type: 'nexopa-data-response',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             requestId: data.requestId,
             key: data.key,
@@ -4431,7 +4431,7 @@
         
         propagateLogoutToIframes: function() {
           const logoutMessage = {
-            type: 'moodchat-session-change',
+            type: 'nexopa-session-change',
             messageId: MESSAGE_REGISTRY.generateMessageId(),
             data: {
               type: 'logged_out',
@@ -4765,7 +4765,7 @@
           const safeSession = window.app?.session?.getSession ? window.app.session.getSession() : null;
           const isValidSession = safeSession && (type === 'authenticated' || type === 'refreshed' || type === 'synced');
           
-          const event = new CustomEvent('moodchat-session-change', {
+          const event = new CustomEvent('nexopa-session-change', {
             detail: {
               type: type,
               user: isValidSession ? {
@@ -4813,7 +4813,7 @@
           }
           this._listeners.get(eventType).push(callback);
           
-          window.addEventListener(`moodchat-${eventType}`, (event) => {
+          window.addEventListener(`nexopa-${eventType}`, (event) => {
             executeSafely(`sessionListener.${eventType}`, () => {
               if (callback && typeof callback === 'function') {
                 callback(event.detail);

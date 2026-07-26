@@ -1,4 +1,4 @@
-# MoodChat Theme System — Consolidation & Flash Fix
+# Nexopa Theme System — Consolidation & Flash Fix
 (Reapplied against a fresh clone — the repo had moved forward with unrelated
 commits since the first pass, and a new `core files/` directory had appeared
 containing merged/canonical copies of Tool-core.js, status-core.js,
@@ -30,7 +30,7 @@ every load, forcing a second repaint even when nothing had changed.
    pre-paint script that sets `data-theme` **and** font size before first
    render — no more flash-then-correct.
 4. **`index.html`** converted from its own private `.theme-dark`/
-   `moodchat_theme` system to the shared one (was the most visible offender,
+   `nexopa_theme` system to the shared one (was the most visible offender,
    since it's the first screen most people see).
 5. **`settings.html`** converted from its own private `#1a1a1a` palette to
    the app-wide `#0f172a` palette.

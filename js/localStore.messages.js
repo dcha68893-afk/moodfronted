@@ -288,7 +288,7 @@
                 const id = String(conv.id || conv.chatId || conv.conversationId || '');
                 if (id) {
                     try {
-                        const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+                        const tombstones = JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}');
                         if (tombstones[id]) {
                             console.log('[LocalStore] FIX#2 — Blocked tombstoned conversation from resurrection:', id);
                             return null;
@@ -305,9 +305,9 @@
             const id = String(chatId);
             // Write tombstone to localStorage
             try {
-                const tombstones = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}');
+                const tombstones = JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}');
                 tombstones[id] = { deletedAt: Date.now(), entityType: 'chat', syncRevision: 1 };
-                localStorage.setItem('moodchat_tombstones_v1', JSON.stringify(tombstones));
+                localStorage.setItem('nexopa_tombstones_v1', JSON.stringify(tombstones));
             } catch (_) {}
             // Remove from IDB
             try { await window.AppCache.remove('chats', id); } catch (_) {}

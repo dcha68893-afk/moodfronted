@@ -7079,7 +7079,7 @@ fetchOptions.signal = controller.signal;
             };
 
             // Primary fast path: listen for the event dispatched by app.core.bootstrap.js
-            window.addEventListener('moodchat-bootstrap-complete', () => markReady('event'), { once: true });
+            window.addEventListener('nexopa-bootstrap-complete', () => markReady('event'), { once: true });
 
             const checkBootstrap = () => {
                 const isBootstrapComplete = 

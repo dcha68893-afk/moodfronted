@@ -586,7 +586,7 @@ function sendChildReady() {
                     // app.core.session.js writes on login rather than
                     // waiting on a postMessage that may never arrive.
                     const token = localStorage.getItem('accessToken');
-                    const userStr = localStorage.getItem('moodchat_user');
+                    const userStr = localStorage.getItem('nexopa_user');
                     if (token && userStr) {
                         const user = JSON.parse(userStr);
                         const cachedSession = { token, user, userId: user?.id };

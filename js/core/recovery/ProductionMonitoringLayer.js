@@ -2,7 +2,7 @@
  * ProductionMonitoringLayer.js
  * Phase 5 — Monitoring + Diagnostics Layer (Frontend)
  *
- * Full production observability for MoodChat:
+ * Full production observability for Nexopa:
  *  - Structured telemetry (timestamp, deviceId, transport, latency, etc.)
  *  - Reconnect failure tracking
  *  - Call drop tracking
@@ -189,10 +189,10 @@
       this._extendPhase1Monitoring();
 
       // Expose global debug command
-      window.__MoodChatDiag = () => this.printDiagnostics();
-      window.__MoodChatExport = () => this.exportJSON();
+      window.__NexopaDiag = () => this.printDiagnostics();
+      window.__NexopaExport = () => this.exportJSON();
 
-      console.log('[ProductionMonitor] ✅ Started — run __MoodChatDiag() for full snapshot');
+      console.log('[ProductionMonitor] ✅ Started — run __NexopaDiag() for full snapshot');
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@
         lan:         window.__LANCommunicationEngine?.getDiagnostics?.() || { enabled: false },
         mesh:        window.__MeshMessagesTransport?.getDiagnostics?.() || { enabled: false },
         offlineQueue: window.__OfflineMessageQueue?.getDiagnostics?.() || { total: 0, queued: 0 },
-        tombstones:  (() => { try { const t = JSON.parse(localStorage.getItem('moodchat_tombstones_v1') || '{}'); return { count: Object.keys(t).length, ids: Object.keys(t) }; } catch(_) { return { count: 0 }; } })(),
+        tombstones:  (() => { try { const t = JSON.parse(localStorage.getItem('nexopa_tombstones_v1') || '{}'); return { count: Object.keys(t).length, ids: Object.keys(t) }; } catch(_) { return { count: 0 }; } })(),
         activeTransport: window.__HybridTransportEngine?.getBestTransport?.() || 'INTERNET',
         lanPeers:    window.__lanPeerList?.length || 0,
         socketState: window.KynectaRealtime?._socket?.connected ? 'CONNECTED' : 'DISCONNECTED',
@@ -238,7 +238,7 @@
 
     printDiagnostics() {
       const snap = this.getSnapshot();
-      console.group('🔍 MoodChat Diagnostics — ' + snap.ts);
+      console.group('🔍 Nexopa Diagnostics — ' + snap.ts);
       console.log('📡 Network:', snap.network);
       console.log('🔄 Recovery:', snap.recovery);
       console.log('🔐 Security:', snap.security);
@@ -369,5 +369,5 @@
   window.__ProductionMonitoringLayer = monitor;
   window.ProdMonitor                 = monitor;
 
-  console.log('[ProductionMonitor] ✅ Ready — __MoodChatDiag() for full snapshot');
+  console.log('[ProductionMonitor] ✅ Ready — __NexopaDiag() for full snapshot');
 })();

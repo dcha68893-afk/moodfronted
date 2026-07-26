@@ -391,13 +391,13 @@
                 || null;
             if (!token && window.AppStorage) {
                 token = window.AppStorage.get('token')
-                    || window.AppStorage.get('moodchat_token')
+                    || window.AppStorage.get('nexopa_token')
                     || window.AppStorage.get('accessToken')
                     || null;
             }
             if (!token) {
                 token = localStorage.getItem('token')
-                    || localStorage.getItem('moodchat_token')
+                    || localStorage.getItem('nexopa_token')
                     || localStorage.getItem('kynecta_token')
                     || null;
             }
@@ -422,10 +422,10 @@
             if (window.__PARENT_SESSION__?.token) return true;
             if (window.AUTH_SESSION?.token)       return true;
             if (window.AppStorage) {
-                const t = window.AppStorage.get('token') || window.AppStorage.get('moodchat_token');
+                const t = window.AppStorage.get('token') || window.AppStorage.get('nexopa_token');
                 if (t) return true;
             }
-            if (localStorage.getItem('token') || localStorage.getItem('moodchat_token')) return true;
+            if (localStorage.getItem('token') || localStorage.getItem('nexopa_token')) return true;
             return false;
         }
 

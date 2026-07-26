@@ -1,5 +1,5 @@
 /**
- * dm-poll.js — Poll messages in 1:1 DM chats for MoodChat
+ * dm-poll.js — Poll messages in 1:1 DM chats for Nexopa
  *
  * Phase 1 feature: Poll messages in DMs
  *

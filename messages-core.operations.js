@@ -65,7 +65,7 @@ const ChatManager = {
                     // wrote to (see its fix above) — so this check always found
                     // an empty object and never actually excluded anything.
                     try {
-                        const _tombstones = SafeStorage.getJSON('moodchat_tombstones_v1') || {};
+                        const _tombstones = SafeStorage.getJSON('nexopa_tombstones_v1') || {};
                         Object.keys(_tombstones).forEach(id => _deleted.add(String(id)));
                     } catch(_) {}
                     this._conversations = ensureSafeArray(cached.conversations)
@@ -794,7 +794,7 @@ const ChatManager = {
             // fixed here, always found an empty object and let every chat
             // through, including ones just deleted locally moments earlier.
             try {
-                const _tombstones = SafeStorage.getJSON('moodchat_tombstones_v1') || {};
+                const _tombstones = SafeStorage.getJSON('nexopa_tombstones_v1') || {};
                 Object.keys(_tombstones).forEach(id => _deleted.add(String(id)));
             } catch(_) {}
 

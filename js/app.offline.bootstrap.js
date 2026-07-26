@@ -67,7 +67,7 @@
         localStorage.getItem('authToken')      ||
         localStorage.getItem('token')          ||
         localStorage.getItem('accessToken')    ||
-        localStorage.getItem('moodchat_token') ||
+        localStorage.getItem('nexopa_token') ||
         localStorage.getItem('kynecta_token');
       const user = JSON.parse(
         localStorage.getItem('currentUser') || localStorage.getItem('user') || 'null'

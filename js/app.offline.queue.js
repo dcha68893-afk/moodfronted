@@ -422,7 +422,7 @@
           (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
           (window.Session && typeof window.Session.getToken === 'function' && window.Session.getToken()) ||
           (window.AUTH_SESSION && window.AUTH_SESSION.token) ||
-          localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken') ||
+          localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken') ||
           null;
 
         const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) };

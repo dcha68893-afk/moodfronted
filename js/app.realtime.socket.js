@@ -135,7 +135,7 @@
             if (origin) return String(origin).replace(/\/+$/, '');
         }
         if (!detectLocalEnvironment()) {
-            return 'https://moodchat-fy56.onrender.com';
+            return 'https://nexopa-fy56.onrender.com';
         }
         return 'http://localhost:4000';
     }
@@ -143,7 +143,7 @@
     // ── FIX #1: Token acquisition — check globals FIRST (set right after login) ──
     function acquireToken() {
         const TOKEN_KEYS = [
-            'moodchat_token', 'kynecta_token', 'auth_token', 'token', 'jwt',
+            'nexopa_token', 'kynecta_token', 'auth_token', 'token', 'jwt',
             'access_token', '__kyn_token', 'kyn_access_token',
             'kynecta_access_token', 'kyn_token', 'userToken', 'accessToken',
             'authToken', 'USER_TOKEN'
@@ -169,7 +169,7 @@
         }
 
         // ── Priority 4: kynecta_auth object (FIX: tolerant parse) ────────────
-        for (const key of ['kynecta_auth', 'kynecta_session', 'kyn_session', 'auth_session', 'moodchat_auth']) {
+        for (const key of ['kynecta_auth', 'kynecta_session', 'kyn_session', 'auth_session', 'nexopa_auth']) {
             try {
                 const raw = localStorage.getItem(key) || sessionStorage.getItem(key);
                 if (!raw) continue;
@@ -765,7 +765,7 @@
                     if (id) return id;
                 }
                 // Try common localStorage keys
-                for (const key of ['moodchat_user', 'kynecta_auth', 'authUser', 'user']) {
+                for (const key of ['nexopa_user', 'kynecta_auth', 'authUser', 'user']) {
                     const raw = localStorage.getItem(key);
                     if (raw) {
                         const parsed = JSON.parse(raw);
@@ -774,7 +774,7 @@
                     }
                 }
                 // Try token decode (last resort)
-                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token');
+                const token = localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token');
                 if (token) {
                     const parts = token.split('.');
                     if (parts.length === 3) {

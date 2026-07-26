@@ -887,7 +887,7 @@ function defaultSettings(userId) {
     account: {
       displayName: "User",
       username: String(userId),
-      bio: "Hello! I'm using MoodChat",
+      bio: "Hello! I'm using Nexopa",
       profileVisibility: "everyone",
       photoVisibility: "everyone",
       lastSeen: "everyone",

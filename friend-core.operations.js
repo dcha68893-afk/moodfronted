@@ -286,8 +286,8 @@ const FriendRequestManager = {
 
         // ── Online path ──────────────────────────────────────────────────────
         // FIX: Use direct fetch — postMessage bridge POST can silently time out (30s).
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
-        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || '';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('nexopa_token') || '';
         try {
             let response;
             try {
@@ -445,8 +445,8 @@ const FriendRequestManager = {
         }
 
         // ── Online path (direct fetch — bridge POST silently times out) ──────
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
-        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || '';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('nexopa_token') || '';
         try {
             let response;
             try {
@@ -2739,7 +2739,7 @@ const KnectaAuth = {
     },
     
     checkTokenMigration: function() {
-        const oldKeys = ['moodchat_token', 'accessToken', 'knecta_token', 'token', 'authToken', 'sessionToken'];
+        const oldKeys = ['nexopa_token', 'accessToken', 'knecta_token', 'token', 'authToken', 'sessionToken'];
         for (const key of oldKeys) {
             localStorage.removeItem(key);
         }

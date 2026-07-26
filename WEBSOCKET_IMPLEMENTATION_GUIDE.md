@@ -2,7 +2,7 @@
 
 ## 🎯 Overview
 
-This implementation provides **stable WebSocket connection management** with exponential backoff retry, UI non-blocking operations, and graceful degradation for your MoodChat application.
+This implementation provides **stable WebSocket connection management** with exponential backoff retry, UI non-blocking operations, and graceful degradation for your Nexopa application.
 
 ## 📁 Files Created
 

@@ -1,4 +1,4 @@
-// js/google-auth.js — "Sign in with Google" for MoodChat
+// js/google-auth.js — "Sign in with Google" for Nexopa
 // Loads Google Identity Services, renders the button in any container found
 // on the page, and on success posts the credential to the backend, which
 // verifies it and returns the same token/user shape as normal login.
@@ -15,7 +15,7 @@
 
     function getApiOrigin() {
         if (typeof window.__getApiOrigin === 'function') return window.__getApiOrigin();
-        return window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://moodchat-fy56.onrender.com';
+        return window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://nexopa-fy56.onrender.com';
     }
 
     function showError(message) {
@@ -84,7 +84,7 @@
                     localStorage.setItem('token', token);
                     localStorage.setItem('accessToken', token);
                     localStorage.setItem('authToken', token);
-                    localStorage.setItem('moodchat_token', token);
+                    localStorage.setItem('nexopa_token', token);
                     localStorage.setItem('USER_TOKEN', token);
                     localStorage.setItem('currentUser', JSON.stringify(user));
                     localStorage.setItem('user', JSON.stringify(user));

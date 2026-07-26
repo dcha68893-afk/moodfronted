@@ -8,7 +8,7 @@
  * Integrates with existing OfflineMessageQueue (Phase 2) by extending it,
  * not replacing it. Adds IDB persistence, priorities, dead-letter, idempotency.
  *
- * Uses `moodchat_` prefix for all storage keys.
+ * Uses `nexopa_` prefix for all storage keys.
  *
  * @version 5.0.0
  * @phase 5 — Durable Queue
@@ -19,7 +19,7 @@
 
   if (window.__DurableQueueLayer) return;
 
-  const DB_NAME    = 'moodchat_dq_v1';
+  const DB_NAME    = 'nexopa_dq_v1';
   const DB_VERSION = 1;
 
   // ─── Queue Priority ───────────────────────────────────────────────────────

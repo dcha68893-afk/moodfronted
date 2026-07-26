@@ -6,7 +6,7 @@
  * and communicating correctly. Repairs integration gaps at runtime.
  *
  * Runs in-browser — no UI shown to users. Results accessible via:
- *   window.__MoodChatDiag()
+ *   window.__NexopaDiag()
  *   window.__Phase6Report
  *
  * @version 6.0.0
@@ -460,7 +460,7 @@
     _validatorStarted = true;
     validator.start();
   }
-  window.addEventListener('moodchat:ready', _startOnce);
+  window.addEventListener('nexopa:ready', _startOnce);
   window.addEventListener('phase5:ready',   _startOnce);
   window.addEventListener('phase4:ready',   _startOnce);
 

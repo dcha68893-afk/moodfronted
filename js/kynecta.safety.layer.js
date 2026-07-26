@@ -248,7 +248,7 @@
              * Remove a key (with protection for auth keys).
              */
             remove: function (key) {
-                var PROTECTED = ['kynecta_auth', 'token', 'moodchat_token', 'accessToken', 'USER_TOKEN'];
+                var PROTECTED = ['kynecta_auth', 'token', 'nexopa_token', 'accessToken', 'USER_TOKEN'];
                 if (PROTECTED.indexOf(key) !== -1 && global.__allowAuthStorageMutation__ !== true) {
                     console.warn('[AppStorage.remove] Blocked removal of protected key:', key);
                     return false;

@@ -13,7 +13,7 @@
  * Uses SubtleCrypto (Web Crypto API) — hardware-backed in modern browsers.
  * Gracefully degrades on older browsers (no encryption, but no breakage).
  *
- * Keys stored in localStorage under `moodchat_` prefix (matches app convention).
+ * Keys stored in localStorage under `nexopa_` prefix (matches app convention).
  *
  * @version 5.0.0
  * @phase 5 — Security Layer
@@ -24,7 +24,7 @@
 
   if (window.__SecurityLayer) return;
 
-  const KEY_STORAGE_PREFIX = 'moodchat_sec_';
+  const KEY_STORAGE_PREFIX = 'nexopa_sec_';
   const NONCE_WINDOW_MS    = 300000;  // 5 min replay protection window
   const SESSION_KEY_TTL_MS = 24 * 60 * 60 * 1000; // 24h key rotation
 

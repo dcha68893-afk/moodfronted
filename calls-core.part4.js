@@ -128,11 +128,11 @@
 
 
 
-            'moodchat-fy56.onrender.com',
+            'nexopa-fy56.onrender.com',
 
 
 
-            'moodfronted.onrender.com',
+            'nexopa.onrender.com',
 
 
 

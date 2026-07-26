@@ -1,5 +1,5 @@
 /**
- * message-search.js — Full-text message search UI for MoodChat
+ * message-search.js — Full-text message search UI for Nexopa
  *
  * Wires the existing chatSearchBar in message.html to the real
  * GET /api/search/messages and GET /api/search/messages/:chatId endpoints.

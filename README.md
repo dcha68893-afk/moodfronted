@@ -1,8 +1,8 @@
-# MoodChat — Fix Package (2026-07-24)
+# Nexopa — Fix Package (2026-07-24)
 
 This zip contains ONLY the files that were changed, in the same folder
 structure as your two repos, so you can drop them straight over the
-matching files in `moodfronted` and `moodchat`.
+matching files in `moodfronted` and `nexopa`.
 
 ```
 moodfronted/
@@ -15,7 +15,7 @@ moodfronted/
   calls-core.part6.js
   calls-core.part7.js
   calls-core.part8.js
-moodchat/
+nexopa/
   src/utils/ensureSchema.js
 ```
 

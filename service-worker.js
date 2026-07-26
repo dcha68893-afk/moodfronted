@@ -32,7 +32,7 @@
 // one-time clean slate for every static asset already cached from
 // previous versions.
 const SW_VERSION = '19.2.0';
-const CACHE_NAME = 'moodchat-static-v22'; // Bumped — theme.colors.css/pwa-manager.js now network-first, forces stale-CSS eviction
+const CACHE_NAME = 'nexopa-static-v22'; // Bumped — theme.colors.css/pwa-manager.js now network-first, forces stale-CSS eviction
 const CACHE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ---------------------------------------------------------------------------
@@ -44,8 +44,8 @@ const CORE_STATIC_ASSETS = [
   '/index.html',
   '/manifest.json',
   // FIX F-02: Corrected icon paths — old paths did not exist and caused SW install failure
-  '/icons/moodchat-192.png',
-  '/icons/moodchat-512.png',
+  '/icons/nexopa-192.png',
+  '/icons/nexopa-512.png',
   // FIX F-02: Removed /api.js (doesn't exist), /Tool.js (is Tool-ui.js), /group.js (is group-ui.js)
   '/Tool.css',
   '/Tool-ui.js',
@@ -194,7 +194,7 @@ const BYPASS_PATTERNS = [
   // FIX (WiFi→Offline): Backend health probe URLs must bypass cache.
   // Without this, the SW returned a 503 from its catch() for the health probe,
   // causing NetworkIntelligenceManager to mark internet OFFLINE even on WiFi.
-  /moodchat-fy56\.onrender\.com/i,
+  /nexopa-fy56\.onrender\.com/i,
   /onrender\.com\/health/i,
   /\.onrender\.com\/api/i,
   /www\.google\.com\/generate_204/i,
@@ -275,7 +275,7 @@ var OFFLINE_SHELL = [
   '<head>',
   '<meta charset="UTF-8">',
   '<meta name="viewport" content="width=device-width,initial-scale=1.0">',
-  '<title>MoodChat - Offline</title>',
+  '<title>Nexopa - Offline</title>',
   '<style>',
   'body { margin: 0; font-family: Segoe UI, sans-serif;',
   '  background: linear-gradient(135deg, #667eea, #764ba2);',
@@ -294,7 +294,7 @@ var OFFLINE_SHELL = [
   '<body>',
   '<div class="card">',
   '<div style="font-size: 3rem; margin-bottom: 16px">&#x1F4AC;</div>',
-  '<h1>MoodChat</h1>',
+  '<h1>Nexopa</h1>',
   '<p>You are offline. Connect to the internet, or tap below if you have visited before.</p>',
   '<button onclick="location.reload()">Try Again</button>',
   '</div>',
@@ -859,15 +859,15 @@ self.addEventListener('push', function(event) {
 
     let data = {};
     try { data = event.data.json(); } catch(_) {
-        try { data = { title: 'MoodChat', body: event.data.text() }; } catch(__) { return; }
+        try { data = { title: 'Nexopa', body: event.data.text() }; } catch(__) { return; }
     }
 
-    const title   = data.title   || 'MoodChat';
+    const title   = data.title   || 'Nexopa';
     const options = {
         body:    data.body    || data.message || 'You have a new notification',
-        icon:    data.icon    || '/icons/moodchat-192.png',
-        badge:   data.badge   || '/icons/moodchat-192.png',
-        tag:     data.tag     || 'moodchat-notification',
+        icon:    data.icon    || '/icons/nexopa-192.png',
+        badge:   data.badge   || '/icons/nexopa-192.png',
+        tag:     data.tag     || 'nexopa-notification',
         data:    data.data    || { url: data.url || '/chat.html' },
         // FIX: vibrate was hardcoded to always fire regardless of the
         // Notifications > Vibration setting, and there was no way to
@@ -889,7 +889,7 @@ self.addEventListener('push', function(event) {
     // Game daily-reward / streak reminders
     if (data.type === 'daily_reward') {
         options.tag  = 'game-daily-reward';
-        options.icon = data.icon || '/icons/moodchat-192.png';
+        options.icon = data.icon || '/icons/nexopa-192.png';
         options.data = { url: '/game.html' };
         options.requireInteraction = false;
     }

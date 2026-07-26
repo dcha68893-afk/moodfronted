@@ -1,5 +1,5 @@
 /**
- * swipe-reply.js — Swipe-to-reply gesture for MoodChat
+ * swipe-reply.js — Swipe-to-reply gesture for Nexopa
  *
  * Phase 1 feature: Swipe-to-reply (mobile)
  *

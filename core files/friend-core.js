@@ -1727,8 +1727,8 @@ const SecurityValidator = {
 
         // PRODUCTION FIX: Trust known Render.com origins explicitly
         const KNOWN_ORIGINS = [
-            'https://moodfronted.onrender.com',
-            'https://moodchat-fy56.onrender.com'
+            'https://nexopa.onrender.com',
+            'https://nexopa-fy56.onrender.com'
         ];
         if (KNOWN_ORIGINS.includes(origin)) return true;
 
@@ -3988,8 +3988,8 @@ const FriendRequestManager = {
 
         // ── Online path ──────────────────────────────────────────────────────
         // FIX: Use direct fetch — postMessage bridge POST can silently time out (30s).
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
-        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || '';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('nexopa_token') || '';
         try {
             let response;
             try {
@@ -4147,8 +4147,8 @@ const FriendRequestManager = {
         }
 
         // ── Online path (direct fetch — bridge POST silently times out) ──────
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
-        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('moodchat_token') || '';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
+        const _token = __session.token || localStorage.getItem('token') || localStorage.getItem('authToken') || localStorage.getItem('nexopa_token') || '';
         try {
             let response;
             try {
@@ -6373,7 +6373,7 @@ const KnectaAuth = {
     },
     
     checkTokenMigration: function() {
-        const oldKeys = ['moodchat_token', 'accessToken', 'knecta_token', 'token', 'authToken', 'sessionToken'];
+        const oldKeys = ['nexopa_token', 'accessToken', 'knecta_token', 'token', 'authToken', 'sessionToken'];
         for (const key of oldKeys) {
             localStorage.removeItem(key);
         }
@@ -8714,11 +8714,11 @@ function savePrivateNote(friendId, note) {
         // Using fire-and-forget: UI reflects change immediately, DB catches up async.
         (function() {
             try {
-                const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+                const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
                 const _token = (typeof __session !== 'undefined' && __session?.token)
                     || localStorage.getItem('token')
                     || localStorage.getItem('authToken')
-                    || localStorage.getItem('moodchat_token')
+                    || localStorage.getItem('nexopa_token')
                     || '';
                 fetch(`${_apiBase}/friends/${friendId}/notes`, {
                     method: 'PUT',
@@ -8747,7 +8747,7 @@ function savePrivateNote(friendId, note) {
 function hydratePrivateNotesFromDB() {
     setTimeout(() => {
         try {
-            const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+            const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
             const _token = (typeof __session !== 'undefined' && __session?.token)
                 || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
             const friendIds = (window.friends || []).map(f => f.id).filter(Boolean).slice(0, 100);
@@ -10551,7 +10551,7 @@ const NearbyManager = {
 async function snoozeFriend(friendId, days = 7) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/snooze`, {
@@ -10581,7 +10581,7 @@ async function snoozeFriend(friendId, days = 7) {
 async function unsnoozeFriend(friendId) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/snooze`, {
@@ -10611,7 +10611,7 @@ async function unsnoozeFriend(friendId) {
 async function restrictFriend(friendId) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/restrict`, {
@@ -10638,7 +10638,7 @@ async function restrictFriend(friendId) {
 async function unrestrictFriend(friendId) {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/restrict`, {
@@ -10668,7 +10668,7 @@ async function reportFriend(friendId, reason, description = '') {
     if (!validateFriendId(friendId)) return { success: false, error: 'Invalid friend ID' };
     if (!reason) return { success: false, error: 'Reason required' };
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/${friendId}/report`, {
@@ -10722,7 +10722,7 @@ async function importPhoneContacts() {
 
         if (phoneHashes.length === 0) return { success: true, data: { matches: [] } };
 
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
 
@@ -10734,10 +10734,10 @@ async function importPhoneContacts() {
         const data = await res.json().catch(() => ({}));
 
         if (res.ok && data.success && data.data?.matches?.length > 0) {
-            showNotification?.(`Found ${data.data.matches.length} contact${data.data.matches.length > 1 ? 's' : ''} on MoodChat`, 'success');
+            showNotification?.(`Found ${data.data.matches.length} contact${data.data.matches.length > 1 ? 's' : ''} on Nexopa`, 'success');
             window.dispatchEvent(new CustomEvent('contactMatchesFound', { detail: data.data }));
         } else {
-            showNotification?.('No contacts found on MoodChat', 'info');
+            showNotification?.('No contacts found on Nexopa', 'info');
         }
         return data;
     } catch (e) {
@@ -10752,7 +10752,7 @@ async function importPhoneContacts() {
  */
 async function getFriendPrivacySettings() {
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/privacy`, {
@@ -10768,7 +10768,7 @@ async function getFriendPrivacySettings() {
 
 async function updateFriendPrivacySettings(settings = {}) {
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/privacy`, {
@@ -10791,7 +10791,7 @@ async function updateFriendPrivacySettings(settings = {}) {
  */
 async function exportFriendsCSV() {
     try {
-        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://moodchat-fy56.onrender.com/api';
+        const _apiBase = window.__getApiBase ? window.__getApiBase() : 'https://nexopa-fy56.onrender.com/api';
         const _token = (typeof __session !== 'undefined' && __session?.token)
             || localStorage.getItem('token') || localStorage.getItem('authToken') || '';
         const res = await fetch(`${_apiBase}/friends/export/csv`, {

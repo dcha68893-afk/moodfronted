@@ -1336,15 +1336,15 @@ let PS = null; // Platform State
 // Resolve API base and auth token from parent app storage
 const _API_BASE = (() => {
   try {
-    const s = sessionStorage.getItem('moodchat_api_base') || localStorage.getItem('moodchat_api_base');
+    const s = sessionStorage.getItem('nexopa_api_base') || localStorage.getItem('nexopa_api_base');
     if (s) return s.replace(/\/$/, '');
   } catch(_){}
-  // ✅ FIX: nothing in the app ever wrote 'moodchat_api_base' to storage or set
-  // window.MOODCHAT_API_BASE, so this always fell through to '' and every
+  // ✅ FIX: nothing in the app ever wrote 'nexopa_api_base' to storage or set
+  // window.NEXOPA_API_BASE, so this always fell through to '' and every
   // fetch in this file (leaderboard, challenges, friends, chats, push, progress)
   // silently went to a relative path with no host — hardcode the real backend
   // as the final fallback, same origin used by chat.html/friend.html/etc.
-  return window.MOODCHAT_API_BASE || 'https://moodchat-fy56.onrender.com';
+  return window.NEXOPA_API_BASE || 'https://nexopa-fy56.onrender.com';
 })();
 const _getAuthToken = () => {
   try {

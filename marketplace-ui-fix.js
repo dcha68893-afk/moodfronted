@@ -10,8 +10,8 @@
 
 // ── 1. API BASE URL FIX (must run first, before any API call) ──────────────
 // FIX-MARKETPLACE-URL: window.location.origin here is the FRONTEND host
-// (moodfronted.onrender.com). The API lives on a DIFFERENT host
-// (moodchat-fy56.onrender.com). Falling back to window.location.origin + '/api'
+// (nexopa.onrender.com). The API lives on a DIFFERENT host
+// (nexopa-fy56.onrender.com). Falling back to window.location.origin + '/api'
 // silently pointed every marketplace fetch at the frontend's own domain,
 // which has no /api routes — corrupting all marketplace calls (listings,
 // wishlist, categories, spotlight, etc. all failed with 404/fetch errors).
@@ -19,7 +19,7 @@
 // (it has real environment detection: localhost vs render vs custom domain).
 // This resolver mirrors that fallback chain instead of guessing from the
 // current page's own origin.
-function _resolveMoodChatApiBase() {
+function _resolveNexopaApiBase() {
     // Prefer whatever api.core.js already computed, if it has run.
     if (window.__kynAPI?.baseUrl && !window.__kynAPI.baseUrl.includes(window.location.host)) {
         return window.__kynAPI.baseUrl;
@@ -34,13 +34,13 @@ function _resolveMoodChatApiBase() {
     }
 
     // Production fallback: the known backend host, NOT window.location.origin.
-    return 'https://moodchat-fy56.onrender.com/api';
+    return 'https://nexopa-fy56.onrender.com/api';
 }
 
 (function _fixApiBase() {
     if (window.__kynAPI?.baseUrl && !window.__kynAPI.baseUrl.includes(window.location.host)) return;
     window.__kynAPI = window.__kynAPI || {};
-    window.__kynAPI.baseUrl = _resolveMoodChatApiBase();
+    window.__kynAPI.baseUrl = _resolveNexopaApiBase();
     console.log('[ui-fix] API base set to:', window.__kynAPI.baseUrl);
 })();
 
@@ -59,10 +59,10 @@ function _realOpenProduct(productId) {
     }
 
     // Path B: fetch from API then show
-    const base = (window.__kynAPI?.baseUrl || _resolveMoodChatApiBase()).replace(/\/api$/, '');
+    const base = (window.__kynAPI?.baseUrl || _resolveNexopaApiBase()).replace(/\/api$/, '');
     const token = window.__kynToken || window.__accessToken ||
                   localStorage.getItem('authToken') || localStorage.getItem('token') ||
-                  localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken') || '';
+                  localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken') || '';
 
     // Show loading state immediately
     const panel   = document.getElementById('marketplaceDetailPanel');
@@ -351,7 +351,7 @@ window._jmMessageSeller = function(sellerId, sellerName, productId) {
 window.addEventListener('DOMContentLoaded', function() {
     if (!window.__kynAPI) window.__kynAPI = {};
     if (!window.__kynAPI.baseUrl || window.__kynAPI.baseUrl.includes(window.location.host)) {
-        window.__kynAPI.baseUrl = _resolveMoodChatApiBase();
+        window.__kynAPI.baseUrl = _resolveNexopaApiBase();
     }
 });
 

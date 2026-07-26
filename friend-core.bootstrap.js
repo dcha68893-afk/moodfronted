@@ -1640,8 +1640,8 @@ const SecurityValidator = {
 
         // PRODUCTION FIX: Trust known Render.com origins explicitly
         const KNOWN_ORIGINS = [
-            'https://moodfronted.onrender.com',
-            'https://moodchat-fy56.onrender.com'
+            'https://nexopa.onrender.com',
+            'https://nexopa-fy56.onrender.com'
         ];
         if (KNOWN_ORIGINS.includes(origin)) return true;
 

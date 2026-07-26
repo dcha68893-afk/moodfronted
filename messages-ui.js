@@ -13541,7 +13541,7 @@ Type: ${message.type || 'text'}`;
         // FIXED: (window.messagesCore || null) is inside the IIFE — not accessible here. Use window.messagesCore.
         const core = window.messagesCore || null;
         let token = null;
-        try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
+        try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(_e){}
         try {
             const resp = await fetch('/api/messages/bulk/history', {
                 headers: token ? { Authorization: 'Bearer ' + token } : {}
@@ -13560,7 +13560,7 @@ Type: ${message.type || 'text'}`;
         window.messagesUI?.showMultiSendHistoryPanel?.({ detailOnly: true });
         const core = (window.messagesCore || null);
         let token = null;
-        try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
+        try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(_e){}
         try {
             const resp = await fetch('/api/messages/bulk/history/' + encodeURIComponent(batchId), {
                 headers: token ? { Authorization: 'Bearer ' + token } : {}
@@ -13634,7 +13634,7 @@ Type: ${message.type || 'text'}`;
         let token = null;
         try {
             const sess = core && core.getSession && core.getSession();
-            token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken');
+            token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken');
         } catch(_e){}
 
         window.messagesUI.setMultiSendButtonState(true);
@@ -13732,7 +13732,7 @@ Type: ${message.type || 'text'}`;
                 }
 
                 let token = null;
-                try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('moodchat_token') || localStorage.getItem('accessToken'); } catch(_e){}
+                try { const sess = core && core.getSession && core.getSession(); token = (sess && sess.token) || localStorage.getItem('authToken') || localStorage.getItem('token') || localStorage.getItem('nexopa_token') || localStorage.getItem('accessToken'); } catch(_e){}
 
                 try {
                     const resp = await fetch('/api/messages/bulk', {

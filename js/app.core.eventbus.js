@@ -582,7 +582,7 @@
             source: 'window'
         }));
         eventBus.bridgeWindowEvent('sessionUpdated', 'SESSION_UPDATED');
-        eventBus.bridgeWindowEvent('moodchat-session-change', 'SESSION_UPDATED');
+        eventBus.bridgeWindowEvent('nexopa-session-change', 'SESSION_UPDATED');
         eventBus.bridgeWindowEvent('KYNECTA_UI_RENDERED', 'UI_SHELL_RENDERED');
     }
 

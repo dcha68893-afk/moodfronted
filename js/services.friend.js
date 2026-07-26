@@ -401,12 +401,12 @@
                 }
                 if (!token && window.AppStorage) {
                     token = window.AppStorage.get('token') ||
-                            window.AppStorage.get('moodchat_token') ||
+                            window.AppStorage.get('nexopa_token') ||
                             window.AppStorage.get('accessToken');
                 }
                 if (!token && window.localStorage) {
                     token = localStorage.getItem('token') ||
-                            localStorage.getItem('moodchat_token') ||
+                            localStorage.getItem('nexopa_token') ||
                             localStorage.getItem('accessToken') ||
                             localStorage.getItem('kynecta_token');
                 }

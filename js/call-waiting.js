@@ -1,5 +1,5 @@
 /**
- * call-waiting.js — Call waiting and call hold for MoodChat
+ * call-waiting.js — Call waiting and call hold for Nexopa
  *
  * Phase remaining: Call waiting / call on hold
  *

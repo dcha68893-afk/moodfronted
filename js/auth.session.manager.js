@@ -439,7 +439,7 @@
         try {
             localStorage.removeItem('token');
             localStorage.removeItem('accessToken');
-            localStorage.removeItem('moodchat_token');
+            localStorage.removeItem('nexopa_token');
             localStorage.removeItem('USER_TOKEN');
             localStorage.removeItem('currentUser');
             localStorage.removeItem('user');
@@ -527,7 +527,7 @@
             // Resolve backend base URL the same way api_auth.js does
             const baseUrl = (window.API && window.API.baseUrl)
                 || (window._API_CONFIG && window._API_CONFIG.baseUrl)
-                || 'https://moodchat-fy56.onrender.com/api';
+                || 'https://nexopa-fy56.onrender.com/api';
 
             console.log('[SessionManager] Calling /auth/refresh directly');
             const response = await fetch(`${baseUrl}/auth/refresh`, {
@@ -551,12 +551,12 @@
             const newRefresh = data.refreshToken || storedRefresh;
 
             // PATCH v1.4: Wipe ALL old token locations atomically before persisting
-            // the new ones.  Without this step the legacy keys (authToken, moodchat_token,
+            // the new ones.  Without this step the legacy keys (authToken, nexopa_token,
             // USER_TOKEN, …) kept holding the expired token value.  Any module that
             // reads those keys directly — including api_core.js and embedded iframes —
             // would then continue sending the expired token and receive 401 errors
             // even though the refresh succeeded.
-            const LEGACY_TOKEN_KEYS_SM = ['authToken', 'accessToken', 'token', 'moodchat_token',
+            const LEGACY_TOKEN_KEYS_SM = ['authToken', 'accessToken', 'token', 'nexopa_token',
                                            'USER_TOKEN', 'kynecta_token', 'auth_token'];
             LEGACY_TOKEN_KEYS_SM.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
             // Also clear window globals so nothing reads a stale in-memory value
@@ -596,7 +596,7 @@
             }
 
             // Keep legacy keys in sync
-            ['authToken', 'accessToken', 'token', 'moodchat_token', 'USER_TOKEN', 'kynecta_token']
+            ['authToken', 'accessToken', 'token', 'nexopa_token', 'USER_TOKEN', 'kynecta_token']
                 .forEach(k => { try { localStorage.setItem(k, newToken); } catch (_) {} });
             if (newRefresh !== storedRefresh) {
                 ['REFRESH_TOKEN', 'refreshToken']
@@ -768,10 +768,10 @@
                 console.warn('[SessionManager] ⚠️ Corrupted/incomplete session detected — auto-clearing all keys');
                 const ALL_SESSION_KEYS = [
                     'kynecta_auth', 'kynecta_session',
-                    'accessToken', 'moodchat_token', 'USER_TOKEN', 'token',
+                    'accessToken', 'nexopa_token', 'USER_TOKEN', 'token',
                     'auth_token', 'auth_user', 'currentUser', 'user',
-                    'moodchat_accessToken', 'moodchat_refreshToken', 'moodchat_user',
-                    'moodchat_tokenExpiry', 'moodchat_issuedAt', 'moodchat_validated',
+                    'nexopa_accessToken', 'nexopa_refreshToken', 'nexopa_user',
+                    'nexopa_tokenExpiry', 'nexopa_issuedAt', 'nexopa_validated',
                     'REFRESH_TOKEN', 'TOKEN_EXPIRY', 'isLoggedIn', 'kynecta_token'
                 ];
                 ALL_SESSION_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch(_) {} });

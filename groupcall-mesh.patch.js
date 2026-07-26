@@ -1,5 +1,5 @@
 /**
- * groupcall-mesh.patch.js — True multi-peer group calls for MoodChat
+ * groupcall-mesh.patch.js — True multi-peer group calls for Nexopa
  *
  * The existing calls-core.js creates exactly ONE RTCPeerConnection regardless
  * of participant count, so group calls only worked between 2 people even when

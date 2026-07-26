@@ -124,7 +124,7 @@
   }
 
   async function bootstrap() {
-    console.log(`[Phase6Bootstrap] 🚀 MoodChat loading ${MODULES.length} modules from ${BASE}`);
+    console.log(`[Phase6Bootstrap] 🚀 Nexopa loading ${MODULES.length} modules from ${BASE}`);
 
     for (const m of MODULES) await loadScript(BASE + m);
 
@@ -154,14 +154,14 @@
     _wireCrossModuleListeners();
     _wirePhase10();  // Phase 10: connect all transport/deletion systems
 
-    window.dispatchEvent(new CustomEvent('moodchat:ready', {
+    window.dispatchEvent(new CustomEvent('nexopa:ready', {
       detail: { phase: 10, elapsed, loaded, modules: MODULES.length }
     }));
 
     const bus = window.KynectaEventBus;
     if (bus) bus.emit('SYNC_STARTED', { reason: 'phase10_boot' }, { async: true });
 
-    console.log('[Phase6Bootstrap] 🎉 MoodChat Phase 10 fully initialized — __MoodChatDiag() for diagnostics');
+    console.log('[Phase6Bootstrap] 🎉 Nexopa Phase 10 fully initialized — __NexopaDiag() for diagnostics');
   }
 
   function _wireOfflineQueue() {
@@ -224,7 +224,7 @@
       }
 
       // 3. Fall back to REST API (same as normal send) — most reliable
-      const apiBase = window.__getApiBase?.() || 'https://moodchat-fy56.onrender.com/api';
+      const apiBase = window.__getApiBase?.() || 'https://nexopa-fy56.onrender.com/api';
       const token = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
       const endpoint = msg.groupId ? `${apiBase}/groups/${msg.groupId}/messages` : `${apiBase}/messages`;
 

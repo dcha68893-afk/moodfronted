@@ -1,6 +1,6 @@
 {
-  "name": "Kynecta MoodChat",
-  "short_name": "MoodChat",
+  "name": "Kynecta Nexopa",
+  "short_name": "Nexopa",
   "description": "Real-time mood-based chat and marketplace platform",
   "start_url": "/chat.html",
   "scope": "/",
@@ -11,13 +11,13 @@
   "lang": "en",
   "icons": [
     {
-      "src": "/icons/moodchat-192.png",
+      "src": "/icons/nexopa-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icons/moodchat-512.png",
+      "src": "/icons/nexopa-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -28,7 +28,7 @@
   "related_applications": [
     {
       "platform": "webapp",
-      "url": "https://moodchat-fy56.onrender.com/manifest.json"
+      "url": "https://nexopa-fy56.onrender.com/manifest.json"
     }
   ],
   "screenshots": []

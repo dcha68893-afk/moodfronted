@@ -203,8 +203,8 @@ const ALLOWED_ORIGINS = Object.freeze([
     'http://localhost:5500',
     'http://127.0.0.1:5500',
     'http://localhost:4000',
-    'https://moodchat-fy56.onrender.com',
-    'https://moodfronted.onrender.com'
+    'https://nexopa-fy56.onrender.com',
+    'https://nexopa.onrender.com'
 ]);
 
 const MESSAGE_SCHEMAS = Object.freeze({

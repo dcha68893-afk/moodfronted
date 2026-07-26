@@ -1,5 +1,5 @@
 /**
- * gif-picker.js — Tenor GIF search for MoodChat
+ * gif-picker.js — Tenor GIF search for Nexopa
  *
  * Phase 1 feature: GIF Search (Tenor/Giphy)
  *
@@ -21,7 +21,7 @@
   // ── Config ─────────────────────────────────────────────────────────────────
   const TENOR_KEY    = global.TENOR_API_KEY || 'AIzaSyAyimkuYQYF_FXVALexPzfL7eomIcLW2jY'; // public demo key
   const TENOR_BASE   = 'https://tenor.googleapis.com/v2';
-  const CLIENT_KEY   = 'moodchat';
+  const CLIENT_KEY   = 'nexopa';
   const PAGE_LIMIT   = 20;
 
   // ── State ──────────────────────────────────────────────────────────────────

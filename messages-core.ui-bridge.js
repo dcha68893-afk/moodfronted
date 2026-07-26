@@ -2232,13 +2232,13 @@ const UIStateManager = {
                 // checks for tombstones (AppCache.getAll() for chats/groups in
                 // app.cache.js, and LocalMessageStore.saveConversation /
                 // deleteConversation in localStore.messages.js) reads
-                // 'moodchat_tombstones_v1'. Because the keys never matched, the
+                // 'nexopa_tombstones_v1'. Because the keys never matched, the
                 // tombstone written here was invisible to every one of those
                 // checks, so a deleted chat's row simply sat in IndexedDB
                 // un-flagged and came back on the next refresh/hydration.
-                const _tombstones = SafeStorage.getJSON('moodchat_tombstones_v1') || {};
+                const _tombstones = SafeStorage.getJSON('nexopa_tombstones_v1') || {};
                 _tombstones[sid] = tombstone;
-                SafeStorage.setJSON('moodchat_tombstones_v1', _tombstones);
+                SafeStorage.setJSON('nexopa_tombstones_v1', _tombstones);
 
                 // 3. Clear all message caches for this conversation
                 SafeStorage.remove(`${LOCAL_STORAGE_KEYS.MESSAGES_PREFIX}${sid}`);
@@ -2281,7 +2281,7 @@ const UIStateManager = {
                 // KynectaLocalStore.deleteMessagesByChat call above). Call the
                 // real store's deleteConversation(), which removes the chat
                 // from IDB, deletes its messages, and writes the tombstone to
-                // the correct key ('moodchat_tombstones_v1') that
+                // the correct key ('nexopa_tombstones_v1') that
                 // getAllConversations()/getAll('chats') actually check.
                 try {
                     if (window.KynectaLocalStore && typeof window.KynectaLocalStore.deleteConversation === 'function') {

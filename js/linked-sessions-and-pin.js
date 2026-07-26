@@ -1,5 +1,5 @@
 /**
- * linked-sessions-and-pin.js — Linked devices UI + Two-step PIN for MoodChat
+ * linked-sessions-and-pin.js — Linked devices UI + Two-step PIN for Nexopa
  *
  * Phase 2 features:
  *   1. Linked Sessions — wires the existing (but empty) sessionsModal in

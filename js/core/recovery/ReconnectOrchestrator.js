@@ -2,7 +2,7 @@
  * ReconnectOrchestrator.js
  * Phase 5 — Recovery Layer: Reconnect Orchestrator
  *
- * Integrates with the EXISTING MoodChat architecture:
+ * Integrates with the EXISTING Nexopa architecture:
  *  - Monitors Socket.IO connection (KynectaRealtime._socket)
  *  - Uses exponential backoff with jitter (prevents reconnect storms)
  *  - Restores: rooms, subscriptions, group memberships, queue flush
@@ -11,7 +11,7 @@
  *  - Works alongside existing app.realtime.socket.js reconnect logic
  *    WITHOUT duplicating or replacing it
  *
- * Storage keys use `moodchat_` prefix (matches app convention).
+ * Storage keys use `nexopa_` prefix (matches app convention).
  *
  * @version 5.0.0
  * @phase 5 — Recovery Layer
@@ -152,7 +152,7 @@
 
     _getMyUserId() {
       try {
-        const raw = localStorage.getItem('moodchat_user') ||
+        const raw = localStorage.getItem('nexopa_user') ||
                     localStorage.getItem('kynecta_auth');
         return raw ? (JSON.parse(raw)?.id || JSON.parse(raw)?.user?.id) : null;
       } catch (_) { return null; }

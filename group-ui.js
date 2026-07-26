@@ -1842,8 +1842,8 @@ export function registerMessageHandlers() {
                 'http://localhost:5500',
                 'http://localhost:4000',
                 'http://localhost:3000',
-                'https://moodfronted.onrender.com',
-                'https://moodchat-fy56.onrender.com'
+                'https://nexopa.onrender.com',
+                'https://nexopa-fy56.onrender.com'
             ];
             if (!allowedOrigins.includes(event.origin) && event.origin !== 'null' && event.origin !== '') {
                 return;
@@ -2709,7 +2709,7 @@ async function _fetchInvites() {
     try {
         const tok = (window.KynectaStore && window.KynectaStore.get && window.KynectaStore.get('auth.token')) ||
                     localStorage.getItem('token') || localStorage.getItem('authToken') || '';
-        const BASE = (window.__API_BASE) || (window.__getApiBase && window.__getApiBase()) || 'https://moodchat-fy56.onrender.com/api';
+        const BASE = (window.__API_BASE) || (window.__getApiBase && window.__getApiBase()) || 'https://nexopa-fy56.onrender.com/api';
         const res = await fetch(BASE + '/group-members/invitations?status=pending', {
             headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' }
         });
@@ -4534,8 +4534,8 @@ function getAuthToken() {
 
 // FIX-PANEL-FETCH-WRONG-ORIGIN: this used a bare relative path ('/api/groups/public...')
 // with plain fetch(), which resolves against whatever origin THIS document is served
-// from — the frontend (moodfronted.onrender.com), not the backend API
-// (moodchat-fy56.onrender.com). Every panelFetch call (Discover, Explore Public,
+// from — the frontend (nexopa.onrender.com), not the backend API
+// (nexopa-fy56.onrender.com). Every panelFetch call (Discover, Explore Public,
 // Events, Invitations, Friends-for-invite) was therefore 404ing against the frontend
 // and silently falling into the catch block, rendering "No public groups found" /
 // "Could not load" etc. even when the backend had real data. group.html's own api()
@@ -4613,14 +4613,14 @@ export async function loadDiscoverGroups(query, purpose, scope) {
                     try{
                         var memData=await panelFetch('/api/groups/'+gid2+'/members');
                         var members=(memData&&(memData.data&&memData.data.members||memData.members))||[];
-                        var myId=localStorage.getItem('userId')||localStorage.getItem('moodchat_userId')||'';
+                        var myId=localStorage.getItem('userId')||localStorage.getItem('nexopa_userId')||'';
                         var myM=members.find(function(m){return String(m.userId||m.id||m.uid)===String(myId);});
                         if(myM&&found){found.role=myM.role||'member';found.isAdmin=['owner','admin'].includes(found.role);found.isCreator=found.role==='owner'||String(found.createdBy||'')===String(myId);}
                     }catch(me){}
                 }catch(e){}
             }
             if(found){
-                var myId2=localStorage.getItem('userId')||localStorage.getItem('moodchat_userId')||'';
+                var myId2=localStorage.getItem('userId')||localStorage.getItem('nexopa_userId')||'';
                 if(found.role===undefined)found.role='member';
                 if(found.isCreator===undefined)found.isCreator=String(found.createdBy||'')===String(myId2)||found.role==='owner';
                 if(found.isAdmin===undefined)found.isAdmin=found.isCreator||['owner','admin'].includes(found.role);
@@ -4636,7 +4636,7 @@ export async function loadDiscoverGroups(query, purpose, scope) {
         var myGroups=(GC&&(GC.myGroups&&GC.myGroups.length?GC.myGroups:GC.groups))||[];
         var myIds=new Set(myGroups.map(function(g){return String(g.id);}));
         // Also filter by current user as owner/creator
-        var myUserId=String(localStorage.getItem('userId')||localStorage.getItem('moodchat_userId')||'');
+        var myUserId=String(localStorage.getItem('userId')||localStorage.getItem('nexopa_userId')||'');
         var others=grps.filter(function(g){
             if(myIds.has(String(g.id)))return false;
             if(myUserId&&(String(g.createdBy||'')===myUserId||String(g.ownerId||'')===myUserId||String(g.userId||'')===myUserId))return false;
@@ -5117,7 +5117,7 @@ async function _directCreateGroup(groupData) {
         (window.parent && window.parent.__apiBaseUrl) ||
         (typeof window.__getApiBase === 'function' ? window.__getApiBase() : null) ||
         (window.parent && typeof window.parent.__getApiBase === 'function' ? window.parent.__getApiBase() : null) ||
-        'https://moodchat-fy56.onrender.com/api'
+        'https://nexopa-fy56.onrender.com/api'
     );
     const token = (
         (window.__PARENT_SESSION__ && window.__PARENT_SESSION__.token) ||
