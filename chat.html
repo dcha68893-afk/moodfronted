@@ -4959,6 +4959,28 @@
                             });
                             _chatLog('[Parent] Call ended via API (non-ws source)');
                         } catch(e) { console.warn('[Parent] Failed to POST /calls/end:', e); }
+
+                        // FIX-CALLID-MISMATCH-ROOT-CAUSE: the REST /calls/:id/end route above
+                        // only notifies the *remote* participant when a matching row exists in
+                        // the Calls DB table (id: UUID). Direct calls started via the socket
+                        // 'call:initiate' path (CallSignalingService, in-memory, hex callId like
+                        // call_<timestamp>_<random>) never get a DB row, so that POST silently
+                        // no-ops server-side and the remote party never receives ANY end signal
+                        // for the vast majority of calls — leaving their screen dark and their
+                        // nav icons hidden forever, since the icon-restore code only runs after
+                        // handleCallEnded's callId match succeeds, and it never even fires.
+                        // CallSignalingService already has a complete, correctly-ID'd socket
+                        // 'call:end' handler (broadcasts 'call:ended' with this same hex callId
+                        // to every other participant) — the frontend just never called it. This
+                        // sends the call-end over the same channel the call was established on,
+                        // so the remote party gets a callId that actually matches their
+                        // UIState.activeCallId instead of nothing (or, on calls that DO have a
+                        // stale/unrelated DB row, a foreign UUID).
+                        try {
+                            if (window.wsService && typeof window.wsService.emit === 'function') {
+                                window.wsService.emit('call:end', { callId, reason: data.payload?.reason || 'ended' });
+                            }
+                        } catch (e) { console.warn('[Parent] Failed to emit call:end over socket:', e); }
                     }
                     // ── CRITICAL FIX: Broadcast CALL_ENDED to ALL iframes so
                     // the remote side (caller or receiver) also resets when

@@ -1564,7 +1564,18 @@ try {
             // FIX Bug 1: Allow 'ws-bridge' and 'banner-bridge' sources through —
             // chat.html posts socket-originated messages with source:'ws-bridge'.
             // Previously these were silently dropped by the security validator.
-            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast']);
+            // FIX (MSG-DROPPED-VALID-SOURCE): this whitelist was missing several
+            // source tags that legitimate first-party code already sends into this
+            // iframe — 'background-sync' (service-worker.js's offline-queue-flush /
+            // status-sync broadcasts), 'realtime-socket' (app.realtime.socket.js's
+            // settings_updated / profile-identity relay, fanned out directly to
+            // every iframe including this one), and 'message-iframe' /
+            // 'parent-socket-relay' (this module's own echo + settings propagation
+            // paths). Every one of those was being silently rejected here as
+            // invalid_source, which both spammed the console and meant real
+            // updates (delivery flushes, sender display-name/avatar changes,
+            // settings changes) never reached the messages module.
+            const ALLOWED_SOURCES = new Set(['parent', 'ws-bridge', 'banner-bridge', 'parent-echo', 'parent-ws-broadcast', 'parent-accept-broadcast', 'parent-end-broadcast', 'parent-frame', 'parent-reject-broadcast', 'background-sync', 'realtime-socket', 'message-iframe', 'parent-socket-relay', 'parent-chat-hdr']);
             if (data.source && !ALLOWED_SOURCES.has(data.source)) {
                 return { valid: false, reason: 'invalid_source' };
             }
@@ -1814,6 +1825,23 @@ try {
             if (this._messageListenerAttached) return;
             
             window.addEventListener('message', (event) => {
+                // FIX (CONSOLE-SPAM / EXTENSION-NOISE): browser extensions (MetaMask's
+                // ObjectMultiplex etc.) inject their own window.postMessage traffic into
+                // EVERY frame on the page, including this iframe. Those messages share
+                // this page's origin (so SECURITY.validateOrigin below always let them
+                // through) but have no app-shaped {type,...} envelope, so every single
+                // one was falling through to SecurityValidator and getting logged as
+                // "Rejected message: invalid_structure" / "invalid_source" — the exact
+                // spam flooding the console on every page load. The one thing genuine
+                // app traffic always has that extension traffic never does is a known
+                // sender window: every real message to this iframe is posted either by
+                // window.parent (chat.html directly, or chat.html relaying another
+                // module's event) or by this frame echoing to itself. Gating on
+                // event.source here silently drops the extension noise before it ever
+                // reaches validation, without touching any legitimate app message path.
+                if (event.source !== window.parent && event.source !== window) {
+                    return;
+                }
                 if (!SECURITY.validateOrigin(event.origin)) {
                     if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message from origin: ${event.origin}`);
                     return;
