@@ -6113,6 +6113,22 @@ clearActiveCall: function() {
 
             { event: 'kyn:call_initiated',   fn: (d) => window.__CallsCoreShared.handleCallInitiated(d) },
 
+            // FIX-CALLID-MISMATCH-ROOT-CAUSE: 'call:initiated_ack' is the one event
+            // that reconciles this client's locally-generated provisional call id
+            // with the server's real UUID (see handleCallInitiatedAck in
+            // calls-core.part7.js). The server emits it correctly, and
+            // app.realtime.socket.js dispatches it as 'kyn:call:initiated_ack'
+            // through this exact bridge — but this map never had an entry for it,
+            // so handleCallInitiatedAck() was never invoked via the real production
+            // delivery path (only via a window.postMessage listener elsewhere that
+            // nothing ever actually posts to from a same-window CustomEvent). With
+            // no reconciliation, activeCallId stays pinned to the local id for the
+            // entire call, so every later accept/end/reject arrives tagged with the
+            // server's UUID, never matches, and gets rejected as "mismatched
+            // callId" — the exact stuck-idle-screen bug this was traced from.
+            { event: 'kyn:call:initiated_ack', fn: (d) => window.__CallsCoreShared.handleCallInitiatedAck(d) },
+            { event: 'kyn:call_initiated_ack', fn: (d) => window.__CallsCoreShared.handleCallInitiatedAck(d) },
+
 
 
             // accepted / started / connected

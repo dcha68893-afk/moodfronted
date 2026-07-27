@@ -203,6 +203,15 @@ let fallbackContentShown = false; // tracks the emergency "show something" fallb
 let currentModal = null;
 let pendingPhotoData = null;
 let pendingCoverPhotoData = null;
+// FIX-DUP-FILE-DIALOG: guards against chooseCoverPhoto() being invoked more
+// than once for the same user gesture (e.g. a stale duplicate click listener
+// left bound to the button by a re-render race in loadProfileSection). Only
+// the first call in a short window actually opens the OS file picker; every
+// extra call in the same burst was previously reaching input.click() anyway
+// and getting rejected by the browser with "File chooser dialog can only be
+// shown with a user activation" — a real, spammy console error rather than
+// a harmless no-op.
+let _coverPhotoPickerOpenUntil = 0;
 let searchDebounceTimer = null;
 let sectionLoadInProgress = false;
 let uiReady = false;
@@ -1930,6 +1939,15 @@ export function removePhoto() {
 // COVER PHOTO FUNCTIONS (mirrors PHOTO FUNCTIONS above)
 // =============================================
 export function chooseCoverPhoto() {
+    // FIX-DUP-FILE-DIALOG: see _coverPhotoPickerOpenUntil declaration above.
+    // If this is a genuine repeat click, the guard window has long since
+    // passed and it proceeds normally.
+    if (Date.now() < _coverPhotoPickerOpenUntil) {
+        debugLog('[Settings] chooseCoverPhoto ignored - picker already opening from a previous call in this burst');
+        return;
+    }
+    _coverPhotoPickerOpenUntil = Date.now() + 800;
+
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
@@ -2328,6 +2346,26 @@ export function loadProfileSection(container) {
 }
 
 function setupProfileEventListeners() {
+    // FIX-DUP-FILE-DIALOG: this function is called from three different
+    // loadProfileSection() call sites (normal init + two fallback/race-guard
+    // paths), and while each of those replaces container.innerHTML before
+    // calling this — which should normally leave only one fresh listener per
+    // button — a genuine race between the fallback timeout and the real init
+    // path landing in the same tick could still bind twice against elements
+    // from the same render pass. Marking the container once we've wired it
+    // makes repeat calls a safe no-op instead of stacking listeners, which is
+    // what turned one real click into multiple chooseCoverPhoto() calls and
+    // multiple "File chooser dialog can only be shown with a user activation"
+    // errors from the second call onward.
+    const _profileSectionRoot = document.querySelector('.settings-section');
+    if (_profileSectionRoot) {
+        if (_profileSectionRoot.dataset.kynListenersBound === 'true') {
+            debugLog('[Settings] setupProfileEventListeners skipped - already bound for this render');
+            return;
+        }
+        _profileSectionRoot.dataset.kynListenersBound = 'true';
+    }
+
     const changePhotoBtn = document.getElementById('changePhotoBtn');
     if (changePhotoBtn) {
         changePhotoBtn.addEventListener('click', () => {

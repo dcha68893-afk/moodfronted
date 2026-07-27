@@ -1761,7 +1761,14 @@
                         clearInterval(_callLeaderHeartbeatTimer);
                         _callLeaderHeartbeatTimer = setInterval(function() {
                             if (_isCallLeader && window.__CallsCoreShared._callBroadcast) {
-                                window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_HEARTBEAT', tabId: window.__CallsCoreShared._tabId, ts: Date.now() });
+                                try {
+                                    window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_HEARTBEAT', tabId: window.__CallsCoreShared._tabId, ts: Date.now() });
+                                } catch (_) {
+                                    // FIX-UNCAUGHT-CLOSED-CHANNEL: channel was closed (tab/iframe
+                                    // teardown) but this timer wasn't cleared in time — stop it
+                                    // instead of throwing again every 1.5s.
+                                    clearInterval(_callLeaderHeartbeatTimer);
+                                }
                             }
                         }, 1500);
                     }
@@ -1779,8 +1786,19 @@
             // Release leader on tab close
             window.addEventListener('beforeunload', function() {
                 if (_isCallLeader && window.__CallsCoreShared._callBroadcast) {
-                    window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_RELEASE', tabId: window.__CallsCoreShared._tabId });
+                    try { window.__CallsCoreShared._callBroadcast.postMessage({ type: 'CALL_LEADER_RELEASE', tabId: window.__CallsCoreShared._tabId }); } catch(_) {}
                 }
+                // FIX-UNCAUGHT-CLOSED-CHANNEL: this used to close the channel here
+                // without ever clearing _callLeaderHeartbeatTimer. If this tab was
+                // the leader, that 1.5s setInterval keeps running and calls
+                // postMessage() on the now-closed BroadcastChannel the next time it
+                // fires — which throws synchronously (InvalidStateError) with no
+                // try/catch around it, surfacing as an uncaught exception right
+                // here. beforeunload doesn't guarantee the page actually unloads
+                // immediately (bfcache, some browsers/extensions, or an iframe
+                // being swapped/reloaded rather than the whole tab closing), so
+                // this timer can easily outlive the channel it depends on.
+                clearInterval(_callLeaderHeartbeatTimer);
                 if (window.__CallsCoreShared._callBroadcast) { try { window.__CallsCoreShared._callBroadcast.close(); } catch(_) {} }
             });
 

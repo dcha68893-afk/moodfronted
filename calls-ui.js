@@ -5608,8 +5608,32 @@ handleContactItemClick: function(e) {
             const _resolvedEnded = _resolve(endedCallId);
             const _resolvedActive = _resolve(UIState.activeCallId);
             if (endedCallId && UIState.activeCallId && String(_resolvedEnded) !== String(_resolvedActive)) {
-                console.warn('[Calls UI] handleCallEnded ignored - mismatched callId', endedCallId, UIState.activeCallId);
-                return;
+                // FIX-CALLID-MISMATCH-DEADLOCK: this used to return unconditionally
+                // right here, before ANY of the teardown/nav-restore code further
+                // down in this function ran — including the _postToParentDebounced
+                // ('CALL_SCREEN_ACTIVE', {active:false}) call. The parent's
+                // stuck-screen watchdog (chat.html) only self-corrects when it sees
+                // __activeCallInProgress === false, and that flag is ONLY ever set
+                // false by that exact postMessage. So whenever the alias-resolution
+                // in resolveCallId() failed to reconcile the server's real callId
+                // with this client's tracked id (a race during handleCallInitiatedAck,
+                // or an id that was never aliased at all), this guard didn't just
+                // ignore a stray echo — it permanently froze both the call screen
+                // AND the parent's only recovery mechanism, since __activeCallInProgress
+                // never flips to false. That's the exact "callId mismatch" stuck-idle-
+                // screen-with-no-nav bug. A mismatch should only be trusted as "this
+                // is a different, still-legitimately-active call" when we're within the
+                // same fresh-second-call window used by the check right below this one;
+                // otherwise there is only ever one real call in flight here, so fall
+                // through and run the normal teardown/navigation instead of freezing.
+                const _freshOtherCall = window.__callInitiatedAt &&
+                    (Date.now() - window.__callInitiatedAt) < 8000 &&
+                    (UIState.callState === 'calling' || UIState.callState === 'initiating' || UIState.callState === 'connecting');
+                if (_freshOtherCall) {
+                    console.warn('[Calls UI] handleCallEnded ignored - mismatched callId during fresh call setup', endedCallId, UIState.activeCallId);
+                    return;
+                }
+                console.warn('[Calls UI] handleCallEnded: mismatched callId but no fresh second call in progress — proceeding with teardown/nav-restore as a safety net', endedCallId, UIState.activeCallId);
             }
             if (!endedCallId && UIState.activeCallId && window.__callInitiatedAt &&
                 (Date.now() - window.__callInitiatedAt) < 8000 &&
@@ -11241,8 +11265,24 @@ if (detectExistingCore()) {
                 // run yet.
                 const _activeId = (window.UIState && window.UIState.activeCallId) || (_callInfo && _callInfo.callId) || (typeof UIState !== 'undefined' && UIState.activeCallId);
                 if (_endedId && _activeId && String(_resolve(_endedId)) !== String(_resolve(_activeId))) {
-                    console.warn('[CallOverlayManager] Ignoring CALL_ENDED/CALL_REJECTED - mismatched callId', _endedId, _activeId);
-                    break;
+                    // FIX-CALLID-MISMATCH-DEADLOCK: mirrors the same fix in
+                    // UIEventHandlers.handleCallEnded above. Breaking here
+                    // unconditionally left the overlay itself (and anything gating
+                    // on it, e.g. the parent's nav-restore) stuck showing the call
+                    // UI forever whenever alias-resolution didn't cover this id
+                    // pair — the exact "callId mismatch" stuck-screen bug. Only
+                    // treat it as a different, still-active call when a fresh
+                    // second call was genuinely just started; otherwise this is
+                    // the real end signal for the one active call, so let it
+                    // through instead of freezing the overlay.
+                    const _freshOtherCall = window.__callInitiatedAt &&
+                        (Date.now() - window.__callInitiatedAt) < 8000 &&
+                        window.UIState && (window.UIState.callState === 'calling' || window.UIState.callState === 'initiating' || window.UIState.callState === 'connecting');
+                    if (_freshOtherCall) {
+                        console.warn('[CallOverlayManager] Ignoring CALL_ENDED/CALL_REJECTED - mismatched callId during fresh call setup', _endedId, _activeId);
+                        break;
+                    }
+                    console.warn('[CallOverlayManager] mismatched callId but no fresh second call in progress — ending overlay as a safety net', _endedId, _activeId);
                 }
                 CallOverlayManager.endCall();
                 break;
