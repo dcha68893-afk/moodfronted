@@ -447,8 +447,11 @@
           html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
           html.classList.add(`theme-${savedTheme}`);
           html.classList.toggle('dark-theme', savedTheme === 'dark');
-          html.setAttribute('data-theme', savedTheme);
-          try { (window.ThemeManager ? window.ThemeManager.setTheme(savedTheme) : localStorage.setItem('app_theme', savedTheme)); } catch (_) {}
+          // FIX (single theme owner): let ThemeManager own the data-theme
+          // paint (it suppresses transitions while it repaints); only fall
+          // back to a raw write if the engine somehow isn't loaded.
+          if (window.ThemeManager) window.ThemeManager.setTheme(savedTheme);
+          else { html.setAttribute('data-theme', savedTheme); try { localStorage.setItem('app_theme', savedTheme); } catch (_) {} }
         },
         getSetting: function(key) {
           try {
@@ -2685,8 +2688,9 @@ window.isPublicPage = function() {
       html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
       html.classList.add(`theme-${savedTheme}`);
       html.classList.toggle('dark-theme', savedTheme === 'dark');
-      html.setAttribute('data-theme', savedTheme);
-      try { (window.ThemeManager ? window.ThemeManager.setTheme(savedTheme) : localStorage.setItem('app_theme', savedTheme)); } catch (_) {}
+      // FIX (single theme owner): delegate the paint to ThemeManager.
+      if (window.ThemeManager) window.ThemeManager.setTheme(savedTheme);
+      else { html.setAttribute('data-theme', savedTheme); try { localStorage.setItem('app_theme', savedTheme); } catch (_) {} }
       
       console.log(`✅ Theme initialized: ${savedTheme}`);
       
@@ -5562,8 +5566,9 @@ sendSessionDataToIframe: function(iframeWindow, iframeId, pageKey) {
       html.classList.remove('theme-dark', 'theme-light', 'theme-auto');
       html.classList.add(`theme-${resolved}`);
       html.classList.toggle('dark-theme', resolved === 'dark');
-      html.setAttribute('data-theme', resolved);
-      try { (window.ThemeManager ? window.ThemeManager.setTheme(resolved) : localStorage.setItem('app_theme', resolved)); } catch (_) {}
+      // FIX (single theme owner): delegate the paint to ThemeManager.
+      if (window.ThemeManager) window.ThemeManager.setTheme(resolved);
+      else { html.setAttribute('data-theme', resolved); try { localStorage.setItem('app_theme', resolved); } catch (_) {} }
       
       // Dispatch theme change event
       const event = new CustomEvent('nexopa-theme-change', {

@@ -4751,8 +4751,9 @@
         html.classList.remove("theme-dark", "theme-light", "theme-auto");
         html.classList.add(`theme-${savedTheme}`);
         html.classList.toggle("dark-theme", savedTheme === "dark");
-        html.setAttribute("data-theme", savedTheme);
-        try { (window.ThemeManager ? window.ThemeManager.setTheme(savedTheme) : localStorage.setItem("app_theme", savedTheme)); } catch (_) {}
+        // FIX (single theme owner): delegate the paint to ThemeManager.
+        if (window.ThemeManager) window.ThemeManager.setTheme(savedTheme);
+        else { html.setAttribute("data-theme", savedTheme); try { localStorage.setItem("app_theme", savedTheme); } catch (_) {} }
 
         console.log(`✅ Theme initialized: ${savedTheme}`);
 

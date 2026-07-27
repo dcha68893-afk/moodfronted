@@ -201,9 +201,11 @@ window.applyFriendsSettings = window.applyFriendsSettings || function applyFrien
         root.setAttribute('data-privacy-profileVisibility', p.profileVisibility || 'everyone');
         root.setAttribute('data-privacy-photoVisibility', p.photoVisibility || 'everyone');
 
-        // Theme propagation
+        // Theme propagation — FIX (single theme owner): delegate to
+        // window.ThemeManager instead of painting independently here.
         if (settings.appearance && settings.appearance.theme) {
-            root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
+            if (window.ThemeManager) window.ThemeManager.setTheme(settings.appearance.theme);
+            else root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
         }
 
         document.dispatchEvent(new CustomEvent('friendsSettingsApplied', {
@@ -248,7 +250,8 @@ window.applyCallsSettings = window.applyCallsSettings || function applyCallsSett
         }
 
         if (settings.appearance && settings.appearance.theme) {
-            root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
+            if (window.ThemeManager) window.ThemeManager.setTheme(settings.appearance.theme);
+            else root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
         }
 
         document.dispatchEvent(new CustomEvent('callsSettingsApplied', {
@@ -280,7 +283,8 @@ window.applyGroupsSettings = window.applyGroupsSettings || function applyGroupsS
         root.setAttribute('data-groups-notifications', String(n.groupNotifications !== false));
 
         if (settings.appearance && settings.appearance.theme) {
-            root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
+            if (window.ThemeManager) window.ThemeManager.setTheme(settings.appearance.theme);
+            else root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
         }
 
         document.dispatchEvent(new CustomEvent('groupsSettingsApplied', {
@@ -319,7 +323,8 @@ window.applyStatusSettings = window.applyStatusSettings || function applyStatusS
             String(n.statusNotifications !== false));
 
         if (settings.appearance && settings.appearance.theme) {
-            root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
+            if (window.ThemeManager) window.ThemeManager.setTheme(settings.appearance.theme);
+            else root.setAttribute('data-theme', (window.__resolveThemeForDOM ? window.__resolveThemeForDOM(settings.appearance.theme) : settings.appearance.theme));
         }
 
         document.dispatchEvent(new CustomEvent('statusSettingsApplied', {

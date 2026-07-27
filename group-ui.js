@@ -5021,11 +5021,19 @@ if (typeof document !== 'undefined') {
     function applyUISettingChange(section, key, value) {
         if (section === "appearance") {
             if (key === "theme") {
+                // FIX (single theme owner): delegate to window.ThemeManager
+                // instead of painting independently — this bridge was a
+                // second, un-patched duplicate of handleUITheme() above,
+                // racing it and the central engine on every settings change.
                 var t = (value === "dark" ? "dark" : "light");
-                document.documentElement.setAttribute("data-theme", t);
-                document.body.setAttribute("data-theme", t);
-                document.body.classList.toggle("dark-theme", t === "dark");
-                document.documentElement.style.colorScheme = t;
+                if (window.ThemeManager) {
+                    window.ThemeManager.setTheme(t);
+                } else {
+                    document.documentElement.setAttribute("data-theme", t);
+                    document.body.setAttribute("data-theme", t);
+                    document.body.classList.toggle("dark-theme", t === "dark");
+                    document.documentElement.style.colorScheme = t;
+                }
             }
             if (key === "fontSize") document.documentElement.style.fontSize = parseInt(value) + "px";
             if (key === "accentColor") { document.documentElement.style.setProperty("--accent-color", value); document.documentElement.style.setProperty("--primary-color", value); }

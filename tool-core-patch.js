@@ -544,9 +544,11 @@
     function _applyToolSettings(settings) {
         if (!settings || typeof settings !== 'object') return;
 
-        // Theme
+        // Theme — FIX (single theme owner): delegate to window.ThemeManager
+        // instead of painting independently.
         if (settings.theme) {
-            document.documentElement.setAttribute('data-theme', settings.theme);
+            if (window.ThemeManager) window.ThemeManager.setTheme(settings.theme);
+            else document.documentElement.setAttribute('data-theme', settings.theme);
             const grid = document.querySelector('[data-tools-grid], .tools-grid, #tools-grid');
             if (grid) grid.setAttribute('data-theme', settings.theme);
         }
