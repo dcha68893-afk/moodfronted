@@ -1867,7 +1867,12 @@ try {
         _handleIncomingMessage: function(event) {
     const validation = SecurityValidator.validateIncomingMessage(event);
     if (!validation.valid) {
-        if (DEBUG) console.log(`[${MODULE_NAME}] Rejected message:`, validation.reason);
+        // FORENSIC: previously only logged validation.reason (e.g. "invalid_source")
+        // with no indication of WHICH source/type/target actually got rejected —
+        // impossible to tell, from the console alone, which of the many postMessage
+        // senders in this app is hitting the whitelist gap. Always visible
+        // (console.log, not gated behind DEBUG) so a live test shows it immediately.
+        console.log(`[${MODULE_NAME}] Rejected message: ${validation.reason} | source=${event.data && event.data.source} | type=${event.data && event.data.type} | target=${event.data && event.data.target}`);
         return;
     }
     

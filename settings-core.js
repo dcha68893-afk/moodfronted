@@ -470,6 +470,29 @@ const SettingsState = {
     },
     
     async update(section, key, value) {
+        this._applyLocalOnly(section, key, value);
+
+        // STEP 4: Persist to backend when possible (non-blocking)
+        if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
+            if (!OfflineQueue.isOnline()) {
+                OfflineQueue.enqueue(section, key, value);
+                this._notify('update-queued', { section, key, value, reason: 'offline-pre-auth' });
+            } else {
+                requestQueue.push(async () => {
+                    try { await this._sendUpdateToBackend(section, key, value); } catch (e) {}
+                });
+            }
+            return { success: true, offline: !OfflineQueue.isOnline() };
+        }
+
+        return this._performUpdate(section, key, value);
+    },
+
+    // Local-only half of update(): apply to AppSettings/Identity, cache to
+    // localStorage, and broadcast to parent + sibling iframes. Split out so
+    // updatePhoto() can reuse it with the FINAL short Cloudinary URL without
+    // triggering a second backend round-trip (see updatePhoto() below).
+    _applyLocalOnly(section, key, value) {
         // STEP 1: Update AppSettings FIRST (single source of truth)
         // This triggers all module subscriptions instantly
         if (window.AppSettings) {
@@ -541,28 +564,13 @@ const SettingsState = {
 
         // STEP 3: Emit unified event for any remaining legacy listeners
         window.dispatchEvent(new CustomEvent('appSettingsChanged', {
-            detail: { 
+            detail: {
                 settings: window.AppSettings?.getAll() || this.data,
                 path: section + '.' + key,
                 value: value,
                 timestamp: Date.now()
             }
         }));
-
-        // STEP 4: Persist to backend when possible (non-blocking)
-        if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
-            if (!OfflineQueue.isOnline()) {
-                OfflineQueue.enqueue(section, key, value);
-                this._notify('update-queued', { section, key, value, reason: 'offline-pre-auth' });
-            } else {
-                requestQueue.push(async () => {
-                    try { await this._sendUpdateToBackend(section, key, value); } catch (e) {}
-                });
-            }
-            return { success: true, offline: !OfflineQueue.isOnline() };
-        }
-
-        return this._performUpdate(section, key, value);
     },
     
     async _performUpdate(section, key, value) {
@@ -666,10 +674,61 @@ const SettingsState = {
             }
 
             const response = await authorizedRequest(endpoint, { method, body });
-            return { success: response?.success !== false };
+            // FIX (cover-photo-hang): callers need more than a bare boolean now —
+            // updatePhoto() below needs the real Cloudinary URL the backend saved,
+            // not the multi-MB base64 string the client sent up. Every existing
+            // caller only ever read `.success` off this return value, so adding
+            // fields is safe.
+            return { success: response?.success !== false, data: response?.data, raw: response };
         } catch (error) {
             throw new Error(error.message || 'Update failed');
         }
+    },
+
+    // FIX (cover-photo-hang / app-freezes-and-reloads-on-save): savePhoto()/
+    // saveCoverPhoto() used to call the generic update(), which — on every
+    // call — JSON.stringifies the ENTIRE settings object into localStorage
+    // twice (_saveToCache) and postMessages it to window.parent AND every
+    // sibling iframe (_applySettingGlobally / the postMessage in update()).
+    // photoUrl/coverPhotoUrl hold a raw base64 data: URL at that point,
+    // which for a real photo is commonly several MB — synchronously
+    // JSON.stringify-ing and structured-cloning that multiple times on the
+    // main thread is exactly what froze the tab long enough for
+    // mobile/desktop browsers to treat it as unresponsive and reload it.
+    // This sends the base64 to the backend directly (one network call, same
+    // as before) and only feeds the resulting short Cloudinary URL — not the
+    // base64 — into local state, cache, and the cross-iframe broadcast.
+    async updatePhoto(section, key, base64Value) {
+        if (!isAuthenticated || currentState !== LifecycleState.ACTIVE) {
+            if (!OfflineQueue.isOnline()) {
+                return { success: false, error: 'Photo uploads require an active connection' };
+            }
+        }
+
+        let result;
+        try {
+            result = await this._sendUpdateToBackend(section, key, base64Value);
+        } catch (error) {
+            return { success: false, error: error.message || 'Photo upload failed' };
+        }
+
+        if (!result || result.success === false) {
+            return { success: false, error: 'Photo upload failed' };
+        }
+
+        // Backend echoes the saved profile back as data.profile — pull the
+        // short Cloudinary URL it actually persisted rather than reusing the
+        // giant base64 we sent up.
+        const savedField = key === 'photoUrl' ? 'avatar' : (key === 'coverPhotoUrl' ? 'coverPhoto' : null);
+        const shortUrl = (savedField && result.data?.profile?.[savedField]) || base64Value;
+
+        // Already saved server-side above — this just applies the short URL
+        // to local state/cache/broadcast, it does NOT re-save to the backend.
+        this._applyLocalOnly(section, key, shortUrl);
+        this.lastSynced = Date.now();
+        this._notify('update-success', { section, key, value: shortUrl });
+
+        return { success: true, url: shortUrl };
     },
     
     _applySettingGlobally(section, key, value) {
