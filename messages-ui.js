@@ -11132,9 +11132,21 @@ Type: ${message.type || 'text'}`;
 
         
 
-        const numericUserId = parseInt(userId);
+        // FIX (root cause of "message rejected when starting chat from
+        // friends/new-chat, but fine from chat history"): this app uses
+        // UUID-based user IDs. parseInt() on a UUID either returns NaN
+        // outright, or silently truncates to a garbage number if the UUID
+        // happens to start with digits — so the conversation ends up
+        // created against the wrong/nonexistent participant, and nothing
+        // ever arrives on the other end. Coerce to a number only when the
+        // ID is purely numeric; otherwise keep it as the original string
+        // (same UUID-safe pattern already used by friend-ui.js's
+        // navigateToChatWithUser/navigateToCallModule).
+        const _rawUserId = String(userId).trim();
+        const _parsedUserId = parseInt(_rawUserId, 10);
+        const numericUserId = (!isNaN(_parsedUserId) && String(_parsedUserId) === _rawUserId) ? _parsedUserId : _rawUserId;
 
-        if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
+        if (!numericUserId || (typeof numericUserId === 'number' && numericUserId <= 0)) {
             // FIX (root cause of "Invalid pending conversation: missing
             // receiverId" on send): this used to fall through to a "last
             // resort" fallback further down that opened an UNREGISTERED
@@ -12600,7 +12612,15 @@ Type: ${message.type || 'text'}`;
 
 
 
-            const id = parseInt(friendId, 10);
+            // FIX: same UUID-vs-parseInt bug as openChatWithUserInUI above —
+            // parseInt() on a UUID-based friendId returns NaN (or a
+            // truncated garbage number), which either aborted this entry
+            // point outright or created a conversation against the wrong
+            // participant. Coerce to a number only when the ID is purely
+            // numeric; otherwise keep the original string.
+            const _rawFriendId = String(friendId || '').trim();
+            const _parsedFriendId = parseInt(_rawFriendId, 10);
+            const id = (!isNaN(_parsedFriendId) && String(_parsedFriendId) === _rawFriendId) ? _parsedFriendId : _rawFriendId;
 
             if (!id) {
 

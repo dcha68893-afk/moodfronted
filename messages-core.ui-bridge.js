@@ -463,7 +463,14 @@ const UIStateManager = {
                         const sidebar = document.getElementById('sidebar');
                         if (sidebar) sidebar.classList.add('active');
                         
-                        ConversationManager.createConversation([parseInt(friendId)], { name: friendName });
+                        // FIX: parseInt() breaks UUID-based friend IDs (returns NaN or a
+                        // truncated garbage number), sending the conversation-create
+                        // request to a nonexistent participant. Coerce to a number only
+                        // when the ID is purely numeric; otherwise keep the UUID string.
+                        const _rawFriendId = String(friendId).trim();
+                        const _parsedFriendId = parseInt(_rawFriendId, 10);
+                        const _safeFriendId = (!isNaN(_parsedFriendId) && String(_parsedFriendId) === _rawFriendId) ? _parsedFriendId : _rawFriendId;
+                        ConversationManager.createConversation([_safeFriendId], { name: friendName });
                     }
                 }
             });
@@ -1014,7 +1021,12 @@ const UIStateManager = {
             return { success: false, error: 'No userId provided' };
         }
         
-        const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+        // FIX: parseInt() breaks UUID-based user IDs (NaN or truncated garbage
+        // number). Coerce to a number only when the ID is purely numeric;
+        // otherwise keep the original UUID string.
+        const _rawOpenUserId = String(userId).trim();
+        const _parsedOpenUserId = parseInt(_rawOpenUserId, 10);
+        const numericUserId = (!isNaN(_parsedOpenUserId) && String(_parsedOpenUserId) === _rawOpenUserId) ? _parsedOpenUserId : _rawOpenUserId;
         
         let realUserName = userName;
         let realAvatar = userAvatar;

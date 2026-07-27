@@ -590,9 +590,26 @@ const SettingsState = {
                 return { success: true, queued: true };
             }
         } catch (error) {
-            OfflineQueue.enqueue(section, key, value);
-            this._notify('update-queued', { section, key, value, reason: error.message });
-            return { success: true, queued: true };
+            // FIX (silent-save-failure): authorizedRequest() only rejects for a
+            // definitive backend response (401, statusCode >= 400, status:
+            // 'error') or a genuine network/timeout failure — it already
+            // reached the server and got a real answer in the first case.
+            // This used to enqueue EVERY rejection for offline retry and
+            // return {success:true, queued:true} regardless — indistinguishable
+            // from a real success to the caller. That meant a definitive
+            // rejection (e.g. a photo upload failing because Cloudinary isn't
+            // configured on the server) was reported back as success, so the
+            // UI applied the change locally while nothing was ever saved.
+            // Only queue for retry when we're actually offline — a request
+            // that failed while online already got a real answer and won't
+            // magically succeed on retry, so surface it as a failure instead.
+            if (!OfflineQueue.isOnline()) {
+                OfflineQueue.enqueue(section, key, value);
+                this._notify('update-queued', { section, key, value, reason: error.message });
+                return { success: true, queued: true };
+            }
+            this._notify('update-failed', { section, key, value, reason: error.message });
+            return { success: false, error: error.message };
         }
     },
     

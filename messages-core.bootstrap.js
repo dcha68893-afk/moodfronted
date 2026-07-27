@@ -2500,9 +2500,17 @@ try {
             if (!user) return false;
             
             const userId = user.id || user.uid;
-            // FIX: accept string IDs like "3" — parseInt for validation
-            const userIdNum = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-            if (!userId || (typeof userId !== 'string' && typeof userId !== 'number') || userIdNum === 0 || isNaN(userIdNum)) {
+            // FIX: this used to run parseInt() on every ID for validation and
+            // reject the result if it came out NaN — which rejects EVERY
+            // UUID-based user ID (this app's actual ID format), not just
+            // malformed ones, blocking login entirely. Only apply the
+            // numeric-parse check when the ID is purely numeric; a non-empty
+            // string that isn't purely numeric (a UUID) is valid as-is.
+            const _rawSessionUserId = typeof userId === 'string' ? userId.trim() : userId;
+            const _isPurelyNumericId = typeof _rawSessionUserId === 'string' && /^-?\d+$/.test(_rawSessionUserId);
+            const _sessionIdIsInvalidNumber = (typeof _rawSessionUserId === 'number' || _isPurelyNumericId) &&
+                (isNaN(parseInt(_rawSessionUserId, 10)) || parseInt(_rawSessionUserId, 10) === 0);
+            if (!userId || (typeof userId !== 'string' && typeof userId !== 'number') || _sessionIdIsInvalidNumber) {
                 console.warn('[SessionStore] Cannot set user with invalid ID:', userId);
                 return false;
             }

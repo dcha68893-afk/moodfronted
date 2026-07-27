@@ -2916,7 +2916,15 @@ const ChatManager = {
 
             if (type === 'direct' && participants.length === 1) {
                 const receiverId = participants[0];
-                const numericReceiverId = typeof receiverId === 'string' ? parseInt(receiverId, 10) : receiverId;
+                // FIX: parseInt() breaks UUID-based receiver IDs — returns NaN
+                // (which JSON.stringify turns into null) or a truncated garbage
+                // number, so the POST /messages body below had no valid
+                // participant to route to and the backend rejected the send.
+                // Coerce to a number only when the ID is purely numeric;
+                // otherwise keep the original UUID string.
+                const _rawReceiverId = String(receiverId).trim();
+                const _parsedReceiverId = parseInt(_rawReceiverId, 10);
+                const numericReceiverId = (!isNaN(_parsedReceiverId) && String(_parsedReceiverId) === _rawReceiverId) ? _parsedReceiverId : _rawReceiverId;
                 
                 try {
                     let existing = ChatManager.getConversations().find(c =>
@@ -3061,7 +3069,12 @@ const ChatManager = {
         async getOrCreateConversationByUserId(userId, userName) {
             if (!userId) return null;
             
-            const numericUserId = typeof userId === 'string' ? parseInt(userId, 10) : userId;
+            // FIX: same UUID-vs-parseInt bug as createConversation() above,
+            // applied for consistency so this public API doesn't reintroduce
+            // it if/when it's called with a UUID user id.
+            const _rawGetUserId = String(userId).trim();
+            const _parsedGetUserId = parseInt(_rawGetUserId, 10);
+            const numericUserId = (!isNaN(_parsedGetUserId) && String(_parsedGetUserId) === _rawGetUserId) ? _parsedGetUserId : _rawGetUserId;
             
             let realUserName = userName;
             let realUserAvatar = null;

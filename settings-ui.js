@@ -1984,7 +1984,18 @@ export function removeCoverPhoto() {
 
 export function saveCoverPhoto() {
     if (pendingCoverPhotoData) {
-        SettingsState.update('profile', 'coverPhotoUrl', pendingCoverPhotoData).then(() => {
+        SettingsState.update('profile', 'coverPhotoUrl', pendingCoverPhotoData).then((result) => {
+            // FIX: SettingsState.update() used to always resolve here even
+            // when the backend genuinely rejected the save (e.g. Cloudinary
+            // not configured) — this applied the optimistic local preview
+            // and reported success regardless, so the cover photo appeared
+            // to save but never actually reached the database or anyone
+            // else. Check the real result now that the backend/SettingsState
+            // surface definitive failures instead of masking them.
+            if (result && result.success === false) {
+                showNotification(result.error || 'Error saving cover photo', 'error');
+                return;
+            }
             if (currentUser) {
                 currentUser.coverPhotoURL = pendingCoverPhotoData;
             }
@@ -2016,7 +2027,14 @@ function updateProfileCoverBanner(url) {
 export function savePhoto() {
     if (pendingPhotoData) {
         // Update through SettingsState for REAL backend persistence
-        SettingsState.update('profile', 'photoUrl', pendingPhotoData).then(() => {
+        SettingsState.update('profile', 'photoUrl', pendingPhotoData).then((result) => {
+            // FIX: same silent-success bug as saveCoverPhoto() above — check
+            // the real result instead of assuming every resolved promise
+            // means the photo actually reached the database.
+            if (result && result.success === false) {
+                showNotification(result.error || 'Error saving photo', 'error');
+                return;
+            }
             if (currentUser) {
                 currentUser.photoURL = pendingPhotoData;
             }
